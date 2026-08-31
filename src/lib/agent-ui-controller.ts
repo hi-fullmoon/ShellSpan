@@ -17,8 +17,6 @@ import { createLogger } from '@/lib/logger';
 import { freezeAgentTarget } from '@/lib/agent-contract';
 import { generateId } from '@/lib/utils';
 import { redactSensitiveValue } from '@/lib/terminal-output-buffer';
-import { agentOperationAuditor } from '@/lib/agent-operation-audit';
-import { agentRolloutAuditor } from '@/lib/agent-rollout-audit';
 import { registerAgentLifecycleHandlers } from '@/lib/agent-lifecycle';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
@@ -100,7 +98,7 @@ function activeToolSnapshot(requestId: string): AgentToolApprovalSnapshot | unde
 /**
  * App-lifetime product coordinator. It consumes the structured Agent stream,
  * routes tool calls through the approval/execution boundary, and keeps UI,
- * backend cancellation, persistence subscribers, and operation audit aligned.
+ * backend cancellation, and persistence subscribers aligned.
  */
 export class AgentUiController {
   private readonly approvalController: AgentApprovalController;
@@ -150,7 +148,6 @@ export class AgentUiController {
         'cancelled',
       ].includes(snapshot.status)) return;
       useAgentStore.getState().updateTool(snapshot);
-      agentOperationAuditor.recordSnapshot(snapshot);
     });
   }
 
@@ -211,10 +208,6 @@ export class AgentUiController {
       return requestId;
     } catch (reason) {
       useAgentStore.getState().failRun(requestId, errorMessage(reason));
-      agentRolloutAuditor.recordRunOutcome(
-        useAgentStore.getState().runs[requestId],
-        'provider',
-      );
       this.releaseTerminalRequest(requestId);
       return undefined;
     } finally {
@@ -267,10 +260,6 @@ export class AgentUiController {
     this.blockedRequests.add(reference.requestId);
     this.cancellationIntents.add(reference.requestId);
     useAgentStore.getState().endIncomplete(reference.requestId);
-    agentRolloutAuditor.recordRunOutcome(
-      useAgentStore.getState().runs[reference.requestId],
-      'approvalRejected',
-    );
     this.releaseTerminalRequest(reference.requestId);
     this.trackLifecycle(this.cancelBackend(reference.requestId).catch((reason) => {
       logger.warn(`Failed to cancel rejected Agent request ${reference.requestId}`, reason);
@@ -285,11 +274,9 @@ export class AgentUiController {
     this.cancellationIntents.add(requestId);
     const activeTool = activeToolSnapshot(requestId);
     if (activeTool) {
-      agentOperationAuditor.recordCancelRequested(activeTool);
       this.approvalController.cancel(requestId, activeTool.toolCall.callId);
     }
     useAgentStore.getState().cancelRun(requestId);
-    agentRolloutAuditor.recordRunOutcome(useAgentStore.getState().runs[requestId], 'cancelled');
     this.releaseTerminalRequest(requestId);
     this.trackLifecycle(this.cancelBackend(requestId).catch((reason) => {
       logger.warn(`Failed to cancel Agent request ${requestId}`, reason);
@@ -302,8 +289,6 @@ export class AgentUiController {
       .filter((run) => run.target.sessionId === sessionId && run.status === 'running')
       .map((run) => run.requestId);
     await Promise.allSettled(requestIds.map((requestId) => this.cancelAndWait(requestId)));
-    await agentOperationAuditor.flush();
-    await agentRolloutAuditor.flush();
   }
 
   async shutdown(): Promise<void> {
@@ -314,8 +299,6 @@ export class AgentUiController {
     while (this.lifecyclePromises.size > 0) {
       await Promise.allSettled([...this.lifecyclePromises]);
     }
-    await agentOperationAuditor.flush();
-    await agentRolloutAuditor.flush();
   }
 
   handleStreamEvent(event: AgentStreamEvent): void {
@@ -342,19 +325,6 @@ export class AgentUiController {
         state.markStarted(event.requestId, event.maxToolSteps, event.toolResultTimeoutMs);
         return;
       case 'capabilityDetected':
-        agentRolloutAuditor.recordCompatibility(
-          {
-            stage: run.rolloutStage,
-            collectLocalDiagnostics: run.rolloutStage === 'preview',
-          },
-          event.capability.source === 'openAiResponses'
-            ? 'openAi'
-            : event.capability.source === 'ollamaModelMetadata'
-              ? 'ollama'
-              : 'openAiCompatible',
-          event.capability,
-          run.target,
-        );
         if (event.capability.support === 'supported') state.setPhase(event.requestId, 'preparingCommand');
         return;
       case 'safeFallback':
@@ -395,7 +365,6 @@ export class AgentUiController {
         }
         const snapshot = this.approvalController.registerToolCall(event.toolCall);
         state.registerTool(snapshot);
-        agentOperationAuditor.recordSnapshot(snapshot);
         return;
       }
       case 'toolResultAccepted':
@@ -418,7 +387,6 @@ export class AgentUiController {
             },
           };
           state.updateTool(timedOut);
-          agentOperationAuditor.recordSnapshot(timedOut);
         }
         return;
       }
@@ -427,17 +395,12 @@ export class AgentUiController {
         return;
       case 'finished':
         state.finishRun(event.requestId, event.outcome);
-        agentRolloutAuditor.recordRunOutcome(useAgentStore.getState().runs[event.requestId]);
         this.releaseTerminalRequest(event.requestId);
         return;
       case 'cancelled': {
         const activeTool = activeToolSnapshot(event.requestId);
         if (activeTool) this.approvalController.cancel(event.requestId, activeTool.toolCall.callId);
         state.cancelRun(event.requestId);
-        agentRolloutAuditor.recordRunOutcome(
-          useAgentStore.getState().runs[event.requestId],
-          'cancelled',
-        );
         this.releaseTerminalRequest(event.requestId);
         return;
       }
@@ -445,10 +408,6 @@ export class AgentUiController {
         const activeTool = activeToolSnapshot(event.requestId);
         if (activeTool) this.approvalController.cancel(event.requestId, activeTool.toolCall.callId);
         state.failRun(event.requestId, event.message);
-        agentRolloutAuditor.recordRunOutcome(
-          useAgentStore.getState().runs[event.requestId],
-          'provider',
-        );
         this.releaseTerminalRequest(event.requestId);
         return;
       }
@@ -482,10 +441,6 @@ export class AgentUiController {
       const message = `Failed to submit terminal result: ${errorMessage(reason)}`;
       this.blockedRequests.add(result.requestId);
       useAgentStore.getState().failRun(safeResult.requestId, message);
-      agentRolloutAuditor.recordRunOutcome(
-        useAgentStore.getState().runs[safeResult.requestId],
-        'provider',
-      );
       this.releaseTerminalRequest(safeResult.requestId);
       void this.cancelBackend(safeResult.requestId).catch(() => undefined);
       throw reason;
@@ -525,14 +480,9 @@ export class AgentUiController {
     this.cancellationIntents.add(requestId);
     const activeTool = activeToolSnapshot(requestId);
     if (activeTool) {
-      agentOperationAuditor.recordCancelRequested(activeTool);
       this.approvalController.cancel(requestId, activeTool.toolCall.callId);
     }
     useAgentStore.getState().failRun(requestId, message);
-    agentRolloutAuditor.recordRunOutcome(
-      useAgentStore.getState().runs[requestId],
-      'targetChanged',
-    );
     this.releaseTerminalRequest(requestId);
     this.trackLifecycle(this.cancelBackend(requestId).catch((reason) => {
       logger.warn(`Failed to cancel invalid Agent target ${requestId}`, reason);
@@ -558,7 +508,6 @@ export class AgentUiController {
       if (timer) clearTimeout(timer);
       this.releaseTimers.delete(requestId);
       this.approvalController.releaseRequest(requestId);
-      agentOperationAuditor.releaseRequest(requestId);
       this.blockedRequests.delete(requestId);
       if (!this.startingRequests.has(requestId)) this.cancellationIntents.delete(requestId);
       const prefix = `${requestId}\u0000`;

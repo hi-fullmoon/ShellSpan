@@ -6,14 +6,22 @@ import { WindowControls } from './window-controls';
 import { SparklesIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAiStore } from '@/stores/aiStore';
+import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/hooks/useI18n';
 
 export const TitleBar: React.FC = () => {
   const platform = usePlatform();
   const isMacOS = platform === 'macos';
   const { t } = useI18n();
-  const aiOpen = useAiStore((state) => state.open);
+  const activeSection = useAppStore((state) => state.activeSection);
+  const panelSection = activeSection === 'terminal' ? 'terminal' : 'workbench';
+  const aiOpen = useAiStore((state) => (
+    activeSection !== 'sftp' && state.panelOpenBySection[panelSection]
+  ));
   const toggleAi = useAiStore((state) => state.toggleOpen);
+  const aiLabel = activeSection === 'terminal'
+    ? t('ai.terminal.toggle')
+    : t('ai.workbench.toggle');
 
   return (
     <div
@@ -25,16 +33,18 @@ export const TitleBar: React.FC = () => {
     >
       <SectionNav />
       <div className="flex h-full items-center gap-2 pr-2">
-        <Button
-          variant={aiOpen ? 'secondary' : 'ghost'}
-          size="icon"
-          className="size-7"
-          onClick={toggleAi}
-          aria-pressed={aiOpen}
-          aria-label={t('ai.toggle')}
-        >
-          <SparklesIcon />
-        </Button>
+        {activeSection !== 'sftp' && (
+          <Button
+            variant={aiOpen ? 'secondary' : 'ghost'}
+            size="icon"
+            className="size-7"
+            onClick={() => toggleAi(panelSection)}
+            aria-pressed={aiOpen}
+            aria-label={aiLabel}
+          >
+            <SparklesIcon />
+          </Button>
+        )}
         {!isMacOS && <WindowControls />}
       </div>
     </div>
