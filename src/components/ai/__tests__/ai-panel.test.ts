@@ -117,11 +117,82 @@ beforeEach(() => {
 });
 
 describe('explicit AI modes', () => {
+  it('isolates Workbench AI from the terminal panel surface and controls', async () => {
+    const previousApp = useAppStore.getState();
+    await initI18n('en-US');
+    useAiStore.getState().clear();
+    useAiStore.getState().setOpen(false);
+    useAppStore.setState({ activeSection: 'workbench', locale: 'en-US' });
+    useAiStore.getState().upsertConversation({
+      id: 'terminal-history',
+      startedAt: '2026-08-30T09:00:00.000Z',
+      updatedAt: '2026-08-30T09:01:00.000Z',
+      title: 'Terminal archived conversation',
+      archived: true,
+      scope: 'terminal',
+      host: 'example.com',
+      port: 22,
+      username: 'root',
+    });
+    useAiStore.getState().setOpen(true, 'workbench');
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      expect(screen.getByRole('complementary', { name: 'Workbench AI' })).toHaveAttribute(
+        'data-ai-scope',
+        'workbench',
+      );
+      expect(screen.getByText('Separate from terminal sessions and does not read terminal output'))
+        .toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Conversation history' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'New conversation' })).toBeEnabled();
+      expect(screen.queryByRole('button', { name: 'AI mode' })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'New conversation' }));
+      const workbenchConversationId = useAiStore.getState().activeWorkbenchConversationId;
+      expect(workbenchConversationId).toBeTruthy();
+      expect(useAiStore.getState().conversations.find((conversation) => (
+        conversation.id === workbenchConversationId
+      ))).toMatchObject({
+        title: 'Workbench conversation',
+        scope: 'workbench',
+        archived: false,
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
+      expect(await screen.findByText('Current conversation')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Workbench conversation' })).toBeInTheDocument();
+      expect(screen.queryByText('Terminal archived conversation')).not.toBeInTheDocument();
+
+      act(() => useAppStore.setState({ activeSection: 'terminal' }));
+      expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+
+      act(() => useAiStore.getState().setOpen(true, 'terminal'));
+      expect(screen.getByRole('complementary', { name: 'Terminal AI' })).toHaveAttribute(
+        'data-ai-scope',
+        'terminal',
+      );
+      expect(screen.getByRole('button', { name: 'Conversation history' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'AI mode' })).toBeInTheDocument();
+
+      act(() => {
+        useAppStore.setState({ activeSection: 'sftp' });
+      });
+      expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
   it('shows and updates Kimi K3 thinking effort from the model menu', async () => {
     const previousApp = useAppStore.getState();
     const previousSettings = useAiSettingsStore.getState();
     await initI18n('en-US');
-    useAppStore.setState({ locale: 'en-US' });
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
     useAiSettingsStore.setState({
       providers: [{
         id: 'kimi',
@@ -160,7 +231,7 @@ describe('explicit AI modes', () => {
   it('keeps the Agent entry visible when the runtime rollout is unavailable', async () => {
     const previousApp = useAppStore.getState();
     await initI18n('en-US');
-    useAppStore.setState({ locale: 'en-US' });
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
     useAiStore.getState().clear();
     useAiStore.getState().setOpen(true);
     const { unmount } = render(createElement(AiPanel));
@@ -203,7 +274,6 @@ describe('explicit AI modes', () => {
           defaultAgentEnabled: true,
           defaultPermissionMode: 'requestApproval',
           availablePermissionModes: ['requestApproval', 'autoApproveReadOnly', 'fullAccess'],
-          collectLocalDiagnostics: false,
         };
       }
       if (command === 'agent_contract_status') {
@@ -381,7 +451,6 @@ describe('explicit AI modes', () => {
           defaultAgentEnabled: true,
           defaultPermissionMode: 'requestApproval',
           availablePermissionModes: ['requestApproval', 'autoApproveReadOnly', 'fullAccess'],
-          collectLocalDiagnostics: false,
         });
       }
       if (command === 'agent_contract_status') {
@@ -534,7 +603,6 @@ describe('explicit AI modes', () => {
           defaultAgentEnabled: true,
           defaultPermissionMode: 'requestApproval',
           availablePermissionModes: ['requestApproval', 'autoApproveReadOnly', 'fullAccess'],
-          collectLocalDiagnostics: false,
         };
       }
       if (command === 'agent_contract_status') {
@@ -941,7 +1009,7 @@ describe('AI request resource feedback', () => {
       expect(tooLargeTitle).toBeVisible();
       expect(screen.getByText(/Your draft has been kept/)).toBeVisible();
       const alertRegion = tooLargeTitle.closest('[role="alert"]')?.parentElement;
-      const emptyStateTitle = screen.getByText('What would you like to ask?');
+      const emptyStateTitle = screen.getByText('What would you like to handle?');
       expect(tooLargeTitle.closest('[role="alert"]')).toHaveAttribute('data-size', 'sm');
       expect(alertRegion).toHaveAttribute('data-slot', 'ai-panel-alerts');
       expect(
@@ -993,7 +1061,7 @@ describe('AI request resource feedback', () => {
       activeTask: undefined,
       error: undefined,
       errorRequestId: undefined,
-      open: true,
+      panelOpenBySection: { workbench: true, terminal: true },
     });
 
     const { unmount } = render(createElement(AiPanel));
@@ -1294,6 +1362,7 @@ describe('AI panel width', () => {
 
   it('keeps the Ask composer controls accessible when the panel narrows', async () => {
     await initI18n('zh-CN');
+    useAppStore.setState({ activeSection: 'terminal', locale: 'zh-CN' });
     useAiStore.getState().setOpen(true);
 
     try {
@@ -1307,7 +1376,7 @@ describe('AI panel width', () => {
       fireEvent.keyDown(handle, { key: 'ArrowRight' });
 
       expect(modeSelector).toHaveTextContent('Ask');
-      expect(screen.getByText('想问些什么？')).toBeInTheDocument();
+      expect(screen.getByText('询问当前终端')).toBeInTheDocument();
       unmount();
     } finally {
       useAiStore.getState().setOpen(false);
@@ -1374,7 +1443,9 @@ describe('AI panel width', () => {
   });
 
   it('does not remeasure the panel container while stream content updates', async () => {
+    const previousApp = useAppStore.getState();
     await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'workbench', locale: 'en-US' });
     useAiStore.getState().clear();
     useAiStore.getState().beginRequest({
       requestId: 'layout-stream',
@@ -1398,6 +1469,8 @@ describe('AI panel width', () => {
       unmount();
       useAiStore.getState().clear();
       useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      await initI18n(previousApp.locale);
     }
   });
 });
@@ -1607,7 +1680,9 @@ describe('AI panel compact and context behavior', () => {
 
 describe('clear conversation dialog', () => {
   it('closes after the conversation is cleared', async () => {
+    const previousApp = useAppStore.getState();
     await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'workbench', locale: 'en-US' });
     useAiStore.getState().clear();
     useAiStore.getState().beginRequest({
       requestId: 'clear-dialog',
@@ -1632,6 +1707,8 @@ describe('clear conversation dialog', () => {
       unmount();
       useAiStore.getState().clear();
       useAiStore.getState().setOpen(false);
+      useAppStore.setState(previousApp, true);
+      await initI18n(previousApp.locale);
     }
   });
 
@@ -1860,7 +1937,7 @@ describe('conversation history', () => {
   it('opens an archived terminal conversation as read-only', async () => {
     const previousApp = useAppStore.getState();
     await initI18n('en-US');
-    useAppStore.setState({ locale: 'en-US' });
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
     useTerminalStore.setState({ sessions: [], activeSessionId: null });
     useAiStore.getState().clear();
     useAiStore.getState().hydrateSessions([{
@@ -1908,7 +1985,7 @@ describe('conversation history', () => {
     const previousApp = useAppStore.getState();
     const previousTerminal = useTerminalStore.getState();
     await initI18n('en-US');
-    useAppStore.setState({ activeSection: 'workbench', locale: 'en-US' });
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
     useTerminalStore.setState({ sessions: [], activeSessionId: null });
     useAiStore.getState().clear();
     const conversation = {
@@ -2029,7 +2106,6 @@ describe('conversation history', () => {
           defaultAgentEnabled: true,
           defaultPermissionMode: 'requestApproval',
           availablePermissionModes: ['requestApproval', 'autoApproveReadOnly', 'fullAccess'],
-          collectLocalDiagnostics: false,
         });
       }
       if (command === 'agent_contract_status') {
@@ -2077,7 +2153,7 @@ describe('conversation history', () => {
     const previousApp = useAppStore.getState();
     const previousTerminal = useTerminalStore.getState();
     await initI18n('en-US');
-    useAppStore.setState({ activeSection: 'workbench', locale: 'en-US' });
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
     useTerminalStore.setState({ sessions: [], activeSessionId: null });
     useAiStore.getState().clear();
     const conversation = {
@@ -2229,7 +2305,6 @@ describe('AI stream listener lifecycle', () => {
           defaultAgentEnabled: true,
           defaultPermissionMode: 'requestApproval',
           availablePermissionModes: ['requestApproval', 'autoApproveReadOnly', 'fullAccess'],
-          collectLocalDiagnostics: false,
         };
       }
       if (command === 'agent_contract_status') {

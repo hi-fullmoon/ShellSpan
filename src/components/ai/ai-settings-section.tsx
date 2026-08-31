@@ -3,6 +3,8 @@ import {
   BotIcon,
   CheckCircle2Icon,
   CircleAlertIcon,
+  EyeIcon,
+  EyeOffIcon,
   HistoryIcon,
   PlusIcon,
   ServerIcon,
@@ -39,15 +41,14 @@ import {
   ComboboxList,
 } from '@/components/ui/combobox';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from '@/components/ui/input-group';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
@@ -76,8 +77,7 @@ import {
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { useAiStore } from '@/stores/aiStore';
-import { useAppStore } from '@/stores/appStore';
-import { AI_PROVIDER_PRESETS, useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { AgentRolloutPolicy } from '@/types/agent';
 import type { AiProviderKind, AiProviderPreset, AiReasoningEffort } from '@/types/ai';
@@ -88,6 +88,7 @@ import {
   OllamaBrandIcon,
   OpenAiBrandIcon,
 } from './provider-brand-icons';
+import { ProviderSetupDialog } from './provider-setup-dialog';
 
 const PRESET_DESCRIPTION_KEYS: Record<AiProviderPreset, LocaleKey> = {
   ollama: 'settings.ai.preset.ollama',
@@ -138,7 +139,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const { error: showError, success: showSuccess } = useToast();
   const providers = useAiSettingsStore((state) => state.providers);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
-  const addProvider = useAiSettingsStore((state) => state.addProvider);
   const updateProvider = useAiSettingsStore((state) => state.updateProvider);
   const removeProvider = useAiSettingsStore((state) => state.removeProvider);
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
@@ -148,12 +148,17 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const setAgentEnabled = useAiSettingsStore((state) => state.setAgentEnabled);
   const activeAgentRequestId = useAgentStore((state) => state.activeRequestId);
   const conversations = useAiStore((state) => state.conversations);
+  const activeWorkbenchConversationId = useAiStore((state) => (
+    state.activeWorkbenchConversationId
+  ));
   const terminalSessions = useTerminalStore((state) => state.sessions);
   const persistenceStatus = useAiSettingsStore((state) => state.persistenceStatus);
   const [selectedProviderId, setSelectedProviderId] = useState(defaultProviderId);
   const [addOpen, setAddOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [models, setModels] = useState<string[]>([]);
+  const [showApiKey, setShowApiKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [success, setSuccess] = useState<string>();
@@ -188,8 +193,11 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         .map((session) => session.conversationId)
         .filter((id): id is string => Boolean(id)),
     );
+    if (activeWorkbenchConversationId) {
+      currentConversationIds.add(activeWorkbenchConversationId);
+    }
     return conversations.filter((conversation) => !currentConversationIds.has(conversation.id));
-  }, [conversations, terminalSessions]);
+  }, [activeWorkbenchConversationId, conversations, terminalSessions]);
 
   useEffect(() => {
     if (selectedProvider && selectedProvider.id !== selectedProviderId) {
@@ -199,6 +207,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
 
   useEffect(() => {
     setModels([]);
+    setShowApiKey(false);
     setError(undefined);
     setSuccess(undefined);
   }, [selectedProvider?.id]);
@@ -219,20 +228,12 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const availableReasoningEfforts = reasoningEffortOptions(selectedProvider);
   const selectedReasoningEffort = effectiveReasoningEffort(selectedProvider);
 
-  const handleAddProvider = (preset: AiProviderPreset): void => {
-    const id = addProvider(preset);
-    setSelectedProviderId(id);
-    setAddOpen(false);
-  };
-
   const handleDeleteProvider = (): void => {
-    setBusy(true);
-    setError(undefined);
     removeProvider(selectedProvider.id);
     const state = useAiSettingsStore.getState();
     setSelectedProviderId(state.defaultProviderId);
+    setEditOpen(false);
     setDeleteOpen(false);
-    setBusy(false);
   };
 
   const handleTest = async (): Promise<void> => {
@@ -312,13 +313,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
     }
   };
 
-  const openAgentHistory = (): void => {
-    const app = useAppStore.getState();
-    app.setOperationHistoryCategory('agent');
-    app.setActiveSection('workbench');
-    app.setActiveWorkbenchTab('history');
-  };
-
   return (
     <div className={cn('@container flex flex-col gap-5', !embedded && 'px-4 py-4')}>
       {!embedded && (
@@ -328,56 +322,80 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         </div>
       )}
 
-      <div className="grid min-w-0 items-start gap-4 @min-[44rem]:grid-cols-[15rem_minmax(0,1fr)]">
-        <div className="contents @min-[44rem]:flex @min-[44rem]:min-w-0 @min-[44rem]:flex-col @min-[44rem]:gap-4">
-          <Card size="sm" className="order-1 min-w-0 @min-[44rem]:order-none">
-            <CardHeader className="border-b">
-              <CardTitle>{t('settings.ai.providers')}</CardTitle>
-              <CardDescription>{t('settings.ai.providersHint')}</CardDescription>
-              <CardAction>
-                <Badge variant="outline">{t('settings.ai.providerCount', { count: providers.length })}</Badge>
-              </CardAction>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-1">
-              {providers.map((provider) => {
-                const selected = provider.id === selectedProvider.id;
-                return (
-                  <Button
-                    key={provider.id}
-                    variant={selected ? 'secondary' : 'ghost'}
-                    className="h-auto w-full justify-start px-2 py-2 text-left"
-                    onClick={() => setSelectedProviderId(provider.id)}
-                    disabled={busy}
-                    aria-pressed={selected}
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate">{provider.name}</span>
-                      <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                        {provider.model || t('ai.modelMissing')}
-                      </span>
-                    </span>
-                    {provider.id === defaultProviderId && (
-                      <Badge variant="outline">{t('settings.ai.default')}</Badge>
-                    )}
-                  </Button>
-                );
-              })}
-            </CardContent>
-            <CardFooter>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => setAddOpen(true)}
-                disabled={busy}
-              >
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="contents">
+          <section className="flex min-w-0 flex-col gap-3" aria-labelledby="ai-model-providers-heading">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 flex-col gap-1">
+                <h3 id="ai-model-providers-heading" className="text-sm font-semibold text-foreground">
+                  {t('settings.ai.providers')}
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  {t('settings.ai.providerCount', { count: providers.length })}
+                </p>
+              </div>
+              <Button size="sm" onClick={() => setAddOpen(true)}>
                 <PlusIcon data-icon="inline-start" />
                 {t('settings.ai.addProvider')}
               </Button>
-            </CardFooter>
-          </Card>
+            </div>
 
-          <Card size="sm" className="order-3 @min-[44rem]:order-none">
+            <div className="flex min-w-0 flex-col gap-3">
+              {providers.map((provider) => {
+                const ProviderIcon = PRESET_ICONS[provider.preset];
+                const isDefault = provider.id === defaultProviderId;
+                return (
+                  <Card key={provider.id} size="sm" className="min-w-0">
+                    <CardHeader className="gap-3 @min-[36rem]:grid-cols-[minmax(0,1fr)_auto]">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+                          <ProviderIcon aria-hidden />
+                        </div>
+                        <div className="flex min-w-0 flex-col gap-1">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <CardTitle className="truncate">{provider.name}</CardTitle>
+                            <Badge variant="outline">
+                              {provider.kind === 'ollama' ? t('ai.local') : t('ai.cloud')}
+                            </Badge>
+                            {isDefault && <Badge variant="secondary">{t('settings.ai.default')}</Badge>}
+                          </div>
+                          <CardDescription className="truncate">
+                            {provider.model || t('ai.modelMissing')}
+                          </CardDescription>
+                        </div>
+                      </div>
+                      <CardAction className="flex items-center gap-2">
+                        {!isDefault && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDefaultProvider(provider.id)}
+                          >
+                            {t('settings.ai.setDefault')}
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedProviderId(provider.id);
+                            setEditOpen(true);
+                          }}
+                        >
+                          {t('settings.ai.editProvider')}
+                        </Button>
+                      </CardAction>
+                    </CardHeader>
+                    <CardContent className="text-xs leading-5 text-muted-foreground">
+                      {t(PRESET_DESCRIPTION_KEYS[provider.preset])}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </section>
+
+          <Card size="sm">
             <CardHeader className="border-b">
               <CardTitle>{t('settings.ai.contextLines')}</CardTitle>
               <CardDescription>{t('settings.ai.contextHint')}</CardDescription>
@@ -401,7 +419,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           </Card>
         </div>
 
-        <div className="order-2 flex min-w-0 flex-col gap-3 @min-[44rem]:order-none">
+        <div className="hidden" aria-hidden="true">
           <Card size="sm" className="min-w-0">
             <CardHeader className="border-b">
               <div className="flex min-w-0 items-center gap-3">
@@ -584,18 +602,28 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                           {t(keyStatusKey)}
                         </Badge>
                       </div>
-                      <Input
-                        id="ai-api-key"
-                        type="password"
-                        value={selectedProvider.apiKey ?? ''}
-                        onChange={(event) => updateProvider(selectedProvider.id, { apiKey: event.target.value })}
-                        aria-invalid={keySaveFailed || undefined}
-                        placeholder="sk-..."
-                        autoComplete="off"
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        spellCheck={false}
-                      />
+                      <InputGroup>
+                        <InputGroupInput
+                          id="ai-api-key"
+                          type={showApiKey ? 'text' : 'password'}
+                          value={selectedProvider.apiKey ?? ''}
+                          onChange={(event) => updateProvider(selectedProvider.id, { apiKey: event.target.value })}
+                          aria-invalid={keySaveFailed || undefined}
+                          placeholder="sk-..."
+                          autoComplete="off"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                        />
+                        <InputGroupAddon align="inline-end">
+                          <InputGroupButton
+                            aria-label={t(showApiKey ? 'settings.ai.hideApiKey' : 'settings.ai.showApiKey')}
+                            onClick={() => setShowApiKey((visible) => !visible)}
+                          >
+                            {showApiKey ? <EyeOffIcon /> : <EyeIcon />}
+                          </InputGroupButton>
+                        </InputGroupAddon>
+                      </InputGroup>
                       <FieldDescription>
                         {t(keySaveFailed ? 'settings.ai.keySaveFailedHint' : 'settings.ai.keyHint')}
                       </FieldDescription>
@@ -683,22 +711,8 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
             <AlertTitle>{t('settings.ai.agent.permissionTitle')}</AlertTitle>
             <AlertDescription>{t('settings.ai.agent.permissionDescription')}</AlertDescription>
           </Alert>
-          {agentPolicy?.collectLocalDiagnostics && (
-            <Alert>
-              <AlertTitle>{t('settings.ai.agent.previewDataTitle')}</AlertTitle>
-              <AlertDescription>{t('settings.ai.agent.previewDataDescription')}</AlertDescription>
-            </Alert>
-          )}
         </CardContent>
-        <CardFooter className="flex-wrap justify-between gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={openAgentHistory}
-          >
-            <HistoryIcon data-icon="inline-start" />
-            {t('settings.ai.agent.viewHistory')}
-          </Button>
+        <CardFooter className="flex-wrap justify-end gap-2">
           <Button
             variant="destructiveOutline"
             size="sm"
@@ -745,38 +759,24 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         </CardFooter>
       </Card>
 
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('settings.ai.addProviderTitle')}</DialogTitle>
-            <DialogDescription>{t('settings.ai.addProviderDescription')}</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {AI_PROVIDER_PRESETS.map((preset) => {
-              return (
-                <Button
-                  key={preset.preset}
-                  variant="outline"
-                  className="h-auto min-w-0 items-start justify-start whitespace-normal px-3 py-3 text-left"
-                  onClick={() => handleAddProvider(preset.preset)}
-                >
-                  <span className="flex min-w-0 flex-1 flex-col gap-1 text-left">
-                    <span className="flex min-w-0 items-center justify-between gap-2">
-                      <span className="truncate">{preset.name}</span>
-                      <Badge variant="outline">
-                        {preset.kind === 'ollama' ? t('ai.local') : t('ai.cloud')}
-                      </Badge>
-                    </span>
-                    <span className="block break-words text-xs leading-snug font-normal text-muted-foreground">
-                      {t(PRESET_DESCRIPTION_KEYS[preset.preset])}
-                    </span>
-                  </span>
-                </Button>
-              );
-            })}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ProviderSetupDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        onSaved={(providerId) => setSelectedProviderId(providerId)}
+      />
+
+      <ProviderSetupDialog
+        open={editOpen}
+        provider={selectedProvider}
+        onOpenChange={setEditOpen}
+        onSaved={(providerId) => setSelectedProviderId(providerId)}
+        onDelete={providers.length > 1
+          ? () => {
+              setEditOpen(false);
+              setDeleteOpen(true);
+            }
+          : undefined}
+      />
 
       <ConfirmDeleteDialog
         open={deleteOpen}

@@ -7,6 +7,7 @@ import {
   CircleAlertIcon,
   EraserIcon,
   HistoryIcon,
+  LayoutDashboardIcon,
   MessageCircleQuestionIcon,
   PaperclipIcon,
   PanelRightCloseIcon,
@@ -91,7 +92,6 @@ import {
   agentTargetFromSession,
   agentUiController,
 } from '@/lib/agent-ui-controller';
-import { agentRolloutAuditor } from '@/lib/agent-rollout-audit';
 import { detectAgentProviderCapabilityCached } from '@/lib/agent-provider-capability';
 import {
   effectiveReasoningEffort,
@@ -118,8 +118,11 @@ import {
   clearPersistedAiConversation,
   deletePersistedAiConversations,
   ensureAiSessionFile,
+  ensureWorkbenchAiConversation,
   persistAiMessage,
+  resolvedAiConversationScope,
   startNewTerminalAiConversation,
+  startNewWorkbenchAiConversation,
 } from '@/lib/ai-sessions';
 import {
   clearAgentConversationData,
@@ -137,6 +140,7 @@ import type {
   AiReasoningEffort,
 } from '@/types/ai';
 import type { LocaleKey } from '@/locales';
+import type { AppSection } from '@/types';
 import type {
   AgentChatMessage,
   AgentContractStatus,
@@ -207,7 +211,6 @@ const DISABLED_AGENT_ROLLOUT_POLICY: AgentRolloutPolicy = {
   defaultAgentEnabled: false,
   defaultPermissionMode: 'requestApproval',
   availablePermissionModes: ['requestApproval'],
-  collectLocalDiagnostics: false,
 };
 const AGENT_CAPABILITY_CHECK_DEBOUNCE_MS = 300;
 
@@ -285,6 +288,11 @@ function conversationLane(task: ConversationTask): 'conversation' | 'command' {
   return task === 'generateCommand' ? 'command' : 'conversation';
 }
 
+function resolvedAiMessageScope(message: Pick<AiChatMessage, 'scope' | 'conversationId' | 'sessionId'>): AppSection {
+  if (message.scope) return message.scope;
+  return message.conversationId || message.sessionId ? 'terminal' : 'workbench';
+}
+
 function sameAgentTarget(left: AgentTargetSnapshot, right: AgentTargetSnapshot): boolean {
   return left.kind === right.kind
     && left.sessionId === right.sessionId
@@ -354,6 +362,7 @@ export function selectConversationHistory(
   requestTask: ConversationTask,
   conversationId?: string,
   reservedMessages: readonly AiMessageInput[] = [],
+  scope?: AppSection,
 ): BoundedAiHistory {
   const completedRequests = new Set(messages
     .filter((message) => message.role === 'assistant' && message.status === 'completed')
@@ -364,6 +373,7 @@ export function selectConversationHistory(
     && completedRequests.has(message.requestId)
     && conversationLane(message.task) === lane
     && message.conversationId === conversationId
+    && (conversationId !== undefined || scope === undefined || resolvedAiMessageScope(message) === scope)
     && message.content.trim()
   ));
   return boundAiHistory(candidates, messageWithHistoricalContext, reservedMessages);
@@ -396,8 +406,16 @@ export function canStartAiRequest(
   requestId: string,
   conversationId?: string,
 ): boolean {
-  if (useAiStore.getState().activeRequestId !== requestId) return false;
-  return !conversationId || useTerminalStore.getState().sessions.some((session) => (
+  const ai = useAiStore.getState();
+  if (ai.activeRequestId !== requestId) return false;
+  if (!conversationId) return true;
+  const requestMessage = ai.messages.find((message) => (
+    message.requestId === requestId && message.role === 'user'
+  ));
+  if (requestMessage && resolvedAiMessageScope(requestMessage) === 'workbench') {
+    return ai.activeWorkbenchConversationId === conversationId;
+  }
+  return useTerminalStore.getState().sessions.some((session) => (
     session.conversationId === conversationId
   ));
 }
@@ -536,10 +554,17 @@ function navigateToAiSettings(): void {
 
 export const AiPanel: React.FC = () => {
   const { t } = useI18n();
-  const open = useAiStore((state) => state.open);
+  const activeSection = useAppStore((state) => state.activeSection);
+  const panelSection = activeSection === 'terminal' ? 'terminal' : 'workbench';
+  const open = useAiStore((state) => (
+    activeSection !== 'sftp' && state.panelOpenBySection[panelSection]
+  ));
   const setOpen = useAiStore((state) => state.setOpen);
   const messages = useAiStore((state) => state.messages);
   const conversations = useAiStore((state) => state.conversations);
+  const activeWorkbenchConversationId = useAiStore((state) => (
+    state.activeWorkbenchConversationId
+  ));
   const loadedConversationIds = useAiStore((state) => state.loadedConversationIds);
   const phase = useAiStore((state) => state.phase);
   const error = useAiStore((state) => state.error);
@@ -562,7 +587,6 @@ export const AiPanel: React.FC = () => {
   const reasoningEffort = defaultProvider
     ? effectiveReasoningEffort(defaultProvider)
     : undefined;
-  const activeSection = useAppStore((state) => state.activeSection);
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const sessions = useTerminalStore((state) => state.sessions);
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId);
@@ -570,7 +594,17 @@ export const AiPanel: React.FC = () => {
   const activeProfile = activeSession?.profileId
     ? profiles.find((profile) => profile.id === activeSession.profileId)
     : undefined;
-  const [draft, setDraft] = useState('');
+  const [draftBySection, setDraftBySection] = useState<Record<Exclude<AppSection, 'sftp'>, string>>({
+    workbench: '',
+    terminal: '',
+  });
+  const draft = draftBySection[panelSection];
+  const setDraft = useCallback((next: React.SetStateAction<string>): void => {
+    setDraftBySection((current) => ({
+      ...current,
+      [panelSection]: typeof next === 'function' ? next(current[panelSection]) : next,
+    }));
+  }, [panelSection]);
   const [mode, setMode] = useState<AiPanelMode>('ask');
   const modeRef = useRef<AiPanelMode>(mode);
   modeRef.current = mode;
@@ -682,13 +716,6 @@ export const AiPanel: React.FC = () => {
     ])
       .then(([policy, status]) => {
         if (cancelled) return;
-        if (agentEnabled && status.providerCapability.support !== 'unknown') {
-          agentRolloutAuditor.recordCompatibility(
-            policy,
-            provider.kind,
-            status.providerCapability,
-          );
-        }
         setAgentAvailability({
           state: 'ready',
           policy,
@@ -727,13 +754,6 @@ export const AiPanel: React.FC = () => {
         .then((evidence) => invokeAgentContractStatus(provider.kind, evidence))
         .then((resolvedStatus) => {
           if (cancelled) return;
-          if (policy) {
-            agentRolloutAuditor.recordCompatibility(
-              policy,
-              provider.kind,
-              resolvedStatus.providerCapability,
-            );
-          }
           setAgentAvailability({ state: 'ready', policy, status: resolvedStatus });
         })
         .catch((reason) => {
@@ -759,6 +779,10 @@ export const AiPanel: React.FC = () => {
   useEffect(() => {
     if (!agentEnabled && mode === 'agent') setMode('ask');
   }, [agentEnabled, mode]);
+
+  useEffect(() => {
+    if (activeSection !== 'terminal' && mode === 'agent') setMode('ask');
+  }, [activeSection, mode]);
 
   useEffect(() => {
     setSelectedConversationId(null);
@@ -935,8 +959,19 @@ export const AiPanel: React.FC = () => {
       return;
     }
     setDraftTooLarge(false);
+    const provider = useAiSettingsStore.getState().getProviderConfig();
+    if (!provider.model) {
+      navigateToAiSettings();
+      return;
+    }
     const requestId = generateId();
-    const liveSnapshot = providedSnapshot ?? currentTerminalContext();
+    const liveSnapshot = providedSnapshot ?? (panelSection === 'workbench'
+      ? {
+          conversationId: ensureWorkbenchAiConversation(
+            t('ai.workbench.conversationTitle'),
+          ).id,
+        }
+      : currentTerminalContext());
     const snapshot = contextEnabled || providedSnapshot
       ? liveSnapshot
       : { ...liveSnapshot, context: undefined, selection: false };
@@ -946,17 +981,14 @@ export const AiPanel: React.FC = () => {
       requestTask,
       snapshot.conversationId,
       [currentMessage],
+      panelSection,
     );
-    const provider = useAiSettingsStore.getState().getProviderConfig();
-    if (!provider.model) {
-      navigateToAiSettings();
-      return;
-    }
     useAiStore.getState().beginRequest({
       requestId,
       task: requestTask,
       userContent: trimmed,
       providerId: provider.id,
+      scope: panelSection,
       conversationId: snapshot.conversationId,
       sessionId: snapshot.sessionId,
       context: snapshot.context,
@@ -965,20 +997,22 @@ export const AiPanel: React.FC = () => {
     streamRegistration?.requestIds.add(requestId);
     recordRequestBudgetNotice(requestId, previousMessages.metadata);
     setDraft('');
-    if (snapshot.conversationId && snapshot.sessionId) {
-      const terminal = useTerminalStore
-        .getState()
-        .sessions.find((session) => session.sessionId === snapshot.sessionId);
-      if (terminal) {
-        try {
-          await ensureAiSessionFile(terminal);
-          const userMessage = useAiStore.getState().messages.find((message) => (
-            message.requestId === requestId && message.role === 'user'
-          ));
-          if (userMessage) await persistAiMessage(userMessage);
-        } catch (reason) {
-          logger.warn('Failed to persist AI request', reason);
+    if (snapshot.conversationId) {
+      try {
+        if (snapshot.sessionId) {
+          const terminal = useTerminalStore
+            .getState()
+            .sessions.find((session) => session.sessionId === snapshot.sessionId);
+          if (terminal) {
+            await ensureAiSessionFile(terminal);
+          }
         }
+        const userMessage = useAiStore.getState().messages.find((message) => (
+          message.requestId === requestId && message.role === 'user'
+        ));
+        if (userMessage) await persistAiMessage(userMessage);
+      } catch (reason) {
+        logger.warn('Failed to persist AI request', reason);
       }
     }
     try {
@@ -1036,7 +1070,14 @@ export const AiPanel: React.FC = () => {
         reason instanceof Error ? reason.message : String(reason),
       );
     }
-  }, [contextEnabled, conversationPersistenceBlocked, recordRequestBudgetNotice]);
+  }, [
+    panelSection,
+    contextEnabled,
+    conversationPersistenceBlocked,
+    recordRequestBudgetNotice,
+    setDraft,
+    t,
+  ]);
 
   const sendAgent = useCallback(async (text: string): Promise<void> => {
     const trimmed = text.trim();
@@ -1095,7 +1136,7 @@ export const AiPanel: React.FC = () => {
       if (
         agentStartAttemptRef.current !== startAttempt
         || !agentSubmissionMountedRef.current
-        || !useAiStore.getState().open
+        || !useAiStore.getState().panelOpenBySection.terminal
         || modeRef.current !== 'agent'
         || useAppStore.getState().activeSection !== 'terminal'
         || useAiStore.getState().phase === 'streaming'
@@ -1126,7 +1167,7 @@ export const AiPanel: React.FC = () => {
       if (
         agentStartAttemptRef.current !== startAttempt
         || !agentSubmissionMountedRef.current
-        || !useAiStore.getState().open
+        || !useAiStore.getState().panelOpenBySection.terminal
         || modeRef.current !== 'agent'
       ) {
         if (requestId) agentUiController.stop(requestId);
@@ -1220,17 +1261,23 @@ export const AiPanel: React.FC = () => {
     : undefined;
   const activeConversationId = activeSection === 'terminal'
     ? activeSession?.conversationId
-    : undefined;
-  const visibleConversationId = selectedConversationId ?? activeConversationId;
+    : activeWorkbenchConversationId ?? undefined;
   const selectedConversation = selectedConversationId
-    ? conversations.find((conversation) => conversation.id === selectedConversationId)
+    ? conversations.find((conversation) => (
+        conversation.id === selectedConversationId
+        && resolvedAiConversationScope(conversation) === panelSection
+      ))
     : undefined;
+  const scopedSelectedConversationId = selectedConversation?.id ?? null;
+  const visibleConversationId = scopedSelectedConversationId ?? activeConversationId;
   const viewingHistory = Boolean(
-    selectedConversationId && selectedConversationId !== activeConversationId,
+    scopedSelectedConversationId && scopedSelectedConversationId !== activeConversationId,
   );
   const archivedConversations = conversations.filter((conversation) => (
-    conversation.id !== activeConversationId
-    && (conversation.archived
+    resolvedAiConversationScope(conversation) === panelSection
+    && conversation.id !== activeConversationId
+    && (panelSection === 'workbench'
+      || conversation.archived
       || !sessions.some((session) => session.conversationId === conversation.id))
   ));
   const indexedConversation = visibleConversationId
@@ -1329,7 +1376,9 @@ export const AiPanel: React.FC = () => {
     && conversationLane(message.task) === 'conversation'
     && (visibleConversationId
       ? message.conversationId === visibleConversationId
-      : message.conversationId === undefined && message.sessionId === conversationSessionId)
+      : message.conversationId === undefined
+        && message.sessionId === conversationSessionId
+        && resolvedAiMessageScope(message) === panelSection)
   ));
   const visibleAgentMessages = visibleConversationId
     ? agentMessages.filter((message) => message.conversationId === visibleConversationId)
@@ -1341,8 +1390,13 @@ export const AiPanel: React.FC = () => {
   const agentBusy = agentStartPending || Boolean(activeAgentRequestId);
   const busy = phase === 'streaming' || agentBusy;
   const handleNewConversation = (): void => {
-    if (busy || !activeSession) return;
-    startNewTerminalAiConversation(activeSession.sessionId);
+    if (busy) return;
+    if (panelSection === 'terminal') {
+      if (!activeSession) return;
+      startNewTerminalAiConversation(activeSession.sessionId);
+    } else {
+      startNewWorkbenchAiConversation(t('ai.workbench.conversationTitle'));
+    }
     setSelectedConversationId(null);
     setFailedConversationLoadIds([]);
     setAgentStartError(undefined);
@@ -1414,6 +1468,7 @@ export const AiPanel: React.FC = () => {
     && mode !== 'agent'
     && failedRequestMessage
     && failedRequestMessage.conversationId === visibleConversationId
+    && (visibleConversationId !== undefined || resolvedAiMessageScope(failedRequestMessage) === panelSection)
     && conversationLane(failedRequestMessage.task) === currentLane
     ? error
     : undefined;
@@ -1453,6 +1508,30 @@ export const AiPanel: React.FC = () => {
       : contextSnapshot.context
         ? t('ai.context.sourceRecentOutput')
         : t('ai.context.sourceNoOutput');
+  const panelTitle = activeSection === 'terminal'
+    ? t('ai.terminal.title')
+    : t('ai.workbench.title');
+  const panelScopeDescription = activeSection === 'terminal'
+    ? t('ai.terminal.scopeDescription')
+    : t('ai.workbench.scopeDescription');
+  const panelEmptyTitle = activeSection === 'terminal'
+    ? t('ai.terminal.emptyTitle')
+    : t('ai.workbench.emptyTitle');
+  const panelEmptyDescription = activeSection === 'terminal'
+    ? t('ai.terminal.empty')
+    : t('ai.workbench.empty');
+  const panelAskPlaceholder = activeSection === 'terminal'
+    ? t('ai.askPlaceholder')
+    : t('ai.workbench.askPlaceholder');
+  const primarySuggestedPrompt = activeSection === 'terminal'
+    ? t('ai.suggestion.askTroubleshooting')
+    : t('ai.suggestion.planConnections');
+  const secondarySuggestedPrompt = activeSection === 'terminal'
+    ? t('ai.suggestion.askMaintenance')
+    : t('ai.suggestion.reviewAuthentication');
+  const PanelScopeIcon = activeSection === 'terminal'
+    ? SquareTerminalIcon
+    : LayoutDashboardIcon;
   const modeSwitchUnavailableReason = busy
     ? t('ai.mode.switchBlockedBusy')
     : viewingHistory
@@ -1465,7 +1544,7 @@ export const AiPanel: React.FC = () => {
     }
     if (value === 'agent' && agentModeSelectable) setMode('agent');
   };
-  const modeControl = (
+  const terminalModeControl = (
     <div className="flex min-w-0 items-center gap-1">
       <DropdownMenu>
         <Tooltip>
@@ -1545,6 +1624,12 @@ export const AiPanel: React.FC = () => {
       )}
     </div>
   );
+  const modeControl = activeSection === 'terminal' ? terminalModeControl : (
+    <Badge variant="ghost" size="sm">
+      <MessageCircleQuestionIcon data-icon="inline-start" />
+      {t('ai.mode.ask')}
+    </Badge>
+  );
   const configureAction = !model.trim() ? (
     <Button variant="link" size="xs" className="mt-1 px-0" onClick={openSettings}>
       {t('ai.configure')}
@@ -1555,12 +1640,14 @@ export const AiPanel: React.FC = () => {
       <aside
         ref={panelRef}
         data-slot="ai-panel"
+        data-ai-scope={activeSection}
         className={cn(
-          'relative flex h-full min-w-0 shrink-0 flex-col bg-background',
+          'relative flex h-full min-w-0 shrink-0 flex-col',
+          activeSection === 'terminal' ? 'bg-background' : 'bg-muted/20',
           !compactViewport && 'border-l border-app-border',
         )}
         style={{ width: compactViewport ? '100%' : panelWidth }}
-        aria-label={t('ai.title')}
+        aria-label={panelTitle}
       >
         {!compactViewport && <div
           data-slot="ai-panel-resize-handle"
@@ -1626,7 +1713,12 @@ export const AiPanel: React.FC = () => {
             className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent shadow-none transition-all duration-150 delay-0 group-hover:w-1 group-hover:bg-app-primary group-hover:delay-200 group-focus-visible:w-1 group-focus-visible:bg-app-primary group-data-[resizing]:w-1 group-data-[resizing]:bg-app-primary"
           />
         </div>}
-        <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
+        <header
+          className={cn(
+            'flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3',
+            activeSection !== 'terminal' && 'bg-card/60',
+          )}
+        >
           <div className="flex min-w-0 items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -1641,7 +1733,10 @@ export const AiPanel: React.FC = () => {
                 )}
               >
                 <span className="min-w-0 text-left">
-                  <span className="block truncate font-semibold">{t('ai.title')}</span>
+                  <span className="flex min-w-0 items-center gap-1.5 font-semibold">
+                    <PanelScopeIcon data-icon="inline-start" />
+                    <span className="truncate">{panelTitle}</span>
+                  </span>
                   <span className="block truncate text-[11px] font-normal text-muted-foreground">
                     {defaultProvider
                       ? [
@@ -1715,7 +1810,7 @@ export const AiPanel: React.FC = () => {
                     variant="ghost"
                     size="sm"
                     className="size-8 p-0"
-                    disabled={busy || !activeSession}
+                    disabled={busy || (panelSection === 'terminal' && !activeSession)}
                     onClick={handleNewConversation}
                     aria-label={t('ai.newConversation')}
                   />
@@ -1724,18 +1819,26 @@ export const AiPanel: React.FC = () => {
                 <SquarePenIcon />
               </TooltipTrigger>
               <TooltipContent>
-                {activeSession ? t('ai.newConversation') : t('ai.newConversationRequiresTerminal')}
+                {panelSection === 'terminal' && !activeSession
+                  ? t('ai.newConversationRequiresTerminal')
+                  : t('ai.newConversation')}
               </TooltipContent>
             </Tooltip>
             <ConversationHistoryDialog
+              scope={panelSection}
               disabled={busy}
-              currentConversation={activeConversationId && activeSession ? {
+              currentConversation={activeConversationId ? {
                 id: activeConversationId,
-                title: activeSession.title,
+                title: panelSection === 'terminal'
+                  ? activeSession?.title
+                    ?? conversations.find((item) => item.id === activeConversationId)?.title
+                    ?? t('ai.terminal.title')
+                  : conversations.find((item) => item.id === activeConversationId)?.title
+                    ?? t('ai.workbench.conversationTitle'),
                 updatedAt: conversations.find((item) => item.id === activeConversationId)?.updatedAt,
               } : undefined}
               conversations={archivedConversations}
-              selectedConversationId={selectedConversationId}
+              selectedConversationId={scopedSelectedConversationId}
               onSelectCurrent={() => {
                 if (busy) return;
                 setSelectedConversationId(null);
@@ -1782,7 +1885,9 @@ export const AiPanel: React.FC = () => {
                 </AlertDialogHeader>
                 <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
                   <AlertDialogDescription className="block min-w-0 max-w-full text-left leading-5 text-app-text">
-                    {t('ai.clearConfirmDescription')}
+                    {activeSection === 'terminal'
+                      ? t('ai.clearConfirmDescription')
+                      : t('ai.clearConfirmScopeDescription', { scope: panelTitle })}
                   </AlertDialogDescription>
                 </div>
                 <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 pb-4 pt-1">
@@ -1829,13 +1934,13 @@ export const AiPanel: React.FC = () => {
                             conversation.startedAt,
                             currentLane,
                           )
-                            .then(() => clearConversation(visibleConversationId, currentLane))
+                            .then(() => clearConversation(visibleConversationId, currentLane, panelSection))
                             .catch((reason) => {
                               logger.warn('Failed to persist cleared AI conversation', reason);
                             })
                             .finally(finishClear);
                         } else {
-                          clearConversation(visibleConversationId, currentLane);
+                          clearConversation(visibleConversationId, currentLane, panelSection);
                         }
                       }
                       setClearDialogOpen(false);
@@ -1850,13 +1955,23 @@ export const AiPanel: React.FC = () => {
               variant="ghost"
               size="sm"
               className="size-8 p-0"
-              onClick={() => setOpen(false)}
+              onClick={() => setOpen(false, panelSection)}
               aria-label={t('ai.close')}
             >
               <PanelRightCloseIcon />
             </Button>
           </div>
         </header>
+
+        {activeSection !== 'terminal' && (
+          <div
+            data-slot="ai-panel-scope"
+            className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+          >
+            <Badge variant="outline" size="sm">{t('ai.scope.isolated')}</Badge>
+            <span className="min-w-0 truncate">{panelScopeDescription}</span>
+          </div>
+        )}
 
         {viewingHistory && selectedConversation && (
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
@@ -1869,6 +1984,12 @@ export const AiPanel: React.FC = () => {
 
         {activeSection === 'terminal' && !viewingHistory && mode !== 'agent' && (
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+            {!activeSession && (
+              <div className="flex min-w-full items-center gap-2 text-xs text-muted-foreground">
+                <SquareTerminalIcon className="size-3.5 shrink-0" aria-hidden />
+                <span className="min-w-0 truncate">{panelScopeDescription}</span>
+              </div>
+            )}
             {activeSession && (
               <div
                 data-testid="ai-host-binding"
@@ -2103,9 +2224,9 @@ export const AiPanel: React.FC = () => {
         ) : visibleMessages.length === 0 ? (
           <div className="min-h-0 flex-1">
             <PanelEmptyState
-              icon={<BotIcon />}
-              title={t('ai.emptyTitle')}
-              description={t('ai.empty')}
+              icon={<PanelScopeIcon />}
+              title={panelEmptyTitle}
+              description={panelEmptyDescription}
               action={!viewingHistory ? (
                 <div className="flex max-w-xs flex-wrap justify-center gap-2">
                   {canAskFromContext && (
@@ -2122,16 +2243,16 @@ export const AiPanel: React.FC = () => {
                   <Button
                     variant={canAskFromContext ? 'outline' : 'secondary'}
                     size="sm"
-                    onClick={() => applySuggestedPrompt(t('ai.suggestion.askTroubleshooting'))}
+                    onClick={() => applySuggestedPrompt(primarySuggestedPrompt)}
                   >
-                    {t('ai.suggestion.askTroubleshooting')}
+                    {primarySuggestedPrompt}
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => applySuggestedPrompt(t('ai.suggestion.askMaintenance'))}
+                    onClick={() => applySuggestedPrompt(secondarySuggestedPrompt)}
                   >
-                    {t('ai.suggestion.askMaintenance')}
+                    {secondarySuggestedPrompt}
                   </Button>
                 </div>
               ) : undefined}
@@ -2221,7 +2342,7 @@ export const AiPanel: React.FC = () => {
               }}
               placeholder={mode === 'agent'
                 ? t('agent.placeholder')
-                : t('ai.askPlaceholder')}
+                : panelAskPlaceholder}
               className="min-h-16 max-h-48 px-4 pt-4 pb-1 leading-5"
             />
             <InputGroupAddon align="block-end" className="flex-col items-stretch gap-1.5 px-2 pb-2 pt-1">
@@ -2262,13 +2383,13 @@ export const AiPanel: React.FC = () => {
   return (
     <TooltipProvider>
       {compactViewport ? (
-        <Drawer open={open} onOpenChange={setOpen}>
+        <Drawer open={open} onOpenChange={(nextOpen) => setOpen(nextOpen, panelSection)}>
           <DrawerContent
             showCloseButton={false}
             className="max-w-none gap-0 overflow-hidden rounded-none border-l p-0"
             style={{ width: `min(100vw, ${panelWidth}px)` }}
           >
-            <DrawerTitle className="sr-only">{t('ai.title')}</DrawerTitle>
+            <DrawerTitle className="sr-only">{panelTitle}</DrawerTitle>
             {panelContent}
           </DrawerContent>
         </Drawer>

@@ -96,7 +96,10 @@ interface AiSettingsState extends AiPreferences {
   initialized: boolean;
   persistenceStatus: 'idle' | 'pending' | 'saving' | 'saved' | 'error';
   hydrateFromDb: () => Promise<void>;
-  addProvider: (preset: AiProviderPreset) => string;
+  addProvider: (
+    preset: AiProviderPreset,
+    changes?: Partial<Omit<AiProviderProfile, 'id' | 'preset'>>,
+  ) => string;
   updateProvider: (id: string, changes: Partial<Omit<AiProviderProfile, 'id'>>) => void;
   removeProvider: (id: string) => void;
   setDefaultProvider: (id: string) => void;
@@ -329,8 +332,11 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         await synchronizeAgentRuntime(defaults.agentEnabled);
       }
     },
-    addProvider: (preset) => {
-      const provider = createProviderProfile(preset, get().providers);
+    addProvider: (preset, changes) => {
+      const provider = {
+        ...createProviderProfile(preset, get().providers),
+        ...changes,
+      };
       set((state) => ({ providers: [...state.providers, provider] }));
       return provider.id;
     },
