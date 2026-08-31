@@ -5,7 +5,6 @@ import { AiSettingsSection } from '../ai-settings-section';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAiStore } from '@/stores/aiStore';
 import { useAgentStore } from '@/stores/agentStore';
-import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 
 const mocks = vi.hoisted(() => ({
@@ -58,7 +57,6 @@ vi.mock('@/hooks/useI18n', () => ({
 const initialAiSettings = useAiSettingsStore.getState();
 const initialAi = useAiStore.getState();
 const initialAgent = useAgentStore.getState();
-const initialApp = useAppStore.getState();
 const initialTerminal = useTerminalStore.getState();
 
 describe('M7 Agent settings management', () => {
@@ -70,7 +68,6 @@ describe('M7 Agent settings management', () => {
       defaultAgentEnabled: true,
       defaultPermissionMode: 'requestApproval',
       availablePermissionModes: ['requestApproval', 'autoApproveReadOnly', 'fullAccess'],
-      collectLocalDiagnostics: false,
     });
     mocks.invokeSetAgentEnabled.mockImplementation(async (enabled: boolean) => enabled);
     mocks.invokeLoadPreferences.mockResolvedValue([]);
@@ -107,7 +104,6 @@ describe('M7 Agent settings management', () => {
       ],
     }, true);
     useAgentStore.setState(initialAgent, true);
-    useAppStore.setState({ ...initialApp, operationHistoryCategory: 'all' }, true);
     useTerminalStore.setState({
       ...initialTerminal,
       activeSessionId: 'terminal-a',
@@ -126,7 +122,7 @@ describe('M7 Agent settings management', () => {
     }, true);
   });
 
-  it('closes Agent safely and opens its filtered local operation history', async () => {
+  it('closes Agent safely when the feature is disabled', async () => {
     render(<AiSettingsSection />);
     expect(await screen.findByText('settings.ai.agent.stage.stable')).toBeInTheDocument();
 
@@ -135,16 +131,16 @@ describe('M7 Agent settings management', () => {
     expect(mocks.shutdown).toHaveBeenCalledOnce();
     expect(mocks.flushAgentSessionPersistence).toHaveBeenCalledOnce();
     expect(useAiSettingsStore.getState().agentEnabled).toBe(false);
-
-    fireEvent.click(screen.getByRole('button', { name: 'settings.ai.agent.viewHistory' }));
-    expect(useAppStore.getState()).toMatchObject({
-      activeSection: 'workbench',
-      activeWorkbenchTab: 'history',
-      operationHistoryCategory: 'agent',
-    });
   });
 
   it('places model settings first and uses outlined destructive actions', async () => {
+    const [firstProvider] = useAiSettingsStore.getState().providers;
+    useAiSettingsStore.setState({
+      providers: [
+        firstProvider,
+        { ...firstProvider, id: 'secondary-provider', name: 'Secondary' },
+      ],
+    });
     render(<AiSettingsSection />);
     await screen.findByText('settings.ai.agent.stage.stable');
 
@@ -152,9 +148,15 @@ describe('M7 Agent settings management', () => {
     const agentHeading = screen.getByText('settings.ai.agent.title');
     expect(providersHeading.compareDocumentPosition(agentHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
-    const deleteProvider = screen.getByRole('button', { name: 'settings.ai.deleteProvider' });
+    const providerCards = screen.getAllByRole('button', { name: 'settings.ai.editProvider' });
+    expect(providerCards).toHaveLength(2);
     const clearSessions = screen.getByRole('button', { name: 'settings.ai.agent.clearSessions' });
     const deleteHistory = screen.getByRole('button', { name: 'ai.history.deleteAll' });
+    fireEvent.click(providerCards[0]);
+    const providerDialog = await screen.findByRole('dialog');
+    const deleteProvider = within(providerDialog).getByRole('button', {
+      name: 'settings.ai.deleteProvider',
+    });
     for (const button of [deleteProvider, clearSessions, deleteHistory]) {
       expect(button).toHaveClass('border-destructive', 'bg-transparent', 'text-destructive');
       expect(button).not.toHaveClass('bg-destructive');
@@ -203,10 +205,12 @@ describe('M7 Agent settings management', () => {
       model: 'k3',
       reasoningEffort: 'high' as const,
       requiresApiKey: true,
+      apiKey: 'secret-key',
     };
     useAiSettingsStore.setState({ providers: [kimi], defaultProviderId: kimi.id });
 
     render(<AiSettingsSection />);
+    await user.click(screen.getByRole('button', { name: 'settings.ai.editProvider' }));
     const effortSelector = await screen.findByRole('combobox', {
       name: 'settings.ai.reasoningEffort',
     });
@@ -214,6 +218,8 @@ describe('M7 Agent settings management', () => {
 
     await user.click(effortSelector);
     await user.click(await screen.findByRole('option', { name: 'ai.reasoningEffort.max' }));
+    expect(useAiSettingsStore.getState().providers[0]).toHaveProperty('reasoningEffort', 'high');
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
     await waitFor(() => expect(useAiSettingsStore.getState().providers[0]).toHaveProperty(
       'reasoningEffort',
       'max',
@@ -221,6 +227,23 @@ describe('M7 Agent settings management', () => {
   });
 
   it('moves bulk conversation-history deletion into settings and preserves current sessions', async () => {
+    useAiStore.setState({
+      conversations: [
+        ...useAiStore.getState().conversations,
+        {
+          id: 'workbench-current',
+          startedAt: '2026-08-29T02:00:00.000Z',
+          updatedAt: '2026-08-29T02:01:00.000Z',
+          title: 'Workbench conversation',
+          archived: false,
+          scope: 'workbench',
+          host: '',
+          port: 0,
+          username: '',
+        },
+      ],
+      activeWorkbenchConversationId: 'workbench-current',
+    });
     render(<AiSettingsSection />);
     await screen.findByText('settings.ai.agent.stage.stable');
 
@@ -237,6 +260,7 @@ describe('M7 Agent settings management', () => {
     ]);
     expect(useAiStore.getState().conversations.map((conversation) => conversation.id)).toEqual([
       'conversation-a',
+      'workbench-current',
     ]);
     expect(mocks.toast).toHaveBeenCalledWith('ai.history.deleted:1');
   });

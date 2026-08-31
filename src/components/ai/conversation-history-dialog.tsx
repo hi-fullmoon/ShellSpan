@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   HistoryIcon,
+  LayoutDashboardIcon,
   SearchIcon,
   SquareTerminalIcon,
   Trash2Icon,
@@ -20,6 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import type { AiConversation } from '@/types/ai';
+import type { AiPanelSection } from '@/stores/aiStore';
 
 interface CurrentConversationItem {
   id: string;
@@ -28,6 +30,7 @@ interface CurrentConversationItem {
 }
 
 interface ConversationHistoryDialogProps {
+  scope: AiPanelSection;
   disabled?: boolean;
   currentConversation?: CurrentConversationItem;
   conversations: AiConversation[];
@@ -51,6 +54,7 @@ function conversationSearchText(conversation: AiConversation): string {
 }
 
 export const ConversationHistoryDialog: React.FC<ConversationHistoryDialogProps> = ({
+  scope,
   disabled = false,
   currentConversation,
   conversations,
@@ -66,6 +70,9 @@ export const ConversationHistoryDialog: React.FC<ConversationHistoryDialogProps>
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>();
   const [deleting, setDeleting] = useState(false);
   const normalizedQuery = query.trim().toLocaleLowerCase();
+  const CurrentConversationIcon = scope === 'workbench'
+    ? LayoutDashboardIcon
+    : SquareTerminalIcon;
   const filteredConversations = useMemo(() => (
     normalizedQuery
       ? conversations.filter((conversation) => (
@@ -163,7 +170,7 @@ export const ConversationHistoryDialog: React.FC<ConversationHistoryDialogProps>
                   className="h-auto w-full justify-start px-2 py-2 text-left"
                   onClick={selectCurrent}
                 >
-                  <SquareTerminalIcon data-icon="inline-start" />
+                  <CurrentConversationIcon data-icon="inline-start" />
                   <span className="min-w-0 truncate">{currentConversation.title}</span>
                 </Button>
               </section>
