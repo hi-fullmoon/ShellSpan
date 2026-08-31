@@ -44,7 +44,6 @@ pub struct AgentRolloutPolicy {
     pub default_agent_enabled: bool,
     pub default_permission_mode: AgentPermissionMode,
     pub available_permission_modes: [AgentPermissionMode; 3],
-    pub collect_local_diagnostics: bool,
 }
 
 #[derive(Debug, Default)]
@@ -367,7 +366,6 @@ fn resolve_agent_rollout_policy(stage: AgentRolloutStage) -> AgentRolloutPolicy 
             AgentPermissionMode::AutoApproveReadOnly,
             AgentPermissionMode::FullAccess,
         ],
-        collect_local_diagnostics: stage == AgentRolloutStage::Preview,
     }
 }
 
@@ -594,11 +592,8 @@ mod tests {
             preview.default_permission_mode,
             AgentPermissionMode::RequestApproval
         );
-        assert!(preview.collect_local_diagnostics);
-
         let stable = resolve_agent_rollout_policy(AgentRolloutStage::Stable);
         assert!(stable.default_agent_enabled);
-        assert!(!stable.collect_local_diagnostics);
     }
 
     #[test]

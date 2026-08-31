@@ -20,7 +20,6 @@ import {
   ActivityIcon,
   ChevronUpIcon,
   FileTextIcon,
-  HistoryIcon,
   InfoIcon,
   KeyboardIcon,
   KeyRoundIcon,
@@ -108,11 +107,6 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
       key: 'knownHosts',
       label: t('workbench.knownHosts.title'),
       icon: ShieldCheckIcon,
-    },
-    {
-      key: 'history',
-      label: t('operationHistory.title'),
-      icon: HistoryIcon,
     },
     {
       key: 'monitor',
