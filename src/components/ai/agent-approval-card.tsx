@@ -39,7 +39,7 @@ import type {
 } from '@/types/agent';
 
 function targetLabel(target: AgentTargetSnapshot): string {
-  return `${target.username}@${target.host}:${target.port} · ${target.sessionId}`;
+  return `${target.username}@${target.host}:${target.port}`;
 }
 
 const OUTPUT_SUMMARY_LIMIT = 2_000;
@@ -186,7 +186,12 @@ export function AgentApprovalCard({
 
   return (
     <>
-      <Card size="sm" className="my-2 ring-0" data-slot="agent-approval-card">
+      <Card
+        size="sm"
+        className="my-2 ring-0"
+        style={{ '--card-spacing': 'calc(var(--spacing) * 2)' } as React.CSSProperties}
+        data-slot="agent-approval-card"
+      >
         <CardHeader>
           <CardTitle>{t('agent.tool.title')}</CardTitle>
           {targetTitle && (
@@ -198,8 +203,8 @@ export function AgentApprovalCard({
             </Badge>
           </CardAction>
         </CardHeader>
-        <CardContent className="flex min-w-0 flex-col gap-3">
-          <dl className="flex min-w-0 flex-col gap-3">
+        <CardContent className="flex min-w-0 flex-col gap-2">
+          <dl className="flex min-w-0 flex-col gap-2">
             <div className="flex flex-col gap-1">
               <dt className="text-xs font-medium text-muted-foreground">
                 {t('agent.approval.target')}
