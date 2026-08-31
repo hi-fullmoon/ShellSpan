@@ -20,7 +20,6 @@ import { promptForMissingPassword, persistPromptedPassword } from '@/lib/passwor
 import { ensureKeychainKeyForProfile } from '@/lib/keychain-key-prompt';
 import { useProfileStore } from '@/stores/profileStore';
 import { createLogger } from '@/lib/logger';
-import { recordOperationHistoryTransition } from '@/lib/operation-history';
 
 const logger = createLogger('remote-health');
 
@@ -93,23 +92,6 @@ export const useRemoteHealthStore = create<RemoteHealthState>()((set, get) => ({
 
   collect: async (profile, authorized) => {
     const operationId = createOperationId('remote-health');
-    const historyTarget = [{
-      kind: 'remote' as const,
-      profileId: profile.id,
-      host: profile.host,
-      port: profile.port,
-      username: profile.username,
-    }];
-    void recordOperationHistoryTransition({
-      taskId: operationId,
-      operationId,
-      category: 'remoteHealth',
-      action: 'collectRemoteHealth',
-      eventKind: 'started',
-      status: 'pending',
-      risk: 'readOnly',
-      targets: historyTarget,
-    });
     const previous = get().entries[profile.id];
     set((state) => ({
       selectedProfileId: profile.id,
@@ -137,29 +119,8 @@ export const useRemoteHealthStore = create<RemoteHealthState>()((set, get) => ({
         operationId: undefined,
         lastResult: result,
       }));
-      void recordOperationHistoryTransition({
-        taskId: operationId,
-        operationId,
-        category: 'remoteHealth',
-        action: 'collectRemoteHealth',
-        eventKind: 'rejected',
-        status: 'unauthorized',
-        risk: 'readOnly',
-        targets: historyTarget,
-      });
       return result;
     }
-    void recordOperationHistoryTransition({
-      taskId: operationId,
-      operationId,
-      category: 'remoteHealth',
-      action: 'collectRemoteHealth',
-      eventKind: 'approved',
-      status: 'pending',
-      risk: 'readOnly',
-      targets: historyTarget,
-      evidence: [{ operationId, kind: 'approval', observedAt: Date.now() }],
-    });
 
     let profileWithSavedSecrets: ConnectionProfile | undefined;
     try {
@@ -178,17 +139,6 @@ export const useRemoteHealthStore = create<RemoteHealthState>()((set, get) => ({
           operationId: undefined,
           lastResult: result,
         }));
-        void recordOperationHistoryTransition({
-          taskId: operationId,
-          operationId,
-          category: 'remoteHealth',
-          action: 'collectRemoteHealth',
-          eventKind: 'completed',
-          status: 'cancelled',
-          risk: 'readOnly',
-          targets: historyTarget,
-          errorCategory: 'cancelled',
-        });
         return result;
       }
       const preparedProfile = await ensureKeychainKeyForProfile(withPassword);
@@ -205,17 +155,6 @@ export const useRemoteHealthStore = create<RemoteHealthState>()((set, get) => ({
           operationId: undefined,
           lastResult: result,
         }));
-        void recordOperationHistoryTransition({
-          taskId: operationId,
-          operationId,
-          category: 'remoteHealth',
-          action: 'collectRemoteHealth',
-          eventKind: 'completed',
-          status: 'cancelled',
-          risk: 'readOnly',
-          targets: historyTarget,
-          errorCategory: 'cancelled',
-        });
         return result;
       }
 
@@ -262,17 +201,6 @@ export const useRemoteHealthStore = create<RemoteHealthState>()((set, get) => ({
         lastResult: failed,
       }));
       logger.error(`Remote health collection failed for profile ${profile.id}`, error);
-      void recordOperationHistoryTransition({
-        taskId: operationId,
-        operationId,
-        category: 'remoteHealth',
-        action: 'collectRemoteHealth',
-        eventKind: 'failed',
-        status: 'failed',
-        risk: 'readOnly',
-        targets: historyTarget,
-        errorCategory: 'unknown',
-      });
       return failed;
     }
   },
