@@ -286,4 +286,88 @@ describe('AI session persistence queue', () => {
       'new_conversation',
     );
   });
+
+  it('retries a failed Workbench creation during exit flush without recreating it once ready', async () => {
+    tauriMocks.create.mockRejectedValueOnce(new Error('temporary disk failure'));
+
+    const first = ensureWorkbenchAiConversation('Workbench conversation');
+    await finalizeAiSessionsBeforeExit();
+
+    expect(tauriMocks.create).toHaveBeenCalledTimes(2);
+    expect(tauriMocks.create.mock.calls[0]?.[0]).toMatchObject({ id: first.id });
+    expect(tauriMocks.create.mock.calls[1]?.[0]).toMatchObject({ id: first.id });
+
+    const existing = ensureWorkbenchAiConversation('Workbench conversation');
+    await flushAiSessionPersistence();
+
+    expect(existing.id).toBe(first.id);
+    expect(tauriMocks.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('shares one in-flight Workbench creation across concurrent ensure calls', async () => {
+    let finishCreation: (() => void) | undefined;
+    tauriMocks.create.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishCreation = resolve;
+    }));
+
+    const first = ensureWorkbenchAiConversation('Workbench conversation');
+    const concurrent = ensureWorkbenchAiConversation('Workbench conversation');
+    await vi.waitFor(() => expect(tauriMocks.create).toHaveBeenCalledTimes(1));
+
+    expect(concurrent.id).toBe(first.id);
+    finishCreation?.();
+    await flushAiSessionPersistence();
+
+    ensureWorkbenchAiConversation('Workbench conversation');
+    await flushAiSessionPersistence();
+    expect(tauriMocks.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries creation before migrating unbound Workbench messages in queue order', async () => {
+    const unboundMessages: AiChatMessage[] = [
+      {
+        ...assistant,
+        id: 'legacy-workbench-user',
+        requestId: 'legacy-workbench-request',
+        role: 'user',
+        content: 'Question from before Workbench sessions',
+        scope: 'workbench',
+        conversationId: undefined,
+        sessionId: undefined,
+      },
+      {
+        ...assistant,
+        id: 'legacy-workbench-assistant',
+        requestId: 'legacy-workbench-request',
+        content: 'Answer from before Workbench sessions',
+        scope: 'workbench',
+        conversationId: undefined,
+        sessionId: undefined,
+      },
+    ];
+    useAiStore.setState({ messages: unboundMessages });
+    tauriMocks.create.mockRejectedValueOnce(new Error('temporary IPC failure'));
+
+    const created = ensureWorkbenchAiConversation('Workbench conversation');
+    await flushAiSessionPersistence();
+
+    expect(tauriMocks.create).toHaveBeenCalledTimes(2);
+    expect(tauriMocks.append.mock.calls.map(([, , message]) => message.id)).toEqual([
+      'legacy-workbench-user',
+      'legacy-workbench-assistant',
+    ]);
+    expect(tauriMocks.create.mock.invocationCallOrder[1]).toBeLessThan(
+      tauriMocks.append.mock.invocationCallOrder[0]!,
+    );
+    expect(useAiStore.getState().messages).toEqual([
+      expect.objectContaining({
+        id: 'legacy-workbench-user',
+        conversationId: created.id,
+      }),
+      expect.objectContaining({
+        id: 'legacy-workbench-assistant',
+        conversationId: created.id,
+      }),
+    ]);
+  });
 });

@@ -26,6 +26,98 @@ import { flushAgentSessionPersistence } from '@/lib/agent-sessions';
 
 const logger = createLogger('aiSessions');
 
+interface WorkbenchAiConversationCreation {
+  meta: AiSessionMeta;
+  metadataReady: boolean;
+  inFlight?: Promise<void>;
+  pendingMessages: Map<string, AiChatMessage>;
+}
+
+// Only locally created Workbench conversations enter this map. Absence means
+// that a hydrated or successfully prepared conversation is safe to append to.
+const workbenchAiConversationCreations = new Map<
+  string,
+  WorkbenchAiConversationCreation
+>();
+
+function enqueueCreationReadyAiSessionPersistence(
+  conversationId: string,
+  operation: () => Promise<void>,
+): Promise<void> {
+  const creation = workbenchAiConversationCreations.get(conversationId);
+  return enqueueAiSessionPersistence(conversationId, async () => {
+    if (creation && !creation.metadataReady) {
+      await invokeCreateAiSession(creation.meta);
+      creation.metadataReady = true;
+    }
+    if (creation) {
+      while (creation.pendingMessages.size > 0) {
+        const pending = creation.pendingMessages.entries().next().value;
+        if (!pending) break;
+        const [messageId, message] = pending;
+        await invokeAppendAiSessionMessage(
+          conversationId,
+          creation.meta.timestamp,
+          message,
+        );
+        creation.pendingMessages.delete(messageId);
+        markAiConversationPersisted(conversationId);
+      }
+      if (workbenchAiConversationCreations.get(conversationId) === creation) {
+        workbenchAiConversationCreations.delete(conversationId);
+      }
+    }
+    await operation();
+  });
+}
+
+function redactedAiMessage(message: AiChatMessage): AiChatMessage {
+  return {
+    ...message,
+    content: redactTerminalSecrets(message.content),
+  };
+}
+
+function markAiConversationPersisted(conversationId: string): void {
+  const conversation = useAiStore
+    .getState()
+    .conversations.find((item) => item.id === conversationId);
+  if (!conversation) return;
+  useAiStore.getState().upsertConversation({
+    ...conversation,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function waitForWorkbenchAiConversationCreation(conversationId: string): Promise<void> {
+  const creation = workbenchAiConversationCreations.get(conversationId);
+  if (!creation) return Promise.resolve();
+  if (creation.inFlight) return creation.inFlight;
+
+  const inFlight = enqueueCreationReadyAiSessionPersistence(
+    conversationId,
+    () => Promise.resolve(),
+  );
+  creation.inFlight = inFlight;
+  void inFlight.then(
+    () => {
+      if (creation.inFlight === inFlight) creation.inFlight = undefined;
+    },
+    () => {
+      if (creation.inFlight === inFlight) creation.inFlight = undefined;
+    },
+  );
+  return inFlight;
+}
+
+async function retryPendingWorkbenchAiConversationCreations(): Promise<void> {
+  await Promise.allSettled(
+    [...workbenchAiConversationCreations.keys()].map((conversationId) => (
+      waitForWorkbenchAiConversationCreation(conversationId)
+    )),
+  );
+}
+
 export function resolvedAiConversationScope(
   conversation: Pick<AiConversation, 'scope'>,
 ): 'workbench' | 'terminal' {
@@ -83,7 +175,11 @@ export function ensureWorkbenchAiConversation(title: string): AiConversation {
         && !conversation.archived
       ))
     : undefined;
-  if (existing) return existing;
+  if (existing) {
+    void waitForWorkbenchAiConversationCreation(existing.id)
+      .catch((error) => logger.warn('Failed to prepare Workbench AI conversation', error));
+    return existing;
+  }
 
   const timestamp = new Date().toISOString();
   const conversation: AiConversation = {
@@ -106,16 +202,20 @@ export function ensureWorkbenchAiConversation(title: string): AiConversation {
     port: 0,
     username: '',
   };
+  workbenchAiConversationCreations.set(conversation.id, {
+    meta,
+    metadataReady: false,
+    pendingMessages: new Map(),
+  });
   ai.upsertConversation(conversation);
   ai.setActiveWorkbenchConversationId(conversation.id);
   const reboundMessages = ai.bindUnboundWorkbenchMessages(conversation.id);
-  void enqueueAiSessionPersistence(conversation.id, () => invokeCreateAiSession(meta))
-    .catch((error) => logger.warn('Failed to create Workbench AI conversation', error));
+  const creation = workbenchAiConversationCreations.get(conversation.id)!;
   for (const message of reboundMessages) {
-    void persistAiMessage(message).catch((error) => {
-      logger.warn('Failed to migrate an in-memory Workbench AI message', error);
-    });
+    creation.pendingMessages.set(message.id, redactedAiMessage(message));
   }
+  void waitForWorkbenchAiConversationCreation(conversation.id)
+    .catch((error) => logger.warn('Failed to prepare Workbench AI conversation', error));
   return conversation;
 }
 
@@ -128,7 +228,7 @@ export function startNewWorkbenchAiConversation(title: string): string {
 
   if (previousConversation && !previousConversation.archived) {
     ai.archiveConversation(previousConversation.id);
-    void enqueueAiSessionPersistence(previousConversation.id, () => (
+    void enqueueCreationReadyAiSessionPersistence(previousConversation.id, () => (
       invokeArchiveAiSession(
         previousConversation.id,
         previousConversation.startedAt,
@@ -146,20 +246,17 @@ export async function persistAiMessage(message: AiChatMessage): Promise<void> {
     .getState()
     .conversations.find((item) => item.id === message.conversationId);
   if (!conversation) return;
-  const redactedMessage = {
-    ...message,
-    content: redactTerminalSecrets(message.content),
-  };
-  await enqueueAiSessionPersistence(conversation.id, () => (
+  const redactedMessage = redactedAiMessage(message);
+  const creation = workbenchAiConversationCreations.get(conversation.id);
+  if (creation) {
+    creation.pendingMessages.set(message.id, redactedMessage);
+    await waitForWorkbenchAiConversationCreation(conversation.id);
+    return;
+  }
+  await enqueueCreationReadyAiSessionPersistence(conversation.id, () => (
     invokeAppendAiSessionMessage(conversation.id, conversation.startedAt, redactedMessage)
   ));
-  const latestConversation = useAiStore
-    .getState()
-    .conversations.find((item) => item.id === conversation.id) ?? conversation;
-  useAiStore.getState().upsertConversation({
-    ...latestConversation,
-    updatedAt: new Date().toISOString(),
-  });
+  markAiConversationPersisted(conversation.id);
 }
 
 export async function clearPersistedAiConversation(
@@ -167,7 +264,7 @@ export async function clearPersistedAiConversation(
   startedAt: string,
   lane: 'conversation' | 'command' | 'agent',
 ): Promise<void> {
-  return enqueueAiSessionPersistence(conversationId, () => (
+  return enqueueCreationReadyAiSessionPersistence(conversationId, () => (
     invokeClearAiSessionLane(conversationId, startedAt, lane)
   ));
 }
@@ -176,7 +273,13 @@ export async function deletePersistedAiConversations(
   conversations: Pick<AiConversation, 'id' | 'startedAt'>[],
 ): Promise<number> {
   await flushAiSessionPersistenceQueue();
-  return invokeDeleteAiSessions(conversations.map(({ id, startedAt }) => ({ id, startedAt })));
+  const deleted = await invokeDeleteAiSessions(
+    conversations.map(({ id, startedAt }) => ({ id, startedAt })),
+  );
+  for (const conversation of conversations) {
+    workbenchAiConversationCreations.delete(conversation.id);
+  }
+  return deleted;
 }
 
 export function startNewTerminalAiConversation(sessionId: string): string | undefined {
@@ -207,6 +310,8 @@ export function startNewTerminalAiConversation(sessionId: string): string | unde
 }
 
 export async function flushAiSessionPersistence(): Promise<void> {
+  await flushAiSessionPersistenceQueue();
+  await retryPendingWorkbenchAiConversationCreations();
   await flushAiSessionPersistenceQueue();
 }
 
