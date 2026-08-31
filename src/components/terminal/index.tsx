@@ -170,16 +170,16 @@ const Terminal: React.FC = () => {
 
   useEffect(() => {
     const handleNewTabRequest = (): void => setNewSessionDialogOpen((previous) => !previous);
-    document.addEventListener('termbridge:new-terminal-tab', handleNewTabRequest);
-    return () => document.removeEventListener('termbridge:new-terminal-tab', handleNewTabRequest);
+    document.addEventListener('shellspan:new-terminal-tab', handleNewTabRequest);
+    return () => document.removeEventListener('shellspan:new-terminal-tab', handleNewTabRequest);
   }, []);
 
   useEffect(() => {
     const handleTabSwitcherRequest = (): void => {
       if (useTerminalStore.getState().sessions.length > 0) setTabSwitcherOpen(true);
     };
-    document.addEventListener('termbridge:switch-terminal-tab', handleTabSwitcherRequest);
-    return () => document.removeEventListener('termbridge:switch-terminal-tab', handleTabSwitcherRequest);
+    document.addEventListener('shellspan:switch-terminal-tab', handleTabSwitcherRequest);
+    return () => document.removeEventListener('shellspan:switch-terminal-tab', handleTabSwitcherRequest);
   }, []);
 
   // Keep terminal groups in sync when sessions are opened or closed elsewhere.
@@ -514,8 +514,8 @@ const Terminal: React.FC = () => {
       if (!target) return;
       activateGroupTab(target.id, target.activeSessionId);
     };
-    document.addEventListener('termbridge:navigate-terminal-pane', handlePaneNavigate);
-    return () => document.removeEventListener('termbridge:navigate-terminal-pane', handlePaneNavigate);
+    document.addEventListener('shellspan:navigate-terminal-pane', handlePaneNavigate);
+    return () => document.removeEventListener('shellspan:navigate-terminal-pane', handlePaneNavigate);
   }, [split, activateGroupTab]);
 
   const reorderGroupTabs = useCallback((slot: TerminalGroupSlot, sessionId: string, insertIndex: number): void => {
@@ -644,8 +644,8 @@ const Terminal: React.FC = () => {
       if (!sessionId) return;
       createOrArrangeSplit(sessionId, detail.direction);
     };
-    document.addEventListener('termbridge:split-terminal-pane', handlePaneSplit);
-    return () => document.removeEventListener('termbridge:split-terminal-pane', handlePaneSplit);
+    document.addEventListener('shellspan:split-terminal-pane', handlePaneSplit);
+    return () => document.removeEventListener('shellspan:split-terminal-pane', handlePaneSplit);
   }, [activeSessionId, createOrArrangeSplit, split]);
 
   const renderTerminalPane = (session: TerminalSession | null, isActive: boolean): React.ReactNode => (

@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS key_credentials (
     kind TEXT NOT NULL DEFAULT 'keyFile',
     public_key TEXT,
     certificate TEXT,
-    service TEXT NOT NULL DEFAULT 'com.termbridge.key'
+    service TEXT NOT NULL DEFAULT 'com.shellspan.key'
 );
 ";
 
@@ -104,7 +104,7 @@ CREATE TABLE key_credentials_v2 (
     kind TEXT NOT NULL DEFAULT 'keyFile',
     public_key TEXT,
     certificate TEXT,
-    service TEXT NOT NULL DEFAULT 'com.termbridge.key'
+    service TEXT NOT NULL DEFAULT 'com.shellspan.key'
 );
 INSERT INTO key_credentials_v2 (
     id, label, updated_at, key_type, kind, public_key, certificate, service
@@ -999,7 +999,7 @@ mod tests {
             "INSERT INTO key_credentials \
              (id, label, updated_at, key_type, kind, public_key, certificate, service, value) \
              VALUES ('key-1', 'Server key', 42, 'rsa', 'keyFile', 'ssh-rsa AAA', NULL, \
-                     'com.termbridge.key', 'plaintext-private-key')",
+                     'com.shellspan.key', 'plaintext-private-key')",
             [],
         )
         .unwrap();
@@ -1477,7 +1477,7 @@ mod tests {
             "Server",
             "profile",
             "password",
-            "com.termbridge.profile-password",
+            "com.shellspan.profile-password",
             None,
             None,
             1000,
@@ -1492,7 +1492,7 @@ mod tests {
             summaries[0].kind,
             crate::models::KeyCredentialKind::Password
         );
-        assert_eq!(summaries[0].service, "com.termbridge.profile-password");
+        assert_eq!(summaries[0].service, "com.shellspan.profile-password");
     }
 
     #[test]

@@ -606,7 +606,7 @@ export const LogPanel: React.FC = () => {
   };
   const handleExport = useCallback(async (): Promise<void> => {
     if (!content) return;
-    const defaultName = activeFileName ?? 'termbridge-logs.txt';
+    const defaultName = activeFileName ?? 'shellspan-logs.txt';
     try {
       const savedPath = await invokeExportLogFile(defaultName, content);
       if (savedPath) success(t('workbench.logs.exported', { path: savedPath }));
@@ -647,12 +647,12 @@ export const LogPanel: React.FC = () => {
             category: operation.errorCategory ?? 'unknown',
           })),
         selectedLog: content
-          ? { name: activeFileName ?? 'termbridge.log', source: activeSource, content }
+          ? { name: activeFileName ?? 'shellspan.log', source: activeSource, content }
           : undefined,
       }, generatedAt.toISOString());
       const stamp = generatedAt.toISOString().replace(/[:.]/g, '-');
       const savedPath = await invokeExportLogFile(
-        `termbridge-diagnostic-${stamp}.json`,
+        `shellspan-diagnostic-${stamp}.json`,
         bundle,
       );
       if (savedPath) success(t('workbench.logs.diagnosticExported', { path: savedPath }));

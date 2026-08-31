@@ -148,7 +148,7 @@ mod tests {
 
     fn database() -> (tempfile::TempDir, Database) {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(&directory.path().join("termbridge.db")).unwrap();
+        let database = Database::open(&directory.path().join("shellspan.db")).unwrap();
         (directory, database)
     }
 

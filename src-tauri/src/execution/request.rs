@@ -20,7 +20,7 @@ pub(crate) const MAX_TOTAL_READ_HARD_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_PROFILE_ID_BYTES: usize = 256;
 const MAX_HOST_BYTES: usize = 1_024;
 const MAX_USERNAME_BYTES: usize = 256;
-const IDENTITY_DIGEST_DOMAIN: &str = "termbridge-reviewed-ssh-target";
+const IDENTITY_DIGEST_DOMAIN: &str = "shellspan-reviewed-ssh-target";
 const IDENTITY_DIGEST_VERSION: &str = "v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -672,7 +672,7 @@ mod tests {
 
         assert_eq!(
             target.identity_digest,
-            "sha256-v1:0032514ca8828ffb0a9a6084b825d1b0687e4a7bda772bf8aef846674fc289b7"
+            "sha256-v1:47f10e34825627682f78a896d68f8c2c8139f6d0d3b757301a9adf3b471c45af"
         );
         assert_eq!(target.identity_digest, target.canonical_digest());
 

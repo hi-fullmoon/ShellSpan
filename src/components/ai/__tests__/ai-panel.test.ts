@@ -82,7 +82,7 @@ function message(
 
 beforeEach(() => {
   resetAgentProviderCapabilityCacheForTests();
-  window.localStorage.removeItem('termbridge.aiPanelWidth');
+  window.localStorage.removeItem('shellspan.aiPanelWidth');
   tauriCoreMock.invoke.mockReset();
   tauriCoreMock.invoke.mockResolvedValue(undefined);
   tauriEventMock.listen.mockClear();

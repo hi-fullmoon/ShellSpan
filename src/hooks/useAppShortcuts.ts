@@ -61,25 +61,25 @@ export function useAppShortcuts(): void {
           openSettings();
           break;
         case 'openCommandPalette':
-          document.dispatchEvent(new Event('termbridge:open-command-palette'));
+          document.dispatchEvent(new Event('shellspan:open-command-palette'));
           break;
         case 'toggleAiPanel':
           useAiStore.getState().toggleOpen();
           break;
         case 'newTerminalTab':
-          document.dispatchEvent(new Event('termbridge:new-terminal-tab'));
+          document.dispatchEvent(new Event('shellspan:new-terminal-tab'));
           break;
         case 'closeTerminalTab':
-          document.dispatchEvent(new Event('termbridge:close-terminal-tab'));
+          document.dispatchEvent(new Event('shellspan:close-terminal-tab'));
           break;
         case 'switchTerminalTab':
-          document.dispatchEvent(new Event('termbridge:switch-terminal-tab'));
+          document.dispatchEvent(new Event('shellspan:switch-terminal-tab'));
           break;
         case 'findTerminal':
-          document.dispatchEvent(new Event('termbridge:find-terminal'));
+          document.dispatchEvent(new Event('shellspan:find-terminal'));
           break;
         case 'newSftpConnection':
-          document.dispatchEvent(new Event('termbridge:new-sftp-connection'));
+          document.dispatchEvent(new Event('shellspan:new-sftp-connection'));
           break;
         case 'nextTerminalTab':
         case 'previousTerminalTab': {

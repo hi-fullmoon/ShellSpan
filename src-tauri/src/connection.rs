@@ -1541,15 +1541,15 @@ mod tests {
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end() {
         let host =
-            std::env::var("TERMBRIDGE_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = std::env::var("TERMBRIDGE_E2E_SSH_PORT")
+            std::env::var("SHELLSPAN_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = std::env::var("SHELLSPAN_E2E_SSH_PORT")
             .ok()
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(22222);
-        let username = std::env::var("TERMBRIDGE_E2E_SSH_USERNAME")
-            .unwrap_or_else(|_| "termbridge".to_string());
-        let password = std::env::var("TERMBRIDGE_E2E_SSH_PASSWORD")
-            .unwrap_or_else(|_| "termbridge-e2e".to_string());
+        let username =
+            std::env::var("SHELLSPAN_E2E_SSH_USERNAME").unwrap_or_else(|_| "shellspan".to_string());
+        let password = std::env::var("SHELLSPAN_E2E_SSH_PASSWORD")
+            .unwrap_or_else(|_| "shellspan-e2e".to_string());
         let temp = tempfile::tempdir().expect("create isolated known-hosts directory");
         let known_hosts_path = temp.path().join("known_hosts");
         let request = || RemoteConnectionRequest {
@@ -1690,20 +1690,20 @@ mod tests {
             .expect("request terminal PTY");
         channel.shell().expect("start remote shell");
         channel
-            .write_all(b"printf 'termbridge-terminal-ok\\n'\nexit\n")
+            .write_all(b"printf 'shellspan-terminal-ok\\n'\nexit\n")
             .expect("write terminal input");
         let mut terminal_output = String::new();
         channel
             .read_to_string(&mut terminal_output)
             .expect("read terminal output");
         channel.wait_close().expect("close terminal channel");
-        assert!(terminal_output.contains("termbridge-terminal-ok"));
+        assert!(terminal_output.contains("shellspan-terminal-ok"));
 
         let sftp = session.sftp().expect("open SFTP subsystem");
-        let remote_path = Path::new("/home/termbridge/upload/termbridge-e2e.txt");
+        let remote_path = Path::new("/home/shellspan/upload/shellspan-e2e.txt");
         let mut remote = sftp.create(remote_path).expect("create remote upload");
         remote
-            .write_all(b"termbridge-sftp-ok")
+            .write_all(b"shellspan-sftp-ok")
             .expect("upload remote content");
         drop(remote);
         let mut downloaded = String::new();
@@ -1711,7 +1711,7 @@ mod tests {
             .expect("open uploaded file")
             .read_to_string(&mut downloaded)
             .expect("download uploaded file");
-        assert_eq!(downloaded, "termbridge-sftp-ok");
+        assert_eq!(downloaded, "shellspan-sftp-ok");
         sftp.unlink(remote_path).expect("clean up remote fixture");
     }
 }

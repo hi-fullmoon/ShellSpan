@@ -208,8 +208,8 @@ pub fn run() {
                 }
             }
             let home_dir = app.path().home_dir()?;
-            let termbridge_dir = home_dir.join(".termbridge");
-            let database = db::Database::open(&termbridge_dir.join("termbridge.db"))?;
+            let shellspan_dir = home_dir.join(".shellspan");
+            let database = db::Database::open(&shellspan_dir.join("shellspan.db"))?;
             let credentials = keychain::CredentialManager::new();
             if let Err(error) = ai::migrate_keychain_api_keys(&credentials, &database) {
                 log::warn!("Failed to migrate AI API keys from the system keychain: {error}");

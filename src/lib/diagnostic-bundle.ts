@@ -27,7 +27,7 @@ export interface DiagnosticBundle {
   schemaVersion: 1;
   generatedAt: string;
   application: {
-    name: 'TermBridge';
+    name: 'ShellSpan';
     version: string;
     platform: string;
     locale: string;
@@ -45,7 +45,7 @@ export function buildDiagnosticBundle(
     schemaVersion: 1,
     generatedAt,
     application: {
-      name: 'TermBridge',
+      name: 'ShellSpan',
       version: input.version,
       platform: input.platform,
       locale: input.locale,

@@ -2,12 +2,12 @@
 # https://git-cliff.org/docs/configuration
 
 [changelog]
-header = "# Changelog\n\nAll notable changes to TermBridge are documented in this file.\n\n"
+header = "# Changelog\n\nAll notable changes to ShellSpan are documented in this file.\n\n"
 body = """
 {% if not version %}
 ## [Unreleased]
 {% else %}
-## [{{ version }}](https://github.com/zhengbiwen/TermBridge/releases/tag/{{ version }}) - {{ timestamp | date(format="%Y-%m-%d") }}
+## [{{ version }}](https://github.com/zhengbiwen/ShellSpan/releases/tag/{{ version }}) - {{ timestamp | date(format="%Y-%m-%d") }}
 {% endif %}
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | upper_first() }}
@@ -18,7 +18,7 @@ body = """
 """
 trim = true
 postprocessors = [
-  { pattern = '\\(#(\d+)\\)', replace = "([#$1](https://github.com/zhengbiwen/TermBridge/pull/$1))" },
+  { pattern = '\\(#(\d+)\\)', replace = "([#$1](https://github.com/zhengbiwen/ShellSpan/pull/$1))" },
 ]
 
 [git]
@@ -48,4 +48,4 @@ commit_parsers = [
 ]
 
 [git.remote]
-origin = "https://github.com/zhengbiwen/TermBridge"
+origin = "https://github.com/zhengbiwen/ShellSpan"

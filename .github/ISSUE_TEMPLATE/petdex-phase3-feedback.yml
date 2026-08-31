@@ -7,7 +7,7 @@ body:
       value: |
         Thank you for choosing to help evaluate the experimental, off-by-default Petdex integration.
 
-        This is a **public GitHub issue** associated with your GitHub account. TermBridge did not upload or prefill any app data. Do **not** include passwords, credentials, tokens, terminal or AI content, commands, logs, diagnostic bundles, host names, IP addresses, usernames, paths, or file names. If you suspect secret exposure, disable the integration and contact a maintainer through an existing trusted private channel; do not paste details here.
+        This is a **public GitHub issue** associated with your GitHub account. ShellSpan did not upload or prefill any app data. Do **not** include passwords, credentials, tokens, terminal or AI content, commands, logs, diagnostic bundles, host names, IP addresses, usernames, paths, or file names. If you suspect secret exposure, disable the integration and contact a maintainer through an existing trusted private channel; do not paste details here.
   - type: checkboxes
     id: consent
     attributes:
@@ -91,7 +91,7 @@ body:
       label: Preferred status surface
       options:
         - External floating desktop pet
-        - Character inside the TermBridge window
+        - Character inside the ShellSpan window
         - Normal system notifications
         - None of these
     validations:

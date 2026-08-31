@@ -209,10 +209,10 @@ describe('CommandPalette', () => {
 
   it('opens from the global event, filters by host, and dispatches the selected action', async () => {
     const connectListener = vi.fn();
-    document.addEventListener('termbridge:connect-profile', connectListener);
+    document.addEventListener('shellspan:connect-profile', connectListener);
     render(<CommandPalette />);
 
-    act(() => document.dispatchEvent(new Event('termbridge:open-command-palette')));
+    act(() => document.dispatchEvent(new Event('shellspan:open-command-palette')));
     const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'api.example sftp' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -221,7 +221,7 @@ describe('CommandPalette', () => {
     const event = connectListener.mock.calls[0][0] as CustomEvent;
     expect(event.detail).toEqual({ profileId: 'profile-1', target: 'sftp' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    document.removeEventListener('termbridge:connect-profile', connectListener);
+    document.removeEventListener('shellspan:connect-profile', connectListener);
   });
 
   it('loads and searches saved bookmarks across profiles when opened', async () => {
@@ -237,7 +237,7 @@ describe('CommandPalette', () => {
     }]);
     render(<CommandPalette />);
 
-    act(() => document.dispatchEvent(new Event('termbridge:open-command-palette')));
+    act(() => document.dispatchEvent(new Event('shellspan:open-command-palette')));
     const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'API logs' } });
 
@@ -260,14 +260,14 @@ describe('CommandPalette', () => {
     useSftpStore.setState({ connections: [sftpConnection], activeConnectionId: null });
     render(<CommandPalette />);
 
-    act(() => document.dispatchEvent(new Event('termbridge:open-command-palette')));
+    act(() => document.dispatchEvent(new Event('shellspan:open-command-palette')));
     let input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'API shell' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(useTerminalStore.getState().activeSessionId).toBe('session-1'));
     expect(useAppStore.getState().activeSection).toBe('terminal');
 
-    act(() => document.dispatchEvent(new Event('termbridge:open-command-palette')));
+    act(() => document.dispatchEvent(new Event('shellspan:open-command-palette')));
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
     input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'Omega browser' } });
@@ -279,7 +279,7 @@ describe('CommandPalette', () => {
   it('opens the exact settings section selected from search', async () => {
     useAppStore.setState({ activeSection: 'terminal' });
     render(<CommandPalette />);
-    act(() => document.dispatchEvent(new Event('termbridge:open-command-palette')));
+    act(() => document.dispatchEvent(new Event('shellspan:open-command-palette')));
     const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'Keyboard shortcuts' } });
     fireEvent.keyDown(input, { key: 'Enter' });

@@ -358,8 +358,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
       ))) return;
       if (closeId) setClosingSessionId(closeId);
     };
-    document.addEventListener('termbridge:close-terminal-tab', handleCloseTabRequest);
-    return () => document.removeEventListener('termbridge:close-terminal-tab', handleCloseTabRequest);
+    document.addEventListener('shellspan:close-terminal-tab', handleCloseTabRequest);
+    return () => document.removeEventListener('shellspan:close-terminal-tab', handleCloseTabRequest);
   }, [activeGroup, activeSessionId, sessions]);
 
   // Auto-scroll the overflowed tab bar while dragging near its edges. Runs on

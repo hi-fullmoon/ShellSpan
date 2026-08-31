@@ -1454,7 +1454,7 @@ pub(crate) async fn open_remote_file(
         .path()
         .home_dir()
         .ok()
-        .map(|home| home.join(".termbridge").join("open-cache"));
+        .map(|home| home.join(".shellspan").join("open-cache"));
     let cancel_flag = remote_file_reads
         .register(operation_id.clone())
         .map_err(|message| RemoteFsError::Other { message })?;
@@ -2505,7 +2505,7 @@ fn configure_local_terminal_environment(command: &mut CommandBuilder) {
     // type requested for SSH sessions in session.rs.
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
-    command.env("TERM_PROGRAM", "TermBridge");
+    command.env("TERM_PROGRAM", "ShellSpan");
     command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
 }
 
@@ -3032,7 +3032,7 @@ mod tests {
         assert_eq!(command.get_env("COLORTERM"), Some(OsStr::new("truecolor")));
         assert_eq!(
             command.get_env("TERM_PROGRAM"),
-            Some(OsStr::new("TermBridge"))
+            Some(OsStr::new("ShellSpan"))
         );
         assert_eq!(
             command.get_env("TERM_PROGRAM_VERSION"),
@@ -3056,7 +3056,7 @@ mod tests {
             .try_clone_reader()
             .expect("clone the real PTY reader");
         let mut command = CommandBuilder::new("/usr/bin/printf");
-        command.arg("termbridge-pty-smoke\\n");
+        command.arg("shellspan-pty-smoke\\n");
         configure_local_terminal_environment(&mut command);
         let mut child = pair
             .slave
@@ -3071,7 +3071,7 @@ mod tests {
         let status = child.wait().expect("wait for the PTY child");
 
         assert!(status.success());
-        assert_eq!(output.replace("\r\n", "\n"), "termbridge-pty-smoke\n");
+        assert_eq!(output.replace("\r\n", "\n"), "shellspan-pty-smoke\n");
     }
 
     #[cfg(target_os = "macos")]
@@ -3105,7 +3105,7 @@ mod tests {
         drop(pair.slave);
 
         let nonce = "0123456789abcdef0123456789abcdef0123456789abcdef";
-        let first = "TERMBRIDGE_M2_0123456789abcdef0123";
+        let first = "SHELLSPAN_M2_0123456789abcdef0123";
         let second = "456789abcdef0123456789abcdef";
         let wrapper = format!(
             "__tb_marker_{nonce}='{first}''{second}'; __tb_command_{nonce}='printf macos-shell-protocol; false'; printf '\\036%s:BEGIN\\037\\n' \"$__tb_marker_{nonce}\"; eval \"$__tb_command_{nonce}\"; __tb_exit_{nonce}=$?; printf '\\036%s:END:%d\\037\\n' \"$__tb_marker_{nonce}\" \"$__tb_exit_{nonce}\"; unset __tb_marker_{nonce} __tb_command_{nonce} __tb_exit_{nonce}\nexit\n"
@@ -3124,11 +3124,11 @@ mod tests {
 
         assert!(status.success());
         assert!(output.contains(
-            "\u{1e}TERMBRIDGE_M2_0123456789abcdef0123456789abcdef0123456789abcdef:BEGIN\u{1f}"
+            "\u{1e}SHELLSPAN_M2_0123456789abcdef0123456789abcdef0123456789abcdef:BEGIN\u{1f}"
         ));
         assert!(output.contains("macos-shell-protocol"));
         assert!(output.contains(
-            "\u{1e}TERMBRIDGE_M2_0123456789abcdef0123456789abcdef0123456789abcdef:END:1\u{1f}"
+            "\u{1e}SHELLSPAN_M2_0123456789abcdef0123456789abcdef0123456789abcdef:END:1\u{1f}"
         ));
     }
 
@@ -3170,7 +3170,7 @@ mod tests {
             let _ = output_tx.send(result);
         });
         writer
-            .write_all(b"Write-Output 'termbridge-conpty-smoke'\rexit 7\r")
+            .write_all(b"Write-Output 'shellspan-conpty-smoke'\rexit 7\r")
             .expect("write deterministic commands to the PowerShell ConPTY");
         writer
             .flush()
@@ -3200,7 +3200,7 @@ mod tests {
             .expect("read deterministic PowerShell ConPTY output");
 
         assert!(
-            output.contains("termbridge-conpty-smoke"),
+            output.contains("shellspan-conpty-smoke"),
             "missing ConPTY smoke marker in {output:?}"
         );
     }

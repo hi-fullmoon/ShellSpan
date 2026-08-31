@@ -162,8 +162,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   useEffect(() => {
     if (!isActive) return;
     const handleOpenSearchRequest = (): void => handleOpenSearch();
-    document.addEventListener('termbridge:find-terminal', handleOpenSearchRequest);
-    return () => document.removeEventListener('termbridge:find-terminal', handleOpenSearchRequest);
+    document.addEventListener('shellspan:find-terminal', handleOpenSearchRequest);
+    return () => document.removeEventListener('shellspan:find-terminal', handleOpenSearchRequest);
   }, [handleOpenSearch, isActive]);
 
   // Bind xterm custom key handler for app shortcuts, find/escape, and copy.
@@ -201,7 +201,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       if (isTabSwitcherShortcut) {
         event.preventDefault();
         event.stopPropagation();
-        document.dispatchEvent(new Event('termbridge:switch-terminal-tab'));
+        document.dispatchEvent(new Event('shellspan:switch-terminal-tab'));
         return false;
       }
 

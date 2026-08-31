@@ -209,7 +209,7 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
         label: newKey.label,
         keyType,
         kind: newKey.kind,
-        service: 'com.termbridge.key',
+        service: 'com.shellspan.key',
       }],
     }));
     return newKey;

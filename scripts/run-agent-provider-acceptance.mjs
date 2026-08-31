@@ -4,9 +4,9 @@ import path from 'node:path';
 
 const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = path.join(workspace, 'src-tauri', 'Cargo.toml');
-const toolsModel = process.env.TERMBRIDGE_M6_OLLAMA_TOOLS_MODEL ?? 'qwen3:0.6b';
-const noToolsModel = process.env.TERMBRIDGE_M6_OLLAMA_NO_TOOLS_MODEL ?? 'smollm:135m';
-const ollamaBaseUrl = process.env.TERMBRIDGE_M6_OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434';
+const toolsModel = process.env.SHELLSPAN_M6_OLLAMA_TOOLS_MODEL ?? 'qwen3:0.6b';
+const noToolsModel = process.env.SHELLSPAN_M6_OLLAMA_NO_TOOLS_MODEL ?? 'smollm:135m';
+const ollamaBaseUrl = process.env.SHELLSPAN_M6_OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434';
 const minimaxOnly = process.argv.includes('--minimax-only');
 export const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimaxi.com';
 export const DEFAULT_MINIMAX_MODEL = 'MiniMax-M2.7';
@@ -44,7 +44,7 @@ export function validatedMiniMaxBaseUrl(value) {
   try {
     url = new URL(value);
   } catch {
-    throw new Error('TERMBRIDGE_M6_MINIMAX_BASE_URL must be a valid MiniMax HTTPS URL');
+    throw new Error('SHELLSPAN_M6_MINIMAX_BASE_URL must be a valid MiniMax HTTPS URL');
   }
   const officialHost = url.hostname === 'api.minimaxi.com' || url.hostname === 'api.minimax.io';
   const supportedPath = url.pathname === '/' || url.pathname === '/v1' || url.pathname === '/v1/';
@@ -58,7 +58,7 @@ export function validatedMiniMaxBaseUrl(value) {
     || url.hash
   ) {
     throw new Error(
-      'TERMBRIDGE_M6_MINIMAX_BASE_URL must use an official MiniMax service root',
+      'SHELLSPAN_M6_MINIMAX_BASE_URL must use an official MiniMax service root',
     );
   }
   return value.replace(/\/$/, '');
@@ -71,17 +71,17 @@ export function buildMiniMaxLiveEnv(sourceEnv) {
       'MINIMAX_API_KEY is required for MiniMax live acceptance; set it only in the current process',
     );
   }
-  const model = sourceEnv.TERMBRIDGE_M6_MINIMAX_MODEL ?? DEFAULT_MINIMAX_MODEL;
+  const model = sourceEnv.SHELLSPAN_M6_MINIMAX_MODEL ?? DEFAULT_MINIMAX_MODEL;
   if (!model.trim()) {
-    throw new Error('TERMBRIDGE_M6_MINIMAX_MODEL must not be empty');
+    throw new Error('SHELLSPAN_M6_MINIMAX_MODEL must not be empty');
   }
   const env = {
     ...sourceEnv,
-    TERMBRIDGE_M6_MINIMAX_LIVE: '1',
-    TERMBRIDGE_M6_MINIMAX_BASE_URL: validatedMiniMaxBaseUrl(
-      sourceEnv.TERMBRIDGE_M6_MINIMAX_BASE_URL ?? DEFAULT_MINIMAX_BASE_URL,
+    SHELLSPAN_M6_MINIMAX_LIVE: '1',
+    SHELLSPAN_M6_MINIMAX_BASE_URL: validatedMiniMaxBaseUrl(
+      sourceEnv.SHELLSPAN_M6_MINIMAX_BASE_URL ?? DEFAULT_MINIMAX_BASE_URL,
     ),
-    TERMBRIDGE_M6_MINIMAX_MODEL: model,
+    SHELLSPAN_M6_MINIMAX_MODEL: model,
     MINIMAX_API_KEY: apiKey,
   };
   delete env.OPENAI_API_KEY;
@@ -105,24 +105,24 @@ function main() {
 
   const ollamaEnv = {
     ...process.env,
-    TERMBRIDGE_M6_OLLAMA_LIVE: '1',
-    TERMBRIDGE_M6_OLLAMA_BASE_URL: ollamaBaseUrl,
-    TERMBRIDGE_M6_OLLAMA_TOOLS_MODEL: toolsModel,
-    TERMBRIDGE_M6_OLLAMA_NO_TOOLS_MODEL: noToolsModel,
+    SHELLSPAN_M6_OLLAMA_LIVE: '1',
+    SHELLSPAN_M6_OLLAMA_BASE_URL: ollamaBaseUrl,
+    SHELLSPAN_M6_OLLAMA_TOOLS_MODEL: toolsModel,
+    SHELLSPAN_M6_OLLAMA_NO_TOOLS_MODEL: noToolsModel,
   };
   cargoLiveTest('m6_live_ollama_tools_acceptance', ollamaEnv);
   cargoLiveTest('m6_live_ollama_no_tools_falls_back_without_tool_events', ollamaEnv);
   cargoLiveTest('m6_live_chat_completions_tool_acceptance', {
     ...ollamaEnv,
-    TERMBRIDGE_M6_COMPATIBLE_LIVE: '1',
-    TERMBRIDGE_M6_COMPATIBLE_BASE_URL: `${ollamaBaseUrl.replace(/\/$/, '')}/v1`,
-    TERMBRIDGE_M6_COMPATIBLE_MODEL: toolsModel,
+    SHELLSPAN_M6_COMPATIBLE_LIVE: '1',
+    SHELLSPAN_M6_COMPATIBLE_BASE_URL: `${ollamaBaseUrl.replace(/\/$/, '')}/v1`,
+    SHELLSPAN_M6_COMPATIBLE_MODEL: toolsModel,
   });
 
-  if (process.env.TERMBRIDGE_M6_MINIMAX_LIVE === '1') {
+  if (process.env.SHELLSPAN_M6_MINIMAX_LIVE === '1') {
     runMiniMaxLiveAcceptance();
   } else {
-    process.stdout.write('SKIP MiniMax live acceptance: TERMBRIDGE_M6_MINIMAX_LIVE is not 1.\n');
+    process.stdout.write('SKIP MiniMax live acceptance: SHELLSPAN_M6_MINIMAX_LIVE is not 1.\n');
     if (process.argv.includes('--require-minimax')) process.exitCode = 2;
   }
 }

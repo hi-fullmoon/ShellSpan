@@ -200,7 +200,7 @@ const FontPreview: React.FC<{ dataUrl: string }> = ({ dataUrl }) => {
       return undefined;
     }
     let active = true;
-    const familyName = `TermBridgePreview-${Date.now().toString(36)}`;
+    const familyName = `ShellSpanPreview-${Date.now().toString(36)}`;
     const fontFace = new FontFace(familyName, `url("${dataUrl}")`);
     void fontFace
       .load()

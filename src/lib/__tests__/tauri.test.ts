@@ -133,7 +133,7 @@ describe('keychain kind serialization', () => {
 
   it('maps lowercase keyfile from the backend to keyFile', async () => {
     invokeMock.mockResolvedValue([
-      { id: 'key-1', label: 'My Key', keyType: 'rsa', kind: 'keyfile', service: 'com.termbridge.key' },
+      { id: 'key-1', label: 'My Key', keyType: 'rsa', kind: 'keyfile', service: 'com.shellspan.key' },
     ]);
 
     const result = await invokeListKeyCredentials();

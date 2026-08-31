@@ -48,7 +48,7 @@ interface RemoteHealthState {
 function sourceFor(profile: ConnectionProfile): RemoteHealthSource {
   return {
     kind: 'sshReadOnly',
-    commandSetVersion: 'termbridge-read-only-v1',
+    commandSetVersion: 'shellspan-read-only-v1',
     profileId: profile.id,
     host: profile.host,
     port: profile.port,

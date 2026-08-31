@@ -785,7 +785,7 @@ mod tests {
     #[test]
     fn missing_profile_fails_before_network_and_cleans_registration() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(&directory.path().join("termbridge.db")).unwrap();
+        let database = Database::open(&directory.path().join("shellspan.db")).unwrap();
         let credentials = CredentialManager::new();
         let cancellations = ExecutionCancellationRegistry::default();
         let known_hosts = directory.path().join("known_hosts");

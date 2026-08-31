@@ -81,7 +81,7 @@ pub(crate) fn initialize_tray(app: &tauri::App) -> Result<(), String> {
     let tray_menu = build_tray_menu(app.handle())
         .map_err(|error| format!("failed to create tray menu: {error}"))?;
     let mut tray_builder = tauri::tray::TrayIconBuilder::with_id("main")
-        .tooltip("TermBridge")
+        .tooltip("ShellSpan")
         .menu(&tray_menu)
         .on_menu_event(|app, event| {
             handle_menu_event(app, event.id.as_ref());
@@ -269,7 +269,7 @@ fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<taur
         }
 
         let about_item =
-            MenuItem::with_id(app, MENU_ABOUT_ID, "About TermBridge", true, None::<&str>)?;
+            MenuItem::with_id(app, MENU_ABOUT_ID, "About ShellSpan", true, None::<&str>)?;
         let settings_item = MenuItem::with_id(
             app,
             MENU_OPEN_SETTINGS_ID,
@@ -285,7 +285,7 @@ fn build_macos_app_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<taur
             None::<&str>,
         )?;
         let quit_item =
-            MenuItem::with_id(app, APP_QUIT_MENU_ID, "Quit TermBridge", true, None::<&str>)?;
+            MenuItem::with_id(app, APP_QUIT_MENU_ID, "Quit ShellSpan", true, None::<&str>)?;
 
         let app_submenu_items = app_submenu.items()?;
         let quit_position = app_submenu_items.len().saturating_sub(1);
@@ -307,7 +307,7 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
     let show_window_item = MenuItem::with_id(
         app,
         TRAY_SHOW_WINDOW_ID,
-        "Show TermBridge",
+        "Show ShellSpan",
         true,
         None::<&str>,
     )?;

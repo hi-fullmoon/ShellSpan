@@ -66,13 +66,13 @@ export function openHostPath(
       const openSide = openConnection.profileId === profile.id ? 'remote' : 'local';
       state.setActiveConnection(openConnection.id);
       useAppStore.getState().setActiveSection('sftp');
-      document.dispatchEvent(new CustomEvent('termbridge:open-sftp-path', {
+      document.dispatchEvent(new CustomEvent('shellspan:open-sftp-path', {
         detail: { connectionId: openConnection.id, side: openSide, path },
       }));
       return;
     }
   }
-  document.dispatchEvent(new CustomEvent('termbridge:connect-profile', {
+  document.dispatchEvent(new CustomEvent('shellspan:connect-profile', {
     detail: {
       profileId: profile.id,
       target,
@@ -87,14 +87,14 @@ export function runHostConnectionAction(
   action: HostConnectionAction,
 ): void {
   if (action === 'terminal' || action === 'sftp') {
-    document.dispatchEvent(new CustomEvent('termbridge:connect-profile', {
+    document.dispatchEvent(new CustomEvent('shellspan:connect-profile', {
       detail: { profileId, target: action },
     }));
     return;
   }
   useAppStore.getState().setActiveSection('workbench');
   useAppStore.getState().setActiveWorkbenchTab('connections');
-  document.dispatchEvent(new CustomEvent('termbridge:open-host-tool', {
+  document.dispatchEvent(new CustomEvent('shellspan:open-host-tool', {
     detail: { profileId, tool: action },
   }));
 }

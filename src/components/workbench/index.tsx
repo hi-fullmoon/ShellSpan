@@ -190,8 +190,8 @@ const Workbench: React.FC<WorkbenchProps> = ({
         void connect(profile, { initialDirectory: detail.initialDirectory });
       }
     };
-    document.addEventListener('termbridge:connect-profile', handleConnectProfile);
-    return () => document.removeEventListener('termbridge:connect-profile', handleConnectProfile);
+    document.addEventListener('shellspan:connect-profile', handleConnectProfile);
+    return () => document.removeEventListener('shellspan:connect-profile', handleConnectProfile);
   }, [connect, openSftpConnection]);
 
   const handleOpenImport = useCallback(async (): Promise<void> => {
@@ -214,7 +214,7 @@ const Workbench: React.FC<WorkbenchProps> = ({
   const handleExport = useCallback(async (): Promise<void> => {
     try {
       const content = exportConnections(useProfileStore.getState().profiles);
-      const path = await invokeExportLogFile('termbridge-connections.json', content);
+      const path = await invokeExportLogFile('shellspan-connections.json', content);
       if (path) showSuccess(t('workbench.connections.exported', { path }));
     } catch (error) {
       logger.error('failed to export connections', error);

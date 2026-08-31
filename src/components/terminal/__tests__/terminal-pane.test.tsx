@@ -140,7 +140,7 @@ describe('TerminalPane', () => {
   it('opens the search bar via the keyboard shortcut and closes it', async () => {
     render(<TerminalPane activeSession={makeSession()} />);
     expect(screen.queryByPlaceholderText('terminal.search.placeholder')).toBeNull();
-    act(() => document.dispatchEvent(new Event('termbridge:find-terminal')));
+    act(() => document.dispatchEvent(new Event('shellspan:find-terminal')));
     const searchInput = screen.getByPlaceholderText('terminal.search.placeholder');
     expect(searchInput).toBeInTheDocument();
     expect(searchInput.parentElement).toHaveClass('border-t-0');
@@ -617,7 +617,7 @@ describe('TerminalPane', () => {
     const handler = terminal.getCustomKeyEventHandlers()[0];
 
     const navigate = vi.fn();
-    document.addEventListener('termbridge:navigate-terminal-pane', navigate);
+    document.addEventListener('shellspan:navigate-terminal-pane', navigate);
 
     const leader = new KeyboardEvent('keydown', {
       key: 'b',
@@ -640,7 +640,7 @@ describe('TerminalPane', () => {
     expect(navigate).toHaveBeenCalledTimes(1);
     expect((navigate.mock.calls[0][0] as CustomEvent).detail.direction).toBe('left');
 
-    document.removeEventListener('termbridge:navigate-terminal-pane', navigate);
+    document.removeEventListener('shellspan:navigate-terminal-pane', navigate);
   });
 
   it('passes through keys that are not part of a leader chord', () => {
@@ -685,7 +685,7 @@ describe('TerminalPane', () => {
     render(<TerminalPane activeSession={makeSession()} />);
     const handler = terminal.getCustomKeyEventHandlers()[0];
     const listener = vi.fn();
-    document.addEventListener('termbridge:switch-terminal-tab', listener);
+    document.addEventListener('shellspan:switch-terminal-tab', listener);
 
     const event = new KeyboardEvent('keydown', {
       key: 'o',
@@ -699,6 +699,6 @@ describe('TerminalPane', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(listener).toHaveBeenCalledOnce();
 
-    document.removeEventListener('termbridge:switch-terminal-tab', listener);
+    document.removeEventListener('shellspan:switch-terminal-tab', listener);
   });
 });

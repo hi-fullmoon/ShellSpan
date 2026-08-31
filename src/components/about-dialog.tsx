@@ -15,7 +15,7 @@ interface AboutDialogProps {
   onClose: () => void;
 }
 
-const GITHUB_URL = 'https://github.com/hi-fullmoon/TermBridge';
+const GITHUB_URL = 'https://github.com/hi-fullmoon/ShellSpan';
 
 export const AboutDialog: React.FC<AboutDialogProps> = ({ open, onClose }) => {
   const { t } = useI18n();

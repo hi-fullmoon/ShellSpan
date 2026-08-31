@@ -1,15 +1,15 @@
-# TermBridge
+# ShellSpan
 
 > 产品路线图：[docs/product-roadmap.md](./docs/product-roadmap.md)
 
-TermBridge 是一个面向运维场景的桌面 SSH 客户端，把终端、SFTP 文件管理与凭证安全整合进同一个应用。
+ShellSpan 是一个面向运维场景的桌面 SSH 客户端，把终端、SFTP 文件管理与凭证安全整合进同一个应用。
 
 无需在多个工具之间来回切换：一个窗口里快速连接服务器、开终端执行命令、拖拽传输文件，密码与私钥统一托管在系统钥匙串中，轻量、顺手、开箱即用。
 
-最新版本与安装包可从 [GitHub Releases](https://github.com/hi-fullmoon/TermBridge/releases/latest) 获取。
+最新版本与安装包可从 [GitHub Releases](https://github.com/hi-fullmoon/ShellSpan/releases/latest) 获取。
 
 > [!IMPORTANT]
-> TermBridge 正在积极开发中，功能、界面和配置格式可能会持续调整。欢迎通过 [GitHub Issues](https://github.com/hi-fullmoon/TermBridge/issues) 反馈问题和建议。
+> ShellSpan 正在积极开发中，功能、界面和配置格式可能会持续调整。欢迎通过 [GitHub Issues](https://github.com/hi-fullmoon/ShellSpan/issues) 反馈问题和建议。
 
 ## 功能特性
 
@@ -84,20 +84,20 @@ pnpm tauri:build      # 构建桌面安装包
 
 ## 终端 Agent 与 MiniMax
 
-TermBridge v2.1 内置 MiniMax 官方兼容接口预设，不需要 OpenAI 帐号或 OpenAI API Key：
+ShellSpan v2.1 内置 MiniMax 官方兼容接口预设，不需要 OpenAI 帐号或 OpenAI API Key：
 
 1. 打开“设置 → AI 助手”，选择“添加厂商 → MiniMax 官方兼容接口”。
 2. 确认协议为“OpenAI Chat Completions 兼容”、服务地址为 `https://api.minimaxi.com`、模型为 `MiniMax-M2.7`。
 3. 在应用内输入自己的 MiniMax API Key，测试连接，并按需设为默认厂商。
 4. 在终端中打开 AI 面板，显式选择 Agent 模式和当前连接的权限档位后再发送任务。
 
-API Key 只应在应用的厂商设置中输入；不要把凭证写入仓库、命令行、聊天、日志或提交记录。厂商 API Key 保存在本机 TermBridge 数据库中。高权限模式可能执行修改或破坏性命令，批准前应核对完整冻结目标与命令；“完全访问权限”只对当前连接实例生效，重连或重启后不会恢复。
+API Key 只应在应用的厂商设置中输入；不要把凭证写入仓库、命令行、聊天、日志或提交记录。厂商 API Key 保存在本机 ShellSpan 数据库中。高权限模式可能执行修改或破坏性命令，批准前应核对完整冻结目标与命令；“完全访问权限”只对当前连接实例生效，重连或重启后不会恢复。
 
 完整配置、安全边界、停止与审批行为见[终端 Agent 使用指南](./docs/terminal-agent.md)。
 
 ## 项目定位
 
-TermBridge 当前专注于两条简洁、顺手的远程运维主链路：
+ShellSpan 当前专注于两条简洁、顺手的远程运维主链路：
 
 - 快速创建 SSH 连接，并在同一窗口管理多个终端会话
 - 通过 SFTP 浏览和管理远程文件

@@ -1,6 +1,6 @@
 services:
   ssh:
-    image: termbridge-ssh-e2e:local
+    image: shellspan-ssh-e2e:local
     ports:
       - "127.0.0.1:22222:22"
     healthcheck:
@@ -9,7 +9,7 @@ services:
       timeout: 3s
       retries: 30
   jump:
-    image: termbridge-ssh-e2e:local
+    image: shellspan-ssh-e2e:local
     ports:
       - "127.0.0.1:22223:22"
     healthcheck:

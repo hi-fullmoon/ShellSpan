@@ -60,7 +60,7 @@ jobs:
           const cargoToml = fs.readFileSync('src-tauri/Cargo.toml', 'utf8');
           const cargoLock = fs.readFileSync('src-tauri/Cargo.lock', 'utf8');
           const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
-          const lockVersion = cargoLock.match(/\[\[package\]\]\s*\nname\s*=\s*"TermBridge"\s*\nversion\s*=\s*"([^"]+)"/m)?.[1];
+          const lockVersion = cargoLock.match(/\[\[package\]\]\s*\nname\s*=\s*"ShellSpan"\s*\nversion\s*=\s*"([^"]+)"/m)?.[1];
           const expectedTag = `v${pkg.version}`;
           // 允许在仓库版本之上追加 semver 预发布后缀的测试 tag
           // （如 package.json 为 2.0.30 时的 v2.0.30-test.1），无需 bump 仓库版本
@@ -236,7 +236,7 @@ jobs:
         shell: bash
         run: |
           # 用 tag 推导出的版本号覆盖配置，使测试构建（如 2.0.30-test.1）的包版本与 tag 一致
-          # signingIdentity 覆盖为 adhoc：配置文件里的 "TermBridge Dev" 是开发者本机钥匙串里的
+          # signingIdentity 覆盖为 adhoc：配置文件里的 "ShellSpan Dev" 是开发者本机钥匙串里的
           # 自签名证书，runner 上没有；自签名对 Gatekeeper 本就无效，CI 用 adhoc 签名即可
           node -e 'console.log(JSON.stringify({version: process.env.APP_VERSION, build: {beforeBuildCommand: ""}, bundle: {macOS: {signingIdentity: "-"}}}))' > tauri-ci-override.json
           read -r -a bundle_args <<< "$BUNDLE_ARGS"
@@ -291,7 +291,7 @@ jobs:
               exit 1
             fi
 
-            app_binary="$app_path/Contents/MacOS/TermBridge"
+            app_binary="$app_path/Contents/MacOS/ShellSpan"
             if [[ ! -x "$app_binary" ]]; then
               echo "macOS app executable not found: $app_binary" >&2
               exit 1
@@ -320,10 +320,10 @@ jobs:
             fi
 
             archive_dir="$(dirname "$archive")"
-            renamed_archive="${archive_dir}/TermBridge-${PLATFORM}.app.tar.gz"
+            renamed_archive="${archive_dir}/ShellSpan-${PLATFORM}.app.tar.gz"
             mv "$archive" "$renamed_archive"
             mv "${archive}.sig" "${renamed_archive}.sig"
-            mv "$dmg" "$(dirname "$dmg")/TermBridge-${PLATFORM}.dmg"
+            mv "$dmg" "$(dirname "$dmg")/ShellSpan-${PLATFORM}.dmg"
           else
             # Windows 只发布 NSIS：更新包固定为 .nsis.zip（MSI 会安装到不同目录，
             # 对 NSIS 安装做原地更新会错位），此处仅校验产物完整。
@@ -418,12 +418,12 @@ jobs:
               gh release edit "$RELEASE_TAG" \
                 --prerelease \
                 --latest=false \
-                --title "TermBridge $RELEASE_TAG" \
+                --title "ShellSpan $RELEASE_TAG" \
                 --notes-file release-output/release-notes.md
             else
               gh release edit "$RELEASE_TAG" \
                 --prerelease=false \
-                --title "TermBridge $RELEASE_TAG" \
+                --title "ShellSpan $RELEASE_TAG" \
                 --notes-file release-output/release-notes.md
             fi
           else
@@ -434,7 +434,7 @@ jobs:
 
             gh release create "$RELEASE_TAG" "${assets[@]}" \
               "${release_args[@]}" \
-              --title "TermBridge $RELEASE_TAG" \
+              --title "ShellSpan $RELEASE_TAG" \
               --notes-file release-output/release-notes.md
           fi
 

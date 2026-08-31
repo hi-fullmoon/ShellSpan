@@ -1,4 +1,4 @@
-# TermBridge × Petdex Phase 0 验证记录
+# ShellSpan × Petdex Phase 0 验证记录
 
 > 验证日期：2026-08-28
 >
@@ -18,19 +18,19 @@
 
 | 项目 | 基线 | 证据 |
 | --- | --- | --- |
-| TermBridge 工作区 | `main`；开始时已有用户本地改动，本次未修改它们 | **实测** `git status --short --branch` |
+| ShellSpan 工作区 | `main`；开始时已有用户本地改动，本次未修改它们 | **实测** `git status --short --branch` |
 | macOS | macOS 26.6.2 (25G83), arm64 | **实测** `sw_vers` / `uname -m` |
 | Petdex Desktop | `/Applications/Petdex.app`，0.8.0，bundle id `dev.petdex.desktop-native`，Notarized Developer ID | **实测** `defaults` / `codesign` / `spctl` |
 | Petdex 当前发布版 | `desktop-v0.8.0`，commit `f2ea48aac6f89fbaeedd6a639faf4e208864ae5d` | **网络实测** GitHub Releases API |
 | Petdex 当前源码快照 | commit `493defbea9d4ae6e687da5bbc40976b0ff838c36` | **网络实测** shallow clone + `git rev-parse HEAD` |
 | Petdex 生产 manifest | 2026-08-28 生成，v1/v2 均为 4667 个条目 | **网络实测** `https://petdex.dev/api/manifest` 及 `/v2` |
-| TermBridge 跨平台 CI | Rust matrix 已在 `windows-2025` 和 `macos-15` 运行 `cargo test --all-targets` | **TermBridge CI 配置证据** `.github/workflows/quality-gate.yml` |
+| ShellSpan 跨平台 CI | Rust matrix 已在 `windows-2025` 和 `macos-15` 运行 `cargo test --all-targets` | **ShellSpan CI 配置证据** `.github/workflows/quality-gate.yml` |
 
 当前发布 tag 与当前源码快照之间，本文所依赖的主路由、Token、动作集合和授权边界没有发现不兼容变化。本机实测以发布版 0.8.0 为准，源码结论以上述固定 commit 为准。
 
 ## 2. PETDEX-001：Desktop 状态接口契约
 
-### 2.1 TermBridge 允许使用的最小契约
+### 2.1 ShellSpan 允许使用的最小契约
 
 | 字段 | 当前契约 | 证据 |
 | --- | --- | --- |
@@ -58,9 +58,9 @@ review
 waiting
 ```
 
-TermBridge roadmap 当前只使用其中的 `idle`、`waiting`、`waving`、`running`、`jumping`、`failed`，这 6 个值均实测返回 HTTP 200。不应将 `review`、`running-left` 或 `running-right` 暴露为 TermBridge 业务事件。发送裸 `running` 时，Petdex 在当前会话内交替应用 `running-right` / `running-left`；POST 响应仍回显 `running`，`GET /state` 可能读到实际应用的方向变体。
+ShellSpan roadmap 当前只使用其中的 `idle`、`waiting`、`waving`、`running`、`jumping`、`failed`，这 6 个值均实测返回 HTTP 200。不应将 `review`、`running-left` 或 `running-right` 暴露为 ShellSpan 业务事件。发送裸 `running` 时，Petdex 在当前会话内交替应用 `running-right` / `running-left`；POST 响应仍回显 `running`，`GET /state` 可能读到实际应用的方向变体。
 
-`GET /health`、`GET /whoami` 和 `GET /state` 当前不需要 Token。TermBridge 如使用它们，只能用于有界状态判定，不应把返回内容当作可信数据或写入详细日志。
+`GET /health`、`GET /whoami` 和 `GET /state` 当前不需要 Token。ShellSpan 如使用它们，只能用于有界状态判定，不应把返回内容当作可信数据或写入详细日志。
 
 ### 2.2 Token 位置、权限与轮换
 
@@ -87,9 +87,9 @@ TermBridge roadmap 当前只使用其中的 `idle`、`waiting`、`waving`、`run
 不能过度声明的边界：
 
 - 这不是对同一用户身份下其他本地进程的隔离边界；能读取该用户文件的进程也能读取 Token。
-- 当前服务器没有校验 HTTP `Host` Header。CORS 和 loopback bind 能降低远程网页直接驱动的风险，但 TermBridge 仍必须固定 IP/端口/路由，不允许代理环境变量、DNS 或前端输入改写目标。
+- 当前服务器没有校验 HTTP `Host` Header。CORS 和 loopback bind 能降低远程网页直接驱动的风险，但 ShellSpan 仍必须固定 IP/端口/路由，不允许代理环境变量、DNS 或前端输入改写目标。
 - Windows Token 是否确实只有当前用户可读，必须在真机检查 ACL；官方文档的概括性 `0600` 表述不足以作为 Windows 证据。
-- Petdex 还提供 `/bubble`，但 TermBridge 契约明确禁止使用它，也不发送 `agent_source`、`title`、会话标识、路径或自由文本。
+- Petdex 还提供 `/bubble`，但 ShellSpan 契约明确禁止使用它，也不发送 `agent_source`、`title`、会话标识、路径或自由文本。
 
 ### 2.4 最小兼容性样例
 
@@ -128,7 +128,7 @@ printf 'header = "X-Petdex-Update-Token: %s"\n' "$token" | \
 
 ### 3.2 Windows 验证记录
 
-TermBridge 现有 Quality Gate 的 Rust matrix 同时覆盖 `windows-2025` 和 `macos-15`，并已执行 `cargo test --all-targets`。因此本次在 [Petdex Phase 0 契约探针](../src-tauri/tests/petdex_contract_probe.rs) 中新增了一个完全自包含的 Rust integration test，并在 Quality Gate 中增加显式命名的执行步骤：
+ShellSpan 现有 Quality Gate 的 Rust matrix 同时覆盖 `windows-2025` 和 `macos-15`，并已执行 `cargo test --all-targets`。因此本次在 [Petdex Phase 0 契约探针](../src-tauri/tests/petdex_contract_probe.rs) 中新增了一个完全自包含的 Rust integration test，并在 Quality Gate 中增加显式命名的执行步骤：
 
 ```text
 cargo test --manifest-path src-tauri/Cargo.toml --locked \
@@ -149,13 +149,13 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked \
 
 | 项目 | 已有证据 | 尚缺证据 |
 | --- | --- | --- |
-| 路径 | 上游 Windows CI 从 `%USERPROFILE%\.petdex\runtime\update-token` 读取 Token；TermBridge 探针跨平台验证 `.petdex/runtime/update-token` 路径组装 | Windows 真机 ACL |
-| 启动与接口 | 上游 CI 在 Windows runner 启动 native exe，检查 7777 监听，并向 `/state` 发送带 Token 的 `running`；TermBridge 探针可在无安装 runner 验证失败分类与轮换策略 | 本 TermBridge 项目控制的 Windows 真机 Petdex 安装包行为 |
+| 路径 | 上游 Windows CI 从 `%USERPROFILE%\.petdex\runtime\update-token` 读取 Token；ShellSpan 探针跨平台验证 `.petdex/runtime/update-token` 路径组装 | Windows 真机 ACL |
+| 启动与接口 | 上游 CI 在 Windows runner 启动 native exe，检查 7777 监听，并向 `/state` 发送带 Token 的 `running`；ShellSpan 探针可在无安装 runner 验证失败分类与轮换策略 | 本 ShellSpan 项目控制的 Windows 真机 Petdex 安装包行为 |
 | 未安装 | 预期 Token 路径不存在且 7777 连接失败 | **待 Windows 真机验证；未通过** |
 | 已安装、未启动 | 源码的进程内服务器表明进程不在时不应有监听；已知 Token 可能残留 | **待 Windows 真机验证具体 PowerShell 异常类型/文案；未通过** |
 | 重启/轮换 | CSPRNG、Token 重写和恒定时间比较为跨平台源码；上游 CI 有 Windows 接口回路测试 | **待 Windows 真机验证旧 Token 401、新 Token 200 和重启恢复时间；未通过** |
 
-Windows 的结论只是“实现与上游 CI 存在对应路径”，不是“TermBridge 的 Windows 验收已通过”。真机验证时不应固定匹配 PowerShell 的本地化错误文本；应匹配结果类别：Token 缺失/不可读、连接拒绝/超时、401 和恢复成功。
+Windows 的结论只是“实现与上游 CI 存在对应路径”，不是“ShellSpan 的 Windows 验收已通过”。真机验证时不应固定匹配 PowerShell 的本地化错误文本；应匹配结果类别：Token 缺失/不可读、连接拒绝/超时、401 和恢复成功。
 
 ## 4. PETDEX-003：社区资产授权边界
 
@@ -172,21 +172,21 @@ Windows 的结论只是“实现与上游 CI 存在对应路径”，不是“Te
 - v2 的紧凑字段与 v1 语义一致。
 - 两者都没有 `license`、`rights`、`copyright` 或 `attribution` 字段。
 - 抽样的生产 `pet.json` 只有 `description`、`displayName`、`id`、`spritesheetPath`，同样没有授权字段。
-- `submittedBy` 只是署名，不是授权；“已上架”也不等于“可由 TermBridge 再分发”。
+- `submittedBy` 只是署名，不是授权；“已上架”也不等于“可由 ShellSpan 再分发”。
 
 ### 4.3 Phase 0 风险结论
 
-1. TermBridge **不随安装包分发、镜像、预置或二次托管任何 Petdex 社区资产**。
+1. ShellSpan **不随安装包分发、镜像、预置或二次托管任何 Petdex 社区资产**。
 2. Phase 1 只驱动用户已安装的 Petdex Desktop 当前宠物，不读取 manifest，不下载资产，不实现目录或宠物选择。
 3. 如未来进入 Phase 4，在每个资产具有可机读许可、署名要求、来源、版本和下架状态之前，不得实现内嵌分发。
-4. Petdex 的 takedown 机制可以减少上游持续供应风险，但不会自动撤回 TermBridge 已打包或已缓存副本，因此不能代替授权字段。
+4. Petdex 的 takedown 机制可以减少上游持续供应风险，但不会自动撤回 ShellSpan 已打包或已缓存副本，因此不能代替授权字段。
 
 ## 5. 退出条件审核
 
 | 退出要求 | 结果 | 证据/缺口 |
 | --- | --- | --- |
 | 本地接口能稳定驱动动作 | **macOS 满足** | 0.8.0 上 9 个状态连续返回 200，退出/重启后结果符合契约 |
-| 无需向 Petdex 发送 TermBridge 业务数据 | **满足** | `/state` 最小 body 只需固定状态枚举；禁止使用 `/bubble` |
+| 无需向 Petdex 发送 ShellSpan 业务数据 | **满足** | `/state` 最小 body 只需固定状态枚举；禁止使用 `/bubble` |
 | macOS 未安装/未启动/重启失败表现 | **部分满足** | 未启动和重启已实测；真实未安装环境待验证 |
 | Windows 未安装/未启动/重启失败表现 | **部分满足** | 无安装契约探针已覆盖 Token 缺失/残留、端口拒绝和 401 重读；真机 Petdex 时序、安装包与 ACL 仍未验证 |
 | 社区资产授权边界 | **满足** | manifest/pet.json 无许可字段；已确定不随包分发第三方资产 |
@@ -195,7 +195,7 @@ Windows 的结论只是“实现与上游 CI 存在对应路径”，不是“Te
 
 ### 5.1 有条件的 Phase 1 开发准入建议
 
-原始技术退出条件是“本地接口能稳定驱动动作，且无需向 Petdex 发送 TermBridge 业务数据”。macOS 0.8.0 真机证据和新增跨平台契约探针已足以支持一个**有条件的 Phase 1 开发准入**，但不是 Phase 0/PETDEX-002 完成或发布准入。本次变更没有开始 Phase 1。
+原始技术退出条件是“本地接口能稳定驱动动作，且无需向 Petdex 发送 ShellSpan 业务数据”。macOS 0.8.0 真机证据和新增跨平台契约探针已足以支持一个**有条件的 Phase 1 开发准入**，但不是 Phase 0/PETDEX-002 完成或发布准入。本次变更没有开始 Phase 1。
 
 未来的 Phase 1 实现必须以以下条件为入口：
 
@@ -214,13 +214,13 @@ Windows 的结论只是“实现与上游 CI 存在对应路径”，不是“Te
 - macOS 在真实未安装环境重复无文件/无监听的静默降级验收。
 - `windows-2025` 与 `macos-15` 的 Phase 0 契约探针、产品适配器测试、Clippy 和全量 Rust 测试持续通过。
 - 真实 Petdex 重启、进度事件风暴和持续失败下，完成去重、节流、退避和业务耗时不受影响的 Phase 2 验收。
-- 日志、错误详情和诊断包的秘密扫描证明不含 Token、终端内容和 TermBridge 业务数据。
+- 日志、错误详情和诊断包的秘密扫描证明不含 Token、终端内容和 ShellSpan 业务数据。
 
 当前产品桥接的队列、仲裁、恢复探测和失败退避参数见 [Petdex 运行时边界](./petdex-runtime.md)。该实现说明不替代上述真机与发布证据。
 
 ## 6. 复核命令与结果摘要
 
-下列上游研究命令均在 TermBridge 仓库外的临时目录或只读端点上运行，未修改 Petdex 源码，未输出 Token：
+下列上游研究命令均在 ShellSpan 仓库外的临时目录或只读端点上运行，未修改 Petdex 源码，未输出 Token：
 
 ```sh
 git clone --depth 1 https://github.com/crafter-station/petdex.git <temp>/petdex
@@ -241,7 +241,7 @@ jq '{generatedAt,total,firstPetKeys:(.pets[0]|keys)}' <temp>/manifest-v1.json
 jq '{v,generatedAt,total,assetBase,fields}' <temp>/manifest-v2.json
 ```
 
-TermBridge Phase 0 契约探针的独立复核命令：
+ShellSpan Phase 0 契约探针的独立复核命令：
 
 ```sh
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check

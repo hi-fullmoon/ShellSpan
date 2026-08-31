@@ -21,7 +21,7 @@ function passingLedger() {
       consent: 'explicit-opt-in',
       explicitOptInUsers: 30,
       equivalentDemandEvidence: 0,
-      evidenceRefs: ['https://github.com/hi-fullmoon/TermBridge/issues/101'],
+      evidenceRefs: ['https://github.com/hi-fullmoon/ShellSpan/issues/101'],
     },
     retention: {
       day7EligibleUsers: 30,
@@ -52,7 +52,7 @@ function passingLedger() {
         systemNotification: 1,
         none: 0,
       },
-      evidenceRefs: ['https://github.com/hi-fullmoon/TermBridge/issues/102'],
+      evidenceRefs: ['https://github.com/hi-fullmoon/ShellSpan/issues/102'],
     },
   };
 }

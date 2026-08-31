@@ -64,7 +64,7 @@ describe('updateFlowReducer', () => {
 
 describe('startup update check throttle', () => {
   it('runs when no previous check is recorded', () => {
-    window.localStorage.removeItem('termbridge.update.lastStartupCheckAt');
+    window.localStorage.removeItem('shellspan.update.lastStartupCheckAt');
     expect(shouldRunStartupUpdateCheck(Date.now())).toBe(true);
   });
 

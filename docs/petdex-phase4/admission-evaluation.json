@@ -33,7 +33,7 @@
       ],
       "gaps": [
         "Require per-asset machine-readable license, attribution requirements, immutable source, asset version, and active or withdrawn status.",
-        "Define how a withdrawal revokes TermBridge previews, downloads, packaged copies, and cached copies; upstream takedown alone is insufficient."
+        "Define how a withdrawal revokes ShellSpan previews, downloads, packaged copies, and cached copies; upstream takedown alone is insufficient."
       ]
     },
     {
@@ -77,7 +77,7 @@
       "status": "blocked",
       "evidence": [
         "Phase 0 documented Petdex manifest v1 and v2, spriteVersionNumber, and the known 8x9 and 8x11 spritesheet families.",
-        "The current TermBridge integration does not parse manifests, pet.json, spritesheets, or downloaded pet packages."
+        "The current ShellSpan integration does not parse manifests, pet.json, spritesheets, or downloaded pet packages."
       ],
       "gaps": [
         "Define supported manifest, pet.json, spritesheet, and package versions with fixtures and fail-closed behavior for unknown or malformed versions.",

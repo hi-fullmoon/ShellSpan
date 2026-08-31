@@ -30,8 +30,8 @@ describe('KeychainPanel', () => {
     useProfileStore.setState(initialProfiles, true);
     useKeychainStore.setState({
       keys: [
-        { id: 'profile-1', label: 'Server password', keyType: 'profile', kind: 'password', service: 'com.termbridge.profile-password' },
-        { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile', service: 'com.termbridge.key' },
+        { id: 'profile-1', label: 'Server password', keyType: 'profile', kind: 'password', service: 'com.shellspan.profile-password' },
+        { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile', service: 'com.shellspan.key' },
       ],
       initialized: true,
     });

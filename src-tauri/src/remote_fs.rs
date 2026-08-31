@@ -71,11 +71,11 @@ fn fallback_open_root() -> PathBuf {
     {
         // SAFETY: geteuid has no preconditions and does not dereference memory.
         let effective_user_id = unsafe { libc::geteuid() };
-        std::env::temp_dir().join(format!("termbridge-open-{effective_user_id}"))
+        std::env::temp_dir().join(format!("shellspan-open-{effective_user_id}"))
     }
     #[cfg(not(unix))]
     {
-        std::env::temp_dir().join("termbridge-open")
+        std::env::temp_dir().join("shellspan-open")
     }
 }
 
@@ -283,7 +283,7 @@ const MIN_TRANSFER_BUFFER_SIZE: usize = 64 * 1024;
 const MAX_TRANSFER_BUFFER_SIZE: usize = 2 * 1024 * 1024;
 const DEFAULT_TRANSFER_BUFFER_SIZE: usize = 64 * 1024;
 #[cfg(test)]
-const TEST_TRANSFER_BUFFER_SIZE_ENV: &str = "TERMBRIDGE_SFTP_BENCH_TRANSFER_BUFFER_BYTES";
+const TEST_TRANSFER_BUFFER_SIZE_ENV: &str = "SHELLSPAN_SFTP_BENCH_TRANSFER_BUFFER_BYTES";
 
 #[cfg(test)]
 fn validate_transfer_buffer_size(size: usize) -> Result<usize, String> {
@@ -2554,7 +2554,7 @@ fn uncredited_remote_copy_bytes(credited: u64, completed_offset: u64) -> u64 {
 fn unique_remote_hidden_path(destination_path: &Path, purpose: &str) -> PathBuf {
     // Do not append to the destination name: a valid 255-byte remote filename
     // would otherwise make every staging/backup path exceed NAME_MAX.
-    destination_path.with_file_name(format!(".termbridge-{purpose}-{}", Uuid::new_v4()))
+    destination_path.with_file_name(format!(".shellspan-{purpose}-{}", Uuid::new_v4()))
 }
 
 fn remote_copy_staging_path(destination_path: &Path) -> PathBuf {
@@ -2672,7 +2672,7 @@ fn open_remote_file_inner(
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "remote-file".to_string());
 
-        // Local copies of remotely-opened files live under ~/.termbridge so
+        // Local copies of remotely-opened files live under ~/.shellspan so
         // they survive reboots (retention cleanup bounds their lifetime); fall
         // back to the system temp dir if the home dir is unavailable.
         let open_root = open_root
@@ -5100,7 +5100,7 @@ mod tests {
         assert!(first
             .file_name()
             .and_then(|value| value.to_str())
-            .is_some_and(|name| name.starts_with(".termbridge-copy-")));
+            .is_some_and(|name| name.starts_with(".shellspan-copy-")));
         assert!(first.file_name().unwrap().len() < 80);
     }
 
@@ -5173,7 +5173,7 @@ mod tests {
         assert!(first
             .file_name()
             .and_then(|value| value.to_str())
-            .is_some_and(|name| name.starts_with(".termbridge-upload-")));
+            .is_some_and(|name| name.starts_with(".shellspan-upload-")));
     }
 
     #[test]
@@ -5186,7 +5186,7 @@ mod tests {
         assert!(first
             .file_name()
             .and_then(|value| value.to_str())
-            .is_some_and(|name| name.starts_with(".termbridge-upload-backup-")));
+            .is_some_and(|name| name.starts_with(".shellspan-upload-backup-")));
     }
 
     #[test]
@@ -5293,10 +5293,10 @@ mod tests {
     }
 
     #[test]
-    fn termbridge_directory_name_is_not_reserved() {
-        // `.termbridge` used to be reserved for application data; it is an
+    fn shellspan_directory_name_is_not_reserved() {
+        // `.shellspan` used to be reserved for application data; it is an
         // ordinary name now that nothing is staged on the server.
-        assert!(validate_remote_name(".termbridge").is_ok());
+        assert!(validate_remote_name(".shellspan").is_ok());
         assert!(validate_remote_name("reports").is_ok());
     }
 
@@ -5953,7 +5953,7 @@ mod tests {
     #[test]
     fn local_upload_scan_honours_cancellation() {
         let directory =
-            std::env::temp_dir().join(format!("termbridge-scan-test-{}", Uuid::new_v4()));
+            std::env::temp_dir().join(format!("shellspan-scan-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&directory).expect("create test directory");
         let cancel_flag = Arc::new(AtomicBool::new(true));
 
@@ -6064,20 +6064,19 @@ mod tests {
     #[ignore = "requires the isolated tests/ssh-e2e Docker service and is run by scripts/run-sftp-benchmark.ps1"]
     fn isolated_sftp_transfer_benchmark() {
         let host =
-            std::env::var("TERMBRIDGE_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = std::env::var("TERMBRIDGE_E2E_SSH_PORT")
+            std::env::var("SHELLSPAN_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = std::env::var("SHELLSPAN_E2E_SSH_PORT")
             .ok()
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(22222);
-        let username = std::env::var("TERMBRIDGE_E2E_SSH_USERNAME")
-            .unwrap_or_else(|_| "termbridge".to_string());
-        let password = std::env::var("TERMBRIDGE_E2E_SSH_PASSWORD")
-            .unwrap_or_else(|_| "termbridge-e2e".to_string());
-        let iterations = benchmark_env_u64("TERMBRIDGE_SFTP_BENCH_ITERATIONS", 3);
-        let large_bytes = benchmark_env_u64("TERMBRIDGE_SFTP_BENCH_LARGE_BYTES", 16 * 1024 * 1024);
-        let small_file_count = benchmark_env_u64("TERMBRIDGE_SFTP_BENCH_SMALL_FILE_COUNT", 128);
-        let small_file_bytes =
-            benchmark_env_u64("TERMBRIDGE_SFTP_BENCH_SMALL_FILE_BYTES", 4 * 1024);
+        let username =
+            std::env::var("SHELLSPAN_E2E_SSH_USERNAME").unwrap_or_else(|_| "shellspan".to_string());
+        let password = std::env::var("SHELLSPAN_E2E_SSH_PASSWORD")
+            .unwrap_or_else(|_| "shellspan-e2e".to_string());
+        let iterations = benchmark_env_u64("SHELLSPAN_SFTP_BENCH_ITERATIONS", 3);
+        let large_bytes = benchmark_env_u64("SHELLSPAN_SFTP_BENCH_LARGE_BYTES", 16 * 1024 * 1024);
+        let small_file_count = benchmark_env_u64("SHELLSPAN_SFTP_BENCH_SMALL_FILE_COUNT", 128);
+        let small_file_bytes = benchmark_env_u64("SHELLSPAN_SFTP_BENCH_SMALL_FILE_BYTES", 4 * 1024);
         let transfer_buffer_bytes = transfer_buffer_size();
         let connection = RemoteConnectionRequest {
             host: host.clone(),
@@ -6094,7 +6093,7 @@ mod tests {
             crate::connection::trusted_known_hosts_fixture(&host, port);
         let local_root = tempfile::tempdir().expect("create benchmark workspace");
         let remote_root = format!(
-            "/home/termbridge/upload/termbridge-benchmark-{}",
+            "/home/shellspan/upload/shellspan-benchmark-{}",
             Uuid::new_v4()
         );
         let emitter = NoopTransferEventEmitter;

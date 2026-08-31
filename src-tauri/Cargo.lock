@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "TermBridge"
+name = "ShellSpan"
 version = "2.1.0"
 dependencies = [
  "apple-native-keyring-store",

@@ -102,7 +102,7 @@ describe('transactional connection import', () => {
   });
 });
 
-describe('TermBridge connection export', () => {
+describe('ShellSpan connection export', () => {
   const profile = {
     id: 'profile-1',
     name: 'API',

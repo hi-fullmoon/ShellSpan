@@ -1,8 +1,8 @@
 # Changelog
 
-All notable changes to TermBridge are documented in this file.
+All notable changes to ShellSpan are documented in this file.
 
-## [v2.1.0](https://github.com/hi-fullmoon/TermBridge/releases/tag/v2.1.0) - 2026-08-30
+## [v2.1.0](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.1.0) - 2026-08-30
 
 ### Features
 
@@ -23,7 +23,7 @@ All notable changes to TermBridge are documented in this file.
 - **windows:** make the native PowerShell acceptance fixture resilient to valid progress under high test-runner load while retaining a hard deadline
 
 
-## [v2.0.55](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.55) - 2026-08-27
+## [v2.0.55](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.55) - 2026-08-27
 
 
 ### Bug Fixes
@@ -72,7 +72,7 @@ All notable changes to TermBridge are documented in this file.
 - **runbook:** freeze execution behavior
 - **execution:** verify reviewed SSH fixture boundary
 
-## [v2.0.54](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.54) - 2026-08-27
+## [v2.0.54](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.54) - 2026-08-27
 
 
 ### Bug Fixes
@@ -122,7 +122,7 @@ All notable changes to TermBridge are documented in this file.
 - **terminal:** polish new session dialog and extend coverage
 - **workbench:** stack monitor panel cards vertically
 
-## [v2.0.53](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.53) - 2026-08-26
+## [v2.0.53](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.53) - 2026-08-26
 
 
 ### Bug Fixes
@@ -166,7 +166,7 @@ All notable changes to TermBridge are documented in this file.
 - **sftp:** cover cancellation, supersession, and prompt flows
 - **terminal:** extend performance benchmark scripts and contract
 
-## [v2.0.52](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.52) - 2026-08-25
+## [v2.0.52](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.52) - 2026-08-25
 
 
 ### Chore
@@ -183,7 +183,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **sftp:** polish sftp pane
 
-## [v2.0.51](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.51) - 2026-08-25
+## [v2.0.51](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.51) - 2026-08-25
 
 
 ### Refactoring
@@ -194,7 +194,7 @@ All notable changes to TermBridge are documented in this file.
 
 - tighten runbook editor focus ring and workbench header layout
 
-## [v2.0.50](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.50) - 2026-08-25
+## [v2.0.50](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.50) - 2026-08-25
 
 
 ### Bug Fixes
@@ -254,7 +254,7 @@ All notable changes to TermBridge are documented in this file.
 
 - refine update section layout in workbench
 
-## [v2.0.49](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.49) - 2026-08-22
+## [v2.0.49](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.49) - 2026-08-22
 
 
 ### Bug Fixes
@@ -273,7 +273,7 @@ All notable changes to TermBridge are documented in this file.
 - register AI stream delta batcher with global registry
 - switch AI model selector to Combobox
 
-## [v2.0.48](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.48) - 2026-08-22
+## [v2.0.48](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.48) - 2026-08-22
 
 
 ### Bug Fixes
@@ -379,7 +379,7 @@ All notable changes to TermBridge are documented in this file.
 - **workbench:** cover form validation focus and password visibility
 - **sftp:** cover new connection menu keyboard and accessibility
 
-## [v2.0.47](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.47) - 2026-08-20
+## [v2.0.47](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.47) - 2026-08-20
 
 
 ### Bug Fixes
@@ -399,7 +399,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **term:** cover paste warning and reconnect guard edge cases
 
-## [v2.0.46](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.46) - 2026-08-20
+## [v2.0.46](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.46) - 2026-08-20
 
 
 ### Bug Fixes
@@ -411,14 +411,14 @@ All notable changes to TermBridge are documented in this file.
 - **sftp:** add pointerup fallback for tab activation
 - **terminal:** add pointerup fallback for tab activation
 
-## [v2.0.45](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.45) - 2026-08-20
+## [v2.0.45](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.45) - 2026-08-20
 
 
 ### Bug Fixes
 
 - **keychain:** trust current app instead of refreshing ACL on every read
 
-## [v2.0.44](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.44) - 2026-08-20
+## [v2.0.44](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.44) - 2026-08-20
 
 
 ### Features
@@ -433,7 +433,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **hook:** mock new profile secret retrieval commands and verify lazy loading
 
-## [v2.0.43](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.43) - 2026-08-20
+## [v2.0.43](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.43) - 2026-08-20
 
 
 ### Bug Fixes
@@ -467,7 +467,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **sftp:** scope conflict-dialog queries to dialog content
 
-## [v2.0.42](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.42) - 2026-08-19
+## [v2.0.42](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.42) - 2026-08-19
 
 
 ### Bug Fixes
@@ -481,7 +481,7 @@ All notable changes to TermBridge are documented in this file.
 - **sftp:** replace new-tab button with double-click on empty space
 - **terminal:** replace new-tab button with double-click on empty space
 
-## [v2.0.41](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.41) - 2026-08-19
+## [v2.0.41](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.41) - 2026-08-19
 
 
 ### Bug Fixes
@@ -492,7 +492,7 @@ All notable changes to TermBridge are documented in this file.
 
 - remove pnpm cache from setup-node in release workflow
 
-## [v2.0.40](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.40) - 2026-08-14
+## [v2.0.40](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.40) - 2026-08-14
 
 
 ### CI/CD
@@ -508,49 +508,49 @@ All notable changes to TermBridge are documented in this file.
 
 - update tests for lazy owner resolution and connection warm-up
 
-## [v2.0.39](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.39) - 2026-08-14
+## [v2.0.39](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.39) - 2026-08-14
 
 
 ### Bug Fixes
 
 - persist remote file open cache under user home dir
 
-## [v2.0.38](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.38) - 2026-08-12
+## [v2.0.38](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.38) - 2026-08-12
 
 
 ### Features
 
 - **sftp:** reuse pending row id when queued batch starts
 
-## [v2.0.37](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.37) - 2026-08-12
+## [v2.0.37](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.37) - 2026-08-12
 
 
 ### Bug Fixes
 
 - **build:** sort ICO entries largest-first for crisp tray icon
 
-## [v2.0.36](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.36) - 2026-08-12
+## [v2.0.36](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.36) - 2026-08-12
 
 
 ### Features
 
 - **sftp:** improve transfer queue ordering and monitor panel accuracy
 
-## [v2.0.35](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.35) - 2026-08-12
+## [v2.0.35](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.35) - 2026-08-12
 
 
 ### Features
 
 - **sftp:** cancel queued batch when dismissing pending row
 
-## [v2.0.34](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.34) - 2026-08-12
+## [v2.0.34](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.34) - 2026-08-12
 
 
 ### Features
 
 - **sftp:** show queued upload batches as pending transfer rows
 
-## [v2.0.33](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.33) - 2026-08-12
+## [v2.0.33](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.33) - 2026-08-12
 
 
 ### Bug Fixes
@@ -561,7 +561,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **sftp:** queue path operations instead of rejecting while busy
 
-## [v2.0.32](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.32) - 2026-08-10
+## [v2.0.32](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.32) - 2026-08-10
 
 
 ### Bug Fixes
@@ -582,7 +582,7 @@ All notable changes to TermBridge are documented in this file.
 - adjust toast notification position offset
 - format terminal registry code style
 
-## [v2.0.31](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.31) - 2026-08-08
+## [v2.0.31](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.31) - 2026-08-08
 
 
 ### Bug Fixes
@@ -606,7 +606,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **workbench:** remove redundant tooltip hover target test
 
-## [v2.0.30](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.30) - 2026-08-08
+## [v2.0.30](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.30) - 2026-08-08
 
 
 ### Bug Fixes
@@ -630,28 +630,28 @@ All notable changes to TermBridge are documented in this file.
 - **ui:** cover toast double-click dismissal behavior
 - 修复 Node 22 下 localStorage 不可用问题
 
-## [v2.0.29](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.29) - 2026-08-07
+## [v2.0.29](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.29) - 2026-08-07
 
 
 ### Features
 
 - **keychain:** clear fallback secret value while preserving metadata
 
-## [v2.0.28](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.28) - 2026-08-07
+## [v2.0.28](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.28) - 2026-08-07
 
 
 ### Features
 
 - **hook:** add useLastValue hook for stable dialog content
 
-## [v2.0.27](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.27) - 2026-08-06
+## [v2.0.27](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.27) - 2026-08-06
 
 
 ### Refactoring
 
 - **scripts:** regenerate full icon set from single master
 
-## [v2.0.26](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.26) - 2026-08-06
+## [v2.0.26](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.26) - 2026-08-06
 
 
 ### Bug Fixes
@@ -668,7 +668,7 @@ All notable changes to TermBridge are documented in this file.
 - move log source toggle to bottom toolbar
 - **sftp:** remove redundant tooltip with full path
 
-## [v2.0.25](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.25) - 2026-08-06
+## [v2.0.25](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.25) - 2026-08-06
 
 
 ### Bug Fixes
@@ -681,7 +681,7 @@ All notable changes to TermBridge are documented in this file.
 - **ui:** add keyboard shortcuts for SFTP file filter
 - improve delete operation UI in transfer progress
 
-## [v2.0.24](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.24) - 2026-08-06
+## [v2.0.24](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.24) - 2026-08-06
 
 
 ### Features
@@ -693,7 +693,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **sftp:** cover delete-row styling and 16px leading icon
 
-## [v2.0.23](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.23) - 2026-08-06
+## [v2.0.23](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.23) - 2026-08-06
 
 
 ### Bug Fixes
@@ -717,7 +717,7 @@ All notable changes to TermBridge are documented in this file.
 ### Testing
 
 - update transfer-progress tests for full paths and h-8 class
-## [v2.0.23](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.23) - 2026-08-05
+## [v2.0.23](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.23) - 2026-08-05
 
 ### Chore
 
@@ -728,13 +728,13 @@ All notable changes to TermBridge are documented in this file.
 - **remote_fs:** dot-prefix copy temp files to hide them from listings
 - **sftp:** show transfer speed next to transfer progress
 
-## [v2.0.22](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.22) - 2026-08-05
+## [v2.0.22](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.22) - 2026-08-05
 
 ### Chore
 
 - **tauri:** update application icons
 
-## [v2.0.21](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.21) - 2026-08-05
+## [v2.0.21](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.21) - 2026-08-05
 
 ### Features
 
@@ -747,25 +747,25 @@ All notable changes to TermBridge are documented in this file.
 
 - **transfer-store:** surface conflict policies in transfer state
 
-## [v2.0.20](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.20) - 2026-08-05
+## [v2.0.20](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.20) - 2026-08-05
 
 ### Bug Fixes
 
 - **store:** ignore stale progress events after transfer completion
 
-## [v2.0.19](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.19) - 2026-08-05
+## [v2.0.19](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.19) - 2026-08-05
 
 ### Refactoring
 
 - remove trash/undo and simplify transfers
 
-## [v2.0.18](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.18) - 2026-08-04
+## [v2.0.18](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.18) - 2026-08-04
 
 ### Bug Fixes
 
 - **ui:** improve tab bar drag behavior and new tab button
 
-## [v2.0.17](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.17) - 2026-08-04
+## [v2.0.17](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.17) - 2026-08-04
 
 ### Chore
 
@@ -776,7 +776,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **ui:** reduce terminal and sftp tab bar height
 
-## [v2.0.16](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.16) - 2026-08-04
+## [v2.0.16](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.16) - 2026-08-04
 
 ### Chore
 
@@ -796,7 +796,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **hook:** add invokeMarkSessionReady mock to useReconnectSession tests
 
-## [v2.0.15](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.15) - 2026-08-03
+## [v2.0.15](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.15) - 2026-08-03
 
 ### Bug Fixes
 
@@ -806,7 +806,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **sftp:** support conflict policies for remote-to-local downloads
 
-## [v2.0.14](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.14) - 2026-08-03
+## [v2.0.14](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.14) - 2026-08-03
 
 ### Bug Fixes
 
@@ -820,7 +820,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **workbench:** add loading state and error feedback for connection management
 
-## [v2.0.13](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.13) - 2026-08-03
+## [v2.0.13](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.13) - 2026-08-03
 
 ### Bug Fixes
 
@@ -838,13 +838,13 @@ All notable changes to TermBridge are documented in this file.
 
 - **ui:** adjust SFTP pane search icon padding-right
 
-## [v2.0.12](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.12) - 2026-07-31
+## [v2.0.12](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.12) - 2026-07-31
 
 ### Features
 
 - **sftp:** harden transfers and pool lifecycle
 
-## [v2.0.11](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.11) - 2026-07-30
+## [v2.0.11](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.11) - 2026-07-30
 
 ### Bug Fixes
 
@@ -863,7 +863,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **settings:** add sidebar navigation for settings panel
 
-## [v2.0.10](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.10) - 2026-07-30
+## [v2.0.10](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.10) - 2026-07-30
 
 ### Bug Fixes
 
@@ -874,7 +874,7 @@ All notable changes to TermBridge are documented in this file.
 - **keychain:** add per-profile secrets management for passphrase and jump host credentials
 - **tauri:** add tray show window on click and menu item for non-macOS
 
-## [v2.0.9](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.9) - 2026-07-27
+## [v2.0.9](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.9) - 2026-07-27
 
 ### Bug Fixes
 
@@ -894,7 +894,7 @@ All notable changes to TermBridge are documented in this file.
 - **keychain:** migrate to native OS keychain and extract connection form drawer
 - **ui:** polish keychain credentials panel and store
 
-## [v2.0.8](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.8) - 2026-07-23
+## [v2.0.8](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.8) - 2026-07-23
 
 ### Bug Fixes
 
@@ -914,14 +914,14 @@ All notable changes to TermBridge are documented in this file.
 
 - **ui:** use slightly thicker default scrollbar size
 
-## [v2.0.7](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.7) - 2026-07-22
+## [v2.0.7](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.7) - 2026-07-22
 
 ### Style
 
 - **ui:** polish sftp bookmark menu and tab bar
 - **ui:** refine split pane subtle divider styling
 
-## [v2.0.6](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.6) - 2026-07-22
+## [v2.0.6](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.6) - 2026-07-22
 
 ### Chore
 
@@ -936,7 +936,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **ui:** use compact dialog in update restart dialog
 
-## [v2.0.5](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.5) - 2026-07-22
+## [v2.0.5](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.5) - 2026-07-22
 
 ### Bug Fixes
 
@@ -958,7 +958,7 @@ All notable changes to TermBridge are documented in this file.
 - **ui:** reduce border opacity to 50% for softer borders
 - **term:** simplify terminal tab bar styles
 
-## [v2.0.4](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.4) - 2026-07-21
+## [v2.0.4](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.4) - 2026-07-21
 
 ### Bug Fixes
 
@@ -982,14 +982,14 @@ All notable changes to TermBridge are documented in this file.
 
 - **term:** fix formatting in terminal component
 
-## [v2.0.3](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.3) - 2026-07-21
+## [v2.0.3](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.3) - 2026-07-21
 
 ### Bug Fixes
 
 - **ui:** align SFTP transfer progress track to bottom edge with 3px height
 - **ui:** prevent double-click activation across menus and buttons
 
-## [v2.0.2](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.2) - 2026-07-20
+## [v2.0.2](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.2) - 2026-07-20
 
 ### Features
 
@@ -997,7 +997,7 @@ All notable changes to TermBridge are documented in this file.
 - **ui:** add search icon inside connection and credentials search inputs
 - **sftp:** persist split pane ratio in store with controlled SplitPane
 
-## [v2.0.1](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.1) - 2026-07-20
+## [v2.0.1](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.1) - 2026-07-20
 
 ### Bug Fixes
 
@@ -1031,7 +1031,7 @@ All notable changes to TermBridge are documented in this file.
 
 - **ui:** replace raw label with Label component in credential prompt
 
-## [v2.0.0](https://github.com/zhengbiwen/TermBridge/releases/tag/v2.0.0) - 2026-07-20
+## [v2.0.0](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.0) - 2026-07-20
 
 ### Bug Fixes
 

@@ -936,7 +936,7 @@ fn render_markdown(events: &[OperationHistoryEvent]) -> String {
         by_task.entry(&event.task_id).or_default().push(event);
     }
     let mut output = format!(
-        "# TermBridge operation history\n\n- Exported at: {}\n- Redacted: yes\n- Storage: local only\n\n",
+        "# ShellSpan operation history\n\n- Exported at: {}\n- Redacted: yes\n- Storage: local only\n\n",
         current_timestamp_ms()
     );
     for task_id in task_order {
@@ -1071,7 +1071,7 @@ pub(crate) async fn export_operation_history(
         OperationHistoryExportFormat::Json => ("json", render_json(&page.events)?),
     };
     let file_name = format!(
-        "termbridge-operation-history-{}.{}",
+        "shellspan-operation-history-{}.{}",
         current_timestamp_ms(),
         extension
     );
@@ -1109,7 +1109,7 @@ pub(crate) async fn export_operation_history(
 
 fn temporary_export_path(path: &std::path::Path) -> PathBuf {
     let mut temporary = path.as_os_str().to_os_string();
-    temporary.push(format!(".termbridge-{}.tmp", uuid::Uuid::new_v4()));
+    temporary.push(format!(".shellspan-{}.tmp", uuid::Uuid::new_v4()));
     PathBuf::from(temporary)
 }
 

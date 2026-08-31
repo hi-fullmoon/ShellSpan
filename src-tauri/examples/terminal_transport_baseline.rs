@@ -85,7 +85,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     } else {
         println!(
-            "ssh_pty\tSKIPPED (pass --ssh with TERMBRIDGE_E2E_SSH_* set for the isolated SSH fixture)"
+            "ssh_pty\tSKIPPED (pass --ssh with SHELLSPAN_E2E_SSH_* set for the isolated SSH fixture)"
         );
     }
 
@@ -439,10 +439,10 @@ struct SshConfig {
 impl SshConfig {
     fn from_env() -> Result<Self, Box<dyn Error>> {
         Ok(Self {
-            host: env::var("TERMBRIDGE_E2E_SSH_HOST")?,
-            port: env::var("TERMBRIDGE_E2E_SSH_PORT")?.parse()?,
-            username: env::var("TERMBRIDGE_E2E_SSH_USERNAME")?,
-            password: env::var("TERMBRIDGE_E2E_SSH_PASSWORD")?,
+            host: env::var("SHELLSPAN_E2E_SSH_HOST")?,
+            port: env::var("SHELLSPAN_E2E_SSH_PORT")?.parse()?,
+            username: env::var("SHELLSPAN_E2E_SSH_USERNAME")?,
+            password: env::var("SHELLSPAN_E2E_SSH_PASSWORD")?,
         })
     }
 }

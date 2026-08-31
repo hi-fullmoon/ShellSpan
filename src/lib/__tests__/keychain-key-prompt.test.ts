@@ -58,7 +58,7 @@ describe('keychain key prompt recovery', () => {
     useKeychainKeyPromptStore.setState(initialKeychainKeyPrompt, true);
     useKeychainStore.setState({
       initialized: true,
-      keys: [{ id: 'new-jump-key', label: 'Jump Key', keyType: 'ed25519', kind: 'keyFile', service: 'com.termbridge.key' }],
+      keys: [{ id: 'new-jump-key', label: 'Jump Key', keyType: 'ed25519', kind: 'keyFile', service: 'com.shellspan.key' }],
     });
     useProfileStore.setState({ profiles: [jumpProfile] });
     vi.mocked(invokeUpdateProfile).mockClear();

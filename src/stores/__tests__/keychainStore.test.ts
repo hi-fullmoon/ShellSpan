@@ -73,15 +73,15 @@ describe('keychainStore hydrate', () => {
 
   it('preserves backend metadata on hydrate', async () => {
     invokeListKeyCredentials.mockResolvedValue([
-      { id: 'profile-1', label: 'Server password', keyType: 'profile', kind: 'password', service: 'com.termbridge.profile-password' },
-      { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile', service: 'com.termbridge.key' },
+      { id: 'profile-1', label: 'Server password', keyType: 'profile', kind: 'password', service: 'com.shellspan.profile-password' },
+      { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile', service: 'com.shellspan.key' },
     ]);
 
     await useKeychainStore.getState().hydrate();
 
     expect(useKeychainStore.getState().keys).toEqual([
-      { id: 'profile-1', label: 'Server password', keyType: 'profile', kind: 'password', service: 'com.termbridge.profile-password' },
-      { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile', service: 'com.termbridge.key' },
+      { id: 'profile-1', label: 'Server password', keyType: 'profile', kind: 'password', service: 'com.shellspan.profile-password' },
+      { id: 'key-1', label: 'Server key', keyType: 'rsa', kind: 'keyFile', service: 'com.shellspan.key' },
     ]);
   });
 
@@ -91,7 +91,7 @@ describe('keychainStore hydrate', () => {
       label: 'Existing key',
       keyType: 'ed25519',
       kind: 'keyFile' as const,
-      service: 'com.termbridge.key',
+      service: 'com.shellspan.key',
     };
     useKeychainStore.setState({ keys: [existing] });
     invokeListKeyCredentials.mockRejectedValueOnce(new Error('database unavailable'));
