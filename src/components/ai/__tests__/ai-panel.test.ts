@@ -292,6 +292,29 @@ describe('explicit AI modes', () => {
         'text-app-primary-text',
       );
 
+      const agentSessionId = useTerminalStore.getState().activeSessionId as string;
+      act(() => useTerminalStore.getState().setStatus(agentSessionId, {
+        sessionId: agentSessionId,
+        status: 'disconnected',
+      }));
+      const availabilityTitle = await screen.findByText('Agent is unavailable');
+      const availabilityAlert = availabilityTitle.closest('[role="alert"]');
+      const alertRegion = availabilityAlert?.parentElement;
+      const emptyStateTitle = screen.getByText('What should the Agent complete?');
+      expect(availabilityAlert).toHaveAttribute('data-size', 'sm');
+      expect(availabilityAlert).toHaveClass('px-2', 'py-1.5', 'text-xs');
+      expect(alertRegion).toHaveAttribute('data-slot', 'ai-panel-alerts');
+      expect(
+        (alertRegion?.compareDocumentPosition(emptyStateTitle) ?? 0)
+          & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).not.toBe(0);
+
+      act(() => useTerminalStore.getState().setStatus(agentSessionId, {
+        sessionId: agentSessionId,
+        status: 'connected',
+      }));
+      await waitFor(() => expect(screen.queryByText('Agent is unavailable')).not.toBeInTheDocument());
+
       fireEvent.click(screen.getByRole('button', { name: 'Terminal permissions' }));
       fireEvent.click(await screen.findByRole('menuitemradio', { name: /^Full access/ }));
       fireEvent.click(await screen.findByRole('button', { name: 'Enable full access' }));
@@ -914,8 +937,17 @@ describe('AI request resource feedback', () => {
       fireEvent.change(textbox, { target: { value: oversized } });
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-      expect(await screen.findByText('Message is too large to send')).toBeVisible();
+      const tooLargeTitle = await screen.findByText('Message is too large to send');
+      expect(tooLargeTitle).toBeVisible();
       expect(screen.getByText(/Your draft has been kept/)).toBeVisible();
+      const alertRegion = tooLargeTitle.closest('[role="alert"]')?.parentElement;
+      const emptyStateTitle = screen.getByText('What would you like to ask?');
+      expect(tooLargeTitle.closest('[role="alert"]')).toHaveAttribute('data-size', 'sm');
+      expect(alertRegion).toHaveAttribute('data-slot', 'ai-panel-alerts');
+      expect(
+        (alertRegion?.compareDocumentPosition(emptyStateTitle) ?? 0)
+          & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).not.toBe(0);
       expect(textbox).toHaveValue(oversized);
       expect(tauriCoreMock.invoke.mock.calls.some(([command]) => (
         command === 'ai_start_request'

@@ -47,6 +47,8 @@ describe('MessageScroller', () => {
 
     await waitFor(() => {
       expect(container.querySelectorAll('[data-slot="message-scroller-item"]')).toHaveLength(2);
+      expect(container.querySelector('[data-slot="message-scroller-content"]'))
+        .toHaveClass('gap-5', 'px-3', 'py-4');
     });
   });
 });

@@ -106,6 +106,38 @@ describe('AgentRunView', () => {
     expect(onSwitchToAsk).toHaveBeenCalledWith('request-fallback');
   });
 
+  it('places task outcome alerts above the Agent conversation', () => {
+    useAgentStore.getState().beginRun({
+      requestId: 'request-failed',
+      goal: 'Inspect nginx',
+      providerId: 'openai',
+      target,
+      targetTitle: 'Production A',
+      permissionMode: 'requestApproval',
+    });
+    useAgentStore.getState().appendText('request-failed', 'The inspection did not finish.');
+    useAgentStore.getState().failRun('request-failed', 'The terminal connection was lost.');
+
+    render(
+      <AgentRunView
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onRetry={vi.fn()}
+        canRetry={() => true}
+        onSwitchToAsk={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    const alert = screen.getByText('The terminal connection was lost.').closest('[role="alert"]');
+    const conversation = screen.getByRole('log', { name: 'Agent task conversation' });
+    expect(alert).not.toBeNull();
+    expect(alert).toHaveAttribute('data-size', 'sm');
+    expect(
+      (alert?.compareDocumentPosition(conversation) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+  });
+
   it('shows when only the Agent model context was shortened', () => {
     useAgentStore.getState().beginRun({
       requestId: 'request-bounded',
