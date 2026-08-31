@@ -165,6 +165,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const startupUpdateCheck = useAppStore((state) => state.startupUpdateCheck);
   const setStartupUpdateCheck = useAppStore((state) => state.setStartupUpdateCheck);
   const petdexEnabled = useAppStore((state) => state.petdexEnabled);
+  const petdexRequestedEnabled = useAppStore((state) => state.petdexRequestedEnabled);
+  const petdexConfiguring = useAppStore((state) => state.petdexConfiguring);
   const setPetdexEnabled = useAppStore((state) => state.setPetdexEnabled);
   const startupSection = useAppStore((state) => state.startupSection);
   const setStartupSection = useAppStore((state) => state.setStartupSection);
@@ -230,27 +232,54 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const setActiveSection = useAppStore((state) => state.setActiveSettingsSection);
   const activeSectionMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
   const settingsViewportRef = useRef<HTMLDivElement>(null);
+  const petdexMountedRef = useRef(true);
+  const petdexOperationRevisionRef = useRef(0);
+  const petdexLiveStatusRevisionRef = useRef(0);
+  const displayedPetdexEnabled = petdexRequestedEnabled ?? petdexEnabled;
 
   useEffect(() => {
     let active = true;
     let unlisten: (() => void) | undefined;
-    void getPetdexStatus()
-      .then((status) => {
-        if (active) setPetdexStatus(status);
-      })
-      .catch(() => {
+    petdexMountedRef.current = true;
+    void (async () => {
+      try {
+        const dispose = await listenToPetdexStatus((status) => {
+          petdexLiveStatusRevisionRef.current += 1;
+          if (active) setPetdexStatus(status);
+        });
+        if (!active) {
+          dispose();
+          return;
+        }
+        unlisten = dispose;
+        const liveRevision = petdexLiveStatusRevisionRef.current;
+        const operationRevision = petdexOperationRevisionRef.current;
+        try {
+          const status = await getPetdexStatus();
+          if (
+            active
+            && liveRevision === petdexLiveStatusRevisionRef.current
+            && operationRevision === petdexOperationRevisionRef.current
+          ) {
+            setPetdexStatus(status);
+          }
+        } catch {
+          if (
+            active
+            && liveRevision === petdexLiveStatusRevisionRef.current
+            && operationRevision === petdexOperationRevisionRef.current
+          ) {
+            setPetdexStatus('connectionError');
+          }
+        }
+      } catch {
         if (active) setPetdexStatus('connectionError');
-      });
-    void listenToPetdexStatus((status) => {
-      if (active) setPetdexStatus(status);
-    }).then((dispose) => {
-      if (active) unlisten = dispose;
-      else dispose();
-    }).catch(() => {
-      if (active) setPetdexStatus('connectionError');
-    });
+      }
+    })();
     return () => {
       active = false;
+      petdexMountedRef.current = false;
+      petdexOperationRevisionRef.current += 1;
       unlisten?.();
     };
   }, []);
@@ -267,18 +296,56 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   const handlePetdexEnabledChange = (enabled: boolean): void => {
-    setPetdexStatus('notDetected');
-    setPetdexEnabled(enabled);
+    const operationRevision = ++petdexOperationRevisionRef.current;
+    const liveRevision = petdexLiveStatusRevisionRef.current;
+    setTestingPetdex(false);
+    void setPetdexEnabled(enabled)
+      .then((status) => {
+        if (
+          petdexMountedRef.current
+          && operationRevision === petdexOperationRevisionRef.current
+          && liveRevision === petdexLiveStatusRevisionRef.current
+        ) {
+          setPetdexStatus(status);
+        }
+      })
+      .catch(() => {
+        if (
+          petdexMountedRef.current
+          && operationRevision === petdexOperationRevisionRef.current
+        ) {
+          setPetdexStatus('connectionError');
+        }
+      });
   };
 
   const handleTestPetdex = async (): Promise<void> => {
+    const operationRevision = ++petdexOperationRevisionRef.current;
+    const liveRevision = petdexLiveStatusRevisionRef.current;
     setTestingPetdex(true);
     try {
-      setPetdexStatus(await testPetdexConnection());
+      const status = await testPetdexConnection();
+      if (
+        petdexMountedRef.current
+        && operationRevision === petdexOperationRevisionRef.current
+        && liveRevision === petdexLiveStatusRevisionRef.current
+      ) {
+        setPetdexStatus(status);
+      }
     } catch {
-      setPetdexStatus('connectionError');
+      if (
+        petdexMountedRef.current
+        && operationRevision === petdexOperationRevisionRef.current
+      ) {
+        setPetdexStatus('connectionError');
+      }
     } finally {
-      setTestingPetdex(false);
+      if (
+        petdexMountedRef.current
+        && operationRevision === petdexOperationRevisionRef.current
+      ) {
+        setTestingPetdex(false);
+      }
     }
   };
 
@@ -455,7 +522,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <Switch
                       aria-label={t('settings.experimental.petdex.enabled')}
                       aria-describedby="petdex-integration-description petdex-privacy-description"
-                      checked={petdexEnabled}
+                      aria-busy={petdexConfiguring}
+                      checked={displayedPetdexEnabled}
                       onCheckedChange={handlePetdexEnabledChange}
                     />
                   </div>
@@ -475,7 +543,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     })}
                     aria-live="polite"
                     aria-atomic="true"
-                    aria-busy={testingPetdex}
+                    aria-busy={testingPetdex || petdexConfiguring}
                   >
                     <Badge
                       variant={petdexStatus === 'connected'
@@ -491,7 +559,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       size="sm"
                       variant="outline"
                       aria-describedby="petdex-privacy-description"
-                      disabled={!petdexEnabled || testingPetdex}
+                      disabled={!petdexEnabled || testingPetdex || petdexConfiguring}
                       onClick={() => void handleTestPetdex()}
                     >
                       <FlaskConicalIcon data-icon="inline-start" />

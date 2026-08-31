@@ -1,8 +1,18 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPanel } from '../settings-panel';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutBindings } from '@/types';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
 
 const petdexMocks = vi.hoisted(() => ({
   configure: vi.fn(),
@@ -51,7 +61,10 @@ describe('SettingsPanel', () => {
     petdexFeedbackMocks.open.mockReset().mockResolvedValue(undefined);
     useAppStore.setState({
       activeSettingsSection: 'general',
+      petdexBackendEnabled: false,
       petdexEnabled: false,
+      petdexRequestedEnabled: null,
+      petdexConfiguring: false,
       shortcuts: { ...DEFAULT_SHORTCUTS },
     });
   });
@@ -162,7 +175,18 @@ describe('SettingsPanel', () => {
 
     fireEvent.click(toggle);
 
-    expect(useAppStore.getState().petdexEnabled).toBe(true);
+    expect(useAppStore.getState()).toMatchObject({
+      petdexEnabled: false,
+      petdexRequestedEnabled: true,
+      petdexConfiguring: true,
+    });
+    await waitFor(() => {
+      expect(useAppStore.getState()).toMatchObject({
+        petdexEnabled: true,
+        petdexRequestedEnabled: null,
+        petdexConfiguring: false,
+      });
+    });
     expect(petdexMocks.configure).toHaveBeenCalledWith(true);
     const testButton = screen.getByRole('button', {
       name: 'settings.experimental.petdex.testAction',
@@ -175,10 +199,62 @@ describe('SettingsPanel', () => {
     expect(petdexMocks.testConnection).toHaveBeenCalledTimes(1);
 
     fireEvent.click(toggle);
-    expect(useAppStore.getState().petdexEnabled).toBe(false);
+    await waitFor(() => {
+      expect(useAppStore.getState().petdexEnabled).toBe(false);
+    });
     expect(petdexMocks.configure).toHaveBeenLastCalledWith(false);
     expect(testButton).toBeDisabled();
     expect(screen.getByText('settings.experimental.petdex.status.notDetected')).toBeInTheDocument();
+  });
+
+  it('does not let an older status snapshot overwrite a newer event', async () => {
+    const snapshot = deferred<'notDetected'>();
+    let emitStatus: ((status: 'connected') => void) | undefined;
+    petdexMocks.getStatus.mockReturnValue(snapshot.promise);
+    petdexMocks.listen.mockImplementation(async (callback) => {
+      emitStatus = callback;
+      return vi.fn();
+    });
+    useAppStore.setState({ activeSettingsSection: 'experimental' });
+
+    render(<SettingsPanel />);
+    await waitFor(() => expect(petdexMocks.getStatus).toHaveBeenCalledTimes(1));
+    act(() => emitStatus?.('connected'));
+    await act(async () => {
+      snapshot.resolve('notDetected');
+      await snapshot.promise;
+    });
+
+    expect(screen.getByText('settings.experimental.petdex.status.connected')).toBeInTheDocument();
+    expect(
+      screen.queryByText('settings.experimental.petdex.status.notDetected'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('rolls back a failed disable request and shows a finite error state', async () => {
+    useAppStore.setState({
+      activeSettingsSection: 'experimental',
+      petdexBackendEnabled: true,
+      petdexEnabled: true,
+    });
+    petdexMocks.configure.mockRejectedValueOnce(new Error('sensitive backend detail'));
+
+    render(<SettingsPanel />);
+    const toggle = screen.getByRole('switch', {
+      name: 'settings.experimental.petdex.enabled',
+    });
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(useAppStore.getState()).toMatchObject({
+      petdexEnabled: true,
+      petdexRequestedEnabled: null,
+      petdexConfiguring: false,
+    });
+    expect(
+      await screen.findByText('settings.experimental.petdex.status.connectionError'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('sensitive backend detail')).not.toBeInTheDocument();
   });
 
   it('opens voluntary feedback only after a user action and without reading the opt-in state', async () => {
