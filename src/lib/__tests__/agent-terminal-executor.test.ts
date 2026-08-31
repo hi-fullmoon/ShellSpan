@@ -376,6 +376,9 @@ describe('Agent M2 terminal display filter', () => {
     expect(privateSupervisor).toContain('Test-ShellSpanParent');
     expect(privateSupervisor).toContain('.WaitForExit(0)');
     expect(privateSupervisor).toContain('SHELLSPAN_AGENT_PARENT_PID');
+    expect(privateSupervisor).not.toContain(
+      '$__shellspanGate.Set(); $__shellspanGate.Dispose()',
+    );
     expect(privateSupervisor).not.toMatch(
       /CleanupConfirmed=\[ShellSpanAgentJob\]::TerminateJobObject/,
     );
@@ -389,6 +392,10 @@ describe('Agent M2 terminal display filter', () => {
     expect(privateSupervisor).not.toContain(command);
     expect(commandBootstrap).toContain('EventWaitHandle]::OpenExisting');
     expect(commandBootstrap).toContain('SHELLSPAN_AGENT_GATE');
+    expect(commandBootstrap).toContain(
+      '$__shellspanChildOk=$?;$__shellspanChildNative=$global:LASTEXITCODE',
+    );
+    expect(commandBootstrap).toContain('. $__shellspanChildScript');
     expect(commandBootstrap).not.toContain('SHELLSPAN_AGENT_MARKER');
     for (const name of [
       'APPDOMAIN_MANAGER_ASM',

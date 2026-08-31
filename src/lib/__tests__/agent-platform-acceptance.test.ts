@@ -14,6 +14,8 @@ const REAL_SHELL_IDLE_TIMEOUT_MS = 10_000;
 const REAL_SHELL_HARD_TIMEOUT_MS = 30_000;
 const REAL_SHELL_TEST_TIMEOUT_MS = 35_000;
 const REAL_SHELL_INPUT_DELAY_MS = 100;
+const WINDOWS_OWNER_DEATH_CLEANUP_TIMEOUT_MS = 5_000;
+const POWERSHELL_STDIN_SCRIPT_END = '__SHELLSPAN_ACCEPTANCE_SCRIPT_END_89abcdef__';
 
 interface ShellDeadlines {
   readonly idleTimeoutMs: number;
@@ -176,6 +178,30 @@ function nativePtyShellCommand(): string {
   return process.platform === 'darwin'
     ? '/bin/cat | /usr/bin/script -q /dev/null /bin/zsh -f'
     : "/bin/cat | /usr/bin/script -q -c '/bin/sh' /dev/null";
+}
+
+function powerShellStdinScriptArguments(): readonly string[] {
+  // `powershell.exe -Command -` executes redirected stdin one physical line at
+  // a time and silently discards a statement continued with a trailing
+  // backtick. The production terminal is a ConPTY and parses those continued
+  // lines interactively. This native-shell harness reconstructs the exact
+  // chunked statement before parsing it so the real supervisor, Job Object,
+  // completion capability, and cleanup paths still execute under PowerShell.
+  const bootstrap = [
+    '$__shellspanAcceptanceSource=[System.Text.StringBuilder]::new()',
+    `while ($true) { $__shellspanAcceptanceLine=[Console]::In.ReadLine(); if ($null -eq $__shellspanAcceptanceLine) { exit 125 }; if ($__shellspanAcceptanceLine -ceq '${POWERSHELL_STDIN_SCRIPT_END}') { break }; [void]$__shellspanAcceptanceSource.Append($__shellspanAcceptanceLine); [void]$__shellspanAcceptanceSource.Append("\`n") }`,
+    '& ([ScriptBlock]::Create($__shellspanAcceptanceSource.ToString()))',
+  ].join(';');
+  return ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', bootstrap];
+}
+
+function createPowerShellStdinScriptChunks(wrapper: string): readonly string[] {
+  return [
+    ...createAgentTerminalInputChunks(wrapper, 'powershell'),
+    // Keep the pipe open in the owner-death case. StreamReader waits after a
+    // lone CR to determine whether it begins CRLF, unlike an interactive PTY.
+    `${POWERSHELL_STDIN_SCRIPT_END}\r\n`,
+  ];
 }
 
 describe('Agent M6 real platform shell acceptance', () => {
@@ -571,13 +597,13 @@ describe('Agent M6 real platform shell acceptance', () => {
       );
       const result = await runShell(
         'powershell.exe',
-        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '-'],
-        [...createAgentTerminalInputChunks(wrapper, 'powershell'), 'exit\r'],
+        powerShellStdinScriptArguments(),
+        createPowerShellStdinScriptChunks(wrapper),
         parser,
       );
 
       expect(result.exitCode).not.toBeNull();
-      expect(result.parsedExitCode).toBe(7);
+      expect(result.parsedExitCode, result.output).toBe(7);
       expect(result.captured).toContain('windows-real-shell');
       expect(result.captured).toContain('quoted secret value');
       expect(result.output.split(boundary.beginPrefix)).toHaveLength(2);
@@ -600,8 +626,8 @@ describe('Agent M6 real platform shell acceptance', () => {
       );
       const result = await runShell(
         'powershell.exe',
-        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '-'],
-        [...createAgentTerminalInputChunks(wrapper, 'powershell'), 'exit\r'],
+        powerShellStdinScriptArguments(),
+        createPowerShellStdinScriptChunks(wrapper),
         parser,
       );
       const descendantMatch = /windows-descendant:(\d+)/.exec(result.captured);
@@ -630,16 +656,18 @@ describe('Agent M6 real platform shell acceptance', () => {
       await new Promise<void>((resolve, reject) => {
         const child = spawn(
           'powershell.exe',
-          ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '-'],
+          powerShellStdinScriptArguments(),
           { stdio: ['pipe', 'pipe', 'pipe'] },
         );
         let output = '';
         let descendantId: number | undefined;
         let settled = false;
+        let cleanupTimeout: ReturnType<typeof setTimeout> | undefined;
         const finish = (error?: Error): void => {
           if (settled) return;
           settled = true;
           clearTimeout(hardTimeout);
+          if (cleanupTimeout !== undefined) clearTimeout(cleanupTimeout);
           clearInterval(deathPoll);
           if (!child.killed) child.kill();
           if (error) reject(error);
@@ -649,8 +677,8 @@ describe('Agent M6 real platform shell acceptance', () => {
           if (descendantId !== undefined && processExists(descendantId)) {
             try { process.kill(descendantId, 'SIGKILL'); } catch { /* already exited */ }
           }
-          finish(new Error(`Windows owner-death cleanup exceeded its deadline: ${output}`));
-        }, REAL_SHELL_IDLE_TIMEOUT_MS);
+          finish(new Error(`Windows owner-death acceptance exceeded its hard deadline: ${output}`));
+        }, REAL_SHELL_HARD_TIMEOUT_MS);
         const deathPoll = setInterval(() => {
           if (descendantId !== undefined && !processExists(descendantId)) finish();
         }, 25);
@@ -660,6 +688,12 @@ describe('Agent M6 real platform shell acceptance', () => {
           if (descendantId === undefined && match) {
             descendantId = Number(match[1]);
             child.kill();
+            cleanupTimeout = setTimeout(() => {
+              if (descendantId !== undefined && processExists(descendantId)) {
+                try { process.kill(descendantId, 'SIGKILL'); } catch { /* already exited */ }
+              }
+              finish(new Error(`Windows owner-death cleanup exceeded its deadline: ${output}`));
+            }, WINDOWS_OWNER_DEATH_CLEANUP_TIMEOUT_MS);
           }
         };
         child.stdout.on('data', onChunk);
@@ -669,7 +703,7 @@ describe('Agent M6 real platform shell acceptance', () => {
         });
         child.once('error', finish);
         child.once('spawn', () => {
-          const chunks = createAgentTerminalInputChunks(wrapper, 'powershell');
+          const chunks = createPowerShellStdinScriptChunks(wrapper);
           let index = 0;
           const submit = (): void => {
             if (settled || child.killed || index >= chunks.length) return;
