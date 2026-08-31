@@ -200,68 +200,56 @@ export function RemoteHealthSection(): React.JSX.Element {
   }, []);
 
   return (
-    <section aria-labelledby="remote-health-heading" className="flex flex-col gap-2.5">
-      <div
-        data-slot="remote-health-section-header"
-        className="flex flex-col gap-3 @min-[42rem]:flex-row @min-[42rem]:items-center @min-[42rem]:justify-between"
-      >
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <h2 id="remote-health-heading" className="text-sm font-medium text-foreground">
-            {t('remoteHealth.title')}
-          </h2>
-          <p className="text-xs text-muted-foreground">{t('remoteHealth.description')}</p>
-        </div>
-        {selectedProfile && (
-          <div
-            data-slot="remote-health-section-actions"
-            className="flex shrink-0 flex-wrap items-center gap-2 self-start @min-[42rem]:self-auto"
-          >
-            <Button
-              size="sm"
-              onClick={() => setAuthorizationProfileId(selectedProfile.id)}
-              disabled={busy}
-            >
-              {busy
-                ? <Spinner data-icon="inline-start" />
-                : <ShieldCheckIcon data-icon="inline-start" />}
-              {entry?.phase === 'preparing'
-                ? t('remoteHealth.preparing')
-                : entry?.phase === 'collecting' || entry?.phase === 'cancelling'
-                  ? t('remoteHealth.collecting')
-                  : remoteSnapshot
-                    ? t('remoteHealth.collectAgain')
-                    : t('remoteHealth.collect')}
-            </Button>
-            {(entry?.phase === 'collecting' || entry?.phase === 'cancelling') && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void cancel(selectedProfile.id)}
-                disabled={entry.phase === 'cancelling'}
-              >
-                <SquareIcon data-icon="inline-start" />
-                {entry.phase === 'cancelling'
-                  ? t('remoteHealth.cancelling')
-                  : t('common.cancel')}
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-
-      <Card>
+    <section aria-labelledby="remote-health-heading">
+      <Card size="sm">
         <CardHeader>
-          <CardTitle>{selectedProfile?.name ?? t('remoteHealth.noProfile')}</CardTitle>
+          <CardTitle id="remote-health-heading">
+            {t('remoteHealth.title')}
+          </CardTitle>
+          <CardDescription>{t('remoteHealth.description')}</CardDescription>
           {selectedProfile && (
-            <CardDescription>
-              {selectedProfile.username}@{selectedProfile.host}:{selectedProfile.port}
-            </CardDescription>
-          )}
-          {statuses && (
-            <CardAction>
-              <div className="flex items-center gap-1">
-                {stale && <Badge variant="secondary">{t('remoteHealth.stale')}</Badge>}
-                <RemoteHealthStatusBadge status={statuses.overall} />
+            <CardAction
+              className="max-w-[60%]"
+            >
+              <div
+                data-slot="remote-health-section-actions"
+                className="flex flex-wrap items-center justify-end gap-1.5"
+              >
+                {statuses && (
+                  <>
+                    {stale && <Badge variant="secondary">{t('remoteHealth.stale')}</Badge>}
+                    <RemoteHealthStatusBadge status={statuses.overall} />
+                  </>
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => setAuthorizationProfileId(selectedProfile.id)}
+                  disabled={busy}
+                >
+                  {busy
+                    ? <Spinner data-icon="inline-start" />
+                    : <ShieldCheckIcon data-icon="inline-start" />}
+                  {entry?.phase === 'preparing'
+                    ? t('remoteHealth.preparing')
+                    : entry?.phase === 'collecting' || entry?.phase === 'cancelling'
+                      ? t('remoteHealth.collecting')
+                      : remoteSnapshot
+                        ? t('remoteHealth.collectAgain')
+                        : t('remoteHealth.collect')}
+                </Button>
+                {(entry?.phase === 'collecting' || entry?.phase === 'cancelling') && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void cancel(selectedProfile.id)}
+                    disabled={entry.phase === 'cancelling'}
+                  >
+                    <SquareIcon data-icon="inline-start" />
+                    {entry.phase === 'cancelling'
+                      ? t('remoteHealth.cancelling')
+                      : t('common.cancel')}
+                  </Button>
+                )}
               </div>
             </CardAction>
           )}
@@ -293,11 +281,7 @@ export function RemoteHealthSection(): React.JSX.Element {
                 </Select>
               </Field>
             </FieldGroup>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              {t('remoteHealth.noProfileDescription')}
-            </p>
-          )}
+          ) : null}
 
           {entry?.lastResult && entry.lastResult.status !== 'success' && (
             <Alert variant={entry.lastResult.status === 'cancelled' ? 'default' : 'destructive'}>
@@ -383,7 +367,13 @@ export function RemoteHealthSection(): React.JSX.Element {
               <AlertTitle>{t('remoteHealth.empty')}</AlertTitle>
               <AlertDescription>{t('remoteHealth.emptyDescription')}</AlertDescription>
             </Alert>
-          ) : null}
+          ) : (
+            <Alert>
+              <ServerCogIcon />
+              <AlertTitle>{t('remoteHealth.noProfile')}</AlertTitle>
+              <AlertDescription>{t('remoteHealth.noProfileDescription')}</AlertDescription>
+            </Alert>
+          )}
 
         </CardContent>
       </Card>

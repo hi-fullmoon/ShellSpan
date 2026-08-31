@@ -308,12 +308,46 @@ describe('SettingsPanel', () => {
       '[&_[data-slot=input]]:h-8',
       '[&_[data-slot=input-group]]:h-8',
       '[&_[data-slot=select-trigger]]:h-8',
+      '[&_[data-slot=select-trigger]]:min-w-36',
     );
     expect(settingsDialog).toHaveClass(
-      'h-[min(48rem,calc(100vh-2rem))]',
-      'w-[min(64rem,calc(100vw-2rem))]',
+      'h-[min(52rem,calc(100vh-2rem))]',
+      'w-[min(72rem,calc(100vw-2rem))]',
       'max-w-none',
     );
+  });
+
+  it('groups related settings into a responsive row card', async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+
+    const startupRow = screen
+      .getByText('settings.general.startupSection')
+      .closest('[data-slot="field"]');
+    const updateRow = screen
+      .getByText('settings.general.update')
+      .closest('[data-slot="field"]');
+    const settingsCard = startupRow?.closest('[data-slot="card"]');
+    const settingsGroups = settingsCard?.closest('[data-slot="settings-groups"]');
+
+    expect(startupRow).toHaveClass('min-h-20', '@min-[34rem]:flex-row');
+    expect(settingsCard).toHaveAttribute('data-variant', 'outline');
+    expect(updateRow?.closest('[data-slot="card"]')).toBe(settingsCard);
+    expect(settingsCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(4);
+    expect(settingsGroups).toHaveClass('flex-col', 'gap-6');
+
+    openSection('settings.terminal.title');
+    const terminalGroups = screen
+      .getByRole('tabpanel', { name: 'settings.terminal.title' })
+      .querySelectorAll('[data-slot="settings-group"]');
+
+    expect(terminalGroups).toHaveLength(4);
+    expect(Array.from(terminalGroups, (group) => group.querySelector('h3')?.textContent)).toEqual([
+      'settings.terminal.groupAppearance',
+      'settings.terminal.groupInteraction',
+      'settings.terminal.groupSafety',
+      'settings.terminal.groupSessions',
+    ]);
   });
 
   it('reports close requests without changing the active app section', async () => {
@@ -327,23 +361,42 @@ describe('SettingsPanel', () => {
     expect(useAppStore.getState().activeSection).toBe('terminal');
   });
 
-  it('sizes the AI provider layout from the settings pane instead of the window', async () => {
+  it('shows model providers as a full-width card list', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
     openSection('settings.ai.title');
 
-    const providerCard = screen.getByText('settings.ai.providers').closest('[data-slot="card"]');
-    const providerColumn = providerCard?.parentElement;
+    const providerSection = screen.getByText('settings.ai.providers').closest('section');
+    const providerColumn = providerSection?.parentElement;
     const providerLayout = providerColumn?.parentElement;
     const section = providerLayout?.parentElement;
-    const firstFormRow = screen.getByText('settings.ai.providerName').closest('[data-slot="field"]')?.parentElement;
 
     expect(section).toHaveClass('@container');
-    expect(providerColumn).toHaveClass('contents', '@min-[44rem]:flex', '@min-[44rem]:flex-col');
-    expect(providerLayout).toHaveClass('@min-[44rem]:grid-cols-[15rem_minmax(0,1fr)]');
-    expect(providerLayout).not.toHaveClass('lg:grid-cols-[15rem_minmax(0,1fr)]');
-    expect(firstFormRow).toHaveClass('@min-[36rem]:grid-cols-2');
-    expect(firstFormRow).not.toHaveClass('sm:grid-cols-2');
+    expect(providerColumn).toHaveClass('contents');
+    expect(providerLayout).toHaveClass('flex', 'flex-col');
+    expect(providerLayout).not.toHaveClass('@min-[44rem]:grid-cols-[15rem_minmax(0,1fr)]');
+    expect(providerSection).toHaveClass('flex', 'flex-col');
+    expect(screen.getAllByRole('button', { name: 'settings.ai.editProvider' })).not.toHaveLength(0);
+  });
+
+  it('dims the settings panel behind the add-provider dialog', async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+    openSection('settings.ai.title');
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.ai.addProvider' }));
+    expect(await screen.findByRole('dialog', {
+      name: 'settings.ai.addProviderTitle',
+    })).toBeInTheDocument();
+
+    const parentDialog = document.querySelector<HTMLElement>(
+      '[data-slot="dialog-content"][data-nested-dialog-open]',
+    );
+    expect(parentDialog).toHaveClass(
+      'data-[nested-dialog-open]:after:bg-black/20',
+      'data-[nested-dialog-open]:after:backdrop-blur-[1px]',
+      "data-[nested-dialog-open]:after:content-['']",
+    );
   });
 
   it('renders when persisted shortcuts come from an older version', async () => {

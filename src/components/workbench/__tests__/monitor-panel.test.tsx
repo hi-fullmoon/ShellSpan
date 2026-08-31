@@ -67,10 +67,11 @@ beforeEach(() => {
 });
 
 describe('MonitorPanel health layers', () => {
-  it('shows local monitoring and remote snapshots on one page without tabs', () => {
+  it('shows local monitoring and remote snapshots on one page without redundant sections', () => {
     render(<MonitorPanel />);
 
-    expect(screen.getByText('workbench.monitor.localDescription')).toBeInTheDocument();
+    expect(screen.getByText('workbench.monitor.localTitle')).toHaveClass('sr-only');
+    expect(screen.queryByText('workbench.monitor.localDescription')).not.toBeInTheDocument();
     expect(screen.getByText('remote-health-layer')).toBeInTheDocument();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
@@ -90,19 +91,19 @@ describe('MonitorPanel health layers', () => {
     expect(refresh.querySelector('[data-icon="inline-start"]')).toBeInTheDocument();
   });
 
-  it('keeps empty connection states compact', () => {
+  it('omits empty SFTP and disconnect detail regions', () => {
     render(<MonitorPanel />);
 
-    const disconnectEmptyState = screen.getByText('workbench.monitor.noDisconnects').parentElement;
-    const sftpEmptyState = screen.getByText('workbench.monitor.noSftpConnections').parentElement;
+    const connectionHeading = screen.getByText('workbench.monitor.connectionHealth');
+    const connectionCard = connectionHeading.closest('[data-slot="card"]');
 
-    expect(disconnectEmptyState).toHaveClass('min-h-16');
-    expect(sftpEmptyState).toHaveClass('min-h-16');
-    expect(disconnectEmptyState).not.toHaveClass('h-52');
-    expect(sftpEmptyState).not.toHaveClass('h-64');
+    expect(connectionCard).toBeInTheDocument();
+    expect(screen.queryByText('workbench.monitor.noDisconnects')).not.toBeInTheDocument();
+    expect(screen.queryByText('workbench.monitor.noSftpConnections')).not.toBeInTheDocument();
+    expect(connectionCard).toContainElement(screen.getByText('workbench.monitor.terminalSessions'));
   });
 
-  it('stacks system monitoring directly below the app process', () => {
+  it('aligns process and system monitoring in one responsive grid', () => {
     useMonitorStore.setState({
       snapshot,
       history: [
@@ -121,16 +122,24 @@ describe('MonitorPanel health layers', () => {
     const systemCard = screen.getByText('workbench.monitor.system')
       .closest('[data-slot="card"]');
 
-    expect(overviewHeading.closest('[data-slot="card"]')).toBeNull();
-    expect(connectionHeading.closest('[data-slot="card"]')).toBeNull();
+    expect(overviewHeading).toHaveClass('sr-only');
+    expect(connectionHeading.closest('[data-slot="card"]')).toBeInTheDocument();
     expect(processCard).toBeInTheDocument();
     expect(systemCard).toBeInTheDocument();
+    expect(screen.getByText('workbench.monitor.appProcess').querySelector('svg')).toBeNull();
+    expect(screen.getByText('workbench.monitor.system').querySelector('svg')).toBeNull();
+    expect(connectionHeading.querySelector('svg')).toBeNull();
     expect(processCard).not.toBe(systemCard);
     expect(processCard?.parentElement).toBe(systemCard?.parentElement);
     expect(processCard?.nextElementSibling).toBe(systemCard);
-    expect(processCard?.parentElement).toHaveClass('flex', 'flex-col');
+    expect(processCard?.parentElement).toHaveClass('grid', 'items-stretch');
+    expect(processCard).toHaveClass('@min-[72rem]:col-span-7');
+    expect(systemCard).toHaveClass('@min-[72rem]:col-span-5');
+    const rssTrend = screen.getByRole('img', { name: 'workbench.monitor.rss' });
+    expect(rssTrend).toHaveAttribute('viewBox', '0 0 300 38');
+    expect(rssTrend.parentElement).toHaveClass('min-h-28', 'gap-1.5', 'py-2.5');
     expect(screen.getAllByRole('progressbar')).toHaveLength(4);
-    expect(document.querySelectorAll('[data-slot="card"]')).toHaveLength(5);
+    expect(document.querySelectorAll('[data-slot="card"]')).toHaveLength(3);
     expect(screen.getByText('remote-health-layer')).toBeInTheDocument();
   });
 });
