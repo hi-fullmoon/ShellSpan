@@ -27,6 +27,8 @@ pub(crate) struct AiSessionMeta {
     pub id: String,
     pub timestamp: String,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
     pub session_id: Option<String>,
     pub profile_id: Option<String>,
     pub host: String,
@@ -42,6 +44,8 @@ pub(crate) struct AiConversationSummary {
     pub updated_at: String,
     pub title: String,
     pub archived: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
     pub session_id: Option<String>,
     pub profile_id: Option<String>,
     pub host: String,
@@ -1678,6 +1682,7 @@ fn load_session_file(path: &Path) -> Result<AiSessionFile, String> {
         },
         title: meta.title,
         archived: accumulator.archived,
+        scope: meta.scope,
         session_id: meta.session_id,
         profile_id: meta.profile_id,
         host: meta.host,
@@ -1746,6 +1751,7 @@ fn load_session_summary(path: &Path) -> Result<AiConversationSummary, String> {
         },
         title: meta.title,
         archived,
+        scope: meta.scope,
         session_id: meta.session_id,
         profile_id: meta.profile_id,
         host: meta.host,
@@ -1809,6 +1815,7 @@ mod tests {
             id: id.into(),
             timestamp: "2026-08-22T10:49:08.000Z".into(),
             title: "root@example.com".into(),
+            scope: Some("terminal".into()),
             session_id: Some("terminal-1".into()),
             profile_id: None,
             host: "example.com".into(),
@@ -1872,6 +1879,7 @@ mod tests {
             id: "conversation-1".into(),
             timestamp: "2026-08-22T10:49:08.000Z".into(),
             title: "root@example.com".into(),
+            scope: Some("terminal".into()),
             session_id: Some("terminal-1".into()),
             profile_id: None,
             host: "example.com".into(),
@@ -1904,6 +1912,34 @@ mod tests {
     }
 
     #[test]
+    fn loads_legacy_terminal_metadata_without_a_scope() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("legacy-session.jsonl");
+        write_records(
+            &path,
+            &[json!({
+                "timestamp": "2026-08-22T10:49:08.000Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "legacy-conversation",
+                    "timestamp": "2026-08-22T10:49:08.000Z",
+                    "title": "root@example.com",
+                    "sessionId": "terminal-1",
+                    "profileId": null,
+                    "host": "example.com",
+                    "port": 22,
+                    "username": "root"
+                },
+                "ordinal": 0
+            })],
+        );
+
+        let summary = load_session_summary(&path).unwrap();
+        assert_eq!(summary.id, "legacy-conversation");
+        assert_eq!(summary.scope, None);
+    }
+
+    #[test]
     fn recovers_interrupted_agent_state_as_cancelled_without_actionable_approval() {
         let root = tempdir().unwrap();
         let path = root.path().join("session.jsonl");
@@ -1911,6 +1947,7 @@ mod tests {
             id: "conversation-agent".into(),
             timestamp: "2026-08-22T10:49:08.000Z".into(),
             title: "root@example.com".into(),
+            scope: Some("terminal".into()),
             session_id: Some("terminal-1".into()),
             profile_id: None,
             host: "example.com".into(),

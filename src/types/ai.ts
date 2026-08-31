@@ -2,6 +2,7 @@ export type AiProviderKind = 'ollama' | 'openAi' | 'openAiCompatible';
 export type AiProviderPreset = 'ollama' | 'openai' | 'deepseek' | 'minimax' | 'kimi' | 'custom';
 export type AiReasoningEffort = 'low' | 'high' | 'max';
 export type AiTaskKind = 'ask' | 'chat' | 'explainTerminal' | 'generateCommand';
+export type AiConversationScope = 'workbench' | 'terminal';
 
 export interface AiProviderConfig {
   id: string;
@@ -49,6 +50,11 @@ export interface AiChatMessage extends AiMessageInput {
   task: AiTaskKind;
   status: 'streaming' | 'completed' | 'cancelled' | 'failed';
   providerId: string;
+  /**
+   * Identifies the app surface that owns an unbound conversation. Persisted
+   * terminal messages are still primarily keyed by conversationId.
+   */
+  scope?: AiConversationScope;
   conversationId?: string;
   sessionId?: string;
   context?: AiContext;
@@ -66,6 +72,8 @@ export interface AiConversation {
   updatedAt: string;
   title: string;
   archived: boolean;
+  /** Missing on legacy files, which are treated as terminal conversations. */
+  scope?: AiConversationScope;
   sessionId?: string;
   profileId?: string;
   host: string;
@@ -78,6 +86,7 @@ export interface AiSessionMeta {
   id: string;
   timestamp: string;
   title: string;
+  scope?: AiConversationScope;
   sessionId?: string;
   profileId?: string;
   host: string;

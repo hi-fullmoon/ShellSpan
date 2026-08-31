@@ -32,8 +32,10 @@ import {
   deletePersistedAiConversations,
   finalizeAiSessionsBeforeExit,
   flushAiSessionPersistence,
+  ensureWorkbenchAiConversation,
   persistAiMessage,
   startNewTerminalAiConversation,
+  startNewWorkbenchAiConversation,
 } from '../ai-sessions';
 
 const conversation: AiConversation = {
@@ -249,6 +251,38 @@ describe('AI session persistence queue', () => {
     expect(tauriMocks.archive).toHaveBeenCalledWith(
       conversation.id,
       conversation.startedAt,
+      'new_conversation',
+    );
+  });
+
+  it('creates and rotates an isolated Workbench AI conversation', async () => {
+    const first = ensureWorkbenchAiConversation('Workbench conversation');
+    await flushAiSessionPersistence();
+
+    expect(first).toMatchObject({
+      title: 'Workbench conversation',
+      scope: 'workbench',
+      archived: false,
+      host: '',
+      port: 0,
+      username: '',
+    });
+    expect(useAiStore.getState().activeWorkbenchConversationId).toBe(first.id);
+    expect(tauriMocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      id: first.id,
+      scope: 'workbench',
+    }));
+
+    const nextId = startNewWorkbenchAiConversation('Workbench conversation');
+    await flushAiSessionPersistence();
+
+    expect(nextId).not.toBe(first.id);
+    expect(useAiStore.getState().activeWorkbenchConversationId).toBe(nextId);
+    expect(useAiStore.getState().conversations.find((item) => item.id === first.id))
+      .toMatchObject({ archived: true, scope: 'workbench' });
+    expect(tauriMocks.archive).toHaveBeenCalledWith(
+      first.id,
+      first.startedAt,
       'new_conversation',
     );
   });
