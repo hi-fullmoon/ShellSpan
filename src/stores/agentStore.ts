@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { generateId } from '@/lib/utils';
 import type {
   AgentChatMessage,
+  AgentTaskOutcome,
   AgentPermissionMode,
   AgentRunPhase,
   AgentRunRecord,
@@ -28,6 +29,7 @@ interface AgentState {
   readonly messages: readonly AgentChatMessage[];
   readonly runs: Readonly<Record<string, AgentRunRecord>>;
   readonly tools: Readonly<Record<string, AgentToolApprovalSnapshot>>;
+  readonly contextLimitedRequests: Readonly<Record<string, true>>;
   readonly activeRequestId?: string;
   beginRun: (input: BeginAgentRunInput) => void;
   markStarted: (requestId: string, maxToolSteps: number, toolResultTimeoutMs: number) => void;
@@ -36,9 +38,10 @@ interface AgentState {
   registerTool: (snapshot: AgentToolApprovalSnapshot) => void;
   updateTool: (snapshot: AgentToolApprovalSnapshot) => void;
   markFallback: (requestId: string, fallback: AgentSafeFallback) => void;
+  markContextLimited: (requestId: string) => void;
   markStepLimit: (requestId: string) => void;
   requestStop: (requestId: string) => void;
-  completeRun: (requestId: string, fallback: boolean) => void;
+  finishRun: (requestId: string, outcome: AgentTaskOutcome) => void;
   endIncomplete: (requestId: string) => void;
   cancelRun: (requestId: string) => void;
   failRun: (requestId: string, error: string) => void;
@@ -73,26 +76,6 @@ function phaseForTool(snapshot: AgentToolApprovalSnapshot): AgentRunPhase {
 
 function isTerminalToolStatus(status: AgentToolApprovalSnapshot['status']): boolean {
   return ['completed', 'rejected', 'failed', 'timedOut', 'cancelled'].includes(status);
-}
-
-function deriveCompletedState(
-  run: AgentRunRecord,
-  tools: Readonly<Record<string, AgentToolApprovalSnapshot>>,
-  fallback: boolean,
-): Pick<AgentRunRecord, 'phase' | 'status'> {
-  if (fallback || run.fallback) return { phase: 'incomplete', status: 'incomplete' };
-  const snapshots = run.toolCallIds
-    .map((callId) => tools[toolKey(run.requestId, callId)])
-    .filter((snapshot): snapshot is AgentToolApprovalSnapshot => Boolean(snapshot));
-  if (snapshots.length === 0) return { phase: 'completed', status: 'completed' };
-  const successful = snapshots.filter((snapshot) => (
-    snapshot.status === 'completed' && snapshot.result?.exitCode === 0
-  )).length;
-  if (!run.stepLimitReached && successful === snapshots.length) {
-    return { phase: 'completed', status: 'completed' };
-  }
-  if (successful > 0) return { phase: 'partial', status: 'partial' };
-  return { phase: 'incomplete', status: 'incomplete' };
 }
 
 function finishAssistant(
@@ -167,6 +150,7 @@ export const useAgentStore = create<AgentState>()((set) => ({
   messages: [],
   runs: {},
   tools: {},
+  contextLimitedRequests: {},
   beginRun: (input) => set((state) => {
     const target = Object.freeze({ ...input.target });
     const run: AgentRunRecord = Object.freeze({
@@ -184,9 +168,12 @@ export const useAgentStore = create<AgentState>()((set) => ({
       status: 'running',
       stopRequested: false,
     });
+    const contextLimitedRequests = { ...state.contextLimitedRequests };
+    delete contextLimitedRequests[input.requestId];
     return {
       activeRequestId: input.requestId,
       runs: { ...state.runs, [input.requestId]: run },
+      contextLimitedRequests,
       messages: [
         ...state.messages,
         {
@@ -279,6 +266,15 @@ export const useAgentStore = create<AgentState>()((set) => ({
       phase: 'preparingCommand',
     })),
   })),
+  markContextLimited: (requestId) => set((state) => {
+    if (!state.runs[requestId] || state.contextLimitedRequests[requestId]) return state;
+    return {
+      contextLimitedRequests: {
+        ...state.contextLimitedRequests,
+        [requestId]: true,
+      },
+    };
+  }),
   markStepLimit: (requestId) => set((state) => ({
     runs: updateRun(state.runs, requestId, (run) => ({
       ...run,
@@ -289,10 +285,9 @@ export const useAgentStore = create<AgentState>()((set) => ({
   requestStop: (requestId) => set((state) => ({
     runs: updateRun(state.runs, requestId, (run) => ({ ...run, stopRequested: true })),
   })),
-  completeRun: (requestId, fallback) => set((state) => {
+  finishRun: (requestId, outcome) => set((state) => {
     const run = state.runs[requestId];
     if (!run || run.status !== 'running') return state;
-    const outcome = deriveCompletedState(run, state.tools, fallback);
     const assistant = state.messages.find((message) => (
       message.id === `agent-assistant-${requestId}`
     ));
@@ -313,7 +308,10 @@ export const useAgentStore = create<AgentState>()((set) => ({
     }
     return {
       activeRequestId: state.activeRequestId === requestId ? undefined : state.activeRequestId,
-      runs: { ...state.runs, [requestId]: { ...run, ...outcome } },
+      runs: {
+        ...state.runs,
+        [requestId]: { ...run, phase: outcome, status: outcome },
+      },
       messages: finishAssistant(state.messages, requestId, 'completed'),
     };
   }),
@@ -403,11 +401,15 @@ export const useAgentStore = create<AgentState>()((set) => ({
         .filter(([requestId]) => !requestIds.has(requestId))),
       tools: Object.fromEntries(Object.entries(state.tools)
         .filter(([, tool]) => !requestIds.has(tool.toolCall.requestId))),
+      contextLimitedRequests: Object.fromEntries(
+        Object.entries(state.contextLimitedRequests)
+          .filter(([requestId]) => !requestIds.has(requestId)),
+      ),
     };
   }),
   clear: () => set((state) => state.activeRequestId
     ? state
-    : { messages: [], runs: {}, tools: {} }),
+    : { messages: [], runs: {}, tools: {}, contextLimitedRequests: {} }),
 }));
 
 export function agentToolKey(requestId: string, callId: string): string {

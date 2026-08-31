@@ -12,13 +12,15 @@ import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { ConnectionProfile } from '@/types';
 
-const { invokeWriteSession } = vi.hoisted(() => ({
-  invokeWriteSession: vi.fn().mockResolvedValue(undefined),
+const { writeUserInput, getTerminalController } = vi.hoisted(() => ({
+  writeUserInput: vi.fn().mockResolvedValue(true),
+  getTerminalController: vi.fn(),
 }));
 
-vi.mock('@/lib/tauri', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/tauri')>()),
-  invokeWriteSession,
+vi.mock('@/components/terminal/registry/terminal-registry', () => ({
+  terminalRegistry: {
+    get: getTerminalController,
+  },
 }));
 
 const profile: ConnectionProfile = {
@@ -35,6 +37,8 @@ const profile: ConnectionProfile = {
 describe('host quick actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    writeUserInput.mockResolvedValue(true);
+    getTerminalController.mockReturnValue({ writeUserInput });
     useAppStore.setState({
       activeSection: 'workbench',
       activeWorkbenchTab: 'connections',
@@ -129,8 +133,8 @@ describe('host quick actions', () => {
     await expect(insertHostCommandSnippet(profile.id, 'systemctl status api'))
       .resolves.toBe('inserted');
 
-    expect(invokeWriteSession).toHaveBeenCalledWith('right-host', 'systemctl status api');
-    expect(invokeWriteSession.mock.calls[0][1]).not.toMatch(/[\r\n]/);
+    expect(writeUserInput).toHaveBeenCalledWith('systemctl status api');
+    expect(writeUserInput.mock.calls[0][0]).not.toMatch(/[\r\n]/);
     expect(useTerminalStore.getState().activeSessionId).toBe('right-host');
     expect(useAppStore.getState().activeSection).toBe('terminal');
   });
@@ -139,7 +143,25 @@ describe('host quick actions', () => {
     await expect(insertHostCommandSnippet(profile.id, 'uptime')).resolves.toBe('no-target');
     await expect(insertHostCommandSnippet(profile.id, 'uptime\n')).resolves.toBe('invalid');
     await expect(insertHostCommandSnippet(profile.id, 'password=plaintext')).resolves.toBe('invalid');
-    expect(invokeWriteSession).not.toHaveBeenCalled();
+    expect(writeUserInput).not.toHaveBeenCalled();
+  });
+
+  it('does not interleave a quick action while Agent execution owns the terminal', async () => {
+    writeUserInput.mockResolvedValueOnce(false);
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'right-host',
+        profileId: profile.id,
+        title: profile.name,
+        status: 'connected',
+        host: profile.host,
+        port: profile.port,
+        username: profile.username,
+      }],
+    });
+
+    await expect(insertHostCommandSnippet(profile.id, 'uptime')).resolves.toBe('no-target');
+    expect(writeUserInput).toHaveBeenCalledWith('uptime');
   });
 
   it('opens a path in the already open pane bound to the profile', () => {

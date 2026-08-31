@@ -70,9 +70,9 @@ import type {
   AgentProviderCapabilityEvidence,
   AgentRolloutPolicy,
   AgentStartRequest,
+  PersistedAgentStateEnvelope,
   AgentStreamEvent,
   AgentToolResult,
-  PersistedAgentRunState,
 } from '@/types/agent';
 
 const logger = createLogger('ipc');
@@ -273,7 +273,7 @@ export async function invokeCancelAgentRequest(requestId: string): Promise<void>
 export async function invokeAppendAiSessionAgentState(
   conversationId: string,
   startedAt: string,
-  state: PersistedAgentRunState,
+  state: PersistedAgentStateEnvelope,
 ): Promise<void> {
   return invokeLogged('append_ai_session_agent_state', {
     conversationId,

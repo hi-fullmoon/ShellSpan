@@ -10,7 +10,12 @@ import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAgentStore } from '@/stores/agentStore';
 import { resetAgentProviderCapabilityCacheForTests } from '@/lib/agent-provider-capability';
-import type { AiChatMessage } from '@/types/ai';
+import type { AiChatMessage, AiStreamEvent } from '@/types/ai';
+import {
+  AI_HISTORY_MAX_MESSAGE_BYTES,
+  AI_REQUEST_MAX_MESSAGE_BYTES,
+  aiUtf8ByteLength,
+} from '@/lib/ai-request-budget';
 import {
   appendTerminalOutput,
   clearTerminalOutput,
@@ -31,7 +36,12 @@ import {
 } from '../ai-panel';
 
 const tauriCoreMock = vi.hoisted(() => ({ invoke: vi.fn() }));
-const tauriEventMock = vi.hoisted(() => ({ listen: vi.fn(async () => () => {}) }));
+const tauriEventMock = vi.hoisted(() => ({
+  listen: vi.fn(async (
+    _event: string,
+    _handler: (event: { payload: AiStreamEvent }) => void,
+  ) => () => {}),
+}));
 const agentUiMock = vi.hoisted(() => ({
   connect: vi.fn(async () => {}),
   start: vi.fn(async () => 'agent-request'),
@@ -41,6 +51,20 @@ const agentUiMock = vi.hoisted(() => ({
   retry: vi.fn(async () => 'retry-request'),
   canRetry: vi.fn(() => false),
 }));
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: tauriCoreMock.invoke }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: tauriEventMock.listen }));
@@ -307,6 +331,166 @@ describe('explicit AI modes', () => {
       useAiStore.getState().setOpen(false);
       useAppStore.setState(previousApp, true);
       useTerminalStore.setState(previousTerminal, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
+  it('keeps pending Agent starts bound to the active conversation and cancellable', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    const previousSettings = useAiSettingsStore.getState();
+    const previousTauriInternals = Object.getOwnPropertyDescriptor(window, '__TAURI_INTERNALS__');
+    const pendingCreate = deferred<void>();
+    const pendingConnect = deferred<void>();
+    agentUiMock.connect
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(() => pendingConnect.promise);
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+    tauriCoreMock.invoke.mockImplementation((command: string) => {
+      if (command === 'agent_rollout_policy') {
+        return Promise.resolve({
+          stage: 'stable',
+          featureEnabled: true,
+          defaultAgentEnabled: true,
+          defaultPermissionMode: 'requestApproval',
+          availablePermissionModes: ['requestApproval', 'autoApproveReadOnly', 'fullAccess'],
+          collectLocalDiagnostics: false,
+        });
+      }
+      if (command === 'agent_contract_status') {
+        return Promise.resolve({
+          contractVersion: 2,
+          featureEnabled: true,
+          agentAvailable: true,
+          defaultPermissionMode: 'requestApproval',
+          providerCapability: {
+            support: 'supported',
+            source: 'ollamaModelMetadata',
+          },
+        });
+      }
+      if (command === 'create_ai_session') return pendingCreate.promise;
+      return Promise.resolve(undefined);
+    });
+    await initI18n('en-US');
+    useAiSettingsStore.setState({
+      providers: [{
+        id: 'pending-agent-provider',
+        name: 'Pending Agent provider',
+        preset: 'ollama',
+        kind: 'ollama',
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'qwen3',
+        requiresApiKey: false,
+      }],
+      defaultProviderId: 'pending-agent-provider',
+      agentEnabled: true,
+    });
+    useAiStore.getState().clear();
+    useAiStore.getState().setOpen(true);
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'pending-agent-session',
+        title: 'Pending Agent target',
+        host: 'pending-agent.example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+        conversationId: 'pending-agent-conversation',
+        conversationStartedAt: '2026-08-31T05:00:00.000Z',
+      }],
+      activeSessionId: 'pending-agent-session',
+    });
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      const modeSelector = await screen.findByRole('button', { name: 'AI mode' });
+      fireEvent.click(modeSelector);
+      const agentOption = await screen.findByRole('menuitemradio', { name: /^Agent/ });
+      await waitFor(() => expect(agentOption).not.toHaveAttribute('aria-disabled', 'true'));
+      fireEvent.click(agentOption);
+      await waitFor(() => expect(modeSelector).toHaveTextContent('Agent'));
+
+      const textbox = screen.getByRole('textbox');
+      fireEvent.change(textbox, { target: { value: 'Verify the current target' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(tauriCoreMock.invoke).toHaveBeenCalledWith(
+        'create_ai_session',
+        expect.anything(),
+      ));
+      expect(screen.getByRole('button', { name: 'New conversation' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Conversation history' })).toBeDisabled();
+
+      act(() => {
+        useTerminalStore.getState().startNewConversation('pending-agent-session');
+      });
+      expect(useTerminalStore.getState().sessions[0]?.conversationId)
+        .not.toBe('pending-agent-conversation');
+      await act(async () => {
+        pendingCreate.resolve(undefined);
+        await pendingCreate.promise;
+      });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
+
+      expect(agentUiMock.start).not.toHaveBeenCalled();
+      expect(textbox).toHaveValue('Verify the current target');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(tauriCoreMock.invoke.mock.calls.filter(([command]) => (
+        command === 'create_ai_session'
+      ))).toHaveLength(2));
+      await waitFor(() => expect(agentUiMock.connect).toHaveBeenCalledTimes(3));
+      expect(agentUiMock.start).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'Stop Agent task' }));
+      expect(agentUiMock.stop).not.toHaveBeenCalled();
+      await act(async () => {
+        pendingConnect.resolve(undefined);
+        await pendingConnect.promise;
+      });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
+      expect(agentUiMock.start).not.toHaveBeenCalled();
+      expect(textbox).toHaveValue('Verify the current target');
+
+      const pendingStart = deferred<string>();
+      agentUiMock.start.mockImplementationOnce(() => {
+        useAgentStore.setState({ activeRequestId: 'pending-agent-request' });
+        return pendingStart.promise;
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(tauriCoreMock.invoke.mock.calls.filter(([command]) => (
+        command === 'create_ai_session'
+      ))).toHaveLength(3));
+      await waitFor(() => expect(agentUiMock.start).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('button', { name: 'Conversation history' })).toBeDisabled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Stop Agent task' }));
+      expect(agentUiMock.stop).toHaveBeenCalledWith('pending-agent-request');
+      await act(async () => {
+        pendingStart.resolve('pending-agent-request');
+        await pendingStart.promise;
+      });
+      await waitFor(() => expect(agentUiMock.stop).toHaveBeenCalledTimes(2));
+      act(() => useAgentStore.setState({ activeRequestId: undefined }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
+      expect(textbox).toHaveValue('Verify the current target');
+    } finally {
+      pendingCreate.resolve(undefined);
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAiSettingsStore.setState(previousSettings, true);
+      useTerminalStore.setState(previousTerminal, true);
+      useAppStore.setState(previousApp, true);
+      if (previousTauriInternals) {
+        Object.defineProperty(window, '__TAURI_INTERNALS__', previousTauriInternals);
+      } else {
+        Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+      }
       await initI18n(previousApp.locale);
     }
   });
@@ -702,6 +886,126 @@ describe('terminal conversation binding', () => {
   });
 });
 
+describe('AI request resource feedback', () => {
+  it('keeps an oversized current draft and does not invoke the backend', async () => {
+    const previousApp = useAppStore.getState();
+    const previousSettings = useAiSettingsStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ locale: 'en-US' });
+    useAiSettingsStore.setState({
+      providers: [{
+        id: 'bounded-provider',
+        name: 'Bounded provider',
+        preset: 'ollama',
+        kind: 'ollama',
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'bounded-model',
+        requiresApiKey: false,
+      }],
+      defaultProviderId: 'bounded-provider',
+    });
+    useAiStore.getState().clear();
+    useAiStore.getState().setOpen(true);
+    const oversized = 'x'.repeat(AI_REQUEST_MAX_MESSAGE_BYTES + 1);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      const textbox = screen.getByRole('textbox');
+      fireEvent.change(textbox, { target: { value: oversized } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      expect(await screen.findByText('Message is too large to send')).toBeVisible();
+      expect(screen.getByText(/Your draft has been kept/)).toBeVisible();
+      expect(textbox).toHaveValue(oversized);
+      expect(tauriCoreMock.invoke.mock.calls.some(([command]) => (
+        command === 'ai_start_request'
+      ))).toBe(false);
+      expect(useAiStore.getState().messages).toHaveLength(0);
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAiSettingsStore.setState(previousSettings, true);
+      useAppStore.setState(previousApp, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
+  it('shows a persistent Marker while keeping omitted history visible locally', async () => {
+    const previousApp = useAppStore.getState();
+    const previousSettings = useAiSettingsStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ locale: 'en-US' });
+    useAiSettingsStore.setState({
+      providers: [{
+        id: 'bounded-provider',
+        name: 'Bounded provider',
+        preset: 'ollama',
+        kind: 'ollama',
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'bounded-model',
+        requiresApiKey: false,
+      }],
+      defaultProviderId: 'bounded-provider',
+    });
+    const history = Array.from({ length: 7 }, (_, index) => ([
+      message(`bounded-${index}`, 'user', `old question ${index}`, { task: 'ask' }),
+      message(`bounded-${index}`, 'assistant', `old answer ${index}`, { task: 'ask' }),
+    ])).flat();
+    useAiStore.setState({
+      messages: history,
+      conversations: [],
+      loadedConversationIds: [],
+      phase: 'idle',
+      activeRequestId: undefined,
+      activeTask: undefined,
+      error: undefined,
+      errorRequestId: undefined,
+      open: true,
+    });
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      expect(screen.getByText('old question 0')).toBeVisible();
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'new question' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      const notice = await screen.findByText(
+        'Only the context sent to the model was shortened for this request. Your complete local conversation history is unchanged.',
+      );
+      expect(notice.closest('[data-slot="marker"]')).toBeInTheDocument();
+      expect(screen.getByText('old question 0')).toBeVisible();
+      expect(useAiStore.getState().messages.some((item) => (
+        item.content === 'old question 0'
+      ))).toBe(true);
+
+      await waitFor(() => {
+        const startCall = tauriCoreMock.invoke.mock.calls.find(([command]) => (
+          command === 'ai_start_request'
+        ));
+        expect(startCall).toBeDefined();
+        const args = startCall?.[1] as {
+          request: { messages: Array<{ role: string; content: string }> };
+        };
+        expect(args.request.messages).toHaveLength(13);
+        expect(args.request.messages.map((item) => item.content)).not.toContain('old question 0');
+        expect(args.request.messages.map((item) => item.content)).toContain('old question 1');
+        expect(args.request.messages[args.request.messages.length - 1]).toEqual({
+          role: 'user',
+          content: 'new question',
+        });
+      });
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAiSettingsStore.setState(previousSettings, true);
+      useAppStore.setState(previousApp, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+});
+
 describe('selectConversationHistory', () => {
   it('shares Ask and legacy chat history while keeping generated commands separate', () => {
     const messages = [
@@ -713,9 +1017,9 @@ describe('selectConversationHistory', () => {
       message('command-1', 'assistant', '```bash\ndf -h\n```', { task: 'generateCommand' }),
     ];
 
-    expect(selectConversationHistory(messages, 'ask').map((item) => item.content))
+    expect(selectConversationHistory(messages, 'ask').messages.map((item) => item.content))
       .toEqual(['Explain this', 'Explanation', 'Explain this', 'Read-only answer']);
-    expect(selectConversationHistory(messages, 'generateCommand').map((item) => item.content))
+    expect(selectConversationHistory(messages, 'generateCommand').messages.map((item) => item.content))
       .toEqual(['Show disk usage', '```bash\ndf -h\n```']);
   });
 
@@ -732,12 +1036,12 @@ describe('selectConversationHistory', () => {
       message('orphan', 'user', 'No assistant response'),
     ];
 
-    expect(selectConversationHistory(messages, 'chat').map((item) => item.content))
+    expect(selectConversationHistory(messages, 'chat').messages.map((item) => item.content))
       .toEqual(['Good request', 'Good answer']);
   });
 
   it('preserves bounded historical terminal context with an untrusted-data boundary', () => {
-    const longContext = `prefix-${'x'.repeat(8100)}`;
+    const longContext = `prefix-${'x'.repeat(9000)}`;
     const messages = [
       message('context', 'user', 'What failed?', {
         context: { label: 'root@server', content: longContext },
@@ -745,11 +1049,19 @@ describe('selectConversationHistory', () => {
       message('context', 'assistant', 'The service failed.'),
     ];
 
-    const [historicalUser] = selectConversationHistory(messages, 'explainTerminal');
+    const [historicalUser] = selectConversationHistory(messages, 'explainTerminal').messages;
     expect(historicalUser.content).toContain('<historical_terminal_context_json>');
     expect(historicalUser.content).toContain('root@server');
     expect(historicalUser.content).not.toContain('prefix-');
-    expect(historicalUser.content).toContain('x'.repeat(8000));
+    const serialized = historicalUser.content
+      .split('<historical_terminal_context_json>\n')[1]
+      ?.split('\n</historical_terminal_context_json>')[0];
+    expect(serialized).toBeDefined();
+    const boundedContext = JSON.parse(serialized!) as { content: string };
+    expect(boundedContext.content).toContain('earlier terminal content omitted');
+    expect(boundedContext.content).toMatch(/x+$/);
+    expect(boundedContext.content).not.toContain('\uFFFD');
+    expect(new TextEncoder().encode(boundedContext.content).byteLength).toBeLessThanOrEqual(8 * 1024);
   });
 
   it('keeps hidden model reasoning out of future conversation history', () => {
@@ -762,7 +1074,7 @@ describe('selectConversationHistory', () => {
       ),
     ];
 
-    expect(selectConversationHistory(messages, 'chat')).toEqual([
+    expect(selectConversationHistory(messages, 'chat').messages).toEqual([
       { role: 'user', content: 'What model are you?' },
       { role: 'assistant', content: 'I am MiniMax-M3.' },
     ]);
@@ -776,7 +1088,7 @@ describe('selectConversationHistory', () => {
       message('server-b', 'assistant', 'Server B needs attention', { conversationId: 'conversation-b', sessionId: 'session-b' }),
     ];
 
-    expect(selectConversationHistory(messages, 'chat', 'conversation-b')).toEqual([
+    expect(selectConversationHistory(messages, 'chat', 'conversation-b').messages).toEqual([
       { role: 'user', content: 'Check server B' },
       { role: 'assistant', content: 'Server B needs attention' },
     ]);
@@ -836,7 +1148,51 @@ describe('selectConversationHistory', () => {
         target: targetA,
         toolCallIds: [],
       },
-    ], targetA, 'conversation-a')).toEqual([{ role: 'user', content: 'Check A' }]);
+    ], targetA, 'conversation-a').messages).toEqual([{ role: 'user', content: 'Check A' }]);
+  });
+
+  it('applies the shared UTF-8 message budget to Agent history', () => {
+    const target = {
+      kind: 'remote' as const,
+      sessionId: 'session-agent-budget',
+      host: 'budget.example.com',
+      port: 22,
+      username: 'root',
+    };
+    const longAnswer = `START-${'你😀'.repeat(20_000)}-END`;
+    const history = selectAgentConversationHistory([
+      {
+        id: 'agent-budget-user',
+        requestId: 'agent-budget',
+        conversationId: 'conversation-agent-budget',
+        role: 'user',
+        content: 'Inspect the service',
+        status: 'completed',
+        providerId: 'openai',
+        target,
+        toolCallIds: [],
+      },
+      {
+        id: 'agent-budget-assistant',
+        requestId: 'agent-budget',
+        conversationId: 'conversation-agent-budget',
+        role: 'assistant',
+        content: longAnswer,
+        status: 'completed',
+        providerId: 'openai',
+        target,
+        toolCallIds: [],
+      },
+    ], target, 'conversation-agent-budget', [{ role: 'user', content: 'Continue' }]);
+
+    expect(history.metadata.truncatedMessages).toBe(1);
+    expect(history.messages[1].content).toMatch(/^START-/);
+    expect(history.messages[1].content).toMatch(/-END$/);
+    expect(history.messages[1].content).not.toContain('\uFFFD');
+    expect(aiUtf8ByteLength(history.messages[1].content)).toBeLessThanOrEqual(
+      AI_HISTORY_MAX_MESSAGE_BYTES,
+    );
+    expect(longAnswer).toContain('你😀'.repeat(20_000));
   });
 });
 
@@ -872,6 +1228,17 @@ describe('summarizeAiError', () => {
       .toBe('ai.error.rateLimited');
     expect(summarizeAiError('AI provider returned HTTP 503 Service Unavailable'))
       .toMatchObject({ key: 'ai.error.unavailable', variables: { status: 503 } });
+  });
+
+  it('classifies request and provider response resource limits', () => {
+    expect(summarizeAiError('AI request messages are too large').key)
+      .toBe('ai.error.requestTooLarge');
+    expect(summarizeAiError(
+      'AI provider stream exceeded the 16 MiB response limit',
+    ).key).toBe('ai.error.responseTooLarge');
+    expect(summarizeAiError(
+      'AI provider HTTP error body exceeded the 4 KiB response limit',
+    ).key).toBe('ai.error.responseTooLarge');
   });
 });
 
@@ -1235,6 +1602,163 @@ describe('clear conversation dialog', () => {
       useAiStore.getState().setOpen(false);
     }
   });
+
+  it('keeps persisted messages visible when the atomic clear fails', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'clear-failure-session',
+        title: 'Clear failure target',
+        host: 'clear.example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+        conversationId: 'clear-failure-conversation',
+        conversationStartedAt: '2026-08-31T00:00:00.000Z',
+      }],
+      activeSessionId: 'clear-failure-session',
+    });
+    useAiStore.getState().clear();
+    useAiStore.getState().hydrateSessions([{
+      conversation: {
+        id: 'clear-failure-conversation',
+        startedAt: '2026-08-31T00:00:00.000Z',
+        updatedAt: '2026-08-31T00:01:00.000Z',
+        title: 'Clear failure target',
+        archived: false,
+        sessionId: 'clear-failure-session',
+        host: 'clear.example.com',
+        port: 22,
+        username: 'root',
+      },
+      messages: [message('clear-failure', 'user', 'Keep me after failure', {
+        conversationId: 'clear-failure-conversation',
+        sessionId: 'clear-failure-session',
+      })],
+    }]);
+    useAiStore.getState().setOpen(true);
+    tauriCoreMock.invoke.mockImplementation((command: string) => (
+      command === 'clear_ai_session_lane'
+        ? Promise.reject(new Error('atomic replace failed'))
+        : Promise.resolve(undefined)
+    ));
+
+    const { unmount } = render(createElement(AiPanel));
+    const clearLabel = /Clear conversation|清空对话/;
+    try {
+      fireEvent.click(screen.getByRole('button', { name: clearLabel }));
+      fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', {
+        name: clearLabel,
+      }));
+
+      await waitFor(() => expect(tauriCoreMock.invoke).toHaveBeenCalledWith(
+        'clear_ai_session_lane',
+        expect.objectContaining({ conversationId: 'clear-failure-conversation' }),
+      ));
+      expect(screen.getByText('Keep me after failure')).toBeInTheDocument();
+      expect(useAiStore.getState().messages).toEqual([
+        expect.objectContaining({ content: 'Keep me after failure' }),
+      ]);
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useTerminalStore.setState(previousTerminal, true);
+      useAppStore.setState(previousApp, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
+  it('blocks new submissions until an atomic clear finishes', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'clear-pending-session',
+        title: 'Clear pending target',
+        host: 'clear-pending.example.com',
+        port: 22,
+        username: 'root',
+        status: 'connected',
+        conversationId: 'clear-pending-conversation',
+        conversationStartedAt: '2026-08-31T00:00:00.000Z',
+      }],
+      activeSessionId: 'clear-pending-session',
+    });
+    useAiStore.getState().clear();
+    useAiStore.getState().hydrateSessions([{
+      conversation: {
+        id: 'clear-pending-conversation',
+        startedAt: '2026-08-31T00:00:00.000Z',
+        updatedAt: '2026-08-31T00:01:00.000Z',
+        title: 'Clear pending target',
+        archived: false,
+        sessionId: 'clear-pending-session',
+        host: 'clear-pending.example.com',
+        port: 22,
+        username: 'root',
+      },
+      messages: [message('clear-pending', 'user', 'Clear only after commit', {
+        conversationId: 'clear-pending-conversation',
+        sessionId: 'clear-pending-session',
+      })],
+    }]);
+    useAiStore.getState().setOpen(true);
+    appendTerminalOutput('clear-pending-session', 'service is healthy\n');
+    let finishClear: (() => void) | undefined;
+    const pendingClear = new Promise<void>((resolve) => {
+      finishClear = resolve;
+    });
+    tauriCoreMock.invoke.mockImplementation((command: string) => (
+      command === 'clear_ai_session_lane' ? pendingClear : Promise.resolve(undefined)
+    ));
+
+    const { unmount } = render(createElement(AiPanel));
+    const clearLabel = /Clear conversation|清空对话/;
+    try {
+      const textbox = screen.getByRole('textbox');
+      fireEvent.change(textbox, { target: { value: 'Must wait for clear' } });
+      expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: clearLabel }));
+      fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', {
+        name: clearLabel,
+      }));
+
+      await waitFor(() => expect(tauriCoreMock.invoke).toHaveBeenCalledWith(
+        'clear_ai_session_lane',
+        expect.objectContaining({ conversationId: 'clear-pending-conversation' }),
+      ));
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+      expect(screen.getByRole('button', {
+        name: 'Ask about terminal output',
+      })).toBeDisabled();
+      fireEvent.keyDown(textbox, { key: 'Enter', shiftKey: false, keyCode: 13 });
+      expect(tauriCoreMock.invoke).not.toHaveBeenCalledWith(
+        'ai_start_request',
+        expect.anything(),
+      );
+      expect(screen.getByText('Clear only after commit')).toBeInTheDocument();
+
+      await act(async () => finishClear?.());
+      await waitFor(() => expect(screen.queryByText('Clear only after commit'))
+        .not.toBeInTheDocument());
+      expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled();
+    } finally {
+      finishClear?.();
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      clearTerminalOutput('clear-pending-session');
+      useTerminalStore.setState(previousTerminal, true);
+      useAppStore.setState(previousApp, true);
+      await initI18n(previousApp.locale);
+    }
+  });
 });
 
 describe('conversation history', () => {
@@ -1348,7 +1872,7 @@ describe('conversation history', () => {
     }
   });
 
-  it('keeps a failed history load retryable instead of caching an empty session', async () => {
+  it('keeps a missing indexed history retryable and audits recovered-prefix loads', async () => {
     const previousApp = useAppStore.getState();
     const previousTerminal = useTerminalStore.getState();
     await initI18n('en-US');
@@ -1371,13 +1895,18 @@ describe('conversation history', () => {
     tauriCoreMock.invoke.mockImplementation((command: string) => {
       if (command !== 'load_ai_session') return Promise.resolve(undefined);
       loadAttempts += 1;
-      if (loadAttempts === 1) return Promise.reject(new Error('temporary read failure'));
+      if (loadAttempts === 1) return Promise.resolve(null);
       return Promise.resolve({
         conversation,
         messages: [message('loaded-after-retry', 'user', 'Recovered history', {
           conversationId: conversation.id,
           sessionId: conversation.sessionId,
         })],
+        recovery: {
+          validRecords: 2,
+          skippedBytes: 17,
+          firstError: 'truncated JSONL tail',
+        },
       });
     });
     useAiStore.getState().setOpen(true);
@@ -1394,6 +1923,7 @@ describe('conversation history', () => {
       fireEvent.click(within(alert as HTMLElement).getByRole('button', { name: 'Retry' }));
 
       expect(await screen.findByText('Recovered history')).toBeInTheDocument();
+      expect(screen.getByText('Conversation history recovered with warnings')).toBeInTheDocument();
       expect(useAiStore.getState().loadedConversationIds).toContain(conversation.id);
       expect(loadAttempts).toBe(2);
     } finally {
@@ -1402,6 +1932,111 @@ describe('conversation history', () => {
       useAiStore.getState().setOpen(false);
       useAppStore.setState(previousApp, true);
       useTerminalStore.setState(previousTerminal, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
+  it('shows history load failures in Agent mode and prevents submission', async () => {
+    const previousApp = useAppStore.getState();
+    const previousTerminal = useTerminalStore.getState();
+    const previousSettings = useAiSettingsStore.getState();
+    const previousTauriInternals = Object.getOwnPropertyDescriptor(window, '__TAURI_INTERNALS__');
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useAiSettingsStore.setState({
+      ...previousSettings,
+      agentEnabled: true,
+      providers: [{
+        id: 'agent-load-provider',
+        name: 'Agent load provider',
+        preset: 'ollama',
+        kind: 'ollama',
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'test-model',
+        requiresApiKey: false,
+      }],
+      defaultProviderId: 'agent-load-provider',
+    }, true);
+    const conversation = {
+      id: 'agent-load-failure',
+      startedAt: '2026-08-31T02:00:00.000Z',
+      updatedAt: '2026-08-31T02:01:00.000Z',
+      title: 'Agent load target',
+      archived: false,
+      sessionId: 'agent-load-session',
+      host: 'agent-load.example.com',
+      port: 22,
+      username: 'root',
+    };
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: conversation.sessionId,
+        title: conversation.title,
+        host: conversation.host,
+        port: conversation.port,
+        username: conversation.username,
+        status: 'connected',
+        conversationId: conversation.id,
+        conversationStartedAt: conversation.startedAt,
+      }],
+      activeSessionId: conversation.sessionId,
+    });
+    useAiStore.getState().clear();
+    useAiStore.getState().hydrateSessionIndex([conversation]);
+    useAiStore.getState().setOpen(true);
+    tauriCoreMock.invoke.mockImplementation((command: string) => {
+      if (command === 'load_ai_session') return Promise.reject(new Error('corrupt session tail'));
+      if (command === 'agent_rollout_policy') {
+        return Promise.resolve({
+          stage: 'stable',
+          featureEnabled: true,
+          defaultAgentEnabled: true,
+          defaultPermissionMode: 'requestApproval',
+          availablePermissionModes: ['requestApproval', 'autoApproveReadOnly', 'fullAccess'],
+          collectLocalDiagnostics: false,
+        });
+      }
+      if (command === 'agent_contract_status') {
+        return Promise.resolve({
+          contractVersion: 2,
+          featureEnabled: true,
+          agentAvailable: true,
+          defaultPermissionMode: 'requestApproval',
+          providerCapability: { support: 'supported', source: 'ollamaModelMetadata' },
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      expect(await screen.findByText('Conversation history unavailable')).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Do not submit' } });
+      const modeSelector = await screen.findByRole('button', { name: 'AI mode' });
+      fireEvent.click(modeSelector);
+      const agentOption = await screen.findByRole('menuitemradio', { name: /^Agent/ });
+      await waitFor(() => expect(agentOption).not.toHaveAttribute('aria-disabled', 'true'));
+      fireEvent.click(agentOption);
+
+      await waitFor(() => expect(modeSelector).toHaveTextContent('Agent'));
+      expect(screen.getByText('Conversation history unavailable')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    } finally {
+      unmount();
+      useAiStore.getState().clear();
+      useAiStore.getState().setOpen(false);
+      useAiSettingsStore.setState(previousSettings, true);
+      useTerminalStore.setState(previousTerminal, true);
+      useAppStore.setState(previousApp, true);
+      if (previousTauriInternals) {
+        Object.defineProperty(window, '__TAURI_INTERNALS__', previousTauriInternals);
+      } else {
+        Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+      }
       await initI18n(previousApp.locale);
     }
   });
@@ -1541,6 +2176,324 @@ describe('AI composer status', () => {
     }
   });
 
+});
+
+describe('AI stream listener lifecycle', () => {
+  function installTauriRuntime(
+    startRequest?: (args: Record<string, unknown> | undefined) => Promise<void>,
+  ): void {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+    tauriCoreMock.invoke.mockImplementation(async (
+      command: string,
+      args?: Record<string, unknown>,
+    ) => {
+      if (command === 'agent_rollout_policy') {
+        return {
+          stage: 'stable',
+          featureEnabled: true,
+          defaultAgentEnabled: true,
+          defaultPermissionMode: 'requestApproval',
+          availablePermissionModes: ['requestApproval', 'autoApproveReadOnly', 'fullAccess'],
+          collectLocalDiagnostics: false,
+        };
+      }
+      if (command === 'agent_contract_status') {
+        return {
+          contractVersion: 2,
+          featureEnabled: true,
+          agentAvailable: true,
+          defaultPermissionMode: 'requestApproval',
+          providerCapability: {
+            support: 'supported',
+            source: 'ollamaModelMetadata',
+          },
+        };
+      }
+      if (command === 'ai_start_request' && startRequest) return startRequest(args);
+      return undefined;
+    });
+  }
+
+  async function preparePanel(
+    startRequest?: (args: Record<string, unknown> | undefined) => Promise<void>,
+  ): Promise<{
+    previousApp: ReturnType<typeof useAppStore.getState>;
+    previousSettings: ReturnType<typeof useAiSettingsStore.getState>;
+  }> {
+    const previousApp = useAppStore.getState();
+    const previousSettings = useAiSettingsStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'workbench', locale: 'en-US' });
+    useAiSettingsStore.setState({
+      providers: [{
+        id: 'listener-provider',
+        name: 'Listener provider',
+        preset: 'ollama',
+        kind: 'ollama',
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'qwen3',
+        requiresApiKey: false,
+      }],
+      defaultProviderId: 'listener-provider',
+    });
+    useAiStore.getState().clear();
+    useAiStore.getState().setOpen(true);
+    installTauriRuntime(startRequest);
+    return { previousApp, previousSettings };
+  }
+
+  async function restorePanel(
+    previousApp: ReturnType<typeof useAppStore.getState>,
+    previousSettings: ReturnType<typeof useAiSettingsStore.getState>,
+  ): Promise<void> {
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    useAiStore.getState().clear();
+    useAiStore.getState().setOpen(false);
+    useAiSettingsStore.setState(previousSettings, true);
+    useAppStore.setState(previousApp, true);
+    await initI18n(previousApp.locale);
+  }
+
+  it('waits for the stream listener before invoking and cancels an invoked request on unmount', async () => {
+    const listenerReady = deferred<() => void>();
+    const unlisten = vi.fn();
+    tauriEventMock.listen.mockImplementationOnce(() => listenerReady.promise);
+    const { previousApp, previousSettings } = await preparePanel();
+    const panel = render(createElement(AiPanel));
+    try {
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Explain this' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      await waitFor(() => expect(useAiStore.getState().phase).toBe('streaming'));
+      expect(tauriCoreMock.invoke.mock.calls.some(([command]) => (
+        command === 'ai_start_request'
+      ))).toBe(false);
+
+      await act(async () => {
+        listenerReady.resolve(unlisten);
+        await listenerReady.promise;
+      });
+      await waitFor(() => expect(tauriCoreMock.invoke).toHaveBeenCalledWith(
+        'ai_start_request',
+        expect.anything(),
+      ));
+      const requestId = useAiStore.getState().activeRequestId;
+      expect(requestId).toBeDefined();
+
+      panel.unmount();
+      expect(useAiStore.getState()).toMatchObject({
+        phase: 'idle',
+        activeRequestId: undefined,
+      });
+      expect(unlisten).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(tauriCoreMock.invoke).toHaveBeenCalledWith(
+        'ai_cancel_request',
+        { requestId },
+      ));
+    } finally {
+      panel.unmount();
+      await restorePanel(previousApp, previousSettings);
+    }
+  });
+
+  it('turns a listener setup rejection into a request failure without invoking the backend', async () => {
+    const listenerReady = deferred<() => void>();
+    tauriEventMock.listen.mockImplementationOnce(() => listenerReady.promise);
+    const { previousApp, previousSettings } = await preparePanel();
+    const panel = render(createElement(AiPanel));
+    try {
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Explain this' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      listenerReady.reject(new Error('stream listener unavailable'));
+
+      await waitFor(() => expect(useAiStore.getState()).toMatchObject({
+        phase: 'error',
+        activeRequestId: undefined,
+        error: 'stream listener unavailable',
+      }));
+      expect(screen.getByText('Request failed')).toBeInTheDocument();
+      expect(tauriCoreMock.invoke.mock.calls.some(([command]) => (
+        command === 'ai_start_request'
+      ))).toBe(false);
+    } finally {
+      panel.unmount();
+      await restorePanel(previousApp, previousSettings);
+    }
+  });
+
+  it('best-effort cancels a request when backend start rejects', async () => {
+    const unlisten = vi.fn<() => void>();
+    tauriEventMock.listen.mockImplementationOnce(async () => unlisten);
+    const { previousApp, previousSettings } = await preparePanel(async () => {
+      throw new Error('backend start failed');
+    });
+    const panel = render(createElement(AiPanel));
+    try {
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Explain this' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      await waitFor(() => expect(useAiStore.getState()).toMatchObject({
+        phase: 'error',
+        activeRequestId: undefined,
+        error: 'backend start failed',
+      }));
+      const requestId = useAiStore.getState().messages.find((message) => (
+        message.role === 'user' && message.content === 'Explain this'
+      ))?.requestId;
+      expect(requestId).toBeDefined();
+      expect(tauriCoreMock.invoke).toHaveBeenCalledWith(
+        'ai_cancel_request',
+        { requestId },
+      );
+    } finally {
+      panel.unmount();
+      await restorePanel(previousApp, previousSettings);
+    }
+  });
+
+  it('recancels an old start that resolves after cancellation and a rapid replacement', async () => {
+    const firstStart = deferred<void>();
+    let startCount = 0;
+    let streamHandler: ((event: { payload: AiStreamEvent }) => void) | undefined;
+    const unlisten = vi.fn();
+    tauriEventMock.listen.mockImplementationOnce(async (_event, handler) => {
+      streamHandler = handler;
+      return unlisten;
+    });
+    const { previousApp, previousSettings } = await preparePanel(async () => {
+      startCount += 1;
+      if (startCount === 1) await firstStart.promise;
+    });
+    const panel = render(createElement(AiPanel));
+    try {
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'First request' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(startCount).toBe(1));
+      const firstRequestId = useAiStore.getState().activeRequestId!;
+
+      fireEvent.click(screen.getByRole('button', { name: 'Stop generating' }));
+      await waitFor(() => expect(tauriCoreMock.invoke.mock.calls.filter(([command, args]) => (
+        command === 'ai_cancel_request'
+        && (args as { requestId?: string } | undefined)?.requestId === firstRequestId
+      ))).toHaveLength(1));
+
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Second request' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(startCount).toBe(2));
+      const secondRequestId = useAiStore.getState().activeRequestId!;
+      expect(secondRequestId).not.toBe(firstRequestId);
+
+      await act(async () => {
+        firstStart.resolve();
+        await firstStart.promise;
+      });
+      await waitFor(() => expect(tauriCoreMock.invoke.mock.calls.filter(([command, args]) => (
+        command === 'ai_cancel_request'
+        && (args as { requestId?: string } | undefined)?.requestId === firstRequestId
+      ))).toHaveLength(2));
+      expect(useAiStore.getState()).toMatchObject({
+        phase: 'streaming',
+        activeRequestId: secondRequestId,
+      });
+
+      act(() => {
+        streamHandler?.({
+          payload: { type: 'textDelta', requestId: firstRequestId, text: 'stale answer' },
+        });
+        streamHandler?.({ payload: { type: 'completed', requestId: firstRequestId } });
+      });
+      expect(useAiStore.getState()).toMatchObject({
+        phase: 'streaming',
+        activeRequestId: secondRequestId,
+      });
+      expect(useAiStore.getState().messages.find((message) => (
+        message.id === `assistant-${secondRequestId}`
+      ))).toMatchObject({ status: 'streaming', content: '' });
+
+      act(() => {
+        streamHandler?.({
+          payload: { type: 'textDelta', requestId: secondRequestId, text: 'fresh answer' },
+        });
+        streamHandler?.({ payload: { type: 'completed', requestId: secondRequestId } });
+      });
+      expect(useAiStore.getState()).toMatchObject({
+        phase: 'idle',
+        activeRequestId: undefined,
+      });
+    } finally {
+      panel.unmount();
+      expect(unlisten).toHaveBeenCalledTimes(1);
+      await restorePanel(previousApp, previousSettings);
+    }
+  });
+
+  it('retires an unresolved listener on unmount and keeps its handler out of a remounted request', async () => {
+    const firstReady = deferred<() => void>();
+    const firstUnlisten = vi.fn();
+    const secondUnlisten = vi.fn();
+    let firstHandler: ((event: { payload: AiStreamEvent }) => void) | undefined;
+    let secondHandler: ((event: { payload: AiStreamEvent }) => void) | undefined;
+    tauriEventMock.listen
+      .mockImplementationOnce((_event, handler) => {
+        firstHandler = handler;
+        return firstReady.promise;
+      })
+      .mockImplementationOnce(async (_event, handler) => {
+        secondHandler = handler;
+        return secondUnlisten;
+      });
+    const { previousApp, previousSettings } = await preparePanel();
+    let panel = render(createElement(AiPanel));
+    try {
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'First request' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(useAiStore.getState().phase).toBe('streaming'));
+      panel.unmount();
+      expect(useAiStore.getState().phase).toBe('idle');
+
+      await act(async () => {
+        firstReady.resolve(firstUnlisten);
+        await firstReady.promise;
+      });
+      expect(firstUnlisten).toHaveBeenCalledTimes(1);
+      expect(tauriCoreMock.invoke.mock.calls.some(([command]) => (
+        command === 'ai_start_request'
+      ))).toBe(false);
+
+      panel = render(createElement(AiPanel));
+      await waitFor(() => expect(tauriEventMock.listen).toHaveBeenCalledTimes(2));
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Second request' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(tauriCoreMock.invoke).toHaveBeenCalledWith(
+        'ai_start_request',
+        expect.anything(),
+      ));
+      const secondRequestId = useAiStore.getState().activeRequestId!;
+
+      act(() => {
+        firstHandler?.({ payload: { type: 'completed', requestId: secondRequestId } });
+      });
+      expect(useAiStore.getState().phase).toBe('streaming');
+
+      act(() => {
+        secondHandler?.({
+          payload: { type: 'textDelta', requestId: secondRequestId, text: 'Second answer' },
+        });
+        secondHandler?.({ payload: { type: 'completed', requestId: secondRequestId } });
+      });
+      expect(useAiStore.getState()).toMatchObject({
+        phase: 'idle',
+        activeRequestId: undefined,
+      });
+    } finally {
+      panel.unmount();
+      expect(secondUnlisten).toHaveBeenCalledTimes(1);
+      await restorePanel(previousApp, previousSettings);
+    }
+  });
 });
 
 describe('cancelActiveAiRequests', () => {

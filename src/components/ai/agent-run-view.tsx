@@ -1,11 +1,12 @@
 import { BotIcon, CircleAlertIcon, MessageCircleQuestionIcon, RotateCcwIcon, SettingsIcon } from 'lucide-react';
 import { AgentApprovalCard } from '@/components/ai/agent-approval-card';
 import { AssistantMessageContent } from '@/components/ai/assistant-message-content';
-import { Bubble, Message, MessageScroller } from '@/components/ai/chat-primitives';
+import { Bubble, Marker, Message, MessageScroller } from '@/components/ai/chat-primitives';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { PanelEmptyState } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
+import type { AiRequestBudgetMetadata } from '@/lib/ai-request-budget';
 import { agentToolKey, useAgentStore } from '@/stores/agentStore';
 import type { LocaleKey } from '@/locales';
 import type { AgentRunRecord } from '@/types/agent';
@@ -24,6 +25,7 @@ export interface AgentRunViewProps {
   readonly canRetry: (requestId: string) => boolean;
   readonly onSwitchToAsk: (requestId: string) => void;
   readonly onOpenSettings: () => void;
+  readonly requestBudgetNotices?: Readonly<Record<string, AiRequestBudgetMetadata>>;
 }
 
 export function AgentRunView({
@@ -34,11 +36,13 @@ export function AgentRunView({
   canRetry,
   onSwitchToAsk,
   onOpenSettings,
+  requestBudgetNotices = {},
 }: AgentRunViewProps): React.ReactNode {
   const { t } = useI18n();
   const allMessages = useAgentStore((state) => state.messages);
   const runs = useAgentStore((state) => state.runs);
   const tools = useAgentStore((state) => state.tools);
+  const contextLimitedRequests = useAgentStore((state) => state.contextLimitedRequests);
   const messages = conversationId ? allMessages.filter((message) => message.conversationId === conversationId) : allMessages;
   const latestMessage = messages[messages.length - 1];
   const latestRun = latestMessage ? runs[latestMessage.requestId] : undefined;
@@ -55,10 +59,10 @@ export function AgentRunView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <MessageScroller className="flex-1" contentClassName="pt-2" followKey={followKey} ariaLabel={t('agent.conversation')}>
-        {messages.map((message) => {
+        {messages.flatMap((message) => {
           const run = runs[message.requestId];
-          if (!run) return null;
-          return (
+          if (!run) return [];
+          const row = (
             <Message key={message.id} role={message.role}>
               <Bubble role={message.role}>
                 {message.role === 'user' ? (
@@ -110,6 +114,17 @@ export function AgentRunView({
               </Bubble>
             </Message>
           );
+          return message.role === 'user' && (
+            requestBudgetNotices[message.requestId]
+            || contextLimitedRequests[message.requestId]
+          )
+            ? [
+                <Marker key={`budget-${message.requestId}`}>
+                  {t('ai.context.limited')}
+                </Marker>,
+                row,
+              ]
+            : [row];
         })}
       </MessageScroller>
 

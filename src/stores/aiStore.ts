@@ -227,16 +227,15 @@ export const useAiStore = create<AiState>()((set) => ({
     };
   }),
   upsertConversation: (conversation) => set((state) => {
-    const hasInMemoryMessages = state.messages.some((message) => (
-      message.conversationId === conversation.id
-    ));
     return {
       conversations: [
         conversation,
         ...state.conversations.filter((item) => item.id !== conversation.id),
       ],
-      loadedConversationIds: hasInMemoryMessages
-        && !state.loadedConversationIds.includes(conversation.id)
+      // upsertConversation is used only for the active, locally owned session.
+      // Mark even an empty conversation as loaded so the history loader cannot
+      // race a just-created Agent session and block its pending submission.
+      loadedConversationIds: !state.loadedConversationIds.includes(conversation.id)
         ? [...state.loadedConversationIds, conversation.id]
         : state.loadedConversationIds,
     };

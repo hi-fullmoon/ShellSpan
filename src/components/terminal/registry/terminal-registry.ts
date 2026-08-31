@@ -337,6 +337,10 @@ export interface TerminalController {
   detach(): void;
   focus(): void;
   simulateInput(data: string): void;
+  hasPendingUserInput(): boolean;
+  hasUnverifiedUserSubmission(): boolean;
+  suppressUserInput(): () => void;
+  writeUserInput(data: string): Promise<boolean>;
   writeInput(data: string): Promise<void>;
   whenOutputReady(): Promise<void>;
   subscribeOutput(listener: TerminalOutputCallback): () => void;
@@ -367,6 +371,9 @@ class TerminalControllerImpl implements TerminalController {
   private readonly getStatus: GetStatusCallback;
   private readonly requestReconnect: RequestReconnectCallback;
   private inputBlockedNoticeRef = false;
+  private userInputSuppressions = 0;
+  private pendingUserInputText = '';
+  private unverifiedUserSubmission = false;
   private reconnectRequestedRef = false;
   private inputGraceDeadlineRef = 0;
   private listenerGeneration = 0;
@@ -457,11 +464,7 @@ class TerminalControllerImpl implements TerminalController {
     const status = this.getStatus(this.sessionId);
 
     if (status === 'connected') {
-      if (Date.now() < this.inputGraceDeadlineRef) {
-        logger.debug(`Dropped input during post-reconnect grace period session=${this.sessionId}`);
-        return;
-      }
-      void this.writeInput(data).catch((error) => {
+      void this.writeUserInput(data).catch((error) => {
         logger.error(`Failed to write input to session ${this.sessionId}`, error);
         this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.writeFailedLabel'), t('terminal.notice.writeFailedMessage'), '31'));
       });
@@ -944,6 +947,136 @@ class TerminalControllerImpl implements TerminalController {
     this.handleInput(data);
   }
 
+  suppressUserInput(): () => void {
+    if (this.disposed) return () => {};
+    this.userInputSuppressions += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.userInputSuppressions = Math.max(0, this.userInputSuppressions - 1);
+    };
+  }
+
+  hasPendingUserInput(): boolean {
+    return this.pendingUserInputText.length > 0;
+  }
+
+  hasUnverifiedUserSubmission(): boolean {
+    return this.unverifiedUserSubmission;
+  }
+
+  private inputLineNeedsContinuation(value: string): boolean {
+    const trimmed = value.trimEnd();
+    if (!trimmed) return false;
+    if (/(?:\\|`)\s*$/.test(value) || /(?:\||&&|\|\|)\s*$/.test(value)) return true;
+    const heredoc = /<<(?!<)-?\s*(?:'([^']+)'|"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))/g;
+    const delimiters: Array<{ delimiter: string; stripTabs: boolean }> = [];
+    const openingLine = value.split('\n', 1)[0];
+    const isUnquotedAt = (offset: number): boolean => {
+      let heredocQuote: "'" | '"' | null = null;
+      let heredocEscaped = false;
+      for (let index = 0; index < offset; index += 1) {
+        const character = openingLine[index];
+        if (heredocEscaped) {
+          heredocEscaped = false;
+        } else if (heredocQuote) {
+          if (character === heredocQuote) heredocQuote = null;
+          else if (character === '\\' && heredocQuote === '"') heredocEscaped = true;
+        } else if (character === '\\') {
+          heredocEscaped = true;
+        } else if (character === "'" || character === '"') {
+          heredocQuote = character;
+        }
+      }
+      return heredocQuote === null && !heredocEscaped;
+    };
+    for (const match of openingLine.matchAll(heredoc)) {
+      if (!isUnquotedAt(match.index ?? 0)) continue;
+      delimiters.push({
+        delimiter: match[1] ?? match[2] ?? match[3],
+        stripTabs: match[0].startsWith('<<-'),
+      });
+    }
+    if (delimiters.length > 0) {
+      const bodyLines = value.split('\n').slice(1);
+      let delimiterIndex = 0;
+      for (const line of bodyLines) {
+        const expected = delimiters[delimiterIndex];
+        if (!expected) break;
+        const candidate = expected.stripTabs ? line.replace(/^\t+/, '') : line;
+        if (candidate === expected.delimiter) delimiterIndex += 1;
+      }
+      if (delimiterIndex < delimiters.length) return true;
+    }
+    let quote: "'" | '"' | null = null;
+    let escaped = false;
+    const closers: string[] = [];
+    const matchingCloser: Record<string, string> = { '(': ')', '[': ']', '{': '}' };
+    for (const character of value) {
+      if (escaped) {
+        escaped = false;
+      } else if (quote) {
+        if (character === '\\' && quote === '"') escaped = true;
+        else if (character === quote) quote = null;
+      } else if (character === "'" || character === '"') {
+        quote = character;
+      } else if (matchingCloser[character]) {
+        closers.push(matchingCloser[character]);
+      } else if (closers[closers.length - 1] === character) {
+        closers.pop();
+      }
+    }
+    return quote !== null
+      || closers.length > 0
+      || /(?:\bthen|\bdo|\belse|\bcase\s+\S+\s+in)\s*$/i.test(trimmed);
+  }
+
+  private trackUserInput(data: string): void {
+    for (let index = 0; index < data.length; index += 1) {
+      const character = data[index];
+      if (character === '\u001b') {
+        if (data[index + 1] === '[') {
+          index += 2;
+          while (index < data.length && !/[A-Za-z~]/.test(data[index])) index += 1;
+        }
+        continue;
+      }
+      if (character === '\u0003' || character === '\u0015') {
+        this.pendingUserInputText = '';
+      } else if (character === '\u007f' || character === '\b') {
+        this.pendingUserInputText = [...this.pendingUserInputText].slice(0, -1).join('');
+      } else if (character === '\r' || character === '\n') {
+        if (character === '\r' && data[index + 1] === '\n') index += 1;
+        const submittedInput = this.pendingUserInputText;
+        if (this.inputLineNeedsContinuation(submittedInput)) {
+          this.pendingUserInputText = `${submittedInput}\n`;
+        } else {
+          if (submittedInput.trim()) this.unverifiedUserSubmission = true;
+          this.pendingUserInputText = '';
+        }
+      } else if (character === '\t' || character >= ' ') {
+        this.pendingUserInputText += character;
+      }
+    }
+  }
+
+  writeUserInput(data: string): Promise<boolean> {
+    if (this.disposed || this.getStatus(this.sessionId) !== 'connected') {
+      return Promise.resolve(false);
+    }
+    if (this.userInputSuppressions > 0) {
+      logger.debug(`Dropped user input while an Agent command owns session=${this.sessionId}`);
+      return Promise.resolve(false);
+    }
+    if (Date.now() < this.inputGraceDeadlineRef) {
+      logger.debug(`Dropped input during post-reconnect grace period session=${this.sessionId}`);
+      return Promise.resolve(false);
+    }
+    this.trackUserInput(data);
+    return this.writeInput(data).then(() => true);
+  }
+
   writeInput(data: string): Promise<void> {
     if (this.disposed) {
       return Promise.reject(new Error(`terminal controller ${this.sessionId} is disposed`));
@@ -1017,6 +1150,8 @@ class TerminalControllerImpl implements TerminalController {
       this.setOutputPaused(false);
     }
     this.pendingOutputCharacters = 0;
+    this.pendingUserInputText = '';
+    this.unverifiedUserSubmission = false;
     this.outputGeneration += 1;
     this.sessionId = sessionId;
     rebindTerminalOutput(previousSessionId, sessionId);

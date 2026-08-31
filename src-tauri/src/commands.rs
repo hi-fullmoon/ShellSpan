@@ -3104,11 +3104,9 @@ mod tests {
             .expect("spawn the native macOS shell through a PTY");
         drop(pair.slave);
 
-        let nonce = "0123456789abcdef0123456789abcdef0123456789abcdef";
-        let first = "SHELLSPAN_M2_0123456789abcdef0123";
-        let second = "456789abcdef0123456789abcdef";
+        let marker = "SHELLSPAN_M2_0123456789abcdef0123456789abcdef0123456789abcdef";
         let wrapper = format!(
-            "__tb_marker_{nonce}='{first}''{second}'; __tb_command_{nonce}='printf macos-shell-protocol; false'; printf '\\036%s:BEGIN\\037\\n' \"$__tb_marker_{nonce}\"; eval \"$__tb_command_{nonce}\"; __tb_exit_{nonce}=$?; printf '\\036%s:END:%d\\037\\n' \"$__tb_marker_{nonce}\" \"$__tb_exit_{nonce}\"; unset __tb_marker_{nonce} __tb_command_{nonce} __tb_exit_{nonce}\nexit\n"
+            "m='{marker}'; c='printf macos-shell-protocol; false'; k=$(LC_ALL=C /usr/bin/od -An -N24 -tx1 /dev/urandom | /usr/bin/tr -d '[:space:]'); h=$(/usr/bin/printf %s \"$k\" | /usr/bin/shasum -a 256); h=${{h%% *}}; /usr/bin/printf '\\036%s:BEGIN:%s\\037\\n' \"$m\" \"$h\"; if /bin/sh -c \"$c\" </dev/null; then x=0; else x=$?; fi; /usr/bin/printf '\\036%s:END:%s:%d\\037\\n' \"$m\" \"$k\" \"$x\"\nexit\n"
         );
         writer
             .write_all(wrapper.as_bytes())
@@ -3124,12 +3122,12 @@ mod tests {
 
         assert!(status.success());
         assert!(output.contains(
-            "\u{1e}SHELLSPAN_M2_0123456789abcdef0123456789abcdef0123456789abcdef:BEGIN\u{1f}"
+            "\u{1e}SHELLSPAN_M2_0123456789abcdef0123456789abcdef0123456789abcdef:BEGIN:"
         ));
         assert!(output.contains("macos-shell-protocol"));
-        assert!(output.contains(
-            "\u{1e}SHELLSPAN_M2_0123456789abcdef0123456789abcdef0123456789abcdef:END:1\u{1f}"
-        ));
+        assert!(output
+            .contains("\u{1e}SHELLSPAN_M2_0123456789abcdef0123456789abcdef0123456789abcdef:END:"));
+        assert!(output.contains(":1\u{1f}"));
     }
 
     #[cfg(target_os = "windows")]

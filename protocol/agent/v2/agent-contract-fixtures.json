@@ -133,13 +133,18 @@
         "callId": "call-2"
       },
       {
+        "type": "contextLimited",
+        "requestId": "request-1"
+      },
+      {
         "type": "stepLimitReached",
         "requestId": "request-1",
         "maxToolSteps": 8
       },
       {
-        "type": "completed",
+        "type": "finished",
         "requestId": "request-1",
+        "outcome": "incomplete",
         "toolSteps": 3,
         "fallback": false
       },
@@ -229,4 +234,3 @@
     }
   ]
 }
-

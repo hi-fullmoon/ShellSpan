@@ -45,6 +45,9 @@
     "agentRisk": {
       "enum": ["readOnly", "stateChange", "destructive"]
     },
+    "agentTaskOutcome": {
+      "enum": ["completed", "incomplete"]
+    },
     "agentTarget": {
       "type": "object",
       "additionalProperties": false,
@@ -188,8 +191,9 @@
         "toolCall",
         "toolResultAccepted",
         "toolResultTimedOut",
+        "contextLimited",
         "stepLimitReached",
-        "completed",
+        "finished",
         "cancelled",
         "error"
       ]
@@ -276,6 +280,15 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["type", "requestId"],
+          "properties": {
+            "type": { "const": "contextLimited" },
+            "requestId": { "$ref": "#/$defs/identifier" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["type", "requestId", "maxToolSteps"],
           "properties": {
             "type": { "const": "stepLimitReached" },
@@ -286,10 +299,11 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "requestId", "toolSteps", "fallback"],
+          "required": ["type", "requestId", "outcome", "toolSteps", "fallback"],
           "properties": {
-            "type": { "const": "completed" },
+            "type": { "const": "finished" },
             "requestId": { "$ref": "#/$defs/identifier" },
+            "outcome": { "$ref": "#/$defs/agentTaskOutcome" },
             "toolSteps": { "type": "integer", "minimum": 0, "maximum": 8 },
             "fallback": { "type": "boolean" }
           }
