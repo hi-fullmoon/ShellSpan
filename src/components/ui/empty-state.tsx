@@ -22,7 +22,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ title, description, icon
 
 export const PanelEmptyState: React.FC<EmptyStateProps> = (props) => {
   return (
-    <div className="flex h-full items-center justify-center">
+    <div data-slot="panel-empty-state" className="flex min-h-0 flex-1 items-center justify-center">
       <EmptyState {...props} />
     </div>
   );
