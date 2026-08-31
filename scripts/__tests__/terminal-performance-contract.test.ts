@@ -30,9 +30,6 @@ const mocks = vi.hoisted(() => ({
   error: vi.fn(),
   createOperationId: vi.fn(() => 'test-operation-id'),
   findOperationId: vi.fn(() => undefined),
-  recordInvocationStarted: vi.fn().mockResolvedValue(undefined),
-  recordInvocationFinished: vi.fn().mockResolvedValue(undefined),
-  recordInvocationFailed: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -51,12 +48,6 @@ vi.mock('@/lib/logger', () => ({
 vi.mock('@/lib/operation-id', () => ({
   createOperationId: mocks.createOperationId,
   findOperationId: mocks.findOperationId,
-}));
-
-vi.mock('@/lib/operation-history', () => ({
-  recordInvocationStarted: mocks.recordInvocationStarted,
-  recordInvocationFinished: mocks.recordInvocationFinished,
-  recordInvocationFailed: mocks.recordInvocationFailed,
 }));
 
 import {
@@ -150,7 +141,7 @@ describe('terminal performance benchmark contract', () => {
     clearTerminalOutput('contract-redaction');
   });
 
-  it('dispatches input in order without generic logging or operation bookkeeping', async () => {
+  it('dispatches input in order without generic logging or ID bookkeeping', async () => {
     const events = 25;
     const writes = Array.from(
       { length: events },
@@ -168,12 +159,9 @@ describe('terminal performance benchmark contract', () => {
     expect(mocks.error).not.toHaveBeenCalled();
     expect(mocks.createOperationId).not.toHaveBeenCalled();
     expect(mocks.findOperationId).not.toHaveBeenCalled();
-    expect(mocks.recordInvocationStarted).not.toHaveBeenCalled();
-    expect(mocks.recordInvocationFinished).not.toHaveBeenCalled();
-    expect(mocks.recordInvocationFailed).not.toHaveBeenCalled();
   });
 
-  it('propagates write failures without logging or recording interactive input', async () => {
+  it('propagates write failures without generic logging', async () => {
     const failure = new Error('native write failed');
     mocks.invoke.mockRejectedValueOnce(failure);
 
@@ -182,8 +170,6 @@ describe('terminal performance benchmark contract', () => {
     expect(mocks.invoke).toHaveBeenCalledOnce();
     expect(mocks.debug).not.toHaveBeenCalled();
     expect(mocks.error).not.toHaveBeenCalled();
-    expect(mocks.recordInvocationStarted).not.toHaveBeenCalled();
-    expect(mocks.recordInvocationFailed).not.toHaveBeenCalled();
   });
 
   it('returns the native IPC promise without another async wrapper', async () => {
@@ -209,7 +195,6 @@ describe('terminal performance benchmark contract', () => {
     expect(mocks.debug).not.toHaveBeenCalled();
     expect(mocks.error).not.toHaveBeenCalled();
     expect(mocks.createOperationId).not.toHaveBeenCalled();
-    expect(mocks.recordInvocationStarted).not.toHaveBeenCalled();
   });
 
   it('preserves backpressure and resize IPC failures for their callers', async () => {
@@ -224,6 +209,5 @@ describe('terminal performance benchmark contract', () => {
 
     expect(mocks.debug).not.toHaveBeenCalled();
     expect(mocks.error).not.toHaveBeenCalled();
-    expect(mocks.recordInvocationFailed).not.toHaveBeenCalled();
   });
 });

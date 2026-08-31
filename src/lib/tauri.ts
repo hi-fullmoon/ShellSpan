@@ -1,12 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { createLogger } from '@/lib/logger';
 import { createOperationId, findOperationId } from '@/lib/operation-id';
-import {
-  recordInvocationFailed,
-  recordInvocationFinished,
-  recordInvocationStarted,
-  type OperationHistoryInvocationMetadata,
-} from '@/lib/operation-history';
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   AuthMethod,
@@ -100,15 +94,12 @@ function isCancelledRemoteFileRead(cmd: string, error: unknown): boolean {
 async function invokeLogged<T>(
   cmd: string,
   args?: Record<string, unknown>,
-  historyMetadata?: OperationHistoryInvocationMetadata,
 ): Promise<T> {
   const operationId = findOperationId(args) ?? createOperationId(cmd);
   logger.debug(`invoke ${cmd} started operation_id=${operationId}`);
-  const history = await recordInvocationStarted(cmd, args, operationId, historyMetadata);
   try {
     const result = await invoke<T>(cmd, args);
     logger.debug(`invoke ${cmd} completed operation_id=${operationId}`);
-    await recordInvocationFinished(history, result);
     return result;
   } catch (error) {
     if (isSupersededDirectoryRequest(cmd, error)) {
@@ -120,7 +111,6 @@ async function invokeLogged<T>(
       throw error;
     }
     logger.error(`invoke ${cmd} failed operation_id=${operationId}`, error);
-    await recordInvocationFailed(history, error);
     throw error;
   }
 }
@@ -132,8 +122,8 @@ type TerminalHotPathCommand =
 
 /**
  * Dispatch transient terminal data/control directly to Tauri. These commands
- * are intentionally excluded from operation history and their callers already
- * provide contextual error handling. Returning invoke's promise unchanged also
+ * bypass higher-level logging because their callers already provide contextual
+ * error handling. Returning invoke's promise unchanged also
  * avoids adding logging and async bookkeeping to each interactive event.
  */
 function invokeTerminalHotPath<T>(

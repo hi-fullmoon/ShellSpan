@@ -23,7 +23,6 @@ export interface AgentRolloutPolicy {
   readonly defaultAgentEnabled: boolean;
   readonly defaultPermissionMode: 'requestApproval';
   readonly availablePermissionModes: readonly AgentPermissionMode[];
-  readonly collectLocalDiagnostics: boolean;
 }
 
 export const AGENT_RISKS = ['readOnly', 'stateChange', 'destructive'] as const;
