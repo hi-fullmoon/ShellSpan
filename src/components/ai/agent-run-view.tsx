@@ -58,6 +58,34 @@ export function AgentRunView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {latestRun.status !== 'running' && latestRun.status !== 'completed' && (
+        <Alert
+          variant={runOutcomeVariant(latestRun)}
+          size="sm"
+          className="mx-3 mt-3 w-auto shrink-0"
+        >
+          <CircleAlertIcon />
+          <AlertTitle>{t(`agent.phase.${latestRun.phase}` as LocaleKey)}</AlertTitle>
+          <AlertDescription className="flex flex-col gap-1.5">
+            <span>
+              {latestRun.error ?? (latestRun.stepLimitReached ? t('agent.recovery.stepLimit') : t('agent.recovery.description'))}
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {canRetry(latestRun.requestId) && (
+                <Button variant="secondary" size="xs" onClick={() => onRetry(latestRun.requestId)}>
+                  <RotateCcwIcon data-icon="inline-start" />
+                  {t('agent.tool.retryTask')}
+                </Button>
+              )}
+              <Button variant="ghost" size="xs" onClick={onOpenSettings}>
+                <SettingsIcon data-icon="inline-start" />
+                {t('ai.reviewSettings')}
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
       <MessageScroller className="flex-1" contentClassName="pt-2" followKey={followKey} ariaLabel={t('agent.conversation')}>
         {messages.flatMap((message) => {
           const run = runs[message.requestId];
@@ -127,30 +155,6 @@ export function AgentRunView({
             : [row];
         })}
       </MessageScroller>
-
-      {latestRun.status !== 'running' && latestRun.status !== 'completed' && (
-        <Alert variant={runOutcomeVariant(latestRun)} className="mx-3 w-auto shrink-0">
-          <CircleAlertIcon />
-          <AlertTitle>{t(`agent.phase.${latestRun.phase}` as LocaleKey)}</AlertTitle>
-          <AlertDescription className="flex flex-col gap-1.5">
-            <span>
-              {latestRun.error ?? (latestRun.stepLimitReached ? t('agent.recovery.stepLimit') : t('agent.recovery.description'))}
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {canRetry(latestRun.requestId) && (
-                <Button variant="secondary" size="xs" onClick={() => onRetry(latestRun.requestId)}>
-                  <RotateCcwIcon data-icon="inline-start" />
-                  {t('agent.tool.retryTask')}
-                </Button>
-              )}
-              <Button variant="ghost" size="xs" onClick={onOpenSettings}>
-                <SettingsIcon data-icon="inline-start" />
-                {t('ai.reviewSettings')}
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
     </div>
   );
 }

@@ -1941,6 +1941,132 @@ export const AiPanel: React.FC = () => {
           </div>
         )}
 
+        {(conversationRecovered
+          || conversationLoadFailed
+          || Boolean(currentError && currentErrorPresentation)
+          || Boolean(mode === 'agent' && agentStartError)
+          || draftTooLarge
+          || Boolean(mode === 'agent' && (!agentAvailable || !activeTerminalReady))) && (
+          <div
+            data-slot="ai-panel-alerts"
+            className="flex shrink-0 flex-col gap-2 px-3 pb-2 pt-3"
+          >
+            {conversationRecovered && !conversationLoadFailed && (
+              <Alert variant="warning" size="sm">
+                <CircleAlertIcon />
+                <AlertTitle>{t('ai.history.recovered')}</AlertTitle>
+                <AlertDescription>{t('ai.history.recoveredDescription')}</AlertDescription>
+              </Alert>
+            )}
+
+            {conversationLoadFailed && (
+              <Alert variant="destructive" size="sm">
+                <CircleAlertIcon />
+                <AlertTitle>{t('ai.history.loadFailed')}</AlertTitle>
+                <AlertDescription className="flex flex-col gap-1.5">
+                  <span>{t('ai.history.loadFailedDescription')}</span>
+                  <div>
+                    <Button variant="secondary" size="xs" onClick={retryConversationLoad}>
+                      <RotateCcwIcon data-icon="inline-start" />
+                      {t('common.retry')}
+                    </Button>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {currentError && currentErrorPresentation && (
+              <Alert variant="destructive" size="sm">
+                <CircleAlertIcon />
+                <AlertTitle>{t('ai.requestFailed')}</AlertTitle>
+                <AlertDescription className="flex flex-col gap-1.5">
+                  <span>{t(currentErrorPresentation.key, currentErrorPresentation.variables)}</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {failedRequestMessage && (
+                      <Button
+                        variant="secondary"
+                        size="xs"
+                        disabled={conversationPersistenceBlocked(
+                          failedRequestMessage.conversationId,
+                        )}
+                        onClick={() => void send(
+                          'ask',
+                          failedRequestMessage.content,
+                          retrySnapshotForMessage(
+                            failedRequestMessage,
+                            useTerminalStore.getState().sessions,
+                          ),
+                        )}
+                      >
+                        <RotateCcwIcon data-icon="inline-start" />
+                        {t('common.retry')}
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="xs" onClick={openSettings}>
+                      <SettingsIcon data-icon="inline-start" />
+                      {t('ai.reviewSettings')}
+                    </Button>
+                  </div>
+                  {currentErrorPresentation.detail && (
+                    <details>
+                      <summary className="cursor-pointer text-xs">
+                        {t('common.errorDetails')}
+                      </summary>
+                      <code className="mt-1 block break-all text-xs">
+                        {currentErrorPresentation.detail}
+                      </code>
+                    </details>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {mode === 'agent' && agentStartError && (
+              <Alert variant="destructive" size="sm">
+                <CircleAlertIcon />
+                <AlertTitle>{t('agent.recovery.startFailed')}</AlertTitle>
+                <AlertDescription>{agentStartError}</AlertDescription>
+              </Alert>
+            )}
+
+            {draftTooLarge && (
+              <Alert variant="destructive" size="sm">
+                <CircleAlertIcon />
+                <AlertTitle>{t('ai.inputTooLargeTitle')}</AlertTitle>
+                <AlertDescription>
+                  {t('ai.inputTooLargeDescription', {
+                    limit: AI_REQUEST_MAX_MESSAGE_BYTES / 1024,
+                  })}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {mode === 'agent' && (!agentAvailable || !activeTerminalReady) && (
+              <Alert variant="warning" size="sm">
+                <CircleAlertIcon />
+                <AlertTitle>{t('agent.availability.title')}</AlertTitle>
+                <AlertDescription className="flex flex-col gap-1.5">
+                  <span>{agentModeUnavailableReason}</span>
+                  {agentAvailability.state === 'ready'
+                    && agentAvailability.status?.featureEnabled
+                    && (
+                      <div>
+                        <Button
+                          variant="secondary"
+                          size="xs"
+                          onClick={() => setMode('ask')}
+                        >
+                          <MessageCircleQuestionIcon data-icon="inline-start" />
+                          {t('agent.fallback.switchToAsk')}
+                        </Button>
+                      </div>
+                    )}
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+        )}
+
         {mode === 'agent' ? (
           <AgentRunView
             conversationId={activeAgentRequestId
@@ -2059,188 +2185,76 @@ export const AiPanel: React.FC = () => {
           </MessageScroller>
         )}
 
-        {conversationRecovered && !conversationLoadFailed && (
-          <Alert variant="warning" className="mx-3 mb-2 w-auto">
-            <CircleAlertIcon />
-            <AlertTitle>{t('ai.history.recovered')}</AlertTitle>
-            <AlertDescription>{t('ai.history.recoveredDescription')}</AlertDescription>
-          </Alert>
-        )}
-
-        {conversationLoadFailed && (
-          <Alert variant="destructive" className="mx-3 mb-2 w-auto">
-            <CircleAlertIcon />
-            <AlertTitle>{t('ai.history.loadFailed')}</AlertTitle>
-            <AlertDescription className="flex flex-col gap-1.5">
-              <span>{t('ai.history.loadFailedDescription')}</span>
-              <div>
-                <Button variant="secondary" size="xs" onClick={retryConversationLoad}>
-                  <RotateCcwIcon data-icon="inline-start" />
-                  {t('common.retry')}
-                </Button>
-              </div>
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {currentError && currentErrorPresentation && (
-          <Alert className="mx-3 mb-2 w-auto border-destructive/30 bg-destructive/5">
-            <CircleAlertIcon className="text-destructive" />
-            <AlertTitle>{t('ai.requestFailed')}</AlertTitle>
-            <AlertDescription className="flex flex-col gap-1.5">
-              <span>{t(currentErrorPresentation.key, currentErrorPresentation.variables)}</span>
-              <div className="flex flex-wrap gap-1.5">
-                {failedRequestMessage && (
-                  <Button
-                    variant="secondary"
-                    size="xs"
-                    disabled={conversationPersistenceBlocked(
-                      failedRequestMessage.conversationId,
-                    )}
-                    onClick={() => void send(
-                      'ask',
-                      failedRequestMessage.content,
-                      retrySnapshotForMessage(
-                        failedRequestMessage,
-                        useTerminalStore.getState().sessions,
-                      ),
-                    )}
-                  >
-                    <RotateCcwIcon data-icon="inline-start" />
-                    {t('common.retry')}
-                  </Button>
-                )}
-                <Button variant="ghost" size="xs" onClick={openSettings}>
-                  <SettingsIcon data-icon="inline-start" />
-                  {t('ai.reviewSettings')}
-                </Button>
-              </div>
-              {currentErrorPresentation.detail && (
-                <details>
-                  <summary className="cursor-pointer text-xs">
-                    {t('common.errorDetails')}
-                  </summary>
-                  <code className="mt-1 block break-all text-xs">
-                    {currentErrorPresentation.detail}
-                  </code>
-                </details>
-              )}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {mode === 'agent' && agentStartError && (
-          <Alert variant="destructive" className="mx-3 mb-2 w-auto">
-            <CircleAlertIcon />
-            <AlertTitle>{t('agent.recovery.startFailed')}</AlertTitle>
-            <AlertDescription>{agentStartError}</AlertDescription>
-          </Alert>
-        )}
-
         <span className="sr-only" aria-live="polite" aria-atomic="true">
           {statusAnnouncement}
         </span>
 
         <div className="shrink-0 p-3 pt-2">
-            {draftTooLarge && (
-              <Alert variant="destructive" className="mb-2">
-                <CircleAlertIcon />
-                <AlertTitle>{t('ai.inputTooLargeTitle')}</AlertTitle>
-                <AlertDescription>
-                  {t('ai.inputTooLargeDescription', {
-                    limit: AI_REQUEST_MAX_MESSAGE_BYTES / 1024,
-                  })}
-                </AlertDescription>
-              </Alert>
+          <InputGroup
+            data-mode={mode}
+            data-permission-mode={mode === 'agent' ? agentPermissionMode : undefined}
+            className={cn(
+              'min-h-28 rounded-3xl bg-card shadow-xs transition-none has-[[data-slot=input-group-control]:focus-visible]:ring-1',
+              mode === 'agent'
+                && 'border-app-warning/60 has-[[data-slot=input-group-control]:focus-visible]:border-app-warning/80 has-[[data-slot=input-group-control]:focus-visible]:ring-app-warning/30',
             )}
-            {mode === 'agent' && (!agentAvailable || !activeTerminalReady) && (
-              <Alert variant="warning" className="mb-2">
-                <CircleAlertIcon />
-                <AlertTitle>{t('agent.availability.title')}</AlertTitle>
-                <AlertDescription className="flex flex-col gap-1.5">
-                  <span>{agentModeUnavailableReason}</span>
-                  {agentAvailability.state === 'ready'
-                    && agentAvailability.status?.featureEnabled
-                    && (
-                      <div>
-                        <Button
-                          variant="secondary"
-                          size="xs"
-                          onClick={() => setMode('ask')}
-                        >
-                          <MessageCircleQuestionIcon data-icon="inline-start" />
-                          {t('agent.fallback.switchToAsk')}
-                        </Button>
-                      </div>
-                    )}
-                </AlertDescription>
-              </Alert>
-            )}
-            <InputGroup
-              data-mode={mode}
-              data-permission-mode={mode === 'agent' ? agentPermissionMode : undefined}
-              className={cn(
-                'min-h-28 rounded-3xl bg-card shadow-xs transition-none has-[[data-slot=input-group-control]:focus-visible]:ring-1',
-                mode === 'agent'
-                  && 'border-app-warning/60 has-[[data-slot=input-group-control]:focus-visible]:border-app-warning/80 has-[[data-slot=input-group-control]:focus-visible]:ring-app-warning/30',
-              )}
-            >
-              <InputGroupTextarea
-                ref={composerRef}
-                value={draft}
-                disabled={viewingHistory}
-                onChange={(event) => {
-                  setDraft(event.target.value);
-                  setDraftTooLarge(false);
-                }}
-                onKeyDown={(event) => {
-                  if (shouldSubmitAiDraft(
-                    event.key,
-                    event.shiftKey,
-                    event.nativeEvent.isComposing,
-                    event.keyCode,
-                  )) {
-                    event.preventDefault();
-                    if (composerSubmitDisabled) return;
-                    submitComposer();
-                  }
-                }}
-                placeholder={mode === 'agent'
-                  ? t('agent.placeholder')
-                  : t('ai.askPlaceholder')}
-                className="min-h-16 max-h-48 px-4 pt-4 pb-1 leading-5"
-              />
-              <InputGroupAddon align="block-end" className="flex-col items-stretch gap-1.5 px-2 pb-2 pt-1">
-                <div className="flex min-w-0 items-center justify-between gap-2">
-                  {modeControl}
-                  <div className="flex min-w-0 shrink items-center justify-end gap-1">
-                    {busy ? (
-                      <InputGroupButton
-                        variant={agentBusy ? 'warning' : 'default'}
-                        size="icon-sm"
-                        className="shrink-0 rounded-full"
-                        onClick={agentBusy ? handleAgentCancel : handleCancel}
-                        aria-label={agentBusy ? t('agent.stopTask') : t('ai.stop')}
-                      >
-                        <SquareIcon />
-                      </InputGroupButton>
-                    ) : (
-                      <InputGroupButton
-                        variant={mode === 'agent' ? 'warning' : 'default'}
-                        size="icon-sm"
-                        className="shrink-0 rounded-full"
-                        onClick={submitComposer}
-                        disabled={composerSubmitDisabled}
-                        aria-label={t('ai.send')}
-                      >
-                        <ArrowUpIcon />
-                      </InputGroupButton>
-                    )}
-                  </div>
+          >
+            <InputGroupTextarea
+              ref={composerRef}
+              value={draft}
+              disabled={viewingHistory}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                setDraftTooLarge(false);
+              }}
+              onKeyDown={(event) => {
+                if (shouldSubmitAiDraft(
+                  event.key,
+                  event.shiftKey,
+                  event.nativeEvent.isComposing,
+                  event.keyCode,
+                )) {
+                  event.preventDefault();
+                  if (composerSubmitDisabled) return;
+                  submitComposer();
+                }
+              }}
+              placeholder={mode === 'agent'
+                ? t('agent.placeholder')
+                : t('ai.askPlaceholder')}
+              className="min-h-16 max-h-48 px-4 pt-4 pb-1 leading-5"
+            />
+            <InputGroupAddon align="block-end" className="flex-col items-stretch gap-1.5 px-2 pb-2 pt-1">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                {modeControl}
+                <div className="flex min-w-0 shrink items-center justify-end gap-1">
+                  {busy ? (
+                    <InputGroupButton
+                      variant={agentBusy ? 'warning' : 'default'}
+                      size="icon-sm"
+                      className="shrink-0 rounded-full"
+                      onClick={agentBusy ? handleAgentCancel : handleCancel}
+                      aria-label={agentBusy ? t('agent.stopTask') : t('ai.stop')}
+                    >
+                      <SquareIcon />
+                    </InputGroupButton>
+                  ) : (
+                    <InputGroupButton
+                      variant={mode === 'agent' ? 'warning' : 'default'}
+                      size="icon-sm"
+                      className="shrink-0 rounded-full"
+                      onClick={submitComposer}
+                      disabled={composerSubmitDisabled}
+                      aria-label={t('ai.send')}
+                    >
+                      <ArrowUpIcon />
+                    </InputGroupButton>
+                  )}
                 </div>
-              </InputGroupAddon>
-            </InputGroup>
-            {configureAction}
+              </div>
+            </InputGroupAddon>
+          </InputGroup>
+          {configureAction}
         </div>
       </aside>
   );

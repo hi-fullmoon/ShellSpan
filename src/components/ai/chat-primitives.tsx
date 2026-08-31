@@ -40,7 +40,7 @@ export const MessageScroller: React.FC<{
         aria-label={ariaLabel}
       >
         <MessageScrollerViewport>
-          <MessageScrollerContent className={cn('gap-5 px-4 py-5', contentClassName)}>
+          <MessageScrollerContent className={cn('gap-5 px-3 py-4', contentClassName)}>
             {React.Children.toArray(children).map((child, index) => {
               const itemKey = React.isValidElement(child) && child.key !== null
                 ? child.key
