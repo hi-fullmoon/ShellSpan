@@ -280,6 +280,6 @@ describe('M7 Agent settings management', () => {
 
     expect(screen.getByText('ai.history.description:0')).toBeInTheDocument();
     expect(screen.getByText('ai.history.empty')).toHaveAttribute('data-slot', 'badge');
-    expect(screen.getByRole('button', { name: 'ai.history.deleteAll' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'ai.history.deleteAll' })).not.toBeInTheDocument();
   });
 });

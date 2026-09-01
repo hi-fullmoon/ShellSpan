@@ -973,6 +973,8 @@ export default {
   'settings.ai.agent.closeFailed': 'Agent 已关闭，但部分收口状态未能完整保存。',
   'settings.ai.agent.permissionTitle': '高权限模式永远不是默认值',
   'settings.ai.agent.permissionDescription': '每个新连接都会恢复“请求批准”。“帮我批准”和“完全访问权限”必须在当前连接中主动选择，重连或重启后不会恢复。',
+  'settings.ai.agent.localData': 'Agent 本地数据',
+  'settings.ai.agent.localDataDescription': '移除 Agent 消息、工具卡和运行快照，保留普通问答与生成命令。',
   'settings.ai.agent.clearSessions': '清理 Agent 会话',
   'settings.ai.agent.clearTitle': '清理全部 Agent 会话？',
   'settings.ai.agent.clearDescription': '这会从所有本地 AI 对话中移除 Agent 消息、工具卡和运行快照；普通问答与生成命令会保留。',
