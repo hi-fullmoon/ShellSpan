@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { DownloadIcon, RefreshCwIcon, RotateCcwIcon } from 'lucide-react';
+import { CheckCircle2Icon, DownloadIcon, RefreshCwIcon, RotateCcwIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { useUpdateStore } from '@/stores/updateStore';
 import { isTauriRuntime } from '@/lib/tauri';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -52,25 +53,31 @@ export const UpdateSection: React.FC = () => {
   const displayProgress = Math.max(0, Math.min(100, downloadProgress ?? 0));
 
   return (
-    <Field className="min-h-20 gap-3 px-5 py-4 @min-[34rem]:flex-row @min-[34rem]:items-center @min-[34rem]:justify-between @min-[34rem]:gap-6">
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+    <Field className="min-h-16 gap-2.5 px-4 py-3 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5">
+      <div data-slot="update-summary" className="flex min-w-0 flex-1 flex-col gap-1">
         <FieldLabel className="text-sm font-medium text-foreground">
           {t('settings.general.update')}
         </FieldLabel>
-        <FieldDescription className="leading-5">
-          {t('settings.general.currentVersion', { version: currentVersion || '--' })}
-        </FieldDescription>
+        <div className="flex flex-wrap items-center gap-2">
+          <FieldDescription className="leading-5">
+            {t('settings.general.currentVersion', { version: currentVersion || '--' })}
+          </FieldDescription>
+          {phase === 'no_update' && (
+            <Badge variant="secondary">
+              <CheckCircle2Icon data-icon="inline-start" />
+              {t('update.latest')}
+            </Badge>
+          )}
+        </div>
       </div>
 
-      <div className="flex min-h-8 w-full flex-col items-stretch justify-center gap-2 @min-[34rem]:w-auto @min-[34rem]:min-w-44 @min-[34rem]:shrink-0 @min-[34rem]:items-end">
+      <div data-slot="update-actions" className="flex min-h-8 w-full flex-col items-stretch justify-center gap-2 @min-[32rem]:w-auto @min-[32rem]:min-w-44 @min-[32rem]:shrink-0 @min-[32rem]:items-end">
         {!downloading && !downloaded && (
           <Button size="sm" disabled={checking} onClick={() => void runCheck('manual')}>
             <RefreshCwIcon data-icon="inline-start" className={cn(checking && 'animate-spin')} />
             {checking ? t('settings.general.checkingUpdate') : t('settings.general.checkUpdate')}
           </Button>
         )}
-
-        {checking && <p className="text-xs text-muted-foreground">{t('update.checking')}</p>}
 
         {downloading && (
           <div className="flex w-full flex-col gap-1.5">
@@ -113,8 +120,6 @@ export const UpdateSection: React.FC = () => {
             </Button>
           </div>
         )}
-
-        {phase === 'no_update' && <p className="text-xs text-muted-foreground">{t('update.latest')}</p>}
       </div>
     </Field>
   );

@@ -129,8 +129,8 @@ export const ConversationHistoryDialog: React.FC<ConversationHistoryDialogProps>
                 render={(
                   <Button
                     variant={selectedConversationId ? 'secondary' : 'ghost'}
-                    size="sm"
-                    className="size-8 p-0"
+                    size="icon"
+                    className="size-7 p-0"
                     disabled={disabled}
                     aria-label={t('ai.history')}
                   />

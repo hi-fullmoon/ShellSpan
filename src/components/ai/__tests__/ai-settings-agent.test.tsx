@@ -203,7 +203,7 @@ describe('M7 Agent settings management', () => {
     );
   });
 
-  it('shows and updates thinking effort for a Kimi K3 provider', async () => {
+  it('keeps thinking effort out of provider setup and preserves its stored value', async () => {
     const user = userEvent.setup();
     const kimi = {
       id: 'kimi',
@@ -219,18 +219,13 @@ describe('M7 Agent settings management', () => {
 
     render(<AiSettingsSection />);
     await user.click(screen.getByRole('button', { name: 'settings.ai.editProvider' }));
-    const effortSelector = await screen.findByRole('combobox', {
+    expect(screen.queryByRole('combobox', {
       name: 'settings.ai.reasoningEffort',
-    });
-    expect(effortSelector).toHaveTextContent('ai.reasoningEffort.high');
-
-    await user.click(effortSelector);
-    await user.click(await screen.findByRole('option', { name: 'ai.reasoningEffort.max' }));
-    expect(useAiSettingsStore.getState().providers[0]).toHaveProperty('reasoningEffort', 'high');
+    })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'common.save' }));
     await waitFor(() => expect(useAiSettingsStore.getState().providers[0]).toHaveProperty(
       'reasoningEffort',
-      'max',
+      'high',
     ));
   });
 
@@ -273,7 +268,7 @@ describe('M7 Agent settings management', () => {
     expect(mocks.toast).toHaveBeenCalledWith('ai.history.deleted:1');
   });
 
-  it('shows an empty state when there is no conversation history to clear', async () => {
+  it('shows a compact empty-history status when there is nothing to clear', async () => {
     useAiStore.setState({
       conversations: useAiStore.getState().conversations.filter((conversation) => (
         conversation.id === 'conversation-a'
@@ -284,8 +279,7 @@ describe('M7 Agent settings management', () => {
     await screen.findByText('settings.ai.agent.stage.stable');
 
     expect(screen.getByText('ai.history.description:0')).toBeInTheDocument();
-    const emptyState = screen.getByText('ai.history.empty').parentElement;
-    expect(emptyState).toHaveClass('min-h-32');
+    expect(screen.getByText('ai.history.empty')).toHaveAttribute('data-slot', 'badge');
     expect(screen.getByRole('button', { name: 'ai.history.deleteAll' })).toBeDisabled();
   });
 });

@@ -139,7 +139,7 @@ const SettingRow: React.FC<SettingRowProps> = ({
 }) => (
   <Field
     className={cn(
-      'min-h-20 gap-3 px-5 py-4 @min-[34rem]:flex-row @min-[34rem]:items-center @min-[34rem]:justify-between @min-[34rem]:gap-6',
+      'min-h-16 gap-2.5 px-4 py-3 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5',
       className,
     )}
   >
@@ -153,7 +153,7 @@ const SettingRow: React.FC<SettingRowProps> = ({
     </div>
     <div
       data-slot="setting-control"
-      className="flex min-h-8 w-full items-center justify-start @min-[34rem]:w-auto @min-[34rem]:shrink-0 @min-[34rem]:justify-end"
+      className="flex min-h-8 w-full items-center justify-start @min-[32rem]:w-auto @min-[32rem]:shrink-0 @min-[32rem]:justify-end"
     >
       {children}
     </div>
@@ -186,17 +186,17 @@ const SettingsGrid: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   if (currentGroup.rows.length > 0) groups.push(currentGroup);
 
   return (
-    <div data-slot="settings-groups" className="flex flex-col gap-6">
+    <div data-slot="settings-groups" className="flex flex-col gap-4">
       {groups.map((group, groupIndex) => (
         <section
           key={groupIndex}
           data-slot="settings-group"
-          className="flex min-w-0 flex-col gap-2.5"
+          className="flex min-w-0 flex-col gap-2"
         >
           {group.title && (
-            <h3 className="px-1 text-sm font-semibold text-foreground">{group.title}</h3>
+            <h3 className="px-1 text-xs font-medium text-muted-foreground">{group.title}</h3>
           )}
-          <Card variant="outline" className="gap-0 py-0">
+          <Card size="sm" variant="outline" className="gap-0 py-0">
             <CardContent className="px-0">
               <FieldGroup className="gap-0">
                 {group.rows.map((row, rowIndex) => (
@@ -449,6 +449,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }),
     [t],
   );
+  const customizedShortcutCount = useMemo(
+    () => (Object.keys(DEFAULT_SHORTCUTS) as ShortcutAction[]).filter((action) => (
+      (shortcuts[action] ?? DEFAULT_SHORTCUTS[action]) !== DEFAULT_SHORTCUTS[action]
+    )).length,
+    [shortcuts],
+  );
 
   const closeRecorder = (): void => {
     setEditingAction(null);
@@ -488,16 +494,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     <Dialog open={open} onOpenChange={(nextOpen) => onOpenChange(nextOpen)}>
       <DialogContent
         showCloseButton={false}
-        className="flex h-[min(52rem,calc(100vh-2rem))] w-[min(72rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 [&_[data-slot=select-trigger]]:min-w-36 sm:rounded-xl"
+        className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 [&_[data-slot=select-trigger]]:min-w-36 sm:rounded-xl"
       >
         <TooltipProvider>
-          <DialogHeader className="flex-row items-center gap-3 border-b border-app-border/50 bg-card/80 px-5 py-4">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Settings2Icon className="size-5" aria-hidden />
+          <DialogHeader className="h-12 flex-row items-center gap-2 border-b border-app-border/50 bg-card/80 px-4 py-0">
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <Settings2Icon className="size-4" aria-hidden />
             </div>
             <div className="min-w-0 flex-1">
-              <DialogTitle className="text-lg">{t('workbench.settings.title')}</DialogTitle>
-              <DialogDescription className="mt-1 text-xs">{t('settings.description')}</DialogDescription>
+              <DialogTitle>{t('workbench.settings.title')}</DialogTitle>
+              <DialogDescription className="sr-only">{t('settings.description')}</DialogDescription>
             </div>
             <DialogClose
               render={
@@ -505,6 +511,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   type="button"
                   variant="ghost"
                   size="icon"
+                  className="size-8"
                   aria-label={t('common.close')}
                 />
               }
@@ -519,16 +526,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             orientation="vertical"
             className="@container min-h-0 flex-1 flex-row gap-0 overflow-hidden"
           >
-            <aside className="flex w-52 shrink-0 flex-col border-r border-app-border/50 bg-muted/30 p-3">
+            <aside className="flex w-44 shrink-0 flex-col border-r border-app-border/50 bg-muted/30 p-2">
             <TabsList
               aria-label={t('settings.sectionNavigation')}
               aria-orientation="vertical"
-              className="h-auto w-full flex-col items-stretch justify-start gap-1 rounded-none bg-transparent p-0"
+              className="h-auto w-full flex-col items-stretch justify-start gap-0.5 rounded-none bg-transparent p-0"
             >
               {SETTINGS_SECTIONS.map((section) => {
                 const Icon = section.icon;
                 return (
-                  <TabsTrigger key={section.id} value={section.id} className="h-9 flex-none justify-start px-3 text-[13px]">
+                  <TabsTrigger key={section.id} value={section.id} className="h-8 flex-none justify-start px-2.5 text-[13px]">
                     <Icon data-icon="inline-start" />
                     {t(section.titleKey)}
                   </TabsTrigger>
@@ -538,18 +545,31 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </aside>
 
             <section className="flex min-w-0 flex-1 flex-col bg-background">
-              <div className="flex shrink-0 items-center gap-3 border-b border-app-border/40 px-5 py-3.5">
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                  <ActiveSectionIcon className="size-4" aria-hidden />
+              <div className="flex shrink-0 items-center gap-2.5 border-b border-app-border/40 px-4 py-2.5">
+                <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                  <ActiveSectionIcon className="size-3.5" aria-hidden />
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <h2 className="text-sm font-semibold text-foreground">{t(activeSectionMeta.titleKey)}</h2>
                   <p className="truncate text-xs text-muted-foreground">{t(activeSectionMeta.descriptionKey)}</p>
                 </div>
+                {activeSection === 'shortcuts' && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    disabled={customizedShortcutCount === 0}
+                    onClick={resetShortcuts}
+                  >
+                    <RotateCcwIcon data-icon="inline-start" />
+                    {t('settings.shortcuts.resetAll')}
+                  </Button>
+                )}
               </div>
 
               <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
-                <div className="@container mx-auto w-full max-w-4xl p-4 @min-[44rem]:p-6">
+                <div className="@container mx-auto w-full max-w-3xl p-4">
             <TabsContent value="appearance" className="w-full">
               <SettingsGrid>
                 <SettingRow label={t('settings.appearance.theme')} description={t('settings.appearance.themeDescription')}>
@@ -1045,19 +1065,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </TabsContent>
 
             <TabsContent value="shortcuts" className="w-full">
-              <div className="flex flex-col gap-6">
-                <div className="flex items-center justify-end">
-                  <Button variant="outline" size="sm" className="shrink-0" onClick={resetShortcuts}>
-                    <RotateCcwIcon data-icon="inline-start" />
-                    {t('settings.shortcuts.resetAll')}
-                  </Button>
-                </div>
+              <div className="flex flex-col gap-4">
                 {SHORTCUT_GROUPS.map((group) => (
-                  <section key={group.id} className="flex min-w-0 flex-col gap-2.5">
-                    <h3 className="px-1 text-sm font-semibold text-foreground">
+                  <section key={group.id} className="flex min-w-0 flex-col gap-2">
+                    <h3 className="px-1 text-xs font-medium text-muted-foreground">
                       {t(SHORTCUT_GROUP_LABEL_KEYS[group.id])}
                     </h3>
-                    <Card variant="outline" className="gap-0 py-0">
+                    <Card size="sm" variant="outline" className="gap-0 py-0">
                       <CardContent className="px-0">
                         {group.actions.map((action, index) => {
                           const binding = shortcuts[action] ?? DEFAULT_SHORTCUTS[action];
@@ -1065,19 +1079,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           return (
                             <React.Fragment key={action}>
                               {index > 0 && <Separator />}
-                              <div className="flex min-h-16 items-center justify-between gap-4 px-5 py-3">
+                              <div className="flex min-h-14 items-center justify-between gap-3 px-4 py-2.5">
                                 <span className="text-sm font-medium">{shortcutLabels[action]}</span>
                                 <div className="flex items-center gap-1">
                                   <Button
-                                    variant="outline"
+                                    variant="ghost"
                                     size="sm"
-                                    className="min-w-24"
+                                    className="min-w-20 justify-end px-1.5"
                                     onClick={() => {
                                       setConflictAction(null);
                                       setEditingAction(action);
                                     }}
                                   >
-                                    <KeyboardIcon data-icon="inline-start" />
                                     {isLeaderShortcutAction(action) ? (
                                       <span className="flex items-center gap-1.5">
                                         <ShortcutKeys shortcut={leaderBinding} />

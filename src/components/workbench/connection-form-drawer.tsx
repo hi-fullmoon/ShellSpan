@@ -13,6 +13,12 @@ import { useToast } from '@/hooks/useToast';
 import { useKeychainStore } from '@/stores/keychainStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from '@/components/ui/input-group';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -754,8 +760,8 @@ const PasswordInput: React.FC<PasswordInputProps> = ({
   const [visible, setVisible] = useState(false);
 
   return (
-    <div className="flex w-full">
-      <Input
+    <InputGroup className="h-9">
+      <InputGroupInput
         id={id}
         type={visible ? 'text' : 'password'}
         value={value}
@@ -765,20 +771,19 @@ const PasswordInput: React.FC<PasswordInputProps> = ({
         autoCapitalize="none"
         aria-invalid={ariaInvalid}
         aria-describedby={describedBy}
-        className="rounded-r-none"
       />
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className="shrink-0 rounded-l-none border-l-0"
-        aria-label={visible ? t('common.hidePassword') : t('common.showPassword')}
-        aria-pressed={visible}
-        onClick={() => setVisible((current) => !current)}
-      >
-        {visible ? <EyeOffIcon /> : <EyeIcon />}
-      </Button>
-    </div>
+      <InputGroupAddon align="inline-end">
+        <InputGroupButton
+          type="button"
+          size="icon-sm"
+          aria-label={visible ? t('common.hidePassword') : t('common.showPassword')}
+          aria-pressed={visible}
+          onClick={() => setVisible((current) => !current)}
+        >
+          {visible ? <EyeOffIcon data-icon="inline-start" /> : <EyeIcon data-icon="inline-start" />}
+        </InputGroupButton>
+      </InputGroupAddon>
+    </InputGroup>
   );
 };
 

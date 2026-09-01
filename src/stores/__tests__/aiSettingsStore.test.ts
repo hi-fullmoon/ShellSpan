@@ -121,11 +121,12 @@ describe('aiSettingsStore', () => {
     expect(useAiSettingsStore.getState().getProviderConfig(kimiId)).toEqual(expect.objectContaining({
       baseUrl: 'https://api.kimi.com/coding',
       model: 'k3',
-      reasoningEffort: 'high',
     }));
+    expect(useAiSettingsStore.getState().getProviderConfig(kimiId))
+      .not.toHaveProperty('reasoningEffort');
   });
 
-  it('persists Kimi K3 thinking effort and only sends it to K3 models', () => {
+  it('persists supported thinking controls and only sends values valid for the active model', () => {
     const kimiId = useAiSettingsStore.getState().addProvider('kimi');
     useAiSettingsStore.getState().updateProvider(kimiId, { reasoningEffort: 'max' });
 
@@ -137,6 +138,15 @@ describe('aiSettingsStore', () => {
       .not.toHaveProperty('reasoningEffort');
     expect(useAiSettingsStore.getState().providers.find((provider) => provider.id === kimiId))
       .toHaveProperty('reasoningEffort', 'max');
+
+    const deepseekId = useAiSettingsStore.getState().addProvider('deepseek');
+    useAiSettingsStore.getState().updateProvider(deepseekId, { reasoningEffort: 'off' });
+    expect(useAiSettingsStore.getState().getProviderConfig(deepseekId))
+      .toEqual(expect.objectContaining({ reasoningEffort: 'off' }));
+
+    useAiSettingsStore.getState().updateProvider(deepseekId, { reasoningEffort: undefined });
+    expect(useAiSettingsStore.getState().providers.find((provider) => provider.id === deepseekId))
+      .not.toHaveProperty('reasoningEffort');
   });
 
   it('drops legacy inline API keys from provider state and request configs', () => {

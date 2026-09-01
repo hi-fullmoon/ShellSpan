@@ -1656,6 +1656,7 @@ impl HttpAgentBackend {
             "stream": true,
             "messages": messages,
         });
+        apply_reasoning_effort(&mut body, &self.provider);
         apply_output_token_limit(&mut body, self.provider.kind, AGENT_MAX_OUTPUT_TOKENS);
         if mode == AgentTurnMode::Tools {
             body["tools"] = chat_agent_tools();

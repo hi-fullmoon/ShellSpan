@@ -216,9 +216,58 @@ describe('explicit AI modes', () => {
       expect(providerSelector).toHaveTextContent('Kimi Code · k3 · High');
 
       fireEvent.click(providerSelector);
+      expect(await screen.findByRole('menuitemradio', { name: 'Automatic' }))
+        .toBeInTheDocument();
       fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Max' }));
       await waitFor(() => expect(useAiSettingsStore.getState().providers[0])
         .toHaveProperty('reasoningEffort', 'max'));
+
+      fireEvent.click(providerSelector);
+      fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Automatic' }));
+      await waitFor(() => expect(useAiSettingsStore.getState().providers[0])
+        .not.toHaveProperty('reasoningEffort'));
+      expect(providerSelector).toHaveTextContent('Kimi Code · k3 · Automatic');
+    } finally {
+      unmount();
+      useAiStore.getState().setOpen(false);
+      useAiSettingsStore.setState(previousSettings, true);
+      useAppStore.setState(previousApp, true);
+      await initI18n(previousApp.locale);
+    }
+  });
+
+  it('shows a thinking toggle instead of effort levels for Ollama Qwen 3', async () => {
+    const previousApp = useAppStore.getState();
+    const previousSettings = useAiSettingsStore.getState();
+    await initI18n('en-US');
+    useAppStore.setState({ activeSection: 'terminal', locale: 'en-US' });
+    useAiSettingsStore.setState({
+      providers: [{
+        id: 'ollama',
+        name: 'Ollama',
+        preset: 'ollama',
+        kind: 'ollama',
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'qwen3:8b',
+        requiresApiKey: false,
+      }],
+      defaultProviderId: 'ollama',
+    });
+    useAiStore.getState().setOpen(true);
+
+    const { unmount } = render(createElement(AiPanel));
+    try {
+      const providerSelector = await screen.findByRole('button', {
+        name: 'Switch AI provider',
+      });
+      expect(providerSelector).toHaveTextContent('Ollama · qwen3:8b · Automatic');
+
+      fireEvent.click(providerSelector);
+      expect(await screen.findByText('Thinking mode')).toBeInTheDocument();
+      expect(screen.queryByRole('menuitemradio', { name: 'Low' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('menuitemradio', { name: 'Off' }));
+      await waitFor(() => expect(useAiSettingsStore.getState().providers[0])
+        .toHaveProperty('reasoningEffort', 'off'));
     } finally {
       unmount();
       useAiStore.getState().setOpen(false);
@@ -243,13 +292,20 @@ describe('explicit AI modes', () => {
 
       fireEvent.click(modeSelector);
       const askOption = await screen.findByRole('menuitemradio', { name: /^Ask/ });
-      expect(screen.getByRole('menu')).toHaveClass('w-64');
-      expect(askOption).toHaveClass('py-1.5');
+      expect(screen.getByRole('menu')).toHaveClass('w-80', 'max-w-[calc(100vw-1rem)]');
+      expect(askOption).toHaveClass('py-1.5', 'text-[13px]');
+      expect(askOption.querySelector('.text-muted-foreground')).toHaveClass(
+        'whitespace-nowrap',
+        'text-[11px]',
+        'leading-4',
+      );
       expect(askOption).toHaveAttribute('aria-checked', 'true');
       const agentOption = screen.getByRole('menuitemradio', { name: /^Agent/ });
-      expect(agentOption).toHaveClass('py-1.5');
+      expect(agentOption).toHaveClass('py-1.5', 'text-[13px]');
       expect(agentOption).toHaveAttribute('aria-disabled', 'true');
       expect(agentOption).toHaveTextContent(/disabled by the current rollout policy/i);
+      expect(agentOption.querySelector('.text-muted-foreground'))
+        .not.toHaveClass('whitespace-nowrap');
     } finally {
       unmount();
       useAiStore.getState().clear();
@@ -645,7 +701,28 @@ describe('explicit AI modes', () => {
     const { unmount } = render(createElement(AiPanel));
     try {
       const providerSelector = screen.getByRole('button', { name: 'Switch AI provider' });
-      expect(providerSelector.closest('header')).not.toBeNull();
+      const panelHeader = providerSelector.closest('header');
+      expect(panelHeader).not.toBeNull();
+      expect(panelHeader).toHaveAttribute('data-slot', 'ai-panel-header');
+      expect(panelHeader).toHaveClass('h-10', 'px-2');
+      expect(providerSelector).toHaveClass('h-8', 'w-fit', 'max-w-full');
+      expect(panelHeader?.querySelector('[data-slot="ai-panel-provider-summary"]'))
+        .toHaveClass('min-w-0', 'flex-1', 'truncate');
+      const panelActions = panelHeader?.querySelector('[data-slot="ai-panel-actions"]');
+      expect(panelActions).toHaveClass('gap-0.5');
+      [
+        'New conversation',
+        'Conversation history',
+        'Clear conversation',
+        'Close AI assistant',
+      ].forEach((label) => {
+        expect(screen.getByRole('button', { name: label }))
+          .toHaveClass('size-7', '[&_svg]:size-4');
+      });
+      expect(panelActions?.querySelector('[data-slot="separator"]')).toHaveClass(
+        'data-vertical:h-4',
+        'data-vertical:self-center',
+      );
       expect(providerSelector.closest('[data-slot="input-group"]')).toBeNull();
 
       const modeSelector = await screen.findByRole('button', { name: 'AI mode' });

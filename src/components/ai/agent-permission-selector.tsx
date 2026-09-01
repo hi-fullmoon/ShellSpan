@@ -132,9 +132,9 @@ export function AgentPermissionSelector({
             <ChevronDownIcon data-icon="inline-end" />
           </span>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-72">
+        <DropdownMenuContent align="start" className="w-96 max-w-[calc(100vw-1rem)]">
           <DropdownMenuGroup>
-            <DropdownMenuLabel>{t('agent.permission')}</DropdownMenuLabel>
+            <DropdownMenuLabel className="text-[11px]">{t('agent.permission')}</DropdownMenuLabel>
             <DropdownMenuRadioGroup value={mode} onValueChange={selectMode}>
               {PERMISSION_OPTIONS.map((option) => {
                 const Icon = option.icon;
@@ -143,7 +143,7 @@ export function AgentPermissionSelector({
                     key={option.mode}
                     value={option.mode}
                     closeOnClick
-                    className="items-start gap-2.5 py-2"
+                    className="items-start gap-2.5 py-2 text-[13px]"
                   >
                     <span
                       data-slot="agent-permission-option-icon"
@@ -156,7 +156,7 @@ export function AgentPermissionSelector({
                     </span>
                     <span className="min-w-0 leading-tight">
                       <span className="block font-medium">{t(option.label)}</span>
-                      <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
+                      <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground sm:whitespace-nowrap">
                         {t(option.description)}
                       </span>
                     </span>
