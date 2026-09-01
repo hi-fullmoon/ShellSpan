@@ -223,9 +223,21 @@ impl Database {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("failed to create database directory: {e}"))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+                    .map_err(|e| format!("failed to secure database directory: {e}"))?;
+            }
         }
         let conn =
             Connection::open(db_path).map_err(|e| format!("failed to open database: {e}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(db_path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| format!("failed to secure database file: {e}"))?;
+        }
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
             .map_err(|e| format!("failed to set pragmas: {e}"))?;
         let db = Self {
@@ -1291,23 +1303,25 @@ mod tests {
         assert!(loaded.contains(&("theme".to_string(), "\"light\"".to_string())));
     }
 
+    #[cfg(unix)]
     #[test]
-    fn ai_provider_preferences_store_inline_api_keys() {
-        let db = test_db();
-        let secret = "stored-with-provider";
-        let providers = serde_json::json!([{
-            "id": "openai",
-            "apiKey": secret,
-        }])
-        .to_string();
-        db.save_preferences(&[("ai.providers".to_string(), providers.clone())])
-            .unwrap();
+    fn database_open_restricts_directory_and_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
 
-        assert!(db
-            .load_preferences()
-            .unwrap()
-            .iter()
-            .any(|(key, value)| key == "ai.providers" && value == &providers));
+        let directory = tempfile::tempdir().unwrap();
+        let storage = directory.path().join("shellspan");
+        let path = storage.join("shellspan.db");
+        let database = Database::open(&path).unwrap();
+        drop(database);
+
+        assert_eq!(
+            std::fs::metadata(&storage).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     #[test]

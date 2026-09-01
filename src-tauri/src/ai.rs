@@ -20,7 +20,7 @@ use crate::{
 
 pub(crate) const AI_STREAM_EVENT: &str = "ai-stream";
 const AI_KEY_SERVICE: &str = "com.shellspan.ai-provider";
-const AI_KEY_MIGRATION_PREFERENCE: &str = "ai.apiKeyStorageMigrationV3";
+const AI_KEY_MIGRATION_PREFERENCE: &str = "ai.apiKeyStorageMigrationV4";
 const MAX_CONTEXT_BYTES: usize = 256 * 1024;
 const MAX_CONTEXT_LABEL_BYTES: usize = 4 * 1024;
 const MAX_SERIALIZED_CONTEXT_BYTES: usize = 512 * 1024;
@@ -311,17 +311,17 @@ impl AiRequestEventSink {
 }
 
 trait AiCredentialStore {
+    fn set_api_key(&self, provider_id: &str, api_key: &str) -> Result<(), String>;
     fn get_api_key(&self, provider_id: &str) -> Result<Option<String>, String>;
-    fn delete_api_key(&self, provider_id: &str) -> Result<(), String>;
 }
 
 impl AiCredentialStore for CredentialManager {
-    fn get_api_key(&self, provider_id: &str) -> Result<Option<String>, String> {
-        self.get_credential(AI_KEY_SERVICE, provider_id)
+    fn set_api_key(&self, provider_id: &str, api_key: &str) -> Result<(), String> {
+        self.set_credential(AI_KEY_SERVICE, provider_id, api_key)
     }
 
-    fn delete_api_key(&self, provider_id: &str) -> Result<(), String> {
-        self.delete_credential(AI_KEY_SERVICE, provider_id)
+    fn get_api_key(&self, provider_id: &str) -> Result<Option<String>, String> {
+        self.get_credential(AI_KEY_SERVICE, provider_id)
     }
 }
 
@@ -340,37 +340,14 @@ impl AiPreferenceStore for Database {
     }
 }
 
-pub(crate) fn migrate_keychain_api_keys(
+pub(crate) fn migrate_inline_api_keys(
     credentials: &CredentialManager,
     database: &Database,
 ) -> Result<usize, String> {
-    migrate_keychain_api_keys_with(credentials, database)
+    migrate_inline_api_keys_with(credentials, database)
 }
 
-fn default_provider_preferences() -> Value {
-    json!([
-        {
-            "id": "ollama",
-            "name": "Ollama",
-            "preset": "ollama",
-            "kind": "ollama",
-            "baseUrl": "http://127.0.0.1:11434",
-            "model": "qwen3",
-            "requiresApiKey": false
-        },
-        {
-            "id": "openai",
-            "name": "OpenAI",
-            "preset": "openai",
-            "kind": "openAi",
-            "baseUrl": "https://api.openai.com",
-            "model": "gpt-5.4-mini",
-            "requiresApiKey": true
-        }
-    ])
-}
-
-fn migrate_keychain_api_keys_with(
+fn migrate_inline_api_keys_with(
     credentials: &impl AiCredentialStore,
     preferences: &impl AiPreferenceStore,
 ) -> Result<usize, String> {
@@ -381,19 +358,22 @@ fn migrate_keychain_api_keys_with(
     {
         return Ok(0);
     }
-    let mut providers: Value =
-        if let Some((_, raw_providers)) = entries.iter().find(|(key, _)| key == "ai.providers") {
-            serde_json::from_str(raw_providers)
-                .map_err(|error| format!("invalid stored AI providers: {error}"))?
-        } else {
-            default_provider_preferences()
-        };
+    let Some((_, raw_providers)) = entries.iter().find(|(key, _)| key == "ai.providers") else {
+        preferences.save_ai_preferences(&[(
+            AI_KEY_MIGRATION_PREFERENCE.to_string(),
+            "true".to_string(),
+        )])?;
+        return Ok(0);
+    };
+    let mut providers: Value = serde_json::from_str(raw_providers)
+        .map_err(|error| format!("invalid stored AI providers: {error}"))?;
     let Some(provider_items) = providers.as_array_mut() else {
         return Err("invalid stored AI providers: expected an array".to_string());
     };
 
-    let mut migrated_provider_ids = Vec::new();
+    let mut pending_keys = Vec::new();
     let mut provider_ids = HashSet::new();
+    let mut providers_changed = false;
     for provider in provider_items {
         let Some(provider) = provider.as_object_mut() else {
             continue;
@@ -411,36 +391,80 @@ fn migrate_keychain_api_keys_with(
                 "cannot migrate duplicate AI provider id: {provider_id}"
             ));
         }
-        let Some(api_key) = credentials
-            .get_api_key(&provider_id)?
-            .map(|key| key.trim().to_string())
-            .filter(|key| !key.is_empty())
-        else {
+        let inline_key = provider
+            .remove("apiKey")
+            .and_then(|value| value.as_str().map(str::trim).map(str::to_string))
+            .filter(|key| !key.is_empty());
+        if inline_key.is_some() {
+            providers_changed = true;
+        }
+        let Some(inline_key) = inline_key else {
             continue;
         };
-        provider.insert("apiKey".to_string(), Value::String(api_key));
-        migrated_provider_ids.push(provider_id);
+        let already_stored = credentials
+            .get_api_key(&provider_id)?
+            .is_some_and(|key| !key.trim().is_empty());
+        if !already_stored {
+            pending_keys.push((provider_id, inline_key));
+        }
     }
 
-    if !migrated_provider_ids.is_empty() {
+    for (provider_id, api_key) in &pending_keys {
+        credentials.set_api_key(provider_id, api_key)?;
+    }
+    if providers_changed {
         preferences.save_ai_preferences(&[(
             "ai.providers".to_string(),
             serde_json::to_string(&providers)
                 .map_err(|error| format!("failed to serialize migrated AI providers: {error}"))?,
         )])?;
     }
-    for provider_id in &migrated_provider_ids {
-        credentials.delete_api_key(provider_id)?;
-    }
     preferences
         .save_ai_preferences(&[(AI_KEY_MIGRATION_PREFERENCE.to_string(), "true".to_string())])?;
-    Ok(migrated_provider_ids.len())
+    Ok(pending_keys.len())
 }
 
 #[tauri::command]
-pub(crate) async fn ai_list_models(provider: AiProviderConfig) -> Result<Vec<String>, String> {
+pub(crate) fn ai_store_api_key(
+    credentials: State<'_, CredentialManager>,
+    provider_id: String,
+    api_key: String,
+) -> Result<(), String> {
+    validate_provider_id(&provider_id)?;
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Err("API key cannot be empty".to_string());
+    }
+    credentials.set_credential(AI_KEY_SERVICE, &provider_id, api_key)
+}
+
+#[tauri::command]
+pub(crate) fn ai_has_api_key(
+    credentials: State<'_, CredentialManager>,
+    provider_id: String,
+) -> Result<bool, String> {
+    validate_provider_id(&provider_id)?;
+    Ok(credentials
+        .get_credential(AI_KEY_SERVICE, &provider_id)?
+        .is_some_and(|value| !value.trim().is_empty()))
+}
+
+#[tauri::command]
+pub(crate) fn ai_delete_api_key(
+    credentials: State<'_, CredentialManager>,
+    provider_id: String,
+) -> Result<(), String> {
+    validate_provider_id(&provider_id)?;
+    credentials.delete_credential(AI_KEY_SERVICE, &provider_id)
+}
+
+#[tauri::command]
+pub(crate) async fn ai_list_models(
+    credentials: State<'_, CredentialManager>,
+    provider: AiProviderConfig,
+) -> Result<Vec<String>, String> {
     validate_provider_config(&provider, false)?;
-    let api_key = api_key_for_provider(&provider)?;
+    let api_key = connection_test_api_key(credentials.inner(), &provider)?;
     let client = build_client()?;
     let response = match provider.kind {
         AiProviderKind::Ollama => client
@@ -485,11 +509,12 @@ pub(crate) async fn ai_list_models(provider: AiProviderConfig) -> Result<Vec<Str
 #[tauri::command]
 pub(crate) fn ai_start_request(
     app: AppHandle,
+    credentials: State<'_, CredentialManager>,
     registry: State<'_, AiRequestRegistry>,
     request: AiStartRequest,
 ) -> Result<(), String> {
     validate_request(&request)?;
-    let api_key = api_key_for_provider(&request.provider)?;
+    let api_key = api_key_for_provider(credentials.inner(), &request.provider)?;
     let request_id = request.request_id.clone();
     let cancellation = register_and_emit_started(registry.inner(), &request_id, || {
         emit(
@@ -728,6 +753,7 @@ async fn stream_openai(
     let mut buffer = Vec::new();
     let mut response_bytes = 0;
     let mut completed = false;
+    let mut emitted_text = false;
     let mut usage = ProviderUsage::default();
     loop {
         tokio::select! {
@@ -756,6 +782,15 @@ async fn stream_openai(
                             request_id: request_id.to_string(),
                             text,
                         })?;
+                        emitted_text = true;
+                    } else if !emitted_text {
+                        if let Some(text) = parsed.fallback_text.filter(|text| !text.is_empty()) {
+                            events.emit(AiStreamEvent::TextDelta {
+                                request_id: request_id.to_string(),
+                                text,
+                            })?;
+                            emitted_text = true;
+                        }
                     }
                 }
                 ensure_provider_stream_frame_size(buffer.len())?;
@@ -782,6 +817,13 @@ async fn stream_openai(
                 request_id: request_id.to_string(),
                 text,
             })?;
+        } else if !emitted_text {
+            if let Some(text) = parsed.fallback_text.filter(|text| !text.is_empty()) {
+                events.emit(AiStreamEvent::TextDelta {
+                    request_id: request_id.to_string(),
+                    text,
+                })?;
+            }
         }
     }
     if completed {
@@ -1150,7 +1192,28 @@ struct ParsedProviderStreamEvent {
     completed: bool,
     output_limit_reached: bool,
     text: Option<String>,
+    fallback_text: Option<String>,
     usage: Option<ProviderUsage>,
+}
+
+fn response_output_text(value: &Value) -> Option<String> {
+    let text = value
+        .pointer("/response/output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
+        .filter_map(|item| item.get("content").and_then(Value::as_array))
+        .flatten()
+        .filter_map(
+            |content| match content.get("type").and_then(Value::as_str) {
+                Some("output_text") => content.get("text").and_then(Value::as_str),
+                Some("refusal") => content.get("refusal").and_then(Value::as_str),
+                _ => None,
+            },
+        )
+        .collect::<String>();
+    (!text.is_empty()).then_some(text)
 }
 
 fn parse_openai_stream_event(event: &str) -> Result<ParsedProviderStreamEvent, String> {
@@ -1162,9 +1225,27 @@ fn parse_openai_stream_event(event: &str) -> Result<ParsedProviderStreamEvent, S
         .map_err(|error| format!("invalid OpenAI stream event: {error}"))?;
     let usage = provider_usage_from_value(AiProviderKind::OpenAi, &value);
     match value.get("type").and_then(Value::as_str) {
-        Some("response.output_text.delta") => Ok(ParsedProviderStreamEvent {
-            text: value
-                .get("delta")
+        Some("response.output_text.delta") | Some("response.refusal.delta") => {
+            Ok(ParsedProviderStreamEvent {
+                text: value
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                usage,
+                ..Default::default()
+            })
+        }
+        Some("response.output_text.done") => Ok(ParsedProviderStreamEvent {
+            fallback_text: value
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            usage,
+            ..Default::default()
+        }),
+        Some("response.refusal.done") => Ok(ParsedProviderStreamEvent {
+            fallback_text: value
+                .get("refusal")
                 .and_then(Value::as_str)
                 .map(str::to_string),
             usage,
@@ -1172,6 +1253,7 @@ fn parse_openai_stream_event(event: &str) -> Result<ParsedProviderStreamEvent, S
         }),
         Some("response.completed") => Ok(ParsedProviderStreamEvent {
             completed: true,
+            fallback_text: response_output_text(&value),
             usage,
             ..Default::default()
         }),
@@ -1230,6 +1312,7 @@ fn parse_openai_compatible_stream_event(event: &str) -> Result<ParsedProviderStr
             .and_then(Value::as_str)
             .filter(|text| !text.is_empty())
             .map(str::to_string),
+        fallback_text: None,
         usage: provider_usage_from_value(AiProviderKind::OpenAiCompatible, &value),
     })
 }
@@ -1487,13 +1570,14 @@ pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Ur
     Ok(url)
 }
 
-pub(crate) fn api_key_for_provider(provider: &AiProviderConfig) -> Result<Option<String>, String> {
-    let api_key = provider
-        .api_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-        .map(str::to_string);
+fn api_key_from_store(
+    credentials: &impl AiCredentialStore,
+    provider: &AiProviderConfig,
+) -> Result<Option<String>, String> {
+    let api_key = credentials
+        .get_api_key(&provider.id)?
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
     match provider.kind {
         AiProviderKind::Ollama => Ok(None),
         AiProviderKind::OpenAi => api_key
@@ -1507,6 +1591,29 @@ pub(crate) fn api_key_for_provider(provider: &AiProviderConfig) -> Result<Option
             }
         }
     }
+}
+
+pub(crate) fn api_key_for_provider(
+    credentials: &CredentialManager,
+    provider: &AiProviderConfig,
+) -> Result<Option<String>, String> {
+    api_key_from_store(credentials, provider)
+}
+
+fn connection_test_api_key(
+    credentials: &impl AiCredentialStore,
+    provider: &AiProviderConfig,
+) -> Result<Option<String>, String> {
+    let inline_key = provider
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(str::to_string);
+    if inline_key.is_some() {
+        return Ok(inline_key);
+    }
+    api_key_from_store(credentials, provider)
 }
 
 pub(crate) fn build_client() -> Result<Client, String> {
@@ -1639,8 +1746,8 @@ mod tests {
     #[derive(Default)]
     struct MockAiCredentials {
         keys: Mutex<HashMap<String, String>>,
-        fail_delete_for: Mutex<Option<String>>,
-        delete_calls: Mutex<usize>,
+        fail_set_for: Mutex<Option<String>>,
+        set_calls: Mutex<usize>,
     }
 
     impl MockAiCredentials {
@@ -1648,25 +1755,28 @@ mod tests {
             self.keys.lock().unwrap().get(provider_id).cloned()
         }
 
-        fn delete_call_count(&self) -> usize {
-            *self.delete_calls.lock().unwrap()
+        fn set_call_count(&self) -> usize {
+            *self.set_calls.lock().unwrap()
         }
     }
 
     impl AiCredentialStore for MockAiCredentials {
-        fn get_api_key(&self, provider_id: &str) -> Result<Option<String>, String> {
-            Ok(self.key(provider_id))
-        }
-
-        fn delete_api_key(&self, provider_id: &str) -> Result<(), String> {
-            *self.delete_calls.lock().unwrap() += 1;
-            if self.fail_delete_for.lock().unwrap().as_deref() == Some(provider_id) {
+        fn set_api_key(&self, provider_id: &str, api_key: &str) -> Result<(), String> {
+            *self.set_calls.lock().unwrap() += 1;
+            if self.fail_set_for.lock().unwrap().as_deref() == Some(provider_id) {
                 return Err(format!(
-                    "simulated keychain delete failure for {provider_id}"
+                    "simulated keychain write failure for {provider_id}"
                 ));
             }
-            self.keys.lock().unwrap().remove(provider_id);
+            self.keys
+                .lock()
+                .unwrap()
+                .insert(provider_id.to_string(), api_key.to_string());
             Ok(())
+        }
+
+        fn get_api_key(&self, provider_id: &str) -> Result<Option<String>, String> {
+            Ok(self.key(provider_id))
         }
     }
 
@@ -2213,6 +2323,32 @@ mod tests {
     }
 
     #[test]
+    fn parses_openai_refusal_delta_and_final_fallback() {
+        let delta = "event: response.refusal.delta\ndata: {\"type\":\"response.refusal.delta\",\"delta\":\"I cannot help\"}";
+        assert_eq!(
+            parse_openai_delta(delta).unwrap().as_deref(),
+            Some("I cannot help")
+        );
+
+        let done = "event: response.refusal.done\ndata: {\"type\":\"response.refusal.done\",\"refusal\":\"I cannot help with that.\"}";
+        assert_eq!(
+            parse_openai_stream_event(done)
+                .unwrap()
+                .fallback_text
+                .as_deref(),
+            Some("I cannot help with that.")
+        );
+    }
+
+    #[test]
+    fn recovers_refusal_from_completed_response_output() {
+        let event = "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"refusal\",\"refusal\":\"Request declined.\"}]}]}}";
+        let parsed = parse_openai_stream_event(event).unwrap();
+        assert!(parsed.completed);
+        assert_eq!(parsed.fallback_text.as_deref(), Some("Request declined."));
+    }
+
+    #[test]
     fn parses_openai_compatible_text_delta() {
         let event = "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}";
         assert_eq!(
@@ -2492,7 +2628,13 @@ mod tests {
     }
 
     #[test]
-    fn reads_and_trims_api_key_from_provider_configuration() {
+    fn reads_and_trims_api_key_from_keychain() {
+        let credentials = MockAiCredentials::default();
+        credentials
+            .keys
+            .lock()
+            .unwrap()
+            .insert("minimax".to_string(), "  keychain-key  ".to_string());
         let provider = AiProviderConfig {
             id: "minimax".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
@@ -2500,17 +2642,20 @@ mod tests {
             model: "MiniMax-M3".to_string(),
             reasoning_effort: None,
             requires_api_key: true,
-            api_key: Some("  database-key  ".to_string()),
+            api_key: Some("stale-inline-key".to_string()),
         };
 
         assert_eq!(
-            api_key_for_provider(&provider).unwrap().as_deref(),
-            Some("database-key")
+            api_key_from_store(&credentials, &provider)
+                .unwrap()
+                .as_deref(),
+            Some("keychain-key")
         );
     }
 
     #[test]
     fn rejects_a_required_provider_without_a_saved_api_key() {
+        let credentials = MockAiCredentials::default();
         let provider = AiProviderConfig {
             id: "minimax".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
@@ -2522,113 +2667,108 @@ mod tests {
         };
 
         assert_eq!(
-            api_key_for_provider(&provider).unwrap_err(),
+            api_key_from_store(&credentials, &provider).unwrap_err(),
             "API key is required"
         );
     }
 
     #[test]
-    fn migrates_keychain_api_keys_to_provider_preferences_then_deletes_the_old_copy() {
-        let secret = "migration-secret-now-stored-with-provider";
+    fn connection_test_can_use_an_ephemeral_inline_key() {
         let credentials = MockAiCredentials::default();
-        credentials
-            .keys
-            .lock()
-            .unwrap()
-            .insert("openai".to_string(), format!("  {secret}  "));
-        let preferences = ai_preferences(None);
+        let provider = AiProviderConfig {
+            id: "provider-setup-draft".to_string(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://api.minimaxi.com/v1".to_string(),
+            model: "MiniMax-M3".to_string(),
+            reasoning_effort: None,
+            requires_api_key: true,
+            api_key: Some("  ephemeral-key  ".to_string()),
+        };
 
         assert_eq!(
-            migrate_keychain_api_keys_with(&credentials, &preferences).unwrap(),
+            connection_test_api_key(&credentials, &provider)
+                .unwrap()
+                .as_deref(),
+            Some("ephemeral-key")
+        );
+        assert!(credentials.key("provider-setup-draft").is_none());
+    }
+
+    #[test]
+    fn migrates_inline_api_keys_to_keychain_and_cleans_preferences() {
+        let secret = "migration-secret-now-in-keychain";
+        let credentials = MockAiCredentials::default();
+        let preferences = ai_preferences(Some(&format!("  {secret}  ")));
+
+        assert_eq!(
+            migrate_inline_api_keys_with(&credentials, &preferences).unwrap(),
             1
         );
-        assert!(credentials.key("openai").is_none());
+        assert_eq!(credentials.key("openai").as_deref(), Some(secret));
         assert_eq!(
             preferences.value(AI_KEY_MIGRATION_PREFERENCE).as_deref(),
             Some("true")
         );
         let stored = preferences.value("ai.providers").unwrap();
-        assert!(stored.contains("apiKey"));
-        assert!(stored.contains(secret));
+        assert!(!stored.contains("apiKey"));
+        assert!(!stored.contains(secret));
     }
 
     #[test]
-    fn keychain_api_key_migration_is_idempotent() {
+    fn inline_api_key_migration_is_idempotent() {
         let credentials = MockAiCredentials::default();
-        credentials
-            .keys
-            .lock()
-            .unwrap()
-            .insert("openai".to_string(), "repeatable-secret".to_string());
-        let preferences = ai_preferences(None);
+        let preferences = ai_preferences(Some("repeatable-secret"));
 
         assert_eq!(
-            migrate_keychain_api_keys_with(&credentials, &preferences).unwrap(),
+            migrate_inline_api_keys_with(&credentials, &preferences).unwrap(),
             1
         );
         assert_eq!(
-            migrate_keychain_api_keys_with(&credentials, &preferences).unwrap(),
+            migrate_inline_api_keys_with(&credentials, &preferences).unwrap(),
             0
         );
-        assert_eq!(credentials.delete_call_count(), 1);
+        assert_eq!(credentials.set_call_count(), 1);
     }
 
     #[test]
-    fn migration_recovers_a_default_openai_key_without_stored_provider_preferences() {
-        let secret = "default-provider-key";
+    fn migration_without_stored_providers_only_records_completion() {
         let credentials = MockAiCredentials::default();
-        credentials
-            .keys
-            .lock()
-            .unwrap()
-            .insert("openai".to_string(), secret.to_string());
         let preferences = MockAiPreferences::new(Vec::new());
 
         assert_eq!(
-            migrate_keychain_api_keys_with(&credentials, &preferences).unwrap(),
-            1
+            migrate_inline_api_keys_with(&credentials, &preferences).unwrap(),
+            0
         );
-
-        let stored = preferences.value("ai.providers").unwrap();
-        assert!(stored.contains("\"id\":\"ollama\""));
-        assert!(stored.contains("\"id\":\"openai\""));
-        assert!(stored.contains(secret));
-        assert!(credentials.key("openai").is_none());
+        assert!(preferences.value("ai.providers").is_none());
+        assert_eq!(
+            preferences.value(AI_KEY_MIGRATION_PREFERENCE).as_deref(),
+            Some("true")
+        );
     }
 
     #[test]
-    fn preference_write_failure_preserves_the_keychain_copy_for_recovery() {
-        let secret = "recover-after-preference-write-failure";
+    fn keychain_write_failure_preserves_the_inline_copy_for_recovery() {
+        let secret = "recover-after-keychain-write-failure";
         let credentials = MockAiCredentials::default();
-        credentials
-            .keys
-            .lock()
-            .unwrap()
-            .insert("openai".to_string(), secret.to_string());
-        let mut preferences = ai_preferences(None);
-        preferences.fail_save = true;
+        *credentials.fail_set_for.lock().unwrap() = Some("openai".to_string());
+        let preferences = ai_preferences(Some(secret));
 
-        let error = migrate_keychain_api_keys_with(&credentials, &preferences).unwrap_err();
+        let error = migrate_inline_api_keys_with(&credentials, &preferences).unwrap_err();
 
         assert!(!error.contains(secret));
-        assert_eq!(credentials.key("openai").as_deref(), Some(secret));
-        assert!(!preferences.value("ai.providers").unwrap().contains(secret));
+        assert!(credentials.key("openai").is_none());
+        assert!(preferences.value("ai.providers").unwrap().contains(secret));
         assert!(preferences.value(AI_KEY_MIGRATION_PREFERENCE).is_none());
     }
 
     #[test]
-    fn keychain_delete_failure_keeps_both_copies_and_retries_later() {
-        let secret = "recover-after-keychain-delete-failure";
+    fn preference_cleanup_failure_keeps_both_copies_for_recovery() {
+        let secret = "recover-after-preference-cleanup-failure";
         let credentials = MockAiCredentials::default();
-        credentials
-            .keys
-            .lock()
-            .unwrap()
-            .insert("openai".to_string(), secret.to_string());
-        *credentials.fail_delete_for.lock().unwrap() = Some("openai".to_string());
-        let preferences = ai_preferences(None);
+        let mut preferences = ai_preferences(Some(secret));
+        preferences.fail_save = true;
 
-        let error = migrate_keychain_api_keys_with(&credentials, &preferences).unwrap_err();
+        let error = migrate_inline_api_keys_with(&credentials, &preferences).unwrap_err();
 
         assert!(!error.contains(secret));
         assert_eq!(credentials.key("openai").as_deref(), Some(secret));
@@ -2647,13 +2787,13 @@ mod tests {
         let preferences = ai_preferences(Some("stale-key"));
 
         assert_eq!(
-            migrate_keychain_api_keys_with(&credentials, &preferences).unwrap(),
-            1
+            migrate_inline_api_keys_with(&credentials, &preferences).unwrap(),
+            0
         );
 
         let stored = preferences.value("ai.providers").unwrap();
-        assert!(stored.contains("current-key"));
+        assert!(!stored.contains("current-key"));
         assert!(!stored.contains("stale-key"));
-        assert!(credentials.key("openai").is_none());
+        assert_eq!(credentials.key("openai").as_deref(), Some("current-key"));
     }
 }

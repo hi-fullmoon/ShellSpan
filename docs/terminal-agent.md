@@ -20,7 +20,7 @@ MiniMax 使用官方 OpenAI-compatible Chat Completions 接口，不依赖 OpenA
 4. 在应用内输入自己的 MiniMax API Key，选择“测试连接并读取模型”。
 5. 如果连接可用，可将 MiniMax 设为默认厂商；然后在终端的 AI 面板中选择 Agent 模式。
 
-不要把 API Key 放进命令参数、聊天、日志、截图、仓库文件或提交记录，也不要把凭证交给 Agent 代为输入。厂商 API Key 会随该厂商配置保存在本机 ShellSpan 数据库中；删除厂商配置会同时删除对应的本地 Key。
+不要把 API Key 放进命令参数、聊天、日志、截图、仓库文件或提交记录，也不要把凭证交给 Agent 代为输入。厂商 API Key 只保存在操作系统钥匙串中，不会写入 ShellSpan 数据库；删除厂商配置会同时删除对应的钥匙串凭据。
 
 ## 权限模式
 

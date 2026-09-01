@@ -8,14 +8,20 @@ import {
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 
 const mocks = vi.hoisted(() => ({
+  invokeDeleteAiApiKey: vi.fn(),
+  invokeHasAiApiKey: vi.fn(),
   invokeListAiModels: vi.fn(),
+  invokeStoreAiApiKey: vi.fn(),
   invokeLoadPreferences: vi.fn(),
   invokeSavePreferences: vi.fn(),
   invokeSetAgentEnabled: vi.fn(),
 }));
 
 vi.mock('@/lib/tauri', () => ({
+  invokeDeleteAiApiKey: mocks.invokeDeleteAiApiKey,
+  invokeHasAiApiKey: mocks.invokeHasAiApiKey,
   invokeListAiModels: mocks.invokeListAiModels,
+  invokeStoreAiApiKey: mocks.invokeStoreAiApiKey,
   invokeLoadPreferences: mocks.invokeLoadPreferences,
   invokeSavePreferences: mocks.invokeSavePreferences,
   invokeSetAgentEnabled: mocks.invokeSetAgentEnabled,
@@ -44,7 +50,10 @@ function deferred<T>() {
 describe('ProviderSetupDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.invokeDeleteAiApiKey.mockResolvedValue(undefined);
+    mocks.invokeHasAiApiKey.mockResolvedValue(false);
     mocks.invokeListAiModels.mockResolvedValue([]);
+    mocks.invokeStoreAiApiKey.mockResolvedValue(undefined);
     mocks.invokeLoadPreferences.mockResolvedValue([]);
     mocks.invokeSavePreferences.mockResolvedValue(undefined);
     mocks.invokeSetAgentEnabled.mockResolvedValue(true);
@@ -98,7 +107,7 @@ describe('ProviderSetupDialog', () => {
     await user.type(screen.getByLabelText(/settings\.ai\.apiKey/), 'secret-key');
     await user.click(screen.getByRole('button', { name: 'common.save' }));
 
-    expect(useAiSettingsStore.getState().providers).toHaveLength(originalCount + 1);
+    await waitFor(() => expect(useAiSettingsStore.getState().providers).toHaveLength(originalCount + 1));
     const savedProviders = useAiSettingsStore.getState().providers;
     const saved = savedProviders[savedProviders.length - 1];
     expect(saved).toEqual(expect.objectContaining({
@@ -106,10 +115,55 @@ describe('ProviderSetupDialog', () => {
       preset: 'deepseek',
       baseUrl: 'https://api.deepseek.com',
       model: 'deepseek-v4-flash',
-      apiKey: 'secret-key',
     }));
+    expect(saved).not.toHaveProperty('apiKey');
+    expect(mocks.invokeStoreAiApiKey).toHaveBeenCalledWith(saved?.id, 'secret-key');
     expect(onSaved).toHaveBeenCalledWith(saved?.id);
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('rolls back a new provider when the keychain write fails', async () => {
+    const user = userEvent.setup();
+    const onSaved = vi.fn();
+    const originalProviders = useAiSettingsStore.getState().providers;
+    mocks.invokeStoreAiApiKey.mockRejectedValueOnce(new Error('keychain unavailable'));
+    render(
+      <ProviderSetupDialog open onOpenChange={vi.fn()} onSaved={onSaved} />,
+    );
+
+    const providerInput = screen.getByRole('combobox', { name: 'settings.ai.chooseProvider' });
+    await user.click(providerInput);
+    await user.type(providerInput, 'DeepSeek');
+    await user.click(await screen.findByRole('option', { name: /DeepSeek/ }));
+    await user.type(screen.getByLabelText(/settings\.ai\.apiKey/), 'secret-key');
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
+
+    expect(await screen.findByText('keychain unavailable')).toBeInTheDocument();
+    expect(useAiSettingsStore.getState().providers).toEqual(originalProviders);
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('keeps an existing keychain credential when the key field is left blank', async () => {
+    const user = userEvent.setup();
+    const provider = useAiSettingsStore.getState().providers[1];
+    mocks.invokeHasAiApiKey.mockResolvedValueOnce(true);
+    const onSaved = vi.fn();
+    render(
+      <ProviderSetupDialog
+        open
+        provider={provider}
+        onOpenChange={vi.fn()}
+        onSaved={onSaved}
+      />,
+    );
+
+    expect(await screen.findByText('settings.ai.keyStored')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(provider.id));
+    expect(mocks.invokeHasAiApiKey).toHaveBeenCalledWith(provider.id);
+    expect(mocks.invokeStoreAiApiKey).not.toHaveBeenCalled();
+    expect(useAiSettingsStore.getState().providers[1]).not.toHaveProperty('apiKey');
   });
 
   it('loads models from the draft without creating a provider', async () => {
@@ -267,10 +321,7 @@ describe('ProviderSetupDialog', () => {
 
   it('edits an existing provider without creating another profile', async () => {
     const user = userEvent.setup();
-    const provider = {
-      ...useAiSettingsStore.getState().providers[0],
-      apiKey: 'existing-key',
-    };
+    const provider = useAiSettingsStore.getState().providers[0];
     useAiSettingsStore.setState({ providers: [provider], defaultProviderId: provider.id });
     const onSaved = vi.fn();
     render(
@@ -291,7 +342,7 @@ describe('ProviderSetupDialog', () => {
     await user.keyboard('{Escape}');
     await user.click(screen.getByRole('button', { name: 'common.save' }));
 
-    expect(useAiSettingsStore.getState().providers).toHaveLength(1);
+    await waitFor(() => expect(useAiSettingsStore.getState().providers).toHaveLength(1));
     expect(useAiSettingsStore.getState().providers[0]).toEqual(expect.objectContaining({
       id: provider.id,
       name: 'Renamed provider',

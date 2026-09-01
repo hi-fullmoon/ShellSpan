@@ -139,7 +139,7 @@ describe('aiSettingsStore', () => {
       .toHaveProperty('reasoningEffort', 'max');
   });
 
-  it('keeps inline API keys in provider preferences and trims them for requests', () => {
+  it('drops legacy inline API keys from provider state and request configs', () => {
     const provider = {
       id: 'minimax',
       name: 'MiniMax',
@@ -156,15 +156,33 @@ describe('aiSettingsStore', () => {
     ]);
     useAiSettingsStore.setState({ ...preferences, initialized: false });
 
-    expect(preferences.providers[0]).toHaveProperty('apiKey', '  database-key  ');
+    expect(preferences.providers[0]).not.toHaveProperty('apiKey');
     expect(useAiSettingsStore.getState().getProviderConfig()).toEqual({
       id: 'minimax',
       kind: 'openAiCompatible',
       baseUrl: 'https://api.minimaxi.com',
       model: 'MiniMax-M3',
       requiresApiKey: true,
-      apiKey: 'database-key',
     });
+  });
+
+  it('never serializes a legacy runtime API key back to preferences', async () => {
+    vi.useFakeTimers();
+    const provider = {
+      ...initialState.providers[1],
+      apiKey: 'must-not-be-persisted',
+    } as typeof initialState.providers[number];
+
+    useAiSettingsStore.setState({
+      providers: [initialState.providers[0], provider],
+      initialized: true,
+    });
+    await vi.advanceTimersByTimeAsync(400);
+
+    const entries = tauri.invokeSavePreferences.mock.calls[0]?.[0] as [string, string][];
+    const storedProviders = entries.find(([key]) => key === 'ai.providers')?.[1] ?? '';
+    expect(storedProviders).not.toContain('must-not-be-persisted');
+    expect(storedProviders).not.toContain('apiKey');
   });
 
   it('moves the default when deleting a provider and always retains one provider', () => {
@@ -182,7 +200,7 @@ describe('aiSettingsStore', () => {
     vi.useFakeTimers();
     useAiSettingsStore.setState({ ...initialState, initialized: true }, true);
 
-    useAiSettingsStore.getState().updateProvider('openai', { apiKey: 'database-key' });
+    useAiSettingsStore.getState().updateProvider('openai', { model: 'gpt-updated' });
 
     expect(useAiSettingsStore.getState().persistenceStatus).toBe('pending');
     expect(tauri.invokeSavePreferences).not.toHaveBeenCalled();
@@ -193,15 +211,15 @@ describe('aiSettingsStore', () => {
     expect(useAiSettingsStore.getState().persistenceStatus).toBe('saved');
   });
 
-  it('flushes a pending API key immediately before application exit', async () => {
+  it('flushes pending provider changes immediately before application exit', async () => {
     vi.useFakeTimers();
     useAiSettingsStore.setState({ ...initialState, initialized: true }, true);
-    useAiSettingsStore.getState().updateProvider('openai', { apiKey: 'exit-key' });
+    useAiSettingsStore.getState().updateProvider('openai', { model: 'gpt-exit' });
 
     await flushAiSettingsPreferences();
 
     expect(tauri.invokeSavePreferences).toHaveBeenCalledWith(expect.arrayContaining([
-      ['ai.providers', expect.stringContaining('exit-key')],
+      ['ai.providers', expect.stringContaining('gpt-exit')],
     ]));
     expect(useAiSettingsStore.getState().persistenceStatus).toBe('saved');
     expect(vi.getTimerCount()).toBe(0);
@@ -211,7 +229,7 @@ describe('aiSettingsStore', () => {
     vi.useFakeTimers();
     tauri.invokeSavePreferences.mockRejectedValueOnce(new Error('database unavailable'));
     useAiSettingsStore.setState({ ...initialState, initialized: true }, true);
-    useAiSettingsStore.getState().updateProvider('openai', { apiKey: 'retry-key' });
+    useAiSettingsStore.getState().updateProvider('openai', { model: 'gpt-retry' });
 
     await vi.advanceTimersByTimeAsync(400);
 
@@ -222,7 +240,7 @@ describe('aiSettingsStore', () => {
 
     expect(tauri.invokeSavePreferences).toHaveBeenCalledTimes(2);
     expect(tauri.invokeSavePreferences).toHaveBeenLastCalledWith(expect.arrayContaining([
-      ['ai.providers', expect.stringContaining('retry-key')],
+      ['ai.providers', expect.stringContaining('gpt-retry')],
     ]));
     expect(useAiSettingsStore.getState().persistenceStatus).toBe('saved');
   });

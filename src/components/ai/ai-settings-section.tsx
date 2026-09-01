@@ -39,6 +39,7 @@ import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import {
   invokeAgentRolloutPolicy,
+  invokeDeleteAiApiKey,
   invokeSetAgentEnabled,
   isTauriRuntime,
 } from '@/lib/tauri';
@@ -152,12 +153,17 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
 
   if (!selectedProvider) return null;
 
-  const handleDeleteProvider = (): void => {
-    removeProvider(selectedProvider.id);
-    const state = useAiSettingsStore.getState();
-    setSelectedProviderId(state.defaultProviderId);
-    setEditOpen(false);
-    setDeleteOpen(false);
+  const handleDeleteProvider = async (): Promise<void> => {
+    try {
+      await invokeDeleteAiApiKey(selectedProvider.id);
+      removeProvider(selectedProvider.id);
+      const state = useAiSettingsStore.getState();
+      setSelectedProviderId(state.defaultProviderId);
+      setEditOpen(false);
+      setDeleteOpen(false);
+    } catch {
+      showError(t('settings.ai.keyDeleteFailed'));
+    }
   };
 
   const handleAgentEnabledChange = async (enabled: boolean): Promise<void> => {
@@ -435,7 +441,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         onOpenChange={setDeleteOpen}
         title={t('settings.ai.deleteProviderTitle', { name: selectedProvider.name })}
         description={t('settings.ai.deleteProviderDescription')}
-        onConfirm={handleDeleteProvider}
+        onConfirm={() => void handleDeleteProvider()}
         confirmVariant="destructiveOutline"
       />
 

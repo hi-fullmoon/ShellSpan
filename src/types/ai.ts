@@ -11,6 +11,10 @@ export interface AiProviderConfig {
   model: string;
   reasoningEffort?: AiReasoningEffort;
   requiresApiKey: boolean;
+}
+
+/** Used only while testing a provider setup; the key is never persisted. */
+export interface AiProviderConnectionConfig extends AiProviderConfig {
   apiKey?: string;
 }
 

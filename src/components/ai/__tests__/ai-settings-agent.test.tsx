@@ -12,20 +12,26 @@ const mocks = vi.hoisted(() => ({
   deletePersistedAiConversations: vi.fn(),
   flushAgentSessionPersistence: vi.fn(),
   invokeAgentRolloutPolicy: vi.fn(),
+  invokeDeleteAiApiKey: vi.fn(),
+  invokeHasAiApiKey: vi.fn(),
   invokeListAiModels: vi.fn(),
   invokeLoadPreferences: vi.fn(),
   invokeSavePreferences: vi.fn(),
   invokeSetAgentEnabled: vi.fn(),
+  invokeStoreAiApiKey: vi.fn(),
   shutdown: vi.fn(),
   toast: vi.fn(),
 }));
 
 vi.mock('@/lib/tauri', () => ({
   invokeAgentRolloutPolicy: mocks.invokeAgentRolloutPolicy,
+  invokeDeleteAiApiKey: mocks.invokeDeleteAiApiKey,
+  invokeHasAiApiKey: mocks.invokeHasAiApiKey,
   invokeListAiModels: mocks.invokeListAiModels,
   invokeLoadPreferences: mocks.invokeLoadPreferences,
   invokeSavePreferences: mocks.invokeSavePreferences,
   invokeSetAgentEnabled: mocks.invokeSetAgentEnabled,
+  invokeStoreAiApiKey: mocks.invokeStoreAiApiKey,
   isTauriRuntime: () => true,
 }));
 
@@ -70,9 +76,12 @@ describe('M7 Agent settings management', () => {
       availablePermissionModes: ['requestApproval', 'autoApproveReadOnly', 'fullAccess'],
     });
     mocks.invokeSetAgentEnabled.mockImplementation(async (enabled: boolean) => enabled);
+    mocks.invokeDeleteAiApiKey.mockResolvedValue(undefined);
+    mocks.invokeHasAiApiKey.mockResolvedValue(true);
     mocks.invokeLoadPreferences.mockResolvedValue([]);
     mocks.invokeSavePreferences.mockResolvedValue(undefined);
     mocks.invokeListAiModels.mockResolvedValue([]);
+    mocks.invokeStoreAiApiKey.mockResolvedValue(undefined);
     mocks.shutdown.mockResolvedValue(undefined);
     mocks.flushAgentSessionPersistence.mockResolvedValue(undefined);
     mocks.clearAgentConversationData.mockResolvedValue(undefined);
@@ -205,7 +214,6 @@ describe('M7 Agent settings management', () => {
       model: 'k3',
       reasoningEffort: 'high' as const,
       requiresApiKey: true,
-      apiKey: 'secret-key',
     };
     useAiSettingsStore.setState({ providers: [kimi], defaultProviderId: kimi.id });
 

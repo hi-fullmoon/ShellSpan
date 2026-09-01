@@ -14,7 +14,6 @@ function profile(model = 'model-a'): AiProviderProfile {
     baseUrl: 'https://provider.example.com/v1',
     model,
     requiresApiKey: true,
-    apiKey: 'not-copied-into-a-cache-key',
   };
 }
 
