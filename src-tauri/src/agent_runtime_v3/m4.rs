@@ -15,7 +15,6 @@ use crate::agent_contract_v3::{
     ApplyPatchArgumentsV3, ListDirectoryArgumentsV3, PlanStepStatusV3, ReadFileArgumentsV3,
     SearchTextArgumentsV3, TransferFileArgumentsV3,
 };
-#[cfg(test)]
 use crate::keychain::CredentialManager;
 use crate::redaction::redact_sensitive_text;
 
@@ -106,6 +105,7 @@ pub(crate) struct TaskRecoverySnapshotV3 {
     pub(crate) processes: Vec<RecoveredProcessV3>,
     pub(crate) recovery_advice: String,
     pub(crate) requires_human_action: bool,
+    pub(crate) requires_session_rebind: bool,
     pub(crate) last_failure: Option<String>,
     pub(crate) last_effect: Option<AgentObservedEffectV3>,
 }
@@ -142,6 +142,20 @@ pub(crate) struct AgentAuditEventV3 {
     pub(crate) effect: Option<AgentEffectKindV3>,
     pub(crate) network_destinations: Vec<AgentNetworkDestinationV3>,
     pub(crate) sensitive_path_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) grant_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) purpose: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) expires_at_unix_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) scope_target_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) scope_tool_names: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) scope_effects: Vec<AgentEffectKindV3>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub(crate) scope_path_count: usize,
     pub(crate) decision: String,
     pub(crate) recorded_at_unix_ms: u64,
 }
@@ -169,6 +183,8 @@ pub(crate) struct PersistedTaskV3 {
     pub(crate) plan: Option<AgentPlanV3>,
     pub(crate) calls: Vec<RecoveryCallV3>,
     pub(crate) processes: Vec<RecoveredProcessV3>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) last_failure: Option<String>,
     pub(crate) created_at_unix_ms: u64,
     pub(crate) updated_at_unix_ms: u64,
 }
@@ -300,17 +316,47 @@ impl M4PersistenceV3 {
             return recover_corrupt_store(&mut state, &path, "persistence bounds were exceeded");
         }
         for mut task in envelope.tasks {
+            if !matches!(
+                task.state.as_str(),
+                "active" | "needsReconciliation" | "lost" | "cancelled" | "completed"
+            ) {
+                task.state = "needsReconciliation".into();
+                task.phase = TaskPhaseV3::Reconciliation;
+            }
             sanitize_persisted_task(&mut task);
             if task.phase == TaskPhaseV3::WaitingApproval {
                 task.phase = TaskPhaseV3::Running;
             }
             task.processes.iter_mut().for_each(|process| {
-                if process.state == "running" {
+                if !matches!(
+                    process.state.as_str(),
+                    "exited" | "cancelled" | "timedout" | "failed" | "acknowledgedLost"
+                ) {
                     process.state = "lost".into();
                     process.recovery_advice = "The native process handle cannot be reattached after restart; inspect the target before continuing.".into();
                     process.updated_at_unix_ms = current_unix_ms();
                 }
             });
+            let recovery = recovery_snapshot(&task);
+            match recovery.disposition {
+                RecoveryDispositionV3::SafeToResume => {}
+                RecoveryDispositionV3::NeedsReconciliation => {
+                    task.state = "needsReconciliation".into();
+                    task.phase = TaskPhaseV3::Reconciliation;
+                }
+                RecoveryDispositionV3::Lost => {
+                    task.state = "lost".into();
+                    task.phase = TaskPhaseV3::Lost;
+                }
+                RecoveryDispositionV3::Cancelled => {
+                    task.state = "cancelled".into();
+                    task.phase = TaskPhaseV3::Cancelled;
+                }
+                RecoveryDispositionV3::Completed => {
+                    task.state = "completed".into();
+                    task.phase = TaskPhaseV3::Completed;
+                }
+            }
             state.tasks.insert(task.request.task_id.clone(), task);
         }
         state.notifications = envelope
@@ -340,9 +386,9 @@ impl M4PersistenceV3 {
             warning: None,
         });
         let tasks = state.tasks.values().cloned().collect::<Vec<_>>();
-        if migrated {
-            persist_locked(&state)?;
-        }
+        // Rewrite every accepted snapshot through the current sanitizer and
+        // recovery classifier before any task can resume.
+        persist_locked(&state)?;
         Ok(tasks)
     }
 
@@ -439,6 +485,20 @@ impl M4PersistenceV3 {
             .get_mut(task_id)
             .ok_or_else(|| "Agent M4 task metadata was not found".to_string())?;
         task.phase = phase;
+        task.updated_at_unix_ms = current_unix_ms();
+        persist_locked(&state)
+    }
+
+    pub(crate) fn set_last_failure(&self, task_id: &str, summary: &str) -> Result<(), String> {
+        let mut state = self
+            .inner
+            .lock()
+            .map_err(|_| "Agent M4 persistence is unavailable".to_string())?;
+        let task = state
+            .tasks
+            .get_mut(task_id)
+            .ok_or_else(|| "Agent M4 task metadata was not found".to_string())?;
+        task.last_failure = Some(bounded_redacted_text(summary, 2_048));
         task.updated_at_unix_ms = current_unix_ms();
         persist_locked(&state)
     }
@@ -587,7 +647,7 @@ fn notification_copy(kind: NotificationKindV3) -> (&'static str, &'static str) {
         ),
         NotificationKindV3::HumanActionRequired => (
             "ShellSpan reconciliation required",
-            "A restarted task has an uncertain operation and will not be replayed automatically.",
+            "A restarted task requires native reconciliation or session rebind. No prior operation will be replayed automatically.",
         ),
         NotificationKindV3::OperatorExpiring => (
             "ShellSpan Operator expiring",
@@ -618,6 +678,10 @@ fn sanitize_persisted_task(task: &mut PersistedTaskV3) {
         .iter_mut()
         .for_each(|call| call.automatic_replay_allowed = false);
     task.processes.truncate(256);
+    task.last_failure = task
+        .last_failure
+        .as_deref()
+        .map(|summary| bounded_redacted_text(summary, 2_048));
     if let Some(plan) = task.plan.as_mut() {
         plan.explanation = plan.explanation.as_deref().map(redact_sensitive_text);
         for step in &mut plan.steps {
@@ -652,7 +716,9 @@ fn recovery_snapshot(task: &PersistedTaskV3) -> TaskRecoverySnapshotV3 {
         "completed" => RecoveryDispositionV3::Completed,
         "needsReconciliation" => RecoveryDispositionV3::NeedsReconciliation,
         "lost" => RecoveryDispositionV3::Lost,
-        _ if has_unknown_write => RecoveryDispositionV3::NeedsReconciliation,
+        _ if has_unknown_write || task.phase == TaskPhaseV3::WaitingExternal => {
+            RecoveryDispositionV3::NeedsReconciliation
+        }
         _ if has_lost_process => RecoveryDispositionV3::Lost,
         _ => RecoveryDispositionV3::SafeToResume,
     };
@@ -673,12 +739,13 @@ fn recovery_snapshot(task: &PersistedTaskV3) -> TaskRecoverySnapshotV3 {
             plan.steps.len(),
         )
     });
-    let last_failure = task
-        .results
-        .iter()
-        .rev()
-        .find(|result| result.status != AgentToolResultStatusV3::Completed)
-        .map(|result| redact_sensitive_text(&result.summary));
+    let last_failure = task.last_failure.clone().or_else(|| {
+        task.results
+            .iter()
+            .rev()
+            .find(|result| result.status != AgentToolResultStatusV3::Completed)
+            .map(|result| redact_sensitive_text(&result.summary))
+    });
     let last_effect = task
         .results
         .iter()
@@ -703,6 +770,7 @@ fn recovery_snapshot(task: &PersistedTaskV3) -> TaskRecoverySnapshotV3 {
             disposition,
             RecoveryDispositionV3::NeedsReconciliation | RecoveryDispositionV3::Lost
         ),
+        requires_session_rebind: false,
         last_failure,
         last_effect,
     }
@@ -712,6 +780,13 @@ fn last_result_failed(task: &PersistedTaskV3) -> bool {
     task.results
         .last()
         .is_some_and(|result| result.status != AgentToolResultStatusV3::Completed)
+}
+
+fn bounded_redacted_text(value: &str, maximum_chars: usize) -> String {
+    redact_sensitive_text(value)
+        .chars()
+        .take(maximum_chars)
+        .collect()
 }
 
 fn update_store_status(state: &mut PersistenceStateV3) {
@@ -780,6 +855,12 @@ fn append_audit_jsonl(state: &PersistenceStateV3, event: &AgentAuditEventV3) -> 
         .append(true)
         .open(&path)
         .map_err(|error| format!("failed to open Agent M4 audit: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("failed to restrict Agent M4 audit: {error}"))?;
+    }
     serde_json::to_writer(&mut file, event)
         .map_err(|error| format!("failed to encode Agent M4 audit: {error}"))?;
     file.write_all(b"\n")
@@ -813,7 +894,13 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(not(windows))]
 fn replace_file(source: &Path, destination: &Path) -> Result<(), String> {
     fs::rename(source, destination)
-        .map_err(|error| format!("failed to atomically replace Agent M4 store: {error}"))
+        .map_err(|error| format!("failed to atomically replace Agent M4 store: {error}"))?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "Agent M4 store has no parent after replacement".to_string())?;
+    fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("failed to flush Agent M4 store directory: {error}"))
 }
 
 #[cfg(windows)]
@@ -868,6 +955,7 @@ pub(crate) struct CallPolicyScopeV3 {
     pub(crate) sensitive_path_count: usize,
     pub(crate) critical_path_count: usize,
     pub(crate) unknown_write: bool,
+    pub(crate) unknown_network_egress: bool,
 }
 
 pub(crate) fn inspect_call_policy_scope_v3(
@@ -940,12 +1028,23 @@ pub(crate) fn inspect_call_policy_scope_v3(
         .iter()
         .filter(|path| path_is_critical_v3(path))
         .count();
+    let unknown_network_egress = call
+        .arguments
+        .get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|command| {
+            network_destinations.is_empty()
+                || command.chars().any(|character| {
+                    matches!(character, '$' | '%' | '`' | ';' | '|' | '&' | '\n' | '\r')
+                })
+        });
     Ok(CallPolicyScopeV3 {
         paths,
         network_destinations,
         sensitive_path_count,
         critical_path_count,
         unknown_write: call.tool_name == "exec_command",
+        unknown_network_egress,
     })
 }
 
@@ -1142,8 +1241,13 @@ impl OperatorStoreV3 {
         if request.target_ids.is_empty()
             || request.tool_names.is_empty()
             || request.effects.is_empty()
+            || request.target_ids.len() > 64
+            || request.tool_names.len() > 64
+            || request.effects.len() > 64
+            || request.path_prefixes.len() > 64
+            || request.network_destinations.len() > 64
         {
-            return Err("Operator scope must bind targets, tools, and effects".into());
+            return Err("Operator scope is empty or exceeds its native bounds".into());
         }
         if request
             .target_ids
@@ -1163,6 +1267,52 @@ impl OperatorStoreV3 {
         if request.effects.contains(&AgentEffectKindV3::None) {
             return Err("Operator scope cannot grant an effect-free pseudo permission".into());
         }
+        if request.tool_names.iter().any(|name| {
+            matches!(
+                name.as_str(),
+                "read_file" | "list_directory" | "search_text" | "apply_patch" | "transfer_file"
+            )
+        }) && request.path_prefixes.is_empty()
+        {
+            return Err("filesystem Operator tools require an explicit path scope".into());
+        }
+        if request.path_prefixes.iter().any(|path| {
+            path.len() > 4_096
+                || path.chars().any(char::is_control)
+                || path_has_parent_component(path)
+        }) {
+            return Err("Operator path scope is invalid".into());
+        }
+        let mut network_destinations = request.network_destinations;
+        if network_destinations.iter().any(|destination| {
+            destination.protocol.is_empty()
+                || destination.protocol.len() > 32
+                || !destination
+                    .protocol
+                    .bytes()
+                    .enumerate()
+                    .all(|(index, byte)| {
+                        if index == 0 {
+                            byte.is_ascii_alphabetic()
+                        } else {
+                            byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'.' | b'-')
+                        }
+                    })
+                || destination.host.is_empty()
+                || destination.host.len() > 255
+                || destination.host.chars().any(char::is_control)
+                || destination.port == 0
+        }) {
+            return Err("Operator network scope is invalid".into());
+        }
+        for destination in &mut network_destinations {
+            destination.protocol.make_ascii_lowercase();
+            destination.host = normalize_host(&destination.host);
+        }
+        network_destinations.sort_by(|left, right| {
+            (&left.protocol, &left.host, left.port).cmp(&(&right.protocol, &right.host, right.port))
+        });
+        network_destinations.dedup();
         let now = current_unix_ms();
         let grant = OperatorGrantV3 {
             grant_id: format!("operator-{}", Uuid::new_v4().simple()),
@@ -1176,7 +1326,7 @@ impl OperatorStoreV3 {
                 .into_iter()
                 .collect(),
             path_prefixes: unique(request.path_prefixes),
-            network_destinations: request.network_destinations,
+            network_destinations,
             allow_elevation: request.allow_elevation,
             issued_at_unix_ms: now,
             expires_at_unix_ms: now.saturating_add(request.ttl_ms),
@@ -1196,7 +1346,7 @@ impl OperatorStoreV3 {
         call: &AgentToolCallV3,
         effect: &AgentObservedEffectV3,
         scope: &CallPolicyScopeV3,
-    ) -> Result<bool, String> {
+    ) -> Result<Option<String>, String> {
         if operator_rollout_v3() != OperatorRolloutV3::Enabled {
             return Err("Operator rollout is disabled or invalid".into());
         }
@@ -1209,7 +1359,7 @@ impl OperatorStoreV3 {
         call: &AgentToolCallV3,
         effect: &AgentObservedEffectV3,
         scope: &CallPolicyScopeV3,
-    ) -> Result<bool, String> {
+    ) -> Result<Option<String>, String> {
         let now = current_unix_ms();
         let mut grants = self
             .grants
@@ -1239,15 +1389,20 @@ impl OperatorStoreV3 {
         }) else {
             // Outside the Operator envelope, the ordinary per-call native
             // confirmation flow remains available. This never auto-approves.
-            return Ok(false);
+            return Ok(None);
         };
-        grant.last_used_at_unix_ms = Some(now);
-        Ok(!scope.unknown_write
+        let auto_approved = !scope.unknown_write
             && scope.sensitive_path_count == 0
             && !matches!(
                 effect.kind,
                 AgentEffectKindV3::Destructive | AgentEffectKindV3::ExternalSideEffect
-            ))
+            );
+        if auto_approved {
+            grant.last_used_at_unix_ms = Some(now);
+            Ok(Some(grant.grant_id.clone()))
+        } else {
+            Ok(None)
+        }
     }
 
     pub(crate) fn revoke(&self, grant_id: &str) -> Result<OperatorGrantV3, String> {
@@ -1343,15 +1498,21 @@ fn unique(values: Vec<String>) -> Vec<String> {
 }
 
 fn path_within_prefix(path: &str, prefix: &str) -> bool {
-    let path = path.replace('\\', "/").to_ascii_lowercase();
-    let prefix = prefix
-        .replace('\\', "/")
-        .trim_end_matches('/')
-        .to_ascii_lowercase();
+    if path_has_parent_component(path) || path_has_parent_component(prefix) {
+        return false;
+    }
+    let path = path.replace('\\', "/");
+    let prefix = prefix.replace('\\', "/").trim_end_matches('/').to_string();
     path == prefix
         || path
             .strip_prefix(&prefix)
             .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn path_has_parent_component(path: &str) -> bool {
+    path.replace('\\', "/")
+        .split('/')
+        .any(|component| component == "..")
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -1413,6 +1574,11 @@ struct BrokerRecordV3 {
 #[derive(Clone, Default)]
 pub(crate) struct NativeBrokerV3 {
     records: Arc<Mutex<HashMap<String, BrokerRecordV3>>>,
+}
+
+pub(crate) struct ConsumedCredentialBundleV3 {
+    pub(crate) grants: Vec<BrokerGrantV3>,
+    pub(crate) values_by_id: HashMap<String, String>,
 }
 
 impl NativeBrokerV3 {
@@ -1509,34 +1675,70 @@ impl NativeBrokerV3 {
         .map(|(grant, _)| grant)
     }
 
-    #[cfg(test)]
-    fn consume_credential_for_test(
+    pub(crate) fn consume_credentials(
         &self,
-        grant_id: &str,
+        task_id: &str,
+        call: &AgentToolCallV3,
+        purpose: BrokerPurposeV3,
+        required_references: &[(String, String)],
         credentials: &CredentialManager,
-    ) -> Result<bool, String> {
+    ) -> Result<ConsumedCredentialBundleV3, String> {
+        if !matches!(
+            purpose,
+            BrokerPurposeV3::RemoteAuthentication | BrokerPurposeV3::McpAuthentication
+        ) {
+            return Err("credential broker purpose is invalid".into());
+        }
+        let now = current_unix_ms();
         let mut records = self
             .records
             .lock()
             .map_err(|_| "native broker is unavailable".to_string())?;
-        let record = records
-            .get_mut(grant_id)
-            .ok_or_else(|| "broker grant was not found".to_string())?;
-        validate_broker_record(record, current_unix_ms())?;
-        if record.public.kind != BrokerRequestKindV3::Credential {
-            return Err("broker grant is not a credential grant".into());
+        let mut unique_references = required_references.to_vec();
+        unique_references.sort();
+        unique_references.dedup();
+        let mut selected = Vec::with_capacity(unique_references.len());
+        let mut selected_ids = HashSet::new();
+        let mut values_by_id = HashMap::new();
+        for (service, credential_id) in unique_references {
+            let (grant_id, public) = records
+                .iter()
+                .find(|(grant_id, record)| {
+                    !selected_ids.contains(*grant_id)
+                        && record.public.task_id == task_id
+                        && record.public.request_id == call.request_id
+                        && record.public.call_id == call.call_id
+                        && record.public.target_id == call.target.target_id()
+                        && record.public.tool_name == call.tool_name
+                        && record.public.kind == BrokerRequestKindV3::Credential
+                        && record.public.purpose == purpose
+                        && record.public.revoked_at_unix_ms.is_none()
+                        && record.public.consumed_at_unix_ms.is_none()
+                        && now < record.public.expires_at_unix_ms
+                        && record.credential_service.as_deref() == Some(service.as_str())
+                        && record.credential_id.as_deref() == Some(credential_id.as_str())
+                })
+                .map(|(grant_id, record)| (grant_id.clone(), record.public.clone()))
+                .ok_or_else(|| {
+                    "no native credential grant matches every exact call reference".to_string()
+                })?;
+            let value = credentials
+                .get_credential(&service, &credential_id)?
+                .ok_or_else(|| "native credential reference could not be resolved".to_string())?;
+            selected_ids.insert(grant_id.clone());
+            selected.push((grant_id, public));
+            values_by_id.insert(credential_id, value);
         }
-        let service = record
-            .credential_service
-            .as_deref()
-            .ok_or_else(|| "credential service reference is missing".to_string())?;
-        let id = record
-            .credential_id
-            .as_deref()
-            .ok_or_else(|| "credential id reference is missing".to_string())?;
-        let present = credentials.get_credential(service, id)?.is_some();
-        record.public.consumed_at_unix_ms = Some(current_unix_ms());
-        Ok(present)
+        for (grant_id, _) in &selected {
+            let record = records
+                .get_mut(grant_id)
+                .ok_or_else(|| "selected native broker grant disappeared".to_string())?;
+            record.public.consumed_at_unix_ms = Some(now);
+        }
+        Ok(ConsumedCredentialBundleV3 {
+            grants: selected.into_iter().map(|(_, grant)| grant).collect(),
+            values_by_id,
+        })
     }
 
     fn consume_matching(
@@ -1561,9 +1763,11 @@ impl NativeBrokerV3 {
                     && record.public.tool_name == call.tool_name
                     && record.public.kind == kind
                     && record.public.purpose == purpose
+                    && record.public.revoked_at_unix_ms.is_none()
+                    && record.public.consumed_at_unix_ms.is_none()
+                    && now < record.public.expires_at_unix_ms
             })
             .ok_or_else(|| "no native broker grant matches the exact call".to_string())?;
-        validate_broker_record(record, now)?;
         record.public.consumed_at_unix_ms = Some(now);
         Ok((
             record.public.clone(),
@@ -1587,13 +1791,15 @@ impl NativeBrokerV3 {
     }
 
     pub(crate) fn list(&self) -> Result<Vec<BrokerGrantV3>, String> {
-        Ok(self
+        let mut grants = self
             .records
             .lock()
             .map_err(|_| "native broker is unavailable".to_string())?
             .values()
             .map(|record| record.public.clone())
-            .collect())
+            .collect::<Vec<_>>();
+        grants.sort_by_key(|grant| grant.expires_at_unix_ms);
+        Ok(grants)
     }
 }
 
@@ -1603,19 +1809,6 @@ fn valid_credential_reference(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':'))
-}
-
-fn validate_broker_record(record: &BrokerRecordV3, now: u64) -> Result<(), String> {
-    if record.public.revoked_at_unix_ms.is_some() {
-        return Err("broker grant was revoked".into());
-    }
-    if record.public.consumed_at_unix_ms.is_some() {
-        return Err("broker grant was already consumed".into());
-    }
-    if now >= record.public.expires_at_unix_ms {
-        return Err("broker grant expired".into());
-    }
-    Ok(())
 }
 
 pub(crate) fn enforce_native_call_policy_v3(
@@ -1635,7 +1828,7 @@ pub(crate) fn enforce_native_call_policy_v3(
         return Err("critical sensitive-path write is disabled by native policy".into());
     }
     if effect.kind == AgentEffectKindV3::ExternalSideEffect && call.tool_name == "exec_command" {
-        if scope.network_destinations.is_empty() {
+        if scope.unknown_network_egress {
             return Err("unknown network egress is denied by native policy".into());
         }
         for destination in &scope.network_destinations {
@@ -1700,7 +1893,13 @@ fn destination_matches_frozen_target(
     destination: &AgentNetworkDestinationV3,
     target: &AgentToolTargetV3,
 ) -> bool {
-    matches!(target, AgentToolTargetV3::Remote { host, port, .. } if normalize_host(host) == destination.host && *port == destination.port)
+    matches!(
+        target,
+        AgentToolTargetV3::Remote { host, port, .. }
+            if matches!(destination.protocol.as_str(), "ssh" | "sftp")
+                && normalize_host(host) == destination.host
+                && *port == destination.port
+    )
 }
 
 pub(crate) fn current_unix_ms() -> u64 {
@@ -1708,6 +1907,10 @@ pub(crate) fn current_unix_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 pub(crate) fn audit_event_v3(
@@ -1729,6 +1932,13 @@ pub(crate) fn audit_event_v3(
             .map(|scope| scope.network_destinations.clone())
             .unwrap_or_default(),
         sensitive_path_count: scope.map_or(0, |scope| scope.sensitive_path_count),
+        grant_id: None,
+        purpose: None,
+        expires_at_unix_ms: None,
+        scope_target_ids: Vec::new(),
+        scope_tool_names: Vec::new(),
+        scope_effects: Vec::new(),
+        scope_path_count: 0,
         decision: decision.into(),
         recorded_at_unix_ms: current_unix_ms(),
     }
@@ -1738,7 +1948,7 @@ pub(crate) fn audit_event_v3(
 mod tests {
     use super::*;
     use crate::agent_contract_v3::{
-        AgentExecutionChannelV3, AgentRequestSourceV3, ExecCommandArgumentsV3,
+        AgentExecutionChannelV3, AgentRequestSourceV3, ExecCommandArgumentsV3, PlanStepV3,
     };
 
     fn request() -> AgentRequestV3 {
@@ -1789,6 +1999,7 @@ mod tests {
             plan: None,
             calls: Vec::new(),
             processes: Vec::new(),
+            last_failure: None,
             created_at_unix_ms: 1,
             updated_at_unix_ms: 1,
         }
@@ -1799,13 +2010,41 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = M4PersistenceV3::default();
         store.configure(root.path()).unwrap();
-        store.upsert_task(persisted("active")).unwrap();
+        let mut task = persisted("active");
+        task.last_failure = Some("token=failure-secret".into());
+        task.plan = Some(AgentPlanV3 {
+            version: 1,
+            explanation: Some("token=plan-secret".into()),
+            steps: vec![PlanStepV3 {
+                id: "step-1".into(),
+                description: "password=description-secret".into(),
+                dependencies: Vec::new(),
+                target_ids: vec!["local-1".into()],
+                required_tools: vec!["read_file".into()],
+                expected_effect: AgentEffectKindV3::SensitiveRead,
+                status: PlanStepStatusV3::Pending,
+                success_criteria: vec!["api_key=criteria-secret".into()],
+                rollback_or_compensation: "token=rollback-secret".into(),
+                evidence_refs: Vec::new(),
+            }],
+            updated_at_unix_ms: 1,
+        });
+        store.upsert_task(task).unwrap();
         let path = root.path().join("agent-m4/tasks-v1.json");
         let raw = fs::read_to_string(path).unwrap();
         assert!(raw.contains("\"version\":1"));
         assert!(!raw.contains("top-secret"));
         assert!(!raw.contains("hunter2"));
+        assert!(!raw.contains("plan-secret"));
+        assert!(!raw.contains("description-secret"));
+        assert!(!raw.contains("criteria-secret"));
+        assert!(!raw.contains("rollback-secret"));
+        assert!(!raw.contains("failure-secret"));
         assert!(raw.len() <= MAX_STORE_BYTES);
+        assert_eq!(
+            fs::read_dir(root.path().join("agent-m4")).unwrap().count(),
+            1
+        );
     }
 
     #[test]
@@ -1831,6 +2070,37 @@ mod tests {
         assert!(corrupt.configure(corrupt_root.path()).unwrap().is_empty());
         assert!(corrupt.status().unwrap().corruption_recovered);
         assert_eq!(fs::read_dir(corrupt_dir).unwrap().count(), 1);
+
+        let invalid_root = tempfile::tempdir().unwrap();
+        let invalid_dir = invalid_root.path().join("agent-m4");
+        fs::create_dir_all(&invalid_dir).unwrap();
+        fs::write(
+            invalid_dir.join("tasks-v1.json"),
+            br#"{"version":1,"writtenAtUnixMs":1,"tasks":"invalid","notifications":[],"audit":[]}"#,
+        )
+        .unwrap();
+        let invalid = M4PersistenceV3::default();
+        assert!(invalid.configure(invalid_root.path()).unwrap().is_empty());
+        assert!(invalid.status().unwrap().corruption_recovered);
+        assert_eq!(fs::read_dir(invalid_dir).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn unknown_persisted_state_and_external_wait_fail_into_reconciliation() {
+        let root = tempfile::tempdir().unwrap();
+        let first = M4PersistenceV3::default();
+        first.configure(root.path()).unwrap();
+        let mut task = persisted("futureState");
+        task.phase = TaskPhaseV3::WaitingExternal;
+        first.upsert_task(task).unwrap();
+
+        let restarted = M4PersistenceV3::default();
+        let loaded = restarted.configure(root.path()).unwrap();
+        assert_eq!(loaded[0].state, "needsReconciliation");
+        assert_eq!(
+            recovery_snapshot(&loaded[0]).disposition,
+            RecoveryDispositionV3::NeedsReconciliation
+        );
     }
 
     #[test]
@@ -1912,12 +2182,74 @@ mod tests {
         assert!(!serde_json::to_string(&grant)
             .unwrap()
             .contains("do-not-leak"));
+        assert!(!serde_json::to_string(&grant)
+            .unwrap()
+            .contains("credential-1"));
+        let mut wrong_call = call("test");
+        wrong_call.call_id = "other-call".into();
         assert!(broker
-            .consume_credential_for_test(&grant.grant_id, &credentials)
-            .unwrap());
-        assert!(broker
-            .consume_credential_for_test(&grant.grant_id, &credentials)
+            .consume_credentials(
+                "task-1",
+                &wrong_call,
+                BrokerPurposeV3::RemoteAuthentication,
+                &[("com.shellspan.fixture".into(), "credential-1".into())],
+                &credentials,
+            )
             .is_err());
+        let bundle = broker
+            .consume_credentials(
+                "task-1",
+                &call("test"),
+                BrokerPurposeV3::RemoteAuthentication,
+                &[("com.shellspan.fixture".into(), "credential-1".into())],
+                &credentials,
+            )
+            .unwrap();
+        assert_eq!(bundle.grants.len(), 1);
+        assert_eq!(
+            bundle.values_by_id.get("credential-1").map(String::as_str),
+            Some("do-not-leak")
+        );
+        assert!(broker
+            .consume_credentials(
+                "task-1",
+                &call("test"),
+                BrokerPurposeV3::RemoteAuthentication,
+                &[("com.shellspan.fixture".into(), "credential-1".into())],
+                &credentials,
+            )
+            .is_err());
+
+        let mut revoked_call = call("test");
+        revoked_call.call_id = "call-revoked".into();
+        let revoked = broker
+            .authorize(
+                BrokerAuthorizeRequestV3 {
+                    task_id: "task-1".into(),
+                    request_id: "req-1".into(),
+                    call_id: revoked_call.call_id.clone(),
+                    target_id: "local-1".into(),
+                    tool_name: "exec_command".into(),
+                    kind: BrokerRequestKindV3::Credential,
+                    purpose: BrokerPurposeV3::RemoteAuthentication,
+                    credential_service: Some("com.shellspan.fixture".into()),
+                    credential_id: Some("credential-1".into()),
+                    ttl_ms: 1_000,
+                },
+                &request(),
+            )
+            .unwrap();
+        broker.revoke(&revoked.grant_id).unwrap();
+        assert!(broker
+            .consume_credentials(
+                "task-1",
+                &revoked_call,
+                BrokerPurposeV3::RemoteAuthentication,
+                &[("com.shellspan.fixture".into(), "credential-1".into())],
+                &credentials,
+            )
+            .is_err());
+        assert!(NativeBrokerV3::default().list().unwrap().is_empty());
     }
 
     #[test]
@@ -1950,6 +2282,7 @@ mod tests {
             sensitive_path_count: 0,
             critical_path_count: 0,
             unknown_write: true,
+            unknown_network_egress: false,
         };
         let effect = AgentObservedEffectV3 {
             kind: AgentEffectKindV3::StateChange,
@@ -1958,17 +2291,48 @@ mod tests {
             paths: Vec::new(),
             network_destinations: Vec::new(),
         };
-        assert!(!store
+        assert!(store
             .authorize_enabled("task-1", &call, &effect, &scope)
-            .unwrap());
+            .unwrap()
+            .is_none());
         assert!(store
             .revoke("operator-1")
             .unwrap()
             .revoked_at_unix_ms
             .is_some());
-        assert!(!store
+        assert!(store
             .authorize_enabled("task-1", &call, &effect, &scope)
-            .unwrap());
+            .unwrap()
+            .is_none());
+
+        let mut expired = store.list().unwrap()[0].clone();
+        expired.grant_id = "operator-expired".into();
+        expired.revoked_at_unix_ms = None;
+        expired.expires_at_unix_ms = current_unix_ms().saturating_sub(1);
+        store
+            .grants
+            .lock()
+            .unwrap()
+            .insert(expired.grant_id.clone(), expired);
+        let auto_scope = CallPolicyScopeV3 {
+            unknown_write: false,
+            ..scope.clone()
+        };
+        assert!(store
+            .authorize_enabled("task-1", &call, &effect, &auto_scope)
+            .unwrap()
+            .is_none());
+        let mut expiring = store.list().unwrap()[0].clone();
+        expiring.grant_id = "operator-expiring".into();
+        expiring.revoked_at_unix_ms = None;
+        expiring.expires_at_unix_ms = current_unix_ms() + 30_000;
+        store
+            .grants
+            .lock()
+            .unwrap()
+            .insert(expiring.grant_id.clone(), expiring);
+        assert_eq!(store.expiring().unwrap().len(), 1);
+        assert!(store.expiring().unwrap().is_empty());
 
         let root = tempfile::tempdir().unwrap();
         let persistence = M4PersistenceV3::default();
@@ -1986,6 +2350,29 @@ mod tests {
         let audit = fs::read_to_string(root.path().join("agent-m4/audit-v1.jsonl")).unwrap();
         assert!(!audit.contains("do-not-audit"));
         assert!(audit.contains("operatorUsed"));
+
+        let registry = crate::agent_runtime_v3::ToolRegistryV3::from_builtin_manifest().unwrap();
+        assert!(store
+            .configure_enabled(
+                OperatorConfigureRequestV3 {
+                    task_id: "task-1".into(),
+                    target_ids: vec!["local-1".into()],
+                    tool_names: vec!["read_file".into()],
+                    effects: vec![AgentEffectKindV3::ReadOnly],
+                    path_prefixes: vec!["C:/workspace".into()],
+                    network_destinations: Vec::new(),
+                    allow_elevation: false,
+                    ttl_ms: MAX_OPERATOR_TTL_MS + 1,
+                },
+                &request(),
+                &registry.list(),
+            )
+            .is_err());
+        assert!(!path_within_prefix("/Srv/App/config", "/srv/app"));
+        assert!(!path_within_prefix(
+            "C:/workspace/../secrets",
+            "C:/workspace"
+        ));
     }
 
     #[test]
@@ -2016,6 +2403,18 @@ mod tests {
                 .unwrap_err()
                 .contains("unknown network egress")
         );
+        let mixed = inspect_call_policy_scope_v3(&call(
+            "curl https://api.example.test/v1; curl $SECOND_URL",
+        ))
+        .unwrap();
+        assert!(mixed.unknown_network_egress);
+        assert!(enforce_native_call_policy_v3(
+            &call("curl https://api.example.test/v1; curl $SECOND_URL"),
+            &effect,
+            &mixed,
+        )
+        .unwrap_err()
+        .contains("unknown network egress"));
         assert!(parse_egress_entry("https://api.example.test:443/path").is_err());
     }
 }

@@ -118,6 +118,7 @@ const task: AgentTaskSnapshotV3 = {
     }],
     recoveryAdvice: 'Inspect the target; the uncertain write will not be replayed.',
     requiresHumanAction: true,
+    requiresSessionRebind: true,
   },
   notifications: [{
     notificationId: 'notice-1',
@@ -170,6 +171,7 @@ describe('Agent M4 background task center', () => {
     expect(screen.getByText('Recover a background task')).toBeInTheDocument();
     expect(screen.getAllByText('needsReconciliation')).toHaveLength(2);
     expect(screen.getByText('process lost')).toBeInTheDocument();
+    expect(screen.getByText(/session rebind required/)).toBeInTheDocument();
     expect(screen.getByText(/will not be replayed/)).toBeInTheDocument();
     expect(screen.queryByText(/terminal output/i)).not.toBeInTheDocument();
 
@@ -184,6 +186,7 @@ describe('Agent M4 background task center', () => {
       disposition: 'safeToResume',
       phase: 'running',
       requiresHumanAction: false,
+      requiresSessionRebind: false,
     } }]);
     render(<AgentM4TaskCenter />);
     expect(await screen.findByText('Background task center')).toBeInTheDocument();
@@ -200,5 +203,44 @@ describe('Agent M4 background task center', () => {
       allowElevation: false,
       ttlMs: 300_000,
     }));
+  });
+
+  it('keeps the Rust task center available when the independent Operator rollout fails closed', async () => {
+    const user = userEvent.setup();
+    mocks.operatorPolicy.mockRejectedValue(new Error('unknown Operator rollout'));
+    mocks.listOperatorGrants.mockRejectedValue(new Error('Operator unavailable'));
+
+    render(<AgentM4TaskCenter />);
+
+    expect(await screen.findByText('Background task center')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    expect(screen.getByText('Recover a background task')).toBeInTheDocument();
+    expect(screen.getByText('disabled')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Enable for 5 minutes' })).toBeDisabled();
+  });
+
+  it('shows and can revoke active grants for older tasks instead of hiding them', async () => {
+    const user = userEvent.setup();
+    mocks.listOperatorGrants.mockResolvedValue([{
+      grantId: 'operator-old',
+      taskId: 'task-old',
+      targetIds: ['local-old'],
+      toolNames: ['read_file'],
+      effects: ['readOnly'],
+      pathPrefixes: ['C:/old'],
+      networkDestinations: [],
+      allowElevation: false,
+      issuedAtUnixMs: Date.now() - 1_000,
+      expiresAtUnixMs: Date.now() + 60_000,
+    }]);
+    mocks.revokeOperator.mockResolvedValue({ grantId: 'operator-old' });
+
+    render(<AgentM4TaskCenter />);
+
+    expect(await screen.findByText('Background task center')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    expect(screen.getByText(/Task task-old/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Revoke now' }));
+    await waitFor(() => expect(mocks.revokeOperator).toHaveBeenCalledWith('operator-old'));
   });
 });

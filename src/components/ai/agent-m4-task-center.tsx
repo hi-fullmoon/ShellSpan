@@ -72,6 +72,7 @@ function scopeForTask(task: AgentTaskSnapshotV3): {
   const toolNames = [...new Set(plan.steps.flatMap((step) => step.requiredTools))];
   const effects = [...new Set(plan.steps.map((step) => step.expectedEffect))];
   const pathPrefixes = task.request.targets.flatMap((target) => {
+    if (!targetIds.includes(target.targetId)) return [];
     if (target.kind === 'local' && target.cwd) return [target.cwd];
     if (target.kind === 'remote' && target.rootPath) return [target.rootPath];
     return [];
@@ -129,8 +130,14 @@ function TaskCard({
             <div>{task.notifications.length}</div>
           </div>
         </div>
-        <Alert variant={recovery.requiresHumanAction ? 'warning' : 'default'} size="sm">
-          <AlertTitle>{recovery.disposition}</AlertTitle>
+        <Alert
+          variant={recovery.requiresHumanAction || recovery.requiresSessionRebind ? 'warning' : 'default'}
+          size="sm"
+        >
+          <AlertTitle>
+            {recovery.disposition}
+            {recovery.requiresSessionRebind ? ' · session rebind required' : ''}
+          </AlertTitle>
           <AlertDescription>{recovery.recoveryAdvice}</AlertDescription>
         </Alert>
         {recovery.processes.map((process) => (
@@ -196,10 +203,12 @@ function OperatorCard({
 }): React.ReactNode {
   const scope = task ? scopeForTask(task) : undefined;
   const active = grants.filter((grant) => !grant.revokedAtUnixMs && grant.expiresAtUnixMs > now);
+  const currentTaskHasGrant = active.some((grant) => grant.taskId === task?.request.taskId);
   const canEnable = policy?.stage === 'enabled'
+    && task?.state === 'active'
     && task?.request.permissionMode === 'operator'
     && Boolean(scope)
-    && active.length === 0;
+    && !currentTaskHasGrant;
 
   return (
     <Card size="sm" variant="outline">
@@ -224,7 +233,7 @@ function OperatorCard({
               <Badge variant="outline">{grant.effects.join(', ')}</Badge>
             </div>
             <span className="text-muted-foreground">
-              Targets {grant.targetIds.join(', ')} · {grant.pathPrefixes.length} path scope(s) · elevation {grant.allowElevation ? 'allowed' : 'denied'}
+              Task {grant.taskId} · targets {grant.targetIds.join(', ')} · {grant.pathPrefixes.length} path scope(s) · elevation {grant.allowElevation ? 'allowed' : 'denied'}
             </span>
             <div>
               <Button
@@ -239,7 +248,7 @@ function OperatorCard({
             </div>
           </div>
         ))}
-        {active.length === 0 && (
+        {!currentTaskHasGrant && (
           <span className="text-muted-foreground">
             {canEnable
               ? `Ready to bind the current Rust plan: ${scope?.toolNames.join(', ')}.`
@@ -273,10 +282,15 @@ export function AgentM4TaskCenter(): React.ReactNode {
   const refresh = useCallback(async () => {
     const [nextTasks, nextPolicy, nextGrants, nextStore, audit] = await Promise.all([
       invokeAgentV3ListTasks(),
-      invokeAgentV3OperatorPolicy(),
-      invokeAgentV3ListOperatorGrants(),
-      invokeAgentV3RecoveryStatus(),
-      invokeAgentV3ListAuditEvents(),
+      invokeAgentV3OperatorPolicy().catch(() => ({
+        stage: 'disabled' as const,
+        defaultEnabled: false as const,
+        maximumTtlMs: 0,
+        grantsSurviveRestart: false as const,
+      })),
+      invokeAgentV3ListOperatorGrants().catch(() => []),
+      invokeAgentV3RecoveryStatus().catch(() => undefined),
+      invokeAgentV3ListAuditEvents().catch(() => []),
     ]);
     setTasks(nextTasks);
     setPolicy(nextPolicy);
@@ -400,7 +414,7 @@ export function AgentM4TaskCenter(): React.ReactNode {
           <OperatorCard
             task={latestTask}
             policy={policy}
-            grants={grants.filter((grant) => grant.taskId === latestTask?.request.taskId)}
+            grants={grants}
             now={now}
             busy={busy}
             onEnable={() => void enableOperator()}

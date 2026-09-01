@@ -15,7 +15,7 @@ use crate::redaction::{redact_json_value, redact_sensitive_text};
 
 use super::workspace_root_v3;
 
-const MCP_CREDENTIAL_SERVICE: &str = "com.shellspan.mcp";
+pub(crate) const MCP_CREDENTIAL_SERVICE: &str = "com.shellspan.mcp";
 const MAX_MCP_CONFIG_BYTES: u64 = 256 * 1024;
 const MAX_MCP_SERVERS: usize = 16;
 const MAX_MCP_TOOLS: usize = 256;
@@ -525,7 +525,7 @@ impl McpRuntimeV3 {
         &self,
         task_id: &str,
         call: &AgentMcpCallV3,
-        credentials: &CredentialManager,
+        credential_values: &HashMap<String, String>,
     ) -> Result<(Value, bool), String> {
         require_experimental_mcp()?;
         self.assess_call(task_id, &call.server_id, &call.tool_name, &call.arguments)?;
@@ -546,7 +546,7 @@ impl McpRuntimeV3 {
         let result = invoke_stdio_tool(
             &config,
             &root,
-            credentials,
+            credential_values,
             &call.tool_name,
             &call.arguments,
         )?;
@@ -564,6 +564,33 @@ impl McpRuntimeV3 {
             }),
             true,
         ))
+    }
+
+    pub(crate) fn credential_ids(
+        &self,
+        task_id: &str,
+        server_id: &str,
+    ) -> Result<Vec<String>, String> {
+        let states = self
+            .states
+            .lock()
+            .map_err(|_| "MCP state is unavailable".to_string())?;
+        let state = states
+            .get(task_id)
+            .ok_or_else(|| "MCP task was not found".to_string())?;
+        let server = state
+            .servers
+            .get(server_id)
+            .ok_or_else(|| "MCP server was not configured".to_string())?;
+        let mut ids = server
+            .config
+            .credential_refs
+            .iter()
+            .map(|reference| reference.credential_id.clone())
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids.dedup();
+        Ok(ids)
     }
 }
 
@@ -709,19 +736,38 @@ fn discover_stdio_tools(
 fn invoke_stdio_tool(
     config: &McpServerConfigV3,
     root: &Path,
-    credentials: &CredentialManager,
+    credential_values: &HashMap<String, String>,
     tool_name: &str,
     arguments: &Value,
 ) -> Result<Value, String> {
-    stdio_exchange(
-        config,
-        root,
-        credentials,
+    let executable = resolve_executable(config, root)?;
+    let cwd = resolve_cwd(config, root)?;
+    let mut command = Command::new(executable);
+    command
+        .args(&config.args)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    for reference in &config.credential_refs {
+        let value = credential_values
+            .get(&reference.credential_id)
+            .ok_or_else(|| "MCP broker did not provide every required credential".to_string())?;
+        command.env(&reference.env, value);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("failed to start MCP stdio server: {error}"))?;
+    let result = exchange_with_child(
+        &mut child,
         McpActionV3::Call {
             tool_name,
             arguments,
         },
-    )
+    );
+    let _ = child.kill();
+    let _ = child.wait();
+    result
 }
 
 enum McpActionV3<'a> {
