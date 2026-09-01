@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "contractVersion": 2,
   "collectorVersion": 1,
-  "capturedAt": "2026-08-31T20:42:39.729Z",
-  "sourceRevision": "93f21e6b3cf20fd0b4ffc4f583e0df5e7f75c8e6",
-  "v2ContractSha256": "d4d4741e9ed95b0122debea70d45874c61ace1aeb5671074b1153ee12999413b",
+  "capturedAt": "2026-09-01T05:50:53.583Z",
+  "sourceRevision": "33ad91ff5944590e211c25b55d676ee96d5a3748",
+  "v2ContractSha256": "760e1839bfd19630acd20526a13c417e323349aafed9d979ffe4a5cc764b4770",
   "taskSetSha256": "59d23f4031d728e3234e348d3393eafa4fc5a8028681fde166be23271181314c",
   "environment": {
-    "platform": "win32",
-    "architecture": "x64",
-    "node": "v26.5.0",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "node": "v24.15.0",
     "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
   },
   "probes": [
@@ -25,7 +25,7 @@
       ],
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 4466
+      "durationMs": 1270
     },
     {
       "id": "v2-security",
@@ -46,13 +46,12 @@
       ],
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 19285
+      "durationMs": 6710
     },
     {
       "id": "v2-rust-contract",
       "command": [
         "cargo",
-        "+1.95.0-x86_64-pc-windows-msvc",
         "test",
         "--manifest-path",
         "src-tauri/Cargo.toml",
@@ -61,8 +60,7 @@
       ],
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 1152,
-      "note": "The repository-pinned MSVC toolchain was used for Windows Tauri tests."
+      "durationMs": 1548
     }
   ],
   "taskAssessments": [
