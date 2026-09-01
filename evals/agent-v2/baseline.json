@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": 2,
+  "collectorVersion": 1,
+  "capturedAt": "2026-08-31T20:42:39.729Z",
+  "sourceRevision": "93f21e6b3cf20fd0b4ffc4f583e0df5e7f75c8e6",
+  "v2ContractSha256": "d4d4741e9ed95b0122debea70d45874c61ace1aeb5671074b1153ee12999413b",
+  "taskSetSha256": "59d23f4031d728e3234e348d3393eafa4fc5a8028681fde166be23271181314c",
+  "environment": {
+    "platform": "win32",
+    "architecture": "x64",
+    "node": "v26.5.0",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+  },
+  "probes": [
+    {
+      "id": "v2-contract",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "src/lib/__tests__/agent-contract.test.ts",
+        "--maxWorkers=1"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 4466
+    },
+    {
+      "id": "v2-security",
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "src/lib/__tests__/agent-terminal-executor.test.ts",
+        "src/lib/__tests__/safe-shell-command.test.ts",
+        "src/lib/__tests__/agent-command-risk.test.ts",
+        "src/lib/__tests__/agent-approval-controller.test.ts",
+        "src/lib/__tests__/agent-ui-controller.test.ts",
+        "src/lib/__tests__/agent-sessions.test.ts",
+        "src/lib/__tests__/terminal-output-buffer.test.ts",
+        "src/stores/__tests__/agentPermissionStore.test.ts",
+        "--maxWorkers=1"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 19285
+    },
+    {
+      "id": "v2-rust-contract",
+      "command": [
+        "cargo",
+        "+1.95.0-x86_64-pc-windows-msvc",
+        "test",
+        "--manifest-path",
+        "src-tauri/Cargo.toml",
+        "--locked",
+        "agent_contract::tests"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "durationMs": 1152,
+      "note": "The repository-pinned MSVC toolchain was used for Windows Tauri tests."
+    }
+  ],
+  "taskAssessments": [
+    {
+      "taskId": "disk-space-diagnosis",
+      "v2Disposition": "supported",
+      "gapCodes": [
+        "native-policy-token"
+      ]
+    },
+    {
+      "taskId": "service-recovery",
+      "v2Disposition": "partial",
+      "gapCodes": [
+        "structured-file-tools",
+        "process-handles",
+        "native-policy-token"
+      ]
+    },
+    {
+      "taskId": "log-root-cause",
+      "v2Disposition": "supported",
+      "gapCodes": [
+        "structured-file-tools",
+        "native-policy-token"
+      ]
+    },
+    {
+      "taskId": "local-edit-sftp-publish",
+      "v2Disposition": "unsupported",
+      "gapCodes": [
+        "structured-file-tools",
+        "structured-transfer",
+        "multi-target",
+        "native-policy-token"
+      ]
+    },
+    {
+      "taskId": "docker-health",
+      "v2Disposition": "partial",
+      "gapCodes": [
+        "process-handles",
+        "native-policy-token"
+      ]
+    },
+    {
+      "taskId": "multi-host-canary",
+      "v2Disposition": "unsupported",
+      "gapCodes": [
+        "multi-target",
+        "native-policy-token"
+      ]
+    },
+    {
+      "taskId": "restart-reconciliation",
+      "v2Disposition": "unsupported",
+      "gapCodes": [
+        "process-handles",
+        "restart-reconciliation",
+        "native-policy-token"
+      ]
+    }
+  ],
+  "summary": {
+    "passedProbes": 3,
+    "failedProbes": 0,
+    "skippedProbes": 0,
+    "supportedTasks": 2,
+    "partialTasks": 2,
+    "unsupportedTasks": 3
+  }
+}

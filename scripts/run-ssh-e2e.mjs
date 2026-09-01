@@ -5,6 +5,9 @@ import path from 'node:path';
 const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const composeFile = path.join(workspace, 'tests', 'ssh-e2e', 'compose.yml');
 const projectName = 'shellspan-e2e';
+const testFilter = process.argv.includes('--agent-m2')
+  ? 'isolated_ssh_sftp_end_to_end_agent_m2_native_files'
+  : 'isolated_ssh_sftp_end_to_end';
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -34,7 +37,7 @@ try {
   ]);
   run('cargo', [
     'test', '--manifest-path', path.join(workspace, 'src-tauri', 'Cargo.toml'),
-    '--locked', 'isolated_ssh_sftp_end_to_end', '--', '--ignored', '--nocapture',
+    '--locked', testFilter, '--', '--ignored', '--nocapture',
     '--test-threads=1',
   ], {
     env: {

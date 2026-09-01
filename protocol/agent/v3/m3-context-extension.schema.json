@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shellspan.dev/protocol/agent/v3/m3-context-extension.schema.json",
+  "title": "ShellSpan Agent v3 M3 context and extension contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["context", "skill", "hooks", "runbook", "mcp"],
+  "properties": {
+    "context": { "$ref": "#/$defs/contextSnapshot" },
+    "skill": { "$ref": "#/$defs/skillDeclaration" },
+    "hooks": { "$ref": "#/$defs/hookFile" },
+    "runbook": { "$ref": "#/$defs/runbook" },
+    "mcp": { "$ref": "#/$defs/mcpConfig" }
+  },
+  "$defs": {
+    "effect": {
+      "enum": ["none", "readOnly", "sensitiveRead", "stateChange", "destructive", "externalSideEffect"]
+    },
+    "targetKind": {
+      "enum": ["local", "remote", "process", "ui", "task"]
+    },
+    "contextScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskId"],
+      "properties": {
+        "workspaceRoot": { "type": "string", "minLength": 1 },
+        "targetId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "taskId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "contextFragment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fragmentId",
+        "layer",
+        "sourceKind",
+        "source",
+        "scope",
+        "priority",
+        "overrides",
+        "trust",
+        "sensitivity",
+        "instructionEligible",
+        "untrusted",
+        "byteLength",
+        "estimatedTokens",
+        "preview"
+      ],
+      "properties": {
+        "fragmentId": { "type": "string", "minLength": 1 },
+        "layer": { "enum": ["workspace", "host", "session", "task"] },
+        "sourceKind": {
+          "enum": ["nativeIdentity", "userRequest", "projectInstruction", "plan", "toolEvidence", "compaction"]
+        },
+        "source": { "type": "string", "minLength": 1 },
+        "scope": { "$ref": "#/$defs/contextScope" },
+        "priority": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "overrides": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "trust": { "enum": ["native", "userProvided", "projectScoped", "untrustedData"] },
+        "sensitivity": { "enum": ["public", "internal", "sensitive", "secretReference"] },
+        "instructionEligible": { "type": "boolean" },
+        "untrusted": { "type": "boolean" },
+        "byteLength": { "type": "integer", "minimum": 0 },
+        "estimatedTokens": { "type": "integer", "minimum": 0 },
+        "preview": { "type": "string", "maxLength": 320 },
+        "omissionReason": { "enum": ["symlinkRejected", "sizeLimit"] }
+      }
+    },
+    "contextArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "kind", "mediaType", "byteLength", "sha256", "createdAtUnixMs"],
+      "properties": {
+        "artifactId": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["structuredCompaction", "symbolMap", "directoryMap"] },
+        "mediaType": { "type": "string", "minLength": 1 },
+        "byteLength": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "createdAtUnixMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "contextSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation", "fragments", "artifacts", "usage"],
+      "properties": {
+        "generation": { "type": "integer", "minimum": 1 },
+        "fragments": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/contextFragment" }
+        },
+        "artifacts": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/contextArtifact" }
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sourceBytes", "modelVisibleBytes", "estimatedInputTokens", "costReason"],
+          "properties": {
+            "sourceBytes": { "type": "integer", "minimum": 0 },
+            "modelVisibleBytes": { "type": "integer", "minimum": 0 },
+            "estimatedInputTokens": { "type": "integer", "minimum": 0 },
+            "estimatedCostUsd": { "type": "number", "minimum": 0 },
+            "costReason": { "type": "string", "minLength": 1 }
+          }
+        },
+        "compactedAtUnixMs": { "type": "integer", "minimum": 0 },
+        "compactionReason": { "enum": ["manual", "budgetPressure", "beforeExtension"] }
+      }
+    },
+    "skillDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "name", "description", "requiredTools", "targets", "permissions", "body"],
+      "properties": {
+        "version": { "const": 1 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "requiredTools": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/targetKind" }
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/effect" }
+        },
+        "body": { "type": "string", "maxLength": 65536 }
+      }
+    },
+    "hook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "event", "mode", "action"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "event": {
+          "enum": ["sessionStart", "sessionEnd", "userPromptSubmitted", "beforeTool", "afterTool", "toolFailed", "permissionRequested", "beforeCompact", "taskCompleted", "taskFailed"]
+        },
+        "mode": { "enum": ["sync", "async"] },
+        "action": { "enum": ["allow", "deny", "modify", "observe"] },
+        "tool": { "type": "string", "minLength": 1 },
+        "argumentOverrides": { "type": "object" },
+        "reason": { "type": "string", "maxLength": 1024 },
+        "metricName": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "sync" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "event": { "const": "beforeTool" },
+              "action": { "enum": ["allow", "deny", "modify"] }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "async" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "action": { "const": "observe" },
+              "metricName": { "type": "string", "minLength": 1, "maxLength": 128 }
+            },
+            "required": ["metricName"]
+          }
+        }
+      ]
+    },
+    "hookFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "hooks"],
+      "properties": {
+        "version": { "const": 1 },
+        "hooks": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/hook" }
+        }
+      }
+    },
+    "runbookStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "requiredTools", "expectedEffect", "successCriteria", "rollbackOrCompensation"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "dependencies": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "requiredTools": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+        "expectedEffect": { "$ref": "#/$defs/effect" },
+        "successCriteria": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "rollbackOrCompensation": { "type": "string", "minLength": 1 }
+      }
+    },
+    "runbook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "id", "name", "description", "parameters", "prechecks", "steps", "successCriteria", "rollback"],
+      "properties": {
+        "version": { "const": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "required"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "required": { "type": "boolean" },
+              "default": { "type": "string" }
+            }
+          }
+        },
+        "prechecks": { "type": "array", "items": { "$ref": "#/$defs/runbookStep" } },
+        "steps": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/runbookStep" } },
+        "successCriteria": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "rollback": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    },
+    "mcpServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "transport", "command", "enabled"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "transport": { "const": "stdio" },
+        "command": { "type": "string", "minLength": 1 },
+        "args": { "type": "array", "maxItems": 64, "items": { "type": "string" } },
+        "cwd": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "credentialRefs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["env", "credentialId"],
+            "properties": {
+              "env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+              "credentialId": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "toolPolicies": {
+          "type": "object",
+          "additionalProperties": { "enum": ["disabled", "readOnly", "externalWrite"] }
+        }
+      }
+    },
+    "mcpConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "servers"],
+      "properties": {
+        "version": { "const": 1 },
+        "servers": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/mcpServer" } }
+      }
+    }
+  }
+}

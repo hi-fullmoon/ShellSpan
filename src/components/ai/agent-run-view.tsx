@@ -1,6 +1,9 @@
 import { BotIcon, CircleAlertIcon, MessageCircleQuestionIcon, RotateCcwIcon, SettingsIcon } from 'lucide-react';
 import { AgentApprovalCard } from '@/components/ai/agent-approval-card';
 import { AssistantMessageContent } from '@/components/ai/assistant-message-content';
+import { AgentM2TaskSurface } from '@/components/ai/agent-m2-task-surface';
+import { AgentM3ContextSurface } from '@/components/ai/agent-m3-context-surface';
+import { AgentM4TaskCenter } from '@/components/ai/agent-m4-task-center';
 import { Bubble, Marker, Message, MessageScroller } from '@/components/ai/chat-primitives';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -58,6 +61,9 @@ export function AgentRunView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <AgentM4TaskCenter />
+      <AgentM3ContextSurface />
+      <AgentM2TaskSurface />
       {latestRun.status !== 'running' && latestRun.status !== 'completed' && (
         <Alert
           variant={runOutcomeVariant(latestRun)}

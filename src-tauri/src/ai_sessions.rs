@@ -2129,7 +2129,10 @@ mod tests {
         let root = tempdir().unwrap();
         let non_directory = root.path().join("not-a-directory");
         fs::write(&non_directory, b"private-session-data").unwrap();
-        let inaccessible_path = non_directory.join("session.jsonl");
+        // A NUL-containing component is rejected deterministically on every
+        // supported platform. A child below a regular file is reported as
+        // merely absent by Windows, so it cannot exercise this error path.
+        let inaccessible_path = non_directory.join("session\0.jsonl");
 
         let inspect_error = session_file_exists(&inaccessible_path).unwrap_err();
         assert!(inspect_error.contains("failed to inspect AI session"));

@@ -1,0 +1,772 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shellspan.local/protocol/agent/v3/tool-contract.schema.json",
+  "title": "ShellSpan Agent v3 built-in tool call and result contracts",
+  "oneOf": [
+    { "$ref": "#/$defs/agentToolCall" },
+    { "$ref": "#/$defs/agentToolResult" }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "toolName": {
+      "enum": [
+        "exec_command",
+        "write_stdin",
+        "wait_process",
+        "kill_process",
+        "read_file",
+        "list_directory",
+        "search_text",
+        "apply_patch",
+        "transfer_file",
+        "host_snapshot",
+        "ask_user",
+        "update_plan"
+      ]
+    },
+    "targetKind": {
+      "enum": ["local", "remote", "process", "ui", "task"]
+    },
+    "effectKind": {
+      "enum": [
+        "none",
+        "readOnly",
+        "sensitiveRead",
+        "stateChange",
+        "destructive",
+        "externalSideEffect"
+      ]
+    },
+    "localTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "targetId", "sessionId"],
+      "properties": {
+        "kind": { "const": "local" },
+        "targetId": { "$ref": "#/$defs/identifier" },
+        "sessionId": { "$ref": "#/$defs/identifier" },
+        "cwd": { "$ref": "#/$defs/path" }
+      }
+    },
+    "remoteTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "targetId", "sessionId", "host", "port", "username"],
+      "properties": {
+        "kind": { "const": "remote" },
+        "targetId": { "$ref": "#/$defs/identifier" },
+        "sessionId": { "$ref": "#/$defs/identifier" },
+        "profileId": { "$ref": "#/$defs/identifier" },
+        "host": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "username": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "rootPath": { "$ref": "#/$defs/path" },
+        "localRoot": { "$ref": "#/$defs/path" }
+      }
+    },
+    "processTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "targetId", "ownerTargetId", "processHandle"],
+      "properties": {
+        "kind": { "const": "process" },
+        "targetId": { "$ref": "#/$defs/identifier" },
+        "ownerTargetId": { "$ref": "#/$defs/identifier" },
+        "processHandle": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "uiTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "targetId", "surfaceId"],
+      "properties": {
+        "kind": { "const": "ui" },
+        "targetId": { "$ref": "#/$defs/identifier" },
+        "surfaceId": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "taskTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "targetId", "taskId"],
+      "properties": {
+        "kind": { "const": "task" },
+        "targetId": { "$ref": "#/$defs/identifier" },
+        "taskId": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "toolTarget": {
+      "oneOf": [
+        { "$ref": "#/$defs/localTarget" },
+        { "$ref": "#/$defs/remoteTarget" },
+        { "$ref": "#/$defs/processTarget" },
+        { "$ref": "#/$defs/uiTarget" },
+        { "$ref": "#/$defs/taskTarget" }
+      ]
+    },
+    "networkDestination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "host"],
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[A-Za-z][A-Za-z0-9+.-]*$"
+        },
+        "host": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "observedEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "targetId", "summary"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/effectKind" },
+        "targetId": { "$ref": "#/$defs/identifier" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "paths": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/path" }
+        },
+        "networkDestinations": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/networkDestination" }
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "kind", "mediaType", "byteLength", "sha256"],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/identifier" },
+        "kind": { "enum": ["text", "binary", "diff", "log", "report"] },
+        "mediaType": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "byteLength": { "type": "integer", "minimum": 0, "maximum": 1073741824 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "execCommandArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "explanation", "channel"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192,
+          "pattern": "^[^\\u0000-\\u001F\\u007F]*$"
+        },
+        "explanation": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "channel": { "enum": ["pty", "direct"] },
+        "cwd": { "$ref": "#/$defs/path" },
+        "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 3600000 },
+        "background": { "type": "boolean" },
+        "elevated": { "type": "boolean" }
+      }
+    },
+    "writeStdinArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input"],
+      "properties": {
+        "input": { "type": "string", "maxLength": 65536 },
+        "close": { "type": "boolean" }
+      }
+    },
+    "waitProcessArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeoutMs": { "type": "integer", "minimum": 0, "maximum": 3600000 },
+        "maxOutputBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 }
+      }
+    },
+    "killProcessArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signal"],
+      "properties": {
+        "signal": { "enum": ["interrupt", "terminate", "kill"] },
+        "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
+      }
+    },
+    "readFileArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "encoding"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "encoding": { "enum": ["utf8", "base64", "metadataOnly"] },
+        "offset": { "type": "integer", "minimum": 0 },
+        "maxBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "expectedSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "listDirectoryArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "cursor": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "pageSize": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "includeHidden": { "type": "boolean" }
+      }
+    },
+    "searchTextArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "query", "mode"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "query": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "mode": { "enum": ["content", "fileName", "both"] },
+        "caseSensitive": { "type": "boolean" },
+        "globs": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+        },
+        "maxResults": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "cursor": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      }
+    },
+    "patchPrecondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "applyPatchArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["patch", "preconditions"],
+      "properties": {
+        "patch": { "type": "string", "minLength": 1, "maxLength": 1048576 },
+        "preconditions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/patchPrecondition" }
+        },
+        "dryRun": { "type": "boolean" }
+      }
+    },
+    "transferFileArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction", "sourcePath", "destinationPath", "overwrite"],
+      "properties": {
+        "direction": { "enum": ["upload", "download"] },
+        "sourcePath": { "$ref": "#/$defs/path" },
+        "destinationPath": { "$ref": "#/$defs/path" },
+        "overwrite": { "type": "boolean" },
+        "expectedSha256": { "$ref": "#/$defs/sha256" },
+        "destinationSha256": { "$ref": "#/$defs/sha256" },
+        "maxBytes": { "type": "integer", "minimum": 1, "maximum": 268435456 }
+      }
+    },
+    "hostSnapshotArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sections"],
+      "properties": {
+        "sections": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "enum": ["os", "resources", "services", "network"] }
+        },
+        "includeSensitive": { "type": "boolean" }
+      }
+    },
+    "askUserChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      }
+    },
+    "askUserArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prompt", "allowFreeText"],
+      "properties": {
+        "prompt": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/askUserChoice" }
+        },
+        "allowFreeText": { "type": "boolean" },
+        "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 86400000 }
+      }
+    },
+    "planStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "dependencies", "targetIds", "requiredTools", "expectedEffect", "status", "successCriteria", "rollbackOrCompensation"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "dependencies": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } },
+        "targetIds": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } },
+        "requiredTools": { "type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": { "$ref": "#/$defs/toolName" } },
+        "expectedEffect": { "$ref": "#/$defs/effectKind" },
+        "status": { "enum": ["pending", "inProgress", "completed", "blocked"] },
+        "successCriteria": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+        },
+        "rollbackOrCompensation": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "evidenceRefs": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } }
+      }
+    },
+    "updatePlanArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planVersion", "steps"],
+      "properties": {
+        "planVersion": { "type": "integer", "minimum": 0 },
+        "explanation": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/planStep" }
+        }
+      }
+    },
+    "toolCallBase": {
+      "type": "object",
+      "required": ["requestId", "callId", "toolName", "arguments", "target", "capabilityId"],
+      "properties": {
+        "requestId": { "$ref": "#/$defs/identifier" },
+        "callId": { "$ref": "#/$defs/identifier" },
+        "toolName": { "$ref": "#/$defs/toolName" },
+        "arguments": { "type": "object" },
+        "target": { "$ref": "#/$defs/toolTarget" },
+        "capabilityId": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "execCommandCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        {
+          "type": "object",
+          "properties": {
+            "toolName": { "const": "exec_command" },
+            "arguments": { "$ref": "#/$defs/execCommandArguments" },
+            "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/remoteTarget" }] }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "writeStdinCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "write_stdin" }, "arguments": { "$ref": "#/$defs/writeStdinArguments" }, "target": { "$ref": "#/$defs/processTarget" } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "waitProcessCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "wait_process" }, "arguments": { "$ref": "#/$defs/waitProcessArguments" }, "target": { "$ref": "#/$defs/processTarget" } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "killProcessCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "kill_process" }, "arguments": { "$ref": "#/$defs/killProcessArguments" }, "target": { "$ref": "#/$defs/processTarget" } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "readFileCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "read_file" }, "arguments": { "$ref": "#/$defs/readFileArguments" }, "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/remoteTarget" }] } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "listDirectoryCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "list_directory" }, "arguments": { "$ref": "#/$defs/listDirectoryArguments" }, "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/remoteTarget" }] } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "searchTextCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "search_text" }, "arguments": { "$ref": "#/$defs/searchTextArguments" }, "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/remoteTarget" }] } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "applyPatchCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "apply_patch" }, "arguments": { "$ref": "#/$defs/applyPatchArguments" }, "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/remoteTarget" }] } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "transferFileCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "transfer_file" }, "arguments": { "$ref": "#/$defs/transferFileArguments" }, "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/remoteTarget" }] } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "hostSnapshotCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "host_snapshot" }, "arguments": { "$ref": "#/$defs/hostSnapshotArguments" }, "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/remoteTarget" }] } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "askUserCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "ask_user" }, "arguments": { "$ref": "#/$defs/askUserArguments" }, "target": { "$ref": "#/$defs/uiTarget" } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "updatePlanCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "update_plan" }, "arguments": { "$ref": "#/$defs/updatePlanArguments" }, "target": { "$ref": "#/$defs/taskTarget" } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "agentToolCall": {
+      "oneOf": [
+        { "$ref": "#/$defs/execCommandCall" },
+        { "$ref": "#/$defs/writeStdinCall" },
+        { "$ref": "#/$defs/waitProcessCall" },
+        { "$ref": "#/$defs/killProcessCall" },
+        { "$ref": "#/$defs/readFileCall" },
+        { "$ref": "#/$defs/listDirectoryCall" },
+        { "$ref": "#/$defs/searchTextCall" },
+        { "$ref": "#/$defs/applyPatchCall" },
+        { "$ref": "#/$defs/transferFileCall" },
+        { "$ref": "#/$defs/hostSnapshotCall" },
+        { "$ref": "#/$defs/askUserCall" },
+        { "$ref": "#/$defs/updatePlanCall" }
+      ]
+    },
+    "execCommandResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "state", "stdout", "stderr", "truncated"],
+      "properties": {
+        "channel": { "enum": ["pty", "direct"] },
+        "state": { "enum": ["running", "exited"] },
+        "exitCode": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+        "stdout": { "type": "string", "maxLength": 1048576 },
+        "stderr": { "type": "string", "maxLength": 1048576 },
+        "combinedOutput": { "type": "string", "maxLength": 1048576 },
+        "processHandle": { "$ref": "#/$defs/identifier" },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" },
+        "compatibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sourceContract", "outputSeparation", "truncationKnowledge"],
+          "properties": {
+            "sourceContract": { "const": "v2" },
+            "outputSeparation": { "const": "combined" },
+            "truncationKnowledge": { "const": "notReported" }
+          }
+        }
+      }
+    },
+    "writeStdinResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["acceptedBytes", "closed"],
+      "properties": {
+        "acceptedBytes": { "type": "integer", "minimum": 0, "maximum": 65536 },
+        "closed": { "type": "boolean" }
+      }
+    },
+    "waitProcessResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "stdout", "stderr", "truncated"],
+      "properties": {
+        "state": { "enum": ["running", "exited", "unknown"] },
+        "exitCode": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+        "stdout": { "type": "string", "maxLength": 1048576 },
+        "stderr": { "type": "string", "maxLength": 1048576 },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "killProcessResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["terminationRequested", "terminated", "unknown"] }
+      }
+    },
+    "readFileResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "encoding", "byteLength", "sha256", "truncated"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "encoding": { "enum": ["utf8", "base64", "metadataOnly"] },
+        "byteLength": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "content": { "type": "string", "maxLength": 1398104 },
+        "offset": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" },
+        "isBinary": { "type": "boolean" },
+        "sensitive": { "type": "boolean" },
+        "untrusted": { "type": "boolean" },
+        "permissions": { "type": "integer", "minimum": 0 },
+        "modifiedAtUnixMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "directoryEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path", "kind"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "path": { "$ref": "#/$defs/path" },
+        "kind": { "enum": ["file", "directory", "symlink", "other"] },
+        "byteLength": { "type": "integer", "minimum": 0 },
+        "sensitive": { "type": "boolean" }
+      }
+    },
+    "listDirectoryResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "entries"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "entries": { "type": "array", "maxItems": 1000, "items": { "$ref": "#/$defs/directoryEntry" } },
+        "nextCursor": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "sensitive": { "type": "boolean" },
+        "untrusted": { "type": "boolean" }
+      }
+    },
+    "searchMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 },
+        "preview": { "type": "string", "maxLength": 4096 },
+        "sensitive": { "type": "boolean" }
+      }
+    },
+    "searchTextResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matches", "truncated"],
+      "properties": {
+        "rootPath": { "$ref": "#/$defs/path" },
+        "matches": { "type": "array", "maxItems": 1000, "items": { "$ref": "#/$defs/searchMatch" } },
+        "nextCursor": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "truncated": { "type": "boolean" },
+        "sensitive": { "type": "boolean" },
+        "untrusted": { "type": "boolean" }
+      }
+    },
+    "patchedFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "beforeSha256", "afterSha256"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "beforeSha256": { "$ref": "#/$defs/sha256" },
+        "afterSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "applyPatchResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applied", "files"],
+      "properties": {
+        "applied": { "type": "boolean" },
+        "diff": { "type": "string", "minLength": 1, "maxLength": 1048576 },
+        "checkpointId": { "$ref": "#/$defs/identifier" },
+        "verified": { "type": "boolean" },
+        "files": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/patchedFile" } }
+      }
+    },
+    "transferFileResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction", "sourcePath", "destinationPath", "bytesTransferred", "sha256"],
+      "properties": {
+        "direction": { "enum": ["upload", "download"] },
+        "sourcePath": { "$ref": "#/$defs/path" },
+        "destinationPath": { "$ref": "#/$defs/path" },
+        "bytesTransferred": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "checkpointId": { "$ref": "#/$defs/identifier" },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "hostSnapshotResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capturedAt", "os"],
+      "properties": {
+        "capturedAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+        },
+        "os": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["family"],
+          "properties": {
+            "family": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "version": { "type": "string", "maxLength": 256 },
+            "architecture": { "type": "string", "maxLength": 128 }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpuPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+            "memoryUsedBytes": { "type": "integer", "minimum": 0 },
+            "memoryTotalBytes": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "services": { "type": "array", "maxItems": 512, "items": { "type": "string", "maxLength": 512 } },
+        "network": { "type": "array", "maxItems": 512, "items": { "type": "string", "maxLength": 512 } }
+      }
+    },
+    "askUserResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["responseType"],
+      "properties": {
+        "responseType": { "enum": ["choice", "freeText", "cancelled"] },
+        "selectedIds": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } },
+        "text": { "type": "string", "maxLength": 16384 }
+      }
+    },
+    "updatePlanResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planVersion", "acceptedSteps"],
+      "properties": {
+        "planVersion": { "type": "integer", "minimum": 1 },
+        "acceptedSteps": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+    "toolResultBase": {
+      "type": "object",
+      "required": ["requestId", "callId", "toolName", "targetId", "status", "summary"],
+      "properties": {
+        "requestId": { "$ref": "#/$defs/identifier" },
+        "callId": { "$ref": "#/$defs/identifier" },
+        "toolName": { "$ref": "#/$defs/toolName" },
+        "targetId": { "$ref": "#/$defs/identifier" },
+        "status": { "enum": ["completed", "rejected", "failed", "timedOut", "cancelled"] },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "data": { "type": "object" },
+        "artifacts": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/artifact" } },
+        "effects": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/observedEffect" } },
+        "truncated": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": { "status": { "const": "completed" } }
+          },
+          "then": {
+            "required": ["data"],
+            "properties": { "data": { "type": "object" } }
+          }
+        }
+      ]
+    },
+    "execCommandResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "exec_command" }, "data": { "$ref": "#/$defs/execCommandResultData" } } }], "unevaluatedProperties": false },
+    "writeStdinResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "write_stdin" }, "data": { "$ref": "#/$defs/writeStdinResultData" } } }], "unevaluatedProperties": false },
+    "waitProcessResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "wait_process" }, "data": { "$ref": "#/$defs/waitProcessResultData" } } }], "unevaluatedProperties": false },
+    "killProcessResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "kill_process" }, "data": { "$ref": "#/$defs/killProcessResultData" } } }], "unevaluatedProperties": false },
+    "readFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "read_file" }, "data": { "$ref": "#/$defs/readFileResultData" } } }], "unevaluatedProperties": false },
+    "listDirectoryResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "list_directory" }, "data": { "$ref": "#/$defs/listDirectoryResultData" } } }], "unevaluatedProperties": false },
+    "searchTextResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "search_text" }, "data": { "$ref": "#/$defs/searchTextResultData" } } }], "unevaluatedProperties": false },
+    "applyPatchResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "apply_patch" }, "data": { "$ref": "#/$defs/applyPatchResultData" } } }], "unevaluatedProperties": false },
+    "transferFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "transfer_file" }, "data": { "$ref": "#/$defs/transferFileResultData" } } }], "unevaluatedProperties": false },
+    "hostSnapshotResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "host_snapshot" }, "data": { "$ref": "#/$defs/hostSnapshotResultData" } } }], "unevaluatedProperties": false },
+    "askUserResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "ask_user" }, "data": { "$ref": "#/$defs/askUserResultData" } } }], "unevaluatedProperties": false },
+    "updatePlanResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "update_plan" }, "data": { "$ref": "#/$defs/updatePlanResultData" } } }], "unevaluatedProperties": false },
+    "agentToolResult": {
+      "oneOf": [
+        { "$ref": "#/$defs/execCommandResult" },
+        { "$ref": "#/$defs/writeStdinResult" },
+        { "$ref": "#/$defs/waitProcessResult" },
+        { "$ref": "#/$defs/killProcessResult" },
+        { "$ref": "#/$defs/readFileResult" },
+        { "$ref": "#/$defs/listDirectoryResult" },
+        { "$ref": "#/$defs/searchTextResult" },
+        { "$ref": "#/$defs/applyPatchResult" },
+        { "$ref": "#/$defs/transferFileResult" },
+        { "$ref": "#/$defs/hostSnapshotResult" },
+        { "$ref": "#/$defs/askUserResult" },
+        { "$ref": "#/$defs/updatePlanResult" }
+      ]
+    }
+  }
+}

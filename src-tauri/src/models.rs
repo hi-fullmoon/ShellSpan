@@ -782,6 +782,13 @@ pub(crate) enum SessionStatus {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum SessionTerminalKind {
+    Local,
+    Remote,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum RemoteFileKind {
     Directory,
@@ -888,6 +895,16 @@ pub(crate) struct ManagedSession {
     /// watermark. Remote workers stop reading; local workers stop draining
     /// their bounded reader queue until the backlog drains.
     pub(crate) output_paused: Arc<AtomicBool>,
+    pub(crate) terminal_kind: SessionTerminalKind,
+    pub(crate) identity: SessionIdentity,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SessionTargetState {
+    pub(crate) terminal_kind: SessionTerminalKind,
+    pub(crate) identity: SessionIdentity,
+    pub(crate) status: SessionStatus,
 }
 
 #[derive(Default)]
@@ -1700,6 +1717,22 @@ impl SessionManager {
             .ok_or_else(|| format!("session {session_id} not found"))
     }
 
+    pub(crate) fn target_state(&self, session_id: &str) -> Result<SessionTargetState, String> {
+        let guard = self
+            .registry
+            .lock()
+            .map_err(|_| "session registry poisoned".to_string())?;
+        let managed = guard
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| format!("session {session_id} not found"))?;
+        Ok(SessionTargetState {
+            terminal_kind: managed.terminal_kind,
+            identity: managed.identity.clone(),
+            status: managed.status.status,
+        })
+    }
+
     pub(crate) fn set_status(&self, session_id: &str, status: StatusEvent) -> Result<(), String> {
         let mut guard = self
             .registry
@@ -1781,8 +1814,8 @@ impl ManagedSession {
 #[cfg(test)]
 mod session_manager_tests {
     use super::{
-        ManagedSession, SessionCommand, SessionCommandSender, SessionManager, SessionStatus,
-        StatusEvent,
+        ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, SessionManager,
+        SessionStatus, SessionTerminalKind, StatusEvent,
     };
     use crossbeam_channel::{bounded, unbounded, Receiver, Sender as EventSender};
     use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
@@ -1800,6 +1833,13 @@ mod session_manager_tests {
             },
             output_ready: Arc::new(AtomicBool::new(false)),
             output_paused: Arc::new(AtomicBool::new(false)),
+            terminal_kind: SessionTerminalKind::Local,
+            identity: SessionIdentity {
+                title: "Local".to_string(),
+                host: "local".to_string(),
+                port: 0,
+                username: "tester".to_string(),
+            },
         }
     }
 

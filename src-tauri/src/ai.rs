@@ -1414,7 +1414,10 @@ fn validate_request_id(request_id: &str) -> Result<(), String> {
 }
 
 fn is_loopback_host(host: Option<&str>) -> bool {
-    matches!(host, Some("localhost" | "127.0.0.1" | "::1"))
+    // `url::Url::host_str` has returned both bracketed and unbracketed IPv6
+    // literals across dependency versions. Keep the allow-list exact while
+    // accepting the canonical loopback spelling in either representation.
+    matches!(host, Some("localhost" | "127.0.0.1" | "::1" | "[::1]"))
 }
 
 pub(crate) fn is_kimi_code_provider(provider: &AiProviderConfig) -> bool {
