@@ -4,6 +4,7 @@ import {
   HistoryIcon,
   PlusIcon,
   ServerIcon,
+  ShieldCheckIcon,
   Trash2Icon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -330,82 +331,109 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         </Card>
       </section>
 
-      <Card size="sm" variant="outline">
-        <CardHeader className="border-b">
-          <CardTitle className="flex items-center gap-2">
-            <BotIcon />
-            {t('settings.ai.agent.title')}
-          </CardTitle>
-          <CardDescription>{t('settings.ai.agent.description')}</CardDescription>
-          <CardAction>
-            <Badge variant={agentPolicy?.featureEnabled ? 'secondary' : 'outline'}>
-              {agentPolicy
-                ? t(`settings.ai.agent.stage.${agentPolicy.stage}` as LocaleKey)
-                : t('settings.ai.agent.stage.checking')}
-            </Badge>
-          </CardAction>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <Field
-            className="flex-row items-center gap-3"
-            data-disabled={!agentPolicy?.featureEnabled || agentActionBusy || undefined}
-          >
-            <div className="min-w-0 flex-1">
-              <FieldLabel htmlFor="ai-agent-enabled">{t('settings.ai.agent.enable')}</FieldLabel>
-              <FieldDescription>{t('settings.ai.agent.enableDescription')}</FieldDescription>
+      <section aria-labelledby="terminal-agent-heading">
+        <Card size="sm" variant="outline" className="gap-0 py-0">
+          <CardHeader className="flex items-start gap-3 border-b py-4">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <BotIcon className="size-4" aria-hidden />
             </div>
-            <Switch
-              id="ai-agent-enabled"
-              checked={agentEnabled && Boolean(agentPolicy?.featureEnabled)}
-              disabled={!agentPolicy?.featureEnabled || agentActionBusy}
-              onCheckedChange={(enabled) => void handleAgentEnabledChange(enabled)}
-            />
-          </Field>
-          <Alert>
-            <AlertTitle>{t('settings.ai.agent.permissionTitle')}</AlertTitle>
-            <AlertDescription>{t('settings.ai.agent.permissionDescription')}</AlertDescription>
-          </Alert>
-        </CardContent>
-        <CardFooter className="flex-wrap justify-end gap-2">
-          <Button
-            variant="destructiveOutline"
-            size="sm"
-            disabled={agentActionBusy}
-            onClick={() => setClearAgentOpen(true)}
-          >
-            {agentActionBusy ? <Spinner data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
-            {t('settings.ai.agent.clearSessions')}
-          </Button>
-        </CardFooter>
-      </Card>
-
-      <Card size="sm" variant="outline">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <HistoryIcon />
-            {t('ai.history')}
-          </CardTitle>
-          <CardDescription>
-            {t('ai.history.description', { count: historicalConversations.length })}
-          </CardDescription>
-          <CardAction className="flex items-center gap-2">
-            {historicalConversations.length === 0 && (
-              <Badge variant="outline">{t('ai.history.empty')}</Badge>
-            )}
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle id="terminal-agent-heading">{t('settings.ai.agent.title')}</CardTitle>
+                <Badge variant={agentPolicy?.featureEnabled ? 'secondary' : 'outline'}>
+                  {agentPolicy
+                    ? t(`settings.ai.agent.stage.${agentPolicy.stage}` as LocaleKey)
+                    : t('settings.ai.agent.stage.checking')}
+                </Badge>
+              </div>
+              <CardDescription>{t('settings.ai.agent.description')}</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-0 px-0">
+            <Field
+              className="flex-row items-center gap-4 px-4 py-3.5"
+              data-disabled={!agentPolicy?.featureEnabled || agentActionBusy || undefined}
+            >
+              <div className="min-w-0 flex-1">
+                <FieldLabel className="text-sm font-medium text-foreground" htmlFor="ai-agent-enabled">
+                  {t('settings.ai.agent.enable')}
+                </FieldLabel>
+                <FieldDescription className="leading-5">
+                  {t('settings.ai.agent.enableDescription')}
+                </FieldDescription>
+              </div>
+              <Switch
+                id="ai-agent-enabled"
+                checked={agentEnabled && Boolean(agentPolicy?.featureEnabled)}
+                disabled={!agentPolicy?.featureEnabled || agentActionBusy}
+                onCheckedChange={(enabled) => void handleAgentEnabledChange(enabled)}
+              />
+            </Field>
+            <Separator />
+            <div className="p-4">
+              <Alert size="sm">
+                <ShieldCheckIcon aria-hidden />
+                <AlertTitle>{t('settings.ai.agent.permissionTitle')}</AlertTitle>
+                <AlertDescription>{t('settings.ai.agent.permissionDescription')}</AlertDescription>
+              </Alert>
+            </div>
+          </CardContent>
+          <CardFooter className="flex-col items-stretch justify-between gap-3 px-4 py-3 @min-[34rem]:flex-row @min-[34rem]:items-center">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <p className="text-xs font-medium text-foreground">{t('settings.ai.agent.localData')}</p>
+              <p className="text-xs leading-5 text-muted-foreground">
+                {t('settings.ai.agent.localDataDescription')}
+              </p>
+            </div>
             <Button
+              className="w-full @min-[34rem]:w-auto"
               variant="destructiveOutline"
               size="sm"
-              disabled={historicalConversations.length === 0 || historyActionBusy}
-              onClick={() => setClearHistoryOpen(true)}
+              disabled={agentActionBusy}
+              onClick={() => setClearAgentOpen(true)}
             >
-              {historyActionBusy
-                ? <Spinner data-icon="inline-start" />
-                : <Trash2Icon data-icon="inline-start" />}
-              {t('ai.history.deleteAll')}
+              {agentActionBusy ? <Spinner data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
+              {t('settings.ai.agent.clearSessions')}
             </Button>
-          </CardAction>
-        </CardHeader>
-      </Card>
+          </CardFooter>
+        </Card>
+      </section>
+
+      <section aria-labelledby="conversation-history-heading">
+        <Card size="sm" variant="outline" className="gap-0 py-0">
+          <CardHeader className="flex flex-col gap-3 py-4 @min-[34rem]:flex-row @min-[34rem]:items-center">
+            <div className="flex min-w-0 flex-1 items-start gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                <HistoryIcon className="size-4" aria-hidden />
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <CardTitle id="conversation-history-heading">{t('ai.history')}</CardTitle>
+                <CardDescription>
+                  {t('ai.history.description', { count: historicalConversations.length })}
+                </CardDescription>
+              </div>
+            </div>
+            <div className="flex w-full shrink-0 items-center @min-[34rem]:w-auto">
+              {historicalConversations.length === 0 ? (
+                <Badge variant="outline">{t('ai.history.empty')}</Badge>
+              ) : (
+                <Button
+                  className="w-full @min-[34rem]:w-auto"
+                  variant="destructiveOutline"
+                  size="sm"
+                  disabled={historyActionBusy}
+                  onClick={() => setClearHistoryOpen(true)}
+                >
+                  {historyActionBusy
+                    ? <Spinner data-icon="inline-start" />
+                    : <Trash2Icon data-icon="inline-start" />}
+                  {t('ai.history.deleteAll')}
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+        </Card>
+      </section>
 
       <ProviderSetupDialog
         open={addOpen}

@@ -975,6 +975,8 @@ export default {
   'settings.ai.agent.closeFailed': 'Agent is off, but ShellSpan could not finish saving every closing state.',
   'settings.ai.agent.permissionTitle': 'Elevated permissions are never the default',
   'settings.ai.agent.permissionDescription': 'Request approval is restored for every new connection. Approve for me and Full access require an explicit connection-scoped choice and are never restored after reconnecting or restarting.',
+  'settings.ai.agent.localData': 'Local Agent data',
+  'settings.ai.agent.localDataDescription': 'Remove Agent messages, tool cards, and run snapshots while keeping general chat and generated commands.',
   'settings.ai.agent.clearSessions': 'Clear Agent sessions',
   'settings.ai.agent.clearTitle': 'Clear every Agent conversation lane?',
   'settings.ai.agent.clearDescription': 'This removes Agent messages, tool cards, and run snapshots from every local AI conversation. General chat and generated commands are kept.',
