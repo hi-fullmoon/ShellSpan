@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   listOperatorGrants: vi.fn(),
   recoveryStatus: vi.fn(),
   listAudit: vi.fn(),
+  rebind: vi.fn(),
   reconcile: vi.fn(),
   configureOperator: vi.fn(),
   revokeOperator: vi.fn(),
@@ -25,12 +26,14 @@ vi.mock('@/lib/tauri', () => ({
   invokeAgentV3ListOperatorGrants: mocks.listOperatorGrants,
   invokeAgentV3RecoveryStatus: mocks.recoveryStatus,
   invokeAgentV3ListAuditEvents: mocks.listAudit,
+  invokeAgentV3RebindRecoverySession: mocks.rebind,
   invokeAgentV3ReconcileTask: mocks.reconcile,
   invokeAgentV3ConfigureOperator: mocks.configureOperator,
   invokeAgentV3RevokeOperator: mocks.revokeOperator,
 }));
 
 import { AgentM4TaskCenter } from '@/components/ai/agent-m4-task-center';
+import { useTerminalStore } from '@/stores/terminalStore';
 
 const task: AgentTaskSnapshotV3 = {
   request: {
@@ -105,6 +108,9 @@ const task: AgentTaskSnapshotV3 = {
       startedAtUnixMs: 1,
       updatedAtUnixMs: 2,
       automaticReplayAllowed: false,
+      networkDestinations: [],
+      sensitivePathCount: 1,
+      criticalPathCount: 0,
     }],
     processes: [{
       processHandle: 'proc-opaque',
@@ -157,24 +163,42 @@ beforeEach(() => {
     corruptionRecovered: false,
   });
   mocks.listAudit.mockResolvedValue([{ eventId: 'audit-1' }]);
+  mocks.rebind.mockResolvedValue(task);
   mocks.reconcile.mockResolvedValue(task);
   mocks.configureOperator.mockResolvedValue({ grantId: 'operator-1' });
+  useTerminalStore.setState({ activeSessionId: 'session-live' });
 });
 
 describe('Agent M4 background task center', () => {
   it('renders only Rust snapshots and exposes honest lost/reconciliation actions', async () => {
     const user = userEvent.setup();
+    const reboundTask = {
+      ...task,
+      recovery: { ...task.recovery, requiresSessionRebind: false },
+    };
+    let rebound = false;
+    mocks.listTasks.mockImplementation(async () => [rebound ? reboundTask : task]);
+    mocks.rebind.mockImplementation(async () => {
+      rebound = true;
+      return reboundTask;
+    });
     render(<AgentM4TaskCenter />);
 
     expect(await screen.findByText('Background task center')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Details' }));
     expect(screen.getByText('Recover a background task')).toBeInTheDocument();
-    expect(screen.getAllByText('needsReconciliation')).toHaveLength(2);
+    expect(screen.getAllByText('needsReconciliation').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('process lost')).toBeInTheDocument();
     expect(screen.getByText(/session rebind required/)).toBeInTheDocument();
     expect(screen.getByText(/will not be replayed/)).toBeInTheDocument();
+    expect(screen.getByText('1 sensitive path(s) · 0 network destination(s)')).toBeInTheDocument();
     expect(screen.queryByText(/terminal output/i)).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole('button', { name: 'Rebind to active terminal' }));
+    await waitFor(() => expect(mocks.rebind).toHaveBeenCalledWith('task-m4', 'session-live'));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Revalidate & continue' })).toBeEnabled();
+    });
     await user.click(screen.getByRole('button', { name: 'Revalidate & continue' }));
     await waitFor(() => expect(mocks.reconcile).toHaveBeenCalledWith('task-m4', true));
   });

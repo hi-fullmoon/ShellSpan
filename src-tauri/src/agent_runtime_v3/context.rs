@@ -235,6 +235,31 @@ impl ContextRuntimeV3 {
         Ok(())
     }
 
+    pub(crate) fn rebind_task_request(&self, request: &AgentRequestV3) -> Result<(), String> {
+        let mut states = self
+            .states
+            .lock()
+            .map_err(|_| "Agent context state is unavailable".to_string())?;
+        let state = states
+            .get_mut(&request.task_id)
+            .ok_or_else(|| "Agent context task was not found".to_string())?;
+        if state.request.request_id != request.request_id {
+            return Err("context recovery request identity drifted".into());
+        }
+        let mut fragments = base_fragments(request);
+        fragments.extend(state.fragments.drain(..).filter(|fragment| {
+            !matches!(
+                fragment.metadata.fragment_id.as_str(),
+                "context:task:request" | "context:host:native" | "context:session:native"
+            )
+        }));
+        fragments.truncate(MAX_CONTEXT_FRAGMENTS);
+        state.request = request.clone();
+        state.fragments = fragments;
+        state.generation = state.generation.saturating_add(1);
+        Ok(())
+    }
+
     pub(crate) fn refresh_workspace(
         &self,
         task_id: &str,

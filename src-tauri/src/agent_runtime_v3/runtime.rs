@@ -27,24 +27,25 @@ use crate::models::{
 
 use super::{
     assess_effect_v3, audit_event_v3, current_local_digest_v3, current_remote_digest_v3,
-    enforce_native_call_policy_v3, execute_file_tool_v3, inspect_call_policy_scope_v3,
-    mcp_result_status, preview_file_call_v3, restore_local_checkpoint_v3,
-    restore_remote_checkpoint_v3, spawn_local_process_v3, spawn_remote_process_v3,
-    validate_m1_result_data_v3, AgentAuditEventV3, AgentCallPreviewV3, AgentContextSnapshotV3,
-    AgentFileCheckpointV3, AgentMcpAuthorizeRequestV3, AgentMcpCallV3, AgentMcpCapabilityGrantV3,
-    AgentMcpResultV3, AgentNotificationV3, BrokerAuthorizeRequestV3, BrokerGrantV3,
-    BrokerPurposeV3, BrokerRequestKindV3, CapabilityIssueRequestV3, CheckpointOriginalMetadataV3,
-    CheckpointStoreV3, ContextRetrievalRequestV3, ContextRetrievalV3, ContextRuntimeV3,
-    ExtensionRuntimeV3, ExtensionSnapshotV3, FileExecutionContextV3, FileOperationRegistryV3,
-    HookDecisionV3, HookEventV3, InstantiateRunbookRequestV3, IssuedCapabilityV3,
-    LoadSkillRequestV3, LoadedSkillV3, M4PersistenceV3, McpRuntimeV3, McpServerSnapshotV3,
-    McpSetEnabledRequestV3, McpToolSchemaRequestV3, McpToolSchemaV3, NativeBrokerV3,
-    NativeCapabilityStoreV3, NotificationKindV3, OperatorConfigureRequestV3, OperatorGrantV3,
-    OperatorStoreV3, PersistedTaskV3, ProcessLifecycleV3, ProcessRegistryV3, ProcessSnapshotV3,
-    PtyLifecycleV3, PtyRegistryV3, RecoveredProcessV3, RecoveryDispositionV3,
+    enforce_checkpoint_restore_policy_v3, enforce_native_call_policy_v3, execute_file_tool_v3,
+    inspect_call_policy_scope_v3, mcp_result_status, preview_file_call_v3,
+    restore_local_checkpoint_v3, restore_remote_checkpoint_v3, spawn_local_process_v3,
+    spawn_remote_process_v3, validate_m1_result_data_v3, validate_recovery_policy_configuration_v3,
+    AgentAuditEventV3, AgentCallPreviewV3, AgentContextSnapshotV3, AgentFileCheckpointV3,
+    AgentMcpAuthorizeRequestV3, AgentMcpCallV3, AgentMcpCapabilityGrantV3, AgentMcpResultV3,
+    AgentNotificationV3, BrokerAuthorizeRequestV3, BrokerGrantV3, BrokerPurposeV3,
+    BrokerRequestKindV3, CapabilityAuthorizationSourceV3, CapabilityIssueRequestV3,
+    CheckpointOriginalMetadataV3, CheckpointStoreV3, ContextRetrievalRequestV3, ContextRetrievalV3,
+    ContextRuntimeV3, ExtensionRuntimeV3, ExtensionSnapshotV3, FileExecutionContextV3,
+    FileOperationRegistryV3, HookDecisionV3, HookEventV3, InstantiateRunbookRequestV3,
+    IssuedCapabilityV3, LoadSkillRequestV3, LoadedSkillV3, M4PersistenceV3, McpRuntimeV3,
+    McpServerSnapshotV3, McpSetEnabledRequestV3, McpToolSchemaRequestV3, McpToolSchemaV3,
+    NativeBrokerV3, NativeCapabilityStoreV3, NotificationKindV3, OperatorConfigureRequestV3,
+    OperatorGrantV3, OperatorStoreV3, PersistedTaskV3, ProcessLifecycleV3, ProcessRegistryV3,
+    ProcessSnapshotV3, PtyLifecycleV3, PtyRegistryV3, RecoveredProcessV3, RecoveryDispositionV3,
     RecoveryStoreStatusV3, RegisteredToolV3, RemoteProcessStartV3, TaskPhaseV3,
     TaskRecoverySnapshotV3, ToolRegistryErrorV3, ToolRegistryV3, DEFAULT_CAPABILITY_TTL_MS,
-    MAX_CAPABILITY_TTL_MS, MCP_CREDENTIAL_SERVICE,
+    MAX_CAPABILITY_TTL_MS, MCP_CREDENTIAL_SERVICE, REMOTE_PROFILE_BROKER_SERVICE,
 };
 
 const MAX_ACTIVE_TASKS: usize = 128;
@@ -173,6 +174,11 @@ impl AgentTaskStoreV3 {
             .ok_or_else(|| "Agent task was not found".to_string())?;
         if task.state != TaskRuntimeStateV3::Active {
             return Err("Agent task is not active".into());
+        }
+        if task.restored {
+            return Err(
+                "restarted Agent task requires native session rebind before authorization".into(),
+            );
         }
         Ok(task.request.clone())
     }
@@ -349,14 +355,12 @@ impl AgentTaskStoreV3 {
         let task = tasks
             .get_mut(task_id)
             .ok_or_else(|| "Agent task was not found".to_string())?;
-        if !matches!(
+        if !(matches!(
             task.state,
             TaskRuntimeStateV3::NeedsReconciliation | TaskRuntimeStateV3::Lost
-        ) && !(task.state == TaskRuntimeStateV3::Active && task.restored)
+        ) || task.state == TaskRuntimeStateV3::Active && task.restored)
         {
-            return Err(
-                "only a restarted task may rebind a recovery session".into(),
-            );
+            return Err("only a restarted task may rebind a recovery session".into());
         }
         let target = task
             .request
@@ -485,6 +489,7 @@ pub(crate) struct PreparedAuthorizationV3 {
     pub(crate) native_prompt: String,
     pub(crate) preview: AgentCallPreviewV3,
     hook_decisions: Vec<HookDecisionV3>,
+    authorization_source: CapabilityAuthorizationSourceV3,
 }
 
 pub(crate) struct PreparedMcpAuthorizationV3 {
@@ -760,6 +765,15 @@ impl AgentRuntimeV3 {
                         | AgentEffectKindV3::Destructive
                         | AgentEffectKindV3::ExternalSideEffect
                 ));
+        let authorization_source = match operator_grant_id.as_ref() {
+            Some(grant_id) => CapabilityAuthorizationSourceV3::OperatorGrant {
+                grant_id: grant_id.clone(),
+            },
+            None if requires_native_confirmation => {
+                CapabilityAuthorizationSourceV3::NativeConfirmation
+            }
+            None => CapabilityAuthorizationSourceV3::ScopedAutopilot,
+        };
         let ttl_ms = input.ttl_ms.unwrap_or(DEFAULT_CAPABILITY_TTL_MS);
         if ttl_ms == 0 || ttl_ms > MAX_CAPABILITY_TTL_MS {
             return Err("capability TTL is outside the native limit".into());
@@ -808,13 +822,19 @@ impl AgentRuntimeV3 {
             Some(&call),
             Some(&effect),
             Some(&scope),
-            if requires_native_confirmation {
-                "native confirmation required"
-            } else {
-                "allowed by exact Operator scope"
+            match &authorization_source {
+                CapabilityAuthorizationSourceV3::NativeConfirmation => {
+                    "native confirmation required"
+                }
+                CapabilityAuthorizationSourceV3::ScopedAutopilot => {
+                    "allowed by native Scoped Autopilot policy"
+                }
+                CapabilityAuthorizationSourceV3::OperatorGrant { .. } => {
+                    "allowed by exact Operator scope"
+                }
             },
         );
-        audit.grant_id = operator_grant_id;
+        audit.grant_id = operator_grant_id.clone();
         self.persistence.audit(audit)?;
         self.persistence.set_phase(
             &request.task_id,
@@ -840,6 +860,7 @@ impl AgentRuntimeV3 {
             native_prompt,
             preview,
             hook_decisions: hook_application.decisions,
+            authorization_source,
         })
     }
 
@@ -854,6 +875,22 @@ impl AgentRuntimeV3 {
                 .set_phase(&prepared.request.task_id, TaskPhaseV3::Failed);
             return Err("native capability approval was denied".into());
         }
+        let operator_scope = if let CapabilityAuthorizationSourceV3::OperatorGrant { grant_id } =
+            &prepared.authorization_source
+        {
+            let scope = inspect_call_policy_scope_v3(&prepared.call)?;
+            self.operator.validate_auto_approval_source(
+                grant_id,
+                &prepared.request.task_id,
+                &prepared.call,
+                &prepared.effect,
+                &scope,
+                false,
+            )?;
+            Some((grant_id.clone(), scope))
+        } else {
+            None
+        };
         let bound_call_digest = call_digest(&prepared.call)?;
         let IssuedCapabilityV3 {
             capability_id,
@@ -862,19 +899,78 @@ impl AgentRuntimeV3 {
             .capabilities
             .issue(
                 CapabilityIssueRequestV3 {
-                    request_id: prepared.request.request_id,
-                    user_session_id: prepared.request.user_session_id,
-                    call_id: prepared.call.call_id,
+                    request_id: prepared.request.request_id.clone(),
+                    user_session_id: prepared.request.user_session_id.clone(),
+                    call_id: prepared.call.call_id.clone(),
                     call_digest: bound_call_digest,
-                    allowed_tools: vec![prepared.call.tool_name],
+                    allowed_tools: vec![prepared.call.tool_name.clone()],
                     allowed_effects: vec![prepared.effect.kind],
                     target_ids: vec![prepared.call.target.target_id().to_string()],
                     ttl_ms: prepared.ttl_ms,
                     max_uses: 1,
+                    authorization_source: prepared.authorization_source.clone(),
                 },
                 current_unix_ms(),
             )
             .map_err(|error| format!("native capability issuance failed: {error:?}"))?;
+        if let Some((grant_id, scope)) = operator_scope {
+            if let Err(error) = self.operator.validate_auto_approval_source(
+                &grant_id,
+                &prepared.request.task_id,
+                &prepared.call,
+                &prepared.effect,
+                &scope,
+                false,
+            ) {
+                let _ = self.capabilities.revoke(&capability_id);
+                return Err(format!(
+                    "Operator capability source changed during issuance: {error}"
+                ));
+            }
+        }
+        if let AgentToolTargetV3::Remote {
+            profile_id: Some(profile_id),
+            ..
+        } = &prepared.call.target
+        {
+            let broker_grant = match self.broker.authorize(
+                BrokerAuthorizeRequestV3 {
+                    task_id: prepared.request.task_id.clone(),
+                    request_id: prepared.request.request_id.clone(),
+                    call_id: prepared.call.call_id.clone(),
+                    target_id: prepared.call.target.target_id().to_string(),
+                    tool_name: prepared.call.tool_name.clone(),
+                    kind: BrokerRequestKindV3::Credential,
+                    purpose: BrokerPurposeV3::RemoteAuthentication,
+                    credential_service: Some(REMOTE_PROFILE_BROKER_SERVICE.into()),
+                    credential_id: Some(profile_id.clone()),
+                    ttl_ms: prepared.ttl_ms,
+                },
+                &prepared.request,
+            ) {
+                Ok(grant) => grant,
+                Err(error) => {
+                    let _ = self.capabilities.revoke(&capability_id);
+                    return Err(error);
+                }
+            };
+            let mut audit = audit_event_v3(
+                "brokerAuthorized",
+                Some(&prepared.request.task_id),
+                Some(&prepared.call),
+                Some(&prepared.effect),
+                None,
+                "single-use remote-authentication grant derived from exact native authorization",
+            );
+            audit.grant_id = Some(broker_grant.grant_id.clone());
+            audit.purpose = Some(format!("{:?}", broker_grant.purpose));
+            audit.expires_at_unix_ms = Some(broker_grant.expires_at_unix_ms);
+            if let Err(error) = self.persistence.audit(audit) {
+                let _ = self.broker.revoke(&broker_grant.grant_id);
+                let _ = self.capabilities.revoke(&capability_id);
+                return Err(error);
+            }
+        }
         self.persistence
             .set_phase(&prepared.request.task_id, TaskPhaseV3::Running)?;
         Ok(AgentCapabilityGrantV3 {
@@ -905,6 +1001,7 @@ impl AgentRuntimeV3 {
         let (checkpoint, original, metadata) =
             self.checkpoints
                 .load_for_restore(&root, task_id, checkpoint_id)?;
+        enforce_checkpoint_restore_policy_v3(&checkpoint.target_path)?;
         let request = self.tasks.request(task_id)?;
         let target = request
             .targets
@@ -945,6 +1042,7 @@ impl AgentRuntimeV3 {
         credentials: &CredentialManager,
         known_hosts_path: &Path,
     ) -> Result<AgentFileCheckpointV3, String> {
+        enforce_checkpoint_restore_policy_v3(&prepared.checkpoint.target_path)?;
         let live_digest = checkpoint_current_digest(
             &prepared.target,
             &prepared.checkpoint,
@@ -1017,6 +1115,25 @@ impl AgentRuntimeV3 {
             Ok(effect) => effect,
             Err(error) => return self.commit_rejection(task_id, &request, &call, &error),
         };
+        let scope = match inspect_call_policy_scope_v3(&call) {
+            Ok(scope) => scope,
+            Err(error) => return self.commit_rejection(task_id, &request, &call, &error),
+        };
+        if let Err(error) = enforce_native_call_policy_v3(&call, &effect, &scope) {
+            let _ = self.persistence.audit(audit_event_v3(
+                "toolDispatchPolicy",
+                Some(task_id),
+                Some(&call),
+                Some(&effect),
+                Some(&scope),
+                &format!("denied at dispatch: {error}"),
+            ));
+            return self.commit_rejection(task_id, &request, &call, &error);
+        }
+        let digest = match call_digest(&call) {
+            Ok(digest) => digest,
+            Err(error) => return self.commit_rejection(task_id, &request, &call, &error),
+        };
         let capability = match self.capabilities.verify_bound_call(
             &call.capability_id,
             AgentCapabilityVerificationContextV3 {
@@ -1025,7 +1142,7 @@ impl AgentRuntimeV3 {
                 call_id: &call.call_id,
                 target_id: call.target.target_id(),
             },
-            &call_digest(&call)?,
+            &digest,
             current_unix_ms(),
         ) {
             Ok(capability) => capability,
@@ -1038,6 +1155,36 @@ impl AgentRuntimeV3 {
                 )
             }
         };
+        let authorization_source = match self.capabilities.authorization_source(&call.capability_id)
+        {
+            Ok(source) => source,
+            Err(error) => {
+                return self.commit_rejection(
+                    task_id,
+                    &request,
+                    &call,
+                    &format!("native capability source verification failed: {error:?}"),
+                )
+            }
+        };
+        if let CapabilityAuthorizationSourceV3::OperatorGrant { grant_id } = &authorization_source {
+            if let Err(error) = self
+                .operator
+                .validate_auto_approval_source(grant_id, task_id, &call, &effect, &scope, false)
+            {
+                let mut audit = audit_event_v3(
+                    "operatorDispatch",
+                    Some(task_id),
+                    Some(&call),
+                    Some(&effect),
+                    Some(&scope),
+                    &format!("denied at dispatch: {error}"),
+                );
+                audit.grant_id = Some(grant_id.clone());
+                let _ = self.persistence.audit(audit);
+                return self.commit_rejection(task_id, &request, &call, &error);
+            }
+        }
         let decision = self.policy.evaluate(AgentPolicyEvaluationV3 {
             request: &request,
             call: &call,
@@ -1064,9 +1211,72 @@ impl AgentRuntimeV3 {
                 &format!("native capability could not be consumed: {error:?}"),
             );
         }
-        if let Err(error) = self
-            .persistence
-            .mark_call_started(task_id, &call, effect.kind)
+        if let CapabilityAuthorizationSourceV3::OperatorGrant { grant_id } = &authorization_source {
+            if let Err(error) = self
+                .operator
+                .validate_auto_approval_source(grant_id, task_id, &call, &effect, &scope, true)
+            {
+                return self.commit_rejection(task_id, &request, &call, &error);
+            }
+            let mut audit = audit_event_v3(
+                "operatorUsed",
+                Some(task_id),
+                Some(&call),
+                Some(&effect),
+                Some(&scope),
+                "active exact-scope Operator source verified at dispatch",
+            );
+            audit.grant_id = Some(grant_id.clone());
+            if let Err(error) = self.persistence.audit(audit) {
+                return self.commit_rejection(task_id, &request, &call, &error);
+            }
+        }
+        if let AgentToolTargetV3::Remote { profile_id, .. } = &call.target {
+            let Some(profile_id) = profile_id.as_deref() else {
+                return self.commit_rejection(
+                    task_id,
+                    &request,
+                    &call,
+                    "remote dispatch requires a frozen profile id",
+                );
+            };
+            let broker_grant = match self
+                .broker
+                .consume_remote_authorization(task_id, &call, profile_id)
+            {
+                Ok(grant) => grant,
+                Err(error) => {
+                    return self.commit_rejection(task_id, &request, &call, &error);
+                }
+            };
+            let mut audit = audit_event_v3(
+                "brokerConsumed",
+                Some(task_id),
+                Some(&call),
+                Some(&effect),
+                Some(&scope),
+                "single-use remote-authentication grant consumed inside Rust",
+            );
+            audit.grant_id = Some(broker_grant.grant_id);
+            audit.purpose = Some(format!("{:?}", broker_grant.purpose));
+            audit.expires_at_unix_ms = Some(broker_grant.expires_at_unix_ms);
+            if let Err(error) = self.persistence.audit(audit) {
+                return self.commit_rejection(task_id, &request, &call, &error);
+            }
+        }
+        if let Err(error) = self.persistence.audit(audit_event_v3(
+            "toolDispatchPolicy",
+            Some(task_id),
+            Some(&call),
+            Some(&effect),
+            Some(&scope),
+            "native policy revalidated at dispatch",
+        )) {
+            return self.commit_rejection(task_id, &request, &call, &error);
+        }
+        if let Err(error) =
+            self.persistence
+                .mark_call_started(task_id, &call, effect.kind, Some(&scope))
         {
             return self.commit_rejection(
                 task_id,
@@ -1885,6 +2095,7 @@ impl AgentRuntimeV3 {
                 target_ids: vec![prepared.call.target_id.clone()],
                 ttl_ms: prepared.ttl_ms,
                 max_uses: 1,
+                authorization_source: CapabilityAuthorizationSourceV3::NativeConfirmation,
             },
             current_unix_ms(),
         ) {
@@ -1955,7 +2166,7 @@ impl AgentRuntimeV3 {
             capability_id: call.capability_id.clone(),
         };
         self.persistence
-            .mark_call_started(task_id, &recovery_call, assessment.effect)?;
+            .mark_call_started(task_id, &recovery_call, assessment.effect, None)?;
         let invocation = (|| {
             let required_references = self
                 .mcp
@@ -2097,13 +2308,19 @@ impl AgentRuntimeV3 {
 
     pub(crate) fn revoke_operator(&self, grant_id: &str) -> Result<OperatorGrantV3, String> {
         let grant = self.operator.revoke(grant_id)?;
+        let revoked_capabilities = self
+            .capabilities
+            .revoke_operator_capabilities(grant_id)
+            .map_err(|error| {
+                format!("failed to revoke Operator-derived capabilities: {error:?}")
+            })?;
         let mut audit = audit_event_v3(
             "operatorRevoked",
             Some(&grant.task_id),
             None,
             None,
             None,
-            "revoked",
+            &format!("revoked with {revoked_capabilities} derived capability record(s)"),
         );
         audit.grant_id = Some(grant.grant_id.clone());
         audit.expires_at_unix_ms = Some(grant.expires_at_unix_ms);
@@ -2173,6 +2390,7 @@ impl AgentRuntimeV3 {
     ) -> Result<AgentTaskSnapshotV3, String> {
         let record = self.tasks.record(task_id)?;
         if continue_task {
+            validate_recovery_policy_configuration_v3(record.request.permission_mode)?;
             let targets = record
                 .request
                 .targets
@@ -2226,10 +2444,10 @@ impl AgentRuntimeV3 {
         known_hosts_path: &Path,
     ) -> Result<AgentTaskSnapshotV3, String> {
         let record = self.tasks.record(task_id)?;
-        if !matches!(
+        if !(matches!(
             record.state,
             TaskRuntimeStateV3::NeedsReconciliation | TaskRuntimeStateV3::Lost
-        ) && !(record.state == TaskRuntimeStateV3::Active && record.restored)
+        ) || record.state == TaskRuntimeStateV3::Active && record.restored)
         {
             return Err("task is not awaiting recovery session rebind".into());
         }
@@ -2267,6 +2485,10 @@ impl AgentRuntimeV3 {
             known_hosts_path,
         )?;
         self.tasks.rebind_session(task_id, replacement_session_id)?;
+        let rebound = self.tasks.record(task_id)?.request;
+        self.context.rebind_task_request(&rebound)?;
+        self.extensions.rebind_task_request(&rebound)?;
+        self.mcp.rebind_task_request(&rebound)?;
         self.persist_task(task_id)?;
         self.persistence.audit(audit_event_v3(
             "recoverySessionRebound",
@@ -3177,6 +3399,49 @@ mod tests {
     }
 
     #[test]
+    fn restarted_safe_task_is_native_blocked_until_session_rebind() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = AgentRuntimeV3::default();
+        first
+            .configure_checkpoint_root(directory.path().to_path_buf())
+            .unwrap();
+        first
+            .tasks
+            .register(request("resume", "local-resume"))
+            .unwrap();
+        first.persist_task("resume").unwrap();
+
+        let restarted = AgentRuntimeV3::default();
+        restarted
+            .configure_checkpoint_root(directory.path().to_path_buf())
+            .unwrap();
+        assert!(restarted.tasks.request("resume").is_err());
+        assert!(restarted.operator.list().unwrap().is_empty());
+        assert!(restarted.broker.list().unwrap().is_empty());
+        let database = Database::open(&directory.path().join("resume.db")).unwrap();
+        let credentials = CredentialManager::new();
+        let rebound = restarted
+            .rebind_recovery_session(
+                "resume",
+                "session-resume",
+                &local_sessions("resume"),
+                &database,
+                &credentials,
+                directory.path(),
+            )
+            .unwrap();
+        assert!(matches!(
+            &rebound.request.targets[0],
+            AgentToolTargetV3::Local { session_id, .. } if session_id == "session-resume"
+        ));
+        assert!(rebound.context.fragments.iter().any(|fragment| {
+            fragment.fragment_id == "context:session:native"
+                && fragment.scope.session_id.as_deref() == Some("session-resume")
+        }));
+        assert!(restarted.tasks.request("resume").is_ok());
+    }
+
+    #[test]
     fn native_runtime_executes_one_exactly_bound_local_call_and_rejects_fabrication() {
         let runtime = AgentRuntimeV3::default();
         let sessions = local_sessions("runtime");
@@ -3249,6 +3514,10 @@ mod tests {
             .unwrap()
             .contains("runtime-ok"));
         assert_eq!(result.data.as_ref().unwrap()["channel"], "direct");
+        assert!(runtime.audit_entries().unwrap().iter().any(|event| {
+            event.action == "toolDispatchPolicy"
+                && event.decision.contains("revalidated at dispatch")
+        }));
         assert_eq!(
             runtime
                 .task_snapshot(&request.task_id)
@@ -3288,18 +3557,22 @@ mod tests {
         let runtime = AgentRuntimeV3::default();
         let sessions = local_sessions("patch");
         let directory = tempfile::tempdir().unwrap();
+        // macOS exposes /var as a system symlink to /private/var. Keep the
+        // absolute-path fixture inside the canonical frozen root so the test
+        // exercises in-root symlink denial rather than that platform alias.
+        let directory_path = directory.path().canonicalize().unwrap();
         runtime
-            .configure_checkpoint_root(directory.path().join("state"))
+            .configure_checkpoint_root(directory_path.join("state"))
             .unwrap();
-        let database = Database::open(&directory.path().join("shellspan.db")).unwrap();
+        let database = Database::open(&directory_path.join("shellspan.db")).unwrap();
         let credentials = CredentialManager::new();
-        let file_path = directory.path().join("config.txt");
+        let file_path = directory_path.join("config.txt");
         fs::write(&file_path, "mode=before\n").unwrap();
         let mut request = request("patch", "local-patch");
         request.targets[0] = AgentToolTargetV3::Local {
             target_id: "local-patch".into(),
             session_id: "session-patch".into(),
-            cwd: Some(directory.path().to_string_lossy().to_string()),
+            cwd: Some(directory_path.to_string_lossy().to_string()),
         };
         runtime
             .register_task(request.clone(), &sessions, &database)
@@ -3329,7 +3602,7 @@ mod tests {
                 &sessions,
                 &database,
                 &credentials,
-                directory.path(),
+                &directory_path,
             )
             .unwrap();
         assert!(prepared.native_prompt.contains("Exact diff"));
@@ -3350,7 +3623,7 @@ mod tests {
                 &sessions,
                 &database,
                 &credentials,
-                directory.path(),
+                &directory_path,
             )
             .unwrap();
         assert_eq!(
@@ -3370,16 +3643,11 @@ mod tests {
                 &sessions,
                 &database,
                 &credentials,
-                directory.path(),
+                &directory_path,
             )
             .unwrap();
         let restored = runtime
-            .restore_prepared_checkpoint(
-                prepared_restore,
-                &database,
-                &credentials,
-                directory.path(),
-            )
+            .restore_prepared_checkpoint(prepared_restore, &database, &credentials, &directory_path)
             .unwrap();
         assert!(restored.restored_at_unix_ms.is_some());
         assert_eq!(fs::read_to_string(&file_path).unwrap(), before);

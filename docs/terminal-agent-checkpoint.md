@@ -11,7 +11,9 @@ Follow `docs/terminal-agent-enhancement-plan.md` through M0–M5 and the final a
 - Remote: `git@github.com:hi-fullmoon/ShellSpan.git`
 - Branch: `main`
 - M0–M3 foundation commit: `26c27763a40671e34f61e42861c3d152d6d7b9b2`
-- Latest M4 implementation checkpoint: `1ec4b51` (`wip(agent): checkpoint M4 recovery controls`)
+- Original M4 implementation checkpoint: `1ec4b51` (`wip(agent): checkpoint M4 recovery controls`)
+- Accepted M4 continuation: the local commit containing this updated checkpoint
+  and `docs/terminal-agent-m4.md`; it is intentionally not pushed by this task
 - At the time this document was started, local `main`, `origin/main`, and `origin/HEAD` all pointed to `1ec4b51`, and the worktree was clean.
 
 The M4 checkpoint contains 11 changed files with 871 insertions and 165 deletions. It is intentionally a WIP checkpoint and must not be represented as an accepted M4 implementation.
@@ -24,7 +26,7 @@ The M4 checkpoint contains 11 changed files with 871 insertions and 165 deletion
 | M1 — unified execution engine and local rollback | Complete | `docs/terminal-agent-m1.md`; included in `26c2776` |
 | M2 — MCP connectors and remote execution security | Complete | `docs/terminal-agent-m2.md`; included in `26c2776` |
 | M3 — command DSL, plan preview, and audit | Complete | `docs/terminal-agent-m3.md`; included in `26c2776` |
-| M4 — background tasks, restart recovery, and Operator | In progress; stopped at a pushed checkpoint | Partial implementation in `1ec4b51`; M4 acceptance document and current-checkpoint verification are still missing |
+| M4 — background tasks, restart recovery, and Operator | Complete | `docs/terminal-agent-m4.md`; continuation completed and verified on 2026-09-01 |
 | M5 — Fleet and multi-agent orchestration | Not started | No M5 task or acceptance document yet |
 | Final acceptance | Not started | No full regression/security/migration/rollback audit yet |
 
@@ -38,13 +40,16 @@ These IDs are useful only if the same Codex account can still access the origina
 | M1 | ShellSpan M1 | `01a058f9-f51a-7563-8de6-f2caa0b43e52` | Complete |
 | M2 | ShellSpan M2 | `01a0594c-4719-7183-a92d-97bdff1ca6a2` | Complete |
 | M3 | ShellSpan M3 | `01a059be-ef4e-7543-96b2-03ef322e23cf` | Complete |
-| M4 | ShellSpan M4：后台恢复与 Operator | `01a05a0b-2751-7f23-a7d4-545a040f070f` | Stopped and archived after the `1ec4b51` checkpoint |
+| M4 | ShellSpan M4：后台恢复与 Operator | `01a05a0b-2751-7f23-a7d4-545a040f070f` | Original task stopped at `1ec4b51`; M4 was completed in the documented continuation |
 
-If the M4 task is available on the new computer, unarchive and resume it. If it is not available, create one new M4 continuation task window and point it at this document; do not start M5 in that window.
+M4 is complete. Start M5 only in a separate task window and keep this document
+and `docs/terminal-agent-m4.md` as the durable hand-off.
 
-## What is present in the M4 checkpoint
+## What was present in the original M4 checkpoint
 
-The checkpoint advances, but does not finish, the following M4 areas:
+The `1ec4b51` checkpoint advanced, but did not finish, the following M4 areas.
+The accepted continuation closes them and records the current behavior in
+`docs/terminal-agent-m4.md`:
 
 - versioned task persistence and recovery/reconciliation state;
 - Operator scope, expiry, revocation, audit, and fallback handling;
@@ -65,9 +70,9 @@ The implementation checkpoint changed:
 - `src/types/agent-v3.ts`
 - related M3/M4 UI tests and `docs/terminal-agent.md`
 
-## M4 work still required
+## M4 completion evidence
 
-Before marking M4 complete, audit the current code against the plan and close every gap below:
+The M4 continuation closed and documented every checkpoint item below:
 
 1. Confirm Rust remains the authoritative source for background task state, progress, phase, timestamps, targets, effects, failures, notifications, and recovery advice.
 2. Prove persistence is versioned, atomic, bounded, redacted, migratable, and corruption-tolerant. Restart must distinguish safe recovery, reconciliation required, lost, cancelled, and complete.
@@ -82,9 +87,11 @@ Before marking M4 complete, audit the current code against the plan and close ev
 
 ## Verification status and required commands
 
-The user explicitly requested that `1ec4b51` be committed and pushed without verification. Therefore no test result should be attributed to that checkpoint.
+The user explicitly requested that `1ec4b51` be committed and pushed without verification. Therefore no test result is attributed to that checkpoint.
 
-Earlier tests passed against an older intermediate state, but those results are not sufficient evidence for `1ec4b51`. On resume, run at least:
+The M4 continuation ran every command below on macOS with Rust 1.95 and passed;
+the exact results and the one pre-existing ignored Docker fixture are recorded
+in `docs/terminal-agent-m4.md`. Re-run at least this matrix after later changes:
 
 ```powershell
 pnpm test:agent:m4
@@ -127,15 +134,17 @@ Record exact commands and results in `docs/terminal-agent-m4.md`. Do not infer b
    - `docs/terminal-agent-m2.md`
    - `docs/terminal-agent-m3.md`
    - this checkpoint document
-4. Resume or create only the M4 continuation task window. Tell it to inspect the authoritative current worktree, finish the M4 list above, create `docs/terminal-agent-m4.md`, and stop before M5.
-5. Independently review M4 and run the full M4 verification list. Only then mark M4 complete.
-6. Create a separate M5 task window for Fleet and multi-agent orchestration.
-7. After M5 acceptance, create one final acceptance task window for full regression, security, migration, rollback, packaging, and requirement-by-requirement completion evidence.
+4. Confirm the history contains the accepted M4 commit with
+   `docs/terminal-agent-m4.md` and its verification evidence.
+5. Create a separate M5 task window for Fleet and multi-agent orchestration.
+6. After M5 acceptance, create one final acceptance task window for full
+   regression, security, migration, rollback, packaging, and
+   requirement-by-requirement completion evidence.
 
-## Suggested M4 continuation prompt
+## Suggested M5 hand-off
 
 ```text
-Continue ShellSpan Terminal Agent M4 from docs/terminal-agent-checkpoint.md. Read the enhancement plan and M0–M3 documents first, inspect the current worktree as authoritative, and finish only M4. Close every remaining M4 acceptance gap, create docs/terminal-agent-m4.md, and run the complete verification list recorded in the checkpoint. Do not enter M5, do not claim completion without evidence, and preserve v2 as the default with v3/MCP/Operator as independent opt-ins.
+Continue ShellSpan Terminal Agent M5 from docs/terminal-agent-checkpoint.md and docs/terminal-agent-m4.md. Read the enhancement plan and M0–M4 acceptance documents first, inspect the current worktree as authoritative, and finish only M5. Do not weaken M0–M4 target, capability, replay, broker, egress, sensitive-path, or verification boundaries. Preserve v2 as the default with v3, MCP, and Operator as independent opt-ins.
 ```
 
 ## Stop condition for the overall goal
