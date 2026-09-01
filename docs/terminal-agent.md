@@ -1,8 +1,9 @@
 # 终端 Agent 使用指南
 
-> v2.1 的执行路径保持不变。仓库中的 Agent Contract v3 目前仅处于 M0
-> 合同预览阶段，不会启用 v3 工具运行时；协议、迁移和回滚边界见
-> [Terminal Agent enhancement M0 contract baseline](terminal-agent-m0.md)。
+> v2.1 的执行路径仍是默认路径。仓库同时包含显式 opt-in 的 Agent Contract
+> v3 M0–M4 运行时；后台恢复、Operator、迁移和回滚边界见
+> [Terminal Agent enhancement M4 background recovery and Operator](terminal-agent-m4.md)。
+> 未设置 v3 rollout 时不会启用该运行时。
 
 ShellSpan v2.1 将终端 Agent 开放到 Stable。Agent 只接受模型返回的结构化 `run_terminal_command` 调用，在任务发起时绑定的同一个 PTY 中执行命令，并把真实输出与退出码作为后续判断依据。普通 Assistant 文本和 Markdown 代码块没有自动执行路径。
 

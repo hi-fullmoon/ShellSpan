@@ -33,17 +33,18 @@ use super::{
     validate_m1_result_data_v3, AgentAuditEventV3, AgentCallPreviewV3, AgentContextSnapshotV3,
     AgentFileCheckpointV3, AgentMcpAuthorizeRequestV3, AgentMcpCallV3, AgentMcpCapabilityGrantV3,
     AgentMcpResultV3, AgentNotificationV3, BrokerAuthorizeRequestV3, BrokerGrantV3,
-    CapabilityIssueRequestV3, CheckpointOriginalMetadataV3, CheckpointStoreV3,
-    ContextRetrievalRequestV3, ContextRetrievalV3, ContextRuntimeV3, ExtensionRuntimeV3,
-    ExtensionSnapshotV3, FileExecutionContextV3, FileOperationRegistryV3, HookDecisionV3,
-    HookEventV3, InstantiateRunbookRequestV3, IssuedCapabilityV3, LoadSkillRequestV3,
-    LoadedSkillV3, M4PersistenceV3, McpRuntimeV3, McpServerSnapshotV3, McpSetEnabledRequestV3,
-    McpToolSchemaRequestV3, McpToolSchemaV3, NativeBrokerV3, NativeCapabilityStoreV3,
-    NotificationKindV3, OperatorConfigureRequestV3, OperatorGrantV3, OperatorStoreV3,
-    PersistedTaskV3, ProcessLifecycleV3, ProcessRegistryV3, ProcessSnapshotV3, PtyLifecycleV3,
-    PtyRegistryV3, RecoveredProcessV3, RecoveryDispositionV3, RecoveryStoreStatusV3,
-    RegisteredToolV3, RemoteProcessStartV3, TaskPhaseV3, TaskRecoverySnapshotV3,
-    ToolRegistryErrorV3, ToolRegistryV3, DEFAULT_CAPABILITY_TTL_MS, MAX_CAPABILITY_TTL_MS,
+    BrokerPurposeV3, BrokerRequestKindV3, CapabilityIssueRequestV3, CheckpointOriginalMetadataV3,
+    CheckpointStoreV3, ContextRetrievalRequestV3, ContextRetrievalV3, ContextRuntimeV3,
+    ExtensionRuntimeV3, ExtensionSnapshotV3, FileExecutionContextV3, FileOperationRegistryV3,
+    HookDecisionV3, HookEventV3, InstantiateRunbookRequestV3, IssuedCapabilityV3,
+    LoadSkillRequestV3, LoadedSkillV3, M4PersistenceV3, McpRuntimeV3, McpServerSnapshotV3,
+    McpSetEnabledRequestV3, McpToolSchemaRequestV3, McpToolSchemaV3, NativeBrokerV3,
+    NativeCapabilityStoreV3, NotificationKindV3, OperatorConfigureRequestV3, OperatorGrantV3,
+    OperatorStoreV3, PersistedTaskV3, ProcessLifecycleV3, ProcessRegistryV3, ProcessSnapshotV3,
+    PtyLifecycleV3, PtyRegistryV3, RecoveredProcessV3, RecoveryDispositionV3,
+    RecoveryStoreStatusV3, RegisteredToolV3, RemoteProcessStartV3, TaskPhaseV3,
+    TaskRecoverySnapshotV3, ToolRegistryErrorV3, ToolRegistryV3, DEFAULT_CAPABILITY_TTL_MS,
+    MAX_CAPABILITY_TTL_MS, MCP_CREDENTIAL_SERVICE,
 };
 
 const MAX_ACTIVE_TASKS: usize = 128;
@@ -99,6 +100,7 @@ struct AgentTaskRecordV3 {
     completed_call_ids: HashSet<String>,
     results: Vec<AgentToolResultV3>,
     plan: Option<AgentPlanV3>,
+    restored: bool,
     created_at_unix_ms: u64,
     updated_at_unix_ms: u64,
 }
@@ -153,6 +155,7 @@ impl AgentTaskStoreV3 {
                 completed_call_ids: HashSet::new(),
                 results: Vec::new(),
                 plan: None,
+                restored: false,
                 created_at_unix_ms: now,
                 updated_at_unix_ms: now,
             },
@@ -191,6 +194,7 @@ impl AgentTaskStoreV3 {
             .results
             .iter()
             .map(|result| result.call_id.clone())
+            .chain(task.calls.iter().map(|call| call.call_id.clone()))
             .collect();
         tasks.insert(
             task.request.task_id.clone(),
@@ -202,6 +206,7 @@ impl AgentTaskStoreV3 {
                 completed_call_ids,
                 results: task.results,
                 plan: task.plan,
+                restored: true,
                 created_at_unix_ms: task.created_at_unix_ms,
                 updated_at_unix_ms: current_unix_ms(),
             },
@@ -330,6 +335,7 @@ impl AgentTaskStoreV3 {
         } else {
             TaskRuntimeStateV3::Cancelled
         };
+        task.restored = false;
         task.sequence = task.sequence.saturating_add(1);
         task.updated_at_unix_ms = current_unix_ms();
         Ok(())
@@ -346,9 +352,10 @@ impl AgentTaskStoreV3 {
         if !matches!(
             task.state,
             TaskRuntimeStateV3::NeedsReconciliation | TaskRuntimeStateV3::Lost
-        ) {
+        ) && !(task.state == TaskRuntimeStateV3::Active && task.restored)
+        {
             return Err(
-                "only a restarted task awaiting reconciliation may rebind a session".into(),
+                "only a restarted task may rebind a recovery session".into(),
             );
         }
         let target = task
@@ -371,6 +378,7 @@ impl AgentTaskStoreV3 {
         }
         validate_agent_request_v3(&task.request)
             .map_err(|_| "replacement session violated the frozen request".to_string())?;
+        task.restored = false;
         task.sequence = task.sequence.saturating_add(1);
         task.updated_at_unix_ms = current_unix_ms();
         Ok(())
@@ -572,7 +580,9 @@ impl AgentRuntimeV3 {
                 self.extensions.register_task(&task.request)?;
                 self.mcp.register_task(&task.request)?;
                 self.tasks.restore(task, state)?;
-                if recovery.requires_human_action {
+                if recovery.requires_human_action
+                    || recovery.disposition == RecoveryDispositionV3::SafeToResume
+                {
                     self.persistence.push_notification(
                         Some(&task_id),
                         NotificationKindV3::HumanActionRequired,
@@ -661,6 +671,7 @@ impl AgentRuntimeV3 {
             plan: record.plan,
             calls,
             processes,
+            last_failure: existing.and_then(|recovery| recovery.last_failure),
             created_at_unix_ms: record.created_at_unix_ms,
             updated_at_unix_ms: record.updated_at_unix_ms,
         })
@@ -732,12 +743,13 @@ impl AgentRuntimeV3 {
             ));
             return Err(error);
         }
-        let operator_auto_approved = if request.permission_mode == AgentPermissionModeV3::Operator {
+        let operator_grant_id = if request.permission_mode == AgentPermissionModeV3::Operator {
             self.operator
                 .authorize(&request.task_id, &call, &effect, &scope)?
         } else {
-            false
+            None
         };
+        let operator_auto_approved = operator_grant_id.is_some();
         let requires_native_confirmation = !operator_auto_approved
             && (request.permission_mode == AgentPermissionModeV3::RequestApproval
                 || request.permission_mode == AgentPermissionModeV3::Operator
@@ -790,7 +802,7 @@ impl AgentRuntimeV3 {
             ttl_ms,
             preview_text
         );
-        self.persistence.audit(audit_event_v3(
+        let mut audit = audit_event_v3(
             "toolAuthorization",
             Some(&request.task_id),
             Some(&call),
@@ -801,7 +813,9 @@ impl AgentRuntimeV3 {
             } else {
                 "allowed by exact Operator scope"
             },
-        ))?;
+        );
+        audit.grant_id = operator_grant_id;
+        self.persistence.audit(audit)?;
         self.persistence.set_phase(
             &request.task_id,
             if requires_native_confirmation {
@@ -1148,15 +1162,19 @@ impl AgentRuntimeV3 {
             let scope = inspect_call_policy_scope_v3(call)?;
             self.operator
                 .allows_elevation(task_id, call, effect, &scope)?;
-            self.broker.consume_elevation(task_id, call)?;
-            self.persistence.audit(audit_event_v3(
+            let broker_grant = self.broker.consume_elevation(task_id, call)?;
+            let mut audit = audit_event_v3(
                 "brokerConsumed",
                 Some(task_id),
                 Some(call),
                 Some(effect),
                 None,
                 "single-use elevation grant consumed inside Rust",
-            ))?;
+            );
+            audit.grant_id = Some(broker_grant.grant_id);
+            audit.purpose = Some(format!("{:?}", broker_grant.purpose));
+            audit.expires_at_unix_ms = Some(broker_grant.expires_at_unix_ms);
+            self.persistence.audit(audit)?;
             if arguments.channel == AgentExecutionChannelV3::Pty {
                 return Err(
                     "elevated PTY execution is denied because prompts could expose credentials"
@@ -1463,7 +1481,19 @@ impl AgentRuntimeV3 {
         if self.registry.get(&call.tool_name).is_err() {
             return Err(reason.to_string());
         }
-        self.tasks.commit(task_id, call, result)
+        let committed = self.tasks.commit(task_id, call, result)?;
+        self.persist_task(task_id)?;
+        self.persistence.set_phase(task_id, TaskPhaseV3::Failed)?;
+        self.persistence
+            .push_notification(Some(task_id), NotificationKindV3::Failed)?;
+        self.extensions.record_event(
+            task_id,
+            HookEventV3::ToolFailed,
+            Some(&call.tool_name),
+            Some(&call.call_id),
+            "Rejected",
+        );
+        Ok(committed)
     }
 
     fn revalidate_target(
@@ -1582,6 +1612,11 @@ impl AgentRuntimeV3 {
         let extensions = self.extensions.snapshot(&record.request.task_id)?;
         let mcp_servers = self.mcp.snapshots(&record.request.task_id)?;
         let mcp_results = self.mcp.results(&record.request.task_id)?;
+        let mut recovery = self.persistence.task_recovery(&record.request.task_id)?;
+        recovery.requires_session_rebind = record.restored;
+        if record.restored && recovery.disposition == RecoveryDispositionV3::SafeToResume {
+            recovery.recovery_advice = "The call journal is safe to resume, but the restarted task must first bind a live session with the same native identity and root; no old capability or process handle is restored.".into();
+        }
         Ok(AgentTaskSnapshotV3 {
             processes: self.processes.list_for_task(&record.request.task_id)?,
             plan: record.plan,
@@ -1597,7 +1632,7 @@ impl AgentRuntimeV3 {
             extensions,
             mcp_servers,
             mcp_results,
-            recovery: self.persistence.task_recovery(&record.request.task_id)?,
+            recovery,
             notifications: self
                 .persistence
                 .notifications()?
@@ -1789,23 +1824,78 @@ impl AgentRuntimeV3 {
             return Err("native MCP capability approval was denied".into());
         }
         let digest = mcp_call_digest(&prepared.call)?;
-        let issued = self
-            .capabilities
-            .issue(
-                CapabilityIssueRequestV3 {
-                    request_id: prepared.request.request_id,
-                    user_session_id: prepared.request.user_session_id,
-                    call_id: prepared.call.call_id,
-                    call_digest: digest,
-                    allowed_tools: vec![prepared.canonical_tool_name],
-                    allowed_effects: vec![prepared.effect],
-                    target_ids: vec![prepared.call.target_id],
+        let credential_ids = self
+            .mcp
+            .credential_ids(&prepared.request.task_id, &prepared.call.server_id)?;
+        let mut broker_grants: Vec<BrokerGrantV3> = Vec::with_capacity(credential_ids.len());
+        for credential_id in credential_ids {
+            let grant = match self.broker.authorize(
+                BrokerAuthorizeRequestV3 {
+                    task_id: prepared.request.task_id.clone(),
+                    request_id: prepared.request.request_id.clone(),
+                    call_id: prepared.call.call_id.clone(),
+                    target_id: prepared.call.target_id.clone(),
+                    tool_name: prepared.canonical_tool_name.clone(),
+                    kind: BrokerRequestKindV3::Credential,
+                    purpose: BrokerPurposeV3::McpAuthentication,
+                    credential_service: Some(MCP_CREDENTIAL_SERVICE.into()),
+                    credential_id: Some(credential_id),
                     ttl_ms: prepared.ttl_ms,
-                    max_uses: 1,
                 },
-                current_unix_ms(),
-            )
-            .map_err(|error| format!("native MCP capability issuance failed: {error:?}"))?;
+                &prepared.request,
+            ) {
+                Ok(grant) => grant,
+                Err(error) => {
+                    for issued in &broker_grants {
+                        let _ = self.broker.revoke(&issued.grant_id);
+                    }
+                    return Err(error);
+                }
+            };
+            let mut audit = audit_event_v3(
+                "brokerAuthorized",
+                Some(&prepared.request.task_id),
+                None,
+                None,
+                None,
+                "single-use MCP credential grant issued after native confirmation",
+            );
+            audit.grant_id = Some(grant.grant_id.clone());
+            audit.target_id = Some(grant.target_id.clone());
+            audit.tool_name = Some(grant.tool_name.clone());
+            audit.purpose = Some(format!("{:?}", grant.purpose));
+            audit.expires_at_unix_ms = Some(grant.expires_at_unix_ms);
+            if let Err(error) = self.persistence.audit(audit) {
+                let _ = self.broker.revoke(&grant.grant_id);
+                for issued in &broker_grants {
+                    let _ = self.broker.revoke(&issued.grant_id);
+                }
+                return Err(error);
+            }
+            broker_grants.push(grant);
+        }
+        let issued = match self.capabilities.issue(
+            CapabilityIssueRequestV3 {
+                request_id: prepared.request.request_id.clone(),
+                user_session_id: prepared.request.user_session_id.clone(),
+                call_id: prepared.call.call_id.clone(),
+                call_digest: digest,
+                allowed_tools: vec![prepared.canonical_tool_name.clone()],
+                allowed_effects: vec![prepared.effect],
+                target_ids: vec![prepared.call.target_id.clone()],
+                ttl_ms: prepared.ttl_ms,
+                max_uses: 1,
+            },
+            current_unix_ms(),
+        ) {
+            Ok(issued) => issued,
+            Err(error) => {
+                for grant in &broker_grants {
+                    let _ = self.broker.revoke(&grant.grant_id);
+                }
+                return Err(format!("native MCP capability issuance failed: {error:?}"));
+            }
+        };
         self.persistence
             .set_phase(&prepared.request.task_id, TaskPhaseV3::Running)?;
         Ok(AgentMcpCapabilityGrantV3 {
@@ -1866,7 +1956,37 @@ impl AgentRuntimeV3 {
         };
         self.persistence
             .mark_call_started(task_id, &recovery_call, assessment.effect)?;
-        let (status, data, truncated) = match self.mcp.invoke_call(task_id, &call, credentials) {
+        let invocation = (|| {
+            let required_references = self
+                .mcp
+                .credential_ids(task_id, &call.server_id)?
+                .into_iter()
+                .map(|credential_id| (MCP_CREDENTIAL_SERVICE.to_string(), credential_id))
+                .collect::<Vec<_>>();
+            let bundle = self.broker.consume_credentials(
+                task_id,
+                &recovery_call,
+                BrokerPurposeV3::McpAuthentication,
+                &required_references,
+                credentials,
+            )?;
+            for grant in &bundle.grants {
+                let mut audit = audit_event_v3(
+                    "brokerConsumed",
+                    Some(task_id),
+                    Some(&recovery_call),
+                    None,
+                    None,
+                    "single-use MCP credential grant consumed inside Rust",
+                );
+                audit.grant_id = Some(grant.grant_id.clone());
+                audit.purpose = Some(format!("{:?}", grant.purpose));
+                audit.expires_at_unix_ms = Some(grant.expires_at_unix_ms);
+                self.persistence.audit(audit)?;
+            }
+            self.mcp.invoke_call(task_id, &call, &bundle.values_by_id)
+        })();
+        let (status, data, truncated) = match invocation {
             Ok((data, truncated)) => (mcp_result_status(&data), data, truncated),
             Err(error) => (
                 "failed",
@@ -1898,6 +2018,12 @@ impl AgentRuntimeV3 {
         )?;
         self.persist_task(task_id)?;
         if status != "completed" {
+            let failure = result
+                .data
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("MCP tool execution returned a native failure");
+            self.persistence.set_last_failure(task_id, failure)?;
             self.persistence.set_phase(task_id, TaskPhaseV3::Failed)?;
             self.persistence
                 .push_notification(Some(task_id), NotificationKindV3::Failed)?;
@@ -1942,14 +2068,22 @@ impl AgentRuntimeV3 {
         let grant = self
             .operator
             .configure(request, &task, &self.registry.list())?;
-        self.persistence.audit(audit_event_v3(
+        let mut audit = audit_event_v3(
             "operatorConfigured",
             Some(&task.task_id),
             None,
             None,
             None,
             "allowed with bounded scope and TTL",
-        ))?;
+        );
+        audit.grant_id = Some(grant.grant_id.clone());
+        audit.expires_at_unix_ms = Some(grant.expires_at_unix_ms);
+        audit.scope_target_ids = grant.target_ids.clone();
+        audit.scope_tool_names = grant.tool_names.clone();
+        audit.scope_effects = grant.effects.clone();
+        audit.scope_path_count = grant.path_prefixes.len();
+        audit.network_destinations = grant.network_destinations.clone();
+        self.persistence.audit(audit)?;
         Ok(grant)
     }
 
@@ -1963,14 +2097,22 @@ impl AgentRuntimeV3 {
 
     pub(crate) fn revoke_operator(&self, grant_id: &str) -> Result<OperatorGrantV3, String> {
         let grant = self.operator.revoke(grant_id)?;
-        self.persistence.audit(audit_event_v3(
+        let mut audit = audit_event_v3(
             "operatorRevoked",
             Some(&grant.task_id),
             None,
             None,
             None,
             "revoked",
-        ))?;
+        );
+        audit.grant_id = Some(grant.grant_id.clone());
+        audit.expires_at_unix_ms = Some(grant.expires_at_unix_ms);
+        audit.scope_target_ids = grant.target_ids.clone();
+        audit.scope_tool_names = grant.tool_names.clone();
+        audit.scope_effects = grant.effects.clone();
+        audit.scope_path_count = grant.path_prefixes.len();
+        audit.network_destinations = grant.network_destinations.clone();
+        self.persistence.audit(audit)?;
         Ok(grant)
     }
 
@@ -1980,14 +2122,20 @@ impl AgentRuntimeV3 {
     ) -> Result<BrokerGrantV3, String> {
         let task = self.tasks.request(&request.task_id)?;
         let grant = self.broker.authorize(request, &task)?;
-        self.persistence.audit(audit_event_v3(
+        let mut audit = audit_event_v3(
             "brokerAuthorized",
             Some(&task.task_id),
             None,
             None,
             None,
             "single-use native broker grant issued",
-        ))?;
+        );
+        audit.grant_id = Some(grant.grant_id.clone());
+        audit.target_id = Some(grant.target_id.clone());
+        audit.tool_name = Some(grant.tool_name.clone());
+        audit.purpose = Some(format!("{:?}", grant.purpose));
+        audit.expires_at_unix_ms = Some(grant.expires_at_unix_ms);
+        self.persistence.audit(audit)?;
         Ok(grant)
     }
 
@@ -1997,14 +2145,20 @@ impl AgentRuntimeV3 {
 
     pub(crate) fn revoke_broker(&self, grant_id: &str) -> Result<BrokerGrantV3, String> {
         let grant = self.broker.revoke(grant_id)?;
-        self.persistence.audit(audit_event_v3(
+        let mut audit = audit_event_v3(
             "brokerRevoked",
             Some(&grant.task_id),
             None,
             None,
             None,
             "revoked",
-        ))?;
+        );
+        audit.grant_id = Some(grant.grant_id.clone());
+        audit.target_id = Some(grant.target_id.clone());
+        audit.tool_name = Some(grant.tool_name.clone());
+        audit.purpose = Some(format!("{:?}", grant.purpose));
+        audit.expires_at_unix_ms = Some(grant.expires_at_unix_ms);
+        self.persistence.audit(audit)?;
         Ok(grant)
     }
 
@@ -2075,7 +2229,8 @@ impl AgentRuntimeV3 {
         if !matches!(
             record.state,
             TaskRuntimeStateV3::NeedsReconciliation | TaskRuntimeStateV3::Lost
-        ) {
+        ) && !(record.state == TaskRuntimeStateV3::Active && record.restored)
+        {
             return Err("task is not awaiting recovery session rebind".into());
         }
         let host_targets = record
@@ -2205,20 +2360,6 @@ impl AgentRuntimeV3 {
         self.extensions
             .record_event(task_id, HookEventV3::SessionEnd, None, None, "cancelled");
         Ok(())
-    }
-
-    pub(crate) fn cancel_all(&self, sessions: &SessionManager) -> Result<usize, String> {
-        let task_ids = self
-            .tasks
-            .records()?
-            .into_iter()
-            .filter(|record| record.state == TaskRuntimeStateV3::Active)
-            .map(|record| record.request.task_id)
-            .collect::<Vec<_>>();
-        for task_id in &task_ids {
-            self.cancel_task(task_id, sessions)?;
-        }
-        Ok(task_ids.len())
     }
 
     pub(crate) fn prepare_for_shutdown(&self, sessions: &SessionManager) -> Result<usize, String> {
@@ -3003,6 +3144,36 @@ mod tests {
         let mut compatibility = request("compat", "local-1");
         compatibility.source_contract = AgentRequestSourceV3::V2Compatibility;
         assert!(store.register(compatibility).is_err());
+    }
+
+    #[test]
+    fn shutdown_persists_active_tasks_once_without_marking_them_cancelled() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = AgentRuntimeV3::default();
+        runtime
+            .configure_checkpoint_root(directory.path().to_path_buf())
+            .unwrap();
+        runtime
+            .tasks
+            .register(request("shutdown", "local-shutdown"))
+            .unwrap();
+        runtime.persist_task("shutdown").unwrap();
+        let sessions = SessionManager::default();
+
+        assert_eq!(runtime.prepare_for_shutdown(&sessions).unwrap(), 1);
+        assert_eq!(runtime.prepare_for_shutdown(&sessions).unwrap(), 0);
+        assert_eq!(
+            runtime.tasks.record("shutdown").unwrap().state,
+            TaskRuntimeStateV3::Active
+        );
+        assert_eq!(
+            runtime
+                .persistence
+                .task_recovery("shutdown")
+                .unwrap()
+                .disposition,
+            RecoveryDispositionV3::SafeToResume
+        );
     }
 
     #[test]

@@ -728,8 +728,8 @@ pub(crate) fn request_app_restart(
     if let Err(error) = agent_requests.cancel_all() {
         warn!("Failed to cancel Agent requests before restart: {error}");
     }
-    if let Err(error) = agent_runtime_v3.cancel_all(&sessions) {
-        warn!("Failed to cancel Agent v3 tasks before restart: {error}");
+    if let Err(error) = agent_runtime_v3.prepare_for_shutdown(&sessions) {
+        warn!("Failed to persist Agent v3 tasks before restart: {error}");
     }
     app.request_restart();
 }
@@ -749,8 +749,8 @@ pub(crate) fn request_app_exit(
     if let Err(error) = agent_requests.cancel_all() {
         warn!("Failed to cancel Agent requests before exit: {error}");
     }
-    if let Err(error) = agent_runtime_v3.cancel_all(&sessions) {
-        warn!("Failed to cancel Agent v3 tasks before exit: {error}");
+    if let Err(error) = agent_runtime_v3.prepare_for_shutdown(&sessions) {
+        warn!("Failed to persist Agent v3 tasks before exit: {error}");
     }
     app.exit(0);
 }

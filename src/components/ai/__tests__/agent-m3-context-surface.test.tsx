@@ -109,6 +109,7 @@ const task: AgentTaskSnapshotV3 = {
     processes: [],
     recoveryAdvice: 'Fresh native authorization is required.',
     requiresHumanAction: false,
+    requiresSessionRebind: false,
   },
   notifications: [],
   createdAtUnixMs: 1,

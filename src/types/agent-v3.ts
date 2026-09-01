@@ -420,6 +420,7 @@ export interface AgentTaskRecoverySnapshotV3 {
   readonly processes: readonly AgentRecoveredProcessV3[];
   readonly recoveryAdvice: string;
   readonly requiresHumanAction: boolean;
+  readonly requiresSessionRebind: boolean;
   readonly lastFailure?: string;
   readonly lastEffect?: AgentObservedEffectV3;
 }
@@ -452,6 +453,13 @@ export interface AgentAuditEventV3 {
   readonly effect?: AgentEffectKindV3;
   readonly networkDestinations: readonly AgentNetworkDestinationV3[];
   readonly sensitivePathCount: number;
+  readonly grantId?: string;
+  readonly purpose?: string;
+  readonly expiresAtUnixMs?: number;
+  readonly scopeTargetIds?: readonly string[];
+  readonly scopeToolNames?: readonly string[];
+  readonly scopeEffects?: readonly AgentEffectKindV3[];
+  readonly scopePathCount?: number;
   readonly decision: string;
   readonly recordedAtUnixMs: number;
 }

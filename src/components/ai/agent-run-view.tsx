@@ -53,7 +53,8 @@ export function AgentRunView({
 
   if (!latestRun || messages.length === 0) {
     return (
-      <div className="min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <AgentM4TaskCenter />
         <PanelEmptyState icon={<BotIcon />} title={t('agent.emptyTitle')} description={t('agent.emptyDescription')} />
       </div>
     );

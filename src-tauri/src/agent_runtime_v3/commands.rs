@@ -1,4 +1,6 @@
 use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+use std::time::Duration;
+
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
@@ -58,6 +60,25 @@ fn deliver_pending_notifications(app: &AppHandle, runtime: &AgentRuntimeV3) {
             }
         }
     }
+}
+
+fn schedule_operator_expiry_notification(
+    app: &AppHandle,
+    runtime: &AgentRuntimeV3,
+    grant: &OperatorGrantV3,
+) {
+    let delay_ms = grant
+        .expires_at_unix_ms
+        .saturating_sub(super::current_unix_ms())
+        .saturating_sub(60_000);
+    let app = app.clone();
+    let runtime = runtime.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        if runtime.operator_grants().is_ok() {
+            deliver_pending_notifications(&app, &runtime);
+        }
+    });
 }
 
 #[tauri::command]
@@ -273,7 +294,9 @@ pub(crate) fn agent_v3_configure_operator(
     if dialog.show() != MessageDialogResult::Yes {
         return Err("native Operator configuration was denied".into());
     }
-    runtime.configure_operator(request)
+    let grant = runtime.configure_operator(request)?;
+    schedule_operator_expiry_notification(&app, &runtime, &grant);
+    Ok(grant)
 }
 
 #[tauri::command]
