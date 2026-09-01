@@ -16,6 +16,9 @@ Follow `docs/terminal-agent-enhancement-plan.md` through M0–M5 and the final a
   and `docs/terminal-agent-m4.md`; it is intentionally not pushed by this task
 - Accepted M5 continuation: the local commit containing
   `docs/terminal-agent-m5.md`; it is intentionally not pushed by this task
+- Accepted final pass: the local commit containing
+  `docs/terminal-agent-final-acceptance.md` and the refreshed v2 baseline; it
+  is intentionally not pushed by this task
 - At the time this document was started, local `main`, `origin/main`, and `origin/HEAD` all pointed to `1ec4b51`, and the worktree was clean.
 
 The M4 checkpoint contains 11 changed files with 871 insertions and 165 deletions. It is intentionally a WIP checkpoint and must not be represented as an accepted M4 implementation.
@@ -30,7 +33,7 @@ The M4 checkpoint contains 11 changed files with 871 insertions and 165 deletion
 | M3 — command DSL, plan preview, and audit | Complete | `docs/terminal-agent-m3.md`; included in `26c2776` |
 | M4 — background tasks, restart recovery, and Operator | Complete | `docs/terminal-agent-m4.md`; continuation completed and verified on 2026-09-01 |
 | M5 — Fleet and multi-agent orchestration | Complete | `docs/terminal-agent-m5.md`; implementation and acceptance verified on 2026-09-01 |
-| Final acceptance | Not started | No full regression/security/migration/rollback audit yet |
+| Final acceptance | Complete | `docs/terminal-agent-final-acceptance.md`; full local regression, security, migration, restart, rollback, build, and packaging-feasibility audit completed on 2026-09-01 |
 
 ## Codex phase task history
 
@@ -44,10 +47,11 @@ These IDs are useful only if the same Codex account can still access the origina
 | M3 | ShellSpan M3 | `01a059be-ef4e-7543-96b2-03ef322e23cf` | Complete |
 | M4 | ShellSpan M4：后台恢复与 Operator | `01a05a0b-2751-7f23-a7d4-545a040f070f` | Original task stopped at `1ec4b51`; M4 was completed in the documented continuation |
 | M5 | ShellSpan M5 Fleet 与多 Agent | `01a05ae7-e351-7773-8716-ae798b00f362` | Separate M5 window completed design/code audit; implementation and acceptance were finished by the controlling task after the window scheduler stalled |
+| Final acceptance | ShellSpan 最终验收 | `01a05b07-e46d-7312-a9af-8f5ed4912143` | Separate final window read the complete plan and M0–M5 evidence, then stalled after a no-match read-only search was misclassified as awaiting approval; the controlling task completed and committed the full acceptance pass |
 
-M5 is complete. Start final acceptance only in a separate task window and keep
-this document plus `docs/terminal-agent-m4.md` and
-`docs/terminal-agent-m5.md` as the durable hand-off.
+M0–M5 and the separate final acceptance pass are complete. Keep this document,
+`docs/terminal-agent-m0.md` through `docs/terminal-agent-m5.md`, and
+`docs/terminal-agent-final-acceptance.md` as the durable hand-off.
 
 ## What was present in the original M4 checkpoint
 
@@ -138,13 +142,12 @@ Record exact commands and results in `docs/terminal-agent-m4.md`. Do not infer b
    - `docs/terminal-agent-m2.md`
    - `docs/terminal-agent-m3.md`
    - this checkpoint document
-4. Confirm the history contains the accepted M4 commit with
-   `docs/terminal-agent-m4.md` and its verification evidence.
-5. Create a separate M5 task window for Fleet and multi-agent orchestration.
-6. M5 is accepted in `docs/terminal-agent-m5.md`. Create one final acceptance
-   task window for full
-   regression, security, migration, rollback, packaging, and
-   requirement-by-requirement completion evidence.
+4. Confirm the history contains the accepted M4, M5, and final acceptance
+   commits with `docs/terminal-agent-m4.md`, `docs/terminal-agent-m5.md`, and
+   `docs/terminal-agent-final-acceptance.md`.
+5. Treat the final acceptance document as the current verification matrix and
+   limitations record. Re-run it only when validating later changes; no
+   enhancement phase remains open in this checkpoint.
 
 ## Suggested M5 hand-off
 
@@ -180,6 +183,35 @@ The M5 phase delivered and verified:
 Run the ShellSpan Terminal Agent final acceptance pass from docs/terminal-agent-checkpoint.md. Read docs/terminal-agent-enhancement-plan.md and the M0–M5 acceptance documents, inspect the current repository as authoritative, and do not add unrelated features. Audit every requirement against concrete code and test evidence; run full frontend/Rust regression, security, migration, restart/reconciliation, rollback, build, and packaging checks. Record known limits honestly, update the checkpoint only after all required evidence passes, and preserve Agent v2 as the default with v3, MCP, Operator, and Fleet as independent opt-ins.
 ```
 
+The final acceptance pass is now complete; the block above is retained only as
+historical hand-off evidence.
+
+## Final acceptance evidence
+
+The final pass audited the enhancement plan against the protocol, Rust runtime,
+typed IPC, UI, and executable tests. It also repaired a stale v2 baseline
+contract digest by running the official collector; the underlying v2 schema
+was unchanged.
+
+The local evidence includes:
+
+1. 164 frontend test files with 1,584 passing tests and 3 platform-conditioned
+   skips, plus all targeted Agent security, v3, M3, M4, and M5 suites.
+2. 479 passing Rust library tests, 18 explicitly ignored external/controlled
+   tests, and 5 passing integration probes.
+3. Successful TypeScript, production frontend, clippy, formatting, and unsigned
+   macOS Tauri application bundle checks.
+4. A standard Tauri release binary build followed by the expected signing
+   failure because this host has no `ShellSpan Dev` identity; the same bundle
+   completed with the official `--no-sign` local verification option.
+5. Exact Docker, provider-credential, controlled-desktop, and cross-platform
+   limitations recorded without claiming they passed.
+
+See `docs/terminal-agent-final-acceptance.md` for the requirement matrix,
+commands, results, security audit, migration/rollback proof, and known limits.
+
 ## Stop condition for the overall goal
 
-The original goal is complete only when M0–M5 and the final acceptance pass are all implemented, documented, and verified, with each phase performed in its own Codex task window.
+The original goal is complete: M0–M5 and the final acceptance pass are
+implemented, documented, and verified, and a separate Codex task window was
+created for every phase.
