@@ -4,6 +4,7 @@ import { AssistantMessageContent } from '@/components/ai/assistant-message-conte
 import { AgentM2TaskSurface } from '@/components/ai/agent-m2-task-surface';
 import { AgentM3ContextSurface } from '@/components/ai/agent-m3-context-surface';
 import { AgentM4TaskCenter } from '@/components/ai/agent-m4-task-center';
+import { AgentM5FleetCenter } from '@/components/ai/agent-m5-fleet-center';
 import { Bubble, Marker, Message, MessageScroller } from '@/components/ai/chat-primitives';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,7 @@ export function AgentRunView({
   if (!latestRun || messages.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
+        <AgentM5FleetCenter />
         <AgentM4TaskCenter />
         <PanelEmptyState icon={<BotIcon />} title={t('agent.emptyTitle')} description={t('agent.emptyDescription')} />
       </div>
@@ -62,6 +64,7 @@ export function AgentRunView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <AgentM5FleetCenter />
       <AgentM4TaskCenter />
       <AgentM3ContextSurface />
       <AgentM2TaskSurface />

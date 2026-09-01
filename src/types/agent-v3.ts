@@ -370,6 +370,139 @@ export interface AgentTaskSnapshotV3 {
   readonly updatedAtUnixMs: number;
 }
 
+export type AgentFleetStateV3 =
+  | 'ready'
+  | 'running'
+  | 'failStopped'
+  | 'needsReconciliation'
+  | 'completed'
+  | 'completedWithFailures'
+  | 'cancelled';
+
+export interface AgentFleetFeaturePolicyV3 {
+  readonly stage: 'disabled' | 'enabled';
+  readonly defaultEnabled: false;
+  readonly maximumTargets: number;
+  readonly stateSurvivesRestart: true;
+  readonly subAgentAuthoritySurvivesRestart: false;
+}
+
+export type AgentFleetTargetStateV3 =
+  | 'pending'
+  | 'canary'
+  | 'running'
+  | 'awaitingVerification'
+  | 'succeeded'
+  | 'failed'
+  | 'blocked'
+  | 'needsReconciliation'
+  | 'rolledBack';
+
+export type AgentSubAgentRoleV3 =
+  | 'explorer'
+  | 'diagnostician'
+  | 'operator'
+  | 'verifier'
+  | 'reviewer';
+
+export interface AgentFleetSelectorV3 {
+  readonly labels: Readonly<Record<string, string>>;
+  readonly groups: readonly string[];
+  readonly environments: readonly string[];
+}
+
+export interface AgentFleetMemberV3 {
+  readonly taskId: string;
+  readonly targetId: string;
+  readonly displayName: string;
+  readonly labels: Readonly<Record<string, string>>;
+  readonly group: string;
+  readonly environment: string;
+}
+
+export interface AgentFleetPolicyV3 {
+  readonly maxConcurrency: number;
+  readonly batchSize: number;
+  readonly canarySize: number;
+  readonly maxFailures: number;
+  readonly jitterMs: number;
+  readonly maxCallsTotal: number;
+  readonly maxCallsPerTarget: number;
+}
+
+export interface AgentRegisterFleetRequestV3 {
+  readonly fleetId: string;
+  readonly goal: string;
+  readonly members: readonly AgentFleetMemberV3[];
+  readonly selector: AgentFleetSelectorV3;
+  readonly policy: AgentFleetPolicyV3;
+}
+
+export interface AgentRegisterSubAgentRequestV3 {
+  readonly fleetId: string;
+  readonly role: AgentSubAgentRoleV3;
+  readonly targetIds: readonly string[];
+  readonly toolNames: readonly AgentToolNameV3[];
+  readonly effects: readonly AgentEffectKindV3[];
+  readonly maxCalls: number;
+}
+
+export interface AgentSubmitFleetVerificationRequestV3 {
+  readonly fleetId: string;
+  readonly subAgentId: string;
+  readonly targetId: string;
+  readonly evidenceCallId: string;
+  readonly succeeded: boolean;
+  readonly summary: string;
+}
+
+export interface AgentFleetTargetSnapshotV3 extends AgentFleetMemberV3 {
+  readonly waveIndex: number;
+  readonly state: AgentFleetTargetStateV3;
+  readonly planVersion: number;
+  readonly allowedTools: readonly AgentToolNameV3[];
+  readonly allowedEffects: readonly AgentEffectKindV3[];
+  readonly callsUsed: number;
+  readonly lastCallId?: string;
+  readonly lastWriterSubAgentId?: string;
+  readonly verifierSubAgentId?: string;
+  readonly verificationEvidenceCallId?: string;
+  readonly verificationSummary?: string;
+  readonly lastError?: string;
+  readonly rollbackCheckpointId?: string;
+}
+
+export interface AgentSubAgentSnapshotV3 {
+  readonly subAgentId: string;
+  readonly role: AgentSubAgentRoleV3;
+  readonly targetIds: readonly string[];
+  readonly toolNames: readonly AgentToolNameV3[];
+  readonly effects: readonly AgentEffectKindV3[];
+  readonly maxCalls: number;
+  readonly callsUsed: number;
+  readonly active: boolean;
+  readonly registeredAtUnixMs: number;
+}
+
+export interface AgentFleetSnapshotV3 {
+  readonly fleetId: string;
+  readonly goal: string;
+  readonly state: AgentFleetStateV3;
+  readonly selector: AgentFleetSelectorV3;
+  readonly policy: AgentFleetPolicyV3;
+  readonly targetSnapshotSha256: string;
+  readonly writeIntent: boolean;
+  readonly waves: readonly (readonly string[])[];
+  readonly currentWave: number;
+  readonly targets: readonly AgentFleetTargetSnapshotV3[];
+  readonly subAgents: readonly AgentSubAgentSnapshotV3[];
+  readonly callsUsed: number;
+  readonly activeCallCount: number;
+  readonly failureCount: number;
+  readonly createdAtUnixMs: number;
+  readonly updatedAtUnixMs: number;
+}
+
 export type AgentRecoveryDispositionV3 =
   | 'safeToResume'
   | 'needsReconciliation'
