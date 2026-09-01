@@ -17,6 +17,13 @@ const MAX_CAPABILITY_RECORDS: usize = 1024;
 
 type HmacSha256 = Hmac<Sha256>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CapabilityAuthorizationSourceV3 {
+    NativeConfirmation,
+    ScopedAutopilot,
+    OperatorGrant { grant_id: String },
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct CapabilityIssueRequestV3 {
     pub(crate) request_id: String,
@@ -28,6 +35,7 @@ pub(crate) struct CapabilityIssueRequestV3 {
     pub(crate) target_ids: Vec<String>,
     pub(crate) ttl_ms: u64,
     pub(crate) max_uses: u16,
+    pub(crate) authorization_source: CapabilityAuthorizationSourceV3,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +59,7 @@ struct CapabilityRecordV3 {
     revoked: bool,
     uses: u16,
     max_uses: u16,
+    authorization_source: CapabilityAuthorizationSourceV3,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,6 +147,7 @@ impl NativeCapabilityStoreV3 {
             revoked: false,
             uses: 0,
             max_uses: request.max_uses,
+            authorization_source: request.authorization_source,
         };
         let mut records = self
             .records
@@ -168,6 +178,30 @@ impl NativeCapabilityStoreV3 {
             .ok_or(CapabilityStoreErrorV3::Unknown)?;
         record.revoked = true;
         Ok(())
+    }
+
+    pub(crate) fn revoke_operator_capabilities(
+        &self,
+        grant_id: &str,
+    ) -> Result<usize, CapabilityStoreErrorV3> {
+        let mut records = self
+            .records
+            .lock()
+            .map_err(|_| CapabilityStoreErrorV3::Unavailable)?;
+        let mut revoked = 0;
+        for record in records.values_mut() {
+            if matches!(
+                &record.authorization_source,
+                CapabilityAuthorizationSourceV3::OperatorGrant {
+                    grant_id: source_grant_id
+                } if source_grant_id == grant_id
+            ) && !record.revoked
+            {
+                record.revoked = true;
+                revoked += 1;
+            }
+        }
+        Ok(revoked)
     }
 
     pub(crate) fn consume(
@@ -215,6 +249,18 @@ impl NativeCapabilityStoreV3 {
             }
         }
         self.verify(capability_id, context, now_unix_ms)
+    }
+
+    pub(crate) fn authorization_source(
+        &self,
+        capability_id: &str,
+    ) -> Result<CapabilityAuthorizationSourceV3, CapabilityStoreErrorV3> {
+        self.records
+            .lock()
+            .map_err(|_| CapabilityStoreErrorV3::Unavailable)?
+            .get(capability_id)
+            .map(|record| record.authorization_source.clone())
+            .ok_or(CapabilityStoreErrorV3::Unknown)
     }
 
     pub(crate) fn verify_extension_bound_call(
@@ -348,6 +394,7 @@ mod tests {
                     target_ids: vec!["local-1".into()],
                     ttl_ms: 1_000,
                     max_uses: 1,
+                    authorization_source: CapabilityAuthorizationSourceV3::NativeConfirmation,
                 },
                 now,
             )
@@ -459,6 +506,7 @@ mod tests {
                     target_ids: vec!["local-1".into()],
                     ttl_ms: 1_000,
                     max_uses: 1,
+                    authorization_source: CapabilityAuthorizationSourceV3::ScopedAutopilot,
                 },
                 10,
             )
@@ -494,6 +542,42 @@ mod tests {
                 11,
             ),
             Err(AgentCapabilityVerificationFailureV3::InvalidProof)
+        );
+    }
+
+    #[test]
+    fn operator_authorization_source_is_native_and_revocation_cascades() {
+        let store = NativeCapabilityStoreV3::with_signing_key([23; 32]);
+        let grant_id = "operator-1".to_string();
+        let issued = store
+            .issue(
+                CapabilityIssueRequestV3 {
+                    request_id: "req-1".into(),
+                    user_session_id: "user-1".into(),
+                    call_id: "call-1".into(),
+                    call_digest: "d".repeat(64),
+                    allowed_tools: vec!["read_file".into()],
+                    allowed_effects: vec![AgentEffectKindV3::SensitiveRead],
+                    target_ids: vec!["local-1".into()],
+                    ttl_ms: 1_000,
+                    max_uses: 1,
+                    authorization_source: CapabilityAuthorizationSourceV3::OperatorGrant {
+                        grant_id: grant_id.clone(),
+                    },
+                },
+                100,
+            )
+            .unwrap();
+        assert_eq!(
+            store.authorization_source(&issued.capability_id).unwrap(),
+            CapabilityAuthorizationSourceV3::OperatorGrant {
+                grant_id: grant_id.clone()
+            }
+        );
+        assert_eq!(store.revoke_operator_capabilities(&grant_id).unwrap(), 1);
+        assert_eq!(
+            store.verify_bound_call(&issued.capability_id, context(), &"d".repeat(64), 101),
+            Err(AgentCapabilityVerificationFailureV3::Revoked)
         );
     }
 }

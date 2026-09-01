@@ -245,6 +245,21 @@ impl McpRuntimeV3 {
         Ok(())
     }
 
+    pub(crate) fn rebind_task_request(&self, request: &AgentRequestV3) -> Result<(), String> {
+        let mut states = self
+            .states
+            .lock()
+            .map_err(|_| "MCP state is unavailable".to_string())?;
+        let state = states
+            .get_mut(&request.task_id)
+            .ok_or_else(|| "MCP task was not found".to_string())?;
+        if state.request.request_id != request.request_id {
+            return Err("MCP recovery request identity drifted".into());
+        }
+        state.request = request.clone();
+        Ok(())
+    }
+
     pub(crate) fn reload_config(&self, task_id: &str) -> Result<Vec<McpServerSnapshotV3>, String> {
         let mut states = self
             .states

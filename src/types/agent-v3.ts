@@ -398,6 +398,9 @@ export interface AgentRecoveryCallV3 {
   readonly startedAtUnixMs: number;
   readonly updatedAtUnixMs: number;
   readonly automaticReplayAllowed: false;
+  readonly networkDestinations: readonly AgentNetworkDestinationV3[];
+  readonly sensitivePathCount: number;
+  readonly criticalPathCount: number;
 }
 
 export interface AgentRecoveredProcessV3 {

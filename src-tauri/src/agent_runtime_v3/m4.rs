@@ -29,6 +29,7 @@ const MAX_AUDIT_ENTRIES: usize = 1024;
 const MAX_OPERATOR_TTL_MS: u64 = 30 * 60 * 1_000;
 const MAX_BROKER_TTL_MS: u64 = 5 * 60 * 1_000;
 const OPERATOR_EXPIRY_NOTICE_MS: u64 = 60_000;
+pub(crate) const REMOTE_PROFILE_BROKER_SERVICE: &str = "com.shellspan.remote-profile";
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -79,6 +80,12 @@ pub(crate) struct RecoveryCallV3 {
     pub(crate) started_at_unix_ms: u64,
     pub(crate) updated_at_unix_ms: u64,
     pub(crate) automatic_replay_allowed: bool,
+    #[serde(default)]
+    pub(crate) network_destinations: Vec<AgentNetworkDestinationV3>,
+    #[serde(default)]
+    pub(crate) sensitive_path_count: usize,
+    #[serde(default)]
+    pub(crate) critical_path_count: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -413,6 +420,7 @@ impl M4PersistenceV3 {
         task_id: &str,
         call: &AgentToolCallV3,
         effect: AgentEffectKindV3,
+        scope: Option<&CallPolicyScopeV3>,
     ) -> Result<(), String> {
         let mut state = self
             .inner
@@ -438,6 +446,11 @@ impl M4PersistenceV3 {
             started_at_unix_ms: now,
             updated_at_unix_ms: now,
             automatic_replay_allowed: false,
+            network_destinations: scope
+                .map(|scope| scope.network_destinations.clone())
+                .unwrap_or_default(),
+            sensitive_path_count: scope.map_or(0, |scope| scope.sensitive_path_count),
+            critical_path_count: scope.map_or(0, |scope| scope.critical_path_count),
         });
         task.phase = TaskPhaseV3::Running;
         task.updated_at_unix_ms = now;
@@ -1347,10 +1360,15 @@ impl OperatorStoreV3 {
         effect: &AgentObservedEffectV3,
         scope: &CallPolicyScopeV3,
     ) -> Result<Option<String>, String> {
-        if operator_rollout_v3() != OperatorRolloutV3::Enabled {
-            return Err("Operator rollout is disabled or invalid".into());
+        match operator_rollout_v3() {
+            OperatorRolloutV3::Enabled => self.authorize_enabled(task_id, call, effect, scope),
+            // A persisted Operator task has no surviving grant. Disabling the
+            // independent rollout therefore falls back to the ordinary native
+            // per-call confirmation path instead of reviving or implying a
+            // grant.
+            OperatorRolloutV3::Disabled => Ok(None),
+            OperatorRolloutV3::Invalid => Err("Operator rollout value is invalid".into()),
         }
-        self.authorize_enabled(task_id, call, effect, scope)
     }
 
     fn authorize_enabled(
@@ -1366,43 +1384,59 @@ impl OperatorStoreV3 {
             .lock()
             .map_err(|_| "Operator store is unavailable".to_string())?;
         let Some(grant) = grants.values_mut().find(|grant| {
-            grant.task_id == task_id
-                && grant.revoked_at_unix_ms.is_none()
-                && now < grant.expires_at_unix_ms
-                && grant
-                    .target_ids
-                    .iter()
-                    .any(|id| id == call.target.target_id())
-                && grant.tool_names.iter().any(|name| name == &call.tool_name)
-                && grant.effects.contains(&effect.kind)
-                && scope.paths.iter().all(|path| {
-                    grant.path_prefixes.is_empty()
-                        || grant
-                            .path_prefixes
-                            .iter()
-                            .any(|prefix| path_within_prefix(path, prefix))
-                })
-                && scope
-                    .network_destinations
-                    .iter()
-                    .all(|destination| grant.network_destinations.contains(destination))
+            operator_grant_allows_call(grant, task_id, call, effect, scope, now)
+                && operator_call_is_auto_approvable(effect, scope)
         }) else {
             // Outside the Operator envelope, the ordinary per-call native
             // confirmation flow remains available. This never auto-approves.
             return Ok(None);
         };
-        let auto_approved = !scope.unknown_write
-            && scope.sensitive_path_count == 0
-            && !matches!(
-                effect.kind,
-                AgentEffectKindV3::Destructive | AgentEffectKindV3::ExternalSideEffect
-            );
-        if auto_approved {
-            grant.last_used_at_unix_ms = Some(now);
-            Ok(Some(grant.grant_id.clone()))
-        } else {
-            Ok(None)
+        Ok(Some(grant.grant_id.clone()))
+    }
+
+    pub(crate) fn validate_auto_approval_source(
+        &self,
+        grant_id: &str,
+        task_id: &str,
+        call: &AgentToolCallV3,
+        effect: &AgentObservedEffectV3,
+        scope: &CallPolicyScopeV3,
+        mark_used: bool,
+    ) -> Result<(), String> {
+        if operator_rollout_v3() != OperatorRolloutV3::Enabled {
+            return Err("Operator rollout is no longer enabled".into());
         }
+        self.validate_auto_approval_source_enabled(
+            grant_id, task_id, call, effect, scope, mark_used,
+        )
+    }
+
+    fn validate_auto_approval_source_enabled(
+        &self,
+        grant_id: &str,
+        task_id: &str,
+        call: &AgentToolCallV3,
+        effect: &AgentObservedEffectV3,
+        scope: &CallPolicyScopeV3,
+        mark_used: bool,
+    ) -> Result<(), String> {
+        let now = current_unix_ms();
+        let mut grants = self
+            .grants
+            .lock()
+            .map_err(|_| "Operator store is unavailable".to_string())?;
+        let grant = grants
+            .get_mut(grant_id)
+            .ok_or_else(|| "Operator capability source was not found".to_string())?;
+        if !operator_grant_allows_call(grant, task_id, call, effect, scope, now)
+            || !operator_call_is_auto_approvable(effect, scope)
+        {
+            return Err("Operator capability source is revoked, expired, or out of scope".into());
+        }
+        if mark_used {
+            grant.last_used_at_unix_ms = Some(now);
+        }
+        Ok(())
     }
 
     pub(crate) fn revoke(&self, grant_id: &str) -> Result<OperatorGrantV3, String> {
@@ -1454,6 +1488,9 @@ impl OperatorStoreV3 {
         effect: &AgentObservedEffectV3,
         scope: &CallPolicyScopeV3,
     ) -> Result<(), String> {
+        if operator_rollout_v3() != OperatorRolloutV3::Enabled {
+            return Err("Operator rollout is no longer enabled".into());
+        }
         let now = current_unix_ms();
         let grants = self
             .grants
@@ -1487,6 +1524,48 @@ impl OperatorStoreV3 {
             Err("Operator scope does not allow elevation".into())
         }
     }
+}
+
+fn operator_call_is_auto_approvable(
+    effect: &AgentObservedEffectV3,
+    scope: &CallPolicyScopeV3,
+) -> bool {
+    !scope.unknown_write
+        && scope.sensitive_path_count == 0
+        && !matches!(
+            effect.kind,
+            AgentEffectKindV3::Destructive | AgentEffectKindV3::ExternalSideEffect
+        )
+}
+
+fn operator_grant_allows_call(
+    grant: &OperatorGrantV3,
+    task_id: &str,
+    call: &AgentToolCallV3,
+    effect: &AgentObservedEffectV3,
+    scope: &CallPolicyScopeV3,
+    now: u64,
+) -> bool {
+    grant.task_id == task_id
+        && grant.revoked_at_unix_ms.is_none()
+        && now < grant.expires_at_unix_ms
+        && grant
+            .target_ids
+            .iter()
+            .any(|id| id == call.target.target_id())
+        && grant.tool_names.iter().any(|name| name == &call.tool_name)
+        && grant.effects.contains(&effect.kind)
+        && scope.paths.iter().all(|path| {
+            grant.path_prefixes.is_empty()
+                || grant
+                    .path_prefixes
+                    .iter()
+                    .any(|prefix| path_within_prefix(path, prefix))
+        })
+        && scope
+            .network_destinations
+            .iter()
+            .all(|destination| grant.network_destinations.contains(destination))
 }
 
 fn unique(values: Vec<String>) -> Vec<String> {
@@ -1587,14 +1666,18 @@ impl NativeBrokerV3 {
         request: BrokerAuthorizeRequestV3,
         task: &AgentRequestV3,
     ) -> Result<BrokerGrantV3, String> {
-        if request.task_id != task.task_id
-            || request.request_id != task.request_id
-            || !task
-                .targets
-                .iter()
-                .any(|target| target.target_id() == request.target_id)
-        {
+        if request.task_id != task.task_id || request.request_id != task.request_id {
             return Err("broker request is outside the frozen task".into());
+        }
+        let target = task
+            .targets
+            .iter()
+            .find(|target| target.target_id() == request.target_id)
+            .ok_or_else(|| "broker request is outside the frozen task".to_string())?;
+        if request.purpose == BrokerPurposeV3::RemoteAuthentication
+            && !matches!(target, AgentToolTargetV3::Remote { .. })
+        {
+            return Err("remote-authentication broker purpose requires a remote target".into());
         }
         if request.ttl_ms == 0 || request.ttl_ms > MAX_BROKER_TTL_MS {
             return Err("broker TTL is outside the native limit".into());
@@ -1673,6 +1756,40 @@ impl NativeBrokerV3 {
             BrokerPurposeV3::Elevation,
         )
         .map(|(grant, _)| grant)
+    }
+
+    pub(crate) fn consume_remote_authorization(
+        &self,
+        task_id: &str,
+        call: &AgentToolCallV3,
+        profile_id: &str,
+    ) -> Result<BrokerGrantV3, String> {
+        let now = current_unix_ms();
+        let mut records = self
+            .records
+            .lock()
+            .map_err(|_| "native broker is unavailable".to_string())?;
+        let record = records
+            .values_mut()
+            .find(|record| {
+                record.public.task_id == task_id
+                    && record.public.request_id == call.request_id
+                    && record.public.call_id == call.call_id
+                    && record.public.target_id == call.target.target_id()
+                    && record.public.tool_name == call.tool_name
+                    && record.public.kind == BrokerRequestKindV3::Credential
+                    && record.public.purpose == BrokerPurposeV3::RemoteAuthentication
+                    && record.public.revoked_at_unix_ms.is_none()
+                    && record.public.consumed_at_unix_ms.is_none()
+                    && now < record.public.expires_at_unix_ms
+                    && record.credential_service.as_deref() == Some(REMOTE_PROFILE_BROKER_SERVICE)
+                    && record.credential_id.as_deref() == Some(profile_id)
+            })
+            .ok_or_else(|| {
+                "no native remote-authentication grant matches the exact call".to_string()
+            })?;
+        record.public.consumed_at_unix_ms = Some(now);
+        Ok(record.public.clone())
     }
 
     pub(crate) fn consume_credentials(
@@ -1827,8 +1944,13 @@ pub(crate) fn enforce_native_call_policy_v3(
     {
         return Err("critical sensitive-path write is disabled by native policy".into());
     }
-    if effect.kind == AgentEffectKindV3::ExternalSideEffect && call.tool_name == "exec_command" {
-        if scope.unknown_network_egress {
+    if effect.kind == AgentEffectKindV3::ExternalSideEffect
+        || !scope.network_destinations.is_empty()
+    {
+        if effect.kind == AgentEffectKindV3::ExternalSideEffect
+            && call.tool_name == "exec_command"
+            && scope.unknown_network_egress
+        {
             return Err("unknown network egress is denied by native policy".into());
         }
         for destination in &scope.network_destinations {
@@ -1845,11 +1967,36 @@ pub(crate) fn enforce_native_call_policy_v3(
     Ok(())
 }
 
+pub(crate) fn enforce_checkpoint_restore_policy_v3(path: &str) -> Result<(), String> {
+    if path_is_critical_v3(path) && !sensitive_writes_explicitly_enabled() {
+        return Err("critical sensitive-path restore is disabled by native policy".into());
+    }
+    Ok(())
+}
+
 fn sensitive_writes_explicitly_enabled() -> bool {
     matches!(
         std::env::var("SHELLSPAN_AGENT_SENSITIVE_WRITES"),
         Ok(value) if value.eq_ignore_ascii_case("enabled")
     )
+}
+
+pub(crate) fn validate_recovery_policy_configuration_v3(
+    permission_mode: AgentPermissionModeV3,
+) -> Result<(), String> {
+    match std::env::var("SHELLSPAN_AGENT_SENSITIVE_WRITES") {
+        Err(std::env::VarError::NotPresent) => {}
+        Ok(value)
+            if value.eq_ignore_ascii_case("disabled") || value.eq_ignore_ascii_case("enabled") => {}
+        _ => return Err("unknown sensitive-path policy fails closed".into()),
+    }
+    let _ = egress_allowlist()?;
+    if permission_mode == AgentPermissionModeV3::Operator
+        && operator_rollout_v3() == OperatorRolloutV3::Invalid
+    {
+        return Err("unknown Operator rollout value fails closed".into());
+    }
+    Ok(())
 }
 
 fn egress_allowlist() -> Result<HashSet<AgentNetworkDestinationV3>, String> {
@@ -2115,6 +2262,9 @@ mod tests {
             started_at_unix_ms: 1,
             updated_at_unix_ms: 1,
             automatic_replay_allowed: false,
+            network_destinations: Vec::new(),
+            sensitive_path_count: 0,
+            critical_path_count: 0,
         });
         task.processes.push(RecoveredProcessV3 {
             process_handle: "proc-secret".into(),
@@ -2161,6 +2311,25 @@ mod tests {
         credentials
             .set_credential("com.shellspan.fixture", "credential-1", "do-not-leak")
             .unwrap();
+        let mut remote_request = request();
+        remote_request.targets = vec![AgentToolTargetV3::Remote {
+            target_id: "remote-1".into(),
+            session_id: "session-remote".into(),
+            profile_id: Some("profile-1".into()),
+            host: "fixture.test".into(),
+            port: 22,
+            username: "fixture".into(),
+            root_path: Some("/srv/app".into()),
+            local_root: None,
+        }];
+        let remote_call = |call_id: &str| AgentToolCallV3 {
+            request_id: "req-1".into(),
+            call_id: call_id.into(),
+            tool_name: "exec_command".into(),
+            arguments: call("test").arguments,
+            target: remote_request.targets[0].clone(),
+            capability_id: "cap".into(),
+        };
         let broker = NativeBrokerV3::default();
         let grant = broker
             .authorize(
@@ -2168,7 +2337,7 @@ mod tests {
                     task_id: "task-1".into(),
                     request_id: "req-1".into(),
                     call_id: "call-1".into(),
-                    target_id: "local-1".into(),
+                    target_id: "remote-1".into(),
                     tool_name: "exec_command".into(),
                     kind: BrokerRequestKindV3::Credential,
                     purpose: BrokerPurposeV3::RemoteAuthentication,
@@ -2176,7 +2345,7 @@ mod tests {
                     credential_id: Some("credential-1".into()),
                     ttl_ms: 1_000,
                 },
-                &request(),
+                &remote_request,
             )
             .unwrap();
         assert!(!serde_json::to_string(&grant)
@@ -2185,8 +2354,7 @@ mod tests {
         assert!(!serde_json::to_string(&grant)
             .unwrap()
             .contains("credential-1"));
-        let mut wrong_call = call("test");
-        wrong_call.call_id = "other-call".into();
+        let wrong_call = remote_call("other-call");
         assert!(broker
             .consume_credentials(
                 "task-1",
@@ -2199,7 +2367,7 @@ mod tests {
         let bundle = broker
             .consume_credentials(
                 "task-1",
-                &call("test"),
+                &remote_call("call-1"),
                 BrokerPurposeV3::RemoteAuthentication,
                 &[("com.shellspan.fixture".into(), "credential-1".into())],
                 &credentials,
@@ -2213,22 +2381,21 @@ mod tests {
         assert!(broker
             .consume_credentials(
                 "task-1",
-                &call("test"),
+                &remote_call("call-1"),
                 BrokerPurposeV3::RemoteAuthentication,
                 &[("com.shellspan.fixture".into(), "credential-1".into())],
                 &credentials,
             )
             .is_err());
 
-        let mut revoked_call = call("test");
-        revoked_call.call_id = "call-revoked".into();
+        let revoked_call = remote_call("call-revoked");
         let revoked = broker
             .authorize(
                 BrokerAuthorizeRequestV3 {
                     task_id: "task-1".into(),
                     request_id: "req-1".into(),
                     call_id: revoked_call.call_id.clone(),
-                    target_id: "local-1".into(),
+                    target_id: "remote-1".into(),
                     tool_name: "exec_command".into(),
                     kind: BrokerRequestKindV3::Credential,
                     purpose: BrokerPurposeV3::RemoteAuthentication,
@@ -2236,7 +2403,7 @@ mod tests {
                     credential_id: Some("credential-1".into()),
                     ttl_ms: 1_000,
                 },
-                &request(),
+                &remote_request,
             )
             .unwrap();
         broker.revoke(&revoked.grant_id).unwrap();
@@ -2248,6 +2415,33 @@ mod tests {
                 &[("com.shellspan.fixture".into(), "credential-1".into())],
                 &credentials,
             )
+            .is_err());
+        let profile_call = remote_call("call-profile");
+        let profile_grant = broker
+            .authorize(
+                BrokerAuthorizeRequestV3 {
+                    task_id: "task-1".into(),
+                    request_id: "req-1".into(),
+                    call_id: profile_call.call_id.clone(),
+                    target_id: "remote-1".into(),
+                    tool_name: "exec_command".into(),
+                    kind: BrokerRequestKindV3::Credential,
+                    purpose: BrokerPurposeV3::RemoteAuthentication,
+                    credential_service: Some(REMOTE_PROFILE_BROKER_SERVICE.into()),
+                    credential_id: Some("profile-1".into()),
+                    ttl_ms: 1_000,
+                },
+                &remote_request,
+            )
+            .unwrap();
+        assert!(!serde_json::to_string(&profile_grant)
+            .unwrap()
+            .contains("profile-1"));
+        assert!(broker
+            .consume_remote_authorization("task-1", &profile_call, "profile-1")
+            .is_ok());
+        assert!(broker
+            .consume_remote_authorization("task-1", &profile_call, "profile-1")
             .is_err());
         assert!(NativeBrokerV3::default().list().unwrap().is_empty());
     }
@@ -2318,6 +2512,44 @@ mod tests {
             unknown_write: false,
             ..scope.clone()
         };
+        let mut source = store.list().unwrap()[0].clone();
+        source.grant_id = "operator-source".into();
+        source.revoked_at_unix_ms = None;
+        source.expires_at_unix_ms = current_unix_ms() + 10_000;
+        store
+            .grants
+            .lock()
+            .unwrap()
+            .insert(source.grant_id.clone(), source);
+        assert!(store
+            .validate_auto_approval_source_enabled(
+                "operator-source",
+                "task-1",
+                &call,
+                &effect,
+                &auto_scope,
+                true,
+            )
+            .is_ok());
+        assert!(store
+            .list()
+            .unwrap()
+            .iter()
+            .find(|grant| grant.grant_id == "operator-source")
+            .unwrap()
+            .last_used_at_unix_ms
+            .is_some());
+        store.revoke("operator-source").unwrap();
+        assert!(store
+            .validate_auto_approval_source_enabled(
+                "operator-source",
+                "task-1",
+                &call,
+                &effect,
+                &auto_scope,
+                false,
+            )
+            .is_err());
         assert!(store
             .authorize_enabled("task-1", &call, &effect, &auto_scope)
             .unwrap()
@@ -2415,6 +2647,17 @@ mod tests {
         )
         .unwrap_err()
         .contains("unknown network egress"));
+        let drifted_effect = AgentObservedEffectV3 {
+            kind: AgentEffectKindV3::ReadOnly,
+            ..effect.clone()
+        };
+        assert!(enforce_native_call_policy_v3(
+            &call("curl https://api.example.test/v1"),
+            &drifted_effect,
+            &scope,
+        )
+        .unwrap_err()
+        .contains("not allowlisted"));
         assert!(parse_egress_entry("https://api.example.test:443/path").is_err());
     }
 }

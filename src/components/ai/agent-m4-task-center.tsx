@@ -31,12 +31,14 @@ import {
   invokeAgentV3ListOperatorGrants,
   invokeAgentV3ListTasks,
   invokeAgentV3OperatorPolicy,
+  invokeAgentV3RebindRecoverySession,
   invokeAgentV3ReconcileTask,
   invokeAgentV3RecoveryStatus,
   invokeAgentV3RevokeOperator,
   invokeAgentV3RolloutPolicy,
   isTauriRuntime,
 } from '@/lib/tauri';
+import { useTerminalStore } from '@/stores/terminalStore';
 import { cn } from '@/lib/utils';
 import type {
   AgentEffectKindV3,
@@ -83,10 +85,14 @@ function scopeForTask(task: AgentTaskSnapshotV3): {
 function TaskCard({
   task,
   busy,
+  activeSessionId,
+  onRebind,
   onReconcile,
 }: {
   readonly task: AgentTaskSnapshotV3;
   readonly busy?: string;
+  readonly activeSessionId: string | null;
+  readonly onRebind: (taskId: string, sessionId: string) => void;
   readonly onReconcile: (taskId: string, continueTask: boolean) => void;
 }): React.ReactNode {
   const recovery = task.recovery;
@@ -94,6 +100,15 @@ function TaskCard({
     ? `${recovery.progressCompleted}/${recovery.progressTotal}`
     : 'not planned';
   const effects = [...new Set(recovery.calls.map((call) => call.effect))];
+  const sensitivePathCount = recovery.calls.reduce(
+    (total, call) => total + call.sensitivePathCount,
+    0,
+  );
+  const networkDestinationCount = new Set(
+    recovery.calls.flatMap((call) => call.networkDestinations.map(
+      (destination) => `${destination.protocol}://${destination.host}:${destination.port}`,
+    )),
+  ).size;
 
   return (
     <Card size="sm" variant="outline">
@@ -129,6 +144,10 @@ function TaskCard({
             <div className="text-muted-foreground">Native notifications</div>
             <div>{task.notifications.length}</div>
           </div>
+          <div>
+            <div className="text-muted-foreground">Recovery policy scope</div>
+            <div>{sensitivePathCount} sensitive path(s) · {networkDestinationCount} network destination(s)</div>
+          </div>
         </div>
         <Alert
           variant={recovery.requiresHumanAction || recovery.requiresSessionRebind ? 'warning' : 'default'}
@@ -158,26 +177,41 @@ function TaskCard({
           </Alert>
         )}
       </CardContent>
-      {recovery.requiresHumanAction && (
+      {(recovery.requiresHumanAction || recovery.requiresSessionRebind) && (
         <CardFooter className="flex flex-wrap gap-1.5">
-          <Button
-            variant="secondary"
-            size="xs"
-            disabled={Boolean(busy)}
-            onClick={() => onReconcile(task.request.taskId, true)}
-          >
-            <ShieldCheckIcon data-icon="inline-start" />
-            Revalidate &amp; continue
-          </Button>
-          <Button
-            variant="outline"
-            size="xs"
-            disabled={Boolean(busy)}
-            onClick={() => onReconcile(task.request.taskId, false)}
-          >
-            <XCircleIcon data-icon="inline-start" />
-            Cancel without replay
-          </Button>
+          {recovery.requiresSessionRebind && (
+            <Button
+              variant="secondary"
+              size="xs"
+              disabled={Boolean(busy) || !activeSessionId}
+              onClick={() => activeSessionId && onRebind(task.request.taskId, activeSessionId)}
+            >
+              <RefreshCwIcon data-icon="inline-start" />
+              {activeSessionId ? 'Rebind to active terminal' : 'Open a matching terminal to rebind'}
+            </Button>
+          )}
+          {recovery.requiresHumanAction && (
+            <>
+              <Button
+                variant="secondary"
+                size="xs"
+                disabled={Boolean(busy) || recovery.requiresSessionRebind}
+                onClick={() => onReconcile(task.request.taskId, true)}
+              >
+                <ShieldCheckIcon data-icon="inline-start" />
+                Revalidate &amp; continue
+              </Button>
+              <Button
+                variant="outline"
+                size="xs"
+                disabled={Boolean(busy)}
+                onClick={() => onReconcile(task.request.taskId, false)}
+              >
+                <XCircleIcon data-icon="inline-start" />
+                Cancel without replay
+              </Button>
+            </>
+          )}
         </CardFooter>
       )}
     </Card>
@@ -277,6 +311,7 @@ export function AgentM4TaskCenter(): React.ReactNode {
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
   const [now, setNow] = useState(Date.now());
+  const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const latestTask = useMemo(() => tasks[tasks.length - 1], [tasks]);
 
   const refresh = useCallback(async () => {
@@ -326,6 +361,19 @@ export function AgentM4TaskCenter(): React.ReactNode {
     setError(undefined);
     try {
       await invokeAgentV3ReconcileTask(taskId, continueTask);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }, [refresh]);
+
+  const rebind = useCallback(async (taskId: string, sessionId: string) => {
+    setBusy(`rebind:${taskId}`);
+    setError(undefined);
+    try {
+      await invokeAgentV3RebindRecoverySession(taskId, sessionId);
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -426,6 +474,8 @@ export function AgentM4TaskCenter(): React.ReactNode {
               key={task.request.taskId}
               task={task}
               busy={busy}
+              activeSessionId={activeSessionId}
+              onRebind={(taskId, sessionId) => void rebind(taskId, sessionId)}
               onReconcile={(taskId, continueTask) => void reconcile(taskId, continueTask)}
             />
           ))}

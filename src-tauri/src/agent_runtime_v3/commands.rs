@@ -276,14 +276,42 @@ pub(crate) fn agent_v3_configure_operator(
 ) -> Result<OperatorGrantV3, String> {
     require_runtime_rollout()?;
     configure_checkpoint_root(&app, &runtime)?;
+    let effects = request
+        .effects
+        .iter()
+        .map(|effect| format!("{effect:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let paths = if request.path_prefixes.is_empty() {
+        "none".into()
+    } else {
+        request.path_prefixes.join(", ")
+    };
+    let network = if request.network_destinations.is_empty() {
+        "none".into()
+    } else {
+        request
+            .network_destinations
+            .iter()
+            .map(|destination| {
+                format!(
+                    "{}://{}:{}",
+                    destination.protocol, destination.host, destination.port
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     let mut dialog = MessageDialog::new()
         .set_level(MessageLevel::Warning)
         .set_title("Enable bounded ShellSpan Operator")
         .set_description(format!(
-            "Enable Operator for one task?\n\nTargets: {}\nTools: {}\nEffects: {}\nTTL: {} ms\nElevation: {}\n\nUnknown writes, external effects, sensitive paths, target validation, rollout, checkpoints, MCP, Hooks, and Runbook policy remain enforced.",
-            request.target_ids.len(),
+            "Enable Operator for one task?\n\nTargets: {}\nTools: {}\nEffects: {}\nPath prefixes: {}\nNetwork destinations: {}\nTTL: {} ms\nElevation: {}\n\nUnknown writes, external effects, sensitive paths, target validation, rollout, checkpoints, MCP, Hooks, and Runbook policy remain enforced.",
+            request.target_ids.join(", "),
             request.tool_names.join(", "),
-            request.effects.len(),
+            effects,
+            paths,
+            network,
             request.ttl_ms,
             request.allow_elevation,
         ))
@@ -334,8 +362,15 @@ pub(crate) fn agent_v3_authorize_broker(
         .set_level(MessageLevel::Warning)
         .set_title("Authorize native credential broker")
         .set_description(format!(
-            "Issue a single-use native broker grant?\n\nTask: {}\nTarget: {}\nTool: {}\nPurpose: {:?}\nTTL: {} ms\n\nNo credential value or elevation token will enter the WebView, model, logs, results, snapshot, or notification.",
-            request.task_id, request.target_id, request.tool_name, request.purpose, request.ttl_ms
+            "Issue a single-use native broker grant?\n\nTask: {}\nRequest: {}\nCall: {}\nTarget: {}\nTool: {}\nPurpose: {:?}\nCredential reference: {}\nTTL: {} ms\n\nNo credential value or elevation token will enter the WebView, model, logs, results, snapshot, or notification.",
+            request.task_id,
+            request.request_id,
+            request.call_id,
+            request.target_id,
+            request.tool_name,
+            request.purpose,
+            request.credential_id.as_deref().unwrap_or("none"),
+            request.ttl_ms
         ))
         .set_buttons(MessageButtons::YesNo);
     if let Some(window) = app.get_webview_window("main") {
