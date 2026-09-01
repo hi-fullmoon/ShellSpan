@@ -1109,6 +1109,7 @@ export default {
   'ai.history.current': 'Current conversation',
   'ai.history.archived': 'Conversation history',
   'ai.history.empty': 'No conversation history',
+  'ai.history.localData': 'Local conversation history',
   'ai.history.description': '{count} conversations stored on this device.',
   'ai.history.search': 'Search conversation history',
   'ai.history.searchPlaceholder': 'Search hosts or conversations',

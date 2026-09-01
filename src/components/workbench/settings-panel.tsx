@@ -23,9 +23,7 @@ import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -56,6 +54,7 @@ import { clearSftpWorkspace } from '@/lib/sftp-workspace-persistence';
 import { getPetdexStatus, listenToPetdexStatus, testPetdexConnection } from '@/lib/petdex';
 import { openPetdexPhase3Feedback } from '@/lib/petdex-feedback';
 import type { PetdexConnectionStatus } from '@/types';
+import { SettingRow, SettingsGroup } from './settings-layout';
 
 interface ShortcutGroup {
   id: 'app' | 'terminal' | 'sftp';
@@ -120,46 +119,6 @@ const PETDEX_STATUS_LABEL_KEYS: Record<PetdexConnectionStatus, LocaleKey> = {
   connectionError: 'settings.experimental.petdex.status.connectionError',
 };
 
-interface SettingRowProps {
-  className?: string;
-  description: string;
-  descriptionId?: string;
-  label: string;
-  labelId?: string;
-  children: React.ReactNode;
-}
-
-const SettingRow: React.FC<SettingRowProps> = ({
-  children,
-  className,
-  description,
-  descriptionId,
-  label,
-  labelId,
-}) => (
-  <Field
-    className={cn(
-      'min-h-16 gap-2.5 px-4 py-3 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5',
-      className,
-    )}
-  >
-    <div className="flex min-w-0 flex-1 flex-col gap-1">
-      <FieldLabel id={labelId} className="text-sm font-medium text-foreground">
-        {label}
-      </FieldLabel>
-      <FieldDescription id={descriptionId} className="leading-5">
-        {description}
-      </FieldDescription>
-    </div>
-    <div
-      data-slot="setting-control"
-      className="flex min-h-8 w-full items-center justify-start @min-[32rem]:w-auto @min-[32rem]:shrink-0 @min-[32rem]:justify-end"
-    >
-      {children}
-    </div>
-  </Field>
-);
-
 interface SettingGroupLabelProps {
   children: React.ReactNode;
 }
@@ -188,27 +147,9 @@ const SettingsGrid: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   return (
     <div data-slot="settings-groups" className="flex flex-col gap-4">
       {groups.map((group, groupIndex) => (
-        <section
-          key={groupIndex}
-          data-slot="settings-group"
-          className="flex min-w-0 flex-col gap-2"
-        >
-          {group.title && (
-            <h3 className="px-1 text-xs font-medium text-muted-foreground">{group.title}</h3>
-          )}
-          <Card size="sm" variant="outline" className="gap-0 py-0">
-            <CardContent className="px-0">
-              <FieldGroup className="gap-0">
-                {group.rows.map((row, rowIndex) => (
-                  <React.Fragment key={rowIndex}>
-                    {rowIndex > 0 && <Separator />}
-                    {row}
-                  </React.Fragment>
-                ))}
-              </FieldGroup>
-            </CardContent>
-          </Card>
-        </section>
+        <SettingsGroup key={groupIndex} title={group.title}>
+          {group.rows}
+        </SettingsGroup>
       ))}
     </div>
   );
@@ -1067,19 +1008,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <TabsContent value="shortcuts" className="w-full">
               <div className="flex flex-col gap-4">
                 {SHORTCUT_GROUPS.map((group) => (
-                  <section key={group.id} className="flex min-w-0 flex-col gap-2">
-                    <h3 className="px-1 text-xs font-medium text-muted-foreground">
-                      {t(SHORTCUT_GROUP_LABEL_KEYS[group.id])}
-                    </h3>
-                    <Card size="sm" variant="outline" className="gap-0 py-0">
-                      <CardContent className="px-0">
-                        {group.actions.map((action, index) => {
+                  <SettingsGroup key={group.id} title={t(SHORTCUT_GROUP_LABEL_KEYS[group.id])}>
+                        {group.actions.map((action) => {
                           const binding = shortcuts[action] ?? DEFAULT_SHORTCUTS[action];
                           const leaderBinding = shortcuts.terminalLeader ?? DEFAULT_SHORTCUTS.terminalLeader;
                           return (
-                            <React.Fragment key={action}>
-                              {index > 0 && <Separator />}
-                              <div className="flex min-h-14 items-center justify-between gap-3 px-4 py-2.5">
+                              <div key={action} className="flex min-h-14 items-center justify-between gap-3 px-4 py-2.5">
                                 <span className="text-sm font-medium">{shortcutLabels[action]}</span>
                                 <div className="flex items-center gap-1">
                                   <Button
@@ -1122,12 +1056,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                   </Tooltip>
                                 </div>
                               </div>
-                            </React.Fragment>
                           );
                         })}
-                      </CardContent>
-                    </Card>
-                  </section>
+                  </SettingsGroup>
                 ))}
               </div>
             </TabsContent>

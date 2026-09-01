@@ -1107,6 +1107,7 @@ export default {
   'ai.history.current': '当前会话',
   'ai.history.archived': '历史会话',
   'ai.history.empty': '暂无历史对话',
+  'ai.history.localData': '本地历史记录',
   'ai.history.description': '共 {count} 条历史会话，仅保存在本机。',
   'ai.history.search': '搜索历史会话',
   'ai.history.searchPlaceholder': '搜索主机或会话',
