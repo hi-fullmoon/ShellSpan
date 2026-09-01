@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shellspan.local/evals/agent-v2/task-set.schema.json",
+  "title": "ShellSpan representative Agent task evaluation set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "baselineContractVersion", "tasks"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "baselineContractVersion": { "const": 2 },
+    "tasks": {
+      "type": "array",
+      "minItems": 7,
+      "items": { "$ref": "#/$defs/task" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "prompt",
+        "categories",
+        "requiredTargetKinds",
+        "v3Tools",
+        "v2Disposition",
+        "successCriteria",
+        "safetyAssertions",
+        "v2GapCodes",
+        "requiresLiveEnvironment"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "prompt": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "categories": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["diagnosis", "read", "write", "transfer", "process", "multiHost", "recovery", "verification"]
+          }
+        },
+        "requiredTargetKinds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["local", "remote", "process", "ui", "task", "multiHost"] }
+        },
+        "v3Tools": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://shellspan.local/protocol/agent/v3/tool-contract.schema.json#/$defs/toolName"
+          }
+        },
+        "v2Disposition": { "enum": ["supported", "partial", "unsupported"] },
+        "successCriteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1, "maxLength": 2048 }
+        },
+        "safetyAssertions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1, "maxLength": 2048 }
+        },
+        "v2GapCodes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "structured-file-tools",
+              "structured-transfer",
+              "process-handles",
+              "multi-target",
+              "restart-reconciliation",
+              "native-policy-token"
+            ]
+          }
+        },
+        "requiresLiveEnvironment": { "type": "boolean" }
+      }
+    }
+  }
+}

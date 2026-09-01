@@ -68,6 +68,38 @@ import type {
   AgentStreamEvent,
   AgentToolResult,
 } from '@/types/agent';
+import type {
+  AgentAuthorizeCallRequestV3,
+  AgentCallPreviewV3,
+  AgentCapabilityGrantV3,
+  AgentContextRetrievalRequestV3,
+  AgentContextRetrievalV3,
+  AgentContextSnapshotV3,
+  AgentExtensionSnapshotV3,
+  AgentFileCheckpointV3,
+  AgentLoadedSkillV3,
+  AgentMcpAuthorizeRequestV3,
+  AgentMcpCallV3,
+  AgentMcpCapabilityGrantV3,
+  AgentMcpResultV3,
+  AgentMcpServerSnapshotV3,
+  AgentMcpToolSchemaV3,
+  AgentPlanV3,
+  AgentRegisteredToolV3,
+  AgentRequestV3,
+  AgentTaskSnapshotV3,
+  AgentToolCallV3,
+  AgentToolResultV3,
+  AgentV3RolloutPolicy,
+  AgentAuditEventV3,
+  AgentBrokerAuthorizeRequestV3,
+  AgentBrokerGrantV3,
+  AgentNotificationV3,
+  AgentOperatorConfigureRequestV3,
+  AgentOperatorGrantV3,
+  AgentOperatorPolicyV3,
+  AgentRecoveryStoreStatusV3,
+} from '@/types/agent-v3';
 
 const logger = createLogger('ipc');
 const DIRECTORY_REQUEST_SUPERSEDED_MESSAGE = 'remote directory request superseded';
@@ -887,4 +919,226 @@ export async function invokeCollectRemoteHealthSnapshot(
 
 export async function invokeCancelRemoteHealthSnapshot(operationId: string): Promise<void> {
   return invokeLogged('cancel_remote_health_snapshot', { operationId });
+}
+
+// --- Agent Contract v3 M2 runtime commands ---
+
+export async function invokeAgentV3RolloutPolicy(): Promise<AgentV3RolloutPolicy> {
+  return invokeLogged<AgentV3RolloutPolicy>('agent_v3_rollout_policy');
+}
+
+export async function invokeAgentV3ListTools(): Promise<AgentRegisteredToolV3[]> {
+  return invokeLogged<AgentRegisteredToolV3[]>('agent_v3_list_tools');
+}
+
+export async function invokeAgentV3RegisterTask(
+  request: AgentRequestV3,
+): Promise<AgentTaskSnapshotV3> {
+  return invokeLogged<AgentTaskSnapshotV3>('agent_v3_register_task', { request });
+}
+
+export async function invokeAgentV3AuthorizeCall(
+  request: AgentAuthorizeCallRequestV3,
+): Promise<AgentCapabilityGrantV3> {
+  return invokeLogged<AgentCapabilityGrantV3>('agent_v3_authorize_call', { request });
+}
+
+export async function invokeAgentV3PreviewCall(
+  request: AgentAuthorizeCallRequestV3,
+): Promise<AgentCallPreviewV3> {
+  return invokeLogged<AgentCallPreviewV3>('agent_v3_preview_call', { request });
+}
+
+export async function invokeAgentV3RevokeCapability(capabilityId: string): Promise<void> {
+  return invokeLogged('agent_v3_revoke_capability', { capabilityId });
+}
+
+export async function invokeAgentV3ExecuteTool(
+  taskId: string,
+  call: AgentToolCallV3,
+): Promise<AgentToolResultV3> {
+  return invokeLogged<AgentToolResultV3>('agent_v3_execute_tool', { taskId, call });
+}
+
+export async function invokeAgentV3GetTask(taskId: string): Promise<AgentTaskSnapshotV3> {
+  return invokeLogged<AgentTaskSnapshotV3>('agent_v3_get_task', { taskId });
+}
+
+export async function invokeAgentV3ListTasks(): Promise<AgentTaskSnapshotV3[]> {
+  return invokeLogged<AgentTaskSnapshotV3[]>('agent_v3_list_tasks');
+}
+
+export async function invokeAgentV3RecoveryStatus(): Promise<AgentRecoveryStoreStatusV3> {
+  return invokeLogged<AgentRecoveryStoreStatusV3>('agent_v3_recovery_status');
+}
+
+export async function invokeAgentV3ListNotifications(): Promise<AgentNotificationV3[]> {
+  return invokeLogged<AgentNotificationV3[]>('agent_v3_list_notifications');
+}
+
+export async function invokeAgentV3ListAuditEvents(): Promise<AgentAuditEventV3[]> {
+  return invokeLogged<AgentAuditEventV3[]>('agent_v3_list_audit_events');
+}
+
+export async function invokeAgentV3OperatorPolicy(): Promise<AgentOperatorPolicyV3> {
+  return invokeLogged<AgentOperatorPolicyV3>('agent_v3_operator_policy');
+}
+
+export async function invokeAgentV3ConfigureOperator(
+  request: AgentOperatorConfigureRequestV3,
+): Promise<AgentOperatorGrantV3> {
+  return invokeLogged<AgentOperatorGrantV3>('agent_v3_configure_operator', { request });
+}
+
+export async function invokeAgentV3ListOperatorGrants(): Promise<AgentOperatorGrantV3[]> {
+  return invokeLogged<AgentOperatorGrantV3[]>('agent_v3_list_operator_grants');
+}
+
+export async function invokeAgentV3RevokeOperator(
+  grantId: string,
+): Promise<AgentOperatorGrantV3> {
+  return invokeLogged<AgentOperatorGrantV3>('agent_v3_revoke_operator', { grantId });
+}
+
+export async function invokeAgentV3AuthorizeBroker(
+  request: AgentBrokerAuthorizeRequestV3,
+): Promise<AgentBrokerGrantV3> {
+  return invokeLogged<AgentBrokerGrantV3>('agent_v3_authorize_broker', { request });
+}
+
+export async function invokeAgentV3ListBrokerGrants(): Promise<AgentBrokerGrantV3[]> {
+  return invokeLogged<AgentBrokerGrantV3[]>('agent_v3_list_broker_grants');
+}
+
+export async function invokeAgentV3RevokeBroker(
+  grantId: string,
+): Promise<AgentBrokerGrantV3> {
+  return invokeLogged<AgentBrokerGrantV3>('agent_v3_revoke_broker', { grantId });
+}
+
+export async function invokeAgentV3ReconcileTask(
+  taskId: string,
+  continueTask: boolean,
+): Promise<AgentTaskSnapshotV3> {
+  return invokeLogged<AgentTaskSnapshotV3>('agent_v3_reconcile_task', {
+    taskId,
+    continueTask,
+  });
+}
+
+export async function invokeAgentV3RebindRecoverySession(
+  taskId: string,
+  replacementSessionId: string,
+): Promise<AgentTaskSnapshotV3> {
+  return invokeLogged<AgentTaskSnapshotV3>('agent_v3_rebind_recovery_session', {
+    taskId,
+    replacementSessionId,
+  });
+}
+
+export async function invokeAgentV3CancelTask(taskId: string): Promise<void> {
+  return invokeLogged('agent_v3_cancel_task', { taskId });
+}
+
+export async function invokeAgentV3RestoreCheckpoint(
+  taskId: string,
+  checkpointId: string,
+): Promise<AgentFileCheckpointV3> {
+  return invokeLogged<AgentFileCheckpointV3>('agent_v3_restore_checkpoint', {
+    taskId,
+    checkpointId,
+  });
+}
+
+// --- Agent Contract v3 M3 context and extension commands ---
+
+export async function invokeAgentV3RefreshContext(
+  taskId: string,
+): Promise<AgentContextSnapshotV3> {
+  return invokeLogged<AgentContextSnapshotV3>('agent_v3_refresh_context', { taskId });
+}
+
+export async function invokeAgentV3CompactContext(
+  taskId: string,
+  reason: 'manual' | 'budgetPressure' | 'beforeExtension',
+): Promise<AgentContextSnapshotV3> {
+  return invokeLogged<AgentContextSnapshotV3>('agent_v3_compact_context', { taskId, reason });
+}
+
+export async function invokeAgentV3RetrieveContext(
+  request: AgentContextRetrievalRequestV3,
+): Promise<AgentContextRetrievalV3> {
+  return invokeLogged<AgentContextRetrievalV3>('agent_v3_retrieve_context', { request });
+}
+
+export async function invokeAgentV3RefreshExtensions(
+  taskId: string,
+): Promise<AgentExtensionSnapshotV3> {
+  return invokeLogged<AgentExtensionSnapshotV3>('agent_v3_refresh_extensions', { taskId });
+}
+
+export async function invokeAgentV3LoadSkill(request: {
+  readonly taskId: string;
+  readonly skillId: string;
+  readonly targetId: string;
+}): Promise<AgentLoadedSkillV3> {
+  return invokeLogged<AgentLoadedSkillV3>('agent_v3_load_skill', { request });
+}
+
+export async function invokeAgentV3InstantiateRunbook(request: {
+  readonly taskId: string;
+  readonly runbookId: string;
+  readonly targetId: string;
+  readonly parameters?: Readonly<Record<string, string>>;
+}): Promise<AgentPlanV3> {
+  return invokeLogged<AgentPlanV3>('agent_v3_instantiate_runbook', { request });
+}
+
+export async function invokeAgentV3ListMcpServers(
+  taskId: string,
+): Promise<AgentMcpServerSnapshotV3[]> {
+  return invokeLogged<AgentMcpServerSnapshotV3[]>('agent_v3_list_mcp_servers', { taskId });
+}
+
+export async function invokeAgentV3SetMcpEnabled(
+  taskId: string,
+  serverId: string,
+  enabled: boolean,
+): Promise<AgentMcpServerSnapshotV3[]> {
+  return invokeLogged<AgentMcpServerSnapshotV3[]>('agent_v3_set_mcp_enabled', {
+    request: { taskId, serverId, enabled },
+  });
+}
+
+export async function invokeAgentV3RefreshMcpServer(
+  taskId: string,
+  serverId: string,
+): Promise<AgentMcpServerSnapshotV3> {
+  return invokeLogged<AgentMcpServerSnapshotV3>('agent_v3_refresh_mcp_server', {
+    taskId,
+    serverId,
+  });
+}
+
+export async function invokeAgentV3GetMcpToolSchema(
+  taskId: string,
+  serverId: string,
+  toolName: string,
+): Promise<AgentMcpToolSchemaV3> {
+  return invokeLogged<AgentMcpToolSchemaV3>('agent_v3_get_mcp_tool_schema', {
+    request: { taskId, serverId, toolName },
+  });
+}
+
+export async function invokeAgentV3AuthorizeMcpCall(
+  request: AgentMcpAuthorizeRequestV3,
+): Promise<AgentMcpCapabilityGrantV3> {
+  return invokeLogged<AgentMcpCapabilityGrantV3>('agent_v3_authorize_mcp_call', { request });
+}
+
+export async function invokeAgentV3ExecuteMcpCall(
+  taskId: string,
+  call: AgentMcpCallV3,
+): Promise<AgentMcpResultV3> {
+  return invokeLogged<AgentMcpResultV3>('agent_v3_execute_mcp_call', { taskId, call });
 }

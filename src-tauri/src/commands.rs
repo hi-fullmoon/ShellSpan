@@ -13,7 +13,7 @@ use crate::models::{
     RemoteDirectoryListing, RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest,
     RemoteFileKind, RemoteFileReadCancellationRegistry, RemoteFsError, RenameRemotePathRequest,
     SessionCommand, SessionCommandSender, SessionCreateRequest, SessionIdentity, SessionStatus,
-    SessionSummary, SftpBookmarkRow, TransferBatchResult, TrustHostRequest,
+    SessionSummary, SessionTerminalKind, SftpBookmarkRow, TransferBatchResult, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest, REMOTE_FILE_READ_CANCELLED_MESSAGE,
 };
 use crate::sftp_pool::SftpPool;
@@ -197,6 +197,13 @@ async fn create_remote_terminal_session(
         // all event listeners.
         output_ready: output_ready.clone(),
         output_paused: output_paused.clone(),
+        terminal_kind: SessionTerminalKind::Remote,
+        identity: SessionIdentity {
+            title: summary.title.clone(),
+            host: summary.host.clone(),
+            port: summary.port,
+            username: summary.username.clone(),
+        },
     };
     state
         .insert(session_id.clone(), managed)
@@ -333,6 +340,13 @@ pub(crate) fn create_local_session(
                 },
                 output_ready: output_ready.clone(),
                 output_paused: output_paused.clone(),
+                terminal_kind: SessionTerminalKind::Local,
+                identity: SessionIdentity {
+                    title: summary.title.clone(),
+                    host: summary.host.clone(),
+                    port: summary.port,
+                    username: summary.username.clone(),
+                },
             },
         )
         .map_err(|message| {
@@ -704,6 +718,8 @@ pub(crate) fn request_app_restart(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
     agent_requests: State<'_, crate::agent::AgentRequestRegistry>,
+    agent_runtime_v3: State<'_, crate::agent_runtime_v3::AgentRuntimeV3>,
+    sessions: State<'_, SessionManager>,
 ) {
     info!("Requesting application restart");
     if let Err(error) = forwards_state.cancel_all() {
@@ -711,6 +727,9 @@ pub(crate) fn request_app_restart(
     }
     if let Err(error) = agent_requests.cancel_all() {
         warn!("Failed to cancel Agent requests before restart: {error}");
+    }
+    if let Err(error) = agent_runtime_v3.cancel_all(&sessions) {
+        warn!("Failed to cancel Agent v3 tasks before restart: {error}");
     }
     app.request_restart();
 }
@@ -720,6 +739,8 @@ pub(crate) fn request_app_exit(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
     agent_requests: State<'_, crate::agent::AgentRequestRegistry>,
+    agent_runtime_v3: State<'_, crate::agent_runtime_v3::AgentRuntimeV3>,
+    sessions: State<'_, SessionManager>,
 ) {
     info!("Requesting application exit");
     if let Err(error) = forwards_state.cancel_all() {
@@ -727,6 +748,9 @@ pub(crate) fn request_app_exit(
     }
     if let Err(error) = agent_requests.cancel_all() {
         warn!("Failed to cancel Agent requests before exit: {error}");
+    }
+    if let Err(error) = agent_runtime_v3.cancel_all(&sessions) {
+        warn!("Failed to cancel Agent v3 tasks before exit: {error}");
     }
     app.exit(0);
 }

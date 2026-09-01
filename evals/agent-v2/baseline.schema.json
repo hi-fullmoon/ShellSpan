@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shellspan.local/evals/agent-v2/baseline.schema.json",
+  "title": "ShellSpan Agent v2 regression baseline capture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "collectorVersion",
+    "capturedAt",
+    "sourceRevision",
+    "v2ContractSha256",
+    "taskSetSha256",
+    "environment",
+    "probes",
+    "taskAssessments",
+    "summary"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "contractVersion": { "const": 2 },
+    "collectorVersion": { "const": 1 },
+    "capturedAt": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "sourceRevision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "v2ContractSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "taskSetSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "architecture", "node", "rustc"],
+      "properties": {
+        "platform": { "type": "string", "minLength": 1 },
+        "architecture": { "type": "string", "minLength": 1 },
+        "node": { "type": "string", "minLength": 1 },
+        "rustc": { "type": "string", "minLength": 1 }
+      }
+    },
+    "probes": {
+      "type": "array",
+      "minItems": 3,
+      "items": { "$ref": "#/$defs/probe" }
+    },
+    "taskAssessments": {
+      "type": "array",
+      "minItems": 7,
+      "items": { "$ref": "#/$defs/taskAssessment" }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passedProbes", "failedProbes", "skippedProbes", "supportedTasks", "partialTasks", "unsupportedTasks"],
+      "properties": {
+        "passedProbes": { "type": "integer", "minimum": 0 },
+        "failedProbes": { "type": "integer", "minimum": 0 },
+        "skippedProbes": { "type": "integer", "minimum": 0 },
+        "supportedTasks": { "type": "integer", "minimum": 0 },
+        "partialTasks": { "type": "integer", "minimum": 0 },
+        "unsupportedTasks": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "command", "status", "exitCode", "durationMs"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "status": { "enum": ["passed", "failed", "skipped"] },
+        "exitCode": { "oneOf": [{ "type": "integer" }, { "type": "null" }] },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "note": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      }
+    },
+    "taskAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskId", "v2Disposition", "gapCodes"],
+      "properties": {
+        "taskId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "v2Disposition": { "enum": ["supported", "partial", "unsupported"] },
+        "gapCodes": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+      }
+    }
+  }
+}

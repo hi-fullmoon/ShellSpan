@@ -295,6 +295,10 @@ impl Database {
         Ok(())
     }
 
+    #[expect(
+        dead_code,
+        reason = "reserved database boundary for later durable Agent task storage"
+    )]
     pub(crate) fn with_connection<T>(
         &self,
         operation: impl FnOnce(&Connection) -> Result<T, String>,

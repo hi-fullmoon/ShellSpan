@@ -1,6 +1,11 @@
 use log::debug;
 use std::sync::{Arc, OnceLock};
 
+#[cfg(test)]
+use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::Mutex;
+
 /// Initializes the platform's native credential store as the keyring-core
 /// default store. Runs once; the result is cached so a permanent failure
 /// (e.g. no Secret Service on a headless Linux box) is reported consistently
@@ -157,10 +162,47 @@ impl CredentialBackend for NativeKeychainBackend {
     }
 }
 
+/// Process-local credential storage for tests that must exercise the real SSH
+/// connection path without writing fixture secrets to the user's keychain.
+#[cfg(test)]
+#[derive(Default)]
+struct InMemoryCredentialBackend {
+    credentials: Mutex<HashMap<(String, String), String>>,
+}
+
+#[cfg(test)]
+impl CredentialBackend for InMemoryCredentialBackend {
+    fn set_credential(&self, service: &str, key: &str, value: &str) -> Result<(), String> {
+        self.credentials
+            .lock()
+            .map_err(|_| "test credential store is unavailable".to_string())?
+            .insert((service.to_string(), key.to_string()), value.to_string());
+        Ok(())
+    }
+
+    fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String> {
+        Ok(self
+            .credentials
+            .lock()
+            .map_err(|_| "test credential store is unavailable".to_string())?
+            .get(&(service.to_string(), key.to_string()))
+            .cloned())
+    }
+
+    fn delete_credential(&self, service: &str, key: &str) -> Result<(), String> {
+        self.credentials
+            .lock()
+            .map_err(|_| "test credential store is unavailable".to_string())?
+            .remove(&(service.to_string(), key.to_string()));
+        Ok(())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public credential manager
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 pub(crate) struct CredentialManager {
     backend: Arc<dyn CredentialBackend>,
 }
@@ -178,6 +220,11 @@ impl CredentialManager {
     #[cfg(test)]
     fn with_backend(backend: Arc<dyn CredentialBackend>) -> Self {
         Self { backend }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn in_memory_for_tests() -> Self {
+        Self::with_backend(Arc::new(InMemoryCredentialBackend::default()))
     }
 
     // --- Generic credentials ---

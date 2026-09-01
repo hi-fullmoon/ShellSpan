@@ -2,6 +2,8 @@
 
 mod agent;
 pub mod agent_contract;
+pub mod agent_contract_v3;
+mod agent_runtime_v3;
 mod ai;
 mod ai_sessions;
 mod commands;
@@ -90,6 +92,9 @@ pub(crate) fn emit_status(
 }
 
 pub(crate) fn emit_data(app: &AppHandle, session_id: &str, chunk: String) -> Result<(), String> {
+    if let Some(runtime) = app.try_state::<agent_runtime_v3::AgentRuntimeV3>() {
+        runtime.observe_pty_output(session_id, &chunk);
+    }
     app.emit(&format!("{SSH_DATA_EVENT_PREFIX}{session_id}"), chunk)
         .map_err(|error| format!("failed to emit data event: {error}"))
 }
@@ -230,11 +235,13 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(SessionManager::default())
         .manage(ai::AiRequestRegistry::default())
         .manage(agent::AgentRequestRegistry::default())
         .manage(agent::AgentProviderCapabilityCache::default())
         .manage(agent_contract::AgentRuntimeAccess::default())
+        .manage(agent_runtime_v3::AgentRuntimeV3::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .manage(PreflightCancellationRegistry::default())
@@ -254,6 +261,41 @@ pub fn run() {
             ai::ai_cancel_request,
             agent_contract::agent_contract_status,
             agent_contract::agent_rollout_policy,
+            agent_contract_v3::agent_v3_rollout_policy,
+            agent_runtime_v3::agent_v3_list_tools,
+            agent_runtime_v3::agent_v3_register_task,
+            agent_runtime_v3::agent_v3_preview_call,
+            agent_runtime_v3::agent_v3_authorize_call,
+            agent_runtime_v3::agent_v3_revoke_capability,
+            agent_runtime_v3::agent_v3_execute_tool,
+            agent_runtime_v3::agent_v3_get_task,
+            agent_runtime_v3::agent_v3_list_tasks,
+            agent_runtime_v3::agent_v3_recovery_status,
+            agent_runtime_v3::agent_v3_list_notifications,
+            agent_runtime_v3::agent_v3_list_audit_events,
+            agent_runtime_v3::agent_v3_operator_policy,
+            agent_runtime_v3::agent_v3_configure_operator,
+            agent_runtime_v3::agent_v3_list_operator_grants,
+            agent_runtime_v3::agent_v3_revoke_operator,
+            agent_runtime_v3::agent_v3_authorize_broker,
+            agent_runtime_v3::agent_v3_list_broker_grants,
+            agent_runtime_v3::agent_v3_revoke_broker,
+            agent_runtime_v3::agent_v3_reconcile_task,
+            agent_runtime_v3::agent_v3_rebind_recovery_session,
+            agent_runtime_v3::agent_v3_cancel_task,
+            agent_runtime_v3::agent_v3_restore_checkpoint,
+            agent_runtime_v3::agent_v3_refresh_context,
+            agent_runtime_v3::agent_v3_compact_context,
+            agent_runtime_v3::agent_v3_retrieve_context,
+            agent_runtime_v3::agent_v3_refresh_extensions,
+            agent_runtime_v3::agent_v3_load_skill,
+            agent_runtime_v3::agent_v3_instantiate_runbook,
+            agent_runtime_v3::agent_v3_list_mcp_servers,
+            agent_runtime_v3::agent_v3_set_mcp_enabled,
+            agent_runtime_v3::agent_v3_get_mcp_tool_schema,
+            agent_runtime_v3::agent_v3_refresh_mcp_server,
+            agent_runtime_v3::agent_v3_authorize_mcp_call,
+            agent_runtime_v3::agent_v3_execute_mcp_call,
             agent::agent_detect_provider_capability,
             agent::agent_set_enabled,
             agent::agent_start_request,
@@ -362,7 +404,21 @@ pub fn run() {
     let app = menu::configure_builder(builder)
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
-    app.run(|_, _| {});
+    app.run(|app, event| {
+        if matches!(
+            event,
+            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+        ) {
+            if let (Some(runtime), Some(sessions)) = (
+                app.try_state::<agent_runtime_v3::AgentRuntimeV3>(),
+                app.try_state::<SessionManager>(),
+            ) {
+                if let Err(error) = runtime.prepare_for_shutdown(&sessions) {
+                    log::warn!("Failed to persist Agent v3 tasks during application exit: {error}");
+                }
+            }
+        }
+    });
 }
 
 #[cfg(test)]

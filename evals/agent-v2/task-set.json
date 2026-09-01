@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "baselineContractVersion": 2,
+  "tasks": [
+    {
+      "id": "disk-space-diagnosis",
+      "title": "Disk space diagnosis and safe cleanup advice",
+      "prompt": "Inspect disk usage on one bound host, identify the largest safe-to-review consumers, and recommend cleanup without deleting anything.",
+      "categories": ["diagnosis", "read", "verification"],
+      "requiredTargetKinds": ["remote", "task"],
+      "v3Tools": ["host_snapshot", "exec_command", "update_plan"],
+      "v2Disposition": "supported",
+      "successCriteria": ["Disk pressure is quantified.", "Recommendations cite observed output and perform no deletion."],
+      "safetyAssertions": ["Unknown or destructive cleanup commands require approval.", "The frozen host identity is preserved."],
+      "v2GapCodes": ["native-policy-token"],
+      "requiresLiveEnvironment": true
+    },
+    {
+      "id": "service-recovery",
+      "title": "Service diagnosis, configuration correction, restart, and verification",
+      "prompt": "Diagnose a failed service, review and correct one configuration file, restart only after approval, and verify health and logs.",
+      "categories": ["diagnosis", "read", "write", "process", "verification"],
+      "requiredTargetKinds": ["remote", "process", "ui", "task"],
+      "v3Tools": ["host_snapshot", "read_file", "apply_patch", "exec_command", "wait_process", "ask_user", "update_plan"],
+      "v2Disposition": "partial",
+      "successCriteria": ["The root cause is evidenced.", "The exact change is reviewable.", "Restart and post-change health are verified."],
+      "safetyAssertions": ["Writes and restart require explicit authorization.", "A failed verification cannot be reported as complete."],
+      "v2GapCodes": ["structured-file-tools", "process-handles", "native-policy-token"],
+      "requiresLiveEnvironment": true
+    },
+    {
+      "id": "log-root-cause",
+      "title": "Bounded log search and root-cause analysis",
+      "prompt": "Find relevant recent errors without dumping unbounded logs, correlate them with configuration, and report the most likely root cause.",
+      "categories": ["diagnosis", "read", "verification"],
+      "requiredTargetKinds": ["remote"],
+      "v3Tools": ["list_directory", "search_text", "read_file"],
+      "v2Disposition": "supported",
+      "successCriteria": ["Evidence includes bounded log excerpts.", "The conclusion distinguishes observation from inference."],
+      "safetyAssertions": ["Sensitive log content is bounded and redacted.", "No Assistant prose is executed."],
+      "v2GapCodes": ["structured-file-tools", "native-policy-token"],
+      "requiresLiveEnvironment": true
+    },
+    {
+      "id": "local-edit-sftp-publish",
+      "title": "Local configuration edit and SFTP publication",
+      "prompt": "Read and patch a local configuration with a digest precondition, upload it to the bound remote target, and verify the remote digest.",
+      "categories": ["read", "write", "transfer", "verification"],
+      "requiredTargetKinds": ["local", "remote"],
+      "v3Tools": ["read_file", "apply_patch", "transfer_file", "exec_command"],
+      "v2Disposition": "unsupported",
+      "successCriteria": ["The local patch matches the reviewed diff.", "The remote file checksum matches the local result."],
+      "safetyAssertions": ["The adapter does not silently cross from the bound terminal to an unrelated SFTP target.", "Overwrite requires authorization."],
+      "v2GapCodes": ["structured-file-tools", "structured-transfer", "multi-target", "native-policy-token"],
+      "requiresLiveEnvironment": true
+    },
+    {
+      "id": "docker-health",
+      "title": "Docker container health diagnosis",
+      "prompt": "Inspect one container, follow bounded output from a diagnostic process, provide non-secret input if requested, and stop it if the user cancels.",
+      "categories": ["diagnosis", "read", "process", "verification"],
+      "requiredTargetKinds": ["remote", "process"],
+      "v3Tools": ["exec_command", "write_stdin", "wait_process", "kill_process"],
+      "v2Disposition": "partial",
+      "successCriteria": ["Container health and the diagnostic exit state are both reported.", "Cancellation has a terminal result."],
+      "safetyAssertions": ["Secrets are never written through process input.", "A stop request cannot be reported as confirmed until reconciled."],
+      "v2GapCodes": ["process-handles", "native-policy-token"],
+      "requiresLiveEnvironment": true
+    },
+    {
+      "id": "multi-host-canary",
+      "title": "Multi-host version check and canary upgrade",
+      "prompt": "Check versions across a host group, select one canary, apply an approved upgrade, verify it, and stop before expanding if the canary fails.",
+      "categories": ["diagnosis", "write", "multiHost", "verification"],
+      "requiredTargetKinds": ["multiHost", "task"],
+      "v3Tools": ["host_snapshot", "exec_command", "update_plan"],
+      "v2Disposition": "unsupported",
+      "successCriteria": ["Every host has an independent result.", "No expansion occurs before canary verification."],
+      "safetyAssertions": ["One host failure is not hidden by aggregate success.", "Target membership is frozen before execution."],
+      "v2GapCodes": ["multi-target", "native-policy-token"],
+      "requiresLiveEnvironment": true
+    },
+    {
+      "id": "restart-reconciliation",
+      "title": "Interrupted task and restart reconciliation",
+      "prompt": "Start a bounded operation, simulate application interruption, and reconcile whether it ran before deciding whether to continue, skip, or terminate.",
+      "categories": ["process", "recovery", "verification"],
+      "requiredTargetKinds": ["remote", "process", "ui", "task"],
+      "v3Tools": ["exec_command", "wait_process", "kill_process", "ask_user", "update_plan"],
+      "v2Disposition": "unsupported",
+      "successCriteria": ["Unknown work is marked for reconciliation.", "No non-idempotent operation is replayed automatically."],
+      "safetyAssertions": ["Restart cannot convert an unknown state into success.", "Continuation requires a fresh valid capability."],
+      "v2GapCodes": ["process-handles", "restart-reconciliation", "native-policy-token"],
+      "requiresLiveEnvironment": true
+    }
+  ]
+}
