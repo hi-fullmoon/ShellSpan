@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPanel } from '../settings-panel';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { useUpdateStore } from '@/stores/updateStore';
 import type { ShortcutBindings } from '@/types';
 
 function deferred<T>() {
@@ -67,6 +69,7 @@ describe('SettingsPanel', () => {
       petdexConfiguring: false,
       shortcuts: { ...DEFAULT_SHORTCUTS },
     });
+    useUpdateStore.getState().reset();
   });
 
   const openSection = (titleKey: string): void => {
@@ -295,7 +298,7 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('dialog', { name: 'workbench.settings.title' })).toBeInTheDocument();
     expect(tabList).toHaveAttribute('aria-orientation', 'vertical');
     expect(tabList).toHaveClass('w-full', 'flex-col', 'items-stretch');
-    expect(tabList.closest('aside')).toHaveClass('w-52');
+    expect(tabList.closest('aside')).toHaveClass('w-44');
   });
 
   it('keeps settings inputs and selects at 32px', async () => {
@@ -311,10 +314,33 @@ describe('SettingsPanel', () => {
       '[&_[data-slot=select-trigger]]:min-w-36',
     );
     expect(settingsDialog).toHaveClass(
-      'h-[min(52rem,calc(100vh-2rem))]',
-      'w-[min(72rem,calc(100vw-2rem))]',
+      'h-[min(48rem,calc(100vh-2rem))]',
+      'w-[min(64rem,calc(100vw-2rem))]',
       'max-w-none',
     );
+  });
+
+  it('shows the up-to-date status beside the current version', async () => {
+    useUpdateStore.setState({ phase: 'no_update' });
+
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+
+    const statusBadge = screen.getByText('update.latest').closest('[data-slot="badge"]');
+
+    expect(statusBadge).toBeInTheDocument();
+    expect(statusBadge?.closest('[data-slot="update-summary"]')).toBeInTheDocument();
+    expect(statusBadge?.closest('[data-slot="update-actions"]')).toBeNull();
+  });
+
+  it('shows update checking state only in the action button', async () => {
+    useUpdateStore.setState({ phase: 'checking' });
+
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+
+    expect(screen.getByRole('button', { name: 'settings.general.checkingUpdate' })).toBeDisabled();
+    expect(screen.queryByText('update.checking')).not.toBeInTheDocument();
   });
 
   it('groups related settings into a responsive row card', async () => {
@@ -330,11 +356,11 @@ describe('SettingsPanel', () => {
     const settingsCard = startupRow?.closest('[data-slot="card"]');
     const settingsGroups = settingsCard?.closest('[data-slot="settings-groups"]');
 
-    expect(startupRow).toHaveClass('min-h-20', '@min-[34rem]:flex-row');
+    expect(startupRow).toHaveClass('min-h-16', '@min-[32rem]:flex-row');
     expect(settingsCard).toHaveAttribute('data-variant', 'outline');
     expect(updateRow?.closest('[data-slot="card"]')).toBe(settingsCard);
     expect(settingsCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(4);
-    expect(settingsGroups).toHaveClass('flex-col', 'gap-6');
+    expect(settingsGroups).toHaveClass('flex-col', 'gap-4');
 
     openSection('settings.terminal.title');
     const terminalGroups = screen
@@ -361,22 +387,39 @@ describe('SettingsPanel', () => {
     expect(useAppStore.getState().activeSection).toBe('terminal');
   });
 
-  it('shows model providers as a full-width card list', async () => {
+  it('groups model providers and terminal context in one compact settings card', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
     openSection('settings.ai.title');
 
     const providerSection = screen.getByText('settings.ai.providers').closest('section');
-    const providerColumn = providerSection?.parentElement;
-    const providerLayout = providerColumn?.parentElement;
-    const section = providerLayout?.parentElement;
+    const providerCard = providerSection?.querySelector('[data-slot="card"]');
+    const providerRows = providerCard?.querySelectorAll('[data-slot="ai-provider-row"]');
+    const contextField = screen.getByText('settings.ai.contextLines').closest('[data-slot="field"]');
 
-    expect(section).toHaveClass('@container');
-    expect(providerColumn).toHaveClass('contents');
-    expect(providerLayout).toHaveClass('flex', 'flex-col');
-    expect(providerLayout).not.toHaveClass('@min-[44rem]:grid-cols-[15rem_minmax(0,1fr)]');
-    expect(providerSection).toHaveClass('flex', 'flex-col');
+    expect(providerCard).toHaveAttribute('data-variant', 'outline');
+    expect(providerRows).toHaveLength(useAiSettingsStore.getState().providers.length);
+    expect(contextField?.closest('[data-slot="card"]')).toBe(providerCard);
     expect(screen.getAllByRole('button', { name: 'settings.ai.editProvider' })).not.toHaveLength(0);
+  });
+
+  it('places global shortcut reset in the shortcuts title bar', async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+    openSection('settings.shortcuts.title');
+
+    const resetAll = screen.getByRole('button', { name: 'settings.shortcuts.resetAll' });
+    const title = screen.getByRole('heading', { name: 'settings.shortcuts.title', level: 2 });
+    const titleBar = title.parentElement?.parentElement;
+    const shortcutPanel = screen.getByRole('tabpanel', { name: 'settings.shortcuts.title' });
+
+    expect(titleBar).toContainElement(resetAll);
+    expect(shortcutPanel).not.toContainElement(resetAll);
+    expect(resetAll).toBeDisabled();
+
+    act(() => useAppStore.getState().setShortcut('openWorkbench', 'mod+9'));
+
+    expect(resetAll).toBeEnabled();
   });
 
   it('dims the settings panel behind the add-provider dialog', async () => {

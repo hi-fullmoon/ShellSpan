@@ -252,7 +252,10 @@ describe('ConnectionFormDrawer', () => {
     expect(passwordInput).toHaveValue('secret');
     expect(showButton).toHaveAttribute('aria-pressed', 'false');
     expect(passwordInput).toHaveClass('h-9');
-    expect(showButton).toHaveClass('h-9');
+    expect(showButton).toHaveAttribute('data-size', 'icon-sm');
+    expect(showButton).toHaveClass('size-8');
+    expect(showButton).not.toHaveClass('border-l-0');
+    expect(passwordInput).not.toHaveClass('rounded-r-none');
 
     fireEvent.click(showButton);
 

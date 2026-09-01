@@ -31,8 +31,9 @@ import {
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { Spinner } from '@/components/ui/spinner';
 import { Switch } from '@/components/ui/switch';
-import { EmptyState, Spinner } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
@@ -227,7 +228,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   };
 
   return (
-    <div className={cn('@container flex flex-col gap-5', !embedded && 'px-4 py-4')}>
+    <div className={cn('@container flex flex-col', embedded ? 'gap-4' : 'gap-5 px-4 py-4')}>
       {!embedded && (
         <div className="flex min-w-0 flex-col gap-1">
           <h2 className="text-base font-semibold text-foreground">{t('settings.ai.title')}</h2>
@@ -235,87 +236,83 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         </div>
       )}
 
-      <div className="flex min-w-0 flex-col gap-4">
-        <div className="contents">
-          <section className="flex min-w-0 flex-col gap-3" aria-labelledby="ai-model-providers-heading">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex min-w-0 flex-col gap-1">
-                <h3 id="ai-model-providers-heading" className="text-sm font-semibold text-foreground">
-                  {t('settings.ai.providers')}
-                </h3>
-                <p className="text-xs text-muted-foreground">
-                  {t('settings.ai.providerCount', { count: providers.length })}
-                </p>
-              </div>
+      <section aria-labelledby="ai-model-providers-heading">
+        <Card size="sm" variant="outline" className="gap-0 py-0">
+          <CardHeader className="border-b py-3">
+            <CardTitle id="ai-model-providers-heading">{t('settings.ai.providers')}</CardTitle>
+            <CardDescription>
+              {t('settings.ai.providerCount', { count: providers.length })}
+            </CardDescription>
+            <CardAction>
               <Button size="sm" onClick={() => setAddOpen(true)}>
                 <PlusIcon data-icon="inline-start" />
                 {t('settings.ai.addProvider')}
               </Button>
-            </div>
-
-            <div className="flex min-w-0 flex-col gap-3">
-              {providers.map((provider) => {
-                const ProviderIcon = PRESET_ICONS[provider.preset];
-                const isDefault = provider.id === defaultProviderId;
-                return (
-                  <Card key={provider.id} size="sm" className="min-w-0">
-                    <CardHeader className="gap-3 @min-[36rem]:grid-cols-[minmax(0,1fr)_auto]">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
-                          <ProviderIcon aria-hidden />
-                        </div>
-                        <div className="flex min-w-0 flex-col gap-1">
-                          <div className="flex min-w-0 flex-wrap items-center gap-2">
-                            <CardTitle className="truncate">{provider.name}</CardTitle>
-                            <Badge variant="outline">
-                              {provider.kind === 'ollama' ? t('ai.local') : t('ai.cloud')}
-                            </Badge>
-                            {isDefault && <Badge variant="secondary">{t('settings.ai.default')}</Badge>}
-                          </div>
-                          <CardDescription className="truncate">
-                            {provider.model || t('ai.modelMissing')}
-                          </CardDescription>
-                        </div>
+            </CardAction>
+          </CardHeader>
+          <CardContent className="px-0">
+            {providers.map((provider, index) => {
+              const ProviderIcon = PRESET_ICONS[provider.preset];
+              const isDefault = provider.id === defaultProviderId;
+              return (
+                <React.Fragment key={provider.id}>
+                  {index > 0 && <Separator />}
+                  <div
+                    data-slot="ai-provider-row"
+                    className="flex min-w-0 flex-col gap-3 px-4 py-3 @min-[36rem]:flex-row @min-[36rem]:items-center @min-[36rem]:justify-between"
+                  >
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/50">
+                        <ProviderIcon aria-hidden />
                       </div>
-                      <CardAction className="flex items-center gap-2">
-                        {!isDefault && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setDefaultProvider(provider.id)}
-                          >
-                            {t('settings.ai.setDefault')}
-                          </Button>
-                        )}
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-medium">{provider.name}</span>
+                          <Badge variant="outline">
+                            {provider.kind === 'ollama' ? t('ai.local') : t('ai.cloud')}
+                          </Badge>
+                          {isDefault && <Badge variant="secondary">{t('settings.ai.default')}</Badge>}
+                        </div>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {provider.model || t('ai.modelMissing')} · {t(PRESET_DESCRIPTION_KEYS[provider.preset])}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center justify-end gap-2">
+                      {!isDefault && (
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => {
-                            setSelectedProviderId(provider.id);
-                            setEditOpen(true);
-                          }}
+                          onClick={() => setDefaultProvider(provider.id)}
                         >
-                          {t('settings.ai.editProvider')}
+                          {t('settings.ai.setDefault')}
                         </Button>
-                      </CardAction>
-                    </CardHeader>
-                    <CardContent className="text-xs leading-5 text-muted-foreground">
-                      {t(PRESET_DESCRIPTION_KEYS[provider.preset])}
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          </section>
-
-          <Card size="sm">
-            <CardHeader className="border-b">
-              <CardTitle>{t('settings.ai.contextLines')}</CardTitle>
-              <CardDescription>{t('settings.ai.contextHint')}</CardDescription>
-            </CardHeader>
-            <CardContent>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedProviderId(provider.id);
+                          setEditOpen(true);
+                        }}
+                      >
+                        {t('settings.ai.editProvider')}
+                      </Button>
+                    </div>
+                  </div>
+                </React.Fragment>
+              );
+            })}
+            <Separator />
+            <Field className="gap-2.5 px-4 py-3 @min-[34rem]:flex-row @min-[34rem]:items-center @min-[34rem]:justify-between">
+              <div className="min-w-0 flex-1">
+                <FieldLabel className="text-sm font-medium text-foreground">
+                  {t('settings.ai.contextLines')}
+                </FieldLabel>
+                <FieldDescription className="leading-5">{t('settings.ai.contextHint')}</FieldDescription>
+              </div>
               <Select value={String(contextLines)} onValueChange={(value) => setContextLines(Number(value))}>
-                <SelectTrigger aria-label={t('settings.ai.contextLines')} className="w-full">
+                <SelectTrigger size="sm" aria-label={t('settings.ai.contextLines')} className="w-full @min-[34rem]:w-auto @min-[34rem]:min-w-36">
                   <SelectValue>{t('settings.ai.contextLinesValue', { count: contextLines })}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -328,13 +325,12 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </CardContent>
-          </Card>
-        </div>
+            </Field>
+          </CardContent>
+        </Card>
+      </section>
 
-      </div>
-
-      <Card size="sm">
+      <Card size="sm" variant="outline">
         <CardHeader className="border-b">
           <CardTitle className="flex items-center gap-2">
             <BotIcon />
@@ -349,7 +345,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
             </Badge>
           </CardAction>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
+        <CardContent className="flex flex-col gap-3">
           <Field
             className="flex-row items-center gap-3"
             data-disabled={!agentPolicy?.featureEnabled || agentActionBusy || undefined}
@@ -383,8 +379,8 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         </CardFooter>
       </Card>
 
-      <Card size="sm">
-        <CardHeader className="border-b">
+      <Card size="sm" variant="outline">
+        <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <HistoryIcon />
             {t('ai.history')}
@@ -392,29 +388,23 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           <CardDescription>
             {t('ai.history.description', { count: historicalConversations.length })}
           </CardDescription>
+          <CardAction className="flex items-center gap-2">
+            {historicalConversations.length === 0 && (
+              <Badge variant="outline">{t('ai.history.empty')}</Badge>
+            )}
+            <Button
+              variant="destructiveOutline"
+              size="sm"
+              disabled={historicalConversations.length === 0 || historyActionBusy}
+              onClick={() => setClearHistoryOpen(true)}
+            >
+              {historyActionBusy
+                ? <Spinner data-icon="inline-start" />
+                : <Trash2Icon data-icon="inline-start" />}
+              {t('ai.history.deleteAll')}
+            </Button>
+          </CardAction>
         </CardHeader>
-        {historicalConversations.length === 0 && (
-          <CardContent>
-            <EmptyState
-              className="min-h-32"
-              icon={<HistoryIcon />}
-              title={t('ai.history.empty')}
-            />
-          </CardContent>
-        )}
-        <CardFooter className="justify-end">
-          <Button
-            variant="destructiveOutline"
-            size="sm"
-            disabled={historicalConversations.length === 0 || historyActionBusy}
-            onClick={() => setClearHistoryOpen(true)}
-          >
-            {historyActionBusy
-              ? <Spinner data-icon="inline-start" />
-              : <Trash2Icon data-icon="inline-start" />}
-            {t('ai.history.deleteAll')}
-          </Button>
-        </CardFooter>
       </Card>
 
       <ProviderSetupDialog

@@ -110,7 +110,22 @@ describe('M3 permission and approval components', () => {
       'leading-none',
     );
     fireEvent.click(trigger);
-    expect(await screen.findByText('agent.permission.requestApprovalDescription')).toBeVisible();
+    const requestApprovalDescription = await screen.findByText(
+      'agent.permission.requestApprovalDescription',
+    );
+    expect(screen.getByRole('menu')).toHaveClass(
+      'w-96',
+      'max-w-[calc(100vw-1rem)]',
+    );
+    expect(screen.getByRole('menuitemradio', {
+      name: /agent\.permission\.requestApproval/,
+    })).toHaveClass('text-[13px]');
+    expect(requestApprovalDescription).toBeVisible();
+    expect(requestApprovalDescription).toHaveClass(
+      'text-[11px]',
+      'leading-4',
+      'sm:whitespace-nowrap',
+    );
     fireEvent.click(screen.getByRole('menuitemradio', {
       name: /agent\.permission\.fullAccess/,
     }));

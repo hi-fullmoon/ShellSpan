@@ -52,6 +52,7 @@ import {
   InputGroupButton,
   InputGroupTextarea,
 } from '@/components/ui/input-group';
+import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Bubble, Marker, Message, MessageScroller } from './chat-primitives';
 import { AssistantMessageContent } from './assistant-message-content';
@@ -95,7 +96,8 @@ import {
 import { detectAgentProviderCapabilityCached } from '@/lib/agent-provider-capability';
 import {
   effectiveReasoningEffort,
-  isAiReasoningEffort,
+  isAiReasoningOption,
+  reasoningCapability,
   reasoningEffortOptions,
 } from '@/lib/ai-reasoning';
 import {
@@ -137,7 +139,7 @@ import type {
   AiSessionRecovery,
   AiStreamEvent,
   AiTaskKind,
-  AiReasoningEffort,
+  AiReasoningOption,
 } from '@/types/ai';
 import type { LocaleKey } from '@/locales';
 import type { AppSection } from '@/types';
@@ -168,9 +170,15 @@ function aiSessionRecovery(
     : value.recovery;
 }
 
-const REASONING_EFFORT_LABEL_KEYS: Record<AiReasoningEffort, LocaleKey> = {
+const REASONING_EFFORT_LABEL_KEYS: Record<AiReasoningOption, LocaleKey> = {
+  off: 'ai.reasoningEffort.off',
+  on: 'ai.reasoningEffort.on',
+  none: 'ai.reasoningEffort.off',
+  minimal: 'ai.reasoningEffort.minimal',
   low: 'ai.reasoningEffort.low',
+  medium: 'ai.reasoningEffort.medium',
   high: 'ai.reasoningEffort.high',
+  xhigh: 'ai.reasoningEffort.xhigh',
   max: 'ai.reasoningEffort.max',
 };
 type ConversationTask = AiTaskKind;
@@ -581,12 +589,16 @@ export const AiPanel: React.FC = () => {
   const agentEnabled = useAiSettingsStore((state) => state.agentEnabled);
   const defaultProvider = providers.find((provider) => provider.id === defaultProviderId) ?? providers[0];
   const model = defaultProvider?.model ?? '';
+  const activeReasoningCapability = defaultProvider
+    ? reasoningCapability(defaultProvider)
+    : undefined;
   const availableReasoningEfforts = defaultProvider
     ? reasoningEffortOptions(defaultProvider)
     : [];
   const reasoningEffort = defaultProvider
     ? effectiveReasoningEffort(defaultProvider)
     : undefined;
+  const selectedReasoningOption = reasoningEffort ?? 'auto';
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const sessions = useTerminalStore((state) => state.sessions);
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId);
@@ -1523,6 +1535,17 @@ export const AiPanel: React.FC = () => {
   const panelAskPlaceholder = activeSection === 'terminal'
     ? t('ai.askPlaceholder')
     : t('ai.workbench.askPlaceholder');
+  const providerSummary = defaultProvider
+    ? [
+        defaultProvider.name,
+        model || t('ai.modelMissing'),
+        availableReasoningEfforts.length > 0
+          ? reasoningEffort
+            ? t(REASONING_EFFORT_LABEL_KEYS[reasoningEffort])
+            : t('ai.reasoningEffort.auto')
+          : undefined,
+      ].filter(Boolean).join(' · ')
+    : t('ai.modelMissing');
   const primarySuggestedPrompt = activeSection === 'terminal'
     ? t('ai.suggestion.askTroubleshooting')
     : t('ai.suggestion.planConnections');
@@ -1579,15 +1602,19 @@ export const AiPanel: React.FC = () => {
           </TooltipTrigger>
           <TooltipContent>{modeSwitchUnavailableReason}</TooltipContent>
         </Tooltip>
-        <DropdownMenuContent align="start" className="w-64">
+        <DropdownMenuContent align="start" className="w-80 max-w-[calc(100vw-1rem)]">
           <DropdownMenuGroup>
-            <DropdownMenuLabel>{t('ai.mode')}</DropdownMenuLabel>
+            <DropdownMenuLabel className="text-[11px]">{t('ai.mode')}</DropdownMenuLabel>
             <DropdownMenuRadioGroup value={mode} onValueChange={selectAiMode}>
-              <DropdownMenuRadioItem value="ask" closeOnClick className="items-start py-1.5">
+              <DropdownMenuRadioItem
+                value="ask"
+                closeOnClick
+                className="items-start py-1.5 text-[13px]"
+              >
                 <MessageCircleQuestionIcon className="mt-0.5" />
                 <span className="min-w-0">
                   <span className="block">{t('ai.mode.ask')}</span>
-                  <span className="block text-xs text-muted-foreground">
+                  <span className="block whitespace-nowrap text-[11px] leading-4 text-muted-foreground">
                     {t('ai.mode.askDescription')}
                   </span>
                 </span>
@@ -1596,12 +1623,17 @@ export const AiPanel: React.FC = () => {
                 value="agent"
                 closeOnClick
                 disabled={!agentModeSelectable}
-                className="items-start py-1.5"
+                className="items-start py-1.5 text-[13px]"
               >
                 <BotIcon className="mt-0.5" />
                 <span className="min-w-0">
                   <span className="block">{t('ai.mode.agent')}</span>
-                  <span className="block text-xs text-muted-foreground">
+                  <span
+                    className={cn(
+                      'block text-[11px] leading-4 text-muted-foreground',
+                      agentModeSelectable && 'whitespace-nowrap',
+                    )}
+                  >
                     {agentModeSelectable
                       ? t('ai.mode.agentDescription')
                       : agentModeUnavailableReason}
@@ -1714,39 +1746,38 @@ export const AiPanel: React.FC = () => {
           />
         </div>}
         <header
+          data-slot="ai-panel-header"
           className={cn(
-            'flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-3',
+            'flex h-10 shrink-0 items-center gap-1 border-b border-border px-2',
             activeSection !== 'terminal' && 'bg-card/60',
           )}
         >
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center">
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={(
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-auto min-w-0 justify-start px-1.5 py-1"
+                    className="h-8 w-fit max-w-full min-w-0 justify-start gap-1 px-1.5"
                     disabled={busy}
                     aria-label={t('ai.changeProvider')}
                   />
                 )}
               >
-                <span className="min-w-0 text-left">
-                  <span className="flex min-w-0 items-center gap-1.5 font-semibold">
-                    <PanelScopeIcon data-icon="inline-start" />
-                    <span className="truncate">{panelTitle}</span>
+                <span className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+                  <PanelScopeIcon data-icon="inline-start" />
+                  <span className="shrink-0 text-xs font-semibold leading-none">
+                    {panelTitle}
                   </span>
-                  <span className="block truncate text-[11px] font-normal text-muted-foreground">
-                    {defaultProvider
-                      ? [
-                          defaultProvider.name,
-                          model || t('ai.modelMissing'),
-                          reasoningEffort
-                            ? t(REASONING_EFFORT_LABEL_KEYS[reasoningEffort])
-                            : undefined,
-                        ].filter(Boolean).join(' · ')
-                      : t('ai.modelMissing')}
+                  <span aria-hidden="true" className="shrink-0 text-muted-foreground/60">
+                    /
+                  </span>
+                  <span
+                    data-slot="ai-panel-provider-summary"
+                    className="min-w-0 flex-1 truncate text-[11px] font-normal text-muted-foreground"
+                  >
+                    {providerSummary}
                   </span>
                 </span>
                 <ChevronDownIcon data-icon="inline-end" />
@@ -1770,19 +1801,31 @@ export const AiPanel: React.FC = () => {
                     ))}
                   </DropdownMenuRadioGroup>
                 </DropdownMenuGroup>
-                {defaultProvider && reasoningEffort && availableReasoningEfforts.length > 0 && (
+                {defaultProvider && activeReasoningCapability && availableReasoningEfforts.length > 0 && (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuGroup>
-                      <DropdownMenuLabel>{t('ai.reasoningEffort')}</DropdownMenuLabel>
+                      <DropdownMenuLabel>
+                        {t(activeReasoningCapability.kind === 'toggle'
+                          ? 'ai.reasoningMode'
+                          : 'ai.reasoningEffort')}
+                      </DropdownMenuLabel>
                       <DropdownMenuRadioGroup
-                        value={reasoningEffort}
+                        value={selectedReasoningOption}
                         onValueChange={(value) => {
-                          if (isAiReasoningEffort(value)) {
+                          if (value === 'auto') {
+                            updateProvider(defaultProvider.id, { reasoningEffort: undefined });
+                          } else if (
+                            isAiReasoningOption(value)
+                            && availableReasoningEfforts.includes(value)
+                          ) {
                             updateProvider(defaultProvider.id, { reasoningEffort: value });
                           }
                         }}
                       >
+                        <DropdownMenuRadioItem value="auto" closeOnClick>
+                          {t('ai.reasoningEffort.auto')}
+                        </DropdownMenuRadioItem>
                         {availableReasoningEfforts.map((effort) => (
                           <DropdownMenuRadioItem key={effort} value={effort} closeOnClick>
                             {t(REASONING_EFFORT_LABEL_KEYS[effort])}
@@ -1802,14 +1845,14 @@ export const AiPanel: React.FC = () => {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <div className="flex items-center gap-1">
+          <div data-slot="ai-panel-actions" className="flex shrink-0 items-center gap-0.5">
             <Tooltip>
               <TooltipTrigger
                 render={(
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="size-8 p-0"
+                    size="icon"
+                    className="size-7 p-0"
                     disabled={busy || (panelSection === 'terminal' && !activeSession)}
                     onClick={handleNewConversation}
                     aria-label={t('ai.newConversation')}
@@ -1858,8 +1901,8 @@ export const AiPanel: React.FC = () => {
                       render={(
                         <Button
                           variant="ghost"
-                          size="sm"
-                          className="size-8 p-0"
+                          size="icon"
+                          className="size-7 p-0"
                           disabled={
                             busy
                             || viewingHistory
@@ -1951,10 +1994,14 @@ export const AiPanel: React.FC = () => {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+            <Separator
+              orientation="vertical"
+              className="mx-0.5 data-vertical:h-4 data-vertical:self-center"
+            />
             <Button
               variant="ghost"
-              size="sm"
-              className="size-8 p-0"
+              size="icon"
+              className="size-7 p-0"
               onClick={() => setOpen(false, panelSection)}
               aria-label={t('ai.close')}
             >

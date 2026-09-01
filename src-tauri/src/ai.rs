@@ -53,8 +53,14 @@ pub(crate) enum AiProviderKind {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum AiReasoningEffort {
+    Off,
+    On,
+    None,
+    Minimal,
     Low,
+    Medium,
     High,
+    Xhigh,
     Max,
 }
 
@@ -577,6 +583,7 @@ async fn run_request(
                 "stream": true,
                 "messages": provider_messages,
             });
+            apply_reasoning_effort(&mut body, &request.provider);
             apply_output_token_limit(&mut body, request.provider.kind, ASK_MAX_OUTPUT_TOKENS);
             let Some(response) = await_with_cancellation(
                 &cancellation,
@@ -1518,9 +1525,21 @@ pub(crate) fn apply_reasoning_effort(body: &mut Value, provider: &AiProviderConf
         return;
     };
     match provider.kind {
-        AiProviderKind::OpenAi => body["reasoning"] = json!({ "effort": effort }),
-        AiProviderKind::OpenAiCompatible => body["reasoning_effort"] = json!(effort),
-        AiProviderKind::Ollama => {}
+        AiProviderKind::OpenAi => match effort {
+            AiReasoningEffort::Off => body["reasoning"] = json!({ "effort": "none" }),
+            AiReasoningEffort::On => {}
+            effort => body["reasoning"] = json!({ "effort": effort }),
+        },
+        AiProviderKind::OpenAiCompatible => match effort {
+            AiReasoningEffort::Off => body["thinking"] = json!({ "type": "disabled" }),
+            AiReasoningEffort::On => body["thinking"] = json!({ "type": "enabled" }),
+            effort => body["reasoning_effort"] = json!(effort),
+        },
+        AiProviderKind::Ollama => match effort {
+            AiReasoningEffort::Off | AiReasoningEffort::None => body["think"] = json!(false),
+            AiReasoningEffort::On => body["think"] = json!(true),
+            effort => body["think"] = json!(effort),
+        },
     }
 }
 
@@ -2624,6 +2643,41 @@ mod tests {
                 .pointer("/reasoning/effort")
                 .and_then(Value::as_str),
             Some("high")
+        );
+
+        let deepseek = AiProviderConfig {
+            id: "deepseek".to_string(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://api.deepseek.com".to_string(),
+            model: "deepseek-v4-flash".to_string(),
+            reasoning_effort: Some(AiReasoningEffort::Off),
+            requires_api_key: true,
+            api_key: None,
+        };
+        let mut deepseek_body = json!({ "model": "deepseek-v4-flash" });
+        apply_reasoning_effort(&mut deepseek_body, &deepseek);
+        assert_eq!(
+            deepseek_body
+                .pointer("/thinking/type")
+                .and_then(Value::as_str),
+            Some("disabled")
+        );
+        assert!(deepseek_body.get("reasoning_effort").is_none());
+
+        let ollama = AiProviderConfig {
+            id: "ollama".to_string(),
+            kind: AiProviderKind::Ollama,
+            base_url: "http://127.0.0.1:11434".to_string(),
+            model: "gpt-oss:20b".to_string(),
+            reasoning_effort: Some(AiReasoningEffort::Medium),
+            requires_api_key: false,
+            api_key: None,
+        };
+        let mut ollama_body = json!({ "model": "gpt-oss:20b" });
+        apply_reasoning_effort(&mut ollama_body, &ollama);
+        assert_eq!(
+            ollama_body.get("think").and_then(Value::as_str),
+            Some("medium")
         );
     }
 

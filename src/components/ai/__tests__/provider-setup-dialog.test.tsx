@@ -60,7 +60,7 @@ describe('ProviderSetupDialog', () => {
     useAiSettingsStore.setState({ ...initialState, initialized: false }, true);
   });
 
-  it('uses a compact shell with an edge-aligned scroll area', () => {
+  it('uses the shared compact shell and grouped responsive form layout', () => {
     render(
       <ProviderSetupDialog open onOpenChange={vi.fn()} onSaved={vi.fn()} />,
     );
@@ -70,17 +70,51 @@ describe('ProviderSetupDialog', () => {
     const providerControl = screen.getByRole('combobox', {
       name: 'settings.ai.chooseProvider',
     }).closest('[data-slot="input-group"]');
-    expect(dialog).toHaveClass('max-w-xl', 'gap-0', 'p-0');
-    expect(dialog).not.toHaveClass('max-w-2xl');
-    expect(scrollArea).toHaveClass('overflow-y-auto', 'px-4', 'py-4');
+    const inputs = dialog.querySelectorAll('[data-slot="input"]');
+    const inputGroups = dialog.querySelectorAll('[data-slot="input-group"]');
+    const fieldGroups = scrollArea?.querySelectorAll('[data-slot="field-group"]');
+    expect(dialog).toHaveClass('max-w-2xl', 'gap-0', 'p-0');
+    expect(scrollArea).toHaveClass('overflow-y-auto', 'px-4', 'py-3', 'gap-5');
     expect(scrollArea).not.toHaveClass('pr-1');
+    expect(fieldGroups).toHaveLength(3);
+    expect(screen.queryByText('settings.ai.provider', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('settings.ai.connectionDetails', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('settings.ai.credentials', { exact: true })).not.toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent('settings.ai.addProviderDescription');
+    expect(dialog).not.toHaveTextContent('settings.ai.connectionDetailsHint');
+    expect(dialog).not.toHaveTextContent('settings.ai.credentialsHint');
+    expect(fieldGroups?.[0]).toHaveClass(
+      '@min-[30rem]:grid',
+      '@min-[30rem]:grid-cols-2',
+    );
     expect(providerControl).toHaveClass(
+      'has-[[data-slot=input-group-control]:focus-visible]:border-input',
       'has-[[data-slot=input-group-control]:focus-visible]:ring-1',
       'has-[[data-slot=input-group-control]:focus-visible]:ring-ring',
     );
     expect(providerControl).not.toHaveClass(
+      'has-[[data-slot=input-group-control]:focus-visible]:border-ring',
       'has-[[data-slot=input-group-control]:focus-visible]:ring-3',
     );
+    expect(inputGroups).toHaveLength(3);
+    inputGroups.forEach((inputGroup) => {
+      expect(inputGroup).toHaveClass(
+        'h-9',
+        'bg-transparent',
+        'has-[[data-slot=input-group-control]:disabled]:bg-transparent',
+        'has-[[data-slot=input-group-control]:focus-visible]:border-input',
+        'has-[[data-slot=input-group-control]:focus-visible]:ring-1',
+      );
+      expect(inputGroup).not.toHaveClass(
+        'has-[[data-slot=input-group-control]:disabled]:bg-input/50',
+        'has-[[data-slot=input-group-control]:focus-visible]:border-ring',
+        'has-[[data-slot=input-group-control]:focus-visible]:ring-3',
+      );
+    });
+    inputs.forEach((input) => {
+      expect(input).toHaveClass('bg-transparent');
+      expect(input).not.toHaveClass('bg-background');
+    });
   });
 
   it('keeps the provider as a draft until every required field is complete and saved', async () => {
@@ -94,14 +128,41 @@ describe('ProviderSetupDialog', () => {
 
     const providerInput = screen.getByRole('combobox', { name: 'settings.ai.chooseProvider' });
     await user.click(providerInput);
+    const ollamaOption = await screen.findByRole('option', { name: /Ollama/ });
+    expect(ollamaOption).toHaveClass('py-1.5', '[&>svg]:size-4!');
+    expect(ollamaOption).not.toHaveClass('py-1');
+    expect(within(ollamaOption).getByText('ai.local')).toHaveClass('bg-secondary');
     await user.type(providerInput, 'DeepSeek');
-    await user.click(await screen.findByRole('option', { name: /DeepSeek/ }));
+    const deepSeekOption = await screen.findByRole('option', { name: /DeepSeek/ });
+    const providerPopup = document.querySelector('[data-slot="combobox-content"]');
+    expect(providerPopup).toHaveClass('min-w-[calc(var(--anchor-width)+--spacing(7))]');
+    expect(deepSeekOption).toHaveClass('pr-1.5');
+    expect(deepSeekOption).not.toHaveClass('pr-8');
+    expect(within(deepSeekOption).getByText('ai.cloud')).toHaveClass('ml-auto', 'border-border');
+    await user.click(deepSeekOption);
 
     expect(useAiSettingsStore.getState().providers).toHaveLength(originalCount);
     expect(providerInput).toHaveValue('DeepSeek');
     expect(screen.getByLabelText('settings.ai.providerName')).toHaveValue('DeepSeek');
     expect(screen.getByLabelText('settings.ai.baseUrl')).toHaveValue('https://api.deepseek.com');
     expect(screen.getByLabelText('settings.ai.model')).toHaveValue('deepseek-v4-flash');
+    const endpointLabel = 'settings.ai.requestEndpoint:https://api.deepseek.com/v1/chat/completions';
+    const endpointButton = screen.getByRole('button', { name: endpointLabel });
+    expect(endpointButton).toHaveClass(
+      'relative',
+      'size-4',
+      'p-0',
+      'after:absolute',
+      'after:-inset-1',
+    );
+    expect(endpointButton).not.toHaveClass('size-5');
+    expect(screen.queryByText(endpointLabel)).not.toBeInTheDocument();
+    expect(screen.queryByText('settings.ai.protocolHint')).not.toBeInTheDocument();
+    expect(screen.queryByText('settings.ai.modelHint')).not.toBeInTheDocument();
+    expect(screen.queryByText('settings.ai.keyHint')).not.toBeInTheDocument();
+
+    await user.hover(endpointButton);
+    expect(await screen.findByText(endpointLabel)).toHaveAttribute('data-slot', 'tooltip-content');
     expect(screen.getByRole('button', { name: 'common.save' })).toBeDisabled();
 
     await user.type(screen.getByLabelText(/settings\.ai\.apiKey/), 'secret-key');
@@ -122,6 +183,21 @@ describe('ProviderSetupDialog', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it('keeps custom providers on the preset API key policy without an extra switch', async () => {
+    const user = userEvent.setup();
+    render(
+      <ProviderSetupDialog open onOpenChange={vi.fn()} onSaved={vi.fn()} />,
+    );
+
+    const providerInput = screen.getByRole('combobox', { name: 'settings.ai.chooseProvider' });
+    await user.click(providerInput);
+    await user.type(providerInput, 'Custom Provider');
+    await user.click(await screen.findByRole('option', { name: /Custom Provider/ }));
+
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/settings\.ai\.apiKey/)).toBeEnabled();
+  });
+
   it('rolls back a new provider when the keychain write fails', async () => {
     const user = userEvent.setup();
     const onSaved = vi.fn();
@@ -138,7 +214,10 @@ describe('ProviderSetupDialog', () => {
     await user.type(screen.getByLabelText(/settings\.ai\.apiKey/), 'secret-key');
     await user.click(screen.getByRole('button', { name: 'common.save' }));
 
-    expect(await screen.findByText('keychain unavailable')).toBeInTheDocument();
+    const feedback = await screen.findByRole('alert');
+    expect(feedback).toHaveTextContent('settings.ai.connectionFailed');
+    expect(feedback).not.toHaveTextContent('keychain unavailable');
+    expect(within(feedback).getByRole('button', { name: /keychain unavailable/ })).toBeInTheDocument();
     expect(useAiSettingsStore.getState().providers).toEqual(originalProviders);
     expect(onSaved).not.toHaveBeenCalled();
   });
@@ -188,7 +267,51 @@ describe('ProviderSetupDialog', () => {
       requiresApiKey: false,
     }));
     expect(useAiSettingsStore.getState().providers).toHaveLength(originalCount);
-    expect(await screen.findByText('settings.ai.connectionSuccess:2')).toBeInTheDocument();
+    const feedback = await screen.findByRole('status');
+    const dialog = screen.getByRole('dialog');
+    const footer = dialog.querySelector<HTMLElement>('[data-slot="dialog-footer"]');
+    const scrollArea = dialog.querySelector<HTMLElement>('[data-slot="provider-dialog-scroll-area"]');
+    expect(feedback).toHaveTextContent('settings.ai.ready');
+    expect(feedback).not.toHaveTextContent('settings.ai.connectionSuccess:2');
+    expect(footer).toContainElement(feedback);
+    expect(scrollArea).not.toContainElement(feedback);
+
+    const detailsButton = within(feedback).getByRole('button', {
+      name: /settings\.ai\.ready: settings\.ai\.connectionSuccess:2/,
+    });
+    expect(detailsButton).toHaveClass('size-4', 'shrink-0', 'p-0');
+    await user.hover(detailsButton);
+    expect(await screen.findByText('settings.ai.connectionSuccess:2')).toHaveAttribute(
+      'data-slot',
+      'tooltip-content',
+    );
+  });
+
+  it('shows a short failure status and reveals the provider error from its icon', async () => {
+    const user = userEvent.setup();
+    mocks.invokeListAiModels.mockRejectedValueOnce(new Error('provider rejected API key'));
+    render(
+      <ProviderSetupDialog open onOpenChange={vi.fn()} onSaved={vi.fn()} />,
+    );
+
+    const providerInput = screen.getByRole('combobox', { name: 'settings.ai.chooseProvider' });
+    await user.click(providerInput);
+    await user.type(providerInput, 'Ollama');
+    await user.click(await screen.findByRole('option', { name: /Ollama/ }));
+    await user.click(screen.getByRole('button', { name: 'settings.ai.verifyConnection' }));
+
+    const feedback = await screen.findByRole('alert');
+    expect(feedback).toHaveTextContent('settings.ai.connectionFailed');
+    expect(feedback).not.toHaveTextContent('provider rejected API key');
+
+    const detailsButton = within(feedback).getByRole('button', {
+      name: 'settings.ai.connectionFailed: provider rejected API key',
+    });
+    await user.hover(detailsButton);
+    expect(await screen.findByText('provider rejected API key')).toHaveAttribute(
+      'data-slot',
+      'tooltip-content',
+    );
   });
 
   it('ignores a model response after switching presets', async () => {

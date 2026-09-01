@@ -4,10 +4,10 @@ import {
   CircleAlertIcon,
   EyeIcon,
   EyeOffIcon,
+  InfoIcon,
   RefreshCwIcon,
   ServerIcon,
 } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,15 +18,14 @@ import {
   ComboboxItem,
   ComboboxList,
 } from '@/components/ui/combobox';
+import { Dialog } from '@/components/ui/dialog';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+  CompactDialogBody,
+  CompactDialogContent,
+  CompactDialogFooter,
+  CompactDialogHeader,
+} from '@/components/ui/compact-dialog';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import {
   InputGroup,
@@ -34,16 +33,15 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from '@/components/ui/input-group';
-import { Separator } from '@/components/ui/separator';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
-import { Switch } from '@/components/ui/switch';
-import { useI18n } from '@/hooks/useI18n';
 import {
-  effectiveReasoningEffort,
-  isAiReasoningEffort,
-  reasoningEffortOptions,
-} from '@/lib/ai-reasoning';
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { useI18n } from '@/hooks/useI18n';
+import { cn } from '@/lib/utils';
 import {
   invokeDeleteAiApiKey,
   invokeHasAiApiKey,
@@ -61,7 +59,6 @@ import type {
   AiProviderKind,
   AiProviderPreset,
   AiProviderProfile,
-  AiReasoningEffort,
 } from '@/types/ai';
 import {
   DeepSeekBrandIcon,
@@ -103,12 +100,6 @@ const PROTOCOL_LABEL_KEYS: Record<AiProviderKind, LocaleKey> = {
   openAiCompatible: 'settings.ai.protocol.openAiCompatible',
 };
 
-const REASONING_EFFORT_LABEL_KEYS: Record<AiReasoningEffort, LocaleKey> = {
-  low: 'ai.reasoningEffort.low',
-  high: 'ai.reasoningEffort.high',
-  max: 'ai.reasoningEffort.max',
-};
-
 const ENDPOINT_SUFFIXES = [
   '/chat/completions',
   '/responses',
@@ -119,6 +110,9 @@ const ENDPOINT_SUFFIXES = [
 ] as const;
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+const SYSTEM_INPUT_CLASS = 'bg-transparent';
+const SYSTEM_INPUT_GROUP_CLASS =
+  'h-9 bg-transparent has-[[data-slot=input-group-control]:disabled]:bg-transparent has-[[data-slot=input-group-control]:focus-visible]:border-input has-[[data-slot=input-group-control]:focus-visible]:ring-1 has-[[data-slot=input-group-control]:focus-visible]:ring-ring dark:bg-transparent dark:has-[[data-slot=input-group-control]:disabled]:bg-transparent';
 
 function parseProviderBaseUrl(baseUrl: string): URL | undefined {
   try {
@@ -241,8 +235,9 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const requestEndpoint = draft
     ? buildProviderRequestEndpoint(draft.baseUrl, draft.kind)
     : undefined;
-  const availableReasoningEfforts = draft ? reasoningEffortOptions(draft) : [];
-  const selectedReasoningEffort = draft ? effectiveReasoningEffort(draft) : undefined;
+  const requestEndpointLabel = requestEndpoint
+    ? t('settings.ai.requestEndpoint', { endpoint: requestEndpoint })
+    : undefined;
   const canTest = Boolean(
     draft
     && requestEndpoint
@@ -355,28 +350,23 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-xl grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0">
-        <DialogHeader className="px-4 pt-4 pr-12">
-          <DialogTitle>
-            {t(provider ? 'settings.ai.editProviderTitle' : 'settings.ai.addProviderTitle')}
-          </DialogTitle>
-          <DialogDescription>
-            {t(provider ? 'settings.ai.editProviderDescription' : 'settings.ai.addProviderDescription')}
-          </DialogDescription>
-        </DialogHeader>
+      <CompactDialogContent className="max-w-2xl">
+        <CompactDialogHeader
+          title={t(provider ? 'settings.ai.editProviderTitle' : 'settings.ai.addProviderTitle')}
+        />
 
         <form
-          className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto_auto]"
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             void handleSave();
           }}
         >
-          <div
+          <CompactDialogBody
             data-slot="provider-dialog-scroll-area"
-            className="min-h-0 overflow-y-auto px-4 py-4"
+            className="@container gap-5"
           >
-            <FieldGroup>
+            <FieldGroup className="gap-2.5 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
               <Field>
                 <FieldLabel htmlFor="ai-new-provider-preset">{t('settings.ai.chooseProvider')}</FieldLabel>
                 <Combobox
@@ -389,6 +379,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 >
                   <ComboboxInput
                     id="ai-new-provider-preset"
+                    className={SYSTEM_INPUT_GROUP_CLASS}
                     placeholder={t('settings.ai.chooseProviderPlaceholder')}
                     autoComplete="off"
                     disabled={Boolean(provider)}
@@ -399,10 +390,18 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                       {(preset: AiProviderPresetDefinition) => {
                         const PresetIcon = PRESET_ICONS[preset.preset];
                         return (
-                          <ComboboxItem key={preset.preset} value={preset}>
+                          <ComboboxItem
+                            key={preset.preset}
+                            value={preset}
+                            showIndicator={false}
+                            className="py-1.5 pr-1.5 [&>svg]:size-4!"
+                          >
                             <PresetIcon aria-hidden />
                             <span className="min-w-0 flex-1 truncate">{preset.name}</span>
-                            <Badge variant="outline">
+                            <Badge
+                              variant={preset.kind === 'ollama' ? 'secondary' : 'outline'}
+                              className="ml-auto"
+                            >
                               {preset.kind === 'ollama' ? t('ai.local') : t('ai.cloud')}
                             </Badge>
                           </ComboboxItem>
@@ -417,33 +416,21 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 <FieldLabel htmlFor="ai-new-provider-name">{t('settings.ai.providerName')}</FieldLabel>
                 <Input
                   id="ai-new-provider-name"
+                  className={SYSTEM_INPUT_CLASS}
                   value={draft?.name ?? ''}
                   placeholder={t('settings.ai.providerNamePlaceholder')}
                   disabled={!draft}
                   onChange={(event) => updateDraft({ name: event.target.value })}
                 />
               </Field>
+            </FieldGroup>
 
-              {draft?.preset === 'custom' && (
-                <Field className="flex-row items-center gap-3">
-                  <div className="min-w-0 flex-1">
-                    <FieldLabel htmlFor="ai-new-provider-requires-key">
-                      {t('settings.ai.authRequired')}
-                    </FieldLabel>
-                    <FieldDescription>{t('settings.ai.authRequiredHint')}</FieldDescription>
-                  </div>
-                  <Switch
-                    id="ai-new-provider-requires-key"
-                    checked={draft.requiresApiKey}
-                    onCheckedChange={(requiresApiKey) => updateDraft({ requiresApiKey })}
-                  />
-                </Field>
-              )}
-
+            <FieldGroup className="gap-2.5 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
               <Field data-disabled={!draft || undefined}>
-                <FieldLabel htmlFor="ai-new-provider-protocol">{t('settings.ai.configurationMethod')}</FieldLabel>
+                <FieldLabel htmlFor="ai-new-provider-protocol">{t('settings.ai.protocol')}</FieldLabel>
                 <Input
                   id="ai-new-provider-protocol"
+                  className={SYSTEM_INPUT_CLASS}
                   value={draft ? t(PROTOCOL_LABEL_KEYS[draft.kind]) : ''}
                   placeholder={t('settings.ai.chooseProviderFirst')}
                   disabled
@@ -451,55 +438,35 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 />
               </Field>
 
-              <Field data-disabled={!draft || undefined}>
-                <div className="flex items-center justify-between gap-2">
-                  <FieldLabel htmlFor="ai-new-provider-key">
-                    {t('settings.ai.apiKey')}
-                    {draft?.requiresApiKey && (
-                      <span className="text-muted-foreground">{t('settings.ai.required')}</span>
-                    )}
-                  </FieldLabel>
-                  {provider && draft?.requiresApiKey && (
-                    <Badge variant={hasStoredApiKey ? 'secondary' : 'outline'}>
-                      {t(hasStoredApiKey ? 'settings.ai.keyStored' : 'settings.ai.keyMissing')}
-                    </Badge>
+              <Field data-disabled={!draft || undefined} data-invalid={Boolean(draft && !requestEndpoint) || undefined}>
+                <div className="flex items-center gap-1">
+                  <FieldLabel htmlFor="ai-new-provider-url">{t('settings.ai.baseUrl')}</FieldLabel>
+                  {requestEndpointLabel && (
+                    <TooltipProvider delay={100}>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              type="button"
+                              variant="plain"
+                              size="xs"
+                              className="relative size-4 p-0 after:absolute after:-inset-1"
+                              aria-label={requestEndpointLabel}
+                            />
+                          }
+                        >
+                          <InfoIcon />
+                        </TooltipTrigger>
+                        <TooltipContent align="start">
+                          {requestEndpointLabel}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   )}
                 </div>
-                <InputGroup>
-                  <InputGroupInput
-                    id="ai-new-provider-key"
-                    type={showApiKey ? 'text' : 'password'}
-                    value={draft?.apiKey ?? ''}
-                    placeholder={hasStoredApiKey ? '••••••••' : 'sk-...'}
-                    disabled={!draft || !draft.requiresApiKey}
-                    onChange={(event) => updateDraft({ apiKey: event.target.value })}
-                    autoComplete="off"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                  />
-                  <InputGroupAddon align="inline-end">
-                    <InputGroupButton
-                      aria-label={t(showApiKey ? 'settings.ai.hideApiKey' : 'settings.ai.showApiKey')}
-                      disabled={!draft || !draft.requiresApiKey}
-                      onClick={() => setShowApiKey((visible) => !visible)}
-                    >
-                      {showApiKey ? <EyeOffIcon /> : <EyeIcon />}
-                    </InputGroupButton>
-                  </InputGroupAddon>
-                </InputGroup>
-                {draft && !draft.requiresApiKey && (
-                  <FieldDescription>{t('settings.ai.noApiKeyHint')}</FieldDescription>
-                )}
-                {draft?.requiresApiKey && (
-                  <FieldDescription>{t('settings.ai.keyHint')}</FieldDescription>
-                )}
-              </Field>
-
-              <Field data-disabled={!draft || undefined} data-invalid={Boolean(draft && !requestEndpoint) || undefined}>
-                <FieldLabel htmlFor="ai-new-provider-url">{t('settings.ai.baseUrl')}</FieldLabel>
                 <Input
                   id="ai-new-provider-url"
+                  className={SYSTEM_INPUT_CLASS}
                   value={draft?.baseUrl ?? ''}
                   placeholder="https://..."
                   disabled={!draft}
@@ -508,14 +475,9 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                   autoCapitalize="none"
                   autoCorrect="off"
                 />
-                {requestEndpoint && (
-                  <FieldDescription className="font-mono break-all">
-                    {t('settings.ai.requestEndpoint', { endpoint: requestEndpoint })}
-                  </FieldDescription>
-                )}
               </Field>
 
-              <Field data-disabled={!draft || undefined}>
+              <Field data-disabled={!draft || undefined} className="@min-[30rem]:col-span-2">
                 <div className="flex items-center justify-between gap-2">
                   <FieldLabel htmlFor="ai-new-provider-model">{t('settings.ai.model')}</FieldLabel>
                   <Button
@@ -540,6 +502,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 >
                   <ComboboxInput
                     id="ai-new-provider-model"
+                    className={SYSTEM_INPUT_GROUP_CLASS}
                     placeholder={draft
                       ? t('settings.ai.modelPlaceholder')
                       : t('settings.ai.chooseProviderFirst')}
@@ -559,80 +522,113 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                   </ComboboxContent>
                 </Combobox>
               </Field>
-
-              {selectedReasoningEffort && availableReasoningEfforts.length > 0 && (
-                <Field>
-                  <FieldLabel>{t('settings.ai.reasoningEffort')}</FieldLabel>
-                  <Select
-                    value={selectedReasoningEffort}
-                    onValueChange={(value) => {
-                      if (isAiReasoningEffort(value)) updateDraft({ reasoningEffort: value });
-                    }}
-                  >
-                    <SelectTrigger aria-label={t('settings.ai.reasoningEffort')}>
-                      <SelectValue>
-                        {t(REASONING_EFFORT_LABEL_KEYS[selectedReasoningEffort])}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {availableReasoningEfforts.map((effort) => (
-                          <SelectItem key={effort} value={effort}>
-                            {t(REASONING_EFFORT_LABEL_KEYS[effort])}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  <FieldDescription>{t('settings.ai.reasoningEffortHint')}</FieldDescription>
-                </Field>
-              )}
             </FieldGroup>
-          </div>
 
-          {feedback && (
-            <div className="px-4 pb-4">
-              <Alert variant={feedback.kind === 'error' ? 'destructive' : 'default'}>
-                {feedback.kind === 'error' ? <CircleAlertIcon /> : <CheckCircle2Icon />}
-                <AlertTitle>
-                  {t(feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready')}
-                </AlertTitle>
-                <AlertDescription>{feedback.message}</AlertDescription>
-              </Alert>
-            </div>
-          )}
+            <FieldGroup className="gap-2.5">
+              <Field data-disabled={!draft || undefined}>
+                <div className="flex items-center justify-between gap-2">
+                  <FieldLabel htmlFor="ai-new-provider-key">
+                    {t('settings.ai.apiKey')}
+                    {draft?.requiresApiKey && (
+                      <span className="text-muted-foreground">{t('settings.ai.required')}</span>
+                    )}
+                  </FieldLabel>
+                  {provider && draft?.requiresApiKey && (
+                    <Badge variant={hasStoredApiKey ? 'secondary' : 'outline'}>
+                      {t(hasStoredApiKey ? 'settings.ai.keyStored' : 'settings.ai.keyMissing')}
+                    </Badge>
+                  )}
+                </div>
+                <InputGroup className={SYSTEM_INPUT_GROUP_CLASS}>
+                  <InputGroupInput
+                    id="ai-new-provider-key"
+                    type={showApiKey ? 'text' : 'password'}
+                    value={draft?.apiKey ?? ''}
+                    placeholder={hasStoredApiKey ? '••••••••' : 'sk-...'}
+                    disabled={!draft || !draft.requiresApiKey}
+                    onChange={(event) => updateDraft({ apiKey: event.target.value })}
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton
+                      aria-label={t(showApiKey ? 'settings.ai.hideApiKey' : 'settings.ai.showApiKey')}
+                      disabled={!draft || !draft.requiresApiKey}
+                      onClick={() => setShowApiKey((visible) => !visible)}
+                    >
+                      {showApiKey ? <EyeOffIcon /> : <EyeIcon />}
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
+              </Field>
+            </FieldGroup>
+          </CompactDialogBody>
 
-          <div className="flex flex-col">
-            <Separator />
-            <DialogFooter className="p-4 sm:justify-between">
-              <div className="flex flex-wrap gap-2">
-                {onDelete && (
-                  <Button type="button" variant="destructiveOutline" onClick={onDelete}>
-                    {t('settings.ai.deleteProvider')}
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={!canTest || busy}
-                  onClick={() => void handleLoadModels()}
+          <CompactDialogFooter className="sm:justify-between">
+            <div className="flex w-full min-w-0 items-center gap-2 sm:flex-1">
+              {onDelete && (
+                <Button type="button" variant="destructiveOutline" size="sm" onClick={onDelete}>
+                  {t('settings.ai.deleteProvider')}
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={!canTest || busy}
+                onClick={() => void handleLoadModels()}
+              >
+                {busy && <Spinner data-icon="inline-start" />}
+                {t('settings.ai.verifyConnection')}
+              </Button>
+              {feedback && (
+                <div
+                  role={feedback.kind === 'error' ? 'alert' : 'status'}
+                  aria-atomic="true"
+                  className={cn(
+                    'flex min-w-0 items-center gap-0.5 text-xs font-medium',
+                    feedback.kind === 'error' ? 'text-destructive' : 'text-app-success',
+                  )}
                 >
-                  {busy && <Spinner data-icon="inline-start" />}
-                  {t('settings.ai.verifyConnection')}
-                </Button>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
-                  {t('common.cancel')}
-                </Button>
-                <Button type="submit" disabled={!canSave || busy}>
-                  {t('common.save')}
-                </Button>
-              </div>
-            </DialogFooter>
-          </div>
+                  <span className="truncate">
+                    {t(feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready')}
+                  </span>
+                  <TooltipProvider delay={250}>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="plain"
+                            size="xs"
+                            className="size-4 shrink-0 p-0"
+                            aria-label={`${t(feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready')}: ${feedback.message}`}
+                          />
+                        }
+                      >
+                        {feedback.kind === 'error' ? <CircleAlertIcon /> : <CheckCircle2Icon />}
+                      </TooltipTrigger>
+                      <TooltipContent align="start" className="max-w-sm break-words">
+                        {feedback.message}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => handleOpenChange(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" size="sm" disabled={!canSave || busy}>
+                {t('common.save')}
+              </Button>
+            </div>
+          </CompactDialogFooter>
         </form>
-      </DialogContent>
+      </CompactDialogContent>
     </Dialog>
   );
 };
