@@ -14,6 +14,8 @@ Follow `docs/terminal-agent-enhancement-plan.md` through M0–M5 and the final a
 - Original M4 implementation checkpoint: `1ec4b51` (`wip(agent): checkpoint M4 recovery controls`)
 - Accepted M4 continuation: the local commit containing this updated checkpoint
   and `docs/terminal-agent-m4.md`; it is intentionally not pushed by this task
+- Accepted M5 continuation: the local commit containing
+  `docs/terminal-agent-m5.md`; it is intentionally not pushed by this task
 - At the time this document was started, local `main`, `origin/main`, and `origin/HEAD` all pointed to `1ec4b51`, and the worktree was clean.
 
 The M4 checkpoint contains 11 changed files with 871 insertions and 165 deletions. It is intentionally a WIP checkpoint and must not be represented as an accepted M4 implementation.
@@ -27,7 +29,7 @@ The M4 checkpoint contains 11 changed files with 871 insertions and 165 deletion
 | M2 — MCP connectors and remote execution security | Complete | `docs/terminal-agent-m2.md`; included in `26c2776` |
 | M3 — command DSL, plan preview, and audit | Complete | `docs/terminal-agent-m3.md`; included in `26c2776` |
 | M4 — background tasks, restart recovery, and Operator | Complete | `docs/terminal-agent-m4.md`; continuation completed and verified on 2026-09-01 |
-| M5 — Fleet and multi-agent orchestration | Not started | No M5 task or acceptance document yet |
+| M5 — Fleet and multi-agent orchestration | Complete | `docs/terminal-agent-m5.md`; implementation and acceptance verified on 2026-09-01 |
 | Final acceptance | Not started | No full regression/security/migration/rollback audit yet |
 
 ## Codex phase task history
@@ -41,9 +43,11 @@ These IDs are useful only if the same Codex account can still access the origina
 | M2 | ShellSpan M2 | `01a0594c-4719-7183-a92d-97bdff1ca6a2` | Complete |
 | M3 | ShellSpan M3 | `01a059be-ef4e-7543-96b2-03ef322e23cf` | Complete |
 | M4 | ShellSpan M4：后台恢复与 Operator | `01a05a0b-2751-7f23-a7d4-545a040f070f` | Original task stopped at `1ec4b51`; M4 was completed in the documented continuation |
+| M5 | ShellSpan M5 Fleet 与多 Agent | `01a05ae7-e351-7773-8716-ae798b00f362` | Separate M5 window completed design/code audit; implementation and acceptance were finished by the controlling task after the window scheduler stalled |
 
-M4 is complete. Start M5 only in a separate task window and keep this document
-and `docs/terminal-agent-m4.md` as the durable hand-off.
+M5 is complete. Start final acceptance only in a separate task window and keep
+this document plus `docs/terminal-agent-m4.md` and
+`docs/terminal-agent-m5.md` as the durable hand-off.
 
 ## What was present in the original M4 checkpoint
 
@@ -137,7 +141,8 @@ Record exact commands and results in `docs/terminal-agent-m4.md`. Do not infer b
 4. Confirm the history contains the accepted M4 commit with
    `docs/terminal-agent-m4.md` and its verification evidence.
 5. Create a separate M5 task window for Fleet and multi-agent orchestration.
-6. After M5 acceptance, create one final acceptance task window for full
+6. M5 is accepted in `docs/terminal-agent-m5.md`. Create one final acceptance
+   task window for full
    regression, security, migration, rollback, packaging, and
    requirement-by-requirement completion evidence.
 
@@ -145,6 +150,34 @@ Record exact commands and results in `docs/terminal-agent-m4.md`. Do not infer b
 
 ```text
 Continue ShellSpan Terminal Agent M5 from docs/terminal-agent-checkpoint.md and docs/terminal-agent-m4.md. Read the enhancement plan and M0–M4 acceptance documents first, inspect the current worktree as authoritative, and finish only M5. Do not weaken M0–M4 target, capability, replay, broker, egress, sensitive-path, or verification boundaries. Preserve v2 as the default with v3, MCP, and Operator as independent opt-ins.
+```
+
+M5 is now complete; the block above is retained only as historical hand-off
+evidence.
+
+## M5 completion evidence
+
+The M5 phase delivered and verified:
+
+1. Rust-frozen label/group/environment selectors and stable target digests.
+2. Mandatory canary-first multi-host writes, bounded batches, jitter,
+   concurrency, per-target/role/Fleet budgets, failure thresholds, and
+   same-target write serialization.
+3. Explicit per-host result and rollback state; failed or blocked hosts cannot
+   be hidden by aggregate completion.
+4. Explorer, Diagnostician, Operator, Verifier, and Reviewer roles with exact
+   parent-plan subsets and non-persistent authority.
+5. Independent native Verifier evidence as the only success transition.
+6. Separate, bounded, sanitized Fleet persistence; restart moves in-flight
+   targets to reconciliation without replay.
+7. A separate default-off Fleet switch, typed IPC, and a shadcn result matrix.
+8. M5, M4 regression, contract, security, type, build, Rust runtime, clippy,
+   formatting, and diff checks recorded in `docs/terminal-agent-m5.md`.
+
+## Suggested final acceptance hand-off
+
+```text
+Run the ShellSpan Terminal Agent final acceptance pass from docs/terminal-agent-checkpoint.md. Read docs/terminal-agent-enhancement-plan.md and the M0–M5 acceptance documents, inspect the current repository as authoritative, and do not add unrelated features. Audit every requirement against concrete code and test evidence; run full frontend/Rust regression, security, migration, restart/reconciliation, rollback, build, and packaging checks. Record known limits honestly, update the checkpoint only after all required evidence passes, and preserve Agent v2 as the default with v3, MCP, Operator, and Fleet as independent opt-ins.
 ```
 
 ## Stop condition for the overall goal

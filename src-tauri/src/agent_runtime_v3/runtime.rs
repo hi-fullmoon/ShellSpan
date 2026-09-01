@@ -32,18 +32,20 @@ use super::{
     restore_local_checkpoint_v3, restore_remote_checkpoint_v3, spawn_local_process_v3,
     spawn_remote_process_v3, validate_m1_result_data_v3, validate_recovery_policy_configuration_v3,
     AgentAuditEventV3, AgentCallPreviewV3, AgentContextSnapshotV3, AgentFileCheckpointV3,
-    AgentMcpAuthorizeRequestV3, AgentMcpCallV3, AgentMcpCapabilityGrantV3, AgentMcpResultV3,
-    AgentNotificationV3, BrokerAuthorizeRequestV3, BrokerGrantV3, BrokerPurposeV3,
-    BrokerRequestKindV3, CapabilityAuthorizationSourceV3, CapabilityIssueRequestV3,
-    CheckpointOriginalMetadataV3, CheckpointStoreV3, ContextRetrievalRequestV3, ContextRetrievalV3,
-    ContextRuntimeV3, ExtensionRuntimeV3, ExtensionSnapshotV3, FileExecutionContextV3,
-    FileOperationRegistryV3, HookDecisionV3, HookEventV3, InstantiateRunbookRequestV3,
+    AgentFleetSnapshotV3, AgentMcpAuthorizeRequestV3, AgentMcpCallV3, AgentMcpCapabilityGrantV3,
+    AgentMcpResultV3, AgentNotificationV3, BrokerAuthorizeRequestV3, BrokerGrantV3,
+    BrokerPurposeV3, BrokerRequestKindV3, CapabilityAuthorizationSourceV3,
+    CapabilityIssueRequestV3, CheckpointOriginalMetadataV3, CheckpointStoreV3,
+    ContextRetrievalRequestV3, ContextRetrievalV3, ContextRuntimeV3, ExtensionRuntimeV3,
+    ExtensionSnapshotV3, FileExecutionContextV3, FileOperationRegistryV3, FleetRuntimeV3,
+    FrozenFleetScopeV3, HookDecisionV3, HookEventV3, InstantiateRunbookRequestV3,
     IssuedCapabilityV3, LoadSkillRequestV3, LoadedSkillV3, M4PersistenceV3, McpRuntimeV3,
     McpServerSnapshotV3, McpSetEnabledRequestV3, McpToolSchemaRequestV3, McpToolSchemaV3,
     NativeBrokerV3, NativeCapabilityStoreV3, NotificationKindV3, OperatorConfigureRequestV3,
     OperatorGrantV3, OperatorStoreV3, PersistedTaskV3, ProcessLifecycleV3, ProcessRegistryV3,
     ProcessSnapshotV3, PtyLifecycleV3, PtyRegistryV3, RecoveredProcessV3, RecoveryDispositionV3,
-    RecoveryStoreStatusV3, RegisteredToolV3, RemoteProcessStartV3, TaskPhaseV3,
+    RecoveryStoreStatusV3, RegisterFleetRequestV3, RegisterSubAgentRequestV3, RegisteredToolV3,
+    RemoteProcessStartV3, SubAgentSnapshotV3, SubmitFleetVerificationRequestV3, TaskPhaseV3,
     TaskRecoverySnapshotV3, ToolRegistryErrorV3, ToolRegistryV3, DEFAULT_CAPABILITY_TTL_MS,
     MAX_CAPABILITY_TTL_MS, MCP_CREDENTIAL_SERVICE, REMOTE_PROFILE_BROKER_SERVICE,
 };
@@ -527,6 +529,7 @@ pub(crate) struct AgentRuntimeV3 {
     persistence: M4PersistenceV3,
     operator: OperatorStoreV3,
     broker: NativeBrokerV3,
+    fleet: FleetRuntimeV3,
     m4_loaded: Arc<Mutex<bool>>,
     shutdown_prepared: Arc<Mutex<bool>>,
     checkpoint_root: Arc<Mutex<Option<PathBuf>>>,
@@ -552,6 +555,7 @@ impl Default for AgentRuntimeV3 {
             persistence: M4PersistenceV3::default(),
             operator: OperatorStoreV3::default(),
             broker: NativeBrokerV3::default(),
+            fleet: FleetRuntimeV3::default(),
             m4_loaded: Arc::new(Mutex::new(false)),
             shutdown_prepared: Arc::new(Mutex::new(false)),
             checkpoint_root: Arc::new(Mutex::new(None)),
@@ -563,6 +567,7 @@ impl Default for AgentRuntimeV3 {
 impl AgentRuntimeV3 {
     pub(crate) fn configure_checkpoint_root(&self, root: PathBuf) -> Result<(), String> {
         self.context.configure_artifact_root(&root)?;
+        self.fleet.configure(&root)?;
         let mut loaded = self
             .m4_loaded
             .lock()
@@ -698,6 +703,121 @@ impl AgentRuntimeV3 {
         self.tasks.register(request)?;
         self.persist_task(&task_id)?;
         self.task_snapshot(&task_id)
+    }
+
+    pub(crate) fn register_fleet(
+        &self,
+        request: RegisterFleetRequestV3,
+        sessions: &SessionManager,
+        database: &Database,
+    ) -> Result<AgentFleetSnapshotV3, String> {
+        let mut scopes = Vec::with_capacity(request.members.len());
+        for member in &request.members {
+            let task = self.tasks.record(&member.task_id)?;
+            if task.state != TaskRuntimeStateV3::Active || task.restored {
+                return Err("Fleet members require active, rebound Rust tasks".into());
+            }
+            let target = task
+                .request
+                .targets
+                .iter()
+                .find(|target| {
+                    target.target_id() == member.target_id
+                        && matches!(
+                            target,
+                            AgentToolTargetV3::Local { .. } | AgentToolTargetV3::Remote { .. }
+                        )
+                })
+                .ok_or_else(|| "Fleet member target is not frozen in its Rust task".to_string())?;
+            self.revalidate_target(target, sessions, database)?;
+            let plan = task
+                .plan
+                .as_ref()
+                .filter(|plan| !plan.steps.is_empty())
+                .ok_or_else(|| "Fleet members require a Rust-accepted plan".to_string())?;
+            let mut allowed_tools = plan
+                .steps
+                .iter()
+                .filter(|step| step.target_ids.contains(&member.target_id))
+                .flat_map(|step| step.required_tools.clone())
+                .collect::<Vec<_>>();
+            let mut allowed_effects = plan
+                .steps
+                .iter()
+                .filter(|step| step.target_ids.contains(&member.target_id))
+                .map(|step| step.expected_effect)
+                .collect::<Vec<_>>();
+            allowed_tools.sort();
+            allowed_tools.dedup();
+            allowed_effects.sort_by_key(|effect| *effect as u8);
+            allowed_effects.dedup();
+            if allowed_tools.is_empty() || allowed_effects.is_empty() {
+                return Err("Fleet target has no executable scope in its Rust plan".into());
+            }
+            scopes.push(FrozenFleetScopeV3 {
+                task_id: member.task_id.clone(),
+                target_id: member.target_id.clone(),
+                plan_version: plan.version,
+                allowed_tools,
+                allowed_effects,
+            });
+        }
+        self.fleet.register(request, scopes)
+    }
+
+    pub(crate) fn register_sub_agent(
+        &self,
+        request: RegisterSubAgentRequestV3,
+    ) -> Result<SubAgentSnapshotV3, String> {
+        self.fleet.register_sub_agent(request)
+    }
+
+    pub(crate) fn fleet_snapshot(&self, fleet_id: &str) -> Result<AgentFleetSnapshotV3, String> {
+        self.fleet.get(fleet_id)
+    }
+
+    pub(crate) fn list_fleets(&self) -> Result<Vec<AgentFleetSnapshotV3>, String> {
+        self.fleet.list()
+    }
+
+    pub(crate) fn submit_fleet_verification(
+        &self,
+        request: SubmitFleetVerificationRequestV3,
+    ) -> Result<AgentFleetSnapshotV3, String> {
+        self.fleet.submit_verification(request)
+    }
+
+    pub(crate) fn reconcile_fleet_target(
+        &self,
+        fleet_id: &str,
+        target_id: &str,
+        continue_with_verification: bool,
+    ) -> Result<AgentFleetSnapshotV3, String> {
+        self.fleet
+            .reconcile_target(fleet_id, target_id, continue_with_verification)
+    }
+
+    pub(crate) fn record_fleet_rollback(
+        &self,
+        fleet_id: &str,
+        target_id: &str,
+        checkpoint_id: &str,
+    ) -> Result<AgentFleetSnapshotV3, String> {
+        let task_id = self.fleet.task_for_target(fleet_id, target_id)?;
+        let task = self.task_snapshot(&task_id)?;
+        let checkpoint = task
+            .checkpoints
+            .iter()
+            .find(|checkpoint| checkpoint.checkpoint_id == checkpoint_id)
+            .ok_or_else(|| "rollback checkpoint does not belong to the Fleet task".to_string())?;
+        if checkpoint.target_id != target_id || checkpoint.restored_at_unix_ms.is_none() {
+            return Err(
+                "Fleet rollback requires a natively restored checkpoint for the exact target"
+                    .into(),
+            );
+        }
+        self.fleet
+            .record_rollback(fleet_id, target_id, checkpoint_id)
     }
 
     pub(crate) fn prepare_authorization(
@@ -1080,6 +1200,85 @@ impl AgentRuntimeV3 {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn execute_tool(
+        &self,
+        task_id: &str,
+        call: AgentToolCallV3,
+        sessions: &SessionManager,
+        database: &Database,
+        credentials: &CredentialManager,
+        known_hosts_path: &Path,
+    ) -> Result<AgentToolResultV3, String> {
+        self.fleet.ensure_direct_dispatch_allowed(task_id)?;
+        self.execute_tool_inner(
+            task_id,
+            call,
+            sessions,
+            database,
+            credentials,
+            known_hosts_path,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn execute_fleet_tool(
+        &self,
+        fleet_id: &str,
+        sub_agent_id: &str,
+        call: AgentToolCallV3,
+        sessions: &SessionManager,
+        database: &Database,
+        credentials: &CredentialManager,
+        known_hosts_path: &Path,
+    ) -> Result<AgentToolResultV3, String> {
+        let tool = self
+            .registry
+            .executable(&call.tool_name)
+            .map_err(registry_error_message)?;
+        let effect = assess_effect_v3(&tool.descriptor, &call)?;
+        let scope = inspect_call_policy_scope_v3(&call)?;
+        let frozen_scope = self
+            .fleet
+            .frozen_scope_for_target(fleet_id, call.target.target_id())?;
+        let task_id = frozen_scope.task_id.clone();
+        let current_task = self.tasks.record(&task_id)?;
+        let current_plan = current_task
+            .plan
+            .as_ref()
+            .ok_or_else(|| "Fleet parent plan disappeared before dispatch".to_string())?;
+        if current_plan.version != frozen_scope.plan_version
+            || !frozen_scope.allowed_tools.contains(&call.tool_name)
+            || !frozen_scope.allowed_effects.contains(&effect.kind)
+        {
+            return Err("Fleet parent plan or native scope changed after registration".into());
+        }
+        let guard =
+            self.fleet
+                .begin_dispatch(fleet_id, sub_agent_id, &call, effect.kind, &scope)?;
+        if guard.jitter_ms > 0 {
+            std::thread::sleep(Duration::from_millis(guard.jitter_ms));
+        }
+        let call_id = call.call_id.clone();
+        match self.execute_tool_inner(
+            &task_id,
+            call,
+            sessions,
+            database,
+            credentials,
+            known_hosts_path,
+        ) {
+            Ok(result) => {
+                self.fleet.finish_dispatch(fleet_id, &call_id, &result)?;
+                Ok(result)
+            }
+            Err(error) => {
+                let _ = self.fleet.abort_dispatch(fleet_id, &call_id, &error);
+                Err(error)
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn execute_tool_inner(
         &self,
         task_id: &str,
         call: AgentToolCallV3,
@@ -3163,12 +3362,16 @@ fn current_unix_ms() -> u64 {
 mod tests {
     use super::*;
     use crate::agent_runtime_v3::sha256_hex;
+    use crate::agent_runtime_v3::{
+        FleetMemberV3, FleetPolicyV3, FleetSelectorV3, FleetTargetStateV3, SubAgentRoleV3,
+    };
     use crate::models::{
         ManagedSession, ProfileRow, SessionCommand, SessionCommandSender, SessionIdentity,
         StatusEvent,
     };
     use crossbeam_channel::unbounded;
     use ssh2::{HostKeyType, KnownHostFileKind, KnownHostKeyFormat, Session};
+    use std::collections::BTreeMap;
     use std::fs;
     use std::net::TcpStream;
     use std::sync::atomic::AtomicBool;
@@ -3191,34 +3394,40 @@ mod tests {
         }
     }
 
-    fn local_sessions(task_id: &str) -> SessionManager {
+    fn local_sessions_many(task_ids: &[&str]) -> SessionManager {
         let sessions = SessionManager::default();
-        let (sender, _receiver) = unbounded::<SessionCommand>();
-        sessions
-            .insert(
-                format!("session-{task_id}"),
-                ManagedSession {
-                    sender: SessionCommandSender::Event(sender),
-                    waker: None,
-                    output_state_sender: None,
-                    status: StatusEvent {
-                        session_id: format!("session-{task_id}"),
-                        status: SessionStatus::Connected,
-                        message: None,
+        for task_id in task_ids {
+            let (sender, _receiver) = unbounded::<SessionCommand>();
+            sessions
+                .insert(
+                    format!("session-{task_id}"),
+                    ManagedSession {
+                        sender: SessionCommandSender::Event(sender),
+                        waker: None,
+                        output_state_sender: None,
+                        status: StatusEvent {
+                            session_id: format!("session-{task_id}"),
+                            status: SessionStatus::Connected,
+                            message: None,
+                        },
+                        output_ready: Arc::new(AtomicBool::new(true)),
+                        output_paused: Arc::new(AtomicBool::new(false)),
+                        terminal_kind: SessionTerminalKind::Local,
+                        identity: SessionIdentity {
+                            title: "Local".into(),
+                            host: "local".into(),
+                            port: 0,
+                            username: "tester".into(),
+                        },
                     },
-                    output_ready: Arc::new(AtomicBool::new(true)),
-                    output_paused: Arc::new(AtomicBool::new(false)),
-                    terminal_kind: SessionTerminalKind::Local,
-                    identity: SessionIdentity {
-                        title: "Local".into(),
-                        host: "local".into(),
-                        port: 0,
-                        username: "tester".into(),
-                    },
-                },
-            )
-            .unwrap();
+                )
+                .unwrap();
+        }
         sessions
+    }
+
+    fn local_sessions(task_id: &str) -> SessionManager {
+        local_sessions_many(&[task_id])
     }
 
     fn remote_sessions(session_id: &str, host: &str, port: u16, username: &str) -> SessionManager {
@@ -3366,6 +3575,214 @@ mod tests {
         let mut compatibility = request("compat", "local-1");
         compatibility.source_contract = AgentRequestSourceV3::V2Compatibility;
         assert!(store.register(compatibility).is_err());
+    }
+
+    #[test]
+    fn fleet_runtime_blocks_direct_bypass_and_requires_independent_verifier_evidence() {
+        let directory = tempfile::tempdir().unwrap();
+        let directory_path = directory.path().canonicalize().unwrap();
+        let runtime = AgentRuntimeV3::default();
+        runtime
+            .configure_checkpoint_root(directory_path.join("state"))
+            .unwrap();
+        let sessions = local_sessions_many(&["fleet-a", "fleet-b"]);
+        let database = Database::open(&directory_path.join("shellspan.db")).unwrap();
+        let credentials = CredentialManager::new();
+        fs::write(directory_path.join("config.txt"), "mode=stable\n").unwrap();
+
+        let mut requests = Vec::new();
+        for (task_id, target_id) in [("fleet-a", "host-a"), ("fleet-b", "host-b")] {
+            let mut task_request = request(task_id, target_id);
+            task_request.targets[0] = AgentToolTargetV3::Local {
+                target_id: target_id.into(),
+                session_id: format!("session-{task_id}"),
+                cwd: Some(directory_path.to_string_lossy().to_string()),
+            };
+            runtime
+                .register_task(task_request.clone(), &sessions, &database)
+                .unwrap();
+            runtime
+                .tasks
+                .update_plan(
+                    task_id,
+                    UpdatePlanArgumentsV3 {
+                        plan_version: 0,
+                        explanation: Some("Fleet read-back plan".into()),
+                        steps: vec![PlanStepV3 {
+                            id: "verify".into(),
+                            description: "Read the frozen configuration".into(),
+                            dependencies: Vec::new(),
+                            target_ids: vec![target_id.into()],
+                            required_tools: vec!["read_file".into()],
+                            expected_effect: AgentEffectKindV3::SensitiveRead,
+                            status: PlanStepStatusV3::InProgress,
+                            success_criteria: vec!["Native read succeeds".into()],
+                            rollback_or_compensation: "No write to roll back".into(),
+                            evidence_refs: Vec::new(),
+                        }],
+                    },
+                    &runtime.registry,
+                )
+                .unwrap();
+            runtime.persist_task(task_id).unwrap();
+            requests.push(task_request);
+        }
+
+        let fleet = runtime
+            .register_fleet(
+                RegisterFleetRequestV3 {
+                    fleet_id: "fleet-native".into(),
+                    goal: "Read every selected host with native evidence".into(),
+                    members: vec![
+                        FleetMemberV3 {
+                            task_id: "fleet-a".into(),
+                            target_id: "host-a".into(),
+                            display_name: "Host A".into(),
+                            labels: BTreeMap::from([("service".into(), "api".into())]),
+                            group: "production".into(),
+                            environment: "prod".into(),
+                        },
+                        FleetMemberV3 {
+                            task_id: "fleet-b".into(),
+                            target_id: "host-b".into(),
+                            display_name: "Host B".into(),
+                            labels: BTreeMap::from([("service".into(), "api".into())]),
+                            group: "production".into(),
+                            environment: "prod".into(),
+                        },
+                    ],
+                    selector: FleetSelectorV3 {
+                        labels: BTreeMap::from([("service".into(), "api".into())]),
+                        groups: vec!["production".into()],
+                        environments: vec!["prod".into()],
+                    },
+                    policy: FleetPolicyV3 {
+                        max_concurrency: 2,
+                        batch_size: 2,
+                        canary_size: 0,
+                        max_failures: 0,
+                        jitter_ms: 0,
+                        max_calls_total: 8,
+                        max_calls_per_target: 4,
+                    },
+                },
+                &sessions,
+                &database,
+            )
+            .unwrap();
+        assert!(!fleet.write_intent);
+
+        let explorer = runtime
+            .register_sub_agent(RegisterSubAgentRequestV3 {
+                fleet_id: "fleet-native".into(),
+                role: SubAgentRoleV3::Explorer,
+                target_ids: vec!["host-a".into()],
+                tool_names: vec!["read_file".into()],
+                effects: vec![AgentEffectKindV3::SensitiveRead],
+                max_calls: 1,
+            })
+            .unwrap();
+        let verifier = runtime
+            .register_sub_agent(RegisterSubAgentRequestV3 {
+                fleet_id: "fleet-native".into(),
+                role: SubAgentRoleV3::Verifier,
+                target_ids: vec!["host-a".into()],
+                tool_names: vec!["read_file".into()],
+                effects: vec![AgentEffectKindV3::SensitiveRead],
+                max_calls: 1,
+            })
+            .unwrap();
+        assert!(runtime
+            .register_sub_agent(RegisterSubAgentRequestV3 {
+                fleet_id: "fleet-native".into(),
+                role: SubAgentRoleV3::Explorer,
+                target_ids: vec!["host-a".into()],
+                tool_names: vec!["read_file".into()],
+                effects: vec![AgentEffectKindV3::StateChange],
+                max_calls: 1,
+            })
+            .is_err());
+
+        let authorize = |call_id: &str| {
+            let authorization = AgentAuthorizeCallRequestV3 {
+                task_id: "fleet-a".into(),
+                request_id: requests[0].request_id.clone(),
+                call_id: call_id.into(),
+                tool_name: "read_file".into(),
+                arguments: json!({"path": "config.txt", "encoding": "utf8"}),
+                target: requests[0].targets[0].clone(),
+                ttl_ms: Some(10_000),
+            };
+            let prepared = runtime
+                .prepare_authorization(
+                    authorization.clone(),
+                    &sessions,
+                    &database,
+                    &credentials,
+                    &directory_path,
+                )
+                .unwrap();
+            let grant = runtime
+                .issue_prepared_authorization(prepared, true)
+                .unwrap();
+            AgentToolCallV3 {
+                request_id: authorization.request_id,
+                call_id: authorization.call_id,
+                tool_name: authorization.tool_name,
+                arguments: authorization.arguments,
+                target: authorization.target,
+                capability_id: grant.capability_id,
+            }
+        };
+
+        let explorer_call = authorize("fleet-read-a");
+        let bypass = runtime.execute_tool(
+            "fleet-a",
+            explorer_call.clone(),
+            &sessions,
+            &database,
+            &credentials,
+            &directory_path,
+        );
+        assert!(bypass.unwrap_err().contains("Rust Fleet dispatch boundary"));
+        let explorer_result = runtime
+            .execute_fleet_tool(
+                "fleet-native",
+                &explorer.sub_agent_id,
+                explorer_call,
+                &sessions,
+                &database,
+                &credentials,
+                &directory_path,
+            )
+            .unwrap();
+        assert_eq!(explorer_result.status, AgentToolResultStatusV3::Completed);
+
+        let verifier_call = authorize("fleet-verify-a");
+        let verifier_result = runtime
+            .execute_fleet_tool(
+                "fleet-native",
+                &verifier.sub_agent_id,
+                verifier_call,
+                &sessions,
+                &database,
+                &credentials,
+                &directory_path,
+            )
+            .unwrap();
+        assert_eq!(verifier_result.status, AgentToolResultStatusV3::Completed);
+        let verified = runtime
+            .submit_fleet_verification(SubmitFleetVerificationRequestV3 {
+                fleet_id: "fleet-native".into(),
+                sub_agent_id: verifier.sub_agent_id,
+                target_id: "host-a".into(),
+                evidence_call_id: "fleet-verify-a".into(),
+                succeeded: true,
+                summary: "Native read-back matched".into(),
+            })
+            .unwrap();
+        assert_eq!(verified.targets[0].state, FleetTargetStateV3::Succeeded);
+        assert_eq!(verified.targets[1].state, FleetTargetStateV3::Pending);
     }
 
     #[test]

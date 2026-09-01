@@ -14,6 +14,7 @@
     "test:agent:runtime-v3": "vitest run src/lib/__tests__/agent-runtime-v3.test.ts --maxWorkers=1",
     "test:agent:m3": "vitest run src/lib/__tests__/agent-m3-contract.test.ts src/lib/__tests__/agent-runtime-v3.test.ts src/components/ai/__tests__/agent-m3-context-surface.test.tsx --maxWorkers=1",
     "test:agent:m4": "vitest run src/lib/__tests__/agent-runtime-v3.test.ts src/lib/__tests__/agent-m4-contract.test.ts src/components/ai/__tests__/agent-m4-task-center.test.tsx --maxWorkers=1",
+    "test:agent:m5": "vitest run src/lib/__tests__/agent-m5-contract.test.ts src/components/ai/__tests__/agent-m5-fleet-center.test.tsx --maxWorkers=1",
     "baseline:agent:v2": "node scripts/collect-agent-v2-baseline.mjs --write",
     "test:agent:platform": "vitest run src/lib/__tests__/agent-platform-acceptance.test.ts && cargo test --manifest-path src-tauri/Cargo.toml --locked real_",
     "test:agent:providers:live": "node scripts/run-agent-provider-acceptance.mjs",

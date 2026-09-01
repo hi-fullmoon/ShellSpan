@@ -13,15 +13,17 @@ use crate::keychain::CredentialManager;
 use crate::models::SessionManager;
 
 use super::{
-    operator_policy_v3, AgentAuditEventV3, AgentAuthorizeCallRequestV3, AgentCallPreviewV3,
-    AgentCapabilityGrantV3, AgentContextSnapshotV3, AgentFileCheckpointV3,
+    fleet_feature_policy_v3, fleet_rollout_v3, operator_policy_v3, AgentAuditEventV3,
+    AgentAuthorizeCallRequestV3, AgentCallPreviewV3, AgentCapabilityGrantV3,
+    AgentContextSnapshotV3, AgentFileCheckpointV3, AgentFleetSnapshotV3,
     AgentMcpAuthorizeRequestV3, AgentMcpCallV3, AgentMcpCapabilityGrantV3, AgentMcpResultV3,
     AgentNotificationV3, AgentPlanV3, AgentRuntimeV3, AgentTaskSnapshotV3,
     BrokerAuthorizeRequestV3, BrokerGrantV3, ContextRetrievalRequestV3, ContextRetrievalV3,
-    ExtensionSnapshotV3, InstantiateRunbookRequestV3, LoadSkillRequestV3, LoadedSkillV3,
-    McpServerSnapshotV3, McpSetEnabledRequestV3, McpToolSchemaRequestV3, McpToolSchemaV3,
-    OperatorConfigureRequestV3, OperatorGrantV3, OperatorPolicyV3, RecoveryStoreStatusV3,
-    RegisteredToolV3,
+    ExtensionSnapshotV3, FleetFeaturePolicyV3, FleetRolloutV3, InstantiateRunbookRequestV3,
+    LoadSkillRequestV3, LoadedSkillV3, McpServerSnapshotV3, McpSetEnabledRequestV3,
+    McpToolSchemaRequestV3, McpToolSchemaV3, OperatorConfigureRequestV3, OperatorGrantV3,
+    OperatorPolicyV3, RecoveryStoreStatusV3, RegisterFleetRequestV3, RegisterSubAgentRequestV3,
+    RegisteredToolV3, SubAgentSnapshotV3, SubmitFleetVerificationRequestV3,
 };
 
 fn require_runtime_rollout() -> Result<(), String> {
@@ -30,6 +32,15 @@ fn require_runtime_rollout() -> Result<(), String> {
         return Err("Agent v3 runtime rollout is disabled; v2 remains authoritative".into());
     }
     Ok(())
+}
+
+fn require_fleet_rollout() -> Result<(), String> {
+    require_runtime_rollout()?;
+    match fleet_rollout_v3() {
+        FleetRolloutV3::Enabled => Ok(()),
+        FleetRolloutV3::Disabled => Err("Agent M5 Fleet rollout is disabled".into()),
+        FleetRolloutV3::Invalid => Err("unknown Agent M5 Fleet rollout fails closed".into()),
+    }
 }
 
 fn configure_checkpoint_root(app: &AppHandle, runtime: &AgentRuntimeV3) -> Result<(), String> {
@@ -100,6 +111,61 @@ pub(crate) fn agent_v3_register_task(
     require_runtime_rollout()?;
     configure_checkpoint_root(&app, &runtime)?;
     runtime.register_task(request, &sessions, &database)
+}
+
+#[tauri::command]
+pub(crate) fn agent_v3_register_fleet(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntimeV3>,
+    sessions: State<'_, SessionManager>,
+    database: State<'_, Database>,
+    request: RegisterFleetRequestV3,
+) -> Result<AgentFleetSnapshotV3, String> {
+    require_fleet_rollout()?;
+    configure_checkpoint_root(&app, &runtime)?;
+    runtime.register_fleet(request, &sessions, &database)
+}
+
+#[tauri::command]
+pub(crate) fn agent_v3_register_sub_agent(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntimeV3>,
+    request: RegisterSubAgentRequestV3,
+) -> Result<SubAgentSnapshotV3, String> {
+    require_fleet_rollout()?;
+    configure_checkpoint_root(&app, &runtime)?;
+    runtime.register_sub_agent(request)
+}
+
+#[tauri::command]
+pub(crate) fn agent_v3_get_fleet(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntimeV3>,
+    fleet_id: String,
+) -> Result<AgentFleetSnapshotV3, String> {
+    require_runtime_rollout()?;
+    configure_checkpoint_root(&app, &runtime)?;
+    runtime.fleet_snapshot(&fleet_id)
+}
+
+#[tauri::command]
+pub(crate) fn agent_v3_list_fleets(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntimeV3>,
+) -> Result<Vec<AgentFleetSnapshotV3>, String> {
+    require_runtime_rollout()?;
+    configure_checkpoint_root(&app, &runtime)?;
+    runtime.list_fleets()
+}
+
+#[tauri::command]
+pub(crate) fn agent_v3_fleet_policy() -> Result<FleetFeaturePolicyV3, String> {
+    require_runtime_rollout()?;
+    let policy = fleet_feature_policy_v3();
+    if policy.stage == "invalid" {
+        return Err("unknown Agent M5 Fleet rollout fails closed".into());
+    }
+    Ok(policy)
 }
 
 #[tauri::command]
@@ -202,6 +268,80 @@ pub(crate) async fn agent_v3_execute_tool(
         deliver_pending_notifications(&app, &runtime);
     }
     Ok(result)
+}
+
+#[tauri::command]
+pub(crate) async fn agent_v3_execute_fleet_tool(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntimeV3>,
+    sessions: State<'_, SessionManager>,
+    database: State<'_, Database>,
+    credentials: State<'_, CredentialManager>,
+    fleet_id: String,
+    sub_agent_id: String,
+    call: AgentToolCallV3,
+) -> Result<AgentToolResultV3, String> {
+    require_fleet_rollout()?;
+    configure_checkpoint_root(&app, &runtime)?;
+    let known_hosts_path = crate::known_hosts::known_hosts_path(&app)?;
+    let runtime = runtime.inner().clone();
+    let sessions = sessions.inner().clone();
+    let database = database.inner().clone();
+    let credentials = credentials.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        runtime.execute_fleet_tool(
+            &fleet_id,
+            &sub_agent_id,
+            call,
+            &sessions,
+            &database,
+            &credentials,
+            &known_hosts_path,
+        )
+    })
+    .await
+    .map_err(|error| format!("Agent v3 Fleet execution worker stopped: {error}"))??;
+    if let Some(runtime) = app.try_state::<AgentRuntimeV3>() {
+        deliver_pending_notifications(&app, &runtime);
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub(crate) fn agent_v3_submit_fleet_verification(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntimeV3>,
+    request: SubmitFleetVerificationRequestV3,
+) -> Result<AgentFleetSnapshotV3, String> {
+    require_fleet_rollout()?;
+    configure_checkpoint_root(&app, &runtime)?;
+    runtime.submit_fleet_verification(request)
+}
+
+#[tauri::command]
+pub(crate) fn agent_v3_reconcile_fleet_target(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntimeV3>,
+    fleet_id: String,
+    target_id: String,
+    continue_with_verification: bool,
+) -> Result<AgentFleetSnapshotV3, String> {
+    require_runtime_rollout()?;
+    configure_checkpoint_root(&app, &runtime)?;
+    runtime.reconcile_fleet_target(&fleet_id, &target_id, continue_with_verification)
+}
+
+#[tauri::command]
+pub(crate) fn agent_v3_record_fleet_rollback(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntimeV3>,
+    fleet_id: String,
+    target_id: String,
+    checkpoint_id: String,
+) -> Result<AgentFleetSnapshotV3, String> {
+    require_runtime_rollout()?;
+    configure_checkpoint_root(&app, &runtime)?;
+    runtime.record_fleet_rollback(&fleet_id, &target_id, &checkpoint_id)
 }
 
 #[tauri::command]

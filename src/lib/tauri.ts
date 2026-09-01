@@ -77,6 +77,8 @@ import type {
   AgentContextSnapshotV3,
   AgentExtensionSnapshotV3,
   AgentFileCheckpointV3,
+  AgentFleetSnapshotV3,
+  AgentFleetFeaturePolicyV3,
   AgentLoadedSkillV3,
   AgentMcpAuthorizeRequestV3,
   AgentMcpCallV3,
@@ -99,6 +101,10 @@ import type {
   AgentOperatorGrantV3,
   AgentOperatorPolicyV3,
   AgentRecoveryStoreStatusV3,
+  AgentRegisterFleetRequestV3,
+  AgentRegisterSubAgentRequestV3,
+  AgentSubAgentSnapshotV3,
+  AgentSubmitFleetVerificationRequestV3,
 } from '@/types/agent-v3';
 
 const logger = createLogger('ipc');
@@ -937,6 +943,32 @@ export async function invokeAgentV3RegisterTask(
   return invokeLogged<AgentTaskSnapshotV3>('agent_v3_register_task', { request });
 }
 
+export async function invokeAgentV3RegisterFleet(
+  request: AgentRegisterFleetRequestV3,
+): Promise<AgentFleetSnapshotV3> {
+  return invokeLogged<AgentFleetSnapshotV3>('agent_v3_register_fleet', { request });
+}
+
+export async function invokeAgentV3RegisterSubAgent(
+  request: AgentRegisterSubAgentRequestV3,
+): Promise<AgentSubAgentSnapshotV3> {
+  return invokeLogged<AgentSubAgentSnapshotV3>('agent_v3_register_sub_agent', { request });
+}
+
+export async function invokeAgentV3GetFleet(
+  fleetId: string,
+): Promise<AgentFleetSnapshotV3> {
+  return invokeLogged<AgentFleetSnapshotV3>('agent_v3_get_fleet', { fleetId });
+}
+
+export async function invokeAgentV3ListFleets(): Promise<AgentFleetSnapshotV3[]> {
+  return invokeLogged<AgentFleetSnapshotV3[]>('agent_v3_list_fleets');
+}
+
+export async function invokeAgentV3FleetPolicy(): Promise<AgentFleetFeaturePolicyV3> {
+  return invokeLogged<AgentFleetFeaturePolicyV3>('agent_v3_fleet_policy');
+}
+
 export async function invokeAgentV3AuthorizeCall(
   request: AgentAuthorizeCallRequestV3,
 ): Promise<AgentCapabilityGrantV3> {
@@ -958,6 +990,48 @@ export async function invokeAgentV3ExecuteTool(
   call: AgentToolCallV3,
 ): Promise<AgentToolResultV3> {
   return invokeLogged<AgentToolResultV3>('agent_v3_execute_tool', { taskId, call });
+}
+
+export async function invokeAgentV3ExecuteFleetTool(
+  fleetId: string,
+  subAgentId: string,
+  call: AgentToolCallV3,
+): Promise<AgentToolResultV3> {
+  return invokeLogged<AgentToolResultV3>('agent_v3_execute_fleet_tool', {
+    fleetId,
+    subAgentId,
+    call,
+  });
+}
+
+export async function invokeAgentV3SubmitFleetVerification(
+  request: AgentSubmitFleetVerificationRequestV3,
+): Promise<AgentFleetSnapshotV3> {
+  return invokeLogged<AgentFleetSnapshotV3>('agent_v3_submit_fleet_verification', { request });
+}
+
+export async function invokeAgentV3ReconcileFleetTarget(
+  fleetId: string,
+  targetId: string,
+  continueWithVerification: boolean,
+): Promise<AgentFleetSnapshotV3> {
+  return invokeLogged<AgentFleetSnapshotV3>('agent_v3_reconcile_fleet_target', {
+    fleetId,
+    targetId,
+    continueWithVerification,
+  });
+}
+
+export async function invokeAgentV3RecordFleetRollback(
+  fleetId: string,
+  targetId: string,
+  checkpointId: string,
+): Promise<AgentFleetSnapshotV3> {
+  return invokeLogged<AgentFleetSnapshotV3>('agent_v3_record_fleet_rollback', {
+    fleetId,
+    targetId,
+    checkpointId,
+  });
 }
 
 export async function invokeAgentV3GetTask(taskId: string): Promise<AgentTaskSnapshotV3> {
