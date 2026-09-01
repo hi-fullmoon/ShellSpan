@@ -184,7 +184,6 @@ function sanitizeProviders(value: unknown): AiProviderProfile[] {
       requiresApiKey: typeof provider.requiresApiKey === 'boolean'
         ? provider.requiresApiKey
         : provider.kind !== 'ollama',
-      apiKey: typeof provider.apiKey === 'string' ? provider.apiKey : undefined,
     });
   }
   return providers;
@@ -256,7 +255,15 @@ let saveInFlight: Promise<void> | null = null;
 function preferenceEntries(preferences: AiPreferences): [string, string][] {
   return PREFERENCE_KEYS.map((key) => [
     storageKey(key),
-    JSON.stringify(preferences[key]),
+    JSON.stringify(key === 'providers'
+      ? preferences.providers.map((provider) => {
+          const safeProvider = { ...provider } as AiProviderProfile & {
+            apiKey?: unknown;
+          };
+          delete safeProvider.apiKey;
+          return safeProvider;
+        })
+      : preferences[key]),
   ]);
 }
 
@@ -324,7 +331,10 @@ export const useAiSettingsStore = create<AiSettingsState>()(
       try {
         const entries = await invokeLoadPreferences();
         const preferences = parseAiPreferences(entries);
-        set({ ...preferences, initialized: true });
+        // Keep initialization false while applying the loaded snapshot so the
+        // persistence subscriber never rewrites unchanged preferences during hydration.
+        set(preferences);
+        set({ initialized: true });
         await synchronizeAgentRuntime(preferences.agentEnabled);
       } catch (error) {
         logger.error('failed to load AI preferences', error);
@@ -376,7 +386,6 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         model: provider.model.trim(),
         ...(reasoningEffort ? { reasoningEffort } : {}),
         requiresApiKey: provider.requiresApiKey,
-        ...(provider.apiKey?.trim() ? { apiKey: provider.apiKey.trim() } : {}),
       };
     },
   })),

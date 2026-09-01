@@ -1,9 +1,13 @@
 use log::debug;
 use std::sync::{Arc, OnceLock};
 
+#[cfg(any(target_os = "macos", test))]
+use log::warn;
 #[cfg(test)]
 use std::collections::HashMap;
-#[cfg(test)]
+#[cfg(any(target_os = "macos", test))]
+use std::collections::{BTreeMap, BTreeSet};
+#[cfg(any(target_os = "macos", test))]
 use std::sync::Mutex;
 
 /// Initializes the platform's native credential store as the keyring-core
@@ -40,6 +44,16 @@ fn ensure_native_store() -> Result<(), String> {
 pub(crate) const KEY_SERVICE: &str = "com.shellspan.key";
 pub(crate) const PROFILE_PASSWORD_SERVICE: &str = "com.shellspan.profile-password";
 pub(crate) const PROFILE_SECRET_SERVICE: &str = "com.shellspan.profile-secret";
+
+/// macOS Keychain authorizes access per item. Keeping every ShellSpan secret in
+/// one item means the user authorizes ShellSpan once while the logical
+/// service/account pairs remain isolated inside the vault payload.
+#[cfg(any(target_os = "macos", test))]
+const CREDENTIAL_VAULT_SERVICE: &str = "com.shellspan.credential-vault";
+#[cfg(any(target_os = "macos", test))]
+const CREDENTIAL_VAULT_ACCOUNT: &str = "shellspan-v1";
+#[cfg(any(target_os = "macos", test))]
+const CREDENTIAL_VAULT_VERSION: u32 = 1;
 
 /// Kinds of per-profile secrets other than the main login password.
 ///
@@ -86,6 +100,194 @@ trait CredentialBackend: Send + Sync {
 // ---------------------------------------------------------------------------
 
 struct NativeKeychainBackend;
+
+/// A single-item credential vault used on macOS.
+///
+/// Windows keeps individual credentials because Credential Manager imposes a
+/// small per-item blob limit. Linux keeps the native Secret Service layout.
+/// The wrapper is also compiled for tests so its migration and isolation
+/// semantics can be exercised without touching the real Keychain.
+#[cfg(any(target_os = "macos", test))]
+struct VaultCredentialBackend {
+    inner: Arc<dyn CredentialBackend>,
+    operation_lock: Arc<Mutex<()>>,
+}
+
+#[cfg(any(target_os = "macos", test))]
+#[derive(serde::Serialize, serde::Deserialize)]
+struct CredentialVault {
+    version: u32,
+    #[serde(default)]
+    entries: BTreeMap<String, BTreeMap<String, String>>,
+    /// Prevents a deleted vault value from falling back to an older per-item
+    /// Keychain entry if best-effort legacy cleanup could not remove it.
+    #[serde(default)]
+    tombstones: BTreeMap<String, BTreeSet<String>>,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl Default for CredentialVault {
+    fn default() -> Self {
+        Self {
+            version: CREDENTIAL_VAULT_VERSION,
+            entries: BTreeMap::new(),
+            tombstones: BTreeMap::new(),
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl CredentialVault {
+    fn get(&self, service: &str, key: &str) -> Option<&str> {
+        self.entries
+            .get(service)
+            .and_then(|entries| entries.get(key))
+            .map(String::as_str)
+    }
+
+    fn is_tombstoned(&self, service: &str, key: &str) -> bool {
+        self.tombstones
+            .get(service)
+            .is_some_and(|keys| keys.contains(key))
+    }
+
+    fn insert(&mut self, service: &str, key: &str, value: &str) {
+        self.entries
+            .entry(service.to_string())
+            .or_default()
+            .insert(key.to_string(), value.to_string());
+        if let Some(keys) = self.tombstones.get_mut(service) {
+            keys.remove(key);
+            if keys.is_empty() {
+                self.tombstones.remove(service);
+            }
+        }
+    }
+
+    fn remove(&mut self, service: &str, key: &str) {
+        if let Some(entries) = self.entries.get_mut(service) {
+            entries.remove(key);
+            if entries.is_empty() {
+                self.entries.remove(service);
+            }
+        }
+        self.tombstones
+            .entry(service.to_string())
+            .or_default()
+            .insert(key.to_string());
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl VaultCredentialBackend {
+    fn new(inner: Arc<dyn CredentialBackend>, operation_lock: Arc<Mutex<()>>) -> Self {
+        Self {
+            inner,
+            operation_lock,
+        }
+    }
+
+    fn validate_logical_specifier(service: &str, key: &str) -> Result<(), String> {
+        if service.is_empty() {
+            return Err("credential service cannot be empty".to_string());
+        }
+        if key.is_empty() {
+            return Err("credential key cannot be empty".to_string());
+        }
+        if service == CREDENTIAL_VAULT_SERVICE && key == CREDENTIAL_VAULT_ACCOUNT {
+            return Err("credential identifier is reserved for the ShellSpan vault".to_string());
+        }
+        Ok(())
+    }
+
+    fn load_vault(&self) -> Result<CredentialVault, String> {
+        let Some(payload) = self
+            .inner
+            .get_credential(CREDENTIAL_VAULT_SERVICE, CREDENTIAL_VAULT_ACCOUNT)?
+        else {
+            return Ok(CredentialVault::default());
+        };
+        let vault: CredentialVault = serde_json::from_str(&payload)
+            .map_err(|e| format!("credential vault is invalid: {e}"))?;
+        if vault.version != CREDENTIAL_VAULT_VERSION {
+            return Err(format!(
+                "unsupported credential vault version: {}",
+                vault.version
+            ));
+        }
+        Ok(vault)
+    }
+
+    fn save_vault(&self, vault: &CredentialVault) -> Result<(), String> {
+        let payload = serde_json::to_string(vault)
+            .map_err(|e| format!("credential vault serialization failed: {e}"))?;
+        self.inner
+            .set_credential(CREDENTIAL_VAULT_SERVICE, CREDENTIAL_VAULT_ACCOUNT, &payload)
+    }
+
+    fn lock_operations(&self) -> Result<std::sync::MutexGuard<'_, ()>, String> {
+        self.operation_lock
+            .lock()
+            .map_err(|_| "credential vault is unavailable".to_string())
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl CredentialBackend for VaultCredentialBackend {
+    fn set_credential(&self, service: &str, key: &str, value: &str) -> Result<(), String> {
+        Self::validate_logical_specifier(service, key)?;
+        let _guard = self.lock_operations()?;
+        let mut vault = self.load_vault()?;
+        vault.insert(service, key, value);
+        self.save_vault(&vault)
+    }
+
+    fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String> {
+        Self::validate_logical_specifier(service, key)?;
+        let _guard = self.lock_operations()?;
+        let mut vault = self.load_vault()?;
+        if let Some(value) = vault.get(service, key) {
+            return Ok(Some(value.to_string()));
+        }
+        if vault.is_tombstoned(service, key) {
+            return Ok(None);
+        }
+
+        // Lazily migrate an older one-item-per-secret entry. Accessing that
+        // legacy item may require its final authorization, but all subsequent
+        // reads use the shared vault item.
+        let Some(value) = self.inner.get_credential(service, key)? else {
+            return Ok(None);
+        };
+        vault.insert(service, key, &value);
+        self.save_vault(&vault)?;
+        if let Err(error) = self.inner.delete_credential(service, key) {
+            warn!(
+                "Could not remove migrated legacy credential service={service} key={key}: {error}"
+            );
+        }
+        Ok(Some(value))
+    }
+
+    fn delete_credential(&self, service: &str, key: &str) -> Result<(), String> {
+        Self::validate_logical_specifier(service, key)?;
+        let _guard = self.lock_operations()?;
+        let mut vault = self.load_vault()?;
+        vault.remove(service, key);
+        self.save_vault(&vault)?;
+
+        // The tombstone already makes deletion effective inside ShellSpan. Try
+        // to remove a possible legacy item as well so no stale secret remains
+        // in Keychain after upgrading.
+        self.inner.delete_credential(service, key)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn shared_native_vault_lock() -> Arc<Mutex<()>> {
+    static LOCK: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
+    Arc::clone(LOCK.get_or_init(|| Arc::new(Mutex::new(()))))
+}
 
 impl CredentialBackend for NativeKeychainBackend {
     fn set_credential(&self, service: &str, key: &str, value: &str) -> Result<(), String> {
@@ -212,14 +414,28 @@ impl CredentialManager {
     /// keychain (macOS Keychain, Windows Credential Manager, or Linux Secret
     /// Service). Operations fail closed when the native store is unavailable.
     pub(crate) fn new() -> Self {
-        Self {
-            backend: Arc::new(NativeKeychainBackend),
-        }
+        #[cfg(target_os = "macos")]
+        let backend: Arc<dyn CredentialBackend> = Arc::new(VaultCredentialBackend::new(
+            Arc::new(NativeKeychainBackend),
+            shared_native_vault_lock(),
+        ));
+        #[cfg(not(target_os = "macos"))]
+        let backend: Arc<dyn CredentialBackend> = Arc::new(NativeKeychainBackend);
+
+        Self { backend }
     }
 
     #[cfg(test)]
     fn with_backend(backend: Arc<dyn CredentialBackend>) -> Self {
         Self { backend }
+    }
+
+    #[cfg(test)]
+    fn with_vault_backend(backend: Arc<dyn CredentialBackend>) -> Self {
+        Self::with_backend(Arc::new(VaultCredentialBackend::new(
+            backend,
+            Arc::new(Mutex::new(())),
+        )))
     }
 
     #[cfg(test)]
@@ -341,7 +557,6 @@ mod macos_keychain {
     use core_foundation_sys::string::CFStringRef;
     use security_framework::base::Error;
     use security_framework::os::macos::keychain::{SecKeychain, SecPreferencesDomain};
-    use security_framework::os::macos::keychain_item::SecKeychainItem;
     use security_framework::os::macos::passwords::find_generic_password;
     use security_framework_sys::base::{
         errSecDuplicateItem, errSecItemNotFound, errSecParam, errSecSuccess, SecAccessRef,
@@ -380,9 +595,6 @@ mod macos_keychain {
             item_ref: *mut SecKeychainItemRef,
         ) -> OSStatus;
 
-        fn SecKeychainItemSetAccess(item_ref: SecKeychainItemRef, access: SecAccessRef)
-            -> OSStatus;
-
         fn SecTrustedApplicationCreateFromPath(path: *const i8, app: *mut CFTypeRef) -> OSStatus;
     }
 
@@ -413,12 +625,9 @@ mod macos_keychain {
 
         let keychain = user_keychain()?;
         match find_generic_password(Some(std::slice::from_ref(&keychain)), service, account) {
-            Ok((_old_password, mut item)) => {
-                set_item_current_app_access(&item)
-                    .map_err(|e| format!("macOS keychain update ACL: {e}"))?;
-                item.set_password(password.as_bytes())
-                    .map_err(|e| format!("macOS keychain update password: {e}"))
-            }
+            Ok((_old_password, mut item)) => item
+                .set_password(password.as_bytes())
+                .map_err(|e| format!("macOS keychain update password: {e}")),
             Err(error) if error.code() == errSecItemNotFound => {
                 match add_with_current_app_access(&keychain, service, account, password.as_bytes())
                 {
@@ -453,12 +662,9 @@ mod macos_keychain {
         password: &str,
     ) -> Result<(), String> {
         match find_generic_password(Some(std::slice::from_ref(keychain)), service, account) {
-            Ok((_old_password, mut item)) => {
-                set_item_current_app_access(&item)
-                    .map_err(|e| format!("macOS keychain update ACL: {e}"))?;
-                item.set_password(password.as_bytes())
-                    .map_err(|e| format!("macOS keychain update password: {e}"))
-            }
+            Ok((_old_password, mut item)) => item
+                .set_password(password.as_bytes())
+                .map_err(|e| format!("macOS keychain update password: {e}")),
             Err(error) => Err(format!("macOS keychain update existing item: {error}")),
         }
     }
@@ -508,12 +714,6 @@ mod macos_keychain {
         }
 
         result
-    }
-
-    fn set_item_current_app_access(item: &SecKeychainItem) -> Result<(), Error> {
-        with_current_app_access(|access| unsafe {
-            cvt_status(SecKeychainItemSetAccess(item.as_concrete_TypeRef(), access))
-        })
     }
 
     fn with_current_app_access<T>(
@@ -644,6 +844,157 @@ mod tests {
                 .get_mut(service)
                 .map(|m| m.remove(key));
             Ok(())
+        }
+    }
+
+    #[test]
+    fn vault_backend_stores_all_logical_credentials_in_one_native_item() {
+        let backend = Arc::new(MockBackend::default());
+        let manager = CredentialManager::with_vault_backend(backend.clone());
+
+        manager
+            .set_credential("com.shellspan.ai-provider", "openai", "sk-openai")
+            .unwrap();
+        manager
+            .set_credential(PROFILE_PASSWORD_SERVICE, "profile-1", "ssh-password")
+            .unwrap();
+
+        assert_eq!(
+            manager
+                .get_credential("com.shellspan.ai-provider", "openai")
+                .unwrap()
+                .as_deref(),
+            Some("sk-openai")
+        );
+        assert_eq!(
+            manager
+                .get_credential(PROFILE_PASSWORD_SERVICE, "profile-1")
+                .unwrap()
+                .as_deref(),
+            Some("ssh-password")
+        );
+
+        let credentials = backend.credentials.lock().unwrap();
+        assert_eq!(credentials.len(), 1);
+        let vault_items = credentials.get(CREDENTIAL_VAULT_SERVICE).unwrap();
+        assert_eq!(vault_items.len(), 1);
+        let payload = vault_items.get(CREDENTIAL_VAULT_ACCOUNT).unwrap();
+        let vault: CredentialVault = serde_json::from_str(payload).unwrap();
+        assert_eq!(
+            vault.get("com.shellspan.ai-provider", "openai"),
+            Some("sk-openai")
+        );
+        assert_eq!(
+            vault.get(PROFILE_PASSWORD_SERVICE, "profile-1"),
+            Some("ssh-password")
+        );
+    }
+
+    #[test]
+    fn vault_backend_lazily_migrates_and_removes_legacy_items() {
+        let backend = Arc::new(MockBackend::default());
+        backend
+            .set_credential(PROFILE_PASSWORD_SERVICE, "profile-1", "legacy-password")
+            .unwrap();
+        let manager = CredentialManager::with_vault_backend(backend.clone());
+
+        assert_eq!(
+            manager
+                .get_credential(PROFILE_PASSWORD_SERVICE, "profile-1")
+                .unwrap()
+                .as_deref(),
+            Some("legacy-password")
+        );
+
+        let credentials = backend.credentials.lock().unwrap();
+        assert!(credentials
+            .get(PROFILE_PASSWORD_SERVICE)
+            .is_none_or(HashMap::is_empty));
+        let payload = credentials
+            .get(CREDENTIAL_VAULT_SERVICE)
+            .and_then(|entries| entries.get(CREDENTIAL_VAULT_ACCOUNT))
+            .unwrap();
+        let vault: CredentialVault = serde_json::from_str(payload).unwrap();
+        assert_eq!(
+            vault.get(PROFILE_PASSWORD_SERVICE, "profile-1"),
+            Some("legacy-password")
+        );
+    }
+
+    #[test]
+    fn vault_delete_preserves_other_credentials_and_tombstones_legacy_fallback() {
+        let backend = Arc::new(MockBackend::default());
+        let manager = CredentialManager::with_vault_backend(backend.clone());
+        manager.set_credential("service-a", "key-a", "a").unwrap();
+        manager.set_credential("service-b", "key-b", "b").unwrap();
+
+        // Simulate a stale pre-vault item that must not reappear after delete.
+        backend
+            .set_credential("service-a", "key-a", "legacy-a")
+            .unwrap();
+        manager.delete_credential("service-a", "key-a").unwrap();
+
+        assert_eq!(manager.get_credential("service-a", "key-a").unwrap(), None);
+        assert_eq!(
+            manager
+                .get_credential("service-b", "key-b")
+                .unwrap()
+                .as_deref(),
+            Some("b")
+        );
+        let credentials = backend.credentials.lock().unwrap();
+        let payload = credentials
+            .get(CREDENTIAL_VAULT_SERVICE)
+            .and_then(|entries| entries.get(CREDENTIAL_VAULT_ACCOUNT))
+            .unwrap();
+        let vault: CredentialVault = serde_json::from_str(payload).unwrap();
+        assert!(vault.is_tombstoned("service-a", "key-a"));
+    }
+
+    #[test]
+    fn vault_backend_fails_closed_for_corrupted_payload() {
+        let backend = Arc::new(MockBackend::default());
+        backend
+            .set_credential(
+                CREDENTIAL_VAULT_SERVICE,
+                CREDENTIAL_VAULT_ACCOUNT,
+                "not-json",
+            )
+            .unwrap();
+        let manager = CredentialManager::with_vault_backend(backend);
+
+        let error = manager
+            .get_credential(PROFILE_PASSWORD_SERVICE, "profile-1")
+            .unwrap_err();
+        assert!(error.contains("credential vault is invalid"));
+    }
+
+    #[test]
+    fn vault_backend_serializes_concurrent_updates_without_losing_entries() {
+        let backend = Arc::new(MockBackend::default());
+        let manager = CredentialManager::with_vault_backend(backend);
+        let handles = (0..12)
+            .map(|index| {
+                let manager = manager.clone();
+                std::thread::spawn(move || {
+                    manager
+                        .set_credential("concurrent-service", &format!("key-{index}"), "value")
+                        .unwrap();
+                })
+            })
+            .collect::<Vec<_>>();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        for index in 0..12 {
+            assert_eq!(
+                manager
+                    .get_credential("concurrent-service", &format!("key-{index}"))
+                    .unwrap()
+                    .as_deref(),
+                Some("value")
+            );
         }
     }
 

@@ -325,9 +325,13 @@ impl FleetRuntimeV3 {
         }
         fs::create_dir_all(&root)
             .map_err(|error| format!("failed to create Agent M5 store: {error}"))?;
-        state.root = Some(root.clone());
+        let mut candidate = FleetStateStoreV3 {
+            root: Some(root.clone()),
+            fleets: HashMap::new(),
+        };
         let path = root.join("fleets-v1.json");
         if !path.exists() {
+            *state = candidate;
             return Ok(());
         }
         let metadata = fs::metadata(&path)
@@ -372,7 +376,7 @@ impl FleetRuntimeV3 {
                 fleet.active_calls.clear();
                 fleet.snapshot.active_call_count = 0;
             }
-            if state
+            if candidate
                 .fleets
                 .insert(fleet.snapshot.fleet_id.clone(), fleet)
                 .is_some()
@@ -380,7 +384,9 @@ impl FleetRuntimeV3 {
                 return Err("Agent M5 persistence contained duplicate Fleet ids".into());
             }
         }
-        persist_locked(&state)
+        persist_locked(&candidate)?;
+        *state = candidate;
+        Ok(())
     }
 
     pub(crate) fn register(
@@ -1561,6 +1567,45 @@ mod tests {
         assert!(snapshot.targets[1..]
             .iter()
             .all(|target| target.state == FleetTargetStateV3::Blocked));
+    }
+
+    #[test]
+    fn configure_retries_loading_after_an_invalid_store_is_repaired() {
+        let valid_directory = tempfile::tempdir().unwrap();
+        let seed = FleetRuntimeV3::default();
+        seed.configure(valid_directory.path()).unwrap();
+        seed.register(
+            registration(),
+            vec![
+                scope("task-1", "target-1"),
+                scope("task-2", "target-2"),
+                scope("task-3", "target-3"),
+            ],
+        )
+        .unwrap();
+        let valid_store = fs::read(
+            valid_directory
+                .path()
+                .join("agent-m5")
+                .join("fleets-v1.json"),
+        )
+        .unwrap();
+
+        let directory = tempfile::tempdir().unwrap();
+        let store_directory = directory.path().join("agent-m5");
+        fs::create_dir_all(&store_directory).unwrap();
+        let store_path = store_directory.join("fleets-v1.json");
+        fs::write(&store_path, b"not valid json").unwrap();
+
+        let runtime = FleetRuntimeV3::default();
+        assert_eq!(
+            runtime.configure(directory.path()).unwrap_err(),
+            "Agent M5 persistence JSON was invalid"
+        );
+
+        fs::write(&store_path, valid_store).unwrap();
+        runtime.configure(directory.path()).unwrap();
+        assert_eq!(runtime.get("fleet-1").unwrap().fleet_id, "fleet-1");
     }
 
     #[test]

@@ -215,9 +215,9 @@ pub fn run() {
             let shellspan_dir = home_dir.join(".shellspan");
             let database = db::Database::open(&shellspan_dir.join("shellspan.db"))?;
             let credentials = keychain::CredentialManager::new();
-            if let Err(error) = ai::migrate_keychain_api_keys(&credentials, &database) {
-                log::warn!("Failed to migrate AI API keys from the system keychain: {error}");
-            }
+            ai::migrate_inline_api_keys(&credentials, &database).map_err(|error| {
+                format!("failed to migrate inline AI API keys to the system keychain: {error}")
+            })?;
             app.manage(petdex::PetdexAdapter::new(home_dir));
             app.manage(credentials);
             app.manage(database);
@@ -256,6 +256,9 @@ pub fn run() {
         .manage(RemoteIdentityCache::default())
         .manage(health::HealthState::default())
         .invoke_handler(tauri::generate_handler![
+            ai::ai_store_api_key,
+            ai::ai_has_api_key,
+            ai::ai_delete_api_key,
             ai::ai_list_models,
             ai::ai_start_request,
             ai::ai_cancel_request,

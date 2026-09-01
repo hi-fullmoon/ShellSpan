@@ -44,7 +44,12 @@ import {
   isAiReasoningEffort,
   reasoningEffortOptions,
 } from '@/lib/ai-reasoning';
-import { invokeListAiModels } from '@/lib/tauri';
+import {
+  invokeDeleteAiApiKey,
+  invokeHasAiApiKey,
+  invokeListAiModels,
+  invokeStoreAiApiKey,
+} from '@/lib/tauri';
 import type { LocaleKey } from '@/locales';
 import {
   AI_PROVIDER_PRESETS,
@@ -52,7 +57,7 @@ import {
   useAiSettingsStore,
 } from '@/stores/aiSettingsStore';
 import type {
-  AiProviderConfig,
+  AiProviderConnectionConfig,
   AiProviderKind,
   AiProviderPreset,
   AiProviderProfile,
@@ -66,7 +71,7 @@ import {
   OpenAiBrandIcon,
 } from './provider-brand-icons';
 
-type ProviderDraft = Omit<AiProviderProfile, 'id'>;
+type ProviderDraft = Omit<AiProviderProfile, 'id'> & { apiKey?: string };
 
 interface ProviderSetupDialogProps {
   open: boolean;
@@ -155,9 +160,12 @@ export function buildProviderRequestEndpoint(
   return url.toString();
 }
 
-function draftConfig(draft: ProviderDraft): AiProviderConfig {
+function draftConfig(
+  draft: ProviderDraft,
+  providerId?: string,
+): AiProviderConnectionConfig {
   return {
-    id: 'provider-setup-draft',
+    id: providerId ?? 'provider-setup-draft',
     kind: draft.kind,
     baseUrl: draft.baseUrl.trim(),
     model: draft.model.trim(),
@@ -177,8 +185,10 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const { t } = useI18n();
   const addProvider = useAiSettingsStore((state) => state.addProvider);
   const updateProvider = useAiSettingsStore((state) => state.updateProvider);
+  const removeProvider = useAiSettingsStore((state) => state.removeProvider);
   const [draft, setDraft] = useState<ProviderDraft>();
   const [models, setModels] = useState<string[]>([]);
+  const [hasStoredApiKey, setHasStoredApiKey] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>();
@@ -197,10 +207,32 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     }
     setDraft(provider ? { ...provider } : undefined);
     setModels([]);
+    setHasStoredApiKey(false);
     setShowApiKey(false);
     setBusy(false);
     setFeedback(undefined);
   }, [open, provider]);
+
+  useEffect(() => {
+    if (!open || !provider?.requiresApiKey) return;
+    let cancelled = false;
+    void invokeHasAiApiKey(provider.id)
+      .then((stored) => {
+        if (!cancelled) setHasStoredApiKey(stored);
+      })
+      .catch((reason) => {
+        if (!cancelled) {
+          setHasStoredApiKey(false);
+          setFeedback({
+            kind: 'error',
+            message: reason instanceof Error ? reason.message : String(reason),
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, provider?.id, provider?.requiresApiKey]);
 
   const selectedPreset = useMemo(
     () => PRESET_OPTIONS.find((preset) => preset.preset === draft?.preset) ?? null,
@@ -214,7 +246,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const canTest = Boolean(
     draft
     && requestEndpoint
-    && (!draft.requiresApiKey || draft.apiKey?.trim()),
+    && (!draft.requiresApiKey || draft.apiKey?.trim() || (provider && hasStoredApiKey)),
   );
   const canSave = Boolean(
     canTest
@@ -249,7 +281,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     setBusy(true);
     setFeedback(undefined);
     try {
-      const found = await invokeListAiModels(draftConfig(draft));
+      const found = await invokeListAiModels(draftConfig(draft, provider?.id));
       if (modelRequestGeneration.current !== requestGeneration) return;
       setModels(found);
       if (!draft.model.trim() && found[0]) {
@@ -275,8 +307,10 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     onOpenChange(nextOpen);
   };
 
-  const handleSave = (): void => {
+  const handleSave = async (): Promise<void> => {
     if (!draft || !canSave) return;
+    setBusy(true);
+    setFeedback(undefined);
     const changes = {
       name: draft.name.trim(),
       kind: draft.kind,
@@ -284,12 +318,39 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
       model: draft.model.trim(),
       ...(draft.reasoningEffort ? { reasoningEffort: draft.reasoningEffort } : {}),
       requiresApiKey: draft.requiresApiKey,
-      apiKey: draft.apiKey?.trim() || undefined,
     };
-    const providerId = provider?.id ?? addProvider(draft.preset, changes);
-    if (provider) updateProvider(provider.id, changes);
-    onSaved(providerId);
-    handleOpenChange(false);
+    let providerId = provider?.id;
+    try {
+      if (provider) {
+        if (!draft.requiresApiKey && hasStoredApiKey) {
+          await invokeDeleteAiApiKey(provider.id);
+        } else if (draft.apiKey?.trim()) {
+          await invokeStoreAiApiKey(provider.id, draft.apiKey.trim());
+        }
+        updateProvider(provider.id, changes);
+      } else {
+        const newProviderId = addProvider(draft.preset, changes);
+        providerId = newProviderId;
+        try {
+          if (draft.requiresApiKey) {
+            await invokeStoreAiApiKey(newProviderId, draft.apiKey?.trim() ?? '');
+          }
+        } catch (error) {
+          removeProvider(newProviderId);
+          throw error;
+        }
+      }
+      if (!providerId) throw new Error('No AI provider was saved');
+      onSaved(providerId);
+      handleOpenChange(false);
+    } catch (reason) {
+      setFeedback({
+        kind: 'error',
+        message: reason instanceof Error ? reason.message : String(reason),
+      });
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -308,7 +369,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
           className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto_auto]"
           onSubmit={(event) => {
             event.preventDefault();
-            handleSave();
+            void handleSave();
           }}
         >
           <div
@@ -398,13 +459,18 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                       <span className="text-muted-foreground">{t('settings.ai.required')}</span>
                     )}
                   </FieldLabel>
+                  {provider && draft?.requiresApiKey && (
+                    <Badge variant={hasStoredApiKey ? 'secondary' : 'outline'}>
+                      {t(hasStoredApiKey ? 'settings.ai.keyStored' : 'settings.ai.keyMissing')}
+                    </Badge>
+                  )}
                 </div>
                 <InputGroup>
                   <InputGroupInput
                     id="ai-new-provider-key"
                     type={showApiKey ? 'text' : 'password'}
                     value={draft?.apiKey ?? ''}
-                    placeholder="sk-..."
+                    placeholder={hasStoredApiKey ? '••••••••' : 'sk-...'}
                     disabled={!draft || !draft.requiresApiKey}
                     onChange={(event) => updateDraft({ apiKey: event.target.value })}
                     autoComplete="off"
@@ -424,6 +490,9 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 </InputGroup>
                 {draft && !draft.requiresApiKey && (
                   <FieldDescription>{t('settings.ai.noApiKeyHint')}</FieldDescription>
+                )}
+                {draft?.requiresApiKey && (
+                  <FieldDescription>{t('settings.ai.keyHint')}</FieldDescription>
                 )}
               </Field>
 

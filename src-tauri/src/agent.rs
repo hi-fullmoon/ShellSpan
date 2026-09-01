@@ -37,6 +37,7 @@ use crate::{
         validate_provider_config, AiMessage, AiProviderConfig, AiProviderKind, ProviderUsage,
         AGENT_MAX_OUTPUT_TOKENS, MAX_ERROR_BODY_BYTES, MAX_PROVIDER_NON_STREAM_RESPONSE_BYTES,
     },
+    keychain::CredentialManager,
     redaction::redact_sensitive_text,
 };
 
@@ -573,13 +574,14 @@ struct AgentToolLoopOutcome {
 pub(crate) async fn agent_detect_provider_capability(
     access: State<'_, AgentRuntimeAccess>,
     capabilities: State<'_, AgentProviderCapabilityCache>,
+    credentials: State<'_, CredentialManager>,
     provider: AiProviderConfig,
 ) -> Result<AgentProviderCapabilityEvidence, String> {
     if !agent_feature_enabled() || !access.user_enabled() {
         return Err("Agent is disabled by the current runtime policy".to_string());
     }
     validate_provider_config(&provider, true)?;
-    let api_key = api_key_for_provider(&provider)?;
+    let api_key = api_key_for_provider(credentials.inner(), &provider)?;
     if let Some(evidence) = capabilities.get(&provider, api_key.as_deref())? {
         return Ok(evidence);
     }
@@ -610,13 +612,14 @@ pub(crate) fn agent_start_request(
     registry: State<'_, AgentRequestRegistry>,
     access: State<'_, AgentRuntimeAccess>,
     capabilities: State<'_, AgentProviderCapabilityCache>,
+    credentials: State<'_, CredentialManager>,
     request: AgentStartRequest,
 ) -> Result<(), String> {
     if !agent_feature_enabled() || !access.user_enabled() {
         return Err("Agent is disabled by the current runtime policy".to_string());
     }
     validate_agent_start_request(&request)?;
-    let api_key = api_key_for_provider(&request.provider)?;
+    let api_key = api_key_for_provider(credentials.inner(), &request.provider)?;
     let provider_capability = capabilities.get(&request.provider, api_key.as_deref())?;
     let cancellation = registry.register(&request.request.request_id)?;
     // Close the register-vs-disable race: if disable/cancel_all happened before
@@ -2363,7 +2366,7 @@ fn process_responses_event(
         usage.merge_latest(next);
     }
     match value.get("type").and_then(Value::as_str) {
-        Some("response.output_text.delta") => {
+        Some("response.output_text.delta") | Some("response.refusal.delta") => {
             if let Some(text) = value.get("delta").and_then(Value::as_str) {
                 assistant_text.push_str(text);
                 events
@@ -2423,8 +2426,13 @@ fn responses_output_text(items: &[Value]) -> String {
         .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
         .filter_map(|item| item.get("content").and_then(Value::as_array))
         .flatten()
-        .filter(|content| content.get("type").and_then(Value::as_str) == Some("output_text"))
-        .filter_map(|content| content.get("text").and_then(Value::as_str))
+        .filter_map(
+            |content| match content.get("type").and_then(Value::as_str) {
+                Some("output_text") => content.get("text").and_then(Value::as_str),
+                Some("refusal") => content.get("refusal").and_then(Value::as_str),
+                _ => None,
+            },
+        )
         .collect::<String>()
 }
 
@@ -4520,6 +4528,60 @@ mod tests {
     }
 
     #[test]
+    fn openai_responses_preserves_streamed_and_completed_refusals() {
+        let events: Arc<dyn AgentEventSink> = Arc::new(RecordingEvents::default());
+        let mut text = String::new();
+        let mut items = BTreeMap::new();
+        let mut completed = false;
+        let mut usage = ProviderUsage::default();
+
+        process_responses_event(
+            "data: {\"type\":\"response.refusal.delta\",\"delta\":\"I cannot help\"}",
+            "request-refusal",
+            1,
+            &events,
+            &mut text,
+            &mut items,
+            &mut completed,
+            &mut usage,
+        )
+        .unwrap();
+        assert_eq!(text, "I cannot help");
+
+        process_responses_event(
+            &format!(
+                "data: {}",
+                json!({
+                    "type": "response.completed",
+                    "response": {
+                        "output": [{
+                            "type": "message",
+                            "content": [{
+                                "type": "refusal",
+                                "refusal": "I cannot help with that."
+                            }]
+                        }]
+                    }
+                })
+            ),
+            "request-refusal",
+            1,
+            &events,
+            &mut text,
+            &mut items,
+            &mut completed,
+            &mut usage,
+        )
+        .unwrap();
+
+        assert!(completed);
+        assert_eq!(
+            responses_output_text(&items.into_values().collect::<Vec<_>>()),
+            "I cannot help with that."
+        );
+    }
+
+    #[test]
     fn ollama_parser_accepts_object_arguments_and_replays_native_shape() {
         let events: Arc<dyn AgentEventSink> = Arc::new(RecordingEvents::default());
         let mut text = String::new();
@@ -5003,7 +5065,12 @@ mod tests {
     }
 
     async fn assert_live_tool_provider(provider: AiProviderConfig) {
-        let api_key = api_key_for_provider(&provider).expect("resolve live-provider API key");
+        let api_key = provider
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .map(str::to_string);
         let mut backend = HttpAgentBackend::new(provider, api_key, live_acceptance_messages())
             .expect("construct live-provider backend");
         let cancellation = CancellationToken::new();
