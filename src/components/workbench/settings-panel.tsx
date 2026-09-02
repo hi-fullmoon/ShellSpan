@@ -1009,55 +1009,55 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               <div className="flex flex-col gap-4">
                 {SHORTCUT_GROUPS.map((group) => (
                   <SettingsGroup key={group.id} title={t(SHORTCUT_GROUP_LABEL_KEYS[group.id])}>
-                        {group.actions.map((action) => {
-                          const binding = shortcuts[action] ?? DEFAULT_SHORTCUTS[action];
-                          const leaderBinding = shortcuts.terminalLeader ?? DEFAULT_SHORTCUTS.terminalLeader;
-                          return (
-                              <div key={action} className="flex min-h-14 items-center justify-between gap-3 px-4 py-2.5">
-                                <span className="text-sm font-medium">{shortcutLabels[action]}</span>
-                                <div className="flex items-center gap-1">
+                    {group.actions.map((action) => {
+                      const binding = shortcuts[action] ?? DEFAULT_SHORTCUTS[action];
+                      const leaderBinding = shortcuts.terminalLeader ?? DEFAULT_SHORTCUTS.terminalLeader;
+                      return (
+                        <div key={action} className="flex min-h-14 items-center justify-between gap-3 px-4 py-2.5">
+                          <span className="text-sm font-medium">{shortcutLabels[action]}</span>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="min-w-20 justify-end px-1.5"
+                              onClick={() => {
+                                setConflictAction(null);
+                                setEditingAction(action);
+                              }}
+                            >
+                              {isLeaderShortcutAction(action) ? (
+                                <span className="flex items-center gap-1.5">
+                                  <ShortcutKeys shortcut={leaderBinding} />
+                                  <span aria-hidden="true" className="text-muted-foreground">
+                                    →
+                                  </span>
+                                  <ShortcutKeys shortcut={binding} />
+                                </span>
+                              ) : (
+                                <ShortcutKeys shortcut={binding} />
+                              )}
+                            </Button>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
                                   <Button
                                     variant="ghost"
-                                    size="sm"
-                                    className="min-w-20 justify-end px-1.5"
-                                    onClick={() => {
-                                      setConflictAction(null);
-                                      setEditingAction(action);
-                                    }}
-                                  >
-                                    {isLeaderShortcutAction(action) ? (
-                                      <span className="flex items-center gap-1.5">
-                                        <ShortcutKeys shortcut={leaderBinding} />
-                                        <span aria-hidden="true" className="text-muted-foreground">
-                                          →
-                                        </span>
-                                        <ShortcutKeys shortcut={binding} />
-                                      </span>
-                                    ) : (
-                                      <ShortcutKeys shortcut={binding} />
-                                    )}
-                                  </Button>
-                                  <Tooltip>
-                                    <TooltipTrigger
-                                      render={
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="size-8"
-                                          disabled={binding === DEFAULT_SHORTCUTS[action]}
-                                          aria-label={t('settings.shortcuts.resetOne', { action: shortcutLabels[action] })}
-                                        />
-                                      }
-                                      onClick={() => resetShortcut(action)}
-                                    >
-                                      <RotateCcwIcon />
-                                    </TooltipTrigger>
-                                    <TooltipContent>{t('settings.shortcuts.reset')}</TooltipContent>
-                                  </Tooltip>
-                                </div>
-                              </div>
-                          );
-                        })}
+                                    size="icon"
+                                    className="size-8"
+                                    disabled={binding === DEFAULT_SHORTCUTS[action]}
+                                    aria-label={t('settings.shortcuts.resetOne', { action: shortcutLabels[action] })}
+                                  />
+                                }
+                                onClick={() => resetShortcut(action)}
+                              >
+                                <RotateCcwIcon />
+                              </TooltipTrigger>
+                              <TooltipContent>{t('settings.shortcuts.reset')}</TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </SettingsGroup>
                 ))}
               </div>

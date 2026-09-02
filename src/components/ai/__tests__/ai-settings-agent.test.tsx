@@ -155,7 +155,16 @@ describe('M7 Agent settings management', () => {
 
     const providersHeading = screen.getByText('settings.ai.providers');
     const agentHeading = screen.getByText('settings.ai.agent.title');
+    const historyHeading = screen.getByText('ai.history');
     expect(providersHeading.compareDocumentPosition(agentHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(agentHeading.compareDocumentPosition(historyHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    for (const heading of [providersHeading, agentHeading, historyHeading]) {
+      const group = heading.closest('[data-slot="settings-group"]');
+      expect(group).not.toBeNull();
+      expect(group?.querySelector('[data-slot="card"]')).not.toBeNull();
+      expect(group?.querySelector('[data-slot="card-header"]')).toBeNull();
+    }
 
     const providerCards = screen.getAllByRole('button', { name: 'settings.ai.editProvider' });
     expect(providerCards).toHaveLength(2);
