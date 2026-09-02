@@ -286,11 +286,11 @@ function resolvedAiMessageScope(message: Pick<AiChatMessage, 'scope' | 'conversa
   return message.conversationId || message.sessionId ? 'terminal' : 'workbench';
 }
 
-function runtimeTargetFromSession(session: TerminalSession): AgentSessionTarget {
+export function runtimeTargetFromSession(session: TerminalSession): AgentSessionTarget {
   const local = session.host === 'local' && session.port === 0;
   return {
     kind: local ? 'local' : 'remote',
-    targetId: `terminal:${session.sessionId}`,
+    targetId: `terminal-${session.sessionId}`,
     sessionId: session.sessionId,
     label: session.title,
     ...(session.profileId ? { profileId: session.profileId } : {}),
