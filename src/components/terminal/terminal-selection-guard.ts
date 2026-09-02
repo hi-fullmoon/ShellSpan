@@ -1,176 +1,96 @@
-import type { IBufferRange, Terminal } from '@xterm/xterm';
+import type { Terminal } from '@xterm/xterm';
 
-const MICRO_DRAG_MAX_DISTANCE_PX = 6;
-const MICRO_DRAG_MAX_DURATION_MS = 140;
-const SYNTHETIC_TAP_MAX_DURATION_MS = 50;
+const DRAG_THRESHOLD_PX = 4;
 
-interface SingleClickGesture {
-  kind: 'single';
+interface SelectionGesture {
   x: number;
   y: number;
-  startedAt: number;
-  maxDistance: number;
+  dragging: boolean;
 }
 
-interface LockedSelectionGesture {
-  kind: 'locked';
-  selection?: IBufferRange;
-}
-
-type SelectionGesture = SingleClickGesture | LockedSelectionGesture;
-
-function cloneRange(range: IBufferRange | undefined): IBufferRange | undefined {
-  if (!range) return undefined;
-  return {
-    start: { ...range.start },
-    end: { ...range.end },
-  };
-}
-
-function restoreSelection(terminal: Terminal, range: IBufferRange | undefined): void {
-  if (!range) return;
-  const startOffset = range.start.y * terminal.cols + range.start.x;
-  const endOffset = range.end.y * terminal.cols + range.end.x;
-  const from = Math.min(startOffset, endOffset);
-  const to = Math.max(startOffset, endOffset);
-  if (to <= from) return;
-  terminal.select(from % terminal.cols, Math.floor(from / terminal.cols), to - from);
-}
-
-function endXtermDrag(terminal: Terminal): void {
-  const selection = cloneRange(terminal.getSelectionPosition());
-  if (selection) {
-    // setSelection removes xterm's document-level drag listeners while keeping
-    // the selection that was completed before the missing mouseup.
-    restoreSelection(terminal, selection);
-  } else {
-    // clearSelection also removes those listeners. Call it even when no text is
-    // selected; that is the important part for a released tap with no mouseup.
-    terminal.clearSelection();
-  }
+function releaseXtermDrag(ownerDocument: Document, event: MouseEvent): void {
+  const MouseEventConstructor = ownerDocument.defaultView?.MouseEvent ?? MouseEvent;
+  ownerDocument.dispatchEvent(new MouseEventConstructor('mouseup', {
+    button: 0,
+    buttons: 0,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    screenX: event.screenX,
+    screenY: event.screenY,
+    ctrlKey: event.ctrlKey,
+    shiftKey: event.shiftKey,
+    altKey: event.altKey,
+    metaKey: event.metaKey,
+    bubbles: true,
+    cancelable: true,
+  }));
 }
 
 /**
- * Normalizes WKWebView's macOS tap-to-click behavior around xterm selection.
+ * Adds a small drag dead zone in front of xterm's document-level selection
+ * listener. WKWebView can synthesize a tiny held-button move for macOS
+ * tap-to-click; xterm otherwise treats any movement as a selection drag.
  *
- * A single-click drag remains entirely owned by xterm. Multi-click selections
- * are snapshots: double click locks the selected word and triple click locks
- * the selected line, so a synthetic held-button move cannot extend them.
+ * Once the pointer crosses the threshold, xterm owns the gesture without any
+ * further interference. This preserves fast drags, modifier selections, and
+ * word/line extension after double or triple click.
  */
 export function installTerminalSelectionGuard(terminal: Terminal): () => void {
   const element = terminal.element;
   if (!element) return () => {};
 
-  let active = true;
+  const ownerDocument = element.ownerDocument;
   let gesture: SelectionGesture | null = null;
-
-  const afterCurrentEvent = (callback: () => void): void => {
-    queueMicrotask(() => {
-      if (active) callback();
-    });
-  };
-
-  const updateDistance = (event: MouseEvent): void => {
-    if (gesture?.kind !== 'single') return;
-    gesture.maxDistance = Math.max(
-      gesture.maxDistance,
-      Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y),
-    );
-  };
-
-  const finishGesture = (event: MouseEvent): void => {
-    updateDistance(event);
-    const completed = gesture;
-    gesture = null;
-    if (!completed) return;
-
-    if (completed.kind === 'locked') {
-      afterCurrentEvent(() => restoreSelection(terminal, completed.selection));
-      return;
-    }
-
-    const duration = Math.max(0, event.timeStamp - completed.startedAt);
-    const isSyntheticTap = duration <= SYNTHETIC_TAP_MAX_DURATION_MS;
-    const isMicroDrag =
-      duration <= MICRO_DRAG_MAX_DURATION_MS
-      && completed.maxDistance <= MICRO_DRAG_MAX_DISTANCE_PX;
-    if (isSyntheticTap || isMicroDrag) {
-      afterCurrentEvent(() => {
-        if (terminal.hasSelection()) terminal.clearSelection();
-      });
-    }
-  };
 
   const handleMouseDown = (event: MouseEvent): void => {
     if (event.button !== 0) return;
-    const clickCount = Math.max(1, event.detail);
-    if (clickCount === 1) {
-      gesture = {
-        kind: 'single',
-        x: event.clientX,
-        y: event.clientY,
-        startedAt: event.timeStamp,
-        maxDistance: 0,
-      };
-      return;
-    }
-
     gesture = {
-      kind: 'locked',
-      selection: cloneRange(terminal.getSelectionPosition()),
+      x: event.clientX,
+      y: event.clientY,
+      dragging: false,
     };
-
-    // xterm normally handles mousedown on its child screen before this event
-    // bubbles to the terminal element. Keep a microtask fallback for renderer
-    // or DOM changes that make the selection visible only after propagation.
-    if (!gesture.selection) {
-      const currentGesture = gesture;
-      afterCurrentEvent(() => {
-        if (gesture === currentGesture) {
-          currentGesture.selection = cloneRange(terminal.getSelectionPosition());
-        }
-      });
-    }
   };
 
   const handleMouseMove = (event: MouseEvent): void => {
     if (!gesture) return;
-    if (gesture.kind === 'locked') {
-      const completed = gesture;
-      gesture = null;
-      // Run after xterm's document listener. terminal.select also ends xterm's
-      // active drag, preventing later hover movement from extending the word.
-      afterCurrentEvent(() => restoreSelection(terminal, completed.selection));
-      return;
-    }
 
-    // WKWebView can omit mouseup after macOS tap-to-click. A later move with no
-    // left button is definitive proof that the tap ended. Stop xterm's drag
-    // synchronously, before its document mousemove listener can extend the
-    // selection. Deferring this leaves xterm armed for the following move.
+    // A buttonless move proves that WKWebView dropped mouseup. Recreate the
+    // release synchronously so xterm removes its drag listeners before it can
+    // consume this move. A synthetic mouseup also preserves xterm's native
+    // normal, word, line, and column selection modes.
     if (!(event.buttons & 1)) {
       gesture = null;
-      endXtermDrag(terminal);
+      releaseXtermDrag(ownerDocument, event);
       return;
     }
 
-    updateDistance(event);
+    if (!gesture.dragging) {
+      const distance = Math.hypot(
+        event.clientX - gesture.x,
+        event.clientY - gesture.y,
+      );
+      gesture.dragging = distance >= DRAG_THRESHOLD_PX;
+    }
+
+    if (!gesture.dragging) {
+      // This listener is installed before xterm adds its document listener on
+      // mousedown, so stopping later listeners here creates the dead zone.
+      event.stopImmediatePropagation();
+    }
   };
 
   const handleMouseUp = (event: MouseEvent): void => {
-    if (event.button !== 0) return;
-    finishGesture(event);
+    if (event.button === 0) gesture = null;
   };
 
   element.addEventListener('mousedown', handleMouseDown);
-  document.addEventListener('mousemove', handleMouseMove);
-  document.addEventListener('mouseup', handleMouseUp);
+  ownerDocument.addEventListener('mousemove', handleMouseMove);
+  ownerDocument.addEventListener('mouseup', handleMouseUp);
 
   return () => {
-    active = false;
     gesture = null;
     element.removeEventListener('mousedown', handleMouseDown);
-    document.removeEventListener('mousemove', handleMouseMove);
-    document.removeEventListener('mouseup', handleMouseUp);
+    ownerDocument.removeEventListener('mousemove', handleMouseMove);
+    ownerDocument.removeEventListener('mouseup', handleMouseUp);
   };
 }

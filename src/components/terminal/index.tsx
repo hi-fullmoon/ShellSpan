@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
-import { useAgentStore } from '@/stores/agentStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
@@ -60,11 +59,6 @@ const Terminal: React.FC = () => {
   const sessions = useTerminalStore((state) => state.sessions);
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId) ?? null;
-  const agentControlledSessionId = useAgentStore((state) => {
-    const requestId = state.activeRequestId;
-    const run = requestId ? state.runs[requestId] : undefined;
-    return run?.status === 'running' ? run.target.sessionId : null;
-  });
   const restoreWorkspace = useAppStore((state) => state.restoreWorkspace);
   const activeSection = useAppStore((state) => state.activeSection);
   const { connect, openLocal } = useConnectSession();
@@ -667,16 +661,12 @@ const Terminal: React.FC = () => {
       (session) => session.sessionId === group.activeSessionId,
     ) ?? groupSessions[0] ?? null;
     const focused = focusedSlot === slot;
-    const agentControlled = groupActiveSession?.sessionId === agentControlledSessionId;
-
     return (
       <div
         data-terminal-group={slot}
-        data-agent-controlled={agentControlled ? 'true' : undefined}
         className={cn(
           'relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-app-bg',
           focused && 'ring-1 ring-inset ring-app-primary/70',
-          agentControlled && 'agent-terminal-glow',
         )}
         onPointerDownCapture={(e) => {
           // macOS tap-to-click: the tap that focuses an inactive group would
@@ -789,16 +779,9 @@ const Terminal: React.FC = () => {
     );
   };
 
-  const agentControlsActiveTerminal = !split
-    && activeSession?.sessionId === agentControlledSessionId;
-
   return (
     <div
-      data-agent-controlled={agentControlsActiveTerminal ? 'true' : undefined}
-      className={cn(
-        'flex h-full flex-col bg-app-bg',
-        agentControlsActiveTerminal && 'agent-terminal-glow',
-      )}
+      className="flex h-full flex-col bg-app-bg"
     >
       <TerminalControllerLayer />
       {sessions.length > 0 && !split && (

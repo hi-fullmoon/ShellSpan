@@ -5,8 +5,8 @@ import path from 'node:path';
 const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const composeFile = path.join(workspace, 'tests', 'ssh-e2e', 'compose.yml');
 const projectName = 'shellspan-e2e';
-const testFilter = process.argv.includes('--agent-m2')
-  ? 'isolated_ssh_sftp_end_to_end_agent_m2_native_files'
+const testFilter = process.argv.includes('--agent-native')
+  ? 'isolated_ssh_sftp_end_to_end_agent_native_files'
   : 'isolated_ssh_sftp_end_to_end';
 
 function run(command, args, options = {}) {

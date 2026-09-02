@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAiStore } from '@/stores/aiStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import { registerAgentLifecycleHandlers } from '@/lib/agent-lifecycle';
 import type { AiChatMessage, AiConversation } from '@/types/ai';
 import {
   createAiStreamDeltaBatcher,
@@ -15,6 +14,8 @@ const tauriMocks = vi.hoisted(() => ({
   clear: vi.fn().mockResolvedValue(undefined),
   create: vi.fn().mockResolvedValue(undefined),
   deleteSessions: vi.fn().mockResolvedValue(1),
+  listAgentSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+  cancelAgentSession: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/tauri', () => ({
@@ -24,6 +25,8 @@ vi.mock('@/lib/tauri', () => ({
   invokeClearAiSessionLane: tauriMocks.clear,
   invokeCreateAiSession: tauriMocks.create,
   invokeDeleteAiSessions: tauriMocks.deleteSessions,
+  invokeListAgentRuntimeSessions: tauriMocks.listAgentSessions,
+  invokeCancelAgentRuntime: tauriMocks.cancelAgentSession,
 }));
 
 import {
@@ -150,30 +153,18 @@ describe('AI session persistence queue', () => {
     }
   });
 
-  it('awaits Agent shutdown before final exit persistence completes', async () => {
-    const shutdown = vi.fn().mockResolvedValue(undefined);
-    const unregister = registerAgentLifecycleHandlers({
-      cancelForSession: vi.fn().mockResolvedValue(undefined),
-      shutdown,
-    });
-
-    try {
-      await finalizeAiSessionsBeforeExit();
-      expect(shutdown).toHaveBeenCalledTimes(1);
-    } finally {
-      unregister();
-    }
-  });
-
-  it('cancels the Agent lane before archiving a closed terminal conversation', async () => {
+  it('cancels matching Agent Sessions before archiving a closed terminal conversation', async () => {
     let finishCancellation: (() => void) | undefined;
-    const cancelForSession = vi.fn(() => new Promise<void>((resolve) => {
+    tauriMocks.listAgentSessions.mockResolvedValueOnce({
+      sessions: [{
+        ended: false,
+        archived: false,
+        header: { sessionId: 'agent-session-1', target: { sessionId: 'session-1' } },
+      }],
+    });
+    tauriMocks.cancelAgentSession.mockImplementationOnce(() => new Promise<void>((resolve) => {
       finishCancellation = resolve;
     }));
-    const unregister = registerAgentLifecycleHandlers({
-      cancelForSession,
-      shutdown: vi.fn().mockResolvedValue(undefined),
-    });
     useTerminalStore.setState({
       sessions: [{
         sessionId: 'session-1',
@@ -188,18 +179,16 @@ describe('AI session persistence queue', () => {
       activeSessionId: 'session-1',
     });
 
-    try {
-      archiveTerminalAiSession('session-1');
-      expect(cancelForSession).toHaveBeenCalledWith('session-1');
-      expect(tauriMocks.archive).not.toHaveBeenCalled();
-      finishCancellation?.();
-      await vi.waitFor(() => expect(tauriMocks.archive).toHaveBeenCalledWith(
-        conversation.id,
-        conversation.startedAt,
-      ));
-    } finally {
-      unregister();
-    }
+    archiveTerminalAiSession('session-1');
+    await vi.waitFor(() => expect(tauriMocks.cancelAgentSession).toHaveBeenCalledWith({
+      sessionId: 'agent-session-1',
+    }));
+    expect(tauriMocks.archive).not.toHaveBeenCalled();
+    finishCancellation?.();
+    await vi.waitFor(() => expect(tauriMocks.archive).toHaveBeenCalledWith(
+      conversation.id,
+      conversation.startedAt,
+    ));
   });
 
   it('waits for pending writes before deleting persisted conversations', async () => {
