@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shellspan.local/protocol/agent/runtime/tool-manifest.schema.json",
+  "title": "ShellSpan Agent Runtime built-in tool metadata manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "tools"],
+  "properties": {
+    "contractVersion": { "const": 3 },
+    "tools": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 9,
+      "items": { "$ref": "#/$defs/toolDescriptor" }
+    }
+  },
+  "$defs": {
+    "toolDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "targetKinds",
+        "effectMode",
+        "allowedEffects",
+        "idempotency",
+        "parallel",
+        "cancellable",
+        "retryPolicy",
+        "defaultTimeoutMs",
+        "maxOutputBytes",
+        "maxConcurrency",
+        "requiredCapabilities",
+        "untrustedResultFields"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "https://shellspan.local/protocol/agent/runtime/tool-contract.schema.json#/$defs/toolName"
+        },
+        "version": { "const": "1.0.0" },
+        "targetKinds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://shellspan.local/protocol/agent/runtime/tool-contract.schema.json#/$defs/targetKind"
+          }
+        },
+        "effectMode": { "enum": ["fixed", "nativeClassifier"] },
+        "allowedEffects": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://shellspan.local/protocol/agent/runtime/tool-contract.schema.json#/$defs/effectKind"
+          }
+        },
+        "idempotency": { "enum": ["yes", "no", "conditional"] },
+        "parallel": { "type": "boolean" },
+        "cancellable": { "type": "boolean" },
+        "retryPolicy": { "enum": ["never", "idempotentOnly", "reconcileFirst"] },
+        "defaultTimeoutMs": { "type": "integer", "minimum": 1, "maximum": 86400000 },
+        "maxOutputBytes": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+        "maxConcurrency": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "requiredCapabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9._:-]*$"
+          }
+        },
+        "untrustedResultFields": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^/"
+          }
+        }
+      }
+    }
+  }
+}

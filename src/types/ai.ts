@@ -114,6 +114,7 @@ export interface AiSessionLocator {
 export interface AiSessionFile {
   conversation: AiConversation;
   messages: AiChatMessage[];
-  agentStates?: import('./agent').PersistedAgentRunState[];
+  /** Legacy AI-session Agent records are exposed for read-only import only. */
+  agentStates?: unknown[];
   recovery?: AiSessionRecovery;
 }
