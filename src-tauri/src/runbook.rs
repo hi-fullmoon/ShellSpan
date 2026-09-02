@@ -1,6 +1,6 @@
 #[allow(
     dead_code,
-    reason = "M3 Runbook integration is intentionally outside M2"
+    reason = "shared secret scanning is reserved for native Runbook loading"
 )]
 pub(crate) fn contains_secret_literal(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();

@@ -17,6 +17,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 // the lock to avoid observing a partial append from this process.
 static AI_SESSION_ORDINALS: LazyLock<Mutex<HashMap<PathBuf, usize>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+#[cfg(test)]
 const MAX_AGENT_STATE_BYTES: usize = 1024 * 1024;
 const AGENT_STATE_VERSION: u64 = 1;
 const RECOVERY_EVENT_TYPE: &str = "session_recovered";
@@ -607,25 +608,6 @@ pub(crate) fn append_ai_session_message(
     )
 }
 
-#[tauri::command]
-pub(crate) fn append_ai_session_agent_state(
-    app: AppHandle,
-    conversation_id: String,
-    started_at: String,
-    timestamp: String,
-    state: Value,
-) -> Result<(), String> {
-    let path = session_path(&sessions_root(&app)?, &conversation_id, &started_at)?;
-    let encoded_size = serde_json::to_vec(&state)
-        .map_err(|error| format!("failed to encode Agent session state: {error}"))?
-        .len();
-    if encoded_size > MAX_AGENT_STATE_BYTES {
-        return Err("Agent session event exceeds the 1 MiB persistence limit".to_string());
-    }
-    let record_type = validate_agent_payload(&state)?;
-    append_record(&path, &timestamp, record_type, redact_json_value(&state))
-}
-
 fn record_is_cleared_lane(record: &Value, lane: &str) -> bool {
     match record.get("type").and_then(Value::as_str) {
         Some("response_item") if lane != "agent" => record
@@ -678,7 +660,7 @@ pub(crate) fn clear_ai_session_lane(
     timestamp: String,
     lane: String,
 ) -> Result<(), String> {
-    if lane != "conversation" && lane != "command" && lane != "agent" {
+    if lane != "conversation" && lane != "command" {
         return Err("invalid AI conversation lane".to_string());
     }
     let path = session_path(&sessions_root(&app)?, &conversation_id, &started_at)?;
@@ -1055,7 +1037,7 @@ fn validate_agent_patch(patch: &AgentPatchEnvelope) -> Result<(), String> {
             }
             if message.append_content.is_some() && message.content_offset_bytes.is_none() {
                 return Err(
-                    "Agent v1 message appendContent requires contentOffsetBytes".to_string()
+                    "Legacy Agent message appendContent requires contentOffsetBytes".to_string(),
                 );
             }
             if let Some(call_ids) = &message.append_tool_call_ids {
@@ -1093,25 +1075,6 @@ fn parse_agent_patch(payload: &Value) -> Result<AgentPatchEnvelope, String> {
         .map_err(|error| format!("invalid Agent patch: {error}"))?;
     validate_agent_patch(&patch)?;
     Ok(patch)
-}
-
-fn validate_agent_payload(payload: &Value) -> Result<&'static str, String> {
-    match payload.get("kind") {
-        None => {
-            validate_agent_state(payload)?;
-            Ok("agent_state")
-        }
-        Some(Value::String(kind)) if kind == "checkpoint" => {
-            parse_agent_checkpoint(payload)?;
-            Ok("agent_state_checkpoint")
-        }
-        Some(Value::String(kind)) if kind == "patch" => {
-            parse_agent_patch(payload)?;
-            Ok("agent_state_patch")
-        }
-        Some(Value::String(_)) => Err("unsupported Agent session event kind".to_string()),
-        Some(_) => Err("Agent session event kind must be a string".to_string()),
-    }
 }
 
 fn append_unique_strings(
@@ -1802,8 +1765,8 @@ pub(crate) fn load_ai_session(
 mod tests {
     use super::{
         append_record, atomic_rewrite_with, clear_session_lane, date_parts,
-        delete_ai_session_files, load_session_file, load_session_summary, session_file_exists,
-        session_path, validate_agent_payload, AiSessionLocator, AiSessionMeta,
+        delete_ai_session_files, load_session_file, load_session_summary, parse_agent_checkpoint,
+        parse_agent_patch, session_file_exists, session_path, AiSessionLocator, AiSessionMeta,
     };
     use crate::redaction::redact_json_value;
     use serde_json::{json, to_value};
@@ -2264,11 +2227,8 @@ mod tests {
                 "status":"completed"
             }]
         });
-        assert_eq!(
-            validate_agent_payload(&checkpoint).unwrap(),
-            "agent_state_checkpoint"
-        );
-        assert_eq!(validate_agent_payload(&patch).unwrap(), "agent_state_patch");
+        parse_agent_checkpoint(&checkpoint).unwrap();
+        parse_agent_patch(&patch).unwrap();
         write_records(
             &path,
             &[
@@ -2477,7 +2437,7 @@ mod tests {
                 }
             }]
         });
-        assert!(validate_agent_payload(&invalid_upsert)
+        assert!(parse_agent_patch(&invalid_upsert)
             .unwrap_err()
             .contains("content"));
     }
