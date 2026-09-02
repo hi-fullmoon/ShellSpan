@@ -5,10 +5,12 @@ import { useTerminalStore } from '@/stores/terminalStore';
 import {
   invokeAppendAiSessionMessage,
   invokeArchiveAiSession,
+  invokeCancelAgentRuntime,
   invokeCancelAiRequest,
   invokeClearAiSessionLane,
   invokeCreateAiSession,
   invokeDeleteAiSessions,
+  invokeListAgentRuntimeSessions,
 } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
 import { generateId } from '@/lib/utils';
@@ -18,11 +20,6 @@ import {
   enqueueAiSessionPersistence,
   flushAiSessionPersistenceQueue,
 } from '@/lib/ai-session-persistence-queue';
-import {
-  cancelAgentForSession,
-  shutdownAgentLifecycle,
-} from '@/lib/agent-lifecycle';
-import { flushAgentSessionPersistence } from '@/lib/agent-sessions';
 
 const logger = createLogger('aiSessions');
 
@@ -262,7 +259,7 @@ export async function persistAiMessage(message: AiChatMessage): Promise<void> {
 export async function clearPersistedAiConversation(
   conversationId: string,
   startedAt: string,
-  lane: 'conversation' | 'command' | 'agent',
+  lane: 'conversation' | 'command',
 ): Promise<void> {
   return enqueueCreationReadyAiSessionPersistence(conversationId, () => (
     invokeClearAiSessionLane(conversationId, startedAt, lane)
@@ -316,8 +313,6 @@ export async function flushAiSessionPersistence(): Promise<void> {
 }
 
 export async function finalizeAiSessionsBeforeExit(): Promise<void> {
-  await shutdownAgentLifecycle();
-  await flushAgentSessionPersistence();
   const ai = useAiStore.getState();
   const requestId = ai.activeRequestId;
   if (requestId) {
@@ -345,8 +340,10 @@ export function archiveTerminalAiSession(sessionId: string): void {
   if (!session?.conversationId || !session.conversationStartedAt) return;
   const conversationId = session.conversationId;
   const conversationStartedAt = session.conversationStartedAt;
-  const agentFinalization = cancelAgentForSession(sessionId)
-    .then(() => flushAgentSessionPersistence())
+  const agentFinalization = invokeListAgentRuntimeSessions({ limit: 512 })
+    .then((page) => Promise.all(page.sessions
+      .filter((item) => !item.ended && item.header.target?.sessionId === sessionId)
+      .map((item) => invokeCancelAgentRuntime({ sessionId: item.header.sessionId }))))
     .catch((error) => {
       logger.warn('Failed to finalize Agent task for closed terminal', error);
     });

@@ -10,7 +10,6 @@ import type {
 import {
   invokeLoadPreferences,
   invokeSavePreferences,
-  invokeSetAgentEnabled,
 } from '@/lib/tauri';
 import { createLogger } from '@/lib/logger';
 import { generateId } from '@/lib/utils';
@@ -308,14 +307,6 @@ function schedulePreferencesSave(preferences: AiPreferences): void {
   }, 400);
 }
 
-async function synchronizeAgentRuntime(enabled: boolean): Promise<void> {
-  try {
-    await invokeSetAgentEnabled(enabled);
-  } catch (error) {
-    logger.error('failed to synchronize Agent runtime access', error);
-  }
-}
-
 export const useAiSettingsStore = create<AiSettingsState>()(
   subscribeWithSelector((set, get) => ({
     ...defaults,
@@ -329,11 +320,9 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         // persistence subscriber never rewrites unchanged preferences during hydration.
         set(preferences);
         set({ initialized: true });
-        await synchronizeAgentRuntime(preferences.agentEnabled);
       } catch (error) {
         logger.error('failed to load AI preferences', error);
         set({ initialized: true });
-        await synchronizeAgentRuntime(defaults.agentEnabled);
       }
     },
     addProvider: (preset, changes) => {

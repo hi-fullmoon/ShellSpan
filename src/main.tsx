@@ -22,10 +22,8 @@ import { useAiSettingsStore } from './stores/aiSettingsStore';
 import { useAiStore } from './stores/aiStore';
 import { useSftpStore } from './stores/sftpStore';
 import { hydrateTransferResumeCandidates } from './lib/transfer-resume';
-import { initializeAgentSessionPersistence } from './lib/agent-sessions';
 
 initGlobalErrorLogging();
-initializeAgentSessionPersistence();
 
 const logger = createLogger('bootstrap');
 

@@ -1,15 +1,16 @@
 import { create } from 'zustand';
-import { DEFAULT_AGENT_PERMISSION_MODE } from '@/lib/agent-contract';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import {
   AGENT_PERMISSION_MODES,
   type AgentPermissionMode,
-  type AgentTargetSnapshot,
-} from '@/types/agent';
+  type AgentApprovalTarget,
+} from '@/types/agent-approval';
+
+const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = 'requestApproval';
 
 export interface AgentPermissionBinding {
   readonly mode: AgentPermissionMode;
-  readonly target: Readonly<AgentTargetSnapshot>;
+  readonly target: Readonly<AgentApprovalTarget>;
 }
 
 interface AgentPermissionState {
@@ -21,7 +22,7 @@ interface AgentPermissionState {
   resetAll: () => void;
 }
 
-function targetFromSession(session: TerminalSession): Readonly<AgentTargetSnapshot> {
+function targetFromSession(session: TerminalSession): Readonly<AgentApprovalTarget> {
   return Object.freeze({
     kind: session.host === 'local' && session.port === 0 ? 'local' : 'remote',
     sessionId: session.sessionId,
@@ -33,7 +34,7 @@ function targetFromSession(session: TerminalSession): Readonly<AgentTargetSnapsh
 }
 
 function sameTarget(
-  target: AgentTargetSnapshot,
+  target: AgentApprovalTarget,
   session: TerminalSession | undefined,
 ): boolean {
   if (!session || session.status !== 'connected') return false;
