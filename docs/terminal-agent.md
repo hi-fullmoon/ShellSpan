@@ -1,51 +1,67 @@
 # 终端 Agent 使用指南
 
-> v2.1 的执行路径仍是默认路径。仓库同时包含显式 opt-in 的 Agent Contract
-> v3 M0–M4 运行时；后台恢复、Operator、迁移和回滚边界见
-> [Terminal Agent enhancement M4 background recovery and Operator](terminal-agent-m4.md)。
-> 未设置 v3 rollout 时不会启用该运行时。
+ShellSpan 的 Agent 现在只有一条执行路径：Rust Agent Runtime。对话、Activity、审批、恢复、子 Agent
+和 Fleet 都来自同一份有序 Agent Session 日志；Ask 是独立的只读功能，不是失败后的降级路径。
 
-ShellSpan v2.1 将终端 Agent 开放到 Stable。Agent 只接受模型返回的结构化 `run_terminal_command` 调用，在任务发起时绑定的同一个 PTY 中执行命令，并把真实输出与退出码作为后续判断依据。普通 Assistant 文本和 Markdown 代码块没有自动执行路径。
+## 配置模型
 
-## 配置 MiniMax
+在“设置 → AI 助手”中添加并选择默认模型。支持 OpenAI Responses、OpenAI-compatible Chat
+Completions（包括 Kimi 与 MiniMax）以及本地 Ollama。
 
-MiniMax 使用官方 OpenAI-compatible Chat Completions 接口，不依赖 OpenAI 帐号、OpenAI API Key 或 OpenAI Responses 现场验收。
+MiniMax 默认使用：
 
-1. 打开“设置 → AI 助手”。
-2. 选择“添加厂商”，再选择“MiniMax 官方兼容接口”。
-3. 保持预设值：
-   - 接口协议：OpenAI Chat Completions 兼容
-   - 服务地址：`https://api.minimaxi.com`
-   - 模型：`MiniMax-M2.7`
-4. 在应用内输入自己的 MiniMax API Key，选择“测试连接并读取模型”。
-5. 如果连接可用，可将 MiniMax 设为默认厂商；然后在终端的 AI 面板中选择 Agent 模式。
+- 服务地址：`https://api.minimaxi.com`
+- 模型：`MiniMax-M2.7`
 
-不要把 API Key 放进命令参数、聊天、日志、截图、仓库文件或提交记录，也不要把凭证交给 Agent 代为输入。厂商 API Key 只保存在操作系统钥匙串中，不会写入 ShellSpan 数据库；删除厂商配置会同时删除对应的钥匙串凭据。
+API Key 只保存在操作系统钥匙串中。不要把密钥放进命令、聊天、日志、截图或仓库文件。
+
+## 启动与继续任务
+
+1. 打开一个已连接的本地或远程终端。
+2. 打开 AI 面板并选择 Agent。
+3. 选择当前连接的权限模式。
+4. 输入目标并发送。
+
+后续输入会继续同一个 Agent Session：运行中输入会在下一个安全 Step 边界生效，空闲时输入会启动
+下一 Turn。关闭再打开面板或重启应用后，界面会从已提交日志回放；不会依赖 WebView 内存恢复业务状态。
 
 ## 权限模式
 
-| 模式 | 自动执行范围 | 何时审批 |
+| 模式 | 自动执行范围 | 审批行为 |
 | --- | --- | --- |
-| 请求批准 | 无 | 每条终端命令都先展示完整目标、命令和本地风险 |
-| 帮我批准 | 隔离 Shell 中的低敏只读健康检查 | 状态修改、破坏性命令、可能暴露敏感信息的读取和无法可靠分类的命令 |
-| 完全访问权限 | 当前连接实例内的只读、状态修改和破坏性命令 | 不逐条弹窗；进入该模式前必须主动确认高风险说明 |
+| 请求批准 | 无 | 每个需要执行的操作都先展示目标、意图、参数与风险 |
+| 帮我批准 | 明确允许的低风险只读操作 | 敏感读取、写入、破坏性与外部副作用仍需审批 |
+| 完全访问权限 | 当前连接授权范围内的操作 | 选择模式前需要显式确认；底层安全校验仍然生效 |
 
-新连接始终从“请求批准”开始。“帮我批准”和“完全访问权限”只绑定当前连接实例，不会因同一主机配置而共享，也不会在断线重连、应用重启或新建连接后恢复。
+提升后的权限只绑定当前连接实例。断线、关闭、重连、身份变化或应用重启后都会恢复为“请求批准”。
+权限模式不会绕过冻结目标、参数 Schema、effect 分类、能力范围、有效期、单次使用、路径 containment、
+摘要前置条件、秘密输入阻断、超时、取消、输出上限和脱敏。
 
-权限模式不会关闭以下边界：单行与控制字符校验、冻结目标校验、交互式秘密输入阻断、超时、用户中止、输出上限、秘密脱敏和本地审计。
+工作区 MCP 通过 `.shellspan/mcp.json` 配置。Agent 发起 MCP 调用时会先显示服务器、工具、目标和外部
+副作用审批；只有批准后才会启动 stdio 服务器、发现具体工具并加载其 Schema。凭据仍由 Rust 在执行时
+从系统钥匙串读取，不进入模型上下文或 WebView。
 
 ## 审批、拒绝与停止
 
-- 审批卡会展示任务发起时冻结的完整目标身份、单行命令、意图和本地风险。只有核对无误后才批准。
-- 拒绝会阻止该命令写入 PTY，把工具调用记为 `rejected`，并停止对应的后端 Agent 请求；迟到的批准、输出或工具调用不能重新启动它。
-- 点击“停止”会向绑定的 PTY 发送 Ctrl-C，并同时取消模型请求、审批等待和工具结果等待。停止可能需要等待远端进程与审计状态收敛，不代表可以立刻关闭应用而忽略结果。
-- 命令超时走同一中止边界，并以 `timedOut` 终态记录；非零退出码不会被报告为执行成功。
-- 关闭 Agent、关闭终端、断线、身份变化或应用退出时，活动任务会先取消并保存终态。重启后，未完成任务只会恢复为已取消的历史记录，不会重放命令。
+- 审批卡保留完整目标、意图、参数、风险和结果；工具详情可折叠。
+- 批准只对卡片对应的 Session、Turn、Step、请求和调用生效。
+- 拒绝会提交 `rejected` 结果，不会把命令写入终端。
+- “停止 Agent 任务”会取消模型、审批等待、工具或进程以及后代 Agent，并提交一个终态。
+- 迟到的模型帧、批准或工具结果不能重新打开已结束的 Session。
 
-## 目标与数据边界
+## Conversation 与 Activity
 
-每个任务冻结 `sessionId`、主机、端口、用户和连接身份。切换标签页不改变目标；同一主机的新连接也被视为不同目标。目标消失、重连或身份漂移时，后续命令 fail closed。
+Conversation 展示用户/助手消息、运行时 Marker、工具卡和审批。Activity 展示 Turn/Step、请求耗时与
+token、Plan、Context/Artifact、Recovery、Agent 树和 Fleet target matrix。两个页签由同一事件序列
+投影，因此刷新或回放时保持一致。
 
-发送给模型或写入会话前，终端结果会执行长度限制和秘密脱敏。本地操作历史保存任务、目标、权限、审批、风险、终态和退出码等有界元数据，不保存完整终端输出。Agent 不会自动输入 sudo 密码、SSH 密码、私钥口令或其他秘密。
+Plan 由主 Agent Session 管线通过 `update_plan` 写入单调递增的 `task/plan` 事件。Native 执行层不保存
+Plan、Task、子 Agent 或 Fleet 状态，只接收当前 Session/Turn/Step 的冻结调用上下文并执行一次受控效果。
 
-MiniMax 官方兼容接口已完成真实结构化工具调用验收。OpenAI Responses 适配器仍保留，但 OpenAI 不是 v2.1 的使用或发布前置；历史现场豁免也不表示 OpenAI 现场通过。
+## 数据与恢复
+
+新 Agent 任务只写 Agent Runtime Session 日志。旧版 AI 会话中的 Agent 记录只能作为历史数据读取，
+不能继续执行、审批、恢复或双写。遇到非幂等操作的未知结果时，Runtime 会要求明确的 reconciliation
+证据，不会自动重放。
+
+完整实现约束见 [Agent Runtime 架构](agent-runtime-vnext.md)。
