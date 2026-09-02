@@ -8,6 +8,7 @@ import {
   cancelActiveAiRequests,
   clampAiPanelWidth,
   getAiPanelWidthBounds,
+  runtimeTargetFromSession,
   sanitizeTerminalSelection,
   selectConversationHistory,
   shouldSubmitAiDraft,
@@ -69,6 +70,24 @@ describe('AI panel pure behavior', () => {
   it('clamps panel width while preserving main content', () => {
     expect(getAiPanelWidthBounds(1_200)).toEqual({ min: 320, max: 720 });
     expect(clampAiPanelWidth(900, 1_200)).toBe(720);
+  });
+
+  it('builds an Agent target with a runtime-safe identifier', () => {
+    const target = runtimeTargetFromSession({
+      sessionId: '123e4567-e89b-12d3-a456-426614174000',
+      title: 'Local',
+      host: 'local',
+      port: 0,
+      username: 'operator',
+      status: 'connected',
+    });
+
+    expect(target).toMatchObject({
+      kind: 'local',
+      targetId: 'terminal-123e4567-e89b-12d3-a456-426614174000',
+      sessionId: '123e4567-e89b-12d3-a456-426614174000',
+    });
+    expect(target.targetId).toMatch(/^[A-Za-z0-9_-]{1,128}$/);
   });
 
   it('cancels the active Ask request immediately and through the backend', async () => {
