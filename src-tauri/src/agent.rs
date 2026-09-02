@@ -146,10 +146,10 @@ pub(crate) enum AgentStreamEvent {
     },
 }
 
-#[derive(Default)]
 struct PendingToolResult {
     call_id: String,
     sender: Option<oneshot::Sender<AgentToolResult>>,
+    receiver: Option<oneshot::Receiver<AgentToolResult>>,
 }
 
 struct ActiveAgentRequest {
@@ -212,14 +212,14 @@ impl AgentRequestRegistry {
             .lock()
             .map_err(|_| "Agent tool-result lock poisoned".to_string())?;
         let expected = pending
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| "Agent request has no in-flight tool call".to_string())?;
         if expected.call_id != result.call_id {
             return Err("Agent tool result callId does not match the in-flight call".to_string());
         }
-        let sender = pending
+        let sender = expected
+            .sender
             .take()
-            .and_then(|mut pending| pending.sender.take())
             .ok_or_else(|| "Agent tool result was already submitted".to_string())?;
         sender
             .send(result)
@@ -370,6 +370,8 @@ enum ToolResultWait {
 
 #[async_trait]
 trait ToolResultBroker: Send + Sync {
+    fn prepare_for_result(&self, request_id: &str, call_id: &str) -> Result<(), String>;
+
     async fn wait_for_result(
         &self,
         request_id: &str,
@@ -381,6 +383,27 @@ trait ToolResultBroker: Send + Sync {
 
 #[async_trait]
 impl ToolResultBroker for AgentRequestRegistry {
+    fn prepare_for_result(&self, request_id: &str, call_id: &str) -> Result<(), String> {
+        let active = self.active(request_id)?;
+        if active.cancellation.is_cancelled() {
+            return Err("Agent request is cancelled".to_string());
+        }
+        let (sender, receiver) = oneshot::channel();
+        let mut pending = active
+            .pending
+            .lock()
+            .map_err(|_| "Agent tool-result lock poisoned".to_string())?;
+        if pending.is_some() {
+            return Err("Agent request already has an in-flight tool call".to_string());
+        }
+        *pending = Some(PendingToolResult {
+            call_id: call_id.to_string(),
+            sender: Some(sender),
+            receiver: Some(receiver),
+        });
+        Ok(())
+    }
+
     async fn wait_for_result(
         &self,
         request_id: &str,
@@ -389,20 +412,22 @@ impl ToolResultBroker for AgentRequestRegistry {
         cancellation: &CancellationToken,
     ) -> Result<ToolResultWait, String> {
         let active = self.active(request_id)?;
-        let (sender, receiver) = oneshot::channel();
-        {
+        let receiver = {
             let mut pending = active
                 .pending
                 .lock()
                 .map_err(|_| "Agent tool-result lock poisoned".to_string())?;
-            if pending.is_some() {
-                return Err("Agent request already has an in-flight tool call".to_string());
+            let pending = pending
+                .as_mut()
+                .ok_or_else(|| "Agent request has no prepared tool-result wait".to_string())?;
+            if pending.call_id != call_id {
+                return Err("Prepared Agent tool-result callId does not match".to_string());
             }
-            *pending = Some(PendingToolResult {
-                call_id: call_id.to_string(),
-                sender: Some(sender),
-            });
-        }
+            pending
+                .receiver
+                .take()
+                .ok_or_else(|| "Agent tool-result wait already started".to_string())?
+        };
 
         let outcome = tokio::select! {
             _ = cancellation.cancelled() => ToolResultWait::Cancelled,
@@ -996,6 +1021,12 @@ async fn run_tool_loop(
             explanation: arguments.explanation,
             target: request.target.clone(),
         };
+        results
+            .prepare_for_result(&request.request_id, &call_id)
+            .map_err(|message| AgentRunFailure {
+                failure: ProviderFailure::other(message),
+                tool_steps,
+            })?;
         events
             .emit(AgentStreamEvent::ToolCall {
                 request_id: request.request_id.clone(),
@@ -3075,6 +3106,25 @@ mod tests {
         }
     }
 
+    struct ImmediateSubmittingEvents {
+        registry: AgentRequestRegistry,
+    }
+
+    impl AgentEventSink for ImmediateSubmittingEvents {
+        fn emit(&self, event: AgentStreamEvent) -> Result<(), String> {
+            if let AgentStreamEvent::ToolCall { tool_call, .. } = event {
+                self.registry.submit(AgentToolResult {
+                    request_id: tool_call.request_id,
+                    call_id: tool_call.call_id,
+                    status: AgentToolResultStatus::Completed,
+                    exit_code: Some(0),
+                    output: "synchronous terminal result".to_string(),
+                })?;
+            }
+            Ok(())
+        }
+    }
+
     struct ScriptedResultBroker {
         results: Mutex<VecDeque<(AgentToolResultStatus, Option<i32>, String)>>,
         calls: Mutex<Vec<String>>,
@@ -3114,6 +3164,10 @@ mod tests {
 
     #[async_trait]
     impl ToolResultBroker for ScriptedResultBroker {
+        fn prepare_for_result(&self, _request_id: &str, _call_id: &str) -> Result<(), String> {
+            Ok(())
+        }
+
         async fn wait_for_result(
             &self,
             request_id: &str,
@@ -3424,6 +3478,32 @@ mod tests {
         .await
         .unwrap();
         (outcome, pushed_results)
+    }
+
+    #[tokio::test]
+    async fn full_access_result_can_arrive_while_tool_call_event_is_delivered() {
+        let (provider, pushed_results) = ScriptedTurnProvider::new(vec![
+            terminal_turn("uptime"),
+            outcome_turn(AgentTaskOutcome::Completed, "Verified uptime."),
+        ]);
+        let registry = AgentRequestRegistry::default();
+        let cancellation = registry.register("request-1").unwrap();
+        let outcome = run_agent_request(
+            AiProviderKind::OpenAi,
+            true,
+            Box::new(provider),
+            request(),
+            cancellation,
+            Arc::new(registry.clone()),
+            Arc::new(ImmediateSubmittingEvents { registry }),
+            AgentLoopConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.outcome, AgentTaskOutcome::Completed);
+        assert_eq!(outcome.tool_steps, 1);
+        assert_eq!(pushed_results.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -4058,20 +4138,7 @@ mod tests {
     async fn registry_submission_is_call_correlated_and_exactly_once() {
         let registry = AgentRequestRegistry::default();
         let cancellation = registry.register("request-1").unwrap();
-        let waiting_registry = registry.clone();
-        let waiting_cancellation = cancellation.clone();
-        let waiter = tokio::spawn(async move {
-            waiting_registry
-                .wait_for_result(
-                    "request-1",
-                    "call-1",
-                    Duration::from_secs(1),
-                    &waiting_cancellation,
-                )
-                .await
-                .unwrap()
-        });
-        tokio::task::yield_now().await;
+        registry.prepare_for_result("request-1", "call-1").unwrap();
         assert!(registry
             .submit(AgentToolResult {
                 request_id: "request-1".to_string(),
@@ -4088,7 +4155,23 @@ mod tests {
             exit_code: Some(0),
             output: "real output".to_string(),
         };
+        // A full-access frontend can execute and submit synchronously while
+        // the toolCall event itself is still being delivered. The prepared
+        // slot must accept that result before the async waiter starts.
         registry.submit(result.clone()).unwrap();
+        let waiting_registry = registry.clone();
+        let waiting_cancellation = cancellation.clone();
+        let waiter = tokio::spawn(async move {
+            waiting_registry
+                .wait_for_result(
+                    "request-1",
+                    "call-1",
+                    Duration::from_secs(1),
+                    &waiting_cancellation,
+                )
+                .await
+                .unwrap()
+        });
         assert!(registry.submit(result.clone()).is_err());
         match waiter.await.unwrap() {
             ToolResultWait::Submitted(received) => assert_eq!(received, result),
@@ -4100,6 +4183,9 @@ mod tests {
     async fn registry_wait_converges_on_timeout_and_cancellation() {
         let timed = AgentRequestRegistry::default();
         let timed_cancellation = timed.register("request-timeout").unwrap();
+        timed
+            .prepare_for_result("request-timeout", "call-timeout")
+            .unwrap();
         assert!(matches!(
             timed
                 .wait_for_result(
@@ -4115,6 +4201,9 @@ mod tests {
 
         let cancelled = AgentRequestRegistry::default();
         let cancel_token = cancelled.register("request-cancel").unwrap();
+        cancelled
+            .prepare_for_result("request-cancel", "call-cancel")
+            .unwrap();
         let waiting_registry = cancelled.clone();
         let waiting_token = cancel_token.clone();
         let waiter = tokio::spawn(async move {
