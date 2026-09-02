@@ -25,10 +25,16 @@ const COMPLETION_CAPABILITY_HEX_CHARS = BOUNDARY_ENTROPY_BYTES * 2;
 const COMPLETION_COMMITMENT_HEX_CHARS = 64;
 const COMPLETION_CAPABILITY_FAILURE = '0'.repeat(COMPLETION_CAPABILITY_HEX_CHARS);
 const COMPLETION_COMMITMENT_FAILURE = 'f9a2ba511957122bfa67b029061c679703494540b35f02e0e0496a3b0cdcc46a';
-const RECORD_SEPARATOR = '\u001e';
-const UNIT_SEPARATOR = '\u001f';
+// Windows ConPTY drops the C0 record/unit separators previously used here.
+// An OSC record survives ConPTY and is ignored by terminal renderers if a
+// frame ever reaches one before the display filter removes it.
+const RECORD_SEPARATOR = '\u001b]6973;';
+const UNIT_SEPARATOR = '\u0007';
 const MAX_EXIT_CODE_TOKEN_CHARS = 20;
-const DISPLAY_FILTER_FAIL_OPEN_LIMIT_CHARS = 64 * 1024;
+const DISPLAY_FILTER_FAIL_OPEN_MIN_CHARS = 64 * 1024;
+const DISPLAY_FILTER_FAIL_OPEN_MAX_CHARS = AGENT_TERMINAL_CAPTURE_LIMIT_BYTES;
+const DISPLAY_FILTER_ECHO_EXPANSION_FACTOR = 16;
+const DISPLAY_FILTER_PREFIX_SCAN_TAIL_CHARS = 4 * 1024;
 const CAPTURE_OMISSION_MARKER = '\n[... terminal output beyond the 2 MiB capture boundary omitted ...]\n';
 const TRUSTED_POSIX_READ_ONLY_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
 const POWERSHELL_COMMAND_ENVIRONMENT = 'SHELLSPAN_AGENT_COMMAND';
@@ -39,8 +45,7 @@ const POWERSHELL_PARENT_PID_ENVIRONMENT = 'SHELLSPAN_AGENT_PARENT_PID';
 const POWERSHELL_PARENT_START_ENVIRONMENT = 'SHELLSPAN_AGENT_PARENT_START';
 const POWERSHELL_USER_MODULE_PATH_ENVIRONMENT = 'SHELLSPAN_AGENT_USER_PSMODULEPATH';
 const PTY_WRITE_PROGRESS_FALLBACK_MS = 25;
-const POWERSHELL_PTY_STRING_CHUNK_BYTES = 384;
-const POWERSHELL_PTY_PHYSICAL_LINE_TARGET_BYTES = 768;
+const POWERSHELL_STAGING_CHUNK_CHARS = 512;
 const POWERSHELL_PTY_PHYSICAL_LINE_LIMIT_BYTES = 1_024;
 
 const WINDOWS_RUNTIME_INJECTION_ENVIRONMENT = [
@@ -539,6 +544,34 @@ function longestSuffixMatchingTokenPrefix(value: string, tokens: readonly string
   return 0;
 }
 
+const ANSI_SEQUENCE_PATTERN = /\u001b(?:\][\s\S]*?(?:\u0007|\u001b\\)|\[[0-?]*[ -/]*[@-~]|[@-_])/y;
+
+/** Returns the raw start of a token even when shell highlighting splits it. */
+function indexOfTokenIgnoringAnsi(value: string, token: string): number {
+  let plain = '';
+  const rawStarts: number[] = [];
+  let pendingFormattingStart: number | undefined;
+
+  for (let rawIndex = 0; rawIndex < value.length;) {
+    if (value[rawIndex] === '\u001b') {
+      ANSI_SEQUENCE_PATTERN.lastIndex = rawIndex;
+      const match = ANSI_SEQUENCE_PATTERN.exec(value);
+      if (match) {
+        pendingFormattingStart ??= rawIndex;
+        rawIndex += match[0].length;
+        continue;
+      }
+    }
+    rawStarts.push(pendingFormattingStart ?? rawIndex);
+    pendingFormattingStart = undefined;
+    plain += value[rawIndex];
+    rawIndex += 1;
+  }
+
+  const plainIndex = plain.indexOf(token);
+  return plainIndex < 0 ? -1 : rawStarts[plainIndex];
+}
+
 /**
  * Removes the private M2 wrapper echo and framed boundary records from the
  * visible terminal stream while leaving the raw PTY stream untouched for the
@@ -550,15 +583,31 @@ export class AgentTerminalDisplayFilter implements TerminalOutputFilter {
   private pending = '';
   private wrapperSuppressionAvailable = true;
   private readonly wrapperEchoPrefix: string;
+  private readonly wrapperFailOpenLimitChars: number;
   private completionCommitment?: string;
 
   constructor(
     private readonly boundary: AgentTerminalBoundary,
     private readonly command: string,
     shell: AgentTerminalShell,
+    expectedWrapperLength = 0,
   ) {
     const nonce = boundary.marker.slice(BOUNDARY_PREFIX.length);
     this.wrapperEchoPrefix = `${shell === 'powershell' ? '$' : ''}__tb_marker_${nonce}=`;
+    // Interactive shells can add continuation prompts and ANSI syntax
+    // highlighting to the echoed wrapper. Size the fail-open window from the
+    // wrapper being submitted so a valid, bounded Windows wrapper is not
+    // exposed merely because its decorated echo exceeds the generic floor.
+    const boundedWrapperLength = Number.isFinite(expectedWrapperLength)
+      ? Math.max(0, Math.floor(expectedWrapperLength))
+      : 0;
+    this.wrapperFailOpenLimitChars = Math.min(
+      DISPLAY_FILTER_FAIL_OPEN_MAX_CHARS,
+      Math.max(
+        DISPLAY_FILTER_FAIL_OPEN_MIN_CHARS,
+        boundedWrapperLength * DISPLAY_FILTER_ECHO_EXPANSION_FACTOR,
+      ),
+    );
   }
 
   push(chunk: string): string {
@@ -570,7 +619,7 @@ export class AgentTerminalDisplayFilter implements TerminalOutputFilter {
     while (this.pending) {
       if (this.state === 'seekingStart') {
         const wrapperStart = this.wrapperSuppressionAvailable
-          ? this.pending.indexOf(this.wrapperEchoPrefix)
+          ? indexOfTokenIgnoringAnsi(this.pending, this.wrapperEchoPrefix)
           : -1;
         const beginStart = this.pending.indexOf(this.boundary.beginPrefix);
         if (wrapperStart >= 0 && (beginStart < 0 || wrapperStart <= beginStart)) {
@@ -587,10 +636,12 @@ export class AgentTerminalDisplayFilter implements TerminalOutputFilter {
           continue;
         }
 
-        const activeTokens = this.wrapperSuppressionAvailable
-          ? [this.wrapperEchoPrefix, this.boundary.beginPrefix]
-          : [this.boundary.beginPrefix];
-        const retained = longestSuffixMatchingTokenPrefix(this.pending, activeTokens);
+        const retained = Math.max(
+          longestSuffixMatchingTokenPrefix(this.pending, [this.boundary.beginPrefix]),
+          this.wrapperSuppressionAvailable
+            ? Math.min(this.pending.length, DISPLAY_FILTER_PREFIX_SCAN_TAIL_CHARS)
+            : 0,
+        );
         visible += this.pending.slice(0, this.pending.length - retained);
         this.pending = this.pending.slice(this.pending.length - retained);
         break;
@@ -599,7 +650,7 @@ export class AgentTerminalDisplayFilter implements TerminalOutputFilter {
       if (this.state === 'suppressingWrapper') {
         const beginStart = this.pending.indexOf(this.boundary.beginPrefix);
         if (beginStart < 0) {
-          if (this.pending.length > DISPLAY_FILTER_FAIL_OPEN_LIMIT_CHARS) {
+          if (this.pending.length > this.wrapperFailOpenLimitChars) {
             visible += this.pending;
             this.pending = '';
             this.state = 'seekingStart';
@@ -759,79 +810,6 @@ function quotePowerShell(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-function quotePowerShellForPty(value: string): string {
-  const chunks: string[] = [];
-  let chunk = '';
-  let chunkBytes = 0;
-  for (const character of value) {
-    const escapedBytes = encoder.encode(character).length + (character === "'" ? 1 : 0);
-    if (chunk && chunkBytes + escapedBytes > POWERSHELL_PTY_STRING_CHUNK_BYTES) {
-      chunks.push(quotePowerShell(chunk));
-      chunk = '';
-      chunkBytes = 0;
-    }
-    chunk += character;
-    chunkBytes += escapedBytes;
-  }
-  if (chunk || chunks.length === 0) chunks.push(quotePowerShell(chunk));
-  return chunks.join('+`\n');
-}
-
-function wrapPowerShellForPty(script: string): string {
-  let wrapped = '';
-  let lineBytes = 0;
-  let singleQuoted = false;
-  let doubleQuoted = false;
-  let escaped = false;
-
-  for (let index = 0; index < script.length; index += 1) {
-    const character = script[index];
-    if (character === '\n') {
-      wrapped += character;
-      lineBytes = 0;
-      escaped = false;
-      continue;
-    }
-
-    if (doubleQuoted && escaped) {
-      escaped = false;
-    } else if (doubleQuoted && character === '`') {
-      escaped = true;
-    } else if (!doubleQuoted && character === "'") {
-      if (singleQuoted && script[index + 1] === "'") {
-        wrapped += "''";
-        lineBytes += 2;
-        index += 1;
-        continue;
-      }
-      singleQuoted = !singleQuoted;
-    } else if (!singleQuoted && character === '"') {
-      doubleQuoted = !doubleQuoted;
-    }
-
-    if (
-      character === ' '
-      && !singleQuoted
-      && !doubleQuoted
-      && lineBytes >= POWERSHELL_PTY_PHYSICAL_LINE_TARGET_BYTES
-    ) {
-      wrapped += ' `\n';
-      lineBytes = 0;
-      continue;
-    }
-    wrapped += character;
-    lineBytes += encoder.encode(character).length;
-  }
-
-  const maximumLineBytes = Math.max(
-    ...wrapped.split('\n').map((line) => encoder.encode(line).length),
-  );
-  if (maximumLineBytes > POWERSHELL_PTY_PHYSICAL_LINE_LIMIT_BYTES) {
-    throw new Error(`PowerShell agent wrapper contains a ${maximumLineBytes}-byte PTY input line`);
-  }
-  return wrapped;
-}
-
 function encodePowerShellCommand(value: string): string {
   let utf16LittleEndian = '';
   for (let index = 0; index < value.length; index += 1) {
@@ -839,6 +817,12 @@ function encodePowerShellCommand(value: string): string {
     utf16LittleEndian += String.fromCharCode(codeUnit & 0xff, codeUnit >>> 8);
   }
   return globalThis.btoa(utf16LittleEndian);
+}
+
+function encodeUtf8Base64(value: string): string {
+  let binary = '';
+  for (const byte of encoder.encode(value)) binary += String.fromCharCode(byte);
+  return globalThis.btoa(binary);
 }
 
 function buildPosixWrapper(
@@ -865,8 +849,8 @@ function buildPosixWrapper(
     '__tb_q=0',
     'if /bin/test -n "$__tb_p"; then /bin/kill -TERM "-$__tb_p" 2>/dev/null; /bin/kill -KILL "-$__tb_p" 2>/dev/null; wait "$__tb_p" 2>/dev/null; __tb_i=0; __tb_group_state; __tb_r=$?; while /bin/test "$__tb_r" -eq 0; do if /bin/test "$__tb_i" -ge 20; then __tb_q=1; break; fi; /bin/kill -KILL "-$__tb_p" 2>/dev/null; /bin/sleep 0.05; __tb_i=$((__tb_i + 1)); __tb_group_state; __tb_r=$?; done; if /bin/test "$__tb_r" -eq 2; then __tb_q=1; fi; __tb_p=; fi',
     'if /bin/test "$__tb_q" -ne 0; then /usr/bin/printf \'%s\\n\' \'Agent command process group termination could not be confirmed. Terminal remains quarantined.\'; exit "$__tb_s"; fi',
-    'if /bin/test "$__tb_b" -eq 0; then /usr/bin/printf \'\\036%s:BEGIN:%s\\037\\n\' "$__tb_m" "$__tb_h"; __tb_b=1; fi',
-    '/usr/bin/printf \'\\036%s:END:%s:%d\\037\' "$__tb_m" "$__tb_k" "$__tb_s"',
+    'if /bin/test "$__tb_b" -eq 0; then /usr/bin/printf \'\\033]6973;%s:BEGIN:%s\\007\\n\' "$__tb_m" "$__tb_h"; __tb_b=1; fi',
+    '/usr/bin/printf \'\\033]6973;%s:END:%s:%d\\007\' "$__tb_m" "$__tb_k" "$__tb_s"',
     'exit "$__tb_s"',
   ].join('; ');
   const commandInvocation = isolateReadOnly
@@ -892,7 +876,7 @@ function buildPosixWrapper(
     '__tb_ch=${__tb_ch%% *}',
     `if ! /bin/test "\${#__tb_ch}" -eq ${COMPLETION_COMMITMENT_HEX_CHARS}; then __tb_f=1; fi`,
     'if /bin/test "$__tb_f" -eq 0; then __tb_k=$__tb_ck __tb_h=$__tb_ch; fi',
-    "/usr/bin/printf '\\036%s:BEGIN:%s\\037\\n' \"$__tb_m\" \"$__tb_h\"",
+    "/usr/bin/printf '\\033]6973;%s:BEGIN:%s\\007\\n' \"$__tb_m\" \"$__tb_h\"",
     '__tb_b=1',
     'if /bin/test "$__tb_f" -ne 0; then __tb_finish 125; fi',
     'PAGER=cat; GIT_PAGER=cat; SYSTEMD_PAGER=cat; export PAGER GIT_PAGER SYSTEMD_PAGER',
@@ -965,6 +949,10 @@ function buildPowerShellWrapper(
   const taskkillInfoVar = variable('taskkill_info');
   const taskkillProcessVar = variable('taskkill_process');
   const exitVar = variable('exit');
+  const stagingVar = variable('staging');
+  const stagedScriptVar = variable('staged_script');
+  const stagedHashVar = variable('staged_hash');
+  const stagedActualVar = variable('staged_actual');
   const systemDirectoryExpression =
     '[System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::System)';
   const systemRootExpression =
@@ -1036,7 +1024,7 @@ function buildPowerShellWrapper(
     '$__shellspanHash=$null',
     `try { $__shellspanBytes=[byte[]][System.Array]::CreateInstance([byte],${BOUNDARY_ENTROPY_BYTES}); $__shellspanRandom=[System.Security.Cryptography.RandomNumberGenerator]::Create(); $__shellspanRandom.GetBytes($__shellspanBytes); $__shellspanCapability=[System.BitConverter]::ToString($__shellspanBytes).Replace('-','').ToLowerInvariant(); if ($__shellspanCapability -eq '${COMPLETION_CAPABILITY_FAILURE}') { throw [System.Security.Cryptography.CryptographicException]::new('Invalid random capability.') }; $__shellspanHash=[System.Security.Cryptography.SHA256]::Create(); $__shellspanCommitment=[System.BitConverter]::ToString($__shellspanHash.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($__shellspanCapability))).Replace('-','').ToLowerInvariant() } catch { $__shellspanCapabilityFailed=$true; $__shellspanCapability='${COMPLETION_CAPABILITY_FAILURE}'; $__shellspanCommitment='${COMPLETION_COMMITMENT_FAILURE}' } finally { if ($null -ne $__shellspanRandom) { $__shellspanRandom.Dispose() }; if ($null -ne $__shellspanHash) { $__shellspanHash.Dispose() } }`,
     `if ($__shellspanCapabilityFailed) { [Console]::WriteLine('Secure completion capability generation failed.'); exit 125 }`,
-    "[Console]::WriteLine((-join ([char]30,$__shellspanMarker,':BEGIN:',$__shellspanCommitment,[char]31)))",
+    "[Console]::WriteLine((-join ([char]27,']6973;',$__shellspanMarker,':BEGIN:',$__shellspanCommitment,[char]7)))",
     '$__shellspanJob=[IntPtr]::Zero',
     '$__shellspanGate=$null',
     '$__shellspanProcess=$null',
@@ -1045,9 +1033,9 @@ function buildPowerShellWrapper(
     '$__shellspanCleanupConfirmed=$true',
     '$__shellspanExit=126',
     'try {',
-    `if (-not (Test-ShellSpanParent) -or [System.IO.File]::Exists($__shellspanCancelPath)) { $__shellspanExit=130 } else { Microsoft.PowerShell.Utility\\Add-Type -TypeDefinition ${quotePowerShell(jobObjectSource)}; if (-not (Test-ShellSpanParent)) { $__shellspanExit=130 } else { $__shellspanJob=[ShellSpanAgentJob]::CreateJobObject([IntPtr]::Zero,$null); if ($__shellspanJob -eq [IntPtr]::Zero -or -not [ShellSpanAgentJob]::EnableKillOnClose($__shellspanJob)) { throw [System.InvalidOperationException]::new('Unable to create a contained command job.') }; $__shellspanGateName='shellspan-gate-'+[System.Guid]::NewGuid().ToString('N'); $__shellspanGate=[System.Threading.EventWaitHandle]::new($false,[System.Threading.EventResetMode]::ManualReset,$__shellspanGateName); $__shellspanInfo=[System.Diagnostics.ProcessStartInfo]::new(); $__shellspanInfo.FileName=${powershellExecutableExpression}; $__shellspanInfo.Arguments=${quotePowerShell(commandArguments)}; $__shellspanInfo.UseShellExecute=$false; $__shellspanInfo.CreateNoWindow=$true; $__shellspanInfo.RedirectStandardInput=$true; if ($null -eq $__shellspanUserModulePath) { [void]$__shellspanInfo.EnvironmentVariables.Remove('PSModulePath') } else { $__shellspanInfo.EnvironmentVariables['PSModulePath']=$__shellspanUserModulePath }; $__shellspanInfo.EnvironmentVariables['${POWERSHELL_COMMAND_ENVIRONMENT}']=$__shellspanCommand; $__shellspanInfo.EnvironmentVariables['${POWERSHELL_GATE_ENVIRONMENT}']=$__shellspanGateName; $__shellspanProcess=[System.Diagnostics.Process]::new(); $__shellspanProcess.StartInfo=$__shellspanInfo; if (-not (Test-ShellSpanParent)) { $__shellspanExit=130 } else { $__shellspanStarted=$__shellspanProcess.Start(); if (-not $__shellspanStarted) { throw [System.InvalidOperationException]::new('Agent command process failed to start.') }; $__shellspanProcess.StandardInput.Close(); $__shellspanAssigned=[ShellSpanAgentJob]::AssignProcessToJobObject($__shellspanJob,$__shellspanProcess.Handle); if (-not $__shellspanAssigned) { throw [System.InvalidOperationException]::new('Agent command process could not enter its containment job.') }; if (-not (Test-ShellSpanParent)) { $__shellspanExit=130 } else { [void]$__shellspanGate.Set(); while (-not $__shellspanProcess.WaitForExit(100)) { if ([System.IO.File]::Exists($__shellspanCancelPath) -or -not (Test-ShellSpanParent)) { $__shellspanExit=130; break } }; if ($__shellspanProcess.HasExited) { $__shellspanExit=$__shellspanProcess.ExitCode } } } } }`,
+    `if (-not (Test-ShellSpanParent) -or [System.IO.File]::Exists($__shellspanCancelPath)) { $__shellspanExit=130 } else { Microsoft.PowerShell.Utility\\Add-Type -TypeDefinition ${quotePowerShell(jobObjectSource)}; if (-not (Test-ShellSpanParent)) { $__shellspanExit=130 } else { $__shellspanJob=[ShellSpanAgentJob]::CreateJobObject([IntPtr]::Zero,$null); if ($__shellspanJob -eq [IntPtr]::Zero -or -not [ShellSpanAgentJob]::EnableKillOnClose($__shellspanJob)) { throw [System.InvalidOperationException]::new('Unable to create a contained command job.') }; $__shellspanGateName='shellspan-gate-'+[System.Guid]::NewGuid().ToString('N'); $__shellspanGate=[System.Threading.EventWaitHandle]::new($false,[System.Threading.EventResetMode]::ManualReset,$__shellspanGateName); $__shellspanInfo=[System.Diagnostics.ProcessStartInfo]::new(); $__shellspanInfo.FileName=${powershellExecutableExpression}; $__shellspanInfo.Arguments=${quotePowerShell(commandArguments)}; $__shellspanInfo.UseShellExecute=$false; $__shellspanInfo.CreateNoWindow=$false; $__shellspanInfo.RedirectStandardInput=$true; if ($null -eq $__shellspanUserModulePath) { [void]$__shellspanInfo.EnvironmentVariables.Remove('PSModulePath') } else { $__shellspanInfo.EnvironmentVariables['PSModulePath']=$__shellspanUserModulePath }; $__shellspanInfo.EnvironmentVariables['${POWERSHELL_COMMAND_ENVIRONMENT}']=$__shellspanCommand; $__shellspanInfo.EnvironmentVariables['${POWERSHELL_GATE_ENVIRONMENT}']=$__shellspanGateName; $__shellspanProcess=[System.Diagnostics.Process]::new(); $__shellspanProcess.StartInfo=$__shellspanInfo; if (-not (Test-ShellSpanParent)) { $__shellspanExit=130 } else { $__shellspanStarted=$__shellspanProcess.Start(); if (-not $__shellspanStarted) { throw [System.InvalidOperationException]::new('Agent command process failed to start.') }; $__shellspanProcess.StandardInput.Close(); $__shellspanAssigned=[ShellSpanAgentJob]::AssignProcessToJobObject($__shellspanJob,$__shellspanProcess.Handle); if (-not $__shellspanAssigned) { throw [System.InvalidOperationException]::new('Agent command process could not enter its containment job.') }; if (-not (Test-ShellSpanParent)) { $__shellspanExit=130 } else { [void]$__shellspanGate.Set(); while (-not $__shellspanProcess.WaitForExit(100)) { if ([System.IO.File]::Exists($__shellspanCancelPath) -or -not (Test-ShellSpanParent)) { $__shellspanExit=130; break } }; if ($__shellspanProcess.HasExited) { $__shellspanExit=$__shellspanProcess.ExitCode } } } } }`,
     `} catch { if ([System.IO.File]::Exists($__shellspanCancelPath) -or -not (Test-ShellSpanParent)) { $__shellspanExit=130 } else { $__shellspanExit=126 } } finally { if ($__shellspanAssigned -and $__shellspanJob -ne [IntPtr]::Zero) { $__shellspanCleanupConfirmed=$false; if ([ShellSpanAgentJob]::TerminateJobObject($__shellspanJob,1)) { $__shellspanJobCleanupDeadline=[System.DateTime]::UtcNow.AddSeconds(2); do { if ([ShellSpanAgentJob]::GetActiveProcessCount($__shellspanJob) -eq 0) { $__shellspanCleanupConfirmed=$true; break }; [System.Threading.Thread]::Sleep(20) } while ([System.DateTime]::UtcNow -lt $__shellspanJobCleanupDeadline) } } elseif ($__shellspanStarted -and $null -ne $__shellspanProcess) { try { if (-not $__shellspanProcess.HasExited) { $__shellspanProcess.Kill() }; $__shellspanCleanupConfirmed=$__shellspanProcess.WaitForExit(2000) } catch { $__shellspanCleanupConfirmed=$false } }; if ($null -ne $__shellspanGate) { $__shellspanGate.Dispose() }; if ($null -ne $__shellspanProcess) { $__shellspanProcess.Dispose() }; if ($__shellspanJob -ne [IntPtr]::Zero) { [void][ShellSpanAgentJob]::CloseHandle($__shellspanJob) }; if ($null -ne $__shellspanParent) { $__shellspanParent.Dispose() }; try { [System.IO.File]::Delete($__shellspanCancelPath) } catch { } }`,
-    `if ($__shellspanCleanupConfirmed) { [Console]::Write((-join ([char]30,$__shellspanMarker,':END:',$__shellspanCapability,':',$__shellspanExit,[char]31))) } else { [Console]::WriteLine('Agent command process tree termination could not be confirmed; terminal remains quarantined.') }`,
+    `if ($__shellspanCleanupConfirmed) { [Console]::Write((-join ([char]27,']6973;',$__shellspanMarker,':END:',$__shellspanCapability,':',$__shellspanExit,[char]7))) } else { [Console]::WriteLine('Agent command process tree termination could not be confirmed; terminal remains quarantined.') }`,
     'exit $__shellspanExit',
   ].join(';');
   const privateSupervisorHash = sha256Text(privateSupervisor);
@@ -1094,20 +1082,23 @@ function buildPowerShellWrapper(
     taskkillInfoVar,
     taskkillProcessVar,
     exitVar,
+    stagingVar,
+    stagedScriptVar,
+    stagedHashVar,
+    stagedActualVar,
   ];
 
-  return wrapPowerShellForPty([
-    `${markerVar}=${quotePowerShell(markerFirst)}+${quotePowerShell(markerSecond)}`,
-    `${commandVar}=${quotePowerShellForPty(command)}`,
-    `${supervisorScriptVar}=${quotePowerShellForPty(privateSupervisor)}`,
+  const outerScript = [
+    `${commandVar}=${quotePowerShell(command)}`,
+    `${supervisorScriptVar}=${quotePowerShell(privateSupervisor)}`,
     `${commandModulePathVar}=$null`,
     `${cancelPathVar}=[System.IO.Path]::Combine([System.IO.Path]::GetTempPath(),('shellspan-cancel-'+[System.Guid]::NewGuid().ToString('N')+'.flag'))`,
     `${cancelPartPathVar}=${cancelPathVar}+'.part'`,
     `${processInfoVar}=[System.Diagnostics.ProcessStartInfo]::new()`,
     `${processInfoVar}.FileName=${powershellExecutableExpression}`,
-    `${processInfoVar}.Arguments=${quotePowerShellForPty(supervisorArguments)}`,
+    `${processInfoVar}.Arguments=${quotePowerShell(supervisorArguments)}`,
     `${processInfoVar}.UseShellExecute=$false`,
-    `${processInfoVar}.CreateNoWindow=$true`,
+    `${processInfoVar}.CreateNoWindow=$false`,
     `${processInfoVar}.RedirectStandardInput=$true`,
     ...(!isolateReadOnly ? [`${commandModulePathVar}=${processInfoVar}.EnvironmentVariables['PSModulePath']`] : []),
     ...(isolateReadOnly ? [isolatedEnvironment] : []),
@@ -1129,7 +1120,33 @@ function buildPowerShellWrapper(
     `${taskkillProcessVar}=$null`,
     `${exitVar}=130`,
     `try { ${processStartedVar}=${processVar}.Start(); if (-not ${processStartedVar}) { throw [System.InvalidOperationException]::new('Agent command supervisor failed to start.') }; ${processVar}.StandardInput.Write(${supervisorScriptVar}); ${processVar}.StandardInput.Close(); while (-not ${processVar}.WaitForExit(100)) { }; ${exitVar}=${processVar}.ExitCode } finally { if (${processStartedVar} -and -not ${processVar}.HasExited) { try { [System.IO.File]::WriteAllText(${cancelPartPathVar},'cancel',[System.Text.Encoding]::ASCII); [System.IO.File]::Move(${cancelPartPathVar},${cancelPathVar}) } catch { }; ${cleanupDeadlineVar}=[System.DateTime]::UtcNow.AddSeconds(5); while (-not ${processVar}.WaitForExit(100) -and [System.DateTime]::UtcNow -lt ${cleanupDeadlineVar}) { }; if (-not ${processVar}.HasExited) { try { ${taskkillInfoVar}=[System.Diagnostics.ProcessStartInfo]::new(); ${taskkillInfoVar}.FileName=[System.IO.Path]::Combine(${systemDirectoryExpression},'taskkill.exe'); ${taskkillInfoVar}.Arguments=('/PID '+${processVar}.Id+' /T /F'); ${taskkillInfoVar}.UseShellExecute=$false; ${taskkillInfoVar}.CreateNoWindow=$true; ${taskkillProcessVar}=[System.Diagnostics.Process]::new(); ${taskkillProcessVar}.StartInfo=${taskkillInfoVar}; [void]${taskkillProcessVar}.Start(); [void]${taskkillProcessVar}.WaitForExit(5000) } catch { try { ${processVar}.Kill(); [void]${processVar}.WaitForExit(2000) } catch { } } } }; if (${processVar}.HasExited) { ${exitVar}=${processVar}.ExitCode }; if ($null -ne ${taskkillProcessVar}) { ${taskkillProcessVar}.Dispose() }; ${processVar}.Dispose(); try { [System.IO.File]::Delete(${cancelPathVar}) } catch { }; try { [System.IO.File]::Delete(${cancelPartPathVar}) } catch { }; $global:LASTEXITCODE=${exitVar}; Microsoft.PowerShell.Utility\\Remove-Variable ${supervisorVariables.map((name) => name.slice(1)).join(', ')} -ErrorAction SilentlyContinue }`,
-  ].join('; '));
+  ].join('; ');
+  const encodedOuterScript = encodeUtf8Base64(outerScript);
+  const stagingChunks: string[] = [];
+  for (let offset = 0; offset < encodedOuterScript.length; offset += POWERSHELL_STAGING_CHUNK_CHARS) {
+    stagingChunks.push(encodedOuterScript.slice(offset, offset + POWERSHELL_STAGING_CHUNK_CHARS));
+  }
+  const expectedOuterHash = sha256Text(outerScript);
+  const wrapper = [
+    `${markerVar}=${quotePowerShell(markerFirst)}+${quotePowerShell(markerSecond)}; ${stagingVar}=[System.Text.StringBuilder]::new()`,
+    ...stagingChunks.map((chunk) => `[void]${stagingVar}.Append('${chunk}')`),
+    `${stagedScriptVar}=$null`,
+    `${stagedHashVar}=$null`,
+    `${stagedActualVar}=$null`,
+    `${stagedScriptVar}=[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String(${stagingVar}.ToString()))`,
+    `${stagedHashVar}=[System.Security.Cryptography.SHA256]::Create()`,
+    `${stagedActualVar}=[System.BitConverter]::ToString(${stagedHashVar}.ComputeHash([System.Text.Encoding]::UTF8.GetBytes(${stagedScriptVar}))).Replace('-','').ToLowerInvariant()`,
+    `${stagedHashVar}.Dispose(); ${stagedHashVar}=$null`,
+    `if (${stagedActualVar} -ne '${expectedOuterHash}') { throw [System.Security.Cryptography.CryptographicException]::new('Agent command staging integrity check failed.') }`,
+    `. ([ScriptBlock]::Create(${stagedScriptVar}))`,
+  ].join('\n');
+  const maximumLineBytes = Math.max(
+    ...wrapper.split('\n').map((line) => encoder.encode(line).length),
+  );
+  if (maximumLineBytes > POWERSHELL_PTY_PHYSICAL_LINE_LIMIT_BYTES) {
+    throw new Error(`PowerShell agent wrapper contains a ${maximumLineBytes}-byte PTY input line`);
+  }
+  return wrapper;
 }
 
 export function buildAgentTerminalWrapper(
@@ -2331,7 +2348,7 @@ export class AgentTerminalExecutor {
         // write so even a command that returns in the same event turn cannot
         // outrun output capture.
         unsubscribeOutputFilter = controller.subscribeOutputFilter(
-          new AgentTerminalDisplayFilter(boundary, call.command, shell),
+          new AgentTerminalDisplayFilter(boundary, call.command, shell, wrapper.length),
         );
         unsubscribeOutput = controller.subscribeOutput((chunk) => {
           releaseWritePace?.();

@@ -553,9 +553,23 @@ export function agentTargetFromSession(session: TerminalSession): AgentTargetSna
   };
 }
 
-export const agentUiController = new AgentUiController();
+interface AgentUiHotData {
+  agentUiController?: AgentUiController;
+}
 
-registerAgentLifecycleHandlers({
+const agentUiHotData = import.meta.hot?.data as AgentUiHotData | undefined;
+
+// Vite replaces this module without unloading the webview. Reusing the
+// controller keeps exactly one backend stream listener and prevents two HMR
+// generations from executing and submitting the same terminal tool call.
+export const agentUiController = agentUiHotData?.agentUiController ?? new AgentUiController();
+if (agentUiHotData) agentUiHotData.agentUiController = agentUiController;
+
+const unregisterAgentLifecycle = registerAgentLifecycleHandlers({
   cancelForSession: (sessionId) => agentUiController.cancelForSession(sessionId),
   shutdown: () => agentUiController.shutdown(),
+});
+
+import.meta.hot?.dispose(() => {
+  unregisterAgentLifecycle();
 });
