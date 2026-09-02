@@ -19,9 +19,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
+import { Field } from '@/components/ui/field';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/hooks/useI18n';
@@ -231,13 +230,10 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         title={t('settings.ai.providers')}
         titleId="ai-model-providers-heading"
         action={(
-            <Button
-              size="xs"
-              onClick={() => setAddOpen(true)}
-            >
-              <PlusIcon data-icon="inline-start" />
-              {t('settings.ai.addProvider')}
-            </Button>
+          <Button size="xs" onClick={() => setAddOpen(true)}>
+            <PlusIcon data-icon="inline-start" />
+            {t('settings.ai.addProvider')}
+          </Button>
         )}
       >
         {providers.map((provider) => {
@@ -294,20 +290,20 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           label={t('settings.ai.contextLines')}
           description={t('settings.ai.contextHint')}
         >
-              <Select value={String(contextLines)} onValueChange={(value) => setContextLines(Number(value))}>
-                <SelectTrigger size="sm" aria-label={t('settings.ai.contextLines')}>
-                  <SelectValue>{t('settings.ai.contextLinesValue', { count: contextLines })}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {[50, 100, 200, 500].map((count) => (
-                      <SelectItem key={count} value={String(count)}>
-                        {t('settings.ai.contextLinesValue', { count })}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+          <Select value={String(contextLines)} onValueChange={(value) => setContextLines(Number(value))}>
+            <SelectTrigger size="sm" aria-label={t('settings.ai.contextLines')}>
+              <SelectValue>{t('settings.ai.contextLinesValue', { count: contextLines })}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {[50, 100, 200, 500].map((count) => (
+                  <SelectItem key={count} value={String(count)}>
+                    {t('settings.ai.contextLinesValue', { count })}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </SettingRow>
       </SettingsGroup>
 
@@ -325,15 +321,14 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         <SettingRow
           label={t('settings.ai.agent.enable')}
           description={t('settings.ai.agent.enableDescription')}
-          className={cn(agentActionBusy && 'opacity-50')}
         >
-              <Switch
-                id="ai-agent-enabled"
-                aria-label={t('settings.ai.agent.enable')}
-                checked={agentEnabled && Boolean(agentPolicy?.featureEnabled)}
-                disabled={!agentPolicy?.featureEnabled || agentActionBusy}
-                onCheckedChange={(enabled) => void handleAgentEnabledChange(enabled)}
-              />
+          <Switch
+            id="ai-agent-enabled"
+            aria-label={t('settings.ai.agent.enable')}
+            checked={agentEnabled && Boolean(agentPolicy?.featureEnabled)}
+            disabled={!agentPolicy?.featureEnabled || agentActionBusy}
+            onCheckedChange={(enabled) => void handleAgentEnabledChange(enabled)}
+          />
         </SettingRow>
         <div className="px-4 py-3">
           <Alert size="sm">
@@ -346,16 +341,16 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           label={t('settings.ai.agent.localData')}
           description={t('settings.ai.agent.localDataDescription')}
         >
-            <Button
-              className="w-full @min-[32rem]:w-auto"
-              variant="destructiveOutline"
-              size="sm"
-              disabled={agentActionBusy}
-              onClick={() => setClearAgentOpen(true)}
-            >
-              {agentActionBusy ? <Spinner data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
-              {t('settings.ai.agent.clearSessions')}
-            </Button>
+          <Button
+            className="w-full @min-[32rem]:w-auto"
+            variant="destructiveOutline"
+            size="sm"
+            disabled={agentActionBusy}
+            onClick={() => setClearAgentOpen(true)}
+          >
+            {agentActionBusy ? <Spinner data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
+            {t('settings.ai.agent.clearSessions')}
+          </Button>
         </SettingRow>
       </SettingsGroup>
 
@@ -364,22 +359,22 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           label={t('ai.history.localData')}
           description={t('ai.history.description', { count: historicalConversations.length })}
         >
-              {historicalConversations.length === 0 ? (
-                <Badge variant="outline">{t('ai.history.empty')}</Badge>
-              ) : (
-                <Button
-                  className="w-full @min-[32rem]:w-auto"
-                  variant="destructiveOutline"
-                  size="sm"
-                  disabled={historyActionBusy}
-                  onClick={() => setClearHistoryOpen(true)}
-                >
-                  {historyActionBusy
-                    ? <Spinner data-icon="inline-start" />
-                    : <Trash2Icon data-icon="inline-start" />}
-                  {t('ai.history.deleteAll')}
-                </Button>
-              )}
+          {historicalConversations.length === 0 ? (
+            <Badge variant="outline">{t('ai.history.empty')}</Badge>
+          ) : (
+            <Button
+              className="w-full @min-[32rem]:w-auto"
+              variant="destructiveOutline"
+              size="sm"
+              disabled={historyActionBusy}
+              onClick={() => setClearHistoryOpen(true)}
+            >
+              {historyActionBusy
+                ? <Spinner data-icon="inline-start" />
+                : <Trash2Icon data-icon="inline-start" />}
+              {t('ai.history.deleteAll')}
+            </Button>
+          )}
         </SettingRow>
       </SettingsGroup>
 
