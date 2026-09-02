@@ -371,41 +371,32 @@ describe('TerminalPane', () => {
     document.removeEventListener('mousemove', downstream);
   });
 
-  it('clears a transient selection after xterm finishes handling a trackpad-like tap drift', async () => {
+  it('keeps trackpad-like tap drift away from xterm', () => {
     const terminal = makeMockTerminal();
-    vi.mocked(terminal.hasSelection).mockReturnValue(true);
-    const order: string[] = [];
-    vi.mocked(terminal.clearSelection).mockImplementation(() => {
-      order.push('clear');
-    });
     render(<TerminalPane activeSession={makeSession()} />);
-
-    // xterm registers its document mouseup listener after ours on mousedown.
-    // The deferred clear must run after that listener, not before it.
-    const xtermMouseUp = (): void => {
-      order.push('xterm');
-    };
-    document.addEventListener('mouseup', xtermMouseUp);
+    const xtermMouseMove = vi.fn();
+    document.addEventListener('mousemove', xtermMouseMove);
 
     terminal.element?.dispatchEvent(
       mouseEventAt('mousedown', 1_000, { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
     );
     document.dispatchEvent(
-      mouseEventAt('mousemove', 1_020, { button: 0, buttons: 1, clientX: 106, clientY: 100, bubbles: true }),
+      mouseEventAt('mousemove', 1_020, { button: 0, buttons: 1, clientX: 103, clientY: 100, bubbles: true }),
     );
     document.dispatchEvent(
-      mouseEventAt('mouseup', 1_030, { button: 0, buttons: 0, clientX: 106, clientY: 100, bubbles: true }),
+      mouseEventAt('mouseup', 1_030, { button: 0, buttons: 0, clientX: 103, clientY: 100, bubbles: true }),
     );
 
-    expect(order).toEqual(['xterm']);
-    await vi.waitFor(() => expect(order).toEqual(['xterm', 'clear']));
-    expect(terminal.clearSelection).toHaveBeenCalledTimes(1);
-    document.removeEventListener('mouseup', xtermMouseUp);
+    expect(xtermMouseMove).not.toHaveBeenCalled();
+    expect(terminal.clearSelection).not.toHaveBeenCalled();
+    document.removeEventListener('mousemove', xtermMouseMove);
   });
 
-  it('clears a synthetic instant tap even when WKWebView reports a large coordinate jump', async () => {
+  it('preserves a fast drag once it crosses the distance threshold', () => {
     const terminal = makeMockTerminal('selected');
     render(<TerminalPane activeSession={makeSession()} />);
+    const xtermMouseMove = vi.fn();
+    document.addEventListener('mousemove', xtermMouseMove);
 
     terminal.element?.dispatchEvent(
       mouseEventAt('mousedown', 1_000, { button: 0, buttons: 1, clientX: 100, clientY: 100, bubbles: true }),
@@ -417,7 +408,9 @@ describe('TerminalPane', () => {
       mouseEventAt('mouseup', 1_020, { button: 0, buttons: 0, clientX: 140, clientY: 100, bubbles: true }),
     );
 
-    await vi.waitFor(() => expect(terminal.clearSelection).toHaveBeenCalledTimes(1));
+    expect(xtermMouseMove).toHaveBeenCalledOnce();
+    expect(terminal.clearSelection).not.toHaveBeenCalled();
+    document.removeEventListener('mousemove', xtermMouseMove);
   });
 
   it('preserves xterm word selection on an instant double click', async () => {
