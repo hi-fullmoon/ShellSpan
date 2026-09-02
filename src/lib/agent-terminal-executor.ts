@@ -2158,7 +2158,7 @@ export class AgentTerminalExecutor {
       return toolResult(
         call,
         'failed',
-        'A previous Agent command has not confirmed termination in this terminal session',
+        'A previous Agent command has not confirmed termination in this terminal session; reconnect or reopen the terminal before retrying',
       );
     }
     if (this.activeBySession.has(call.target.sessionId)) {
