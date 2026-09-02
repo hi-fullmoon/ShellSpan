@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import {
   ArrowUpIcon,
@@ -58,12 +58,19 @@ import { Bubble, Marker, Message, MessageScroller } from './chat-primitives';
 import { AssistantMessageContent } from './assistant-message-content';
 import { ConversationHistoryDialog } from './conversation-history-dialog';
 import { AgentPermissionSelector } from './agent-permission-selector';
-import { AgentRunView } from './agent-run-view';
+import { AgentSessionView } from './agent-session-view';
 import { useI18n } from '@/hooks/useI18n';
 import {
   invokeCancelAiRequest,
-  invokeAgentContractStatus,
-  invokeAgentRolloutPolicy,
+  invokeAgentRuntimeFollowup,
+  invokeAgentRuntimeSteer,
+  invokeApproveAgentRuntimeTool,
+  invokeCancelAgentRuntime,
+  invokeCreateAgentRuntimeSession,
+  invokeGetAgentRuntimeSession,
+  invokeListAgentRuntimeSessions,
+  invokeRejectAgentRuntimeTool,
+  invokeStartAgentRuntime,
   invokeLoadAiSession,
   invokeStartAiRequest,
   isTauriRuntime,
@@ -85,15 +92,8 @@ import {
   type AiRequestBudgetMetadata,
   type BoundedAiHistory,
 } from '@/lib/ai-request-budget';
-import {
-  DEFAULT_AGENT_PERMISSION_MODE,
-  resolveAgentContractStatus,
-} from '@/lib/agent-contract';
-import {
-  agentTargetFromSession,
-  agentUiController,
-} from '@/lib/agent-ui-controller';
-import { detectAgentProviderCapabilityCached } from '@/lib/agent-provider-capability';
+import { AgentSessionCommittedClient, type AgentSessionStreamState } from '@/lib/agent-session-client';
+import { projectAgentSession } from '@/lib/agent-session-projection';
 import {
   effectiveReasoningEffort,
   isAiReasoningOption,
@@ -112,7 +112,6 @@ import { terminalRegistry } from '@/components/terminal/registry/terminal-regist
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAiStore } from '@/stores/aiStore';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
-import { useAgentStore } from '@/stores/agentStore';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
@@ -126,10 +125,6 @@ import {
   startNewTerminalAiConversation,
   startNewWorkbenchAiConversation,
 } from '@/lib/ai-sessions';
-import {
-  clearAgentConversationData,
-  hydrateAgentSession,
-} from '@/lib/agent-sessions';
 import type {
   AiChatMessage,
   AiConversation,
@@ -144,11 +139,11 @@ import type {
 import type { LocaleKey } from '@/locales';
 import type { AppSection } from '@/types';
 import type {
-  AgentChatMessage,
-  AgentContractStatus,
-  AgentRolloutPolicy,
-  AgentTargetSnapshot,
-} from '@/types/agent';
+  AgentRuntimeToolDecisionInput,
+  AgentSessionPermissionMode,
+  AgentSessionTarget,
+} from '@/types/agent-session';
+import type { TerminalSession } from '@/stores/terminalStore';
 
 const AI_STREAM_EVENT = 'ai-stream';
 const AI_PANEL_DEFAULT_WIDTH = 400;
@@ -207,20 +202,10 @@ interface AiStreamListenerRegistration {
   readonly startingRequestIds: Set<string>;
 }
 
-interface AgentAvailability {
-  state: 'checking' | 'ready' | 'error';
-  status?: AgentContractStatus;
-  policy?: AgentRolloutPolicy;
-}
-
-const DISABLED_AGENT_ROLLOUT_POLICY: AgentRolloutPolicy = {
-  stage: 'disabled',
-  featureEnabled: false,
-  defaultAgentEnabled: false,
-  defaultPermissionMode: 'requestApproval',
-  availablePermissionModes: ['requestApproval'],
+const EMPTY_AGENT_STREAM: AgentSessionStreamState = {
+  events: [],
+  hasTerminalEvent: false,
 };
-const AGENT_CAPABILITY_CHECK_DEBOUNCE_MS = 300;
 
 export interface AiErrorPresentation {
   detail: string;
@@ -301,32 +286,26 @@ function resolvedAiMessageScope(message: Pick<AiChatMessage, 'scope' | 'conversa
   return message.conversationId || message.sessionId ? 'terminal' : 'workbench';
 }
 
-function sameAgentTarget(left: AgentTargetSnapshot, right: AgentTargetSnapshot): boolean {
-  return left.kind === right.kind
-    && left.sessionId === right.sessionId
-    && left.profileId === right.profileId
-    && left.host === right.host
-    && left.port === right.port
-    && left.username === right.username;
+function runtimeTargetFromSession(session: TerminalSession): AgentSessionTarget {
+  const local = session.host === 'local' && session.port === 0;
+  return {
+    kind: local ? 'local' : 'remote',
+    targetId: `terminal:${session.sessionId}`,
+    sessionId: session.sessionId,
+    label: session.title,
+    ...(session.profileId ? { profileId: session.profileId } : {}),
+    ...(local ? {} : {
+      host: session.host,
+      port: session.port,
+      username: session.username,
+    }),
+  };
 }
 
-export function selectAgentConversationHistory(
-  messages: readonly AgentChatMessage[],
-  target: AgentTargetSnapshot,
-  conversationId?: string,
-  reservedMessages: readonly AiMessageInput[] = [],
-): BoundedAiHistory {
-  const candidates = messages.filter((message) => (
-    message.status === 'completed'
-    && Boolean(message.content.trim())
-    && sameAgentTarget(message.target, target)
-    && (!conversationId || message.conversationId === conversationId)
-  ));
-  return boundAiHistory(
-    candidates,
-    (message) => ({ role: message.role, content: message.content }),
-    reservedMessages,
-  );
+function runtimePermissionMode(mode: string): AgentSessionPermissionMode {
+  if (mode === 'autoApproveReadOnly') return 'scopedAutopilot';
+  if (mode === 'fullAccess') return 'operator';
+  return 'requestApproval';
 }
 
 function initialAiPanelWidth(): number {
@@ -578,9 +557,6 @@ export const AiPanel: React.FC = () => {
   const error = useAiStore((state) => state.error);
   const errorRequestId = useAiStore((state) => state.errorRequestId);
   const clearConversation = useAiStore((state) => state.clearConversation);
-  const agentMessages = useAgentStore((state) => state.messages);
-  const agentRuns = useAgentStore((state) => state.runs);
-  const activeAgentRequestId = useAgentStore((state) => state.activeRequestId);
   const agentPermissionBindings = useAgentPermissionStore((state) => state.bindings);
   const providers = useAiSettingsStore((state) => state.providers);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
@@ -620,11 +596,9 @@ export const AiPanel: React.FC = () => {
   const [mode, setMode] = useState<AiPanelMode>('ask');
   const modeRef = useRef<AiPanelMode>(mode);
   modeRef.current = mode;
-  const [agentAvailability, setAgentAvailability] = useState<AgentAvailability>({
-    state: 'checking',
-  });
   const [agentStartError, setAgentStartError] = useState<string>();
   const [agentStartPending, setAgentStartPending] = useState(false);
+  const [agentStream, setAgentStream] = useState<AgentSessionStreamState>(EMPTY_AGENT_STREAM);
   const [draftTooLarge, setDraftTooLarge] = useState(false);
   const [requestBudgetNotices, setRequestBudgetNotices] = useState<
     Record<string, AiRequestBudgetMetadata>
@@ -660,6 +634,8 @@ export const AiPanel: React.FC = () => {
   const pendingPanelWidthRef = useRef<number | null>(null);
   const streamDeltaBatcherRef = useRef<AiStreamDeltaBatcher | null>(null);
   const streamListenerRegistrationRef = useRef<AiStreamListenerRegistration | null>(null);
+  const agentSessionClientRef = useRef<AgentSessionCommittedClient | null>(null);
+  const agentSessionIdRef = useRef<string | null>(null);
   const agentStartAttemptRef = useRef<symbol | null>(null);
   const agentSubmissionMountedRef = useRef(true);
   const loadingConversationIdsRef = useRef(new Set<string>());
@@ -689,10 +665,7 @@ export const AiPanel: React.FC = () => {
   }, [open]);
 
   useEffect(() => {
-    const retainedRequestIds = new Set([
-      ...messages.map((message) => message.requestId),
-      ...agentMessages.map((message) => message.requestId),
-    ]);
+    const retainedRequestIds = new Set(messages.map((message) => message.requestId));
     setRequestBudgetNotices((current) => {
       const retained = Object.entries(current).filter(([requestId]) => (
         retainedRequestIds.has(requestId)
@@ -701,92 +674,7 @@ export const AiPanel: React.FC = () => {
         ? current
         : Object.fromEntries(retained);
     });
-  }, [agentMessages, messages]);
-
-  useEffect(() => {
-    void agentUiController.connect().catch((reason) => {
-      logger.warn('Failed to listen for Agent events', reason);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!open || !defaultProvider) return;
-    let cancelled = false;
-    setAgentAvailability({ state: 'checking' });
-    const provider = useAiSettingsStore.getState().getProviderConfig(defaultProvider.id);
-    if (!isTauriRuntime()) {
-      setAgentAvailability({
-        state: 'ready',
-        status: resolveAgentContractStatus(false, provider.kind),
-        policy: DISABLED_AGENT_ROLLOUT_POLICY,
-      });
-      return;
-    }
-    void Promise.all([
-      invokeAgentRolloutPolicy(),
-      invokeAgentContractStatus(provider.kind),
-    ])
-      .then(([policy, status]) => {
-        if (cancelled) return;
-        setAgentAvailability({
-          state: 'ready',
-          policy,
-          status: agentEnabled
-            ? status
-            : resolveAgentContractStatus(false, provider.kind, status.providerCapability),
-        });
-      })
-      .catch((reason) => {
-        if (cancelled) return;
-        logger.warn('Failed to resolve Agent availability', reason);
-        setAgentAvailability({ state: 'error' });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [agentEnabled, defaultProvider, open]);
-
-  useEffect(() => {
-    const status = agentAvailability.status;
-    const policy = agentAvailability.policy;
-    if (
-      !open
-      || mode !== 'agent'
-      || !defaultProvider
-      || !agentEnabled
-      || !status?.featureEnabled
-      || status.providerCapability.support !== 'unknown'
-    ) return;
-
-    let cancelled = false;
-    setAgentAvailability((current) => ({ ...current, state: 'checking' }));
-    const timer = window.setTimeout(() => {
-      const provider = useAiSettingsStore.getState().getProviderConfig(defaultProvider.id);
-      void detectAgentProviderCapabilityCached(defaultProvider, provider)
-        .then((evidence) => invokeAgentContractStatus(provider.kind, evidence))
-        .then((resolvedStatus) => {
-          if (cancelled) return;
-          setAgentAvailability({ state: 'ready', policy, status: resolvedStatus });
-        })
-        .catch((reason) => {
-          if (cancelled) return;
-          logger.warn('Failed to detect Agent provider capability', reason);
-          setAgentAvailability((current) => ({ ...current, state: 'error' }));
-        });
-    }, AGENT_CAPABILITY_CHECK_DEBOUNCE_MS);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [
-    agentAvailability.policy,
-    agentAvailability.status?.featureEnabled,
-    agentAvailability.status?.providerCapability.support,
-    agentEnabled,
-    defaultProvider,
-    mode,
-    open,
-  ]);
+  }, [messages]);
 
   useEffect(() => {
     if (!agentEnabled && mode === 'agent') setMode('ask');
@@ -1091,14 +979,80 @@ export const AiPanel: React.FC = () => {
     t,
   ]);
 
+  const connectAgentSession = useCallback(async (
+    sessionId: string,
+  ): Promise<AgentSessionStreamState> => {
+    if (agentSessionIdRef.current === sessionId && agentSessionClientRef.current) {
+      return agentSessionClientRef.current.connect();
+    }
+    agentSessionClientRef.current?.disconnect();
+    const client = new AgentSessionCommittedClient(sessionId);
+    agentSessionIdRef.current = sessionId;
+    agentSessionClientRef.current = client;
+    client.onChange(setAgentStream);
+    try {
+      const state = await client.connect();
+      if (agentSessionClientRef.current === client) setAgentStream(state);
+      return state;
+    } catch (error) {
+      if (agentSessionClientRef.current === client) {
+        client.disconnect();
+        agentSessionClientRef.current = null;
+        agentSessionIdRef.current = null;
+        setAgentStream(EMPTY_AGENT_STREAM);
+      }
+      throw error;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (
+      !open
+      || mode !== 'agent'
+      || !isTauriRuntime()
+      || !activeSession?.conversationId
+    ) return;
+    let active = true;
+    void invokeListAgentRuntimeSessions({ limit: 512 })
+      .then((page) => [...page.sessions]
+        .filter((session) => (
+          !session.archived
+          && session.header.target?.sessionId === activeSession.sessionId
+          && session.header.sessionId.startsWith(`agent-${activeSession.conversationId}`)
+        ))
+        .sort((left, right) => right.header.createdAtUnixMs - left.header.createdAtUnixMs)[0])
+      .then((latest) => {
+        if (!active) return;
+        if (!latest) {
+          agentSessionClientRef.current?.disconnect();
+          agentSessionClientRef.current = null;
+          agentSessionIdRef.current = null;
+          setAgentStream(EMPTY_AGENT_STREAM);
+          return;
+        }
+        return connectAgentSession(latest.header.sessionId);
+      })
+      .catch((reason) => {
+        if (active) logger.warn('Failed to reconnect Agent Session', reason);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeSession?.conversationId, activeSession?.sessionId, connectAgentSession, mode, open]);
+
+  useEffect(() => () => {
+    agentSessionClientRef.current?.disconnect();
+    agentSessionClientRef.current = null;
+    agentSessionIdRef.current = null;
+  }, []);
+
   const sendAgent = useCallback(async (text: string): Promise<void> => {
     const trimmed = text.trim();
     if (
       !trimmed
       || useAiStore.getState().phase === 'streaming'
-      || useAgentStore.getState().activeRequestId
       || agentStartAttemptRef.current
-      || !agentAvailability.status?.agentAvailable
+      || !agentEnabled
       || useAppStore.getState().activeSection !== 'terminal'
     ) return;
     const terminalState = useTerminalStore.getState();
@@ -1112,7 +1066,7 @@ export const AiPanel: React.FC = () => {
       navigateToAiSettings();
       return;
     }
-    const target = agentTargetFromSession(session);
+    const target = runtimeTargetFromSession(session);
     const liveContext = currentTerminalContext();
     const currentMessage = buildBoundedAgentUserMessage(
       trimmed,
@@ -1124,23 +1078,14 @@ export const AiPanel: React.FC = () => {
       return;
     }
     setDraftTooLarge(false);
-    const history = selectAgentConversationHistory(
-      useAgentStore.getState().messages,
-      target,
-      session.conversationId,
-      [currentMessage.message],
-    );
     setAgentStartError(undefined);
     const startAttempt = Symbol('agent-start');
     agentStartAttemptRef.current = startAttempt;
     setAgentStartPending(true);
     try {
-      const conversation = await ensureAiSessionFile(session);
-      if (!conversation) throw new Error('Agent session persistence is unavailable.');
-      // start() establishes its run only after the stream listener is ready.
-      // Wait here so a Stop during listener setup can invalidate this attempt
-      // before beginRun or any backend request becomes possible.
-      await agentUiController.connect();
+      const conversationId = session.conversationId
+        ?? startNewTerminalAiConversation(session.sessionId);
+      if (!conversationId) throw new Error('Agent Session identity is unavailable.');
       const latestTerminalState = useTerminalStore.getState();
       const latestSession = latestTerminalState.sessions.find((candidate) => (
         candidate.sessionId === latestTerminalState.activeSessionId
@@ -1152,46 +1097,62 @@ export const AiPanel: React.FC = () => {
         || modeRef.current !== 'agent'
         || useAppStore.getState().activeSection !== 'terminal'
         || useAiStore.getState().phase === 'streaming'
-        || useAgentStore.getState().activeRequestId
         || !latestSession
         || latestSession.status !== 'connected'
         || latestSession.sessionId !== session.sessionId
-        || latestSession.conversationId !== conversation.id
-        || latestSession.conversationStartedAt !== conversation.startedAt
+        || latestSession.conversationId !== conversationId
         || latestSession.host !== session.host
         || latestSession.port !== session.port
         || latestSession.username !== session.username
-        || conversationPersistenceBlockedRef.current(conversation.id)
+        || conversationPersistenceBlockedRef.current(conversationId)
       ) return;
-      const requestId = await agentUiController.start({
-        goal: trimmed,
-        conversationId: conversation.id,
-        conversationStartedAt: conversation.startedAt,
-        provider,
-        target,
-        targetTitle: session.title,
-        messages: [
-          ...history.messages,
-          currentMessage.message,
-        ],
-        rolloutStage: agentAvailability.policy?.stage ?? 'disabled',
-      });
+      let runtimeSessionId = agentSessionIdRef.current;
+      let runtimeState = runtimeSessionId
+        ? await invokeGetAgentRuntimeSession({ sessionId: runtimeSessionId }).catch(() => undefined)
+        : undefined;
+      if (!runtimeState) {
+        const deterministicSessionId = `agent-${conversationId}`;
+        runtimeState = await invokeGetAgentRuntimeSession({
+          sessionId: deterministicSessionId,
+        }).catch(() => undefined);
+        if (runtimeState) runtimeSessionId = deterministicSessionId;
+      }
+      if (!runtimeState || runtimeState.ended) {
+        runtimeSessionId = `agent-${conversationId}${runtimeState?.ended ? `-${generateId()}` : ''}`;
+        runtimeState = await invokeCreateAgentRuntimeSession({
+          sessionId: runtimeSessionId,
+          taskId: `task-${runtimeSessionId}`,
+          goal: trimmed,
+          target,
+          permissionMode: runtimePermissionMode(
+            useAgentPermissionStore.getState().getMode(session.sessionId),
+          ),
+          successCriteria: [trimmed],
+        });
+      }
+      if (!runtimeSessionId) throw new Error('Agent Session identity is unavailable.');
+      await connectAgentSession(runtimeSessionId);
+      await invokeStartAgentRuntime({ sessionId: runtimeSessionId, provider });
+      const input = {
+        sessionId: runtimeSessionId,
+        messageId: `message-${generateId()}`,
+        content: currentMessage.message.content,
+      };
+      if (runtimeState.status === 'running' || runtimeState.status === 'waiting') {
+        await invokeAgentRuntimeSteer(input);
+      } else {
+        await invokeAgentRuntimeFollowup(input);
+      }
       if (
         agentStartAttemptRef.current !== startAttempt
         || !agentSubmissionMountedRef.current
         || !useAiStore.getState().panelOpenBySection.terminal
         || modeRef.current !== 'agent'
       ) {
-        if (requestId) agentUiController.stop(requestId);
+        await invokeCancelAgentRuntime({ sessionId: runtimeSessionId }).catch(() => undefined);
         return;
       }
-      if (requestId) {
-        recordRequestBudgetNotice(requestId, {
-          ...history.metadata,
-          terminalContextTruncated: currentMessage.terminalContextTruncated,
-        });
-        setDraft('');
-      }
+      setDraft('');
     } catch (reason) {
       if (
         agentStartAttemptRef.current === startAttempt
@@ -1206,11 +1167,11 @@ export const AiPanel: React.FC = () => {
       }
     }
   }, [
-    agentAvailability.policy?.stage,
-    agentAvailability.status?.agentAvailable,
+    agentEnabled,
+    connectAgentSession,
     contextEnabled,
-    recordRequestBudgetNotice,
     conversationPersistenceBlocked,
+    setDraft,
   ]);
 
   const handleContextEnabledChange = useCallback((enabled: boolean): void => {
@@ -1248,8 +1209,12 @@ export const AiPanel: React.FC = () => {
       agentStartAttemptRef.current = null;
       setAgentStartPending(false);
     }
-    const requestId = useAgentStore.getState().activeRequestId;
-    if (requestId) agentUiController.stop(requestId);
+    const sessionId = agentSessionIdRef.current;
+    if (sessionId) {
+      void invokeCancelAgentRuntime({ sessionId }).catch((reason) => {
+        setAgentStartError(reason instanceof Error ? reason.message : String(reason));
+      });
+    }
   };
 
   const submitComposer = (): void => {
@@ -1333,7 +1298,6 @@ export const AiPanel: React.FC = () => {
         if (!session) {
           throw new Error('Indexed AI conversation history no longer exists.');
         }
-        hydrateAgentSession(session);
         useAiStore.getState().hydrateSession(session);
         const recovery = aiSessionRecovery(session);
         if (recovery) {
@@ -1381,6 +1345,11 @@ export const AiPanel: React.FC = () => {
     setFailedConversationLoadIds((current) => current.filter((id) => id !== visibleConversationId));
   };
 
+  const agentProjection = useMemo(
+    () => projectAgentSession(agentStream.events),
+    [agentStream.events],
+  );
+
   if (!open) return null;
 
   const visibleMessages = messages.filter((message) => (
@@ -1392,19 +1361,22 @@ export const AiPanel: React.FC = () => {
         && message.sessionId === conversationSessionId
         && resolvedAiMessageScope(message) === panelSection)
   ));
-  const visibleAgentMessages = visibleConversationId
-    ? agentMessages.filter((message) => message.conversationId === visibleConversationId)
-    : [];
   const followKey = `${visibleMessages.length}:${visibleMessages[visibleMessages.length - 1]?.content.length ?? 0}`;
   const canAskFromContext = !viewingHistory
     && activeSection === 'terminal'
     && Boolean(contextSnapshot.context);
-  const agentBusy = agentStartPending || Boolean(activeAgentRequestId);
+  const agentBusy = agentStartPending
+    || agentProjection.status === 'running'
+    || agentProjection.status === 'waiting';
   const busy = phase === 'streaming' || agentBusy;
   const handleNewConversation = (): void => {
     if (busy) return;
     if (panelSection === 'terminal') {
       if (!activeSession) return;
+      agentSessionClientRef.current?.disconnect();
+      agentSessionClientRef.current = null;
+      agentSessionIdRef.current = null;
+      setAgentStream(EMPTY_AGENT_STREAM);
       startNewTerminalAiConversation(activeSession.sessionId);
     } else {
       startNewWorkbenchAiConversation(t('ai.workbench.conversationTitle'));
@@ -1422,10 +1394,7 @@ export const AiPanel: React.FC = () => {
     const deletedCount = await deletePersistedAiConversations(conversationsToDelete);
     const deletedIds = new Set(conversationsToDelete.map((conversation) => conversation.id));
     useAiStore.getState().removeConversations([...deletedIds]);
-    for (const conversationId of deletedIds) {
-      useAgentStore.getState().clearConversation(conversationId);
-      loadingConversationIdsRef.current.delete(conversationId);
-    }
+    for (const conversationId of deletedIds) loadingConversationIdsRef.current.delete(conversationId);
     setSelectedConversationId((current) => (
       current && deletedIds.has(current) ? null : current
     ));
@@ -1434,29 +1403,17 @@ export const AiPanel: React.FC = () => {
     setRecoveredConversationLoadIds((current) => current.filter((id) => !deletedIds.has(id)));
     return deletedCount;
   };
-  const agentAvailable = Boolean(agentAvailability.status?.agentAvailable);
+  const agentAvailable = agentEnabled && Boolean(model.trim());
   const activeTerminalReady = activeSection === 'terminal'
     && activeSession?.status === 'connected';
-  const agentModeSelectable = agentAvailability.state === 'ready'
-    && agentEnabled
-    && Boolean(agentAvailability.status?.featureEnabled)
-    && agentAvailability.status?.providerCapability.support !== 'unsupported'
-    && activeTerminalReady;
-  const agentModeUnavailableReason = agentAvailability.state === 'checking'
-    ? t('agent.availability.checking')
-    : agentAvailability.state === 'error'
-      ? t('agent.availability.error')
-      : !agentEnabled
-        ? t('agent.availability.userDisabled')
-        : !agentAvailability.status?.featureEnabled
-        ? t('agent.availability.disabled')
-        : agentAvailability.status?.providerCapability.support === 'unsupported'
-          ? t('agent.availability.unsupported')
-          : !activeTerminalReady
-            ? t('agent.availability.needsTerminal')
-            : agentAvailability.status?.providerCapability.support === 'unknown'
-              ? t('agent.availability.unverified')
-              : t('agent.availability.ready');
+  const agentModeSelectable = agentAvailable && activeTerminalReady;
+  const agentModeUnavailableReason = !agentEnabled
+    ? t('agent.availability.userDisabled')
+    : !model.trim()
+      ? t('ai.modelMissing')
+      : !activeTerminalReady
+        ? t('agent.availability.needsTerminal')
+        : t('agent.availability.ready');
   const composerSubmitDisabled = busy
     || viewingHistory
     || conversationLoading
@@ -1468,7 +1425,7 @@ export const AiPanel: React.FC = () => {
   const panelWidthBounds = getAiPanelWidthBounds(containerWidth);
   const currentLane = 'conversation' as const;
   const hasCurrentConversation = mode === 'agent'
-    ? visibleAgentMessages.length > 0
+    ? agentStream.events.length > 0
     : visibleMessages.length > 0;
   const failedRequestMessage = errorRequestId
     ? messages.find((message) => (
@@ -1488,19 +1445,12 @@ export const AiPanel: React.FC = () => {
     ? summarizeAiError(currentError)
     : undefined;
   const lastAssistantMessage = [...visibleMessages].reverse().find((message) => message.role === 'assistant');
-  const latestAgentRun = visibleAgentMessages.length > 0
-    ? agentRuns[visibleAgentMessages[visibleAgentMessages.length - 1].requestId]
-    : undefined;
-  const agentPermissionSessionId = activeAgentRequestId
-    ? agentRuns[activeAgentRequestId]?.target.sessionId
-    : activeSessionId ?? undefined;
-  const agentPermissionMode = activeAgentRequestId
-    ? agentRuns[activeAgentRequestId]?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE
-    : agentPermissionSessionId
-      ? agentPermissionBindings[agentPermissionSessionId]?.mode ?? DEFAULT_AGENT_PERMISSION_MODE
-      : DEFAULT_AGENT_PERMISSION_MODE;
-  const statusAnnouncement = mode === 'agent' && latestAgentRun
-    ? t(`agent.phase.${latestAgentRun.phase}` as LocaleKey)
+  const agentPermissionSessionId = activeSessionId ?? undefined;
+  const agentPermissionMode = agentPermissionSessionId
+    ? agentPermissionBindings[agentPermissionSessionId]?.mode ?? 'requestApproval'
+    : 'requestApproval';
+  const statusAnnouncement = mode === 'agent' && agentStream.events.length > 0
+    ? t(`agent.session.status.${agentProjection.status}` as LocaleKey)
     : phase === 'streaming'
     ? t('ai.status.generating')
     : currentError
@@ -1946,22 +1896,20 @@ export const AiPanel: React.FC = () => {
                         ));
                       };
                       if (mode === 'agent') {
-                        const conversation = conversations.find((item) => (
-                          item.id === visibleConversationId
-                        ));
-                        if (conversation) {
-                          setClearingConversationIds((current) => (
-                            current.includes(conversation.id)
-                              ? current
-                              : [...current, conversation.id]
-                          ));
-                          void clearAgentConversationData(
-                            conversation.id,
-                            conversation.startedAt,
-                          ).catch((reason) => {
-                            logger.warn('Failed to clear persisted Agent lane', reason);
-                          }).finally(finishClear);
+                        const runtimeSessionId = agentSessionIdRef.current;
+                        if (runtimeSessionId) {
+                          void invokeCancelAgentRuntime({ sessionId: runtimeSessionId }).catch((reason) => {
+                            logger.warn('Failed to cancel cleared Agent Session', reason);
+                          });
                         }
+                        agentSessionClientRef.current?.disconnect();
+                        agentSessionClientRef.current = null;
+                        agentSessionIdRef.current = null;
+                        setAgentStream(EMPTY_AGENT_STREAM);
+                        if (activeSession) startNewTerminalAiConversation(activeSession.sessionId);
+                        setSelectedConversationId(null);
+                        setDraft('');
+                        finishClear();
                       } else {
                         const conversation = conversations.find((item) => (
                           item.id === visibleConversationId
@@ -2213,56 +2161,26 @@ export const AiPanel: React.FC = () => {
               <Alert variant="warning" size="sm">
                 <CircleAlertIcon />
                 <AlertTitle>{t('agent.availability.title')}</AlertTitle>
-                <AlertDescription className="flex flex-col gap-1.5">
-                  <span>{agentModeUnavailableReason}</span>
-                  {agentAvailability.state === 'ready'
-                    && agentAvailability.status?.featureEnabled
-                    && (
-                      <div>
-                        <Button
-                          variant="secondary"
-                          size="xs"
-                          onClick={() => setMode('ask')}
-                        >
-                          <MessageCircleQuestionIcon data-icon="inline-start" />
-                          {t('agent.fallback.switchToAsk')}
-                        </Button>
-                      </div>
-                    )}
-                </AlertDescription>
+                <AlertDescription>{agentModeUnavailableReason}</AlertDescription>
               </Alert>
             )}
           </div>
         )}
 
         {mode === 'agent' ? (
-          <AgentRunView
-            conversationId={activeAgentRequestId
-              ? agentRuns[activeAgentRequestId]?.conversationId
-              : visibleConversationId}
-            onApprove={(reference) => agentUiController.approve(reference)}
-            onReject={(reference) => agentUiController.reject(reference)}
-            canRetry={(requestId) => {
-              const run = useAgentStore.getState().runs[requestId];
-              return !conversationPersistenceBlocked(run?.conversationId)
-                && agentUiController.canRetry(requestId);
-            }}
-            onRetry={(requestId) => {
-              const run = useAgentStore.getState().runs[requestId];
-              if (!run || conversationPersistenceBlocked(run.conversationId)) return;
-              const provider = useAiSettingsStore.getState().getProviderConfig(run.providerId);
-              void agentUiController.retry(requestId, provider).then((nextRequestId) => {
-                if (!nextRequestId) setAgentStartError(t('agent.recovery.retryUnavailable'));
+          <AgentSessionView
+            projection={agentProjection}
+            onApproveRuntime={(reference) => {
+              void invokeApproveAgentRuntimeTool(reference).catch((reason) => {
+                setAgentStartError(reason instanceof Error ? reason.message : String(reason));
               });
             }}
-            onSwitchToAsk={(requestId) => {
-              const run = useAgentStore.getState().runs[requestId];
-              setMode('ask');
-              setDraft(run?.goal ?? '');
-              window.requestAnimationFrame(() => composerRef.current?.focus());
+            onRejectRuntime={(reference) => {
+              void invokeRejectAgentRuntimeTool(reference).catch((reason) => {
+                setAgentStartError(reason instanceof Error ? reason.message : String(reason));
+              });
             }}
             onOpenSettings={openSettings}
-            requestBudgetNotices={requestBudgetNotices}
           />
         ) : conversationLoading && visibleMessages.length === 0 ? (
           <div className="flex min-h-0 flex-1 items-center justify-center">

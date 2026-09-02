@@ -28,11 +28,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useI18n } from '@/hooks/useI18n';
-import { DEFAULT_AGENT_PERMISSION_MODE } from '@/lib/agent-contract';
 import { cn } from '@/lib/utils';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import type { AgentPermissionMode } from '@/types/agent';
+import type { AgentPermissionMode } from '@/types/agent-approval';
+
+const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = 'requestApproval';
 
 const PERMISSION_OPTIONS = [
   {

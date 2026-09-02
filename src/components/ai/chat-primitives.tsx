@@ -107,8 +107,13 @@ export const Bubble: React.FC<{
   </BubblePrimitive>
 );
 
-export const Marker: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <MarkerPrimitive>
-    <MarkerContent className="w-full text-center">{children}</MarkerContent>
+export const Marker: React.FC<{
+  children: React.ReactNode;
+  variant?: React.ComponentProps<typeof MarkerPrimitive>['variant'];
+}> = ({ children, variant = 'default' }) => (
+  <MarkerPrimitive variant={variant}>
+    <MarkerContent className={cn(variant === 'default' && 'w-full text-center')}>
+      {children}
+    </MarkerContent>
   </MarkerPrimitive>
 );

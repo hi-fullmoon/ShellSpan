@@ -4,7 +4,7 @@ import { AgentApprovalCard } from '../agent-approval-card';
 import { AgentPermissionSelector } from '../agent-permission-selector';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import type { AgentToolApprovalSnapshot } from '@/types/agent';
+import type { AgentToolApprovalSnapshot } from '@/types/agent-approval';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
@@ -44,11 +44,12 @@ function approvalSnapshot(): AgentToolApprovalSnapshot {
         username: 'operator',
       },
     },
-    permissionMode: 'autoApproveReadOnly',
-    riskAssessment: { risk: 'stateChange', reason: 'unrecognizedStateChange' },
-    decision: { requiresApproval: true, reason: 'riskRequiresApproval' },
+    riskAssessment: { risk: 'stateChange' },
     status: 'awaitingApproval',
     approval: {
+      sessionId: 'agent-session-1',
+      turnId: 'turn-1',
+      stepId: 'step-1',
       requestId: 'request-1',
       callId: 'call-1',
       approvalId: 'approval-1',
@@ -56,7 +57,7 @@ function approvalSnapshot(): AgentToolApprovalSnapshot {
   };
 }
 
-describe('M3 permission and approval components', () => {
+describe('Agent permission and approval components', () => {
   beforeEach(() => {
     useTerminalStore.setState(initialTerminalState, true);
     useAgentPermissionStore.setState(initialPermissionState, true);
@@ -232,5 +233,83 @@ describe('M3 permission and approval components', () => {
     expect(screen.getByText(/token=\[REDACTED\]/)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'agent.tool.retryTask' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows manual collapsing and automatically collapses after completion', () => {
+    const running = { ...approvalSnapshot(), status: 'running' as const, approval: undefined };
+    const { container, rerender } = render(
+      <AgentApprovalCard
+        snapshot={running}
+        targetTitle="Production"
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+
+    const collapseButton = screen.getByRole('button', { name: 'agent.tool.collapse' });
+    expect(collapseButton).toHaveAttribute('aria-expanded', 'true');
+    expect(container.querySelector('[data-slot="card-content"]')).toBeVisible();
+
+    fireEvent.click(collapseButton);
+    expect(screen.getByRole('button', { name: 'agent.tool.expand' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(container.querySelector('[data-slot="card-content"]')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'agent.tool.expand' }));
+    rerender(
+      <AgentApprovalCard
+        snapshot={{
+          ...running,
+          status: 'completed',
+          result: {
+            requestId: 'request-1',
+            callId: 'call-1',
+            status: 'completed',
+            exitCode: 0,
+            output: 'service is healthy',
+          },
+        }}
+        targetTitle="Production"
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'agent.tool.expand' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(container.querySelector('[data-slot="card-content"]')).not.toBeInTheDocument();
+    expect(screen.getByText('systemctl restart nginx --no-block')).toBeVisible();
+  });
+
+  it('keeps unsuccessful terminal results expanded for review', () => {
+    const { container } = render(
+      <AgentApprovalCard
+        snapshot={{
+          ...approvalSnapshot(),
+          status: 'failed',
+          approval: undefined,
+          result: {
+            requestId: 'request-1',
+            callId: 'call-1',
+            status: 'failed',
+            exitCode: 1,
+            output: 'service failed',
+          },
+        }}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'agent.tool.collapse' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(container.querySelector('[data-slot="card-content"]')).toBeVisible();
+    expect(screen.getByText('service failed')).toBeVisible();
   });
 });
