@@ -114,7 +114,11 @@ function decodePowerShellCommand(value: string): string {
 }
 
 function collapsePowerShellPtyLines(value: string): string {
-  return value.replace(/'\+`\n'/g, '').replace(/ `\n/g, ' ');
+  const collapsed = value.replace(/'\+`\n'/g, '').replace(/ `\n/g, ' ');
+  const stagingChunks = [...collapsed.matchAll(/\.Append\('([A-Za-z0-9+/=]+)'\)/g)];
+  return stagingChunks.length > 0
+    ? Buffer.from(stagingChunks.map((match) => match[1]).join(''), 'base64').toString('utf8')
+    : collapsed;
 }
 
 function extractPowerShellStringAssignment(wrapper: string, variablePrefix: string): string {
@@ -184,8 +188,9 @@ describe('Agent M2 terminal boundary parser', () => {
     const frames = testFrames(boundary);
 
     expect(frames.beginToken).toBe(
-      `${boundary.beginPrefix}e944e4b688d2c07c7d9fde7b4b1fb0675b090edc8186820199625f4f9976c9d5\u001f`,
+      `${boundary.beginPrefix}e944e4b688d2c07c7d9fde7b4b1fb0675b090edc8186820199625f4f9976c9d5\u0007`,
     );
+    expect(boundary.beginPrefix).toBe(`\u001b]6973;${boundary.marker}:BEGIN:`);
     expect(frames.beginToken).not.toContain(COMPLETION_CAPABILITY);
     expect(frames.endPrefix).toContain(COMPLETION_CAPABILITY);
   });
@@ -197,7 +202,7 @@ describe('Agent M2 terminal boundary parser', () => {
     for (const piece of [start.slice(0, 7), start.slice(7, 31), start.slice(31)]) {
       expect(parser.push(piece)).toBeNull();
     }
-    const result = parser.push(`\r\nfirst\r\nsecond${testFrames(boundary).endPrefix}7\u001fnext-prompt`);
+    const result = parser.push(`\r\nfirst\r\nsecond${testFrames(boundary).endPrefix}7\u0007next-prompt`);
 
     expect(result).toEqual({ exitCode: 7 });
     expect(parser.finishCapture().text).toBe('\r\nfirst\r\nsecond');
@@ -209,7 +214,7 @@ describe('Agent M2 terminal boundary parser', () => {
     const wrapperEcho = `printf '\\036%s:BEGIN\\037' '${boundary.marker.slice(0, 20)}''${boundary.marker.slice(20)}'`;
 
     expect(parser.push(`${wrapperEcho}\r\n${boundary.marker}:BEGIN\r\n`)).toBeNull();
-    expect(parser.push(`${testFrames(boundary).beginToken}\r\nreal-output${testFrames(boundary).endPrefix}0\u001f`)).toEqual({
+    expect(parser.push(`${testFrames(boundary).beginToken}\r\nreal-output${testFrames(boundary).endPrefix}0\u0007`)).toEqual({
       exitCode: 0,
     });
     expect(parser.finishCapture().text).toBe('\r\nreal-output');
@@ -220,7 +225,7 @@ describe('Agent M2 terminal boundary parser', () => {
     const parser = new AgentTerminalBoundaryParser(boundary);
 
     parser.push(`${testFrames(boundary).beginToken}\nstart${testFrames(boundary).endPrefix}${'9'.repeat(64)}`);
-    expect(parser.push(`\nfinish${testFrames(boundary).endPrefix}0\u001f`)).toEqual({ exitCode: 0 });
+    expect(parser.push(`\nfinish${testFrames(boundary).endPrefix}0\u0007`)).toEqual({ exitCode: 0 });
     expect(parser.finishCapture().text).toContain('finish');
   });
 
@@ -230,8 +235,8 @@ describe('Agent M2 terminal boundary parser', () => {
     const guessedEnd = `${boundary.endPrefix}${'a'.repeat(COMPLETION_CAPABILITY.length)}:`;
 
     expect(parser.push(`${testFrames(boundary).beginToken}\nstart${guessedEnd.slice(0, 29)}`)).toBeNull();
-    expect(parser.push(`${guessedEnd.slice(29)}0\u001ftrailing-output`)).toBeNull();
-    expect(parser.push(`${testFrames(boundary).endPrefix}9\u001fprompt`)).toEqual({ exitCode: 9 });
+    expect(parser.push(`${guessedEnd.slice(29)}0\u0007trailing-output`)).toBeNull();
+    expect(parser.push(`${testFrames(boundary).endPrefix}9\u0007prompt`)).toEqual({ exitCode: 9 });
 
     const captured = parser.finishCapture().text;
     expect(captured).toContain(guessedEnd);
@@ -257,8 +262,8 @@ describe('Agent M2 terminal boundary parser', () => {
     const failureFrames = createAgentTerminalFrames(boundary, '0'.repeat(48));
     const parser = new AgentTerminalBoundaryParser(boundary);
 
-    expect(parser.push(`${failureFrames.beginToken}${failureFrames.endPrefix}0\u001f`)).toBeNull();
-    expect(parser.push(`${failureFrames.endPrefix}125\u001f`)).toBeNull();
+    expect(parser.push(`${failureFrames.beginToken}${failureFrames.endPrefix}0\u0007`)).toBeNull();
+    expect(parser.push(`${failureFrames.endPrefix}125\u0007`)).toBeNull();
     expect(parser.finishCapture().text).toContain('125');
   });
 
@@ -267,7 +272,7 @@ describe('Agent M2 terminal boundary parser', () => {
     const parser = new AgentTerminalBoundaryParser(boundary);
     parser.push(testFrames(boundary).beginToken);
     parser.push(`\nhead-${'x'.repeat(AGENT_TERMINAL_CAPTURE_LIMIT_BYTES + 128)}-tail-你`);
-    expect(parser.push(`${testFrames(boundary).endPrefix}0\u001f`)).toEqual({ exitCode: 0 });
+    expect(parser.push(`${testFrames(boundary).endPrefix}0\u0007`)).toEqual({ exitCode: 0 });
 
     const captured = parser.finishCapture();
     expect(captured.truncated).toBe(true);
@@ -289,7 +294,7 @@ describe('Agent M2 terminal display filter', () => {
       const command = 'kimi --version';
       const wrapper = buildAgentTerminalWrapper(command, boundary, shell);
       const filter = new AgentTerminalDisplayFilter(boundary, command, shell);
-      const stream = `${wrapper}\r\n${testFrames(boundary).beginToken}\r\n0.38.0\r\n${testFrames(boundary).endPrefix}0\u001f[root@host ~]# `;
+      const stream = `${wrapper}\r\n${testFrames(boundary).beginToken}\r\n0.38.0\r\n${testFrames(boundary).endPrefix}0\u0007[root@host ~]# `;
       const cuts = [9, wrapper.length - 3, wrapper.length + 11, stream.length - 17];
       const pieces = cuts.map((end, index) => stream.slice(index === 0 ? 0 : cuts[index - 1], end));
       pieces.push(stream.slice(cuts[cuts.length - 1]));
@@ -299,10 +304,46 @@ describe('Agent M2 terminal display filter', () => {
       expect(visible).toBe('kimi --version\r\n0.38.0\r\n[root@host ~]# ');
       expect(visible).not.toContain('__tb_');
       expect(visible).not.toContain('SHELLSPAN_M2_');
-      expect(visible).not.toContain('\u001e');
-      expect(visible).not.toContain('\u001f');
+      expect(visible).not.toContain('\u001b]6973;');
+      expect(visible).not.toContain('\u0007');
     },
   );
+
+  it('keeps the decorated PowerShell continuation echo hidden until BEGIN arrives', () => {
+    const boundary = createAgentTerminalBoundary(NONCE);
+    const command = 'docker info';
+    const wrapper = buildAgentTerminalWrapper(command, boundary, 'powershell');
+    const filter = new AgentTerminalDisplayFilter(
+      boundary,
+      command,
+      'powershell',
+      wrapper.length,
+    );
+    const echoedChunks = createAgentTerminalInputChunks(wrapper, 'powershell').map(
+      (chunk) => {
+        // PSReadLine decorates syntax tokens and emits cursor/color control
+        // sequences while accepting each continued physical input line.
+        const decorated = chunk.slice(0, -1).replace(
+          /([A-Za-z0-9_$]+|.)/g,
+          '\u001b[?25l\u001b[1m\u001b[38;5;120m\u001b[92m$1\u001b[0m\u001b[?25h',
+        );
+        return `${decorated}\r\n>> `;
+      },
+    );
+
+    expect(echoedChunks.join('').length).toBeGreaterThan(64 * 1024);
+    const visible = [
+      ...echoedChunks.map((chunk) => filter.push(chunk)),
+      filter.push(
+        `${testFrames(boundary).beginToken}\r\nDocker details\r\n${testFrames(boundary).endPrefix}0\u0007PS C:\\> `,
+      ),
+      filter.finish(),
+    ].join('');
+
+    expect(visible).toBe('docker info\r\nDocker details\r\nPS C:\\> ');
+    expect(visible).not.toContain('__tb_');
+    expect(visible).not.toContain('>> ');
+  });
 
   it.each([
     ['posix', 'PATH=/usr/bin:/bin:/usr/sbin:/sbin', ['/usr/local', 'eval "']] as const,
@@ -374,6 +415,9 @@ describe('Agent M2 terminal display filter', () => {
     expect(privateSupervisor).toContain('ActiveProcesses');
     expect(privateSupervisor).toContain('UtcNow.AddSeconds(2)');
     expect(privateSupervisor).toContain('Test-ShellSpanParent');
+    expect(privateSupervisor).toContain('$__shellspanInfo.CreateNoWindow=$false');
+    expect(privateSupervisor).toContain("[char]27,']6973;'");
+    expect(logicalWrapper).toContain(`$__tb_process_info_${NONCE}.CreateNoWindow=$false`);
     expect(privateSupervisor).toContain('.WaitForExit(0)');
     expect(privateSupervisor).toContain('SHELLSPAN_AGENT_PARENT_PID');
     expect(privateSupervisor).not.toContain(
@@ -415,7 +459,7 @@ describe('Agent M2 terminal display filter', () => {
     const visible = [
       filter.push(testFrames(boundary).beginToken.slice(0, 13)),
       filter.push(`${testFrames(boundary).beginToken.slice(13)}\r`),
-      filter.push(`\nready\r\n${testFrames(boundary).endPrefix}0\u001f$ `),
+      filter.push(`\nready\r\n${testFrames(boundary).endPrefix}0\u0007$ `),
       filter.finish(),
     ].join('');
 
@@ -425,10 +469,10 @@ describe('Agent M2 terminal display filter', () => {
   it('keeps a forged end record visible and removes the later valid record', () => {
     const boundary = createAgentTerminalBoundary(NONCE);
     const filter = new AgentTerminalDisplayFilter(boundary, 'printf ready', 'posix');
-    const forged = `${testFrames(boundary).endPrefix}not-an-exit\u001f`;
+    const forged = `${testFrames(boundary).endPrefix}not-an-exit\u0007`;
 
     const visible = filter.push(
-      `${testFrames(boundary).beginToken}\nstart${forged}finish${testFrames(boundary).endPrefix}7\u001fprompt`,
+      `${testFrames(boundary).beginToken}\nstart${forged}finish${testFrames(boundary).endPrefix}7\u0007prompt`,
     );
 
     expect(visible).toBe(`start${forged}finishprompt`);
@@ -448,7 +492,7 @@ describe('Agent M2 terminal display filter', () => {
   it('preserves every byte of an invalid begin candidate', () => {
     const boundary = createAgentTerminalBoundary(NONCE);
     const filter = new AgentTerminalDisplayFilter(boundary, 'printf ready', 'posix');
-    const invalid = `${boundary.beginPrefix}not-a-valid-commitment\u001fafter`;
+    const invalid = `${boundary.beginPrefix}not-a-valid-commitment\u0007after`;
 
     expect(`${filter.push(invalid)}${filter.finish()}`).toBe(invalid);
   });
@@ -476,7 +520,6 @@ describe('Agent M2 command wrapper and local blocking', () => {
       if (shell === 'powershell') {
         const lines = wrapper.split('\n');
         expect(lines.length).toBeGreaterThan(1);
-        expect(lines.slice(0, -1).every((line) => line.endsWith('`'))).toBe(true);
         expect(lines.every((line) => new TextEncoder().encode(line).length <= 1_024)).toBe(true);
         const chunks = createAgentTerminalInputChunks(wrapper, shell);
         expect(chunks.map((chunk) => chunk.slice(0, -1)).join('\n')).toBe(wrapper);
@@ -497,11 +540,12 @@ describe('Agent M2 command wrapper and local blocking', () => {
       expect(wrapper).toContain(boundary.marker.slice(0, Math.floor(boundary.marker.length / 2)));
       expect(wrapper).toContain(boundary.marker.slice(Math.floor(boundary.marker.length / 2)));
       if (shell === 'powershell') {
-        expect(wrapper).toContain('-EncodedCommand');
-        expect(wrapper).toContain('[System.Diagnostics.ProcessStartInfo]');
-        expect(wrapper).toContain('RedirectStandardInput');
-        expect(wrapper).toContain('$global:LASTEXITCODE');
-        expect(wrapper).not.toContain('Invoke-Expression');
+        const logicalWrapper = collapsePowerShellPtyLines(wrapper);
+        expect(logicalWrapper).toContain('-EncodedCommand');
+        expect(logicalWrapper).toContain('[System.Diagnostics.ProcessStartInfo]');
+        expect(logicalWrapper).toContain('RedirectStandardInput');
+        expect(logicalWrapper).toContain('$global:LASTEXITCODE');
+        expect(logicalWrapper).not.toContain('Invoke-Expression');
       }
     },
   );
@@ -514,7 +558,6 @@ describe('Agent M2 command wrapper and local blocking', () => {
     const lines = wrapper.split('\n');
 
     expect(command.length).toBeLessThanOrEqual(AGENT_TERMINAL_COMMAND_LIMIT_CHARS);
-    expect(lines.slice(0, -1).every((line) => line.endsWith('`'))).toBe(true);
     expect(lines.every((line) => new TextEncoder().encode(line).length <= 1_024)).toBe(true);
     expect(extractPowerShellStringAssignment(wrapper, 'command')).toBe(command);
   });
@@ -676,7 +719,7 @@ describe('Agent M2 PTY executor', () => {
       if (!data.endsWith('\r')) return;
       terminalEvents.emitData(
         sessionId,
-        `${testFrames(boundary).beginToken}\r\n\u001b[31mfast\u001b[0m\r\n${testFrames(boundary).endPrefix}0\u001f`,
+        `${testFrames(boundary).beginToken}\r\n\u001b[31mfast\u001b[0m\r\n${testFrames(boundary).endPrefix}0\u0007`,
       );
     });
     const executor = new AgentTerminalExecutor({ nonceFactory: () => NONCE, platform: 'linux' });
@@ -703,7 +746,7 @@ describe('Agent M2 PTY executor', () => {
       if (data.endsWith('\r')) {
         terminalEvents.emitData(
           sessionId,
-          `${testFrames(boundary).beginToken}\r\npaced${testFrames(boundary).endPrefix}0\u001f`,
+          `${testFrames(boundary).beginToken}\r\npaced${testFrames(boundary).endPrefix}0\u0007`,
         );
       }
     });
@@ -728,7 +771,7 @@ describe('Agent M2 PTY executor', () => {
     let firstWrite = true;
     vi.mocked(invokeWriteSession).mockImplementation((sessionId, data) => {
       if (data === '\u0003') {
-        terminalEvents.emitData(sessionId, `${testFrames(boundary).endPrefix}130\u001f`);
+        terminalEvents.emitData(sessionId, `${testFrames(boundary).endPrefix}130\u0007`);
         return Promise.resolve();
       }
       if (firstWrite) {
@@ -777,7 +820,7 @@ describe('Agent M2 PTY executor', () => {
     let firstWrite = true;
     vi.mocked(invokeWriteSession).mockImplementation((sessionId, data) => {
       if (data === '\u0003') {
-        terminalEvents.emitData(sessionId, `${testFrames(boundary).endPrefix}130\u001f`);
+        terminalEvents.emitData(sessionId, `${testFrames(boundary).endPrefix}130\u0007`);
         return Promise.resolve();
       }
       if (firstWrite) {
@@ -838,7 +881,7 @@ describe('Agent M2 PTY executor', () => {
     await Promise.resolve();
     expect(vi.mocked(invokeWriteSession).mock.calls.filter(([, data]) => data === '\u0003'))
       .toHaveLength(1);
-    terminalEvents.emitData('session-1', `${testFrames(boundary).endPrefix}130\u001f`);
+    terminalEvents.emitData('session-1', `${testFrames(boundary).endPrefix}130\u0007`);
 
     await expect(pending).resolves.toMatchObject({ status: 'cancelled' });
   });
@@ -939,7 +982,7 @@ describe('Agent M2 PTY executor', () => {
     vi.mocked(invokeWriteSession).mockImplementation(async (sessionId, data) => {
       terminalEvents.emitData(sessionId, data);
       if (!data.endsWith('\r')) return;
-      const stream = `${testFrames(boundary).beginToken}\r\n0.38.0\r\n${testFrames(boundary).endPrefix}0\u001f[root@host ~]# `;
+      const stream = `${testFrames(boundary).beginToken}\r\n0.38.0\r\n${testFrames(boundary).endPrefix}0\u0007[root@host ~]# `;
       const split = Math.floor(testFrames(boundary).beginToken.length / 2);
       terminalEvents.emitData(sessionId, stream.slice(0, split));
       terminalEvents.emitData(sessionId, stream.slice(split));
@@ -1013,7 +1056,7 @@ describe('Agent M2 PTY executor', () => {
       if (!data.endsWith('\r')) return;
       terminalEvents.emitData(
         sessionId,
-        `${testFrames(boundary).beginToken}\r\nready${testFrames(boundary).endPrefix}0\u001f`,
+        `${testFrames(boundary).beginToken}\r\nready${testFrames(boundary).endPrefix}0\u0007`,
       );
     });
     const executor = new AgentTerminalExecutor({ nonceFactory: () => NONCE, platform: 'linux' });
@@ -1039,7 +1082,7 @@ describe('Agent M2 PTY executor', () => {
       if (!data.endsWith('\r')) return;
       terminalEvents.emitData(sessionId, testFrames(boundary).beginToken.slice(0, 19));
       terminalEvents.emitData(sessionId, `${testFrames(boundary).beginToken.slice(19)}\r\npassword=hunter2\r\n${testFrames(boundary).endPrefix.slice(0, 23)}`);
-      terminalEvents.emitData(sessionId, `${testFrames(boundary).endPrefix.slice(23)}23\u001f`);
+      terminalEvents.emitData(sessionId, `${testFrames(boundary).endPrefix.slice(23)}23\u0007`);
     });
     const executor = new AgentTerminalExecutor({ nonceFactory: () => NONCE, platform: 'linux' });
 
@@ -1061,7 +1104,7 @@ describe('Agent M2 PTY executor', () => {
       terminalEvents.emitData(sessionId, data);
       if (!data.endsWith('\r')) return;
       terminalEvents.emitData(sessionId, `${testFrames(boundary).beginToken}\nhead-${'x'.repeat(AGENT_TERMINAL_CAPTURE_LIMIT_BYTES + 256)}`);
-      terminalEvents.emitData(sessionId, `\npassword=long-secret\nlatest-tail-你${testFrames(boundary).endPrefix}0\u001f`);
+      terminalEvents.emitData(sessionId, `\npassword=long-secret\nlatest-tail-你${testFrames(boundary).endPrefix}0\u0007`);
     });
     const executor = new AgentTerminalExecutor({ nonceFactory: () => NONCE, platform: 'linux' });
 
@@ -1102,7 +1145,7 @@ describe('Agent M2 PTY executor', () => {
     expect(invokeWriteSession).toHaveBeenLastCalledWith('session-1', '\u0003');
     terminalEvents.emitData(
       'session-1',
-      `cleanup-tail${testFrames(boundary).endPrefix}130\u001f`,
+      `cleanup-tail${testFrames(boundary).endPrefix}130\u0007`,
     );
     const result = await pending;
 
@@ -1132,7 +1175,7 @@ describe('Agent M2 PTY executor', () => {
     expect(invokeWriteSession).toHaveBeenLastCalledWith('session-1', '\u0003');
     terminalEvents.emitData(
       'session-1',
-      `${testFrames(boundary).endPrefix}130\u001f`,
+      `${testFrames(boundary).endPrefix}130\u0007`,
     );
     const result = await pending;
 
@@ -1164,7 +1207,7 @@ describe('Agent M2 PTY executor', () => {
     await vi.advanceTimersByTimeAsync(2_500);
     terminalEvents.emitData(
       'session-1',
-      `late-cleanup-tail${testFrames(boundary).endPrefix}130\u001f`,
+      `late-cleanup-tail${testFrames(boundary).endPrefix}130\u0007`,
     );
     const result = await pending;
 
@@ -1190,7 +1233,7 @@ describe('Agent M2 PTY executor', () => {
     expect(executor.cancel(call.requestId, call.callId)).toBe(true);
     terminalEvents.emitData(
       'session-1',
-      `\r\ncancel-cleanup${testFrames(boundary).endPrefix}130\u001f`,
+      `\r\ncancel-cleanup${testFrames(boundary).endPrefix}130\u0007`,
     );
     const result = await pending;
 
@@ -1245,7 +1288,7 @@ describe('Agent M2 PTY executor', () => {
     );
     terminalEvents.emitData(
       'session-1',
-      `${testFrames(boundary).endPrefix.slice(split)}130\u001f`,
+      `${testFrames(boundary).endPrefix.slice(split)}130\u0007`,
     );
     const cancelled = await pending;
     expect(cancelled).toMatchObject({ status: 'cancelled' });
@@ -1263,7 +1306,7 @@ describe('Agent M2 PTY executor', () => {
       if (!data.endsWith('\r')) return;
       terminalEvents.emitData(
         sessionId,
-        `${testFrames(boundary).beginToken}\r\nready${testFrames(boundary).endPrefix}0\u001f`,
+        `${testFrames(boundary).beginToken}\r\nready${testFrames(boundary).endPrefix}0\u0007`,
       );
     });
 
@@ -1299,7 +1342,7 @@ describe('Agent M2 PTY executor', () => {
     expect(vi.mocked(invokeWriteSession).mock.calls.some(([, data]) => data.endsWith('\r'))).toBe(true);
     await vi.advanceTimersByTimeAsync(100);
     expect(invokeWriteSession).toHaveBeenLastCalledWith('session-1', '\u0003');
-    terminalEvents.emitData('session-1', '0\u001f');
+    terminalEvents.emitData('session-1', '0\u0007');
     const timedOut = await pending;
     expect(timedOut).toMatchObject({
       status: 'timedOut',
@@ -1318,7 +1361,7 @@ describe('Agent M2 PTY executor', () => {
       if (!data.endsWith('\r')) return;
       terminalEvents.emitData(
         sessionId,
-        `${testFrames(boundary).beginToken}\r\nready${testFrames(boundary).endPrefix}0\u001f`,
+        `${testFrames(boundary).beginToken}\r\nready${testFrames(boundary).endPrefix}0\u0007`,
       );
     });
 
@@ -1417,7 +1460,7 @@ describe('Agent M2 PTY executor', () => {
     vi.mocked(invokeWriteSession).mockImplementation(async (sessionId, data) => {
       terminalEvents.emitData(sessionId, data);
       if (!data.endsWith('\r')) return;
-      terminalEvents.emitData(sessionId, `${testFrames(boundary).beginToken}\r\n/srv/app\r\n${testFrames(boundary).endPrefix}0\u001f`);
+      terminalEvents.emitData(sessionId, `${testFrames(boundary).beginToken}\r\n/srv/app\r\n${testFrames(boundary).endPrefix}0\u0007`);
     });
     const executor = new AgentTerminalExecutor({ nonceFactory: () => NONCE, platform: 'linux' });
 
