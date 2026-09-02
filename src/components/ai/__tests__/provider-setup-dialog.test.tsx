@@ -14,7 +14,6 @@ const mocks = vi.hoisted(() => ({
   invokeStoreAiApiKey: vi.fn(),
   invokeLoadPreferences: vi.fn(),
   invokeSavePreferences: vi.fn(),
-  invokeSetAgentEnabled: vi.fn(),
 }));
 
 vi.mock('@/lib/tauri', () => ({
@@ -24,7 +23,6 @@ vi.mock('@/lib/tauri', () => ({
   invokeStoreAiApiKey: mocks.invokeStoreAiApiKey,
   invokeLoadPreferences: mocks.invokeLoadPreferences,
   invokeSavePreferences: mocks.invokeSavePreferences,
-  invokeSetAgentEnabled: mocks.invokeSetAgentEnabled,
 }));
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -56,7 +54,6 @@ describe('ProviderSetupDialog', () => {
     mocks.invokeStoreAiApiKey.mockResolvedValue(undefined);
     mocks.invokeLoadPreferences.mockResolvedValue([]);
     mocks.invokeSavePreferences.mockResolvedValue(undefined);
-    mocks.invokeSetAgentEnabled.mockResolvedValue(true);
     useAiSettingsStore.setState({ ...initialState, initialized: false }, true);
   });
 

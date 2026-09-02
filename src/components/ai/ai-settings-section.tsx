@@ -28,23 +28,17 @@ import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import {
-  invokeAgentRolloutPolicy,
+  invokeArchiveAgentRuntimeSession,
+  invokeCancelAgentRuntime,
   invokeDeleteAiApiKey,
-  invokeSetAgentEnabled,
+  invokeListAgentRuntimeSessions,
   isTauriRuntime,
 } from '@/lib/tauri';
-import {
-  clearAgentConversationData,
-  flushAgentSessionPersistence,
-} from '@/lib/agent-sessions';
-import { agentUiController } from '@/lib/agent-ui-controller';
 import { deletePersistedAiConversations } from '@/lib/ai-sessions';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
-import { useAgentStore } from '@/stores/agentStore';
 import { useAiStore } from '@/stores/aiStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import type { AgentRolloutPolicy } from '@/types/agent';
 import type { AiProviderPreset } from '@/types/ai';
 import {
   DeepSeekBrandIcon,
@@ -89,7 +83,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const setContextLines = useAiSettingsStore((state) => state.setContextLines);
   const agentEnabled = useAiSettingsStore((state) => state.agentEnabled);
   const setAgentEnabled = useAiSettingsStore((state) => state.setAgentEnabled);
-  const activeAgentRequestId = useAgentStore((state) => state.activeRequestId);
   const conversations = useAiStore((state) => state.conversations);
   const activeWorkbenchConversationId = useAiStore((state) => (
     state.activeWorkbenchConversationId
@@ -99,26 +92,10 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [agentPolicy, setAgentPolicy] = useState<AgentRolloutPolicy>();
   const [agentActionBusy, setAgentActionBusy] = useState(false);
   const [clearAgentOpen, setClearAgentOpen] = useState(false);
   const [historyActionBusy, setHistoryActionBusy] = useState(false);
   const [clearHistoryOpen, setClearHistoryOpen] = useState(false);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    let active = true;
-    void invokeAgentRolloutPolicy()
-      .then((policy) => {
-        if (active) setAgentPolicy(policy);
-      })
-      .catch(() => {
-        if (active) setAgentPolicy(undefined);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId) ?? providers[0],
@@ -160,16 +137,18 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const handleAgentEnabledChange = async (enabled: boolean): Promise<void> => {
     setAgentActionBusy(true);
     try {
-      const effective = await invokeSetAgentEnabled(enabled);
-      if (enabled && !effective) throw new Error('Agent rollout policy is disabled');
+      if (!enabled && isTauriRuntime()) {
+        const page = await invokeListAgentRuntimeSessions({ limit: 512 });
+        await Promise.all(page.sessions
+          .filter((session) => !session.ended && !session.archived)
+          .map((session) => invokeCancelAgentRuntime({ sessionId: session.header.sessionId })));
+      }
       useAgentPermissionStore.getState().resetAll();
       setAgentEnabled(enabled);
       if (enabled) {
         showSuccess(t('settings.ai.agent.enabled'));
         return;
       }
-      await agentUiController.shutdown();
-      await flushAgentSessionPersistence();
       showSuccess(t('settings.ai.agent.disabled'));
     } catch {
       showError(t(enabled ? 'settings.ai.agent.enableFailed' : 'settings.ai.agent.closeFailed'));
@@ -182,14 +161,17 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
     setAgentActionBusy(true);
     setClearAgentOpen(false);
     try {
-      await agentUiController.shutdown();
-      await flushAgentSessionPersistence();
-      const conversations = useAiStore.getState().conversations;
-      for (const conversation of conversations) {
-        await clearAgentConversationData(conversation.id, conversation.startedAt);
+      const sessions = isTauriRuntime()
+        ? (await invokeListAgentRuntimeSessions({ limit: 512 })).sessions
+        : [];
+      for (const session of sessions.filter((item) => !item.archived)) {
+        if (!session.ended) {
+          await invokeCancelAgentRuntime({ sessionId: session.header.sessionId });
+        }
+        await invokeArchiveAgentRuntimeSession({ sessionId: session.header.sessionId });
       }
       useAgentPermissionStore.getState().resetAll();
-      showSuccess(t('settings.ai.agent.sessionsCleared', { count: conversations.length }));
+      showSuccess(t('settings.ai.agent.sessionsCleared', { count: sessions.length }));
     } catch {
       showError(t('settings.ai.agent.clearFailed'));
     } finally {
@@ -206,9 +188,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       const count = await deletePersistedAiConversations(conversationsToDelete);
       const conversationIds = conversationsToDelete.map((conversation) => conversation.id);
       useAiStore.getState().removeConversations(conversationIds);
-      for (const conversationId of conversationIds) {
-        useAgentStore.getState().clearConversation(conversationId);
-      }
       showSuccess(t('ai.history.deleted', { count }));
     } catch {
       showError(t('ai.history.deleteFailed'));
@@ -310,13 +289,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       <SettingsGroup
         title={t('settings.ai.agent.title')}
         titleId="terminal-agent-heading"
-        action={(
-          <Badge variant={agentPolicy?.featureEnabled ? 'secondary' : 'outline'}>
-            {agentPolicy
-              ? t(`settings.ai.agent.stage.${agentPolicy.stage}` as LocaleKey)
-              : t('settings.ai.agent.stage.checking')}
-          </Badge>
-        )}
       >
         <SettingRow
           label={t('settings.ai.agent.enable')}
@@ -325,8 +297,8 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           <Switch
             id="ai-agent-enabled"
             aria-label={t('settings.ai.agent.enable')}
-            checked={agentEnabled && Boolean(agentPolicy?.featureEnabled)}
-            disabled={!agentPolicy?.featureEnabled || agentActionBusy}
+            checked={agentEnabled}
+            disabled={agentActionBusy}
             onCheckedChange={(enabled) => void handleAgentEnabledChange(enabled)}
           />
         </SettingRow>
@@ -423,9 +395,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           <AlertDialogHeader>
             <AlertDialogTitle>{t('settings.ai.agent.clearTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              {activeAgentRequestId
-                ? t('settings.ai.agent.clearActiveDescription')
-                : t('settings.ai.agent.clearDescription')}
+              {t('settings.ai.agent.clearActiveDescription')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

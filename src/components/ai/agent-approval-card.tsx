@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   CheckIcon,
+  ChevronRightIcon,
   CopyIcon,
   RotateCcwIcon,
   ShieldAlertIcon,
@@ -28,17 +29,23 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { useI18n } from '@/hooks/useI18n';
+import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import type {
   AgentApprovalReference,
   AgentRisk,
-  AgentTargetSnapshot,
+  AgentApprovalTarget,
   AgentToolApprovalSnapshot,
   AgentToolApprovalStatus,
-} from '@/types/agent';
+} from '@/types/agent-approval';
 
-function targetLabel(target: AgentTargetSnapshot): string {
+function targetLabel(target: AgentApprovalTarget): string {
   return `${target.username}@${target.host}:${target.port}`;
 }
 
@@ -163,6 +170,7 @@ export function AgentApprovalCard({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const { approval, result, riskAssessment, status, toolCall } = snapshot;
+  const [detailsOpen, setDetailsOpen] = useState(status !== 'completed');
   const awaitingApproval = status === 'awaitingApproval' && approval !== undefined;
   const stoppable = status === 'pending' || status === 'awaitingApproval' || status === 'running';
   const retryable = retryAllowed && [
@@ -177,6 +185,10 @@ export function AgentApprovalCard({
     if (!awaitingApproval) setDialogOpen(false);
   }, [awaitingApproval]);
 
+  useEffect(() => {
+    if (status === 'completed') setDetailsOpen(false);
+  }, [status]);
+
   const copyCommand = (): void => {
     void navigator.clipboard?.writeText(toolCall.command).then(() => {
       setCopied(true);
@@ -186,114 +198,136 @@ export function AgentApprovalCard({
 
   return (
     <>
-      <Card
-        size="sm"
-        className="my-2 ring-0"
-        style={{ '--card-spacing': 'calc(var(--spacing) * 2)' } as React.CSSProperties}
-        data-slot="agent-approval-card"
-      >
-        <CardHeader>
-          <CardTitle>{t('agent.tool.title')}</CardTitle>
-          {targetTitle && (
-            <CardDescription className="truncate">{targetTitle}</CardDescription>
-          )}
-          <CardAction>
-            <Badge variant={statusVariant(status)} role="status">
-              {t(`agent.status.${status}` as LocaleKey)}
-            </Badge>
-          </CardAction>
-        </CardHeader>
-        <CardContent className="flex min-w-0 flex-col gap-2">
-          <dl className="flex min-w-0 flex-col gap-2">
-            <div className="flex flex-col gap-1">
-              <dt className="text-xs font-medium text-muted-foreground">
-                {t('agent.approval.target')}
-              </dt>
-              <dd className="flex min-w-0 flex-col gap-0.5">
-                {targetTitle && <span>{targetTitle}</span>}
-                <code className="break-all">{targetLabel(toolCall.target)}</code>
-              </dd>
-            </div>
-            <div className="flex flex-col gap-1">
-            <dt className="text-xs font-medium text-muted-foreground">
-              {t('agent.approval.intent')}
-            </dt>
-            <dd>{toolCall.explanation}</dd>
-            </div>
-            <div className="flex flex-col gap-1">
-            <dt className="text-xs font-medium text-muted-foreground">
-              {t('agent.approval.command')}
-            </dt>
-            <dd className="flex min-w-0 flex-col gap-1.5">
-              <code className="whitespace-pre-wrap break-all rounded-md bg-muted p-2 select-text">
-                {toolCall.command}
-              </code>
-              <Button
-                variant="ghost"
-                size="xs"
-                className="self-start"
-                onClick={copyCommand}
-                aria-label={t('agent.tool.copyCommand')}
+      <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <Card
+          size="sm"
+          className="my-2 ring-0"
+          style={{ '--card-spacing': 'calc(var(--spacing) * 2)' } as React.CSSProperties}
+          data-slot="agent-approval-card"
+        >
+          <CardHeader>
+            <CardTitle>{t('agent.tool.title')}</CardTitle>
+            {(targetTitle || !detailsOpen) && (
+              <CardDescription className="flex min-w-0 flex-col gap-0.5">
+                {targetTitle && <span className="truncate">{targetTitle}</span>}
+                {!detailsOpen && <code className="truncate">{toolCall.command}</code>}
+              </CardDescription>
+            )}
+            <CardAction className="flex items-center gap-1">
+              <Badge variant={statusVariant(status)} role="status">
+                {t(`agent.status.${status}` as LocaleKey)}
+              </Badge>
+              <CollapsibleTrigger
+                render={(
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    aria-label={detailsOpen
+                      ? t('agent.tool.collapse')
+                      : t('agent.tool.expand')}
+                  />
+                )}
               >
-                {copied
-                  ? <CheckIcon data-icon="inline-start" />
-                  : <CopyIcon data-icon="inline-start" />}
-                {copied ? t('common.copied') : t('common.copy')}
-              </Button>
-            </dd>
-            </div>
-            <div className="flex items-center gap-2">
-            <dt className="text-xs font-medium text-muted-foreground">
-              {t('agent.approval.risk')}
-            </dt>
-            <dd><Badge variant={riskVariant(riskAssessment.risk)}>
-              {t(`agent.risk.${riskAssessment.risk}` as LocaleKey)}
-            </Badge></dd>
-            </div>
-            {result && (
-              <div className="flex flex-col gap-1">
-                <dt className="text-xs font-medium text-muted-foreground">
-                  {t('agent.tool.result')}
-                </dt>
-                <dd className="flex min-w-0 flex-col gap-1.5">
-                  <span>
-                    {t('agent.tool.exitCode')}: {result.exitCode ?? t('agent.tool.notAvailable')}
-                  </span>
-                  <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs">
-                    {outputSummary || t('agent.tool.noOutput')}
-                  </pre>
-                </dd>
-              </div>
+                <ChevronRightIcon
+                  className={cn('transition-transform', detailsOpen && 'rotate-90')}
+                />
+              </CollapsibleTrigger>
+            </CardAction>
+          </CardHeader>
+          <CollapsibleContent className="flex flex-col gap-(--card-spacing)">
+            <CardContent className="flex min-w-0 flex-col gap-2">
+              <dl className="flex min-w-0 flex-col gap-2">
+                <div className="flex flex-col gap-1">
+                  <dt className="text-xs font-medium text-muted-foreground">
+                    {t('agent.approval.target')}
+                  </dt>
+                  <dd className="flex min-w-0 flex-col gap-0.5">
+                    {targetTitle && <span>{targetTitle}</span>}
+                    <code className="break-all">{targetLabel(toolCall.target)}</code>
+                  </dd>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <dt className="text-xs font-medium text-muted-foreground">
+                    {t('agent.approval.intent')}
+                  </dt>
+                  <dd>{toolCall.explanation}</dd>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <dt className="text-xs font-medium text-muted-foreground">
+                    {t('agent.approval.command')}
+                  </dt>
+                  <dd className="flex min-w-0 flex-col gap-1.5">
+                    <code className="whitespace-pre-wrap break-all rounded-md bg-muted p-2 select-text">
+                      {toolCall.command}
+                    </code>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="self-start"
+                      onClick={copyCommand}
+                      aria-label={t('agent.tool.copyCommand')}
+                    >
+                      {copied
+                        ? <CheckIcon data-icon="inline-start" />
+                        : <CopyIcon data-icon="inline-start" />}
+                      {copied ? t('common.copied') : t('common.copy')}
+                    </Button>
+                  </dd>
+                </div>
+                <div className="flex items-center gap-2">
+                  <dt className="text-xs font-medium text-muted-foreground">
+                    {t('agent.approval.risk')}
+                  </dt>
+                  <dd><Badge variant={riskVariant(riskAssessment.risk)}>
+                    {t(`agent.risk.${riskAssessment.risk}` as LocaleKey)}
+                  </Badge></dd>
+                </div>
+                {result && (
+                  <div className="flex flex-col gap-1">
+                    <dt className="text-xs font-medium text-muted-foreground">
+                      {t('agent.tool.result')}
+                    </dt>
+                    <dd className="flex min-w-0 flex-col gap-1.5">
+                      <span>
+                        {t('agent.tool.exitCode')}: {result.exitCode ?? t('agent.tool.notAvailable')}
+                      </span>
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs">
+                        {outputSummary || t('agent.tool.noOutput')}
+                      </pre>
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            </CardContent>
+            {(awaitingApproval || (stoppable && onStop) || (retryable && onRetry)) && (
+              <CardFooter className="justify-end gap-2">
+                {awaitingApproval && (
+                  <>
+                    <Button variant="outline" size="sm" onClick={() => onReject(approval)}>
+                      {t('agent.approval.reject')}
+                    </Button>
+                    <Button size="sm" onClick={() => setDialogOpen(true)}>
+                      {t('agent.approval.approve')}
+                    </Button>
+                  </>
+                )}
+                {stoppable && onStop && (
+                  <Button variant="destructive" size="sm" onClick={onStop}>
+                    <SquareIcon data-icon="inline-start" />
+                    {t('agent.tool.stop')}
+                  </Button>
+                )}
+                {retryable && onRetry && (
+                  <Button variant="secondary" size="sm" onClick={onRetry}>
+                    <RotateCcwIcon data-icon="inline-start" />
+                    {t('agent.tool.retryTask')}
+                  </Button>
+                )}
+              </CardFooter>
             )}
-          </dl>
-        </CardContent>
-        {(awaitingApproval || (stoppable && onStop) || (retryable && onRetry)) && (
-          <CardFooter className="justify-end gap-2">
-            {awaitingApproval && (
-              <>
-                <Button variant="outline" size="sm" onClick={() => onReject(approval)}>
-                  {t('agent.approval.reject')}
-                </Button>
-                <Button size="sm" onClick={() => setDialogOpen(true)}>
-                  {t('agent.approval.approve')}
-                </Button>
-              </>
-            )}
-            {stoppable && onStop && (
-              <Button variant="destructive" size="sm" onClick={onStop}>
-                <SquareIcon data-icon="inline-start" />
-                {t('agent.tool.stop')}
-              </Button>
-            )}
-            {retryable && onRetry && (
-              <Button variant="secondary" size="sm" onClick={onRetry}>
-                <RotateCcwIcon data-icon="inline-start" />
-                {t('agent.tool.retryTask')}
-              </Button>
-            )}
-          </CardFooter>
-        )}
-      </Card>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
       <AgentApprovalDialog
         open={dialogOpen}
         snapshot={snapshot}
