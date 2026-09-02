@@ -717,19 +717,15 @@ pub(crate) fn close_session(
 pub(crate) fn request_app_restart(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
-    agent_requests: State<'_, crate::agent::AgentRequestRegistry>,
-    agent_runtime_v3: State<'_, crate::agent_runtime_v3::AgentRuntimeV3>,
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     sessions: State<'_, SessionManager>,
 ) {
     info!("Requesting application restart");
     if let Err(error) = forwards_state.cancel_all() {
         warn!("Failed to cancel port forwards before restart: {error}");
     }
-    if let Err(error) = agent_requests.cancel_all() {
-        warn!("Failed to cancel Agent requests before restart: {error}");
-    }
-    if let Err(error) = agent_runtime_v3.prepare_for_shutdown(&sessions) {
-        warn!("Failed to persist Agent v3 tasks before restart: {error}");
+    if let Err(error) = agent_runtime.prepare_for_shutdown(&sessions) {
+        warn!("Failed to persist Agent runtime tasks before restart: {error}");
     }
     app.request_restart();
 }
@@ -738,19 +734,15 @@ pub(crate) fn request_app_restart(
 pub(crate) fn request_app_exit(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
-    agent_requests: State<'_, crate::agent::AgentRequestRegistry>,
-    agent_runtime_v3: State<'_, crate::agent_runtime_v3::AgentRuntimeV3>,
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     sessions: State<'_, SessionManager>,
 ) {
     info!("Requesting application exit");
     if let Err(error) = forwards_state.cancel_all() {
         warn!("Failed to cancel port forwards before exit: {error}");
     }
-    if let Err(error) = agent_requests.cancel_all() {
-        warn!("Failed to cancel Agent requests before exit: {error}");
-    }
-    if let Err(error) = agent_runtime_v3.prepare_for_shutdown(&sessions) {
-        warn!("Failed to persist Agent v3 tasks before exit: {error}");
+    if let Err(error) = agent_runtime.prepare_for_shutdown(&sessions) {
+        warn!("Failed to persist Agent runtime tasks before exit: {error}");
     }
     app.exit(0);
 }
@@ -3128,7 +3120,7 @@ mod tests {
             .expect("spawn the native macOS shell through a PTY");
         drop(pair.slave);
 
-        let marker = "SHELLSPAN_M2_0123456789abcdef0123456789abcdef0123456789abcdef";
+        let marker = "SHELLSPAN_NATIVE_TEST_0123456789abcdef0123456789abcdef0123456789abcdef";
         let wrapper = format!(
             "m='{marker}'; c='printf macos-shell-protocol; false'; k=$(LC_ALL=C /usr/bin/od -An -N24 -tx1 /dev/urandom | /usr/bin/tr -d '[:space:]'); h=$(/usr/bin/printf %s \"$k\" | /usr/bin/shasum -a 256); h=${{h%% *}}; /usr/bin/printf '\\036%s:BEGIN:%s\\037\\n' \"$m\" \"$h\"; if /bin/sh -c \"$c\" </dev/null; then x=0; else x=$?; fi; /usr/bin/printf '\\036%s:END:%s:%d\\037\\n' \"$m\" \"$k\" \"$x\"\nexit\n"
         );
@@ -3146,11 +3138,12 @@ mod tests {
 
         assert!(status.success());
         assert!(output.contains(
-            "\u{1e}SHELLSPAN_M2_0123456789abcdef0123456789abcdef0123456789abcdef:BEGIN:"
+            "\u{1e}SHELLSPAN_NATIVE_TEST_0123456789abcdef0123456789abcdef0123456789abcdef:BEGIN:"
         ));
         assert!(output.contains("macos-shell-protocol"));
-        assert!(output
-            .contains("\u{1e}SHELLSPAN_M2_0123456789abcdef0123456789abcdef0123456789abcdef:END:"));
+        assert!(output.contains(
+            "\u{1e}SHELLSPAN_NATIVE_TEST_0123456789abcdef0123456789abcdef0123456789abcdef:END:"
+        ));
         assert!(output.contains(":1\u{1f}"));
     }
 
