@@ -101,6 +101,7 @@ function MessageScrollerButton({
   Pick<React.ComponentProps<typeof Button>, "variant" | "size">) {
   return (
     <MessageScrollerPrimitive.Button
+      {...props}
       data-slot="message-scroller-button"
       data-direction={direction}
       data-variant={variant}
@@ -111,7 +112,6 @@ function MessageScrollerButton({
         className
       )}
       render={render ?? <Button variant={variant} size={size} />}
-      {...props}
     >
       {children ?? (
         <>
