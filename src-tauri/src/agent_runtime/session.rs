@@ -15,7 +15,7 @@ use super::{
     AgentInboxOperation, AgentMessageSource, AgentRecoveryCheckpoint, AgentSessionEvent,
     AgentSessionEventPayload, AgentSessionPermissionMode, AgentSessionStatus, AgentSessionTarget,
     AgentSubagentSession, AgentSurfaceSnapshot, AgentTaskProjection, RecordedToolCall,
-    AGENT_SESSION_EVENT_VERSION, MAX_AGENT_MESSAGE_BYTES,
+    AGENT_SESSION_EVENT_VERSION, LEGACY_AGENT_SESSION_EVENT_VERSION, MAX_AGENT_MESSAGE_BYTES,
 };
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
@@ -30,6 +30,8 @@ const MAX_SESSION_PAGE_SIZE: usize = 256;
 const MAX_EVENT_PAGE_SIZE: usize = 1_024;
 const MAX_COLLECTION_ITEMS: usize = 1_024;
 const MAX_JS_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+const MAX_SESSION_TITLE_CHARS: usize = 120;
+const MAX_SESSION_TITLE_BYTES: usize = 512;
 
 type EventPublisher = Arc<dyn Fn(&AgentSessionEvent) + Send + Sync>;
 
@@ -39,6 +41,8 @@ pub(crate) struct AgentSessionHeader {
     pub(crate) session_id: String,
     pub(crate) task_id: String,
     pub(crate) goal: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) parent_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -72,6 +76,45 @@ pub(crate) struct CreateAgentSessionRequest {
     pub(crate) capability_scope: Option<super::AgentCapabilityScope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) subagent: Option<AgentSubagentSession>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum AgentInboxMutation {
+    Update {
+        item_id: String,
+        content: String,
+    },
+    Remove {
+        item_id: String,
+    },
+    Reorder {
+        lane: AgentInboxLane,
+        ordered_item_ids: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentInboxMutationInput {
+    pub(crate) session_id: String,
+    pub(crate) expected_revision: u64,
+    pub(crate) client_operation_id: String,
+    pub(crate) mutation: AgentInboxMutation,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentSessionRenameInput {
+    pub(crate) session_id: String,
+    pub(crate) expected_revision: u64,
+    pub(crate) client_operation_id: String,
+    pub(crate) title: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -216,6 +259,7 @@ impl AgentSessionRecord {
             session_id: first.session_id.clone(),
             task_id: task_id.clone(),
             goal: goal.clone(),
+            title: None,
             parent_session_id: parent_session_id.clone(),
             target: target.clone(),
             permission_mode: *permission_mode,
@@ -611,6 +655,7 @@ impl AgentSessionStore {
                     lane,
                     messages: vec![AgentInboxMessage {
                         message_id: format!("subagent-{settlement_id}"),
+                        client_submission_id: None,
                         content: summary,
                         source: AgentMessageSource::Subagent {
                             session_id: child_session_id.to_string(),
@@ -914,17 +959,150 @@ impl AgentSessionStore {
         message: AgentInboxMessage,
     ) -> Result<AgentSessionSnapshot, String> {
         validate_inbox_message(&message)?;
-        self.append(
+        let mut inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| "Agent session was not found".to_string())?;
+        if let Some(client_submission_id) = message.client_submission_id.as_deref() {
+            if let Some((previous_lane, previous)) = find_submission(record, client_submission_id) {
+                if previous_lane != lane || previous != &message {
+                    return Err(
+                        "client submission id was already committed with a different payload"
+                            .into(),
+                    );
+                }
+                return record.snapshot();
+            }
+        }
+        let (events, publisher) = append_payloads_locked(
+            &mut inner,
             session_id,
-            None,
-            None,
-            AgentSessionEventPayload::InboxSpliced {
-                operation: AgentInboxOperation::Enqueued,
-                lane,
-                messages: vec![message],
-            },
+            vec![(
+                None,
+                None,
+                AgentSessionEventPayload::InboxSpliced {
+                    operation: AgentInboxOperation::Enqueued,
+                    lane,
+                    messages: vec![message],
+                },
+            )],
         )?;
-        self.snapshot(session_id)
+        let snapshot = inner
+            .sessions
+            .get(session_id)
+            .expect("appended Session remains registered")
+            .snapshot()?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(snapshot)
+    }
+
+    pub(crate) fn mutate_inbox(
+        &self,
+        input: AgentInboxMutationInput,
+    ) -> Result<AgentSessionSnapshot, String> {
+        validate_identifier(&input.session_id, "sessionId")?;
+        validate_identifier(&input.client_operation_id, "clientOperationId")?;
+        if input.expected_revision > MAX_JS_SAFE_INTEGER {
+            return Err("Agent inbox expected revision exceeds the wire boundary".into());
+        }
+        let mut inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(&input.session_id)
+            .ok_or_else(|| "Agent inbox mutation target Session was not found".to_string())?;
+        validate_mutable_session(record, "inbox mutation")?;
+        validate_expected_revision(record, input.expected_revision)?;
+        let payload = match input.mutation {
+            AgentInboxMutation::Update { item_id, content } => {
+                validate_identifier(&item_id, "itemId")?;
+                validate_text(&content, "inbox content", false, MAX_AGENT_MESSAGE_BYTES)?;
+                let (lane, _) = require_queued_item(record, &item_id)?;
+                AgentSessionEventPayload::InboxItemUpdated {
+                    item_id,
+                    lane,
+                    content,
+                    previous_revision: input.expected_revision,
+                    client_operation_id: input.client_operation_id,
+                }
+            }
+            AgentInboxMutation::Remove { item_id } => {
+                validate_identifier(&item_id, "itemId")?;
+                let (lane, _) = require_queued_item(record, &item_id)?;
+                AgentSessionEventPayload::InboxItemRemoved {
+                    item_id,
+                    lane,
+                    previous_revision: input.expected_revision,
+                    client_operation_id: input.client_operation_id,
+                }
+            }
+            AgentInboxMutation::Reorder {
+                lane,
+                ordered_item_ids,
+            } => {
+                validate_collection_allow_empty(&ordered_item_ids, "ordered inbox item ids")?;
+                for item_id in &ordered_item_ids {
+                    validate_identifier(item_id, "itemId")?;
+                }
+                let mut candidate = record.inbox.clone();
+                candidate.reorder(lane, &ordered_item_ids)?;
+                AgentSessionEventPayload::InboxReordered {
+                    lane,
+                    ordered_item_ids,
+                    previous_revision: input.expected_revision,
+                    client_operation_id: input.client_operation_id,
+                }
+            }
+        };
+        let (events, publisher) =
+            append_payloads_locked(&mut inner, &input.session_id, vec![(None, None, payload)])?;
+        let snapshot = inner
+            .sessions
+            .get(&input.session_id)
+            .expect("mutated Session remains registered")
+            .snapshot()?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(snapshot)
+    }
+
+    pub(crate) fn rename(
+        &self,
+        input: AgentSessionRenameInput,
+    ) -> Result<AgentSessionSnapshot, String> {
+        validate_identifier(&input.session_id, "sessionId")?;
+        validate_identifier(&input.client_operation_id, "clientOperationId")?;
+        let title = input.title.trim().to_string();
+        validate_session_title(&title)?;
+        let mut inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(&input.session_id)
+            .ok_or_else(|| "Agent Session rename target was not found".to_string())?;
+        validate_mutable_session(record, "rename")?;
+        validate_expected_revision(record, input.expected_revision)?;
+        let (events, publisher) = append_payloads_locked(
+            &mut inner,
+            &input.session_id,
+            vec![(
+                None,
+                None,
+                AgentSessionEventPayload::SessionRenamed {
+                    title,
+                    previous_revision: input.expected_revision,
+                    client_operation_id: input.client_operation_id,
+                },
+            )],
+        )?;
+        let snapshot = inner
+            .sessions
+            .get(&input.session_id)
+            .expect("renamed Session remains registered")
+            .snapshot()?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(snapshot)
     }
 
     #[cfg(test)]
@@ -1485,12 +1663,88 @@ fn append_payloads_locked(
     Ok((appended, inner.publisher.clone()))
 }
 
+fn find_submission<'a>(
+    record: &'a AgentSessionRecord,
+    client_submission_id: &str,
+) -> Option<(AgentInboxLane, &'a AgentInboxMessage)> {
+    record.events.iter().find_map(|event| match &event.payload {
+        AgentSessionEventPayload::InboxSpliced {
+            operation: AgentInboxOperation::Enqueued,
+            lane,
+            messages,
+        } => messages
+            .iter()
+            .find(|message| message.client_submission_id.as_deref() == Some(client_submission_id))
+            .map(|message| (*lane, message)),
+        _ => None,
+    })
+}
+
+fn require_queued_item<'a>(
+    record: &'a AgentSessionRecord,
+    item_id: &str,
+) -> Result<(AgentInboxLane, &'a AgentInboxMessage), String> {
+    if let Some(item) = record.inbox.locate(item_id) {
+        return Ok(item);
+    }
+    let existed = record.events.iter().any(|event| match &event.payload {
+        AgentSessionEventPayload::InboxSpliced {
+            operation: AgentInboxOperation::Enqueued,
+            messages,
+            ..
+        } => messages.iter().any(|message| message.message_id == item_id),
+        _ => false,
+    });
+    if existed {
+        Err("Agent inbox item is no longer queued (claimed or removed)".into())
+    } else {
+        Err("Agent inbox item was not found".into())
+    }
+}
+
+fn validate_mutable_session(record: &AgentSessionRecord, operation: &str) -> Result<(), String> {
+    if record.archived {
+        return Err(format!("archived Agent Session rejects {operation}"));
+    }
+    if record.ended || record.status.is_terminal() {
+        return Err(format!("terminal Agent Session rejects {operation}"));
+    }
+    Ok(())
+}
+
+fn validate_expected_revision(
+    record: &AgentSessionRecord,
+    expected_revision: u64,
+) -> Result<(), String> {
+    let current_revision = record.events.len() as u64;
+    if expected_revision != current_revision {
+        return Err(format!(
+            "Agent Runtime revision conflict: expected revision {expected_revision}, current revision {current_revision}"
+        ));
+    }
+    Ok(())
+}
+
 fn validate_event_envelope(
     record: &AgentSessionRecord,
     event: &AgentSessionEvent,
 ) -> Result<(), String> {
-    if event.version != AGENT_SESSION_EVENT_VERSION {
+    if !matches!(
+        event.version,
+        LEGACY_AGENT_SESSION_EVENT_VERSION | AGENT_SESSION_EVENT_VERSION
+    ) {
         return Err("Agent session event version is unsupported".into());
+    }
+    if event.version == LEGACY_AGENT_SESSION_EVENT_VERSION
+        && matches!(
+            &event.payload,
+            AgentSessionEventPayload::InboxItemUpdated { .. }
+                | AgentSessionEventPayload::InboxItemRemoved { .. }
+                | AgentSessionEventPayload::InboxReordered { .. }
+                | AgentSessionEventPayload::SessionRenamed { .. }
+        )
+    {
+        return Err("Agent Session v3 mutation event used a legacy envelope version".into());
     }
     validate_identifier(&event.session_id, "sessionId")?;
     if event.session_id != record.header.session_id {
@@ -1782,6 +2036,23 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
             lane,
             messages,
         } => record.inbox.apply(*operation, *lane, messages)?,
+        AgentSessionEventPayload::InboxItemUpdated {
+            item_id,
+            lane,
+            content,
+            ..
+        } => record.inbox.update(*lane, item_id, content.clone())?,
+        AgentSessionEventPayload::InboxItemRemoved { item_id, lane, .. } => {
+            record.inbox.remove(*lane, item_id)?
+        }
+        AgentSessionEventPayload::InboxReordered {
+            lane,
+            ordered_item_ids,
+            ..
+        } => record.inbox.reorder(*lane, ordered_item_ids)?,
+        AgentSessionEventPayload::SessionRenamed { title, .. } => {
+            record.header.title = Some(title.clone())
+        }
         _ => {}
     }
     Ok(())
@@ -1848,6 +2119,54 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             for message in messages {
                 validate_inbox_message(message)?;
             }
+        }
+        Payload::InboxItemUpdated {
+            item_id,
+            content,
+            previous_revision,
+            client_operation_id,
+            ..
+        } => {
+            require_scope(event, false, false)?;
+            validate_mutation_event_identity(event, *previous_revision, client_operation_id)?;
+            validate_identifier(item_id, "itemId")?;
+            validate_text(content, "inbox content", false, MAX_AGENT_MESSAGE_BYTES)?;
+        }
+        Payload::InboxItemRemoved {
+            item_id,
+            previous_revision,
+            client_operation_id,
+            ..
+        } => {
+            require_scope(event, false, false)?;
+            validate_mutation_event_identity(event, *previous_revision, client_operation_id)?;
+            validate_identifier(item_id, "itemId")?;
+        }
+        Payload::InboxReordered {
+            ordered_item_ids,
+            previous_revision,
+            client_operation_id,
+            ..
+        } => {
+            require_scope(event, false, false)?;
+            validate_mutation_event_identity(event, *previous_revision, client_operation_id)?;
+            validate_collection_allow_empty(ordered_item_ids, "ordered inbox item ids")?;
+            let mut unique = HashSet::with_capacity(ordered_item_ids.len());
+            for item_id in ordered_item_ids {
+                validate_identifier(item_id, "itemId")?;
+                if !unique.insert(item_id) {
+                    return Err("ordered inbox item ids contain duplicates".into());
+                }
+            }
+        }
+        Payload::SessionRenamed {
+            title,
+            previous_revision,
+            client_operation_id,
+        } => {
+            require_scope(event, false, false)?;
+            validate_mutation_event_identity(event, *previous_revision, client_operation_id)?;
+            validate_session_title(title)?;
         }
         Payload::TurnStart => require_scope(event, true, false)?,
         Payload::TurnEnd { reason } => {
@@ -2193,8 +2512,41 @@ fn require_scope(
     Ok(())
 }
 
+fn validate_mutation_event_identity(
+    event: &AgentSessionEvent,
+    previous_revision: u64,
+    client_operation_id: &str,
+) -> Result<(), String> {
+    if event.version != AGENT_SESSION_EVENT_VERSION {
+        return Err("Agent Runtime mutation events require the v3 event contract".into());
+    }
+    if previous_revision != event.seq {
+        return Err("Agent Runtime mutation previous revision does not match its sequence".into());
+    }
+    validate_identifier(client_operation_id, "clientOperationId")
+}
+
+fn validate_session_title(title: &str) -> Result<(), String> {
+    validate_text(title, "Session title", false, MAX_SESSION_TITLE_BYTES)?;
+    if title.trim() != title {
+        return Err("Agent Session title must not contain leading or trailing whitespace".into());
+    }
+    if title.chars().count() > MAX_SESSION_TITLE_CHARS {
+        return Err(format!(
+            "Agent Session title exceeds {MAX_SESSION_TITLE_CHARS} Unicode characters"
+        ));
+    }
+    if title.chars().any(char::is_control) {
+        return Err("Agent Session title must be a single line without control characters".into());
+    }
+    Ok(())
+}
+
 fn validate_inbox_message(message: &AgentInboxMessage) -> Result<(), String> {
     validate_identifier(&message.message_id, "messageId")?;
+    if let Some(client_submission_id) = message.client_submission_id.as_deref() {
+        validate_identifier(client_submission_id, "clientSubmissionId")?;
+    }
     validate_text(
         &message.content,
         "message content",
@@ -2850,11 +3202,12 @@ fn restrict_file(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn restrict_open_file(file: &File) -> Result<(), String> {
+fn restrict_open_file(_file: &File) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(fs::Permissions::from_mode(0o600))
+        _file
+            .set_permissions(fs::Permissions::from_mode(0o600))
             .map_err(|error| format!("failed to restrict Agent session log: {error}"))?;
     }
     Ok(())
@@ -2864,9 +3217,20 @@ fn sync_parent(path: &Path) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "Agent session log has no parent".to_string())?;
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| format!("failed to flush Agent session directory: {error}"))
+    #[cfg(unix)]
+    {
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| format!("failed to flush Agent session directory: {error}"))
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows requires FILE_FLAG_BACKUP_SEMANTICS to open a directory handle.
+        // The log file itself was already sync_all'd; do not turn that successful
+        // durable commit into an AccessDenied failure by using File::open here.
+        let _ = parent;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -2899,6 +3263,7 @@ mod tests {
     fn message(id: &str, content: &str) -> AgentInboxMessage {
         AgentInboxMessage {
             message_id: id.into(),
+            client_submission_id: Some(id.into()),
             content: content.into(),
             source: AgentMessageSource::User,
         }
@@ -3198,6 +3563,359 @@ mod tests {
         assert_eq!(snapshot.event_count, 2);
         assert!(snapshot.inbox.next_turn.is_empty());
         assert!(published.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn inbox_update_remove_and_reorder_commit_with_expected_revision() {
+        let (root, store) = configured();
+        create(&store);
+        for (id, lane) in [
+            ("turn-a", AgentInboxLane::NextTurn),
+            ("turn-b", AgentInboxLane::NextTurn),
+            ("step-a", AgentInboxLane::NextStep),
+        ] {
+            store.enqueue("session-1", lane, message(id, id)).unwrap();
+        }
+
+        let reordered = store
+            .mutate_inbox(AgentInboxMutationInput {
+                session_id: "session-1".into(),
+                expected_revision: 5,
+                client_operation_id: "reorder-1".into(),
+                mutation: AgentInboxMutation::Reorder {
+                    lane: AgentInboxLane::NextTurn,
+                    ordered_item_ids: vec!["turn-b".into(), "turn-a".into()],
+                },
+            })
+            .unwrap();
+        assert_eq!(reordered.event_count, 6);
+        assert_eq!(reordered.inbox.next_turn[0].message_id, "turn-b");
+
+        let updated = store
+            .mutate_inbox(AgentInboxMutationInput {
+                session_id: "session-1".into(),
+                expected_revision: 6,
+                client_operation_id: "update-1".into(),
+                mutation: AgentInboxMutation::Update {
+                    item_id: "turn-b".into(),
+                    content: "updated text".into(),
+                },
+            })
+            .unwrap();
+        assert_eq!(updated.inbox.next_turn[0].content, "updated text");
+
+        let removed = store
+            .mutate_inbox(AgentInboxMutationInput {
+                session_id: "session-1".into(),
+                expected_revision: 7,
+                client_operation_id: "remove-1".into(),
+                mutation: AgentInboxMutation::Remove {
+                    item_id: "turn-a".into(),
+                },
+            })
+            .unwrap();
+        assert_eq!(removed.event_count, 8);
+        assert_eq!(removed.inbox.next_turn.len(), 1);
+        assert_eq!(removed.inbox.next_step[0].message_id, "step-a");
+        let restarted = AgentSessionStore::default();
+        restarted.configure(root.path().to_path_buf()).unwrap();
+        let replayed = restarted.snapshot("session-1").unwrap();
+        assert_eq!(replayed.inbox.next_turn[0].message_id, "turn-b");
+        assert_eq!(replayed.inbox.next_turn[0].content, "updated text");
+    }
+
+    #[test]
+    fn inbox_mutations_reject_conflicts_claimed_missing_and_terminal_items() {
+        let (_root, store) = configured();
+        create(&store);
+        store
+            .enqueue(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("turn-a", "queued"),
+            )
+            .unwrap();
+
+        let conflict = store
+            .mutate_inbox(AgentInboxMutationInput {
+                session_id: "session-1".into(),
+                expected_revision: 2,
+                client_operation_id: "conflict-1".into(),
+                mutation: AgentInboxMutation::Remove {
+                    item_id: "turn-a".into(),
+                },
+            })
+            .unwrap_err();
+        assert!(conflict.contains("current revision 3"));
+
+        store.claim_turn("session-1").unwrap();
+        let claimed_revision = store.snapshot("session-1").unwrap().event_count;
+        assert!(store
+            .mutate_inbox(AgentInboxMutationInput {
+                session_id: "session-1".into(),
+                expected_revision: claimed_revision,
+                client_operation_id: "claimed-1".into(),
+                mutation: AgentInboxMutation::Update {
+                    item_id: "turn-a".into(),
+                    content: "late".into(),
+                },
+            })
+            .unwrap_err()
+            .contains("no longer queued"));
+        assert!(store
+            .mutate_inbox(AgentInboxMutationInput {
+                session_id: "session-1".into(),
+                expected_revision: claimed_revision,
+                client_operation_id: "missing-1".into(),
+                mutation: AgentInboxMutation::Remove {
+                    item_id: "missing".into(),
+                },
+            })
+            .unwrap_err()
+            .contains("not found"));
+
+        store.cancel("session-1").unwrap();
+        let terminal_revision = store.snapshot("session-1").unwrap().event_count;
+        assert!(store
+            .mutate_inbox(AgentInboxMutationInput {
+                session_id: "session-1".into(),
+                expected_revision: terminal_revision,
+                client_operation_id: "terminal-1".into(),
+                mutation: AgentInboxMutation::Reorder {
+                    lane: AgentInboxLane::NextTurn,
+                    ordered_item_ids: Vec::new(),
+                },
+            })
+            .unwrap_err()
+            .contains("terminal"));
+        assert!(store
+            .rename(AgentSessionRenameInput {
+                session_id: "session-1".into(),
+                expected_revision: terminal_revision,
+                client_operation_id: "rename-terminal".into(),
+                title: "Too late".into(),
+            })
+            .unwrap_err()
+            .contains("terminal"));
+    }
+
+    #[test]
+    fn mutation_persistence_failure_keeps_snapshot_and_publish_unchanged() {
+        let (root, store) = configured();
+        create(&store);
+        store
+            .enqueue(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("turn-a", "before"),
+            )
+            .unwrap();
+        let published = Arc::new(Mutex::new(Vec::new()));
+        let observed = Arc::clone(&published);
+        store
+            .set_publisher(Arc::new(move |event| {
+                observed.lock().unwrap().push(event.clone());
+            }))
+            .unwrap();
+        let path = log_path(&root);
+        fs::rename(&path, path.with_extension("saved")).unwrap();
+        fs::create_dir(&path).unwrap();
+
+        assert!(store
+            .mutate_inbox(AgentInboxMutationInput {
+                session_id: "session-1".into(),
+                expected_revision: 3,
+                client_operation_id: "update-failed".into(),
+                mutation: AgentInboxMutation::Update {
+                    item_id: "turn-a".into(),
+                    content: "after".into(),
+                },
+            })
+            .is_err());
+        let snapshot = store.snapshot("session-1").unwrap();
+        assert_eq!(snapshot.event_count, 3);
+        assert_eq!(snapshot.inbox.next_turn[0].content, "before");
+        assert!(published.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn mutation_publish_observes_the_already_committed_log() {
+        let (root, store) = configured();
+        create(&store);
+        store
+            .enqueue(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("turn-a", "before"),
+            )
+            .unwrap();
+        let observed = Arc::new(Mutex::new(false));
+        let callback_observed = Arc::clone(&observed);
+        let path = log_path(&root);
+        store
+            .set_publisher(Arc::new(move |event| {
+                if matches!(
+                    event.payload,
+                    AgentSessionEventPayload::InboxItemUpdated { .. }
+                ) {
+                    let encoded = fs::read_to_string(&path).unwrap();
+                    *callback_observed.lock().unwrap() = encoded.contains("update-committed");
+                }
+            }))
+            .unwrap();
+        store
+            .mutate_inbox(AgentInboxMutationInput {
+                session_id: "session-1".into(),
+                expected_revision: 3,
+                client_operation_id: "update-committed".into(),
+                mutation: AgentInboxMutation::Update {
+                    item_id: "turn-a".into(),
+                    content: "after".into(),
+                },
+            })
+            .unwrap();
+        assert!(*observed.lock().unwrap());
+    }
+
+    #[test]
+    fn client_submission_ids_are_idempotent_per_session_and_survive_restart() {
+        let (root, store) = configured();
+        create(&store);
+        let first = store
+            .enqueue(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("submission-1", "inspect"),
+            )
+            .unwrap();
+        let retry = store
+            .enqueue(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("submission-1", "inspect"),
+            )
+            .unwrap();
+        assert_eq!(retry.event_count, first.event_count);
+        assert!(store
+            .enqueue(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("submission-1", "different"),
+            )
+            .is_err());
+
+        store
+            .create(CreateAgentSessionRequest {
+                session_id: "session-2".into(),
+                task_id: "task-2".into(),
+                goal: "Other".into(),
+                parent_session_id: None,
+                target: None,
+                permission_mode: None,
+                success_criteria: Vec::new(),
+                capability_scope: None,
+                subagent: None,
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .enqueue(
+                    "session-2",
+                    AgentInboxLane::NextTurn,
+                    message("submission-1", "independent"),
+                )
+                .unwrap()
+                .inbox
+                .next_turn
+                .len(),
+            1
+        );
+
+        let restarted = AgentSessionStore::default();
+        restarted.configure(root.path().to_path_buf()).unwrap();
+        let recovered = restarted.snapshot("session-1").unwrap();
+        assert_eq!(
+            recovered.inbox.next_turn[0].client_submission_id.as_deref(),
+            Some("submission-1")
+        );
+        assert_eq!(
+            restarted
+                .enqueue(
+                    "session-1",
+                    AgentInboxLane::NextTurn,
+                    message("submission-1", "inspect"),
+                )
+                .unwrap()
+                .event_count,
+            recovered.event_count
+        );
+    }
+
+    #[test]
+    fn rename_is_durable_and_task_goal_cannot_override_the_manual_title() {
+        let (root, store) = configured();
+        create(&store);
+        let renamed = store
+            .rename(AgentSessionRenameInput {
+                session_id: "session-1".into(),
+                expected_revision: 2,
+                client_operation_id: "rename-1".into(),
+                title: "  手动标题  ".into(),
+            })
+            .unwrap();
+        assert_eq!(renamed.header.title.as_deref(), Some("手动标题"));
+        assert_eq!(renamed.header.goal, "Inspect nginx");
+        store
+            .append(
+                "session-1",
+                None,
+                None,
+                AgentSessionEventPayload::TaskLinked {
+                    task_id: "task-1".into(),
+                    goal: Some("Automatic title candidate".into()),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            store.snapshot("session-1").unwrap().header.title.as_deref(),
+            Some("手动标题")
+        );
+
+        let restarted = AgentSessionStore::default();
+        restarted.configure(root.path().to_path_buf()).unwrap();
+        assert_eq!(
+            restarted
+                .snapshot("session-1")
+                .unwrap()
+                .header
+                .title
+                .as_deref(),
+            Some("手动标题")
+        );
+    }
+
+    #[test]
+    fn v2_event_history_remains_readable_after_the_v3_contract_upgrade() {
+        let (root, store) = configured();
+        create(&store);
+        drop(store);
+        let path = log_path(&root);
+        let legacy = fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|line| {
+                let mut value = serde_json::from_str::<serde_json::Value>(line).unwrap();
+                value["version"] = serde_json::json!(LEGACY_AGENT_SESSION_EVENT_VERSION);
+                serde_json::to_string(&value).unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(&path, legacy).unwrap();
+
+        let restarted = AgentSessionStore::default();
+        restarted.configure(root.path().to_path_buf()).unwrap();
+        assert_eq!(restarted.snapshot("session-1").unwrap().event_count, 2);
     }
 
     #[test]

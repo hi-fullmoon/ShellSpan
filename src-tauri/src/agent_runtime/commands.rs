@@ -9,9 +9,10 @@ use crate::keychain::CredentialManager;
 use super::{
     AgentArtifactRequest, AgentArtifactResponse, AgentChildInputRequest, AgentChildInspection,
     AgentChildRequest, AgentCommittedEventsRequest, AgentFleetControlRequest, AgentFleetInspection,
-    AgentFleetPlanRequest, AgentFleetReconcileRequest, AgentRecoveryCheckpoint,
-    AgentRecoveryReconcileInput, AgentRecoverySessionInput, AgentRuntime, AgentSessionEventPage,
-    AgentSessionEventsRequest, AgentSessionListPage, AgentSessionListRequest, AgentSessionSnapshot,
+    AgentFleetPlanRequest, AgentFleetReconcileRequest, AgentInboxMutationInput,
+    AgentRecoveryCheckpoint, AgentRecoveryReconcileInput, AgentRecoverySessionInput, AgentRuntime,
+    AgentSessionEventPage, AgentSessionEventsRequest, AgentSessionListPage,
+    AgentSessionListRequest, AgentSessionRenameInput, AgentSessionSnapshot,
     AgentSubagentSpawnRequest, AgentToolDecisionInput, CreateAgentSessionRequest,
 };
 
@@ -37,6 +38,8 @@ pub(crate) fn configure_runtime(app: &AppHandle, runtime: &AgentRuntime) -> Resu
 pub(crate) struct AgentSessionInput {
     session_id: String,
     message_id: String,
+    #[serde(default)]
+    client_submission_id: Option<String>,
     content: String,
 }
 
@@ -197,7 +200,15 @@ pub(crate) fn agent_runtime_followup(
     input: AgentSessionInput,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
-    runtime.followup(&input.session_id, input.message_id, input.content)
+    let client_submission_id = input
+        .client_submission_id
+        .unwrap_or_else(|| input.message_id.clone());
+    runtime.followup_submission(
+        &input.session_id,
+        input.message_id,
+        client_submission_id,
+        input.content,
+    )
 }
 
 #[tauri::command]
@@ -207,7 +218,35 @@ pub(crate) fn agent_runtime_steer(
     input: AgentSessionInput,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
-    runtime.steer(&input.session_id, input.message_id, input.content)
+    let client_submission_id = input
+        .client_submission_id
+        .unwrap_or_else(|| input.message_id.clone());
+    runtime.steer_submission(
+        &input.session_id,
+        input.message_id,
+        client_submission_id,
+        input.content,
+    )
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_mutate_inbox(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentInboxMutationInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.mutate_inbox(input)
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_rename_session(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentSessionRenameInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.rename_session(input)
 }
 
 #[tauri::command]

@@ -271,10 +271,11 @@ impl AgentRuntime {
         self.sessions.snapshot(session_id)
     }
 
-    pub(crate) fn followup(
+    pub(crate) fn followup_submission(
         &self,
         session_id: &str,
         message_id: String,
+        client_submission_id: String,
         content: String,
     ) -> Result<AgentSessionSnapshot, String> {
         let snapshot = self.sessions.enqueue(
@@ -282,6 +283,7 @@ impl AgentRuntime {
             AgentInboxLane::NextTurn,
             AgentInboxMessage {
                 message_id,
+                client_submission_id: Some(client_submission_id),
                 content,
                 source: AgentMessageSource::User,
             },
@@ -290,10 +292,22 @@ impl AgentRuntime {
         Ok(snapshot)
     }
 
-    pub(crate) fn steer(
+    #[cfg(test)]
+    pub(crate) fn followup(
         &self,
         session_id: &str,
         message_id: String,
+        content: String,
+    ) -> Result<AgentSessionSnapshot, String> {
+        let client_submission_id = message_id.clone();
+        self.followup_submission(session_id, message_id, client_submission_id, content)
+    }
+
+    pub(crate) fn steer_submission(
+        &self,
+        session_id: &str,
+        message_id: String,
+        client_submission_id: String,
         content: String,
     ) -> Result<AgentSessionSnapshot, String> {
         let snapshot = self.sessions.enqueue(
@@ -301,12 +315,24 @@ impl AgentRuntime {
             AgentInboxLane::NextStep,
             AgentInboxMessage {
                 message_id,
+                client_submission_id: Some(client_submission_id),
                 content,
                 source: AgentMessageSource::User,
             },
         )?;
         self.wake(session_id)?;
         Ok(snapshot)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn steer(
+        &self,
+        session_id: &str,
+        message_id: String,
+        content: String,
+    ) -> Result<AgentSessionSnapshot, String> {
+        let client_submission_id = message_id.clone();
+        self.steer_submission(session_id, message_id, client_submission_id, content)
     }
 
     pub(crate) fn inject(
@@ -321,10 +347,25 @@ impl AgentRuntime {
             AgentInboxLane::NextStep,
             AgentInboxMessage {
                 message_id,
+                client_submission_id: None,
                 content,
                 source: AgentMessageSource::Runtime { label },
             },
         )
+    }
+
+    pub(crate) fn mutate_inbox(
+        &self,
+        input: super::AgentInboxMutationInput,
+    ) -> Result<AgentSessionSnapshot, String> {
+        self.sessions.mutate_inbox(input)
+    }
+
+    pub(crate) fn rename_session(
+        &self,
+        input: super::AgentSessionRenameInput,
+    ) -> Result<AgentSessionSnapshot, String> {
+        self.sessions.rename(input)
     }
 
     pub(crate) async fn cancel(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {

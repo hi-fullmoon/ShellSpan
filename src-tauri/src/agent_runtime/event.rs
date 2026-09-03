@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub(crate) const AGENT_SESSION_EVENT_VERSION: u8 = 2;
+pub(crate) const LEGACY_AGENT_SESSION_EVENT_VERSION: u8 = 2;
+pub(crate) const AGENT_SESSION_EVENT_VERSION: u8 = 3;
 pub(crate) const MAX_AGENT_MESSAGE_BYTES: usize = 128 * 1024;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -54,6 +55,8 @@ pub(crate) enum AgentMessageSource {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentInboxMessage {
     pub(crate) message_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) client_submission_id: Option<String>,
     pub(crate) content: String,
     pub(crate) source: AgentMessageSource,
 }
@@ -352,6 +355,34 @@ pub(crate) enum AgentSessionEventPayload {
         operation: AgentInboxOperation,
         lane: AgentInboxLane,
         messages: Vec<AgentInboxMessage>,
+    },
+    #[serde(rename = "agent/inbox/item_updated")]
+    InboxItemUpdated {
+        item_id: String,
+        lane: AgentInboxLane,
+        content: String,
+        previous_revision: u64,
+        client_operation_id: String,
+    },
+    #[serde(rename = "agent/inbox/item_removed")]
+    InboxItemRemoved {
+        item_id: String,
+        lane: AgentInboxLane,
+        previous_revision: u64,
+        client_operation_id: String,
+    },
+    #[serde(rename = "agent/inbox/reordered")]
+    InboxReordered {
+        lane: AgentInboxLane,
+        ordered_item_ids: Vec<String>,
+        previous_revision: u64,
+        client_operation_id: String,
+    },
+    #[serde(rename = "session/renamed")]
+    SessionRenamed {
+        title: String,
+        previous_revision: u64,
+        client_operation_id: String,
     },
     #[serde(rename = "turn/start")]
     TurnStart,

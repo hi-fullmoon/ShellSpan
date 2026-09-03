@@ -191,6 +191,7 @@ mod tests {
         AgentSessionEventPayload::UserMessage {
             message: AgentInboxMessage {
                 message_id: id.into(),
+                client_submission_id: None,
                 content: content.into(),
                 source: AgentMessageSource::User,
             },
