@@ -363,6 +363,8 @@ enum ProviderProfile {
     OpenAiResponses,
     DeepSeek,
     MiniMax,
+    Qwen,
+    Glm,
     OpenAiCompatible,
     Ollama,
 }
@@ -397,19 +399,30 @@ fn provider_capabilities(provider: &AiProviderConfig) -> ProviderCapabilities {
         {
             ProviderProfile::MiniMax
         }
+        AiProviderKind::OpenAiCompatible
+            if crate::ai::is_dashscope_qwen_thinking_provider(provider) =>
+        {
+            ProviderProfile::Qwen
+        }
+        AiProviderKind::OpenAiCompatible if crate::ai::is_glm_thinking_provider(provider) => {
+            ProviderProfile::Glm
+        }
         AiProviderKind::OpenAiCompatible => ProviderProfile::OpenAiCompatible,
     };
     ProviderCapabilities {
         cumulative_stream: profile == ProviderProfile::MiniMax,
         supports_stream_usage: matches!(
             profile,
-            ProviderProfile::DeepSeek | ProviderProfile::MiniMax
+            ProviderProfile::DeepSeek
+                | ProviderProfile::MiniMax
+                | ProviderProfile::Qwen
+                | ProviderProfile::Glm
         ),
         native_reasoning: !matches!(profile, ProviderProfile::OpenAiCompatible),
         split_reasoning: profile == ProviderProfile::MiniMax,
         replay_reasoning_content: matches!(
             profile,
-            ProviderProfile::DeepSeek | ProviderProfile::MiniMax
+            ProviderProfile::DeepSeek | ProviderProfile::MiniMax | ProviderProfile::Qwen
         ),
         think_tag_fallback: matches!(
             profile,
@@ -2088,6 +2101,7 @@ mod tests {
     use std::thread;
 
     use super::*;
+    use crate::ai::AiReasoningEffort;
 
     struct RecordingSink(Mutex<String>, Mutex<Vec<ModelUsage>>, Mutex<String>);
 
@@ -2320,6 +2334,38 @@ mod tests {
         assert_eq!(*recording.2.lock().unwrap(), "inspect first");
         assert!(completed);
         assert_eq!(reason, ModelFinishReason::ToolCalls);
+    }
+
+    #[test]
+    fn qwen_and_glm_profiles_enable_native_reasoning_and_stream_usage() {
+        let qwen = AiProviderConfig {
+            id: "qwen".into(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
+            model: "qwen3.8-max".into(),
+            reasoning_effort: Some(AiReasoningEffort::On),
+            requires_api_key: true,
+            api_key: None,
+        };
+        let glm = AiProviderConfig {
+            id: "glm".into(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://open.bigmodel.cn/api/paas/v4".into(),
+            model: "glm-5.2".into(),
+            reasoning_effort: Some(AiReasoningEffort::High),
+            requires_api_key: true,
+            api_key: None,
+        };
+
+        let qwen_capabilities = provider_capabilities(&qwen);
+        assert!(qwen_capabilities.native_reasoning);
+        assert!(qwen_capabilities.supports_stream_usage);
+        assert!(qwen_capabilities.replay_reasoning_content);
+
+        let glm_capabilities = provider_capabilities(&glm);
+        assert!(glm_capabilities.native_reasoning);
+        assert!(glm_capabilities.supports_stream_usage);
+        assert!(!glm_capabilities.replay_reasoning_content);
     }
 
     #[test]

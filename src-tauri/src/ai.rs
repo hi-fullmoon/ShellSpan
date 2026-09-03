@@ -574,6 +574,51 @@ fn is_deepseek_v4_provider(provider: &AiProviderConfig) -> bool {
             .is_some_and(|host| host.eq_ignore_ascii_case("api.deepseek.com"))
 }
 
+fn is_minimax_m3_provider(provider: &AiProviderConfig) -> bool {
+    let model = provider.model.trim().to_ascii_lowercase();
+    (model == "minimax-m3" || model.starts_with("minimax-m3-"))
+        && Url::parse(provider.base_url.trim())
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .is_some_and(|host| {
+                host.eq_ignore_ascii_case("api.minimax.io")
+                    || host.eq_ignore_ascii_case("api.minimaxi.com")
+            })
+}
+
+pub(crate) fn is_dashscope_qwen_thinking_provider(provider: &AiProviderConfig) -> bool {
+    let model = provider.model.trim().to_ascii_lowercase();
+    (model == "qwen3" || model.starts_with("qwen3-") || model.starts_with("qwen3."))
+        && !model.split(['-', '.']).any(|segment| segment == "thinking")
+        && Url::parse(provider.base_url.trim())
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .is_some_and(|host| {
+                host.eq_ignore_ascii_case("dashscope.aliyuncs.com")
+                    || host.eq_ignore_ascii_case("dashscope-intl.aliyuncs.com")
+                    || host.to_ascii_lowercase().ends_with(".maas.aliyuncs.com")
+            })
+}
+
+pub(crate) fn is_glm_thinking_provider(provider: &AiProviderConfig) -> bool {
+    let model = provider.model.trim().to_ascii_lowercase();
+    let supported_model = [
+        "glm-4.5", "glm-4.6", "glm-4.7", "glm-5", "glm-5.1", "glm-5.2",
+    ]
+    .iter()
+    .any(|prefix| model == *prefix || model.starts_with(&format!("{prefix}-")));
+    supported_model
+        && Url::parse(provider.base_url.trim())
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .is_some_and(|host| host.eq_ignore_ascii_case("open.bigmodel.cn"))
+}
+
+fn is_glm_5_2_provider(provider: &AiProviderConfig) -> bool {
+    let model = provider.model.trim().to_ascii_lowercase();
+    is_glm_thinking_provider(provider) && (model == "glm-5.2" || model.starts_with("glm-5.2-"))
+}
+
 pub(crate) fn apply_reasoning_effort(body: &mut Value, provider: &AiProviderConfig) {
     let Some(effort) = provider.reasoning_effort else {
         return;
@@ -584,16 +629,35 @@ pub(crate) fn apply_reasoning_effort(body: &mut Value, provider: &AiProviderConf
             AiReasoningEffort::On => {}
             effort => body["reasoning"] = json!({ "effort": effort }),
         },
-        AiProviderKind::OpenAiCompatible => match effort {
-            AiReasoningEffort::Off => body["thinking"] = json!({ "type": "disabled" }),
-            AiReasoningEffort::On => body["thinking"] = json!({ "type": "enabled" }),
-            effort => {
-                body["reasoning_effort"] = json!(effort);
-                if is_deepseek_v4_provider(provider) {
-                    body["thinking"] = json!({ "type": "enabled" });
+        AiProviderKind::OpenAiCompatible => {
+            if is_dashscope_qwen_thinking_provider(provider) {
+                match effort {
+                    AiReasoningEffort::Off | AiReasoningEffort::None => {
+                        body["enable_thinking"] = json!(false)
+                    }
+                    AiReasoningEffort::On => body["enable_thinking"] = json!(true),
+                    effort => body["reasoning_effort"] = json!(effort),
+                }
+            } else {
+                match effort {
+                    AiReasoningEffort::Off => body["thinking"] = json!({ "type": "disabled" }),
+                    AiReasoningEffort::On => {
+                        let thinking_type = if is_minimax_m3_provider(provider) {
+                            "adaptive"
+                        } else {
+                            "enabled"
+                        };
+                        body["thinking"] = json!({ "type": thinking_type });
+                    }
+                    effort => {
+                        body["reasoning_effort"] = json!(effort);
+                        if is_deepseek_v4_provider(provider) || is_glm_5_2_provider(provider) {
+                            body["thinking"] = json!({ "type": "enabled" });
+                        }
+                    }
                 }
             }
-        },
+        }
         AiProviderKind::Ollama => match effort {
             AiReasoningEffort::Off | AiReasoningEffort::None => body["think"] = json!(false),
             AiReasoningEffort::On => body["think"] = json!(true),
@@ -627,6 +691,10 @@ pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Ur
         && url
             .host_str()
             .is_some_and(|host| host.eq_ignore_ascii_case("api.deepseek.com"));
+    let is_official_glm = matches!(provider.kind, AiProviderKind::OpenAiCompatible)
+        && url
+            .host_str()
+            .is_some_and(|host| host.eq_ignore_ascii_case("open.bigmodel.cn"));
     let mut base_path = url.path().trim_end_matches('/').to_string();
     for endpoint_suffix in [
         "/chat/completions",
@@ -643,6 +711,10 @@ pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Ur
     }
     if is_official_deepseek && base_path == "/v1" {
         base_path.clear();
+    } else if is_official_glm {
+        if base_path.is_empty() || base_path == "/v1" {
+            base_path = "/api/paas/v4".to_string();
+        }
     } else if !matches!(provider.kind, AiProviderKind::Ollama) && !base_path.ends_with("/v1") {
         base_path = format!("{}/v1", base_path.trim_end_matches('/'));
     }
@@ -1273,6 +1345,24 @@ mod tests {
             endpoint_url(&deepseek, "models").unwrap().as_str(),
             "https://api.deepseek.com/models"
         );
+
+        let glm = AiProviderConfig {
+            base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+            model: "glm-5.2".to_string(),
+            ..deepseek
+        };
+        assert_eq!(
+            endpoint_url(&glm, "chat/completions").unwrap().as_str(),
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        );
+        let glm_root = AiProviderConfig {
+            base_url: "https://open.bigmodel.cn".to_string(),
+            ..glm
+        };
+        assert_eq!(
+            endpoint_url(&glm_root, "models").unwrap().as_str(),
+            "https://open.bigmodel.cn/api/paas/v4/models"
+        );
     }
 
     #[test]
@@ -1348,6 +1438,61 @@ mod tests {
                 .get("reasoning_effort")
                 .and_then(Value::as_str),
             Some("high")
+        );
+
+        let minimax = AiProviderConfig {
+            id: "minimax".to_string(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://api.minimaxi.com".to_string(),
+            model: "MiniMax-M3".to_string(),
+            reasoning_effort: Some(AiReasoningEffort::On),
+            requires_api_key: true,
+            api_key: None,
+        };
+        let mut minimax_body = json!({ "model": "MiniMax-M3" });
+        apply_reasoning_effort(&mut minimax_body, &minimax);
+        assert_eq!(
+            minimax_body
+                .pointer("/thinking/type")
+                .and_then(Value::as_str),
+            Some("adaptive")
+        );
+
+        let qwen = AiProviderConfig {
+            id: "qwen".to_string(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
+            model: "qwen3.8-max".to_string(),
+            reasoning_effort: Some(AiReasoningEffort::On),
+            requires_api_key: true,
+            api_key: None,
+        };
+        let mut qwen_body = json!({ "model": "qwen3.8-max" });
+        apply_reasoning_effort(&mut qwen_body, &qwen);
+        assert_eq!(
+            qwen_body.get("enable_thinking").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert!(qwen_body.get("thinking").is_none());
+
+        let glm = AiProviderConfig {
+            id: "glm".to_string(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+            model: "glm-5.2".to_string(),
+            reasoning_effort: Some(AiReasoningEffort::High),
+            requires_api_key: true,
+            api_key: None,
+        };
+        let mut glm_body = json!({ "model": "glm-5.2" });
+        apply_reasoning_effort(&mut glm_body, &glm);
+        assert_eq!(
+            glm_body.get("reasoning_effort").and_then(Value::as_str),
+            Some("high")
+        );
+        assert_eq!(
+            glm_body.pointer("/thinking/type").and_then(Value::as_str),
+            Some("enabled")
         );
 
         let ollama = AiProviderConfig {
