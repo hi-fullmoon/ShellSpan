@@ -2,7 +2,7 @@
 
 > Status: implemented as the only executable Agent architecture. The former frontend-driven
 > model loop, independent task control plane, compatibility bridge, and milestone-specific UI
-> surfaces have been removed. Legacy AI-session Agent records can only be read during import.
+> surfaces and legacy conversation persistence have been removed.
 
 ## 1. Ownership
 
@@ -155,14 +155,14 @@ tree and `aiPanelV2` switch are removed. Conversation, Activity, approval takeov
 rename, tool details, Artifact details, settings, and connection-scoped permission selection are
 reachable from the normal product entry.
 
-Ask remains a formal separate adapter over `aiStore` and the Ask stream. It shares the Workspace,
-node and Composer contracts but is not written to the Agent log and is never an Agent fallback.
+There is no secondary conversation adapter or stream. The Workspace, node projection, Composer,
+session browser, and Runtime commands all operate on Agent sessions.
 
 ## 7. Persistence and compatibility
 
 New Agent data is written only to the Agent Runtime Session log and bounded artifact stores.
-Former AI-session Agent records are exposed as opaque read-only import data; there is no append,
-approval, execution, resume, or dual-write path for them. Runtime/UI rollback is performed by
+There is no legacy conversation import, append, approval, execution, resume, or dual-write path.
+Runtime/UI rollback is performed by
 installing a Git/versioned release known to understand the stored event versions, not by switching
 engines or reviving a Legacy React tree in-process. Incompatible downgrade across v3 mutation logs
 must be blocked rather than rewriting committed history.
