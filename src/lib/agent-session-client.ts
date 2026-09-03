@@ -4,7 +4,7 @@ import {
   listenToAgentRuntimeSession,
 } from '@/lib/tauri';
 import {
-  AGENT_SESSION_EVENT_VERSION,
+  isSupportedAgentSessionEventVersion,
   type AgentCommittedEventsRequest,
   type AgentSessionEvent,
   type AgentSessionEventPage,
@@ -175,7 +175,7 @@ export class AgentSessionCommittedClient {
   }
 
   private validateEnvelope(event: AgentSessionEvent): void {
-    if (event.version !== AGENT_SESSION_EVENT_VERSION || event.sessionId !== this.sessionId) {
+    if (!isSupportedAgentSessionEventVersion(event.version) || event.sessionId !== this.sessionId) {
       throw new Error('Committed Agent event has an incompatible identity or version');
     }
   }

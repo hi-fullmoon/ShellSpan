@@ -1,17 +1,12 @@
 import {
-  AGENT_SESSION_EVENT_VERSION,
+  isSupportedAgentSessionEventVersion,
   type AgentActivityAgent,
   type AgentActivityProjection,
   type AgentActivityRequest,
   type AgentActivityStep,
   type AgentActivityTool,
   type AgentActivityTurn,
-  type AgentConversationItem,
-  type AgentConversationMarkerItem,
-  type AgentConversationProjection,
-  type AgentConversationToolItem,
   type AgentSessionEvent,
-  type AgentSessionProjection,
   type AgentSessionRuntimeStatus,
   type AgentSessionToolStatus,
 } from '@/types/agent-session';
@@ -21,12 +16,10 @@ function validateEventWindow(events: readonly AgentSessionEvent[]): void {
   const sessionId = events[0].sessionId;
   const firstSeq = events[0].seq;
   events.forEach((event, index) => {
-    if (event.version !== AGENT_SESSION_EVENT_VERSION) {
+    if (!isSupportedAgentSessionEventVersion(event.version)) {
       throw new Error(`Unsupported Agent Session event version at seq ${event.seq}`);
     }
-    if (event.sessionId !== sessionId) {
-      throw new Error('Agent Session projection cannot mix session ids');
-    }
+    if (event.sessionId !== sessionId) throw new Error('Agent Session projection cannot mix session ids');
     if (!Number.isSafeInteger(event.seq) || event.seq !== firstSeq + index) {
       throw new Error('Agent Session events must be ordered and contiguous');
     }
@@ -36,30 +29,8 @@ function validateEventWindow(events: readonly AgentSessionEvent[]): void {
   });
 }
 
-function messageItemId(messageId: string): string {
-  return `message:${messageId}`;
-}
-
-export function agentSessionToolProjectionId(
-  stepId: string | undefined,
-  callId: string,
-): string {
-  return `tool:${stepId ?? 'unscoped'}:${callId}`;
-}
-
 function toolEventKey(stepId: string | undefined, callId: string): string {
   return `${stepId ?? 'unscoped'}\u0000${callId}`;
-}
-
-function assistantStreamId(event: AgentSessionEvent & { readonly type: 'assistant/chunk' }): string {
-  return `assistant:${event.stepId ?? event.data.requestId}`;
-}
-
-function toolSummary(argumentsValue: unknown): string | undefined {
-  if (!argumentsValue || typeof argumentsValue !== 'object') return undefined;
-  const record = argumentsValue as Record<string, unknown>;
-  const summary = record.explanation ?? record.summary ?? record.intent;
-  return typeof summary === 'string' ? summary : undefined;
 }
 
 function terminalStatusFromReason(reason: string): AgentSessionRuntimeStatus {
@@ -79,310 +50,6 @@ function approvalToolStatus(
     case 'expired': return 'timedOut';
     case 'cancelled': return 'cancelled';
   }
-}
-
-function projectConversationUnchecked(
-  events: readonly AgentSessionEvent[],
-): AgentConversationProjection {
-  const items: AgentConversationItem[] = [];
-  const itemIndex = new Map<string, number>();
-  const inboxItemIds = new Map<string, string>();
-  const toolItemIds = new Map<string, string>();
-  const latestToolItemId = new Map<string, string>();
-
-  const insert = (item: AgentConversationItem): void => {
-    const existing = itemIndex.get(item.id);
-    if (existing === undefined) {
-      itemIndex.set(item.id, items.length);
-      items.push(item);
-      return;
-    }
-    items[existing] = item;
-  };
-
-  const marker = (item: AgentConversationMarkerItem): void => insert(item);
-
-  const updateTool = (
-    stepId: string | undefined,
-    callId: string,
-    update: (tool: AgentConversationToolItem) => AgentConversationToolItem,
-  ): void => {
-    const id = toolItemIds.get(toolEventKey(stepId, callId)) ?? latestToolItemId.get(callId);
-    if (!id) return;
-    const index = itemIndex.get(id);
-    if (index === undefined || items[index].kind !== 'tool') return;
-    items[index] = update(items[index]);
-  };
-
-  for (const event of events) {
-    switch (event.type) {
-      case 'agent/inbox/spliced': {
-        for (const message of event.data.messages) {
-          if (event.data.operation === 'enqueued') {
-            if (event.data.lane === 'nextTurn' && message.source.kind === 'user') {
-              const id = messageItemId(message.messageId);
-              inboxItemIds.set(message.messageId, id);
-              insert({
-                kind: 'message',
-                id,
-                role: 'user',
-                content: message.content,
-                status: 'completed',
-              });
-            } else {
-              const id = `inbox:${message.messageId}`;
-              inboxItemIds.set(message.messageId, id);
-              marker({
-                kind: 'marker',
-                id,
-                marker: message.source.kind === 'runtime' ? 'runtime' : 'steer',
-                detail: message.source.kind === 'runtime'
-                  ? `${message.source.label}: ${message.content}`
-                  : message.content,
-                sessionId: message.source.kind === 'subagent'
-                  ? message.source.sessionId
-                  : undefined,
-              });
-            }
-          } else if (event.data.operation === 'discarded') {
-            marker({
-              kind: 'marker',
-              id: `discarded:${message.messageId}:${event.seq}`,
-              marker: 'discarded',
-              detail: message.content,
-            });
-          }
-        }
-        break;
-      }
-      case 'user/message': {
-        const message = event.data.message;
-        if (inboxItemIds.has(message.messageId)) break;
-        if (message.source.kind === 'runtime' || message.source.kind === 'subagent') {
-          marker({
-            kind: 'marker',
-            id: messageItemId(message.messageId),
-            marker: message.source.kind === 'runtime' ? 'runtime' : 'steer',
-            detail: message.source.kind === 'runtime'
-              ? `${message.source.label}: ${message.content}`
-              : message.content,
-            sessionId: message.source.kind === 'subagent'
-              ? message.source.sessionId
-              : undefined,
-            turnId: event.turnId,
-            stepId: event.stepId,
-          });
-          break;
-        }
-        insert({
-          kind: 'message',
-          id: messageItemId(message.messageId),
-          role: 'user',
-          content: message.content,
-          status: 'completed',
-          turnId: event.turnId,
-          stepId: event.stepId,
-        });
-        break;
-      }
-      case 'assistant/chunk': {
-        const id = assistantStreamId(event);
-        const existingIndex = itemIndex.get(id);
-        const previous = existingIndex === undefined ? undefined : items[existingIndex];
-        insert({
-          kind: 'message',
-          id,
-          role: 'assistant',
-          content: previous?.kind === 'message' ? previous.content + event.data.text : event.data.text,
-          status: 'streaming',
-          turnId: event.turnId,
-          stepId: event.stepId,
-        });
-        break;
-      }
-      case 'assistant/message': {
-        const streamId = event.stepId ? `assistant:${event.stepId}` : undefined;
-        const id = streamId && itemIndex.has(streamId)
-          ? streamId
-          : messageItemId(event.data.messageId);
-        if (!event.data.content && event.data.toolCalls.length > 0 && !itemIndex.has(id)) break;
-        insert({
-          kind: 'message',
-          id,
-          role: 'assistant',
-          content: event.data.content,
-          status: event.data.interrupted ? 'interrupted' : 'completed',
-          turnId: event.turnId,
-          stepId: event.stepId,
-        });
-        break;
-      }
-      case 'request/retry':
-        marker({
-          kind: 'marker',
-          id: `retry:${event.seq}`,
-          marker: 'retry',
-          detail: event.data.reason,
-          count: event.data.attempt,
-          turnId: event.turnId,
-          stepId: event.stepId,
-        });
-        break;
-      case 'request/context':
-        if (event.data.limited) {
-          marker({
-            kind: 'marker',
-            id: `context-limited:${event.data.requestId}:${event.seq}`,
-            marker: 'contextLimited',
-            count: event.data.omittedMessages,
-            turnId: event.turnId,
-            stepId: event.stepId,
-          });
-        }
-        break;
-      case 'tool/call': {
-        const { call } = event.data;
-        const id = agentSessionToolProjectionId(event.stepId, call.callId);
-        toolItemIds.set(toolEventKey(event.stepId, call.callId), id);
-        latestToolItemId.set(call.callId, id);
-        insert({
-          kind: 'tool',
-          id,
-          callId: call.callId,
-          name: call.name,
-          title: call.title ?? call.name,
-          summary: toolSummary(call.arguments),
-          arguments: call.arguments,
-          effect: call.effect ?? 'unknown',
-          target: call.target,
-          status: 'pending',
-          evidenceRefs: [],
-          turnId: event.turnId,
-          stepId: event.stepId,
-        });
-        break;
-      }
-      case 'tool/approval':
-        updateTool(event.stepId, event.data.callId, (tool) => ({
-          ...tool,
-          status: approvalToolStatus(event.data.status),
-          approvalId: event.data.approvalId,
-          approvalRequestId: event.data.requestId,
-          approvalExpiresAtUnixMs: event.data.expiresAtUnixMs,
-          approvalPrompt: event.data.prompt,
-          effect: event.data.risk ?? tool.effect,
-        }));
-        break;
-      case 'tool/execution':
-        updateTool(event.stepId, event.data.callId, (tool) => ({
-          ...tool,
-          status: 'running',
-        }));
-        break;
-      case 'tool/result':
-        updateTool(event.stepId, event.data.callId, (tool) => ({
-          ...tool,
-          status: event.data.status,
-          result: event.data.data,
-          resultSummary: event.data.summary,
-          evidenceRefs: event.data.evidenceRefs ?? [],
-        }));
-        break;
-      case 'context/artifact':
-        marker({
-          kind: 'marker',
-          id: `artifact:${event.data.artifactId}:${event.seq}`,
-          marker: 'artifact',
-          detail: event.data.title,
-          turnId: event.turnId,
-          stepId: event.stepId,
-        });
-        break;
-      case 'compaction/summary':
-        marker({
-          kind: 'marker',
-          id: `compaction:${event.data.surfaceGeneration}:${event.seq}`,
-          marker: 'compaction',
-          detail: event.data.summary,
-          count: event.data.surfaceGeneration,
-          turnId: event.turnId,
-          stepId: event.stepId,
-        });
-        break;
-      case 'subagent/settled':
-        marker({
-          kind: 'marker',
-          id: `subagent-settled:${event.data.childSessionId}:${event.seq}`,
-          marker: 'subagentSettled',
-          detail: event.data.summary,
-          sessionId: event.data.childSessionId,
-          status: event.data.status,
-          turnId: event.turnId,
-          stepId: event.stepId,
-        });
-        break;
-      case 'task/state':
-        if (event.data.recovery && event.data.recovery.status !== 'none') {
-          marker({
-            kind: 'marker',
-            id: `recovery:${event.seq}`,
-            marker: 'recovery',
-            detail: event.data.recovery.summary ?? event.data.recovery.status,
-            turnId: event.turnId,
-            stepId: event.stepId,
-          });
-        }
-        break;
-      case 'agent/status':
-        if (event.data.status === 'failed' || event.data.status === 'cancelled') {
-          marker({
-            kind: 'marker',
-            id: `agent-status:${event.seq}`,
-            marker: event.data.status,
-            detail: event.data.reason,
-            status: event.data.status,
-            turnId: event.turnId,
-            stepId: event.stepId,
-          });
-        }
-        break;
-      case 'session/ended':
-        if (event.data.reason || event.data.status !== 'completed') {
-          marker({
-            kind: 'marker',
-            id: `session-ended:${event.seq}`,
-            marker: event.data.status === 'cancelled' ? 'cancelled' : 'failed',
-            detail: event.data.reason,
-            status: event.data.status,
-          });
-        }
-        break;
-      case 'step/end':
-        if (/max.?token/i.test(event.data.reason)) {
-          marker({
-            kind: 'marker',
-            id: `max-tokens:${event.seq}`,
-            marker: 'maxTokens',
-            detail: event.data.reason,
-            turnId: event.turnId,
-            stepId: event.stepId,
-          });
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
-  return {
-    sessionId: events[0]?.sessionId,
-    items,
-    followKey: items.map((item) => {
-      if (item.kind === 'message') return `${item.id}:${item.status}:${item.content.length}`;
-      if (item.kind === 'tool') return `${item.id}:${item.status}:${item.resultSummary?.length ?? 0}`;
-      return `${item.id}:${item.marker}:${item.detail?.length ?? 0}`;
-    }).join('|'),
-  };
 }
 
 interface MutableActivityStep {
@@ -734,53 +401,9 @@ function projectActivityUnchecked(events: readonly AgentSessionEvent[]): AgentAc
   };
 }
 
-export function projectAgentConversation(
-  events: readonly AgentSessionEvent[],
-): AgentConversationProjection {
-  validateEventWindow(events);
-  return projectConversationUnchecked(events);
-}
-
 export function projectAgentActivity(
   events: readonly AgentSessionEvent[],
 ): AgentActivityProjection {
   validateEventWindow(events);
   return projectActivityUnchecked(events);
-}
-
-export function projectAgentSession(
-  events: readonly AgentSessionEvent[],
-): AgentSessionProjection {
-  validateEventWindow(events);
-  const conversation = projectConversationUnchecked(events);
-  const activity = projectActivityUnchecked(events);
-  let taskId: string | undefined;
-  let goal: string | undefined;
-  let permissionMode: AgentSessionProjection['permissionMode'];
-  let latestRequestId: string | undefined;
-
-  for (const event of events) {
-    if (event.type === 'session/created') {
-      taskId = event.data.taskId;
-      goal = event.data.goal;
-      permissionMode = event.data.permissionMode;
-    } else if (event.type === 'task/linked') {
-      taskId = event.data.taskId;
-      goal = event.data.goal ?? goal;
-    } else if (event.type === 'request/header') {
-      latestRequestId = event.data.requestId;
-    }
-  }
-
-  return {
-    sessionId: events[0]?.sessionId,
-    taskId,
-    goal,
-    permissionMode,
-    status: activity.status,
-    statusReason: activity.statusReason,
-    latestRequestId,
-    conversation,
-    activity,
-  };
 }
