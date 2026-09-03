@@ -12,7 +12,7 @@ use super::{
     AgentSessionStore, AgentStopReason, AgentTokenUsage, AgentToolCallDelta, AgentToolPipeline,
     ModelContentBlock, ModelFinishReason, ModelMessage, ModelRequest, ModelResponse,
     ModelStreamSink, NormalizedModelError, NormalizedModelErrorKind, StreamDelta,
-    ToolPipelineSettlement,
+    ToolPipelineSettlement, MAX_AGENT_STREAM_DELTA_BYTES,
 };
 
 #[cfg(test)]
@@ -1008,29 +1008,49 @@ struct DurableModelStreamSink {
     collected: Arc<Mutex<PartialContentAccumulator>>,
 }
 
+fn utf8_chunks(value: &str, max_bytes: usize) -> Vec<&str> {
+    assert!(
+        max_bytes >= 4,
+        "UTF-8 chunk limits must fit one scalar value"
+    );
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < value.len() {
+        let mut end = (start + max_bytes).min(value.len());
+        while !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        chunks.push(&value[start..end]);
+        start = end;
+    }
+    chunks
+}
+
 impl ModelStreamSink for DurableModelStreamSink {
     fn emit(&self, delta: StreamDelta) -> Result<(), NormalizedModelError> {
         match delta {
             StreamDelta::Text { index, text } => {
-                self.sessions
-                    .append(
-                        &self.session_id,
-                        Some(self.turn_id.clone()),
-                        Some(self.step_id.clone()),
-                        AgentSessionEventPayload::AssistantChunk {
-                            request_id: self.request_id.clone(),
-                            text_delta: Some(text.clone()),
-                            reasoning_delta: None,
-                            tool_call_delta: None,
-                            usage: None,
-                        },
-                    )
-                    .map_err(|error| {
-                        NormalizedModelError::new(
-                            NormalizedModelErrorKind::Terminal,
-                            format!("failed to commit model stream chunk: {error}"),
+                for chunk in utf8_chunks(&text, MAX_AGENT_STREAM_DELTA_BYTES) {
+                    self.sessions
+                        .append(
+                            &self.session_id,
+                            Some(self.turn_id.clone()),
+                            Some(self.step_id.clone()),
+                            AgentSessionEventPayload::AssistantChunk {
+                                request_id: self.request_id.clone(),
+                                text_delta: Some(chunk.to_owned()),
+                                reasoning_delta: None,
+                                tool_call_delta: None,
+                                usage: None,
+                            },
                         )
-                    })?;
+                        .map_err(|error| {
+                            NormalizedModelError::new(
+                                NormalizedModelErrorKind::Terminal,
+                                format!("failed to commit model stream chunk: {error}"),
+                            )
+                        })?;
+                }
                 self.collected
                     .lock()
                     .map_err(|_| {
@@ -1042,25 +1062,27 @@ impl ModelStreamSink for DurableModelStreamSink {
                     .push_text(index, &text);
             }
             StreamDelta::Reasoning { index, text } => {
-                self.sessions
-                    .append(
-                        &self.session_id,
-                        Some(self.turn_id.clone()),
-                        Some(self.step_id.clone()),
-                        AgentSessionEventPayload::AssistantChunk {
-                            request_id: self.request_id.clone(),
-                            text_delta: None,
-                            reasoning_delta: Some(text.clone()),
-                            tool_call_delta: None,
-                            usage: None,
-                        },
-                    )
-                    .map_err(|error| {
-                        NormalizedModelError::new(
-                            NormalizedModelErrorKind::Terminal,
-                            format!("failed to commit model reasoning chunk: {error}"),
+                for chunk in utf8_chunks(&text, MAX_AGENT_STREAM_DELTA_BYTES) {
+                    self.sessions
+                        .append(
+                            &self.session_id,
+                            Some(self.turn_id.clone()),
+                            Some(self.step_id.clone()),
+                            AgentSessionEventPayload::AssistantChunk {
+                                request_id: self.request_id.clone(),
+                                text_delta: None,
+                                reasoning_delta: Some(chunk.to_owned()),
+                                tool_call_delta: None,
+                                usage: None,
+                            },
                         )
-                    })?;
+                        .map_err(|error| {
+                            NormalizedModelError::new(
+                                NormalizedModelErrorKind::Terminal,
+                                format!("failed to commit model reasoning chunk: {error}"),
+                            )
+                        })?;
+                }
                 self.collected
                     .lock()
                     .map_err(|_| {
@@ -1077,30 +1099,43 @@ impl ModelStreamSink for DurableModelStreamSink {
                 name_delta,
                 arguments_delta,
             } => {
-                self.sessions
-                    .append(
-                        &self.session_id,
-                        Some(self.turn_id.clone()),
-                        Some(self.step_id.clone()),
-                        AgentSessionEventPayload::AssistantChunk {
-                            request_id: self.request_id.clone(),
-                            text_delta: None,
-                            reasoning_delta: None,
-                            tool_call_delta: Some(AgentToolCallDelta {
-                                index,
-                                call_id,
-                                name_delta,
-                                arguments_delta,
-                            }),
-                            usage: None,
-                        },
-                    )
-                    .map_err(|error| {
-                        NormalizedModelError::new(
-                            NormalizedModelErrorKind::Terminal,
-                            format!("failed to commit model tool-call chunk: {error}"),
+                let argument_chunks = arguments_delta
+                    .as_deref()
+                    .map(|arguments| utf8_chunks(arguments, MAX_AGENT_STREAM_DELTA_BYTES))
+                    .unwrap_or_default();
+                let chunk_count = argument_chunks.len().max(1);
+                for position in 0..chunk_count {
+                    self.sessions
+                        .append(
+                            &self.session_id,
+                            Some(self.turn_id.clone()),
+                            Some(self.step_id.clone()),
+                            AgentSessionEventPayload::AssistantChunk {
+                                request_id: self.request_id.clone(),
+                                text_delta: None,
+                                reasoning_delta: None,
+                                tool_call_delta: Some(AgentToolCallDelta {
+                                    index,
+                                    call_id: if position == 0 { call_id.clone() } else { None },
+                                    name_delta: if position == 0 {
+                                        name_delta.clone()
+                                    } else {
+                                        None
+                                    },
+                                    arguments_delta: argument_chunks
+                                        .get(position)
+                                        .map(|chunk| (*chunk).to_owned()),
+                                }),
+                                usage: None,
+                            },
                         )
-                    })?;
+                        .map_err(|error| {
+                            NormalizedModelError::new(
+                                NormalizedModelErrorKind::Terminal,
+                                format!("failed to commit model tool-call chunk: {error}"),
+                            )
+                        })?;
+                }
                 self.collected
                     .lock()
                     .map_err(|_| {
@@ -1211,5 +1246,21 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn stream_chunks_stay_within_the_session_limit_without_splitting_utf8() {
+        let input = format!(
+            "{}思考内容{}",
+            "a".repeat(MAX_AGENT_STREAM_DELTA_BYTES - 2),
+            "b".repeat(MAX_AGENT_STREAM_DELTA_BYTES)
+        );
+        let chunks = utf8_chunks(&input, MAX_AGENT_STREAM_DELTA_BYTES);
+
+        assert!(chunks.len() >= 3);
+        assert!(chunks
+            .iter()
+            .all(|chunk| !chunk.is_empty() && chunk.len() <= MAX_AGENT_STREAM_DELTA_BYTES));
+        assert_eq!(chunks.concat(), input);
     }
 }
