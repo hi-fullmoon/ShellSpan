@@ -1,0 +1,139 @@
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { AiPanel } from '@/components/ai/ai-panel';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { useAiStore } from '@/stores/aiStore';
+import { useAppStore } from '@/stores/appStore';
+import { useTerminalStore } from '@/stores/terminalStore';
+
+vi.mock('@/hooks/useI18n', () => ({
+  useI18n: () => ({ locale: 'en-US', ready: true, setLocale: vi.fn(), t: (key: string) => key }),
+}));
+
+const initialAiState = useAiStore.getState();
+const initialAiSettingsState = useAiSettingsStore.getState();
+const initialTerminalState = useTerminalStore.getState();
+
+let nextAnimationFrameId = 1;
+let animationFrames = new Map<number, FrameRequestCallback>();
+
+function setViewport(width: number): void {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(max-width: 479px)' && width <= 479,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
+function flushAnimationFrames(): void {
+  const pending = [...animationFrames.values()];
+  animationFrames.clear();
+  for (const callback of pending) callback(0);
+}
+
+beforeEach(() => {
+  cleanup();
+  window.localStorage.clear();
+  setViewport(1_200);
+  nextAnimationFrameId = 1;
+  animationFrames = new Map();
+  Object.defineProperty(window, 'requestAnimationFrame', {
+    configurable: true,
+    writable: true,
+    value: (callback: FrameRequestCallback) => {
+      const id = nextAnimationFrameId++;
+      animationFrames.set(id, callback);
+      return id;
+    },
+  });
+  Object.defineProperty(window, 'cancelAnimationFrame', {
+    configurable: true,
+    writable: true,
+    value: (id: number) => animationFrames.delete(id),
+  });
+  useAiStore.setState(initialAiState, true);
+  useAiSettingsStore.setState(initialAiSettingsState, true);
+  useTerminalStore.setState(initialTerminalState, true);
+  useAppStore.setState({ activeSection: 'workbench' });
+  useAiStore.setState({ panelOpenBySection: { workbench: true, terminal: false } });
+});
+
+afterEach(() => {
+  cleanup();
+  animationFrames.clear();
+});
+
+describe('AI panel production path and immutable shell', () => {
+  it('renders the real V2 workspace by default with no content-selection seam', () => {
+    render(<div><AiPanel /></div>);
+
+    const panel = screen.getByRole('complementary', { name: 'ai.workbench.title' });
+    expect(panel.querySelector('[data-slot="ai-workspace-root"]')).toHaveAttribute('data-phase', 'hero');
+    expect(within(panel).getByRole('textbox')).toHaveAttribute('placeholder', 'ai.askPlaceholder');
+    expect(panel.querySelector('[data-slot="panel-empty-state"]')).toBeNull();
+  });
+
+  it.each([320, 400, 720])('restores a persisted %d px desktop width', (width) => {
+    window.localStorage.setItem('shellspan.aiPanelWidth', String(width));
+    render(<div><AiPanel /></div>);
+
+    const panel = screen.getByRole('complementary', { name: 'ai.workbench.title' });
+    expect(panel).toHaveStyle({ width: `${width}px` });
+    expect(screen.getByRole('separator', { name: 'ai.resize' })).toHaveAttribute('aria-valuenow', String(width));
+  });
+
+  it('resizes through pointer capture and requestAnimationFrame', () => {
+    window.localStorage.setItem('shellspan.aiPanelWidth', '400');
+    render(<div><AiPanel /></div>);
+    const handle = screen.getByRole('separator', { name: 'ai.resize' });
+    Object.defineProperties(handle, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 7, clientX: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 7, clientX: 420 });
+    act(flushAnimationFrames);
+    expect(screen.getByRole('complementary', { name: 'ai.workbench.title' })).toHaveStyle({ width: '480px' });
+    fireEvent.pointerUp(handle, { pointerId: 7, clientX: 420 });
+    expect(handle).not.toHaveAttribute('data-resizing');
+  });
+
+  it('resizes by the 24 px keyboard contract', () => {
+    window.localStorage.setItem('shellspan.aiPanelWidth', '400');
+    render(<div><AiPanel /></div>);
+    const handle = screen.getByRole('separator', { name: 'ai.resize' });
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' });
+    expect(handle).toHaveAttribute('aria-valuenow', '424');
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    expect(handle).toHaveAttribute('aria-valuenow', '400');
+  });
+
+  it('keeps the desktop aside and compact Drawer structures', () => {
+    const { unmount } = render(<div><AiPanel /></div>);
+    expect(screen.getByRole('complementary', { name: 'ai.workbench.title' }))
+      .toHaveAttribute('data-ai-scope', 'workbench');
+    expect(screen.getByRole('separator', { name: 'ai.resize' })).toBeVisible();
+    unmount();
+
+    setViewport(420);
+    render(<div><AiPanel /></div>);
+    const drawer = document.body.querySelector<HTMLElement>('[data-slot="drawer-content"]');
+    const panel = screen.getByRole('complementary', { name: 'ai.workbench.title' });
+    expect(drawer).toContainElement(panel);
+    expect(panel).toHaveStyle({ width: '100%' });
+    expect(screen.queryByRole('separator', { name: 'ai.resize' })).toBeNull();
+    expect(drawer?.querySelector('[data-slot="drawer-title"]')).toHaveTextContent('ai.workbench.title');
+  });
+});
