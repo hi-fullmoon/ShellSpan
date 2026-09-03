@@ -141,8 +141,8 @@ a durable text block is not parsed by React.
 | Profile | Request/stream form | Reasoning | Streaming usage request | Usage normalization | History replay |
 | --- | --- | --- | --- | --- | --- |
 | OpenAI Responses | `/responses` SSE | Structured response reasoning items | No Chat `stream_options`; response usage events are parsed | input/cache-read/output/reasoning/total when reported | Opaque provider reasoning item plus ordered text/tool blocks |
-| DeepSeek | OpenAI-compatible Chat SSE | Native `reasoning_content` | `stream_options.include_usage=true` | prompt/cache hit/cache miss/output/reasoning/total when reported | `reasoning_content`, text, tools in provider order |
-| MiniMax | OpenAI-compatible cumulative Chat SSE | Native `reasoning_content`; cumulative fragments deduplicated | `stream_options.include_usage=true` | available prompt/cache/output/reasoning/total fields | deduplicated reasoning/text/tools in provider order |
+| DeepSeek | OpenAI-compatible Chat SSE at the unversioned official root | V4 `thinking` + `reasoning_effort`; native `reasoning_content` | `stream_options.include_usage=true` | prompt/cache hit/cache miss/output/reasoning/total when reported | `reasoning_content`, text, tools in provider order |
+| MiniMax | OpenAI-compatible cumulative Chat SSE | `reasoning_split=true`; cumulative `reasoning_content` / `reasoning_details` deduplicated | `stream_options.include_usage=true` | available prompt/cache/output/reasoning/total fields | deduplicated reasoning/text/tools in provider order |
 | Generic OpenAI-compatible | Chat SSE | No native reasoning capability; Runtime `<think>` fallback only | Omitted to avoid incompatible parameters | any usage object supplied by the service; otherwise unknown | text/tools; no fabricated reasoning |
 | Ollama | `/api/chat` JSON stream | `message.thinking` / equivalent, with Runtime `<think>` fallback | Not applicable | prompt/output counts when reported | ordered text/tool history |
 
@@ -221,12 +221,15 @@ pnpm test:agent:providers:live
 ```
 
 - MiniMax: `SHELLSPAN_LIVE_MINIMAX_API_KEY`, optional `_BASE_URL` and `_MODEL`.
-- DeepSeek: `SHELLSPAN_LIVE_DEEPSEEK_API_KEY`, optional `_BASE_URL` and `_MODEL`.
-- Generic compatible: `SHELLSPAN_LIVE_COMPATIBLE_BASE_URL` and `_MODEL`; `_API_KEY` is optional.
+- DeepSeek: `SHELLSPAN_LIVE_DEEPSEEK_API_KEY`, optional `_BASE_URL` and `_MODEL`; the same key
+  runs both thinking-enabled and thinking-disabled OpenAI-compatible smoke cases.
+- Optional generic compatible extension: `SHELLSPAN_LIVE_COMPATIBLE_BASE_URL` and `_MODEL`;
+  `_API_KEY` is optional.
 
-MiniMax and DeepSeek live checks require non-empty answer text, structured reasoning, and at least
-one provider usage fact. The generic check proves a normal answer completes without requiring
-reasoning or streaming usage. Missing configurations are reported as `SKIP`; they are not counted
-as passed. Offline recording tests always verify exact system prompt/tool schemas against the
-actual request body, generic no-reasoning completion, and completion when stream usage options are
-unsupported.
+MiniMax and thinking-enabled DeepSeek checks require non-empty answer text, structured reasoning,
+and at least one provider usage fact. The DeepSeek thinking-disabled check requires a non-empty
+answer, no reasoning block, and provider usage. The optional generic check proves a normal answer
+completes without requiring reasoning or streaming usage. Missing optional configuration is
+reported as `SKIP`; it is not counted as passed. Offline recording tests always verify exact system
+prompt/tool schemas against the actual request body, generic no-reasoning completion, and
+completion when stream usage options are unsupported.

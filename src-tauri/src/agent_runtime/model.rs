@@ -372,6 +372,7 @@ struct ProviderCapabilities {
     cumulative_stream: bool,
     supports_stream_usage: bool,
     native_reasoning: bool,
+    split_reasoning: bool,
     replay_reasoning_content: bool,
     think_tag_fallback: bool,
     parallel_tool_calls: bool,
@@ -405,13 +406,14 @@ fn provider_capabilities(provider: &AiProviderConfig) -> ProviderCapabilities {
             ProviderProfile::DeepSeek | ProviderProfile::MiniMax
         ),
         native_reasoning: !matches!(profile, ProviderProfile::OpenAiCompatible),
+        split_reasoning: profile == ProviderProfile::MiniMax,
         replay_reasoning_content: matches!(
             profile,
             ProviderProfile::DeepSeek | ProviderProfile::MiniMax
         ),
         think_tag_fallback: matches!(
             profile,
-            ProviderProfile::OpenAiCompatible | ProviderProfile::Ollama
+            ProviderProfile::MiniMax | ProviderProfile::OpenAiCompatible | ProviderProfile::Ollama
         ),
         parallel_tool_calls: !crate::ai::is_kimi_code_provider(provider),
     }
@@ -513,6 +515,9 @@ impl HttpModelAdapter {
         apply_output_token_limit(&mut body, self.provider.kind, AGENT_MAX_OUTPUT_TOKENS);
         if capabilities.supports_stream_usage {
             body["stream_options"] = json!({ "include_usage": true });
+        }
+        if capabilities.split_reasoning {
+            body["reasoning_split"] = json!(true);
         }
         if !request.tools.is_empty() {
             body["tools"] = Value::Array(
@@ -1134,10 +1139,24 @@ fn process_chat_event(
         *completed = true;
         *finish_reason = normalize_finish_reason(reason);
     }
-    if let Some(next) = value
+    let direct_reasoning = value
         .pointer("/choices/0/delta/reasoning_content")
         .or_else(|| value.pointer("/choices/0/delta/reasoning"))
-        .and_then(Value::as_str)
+        .and_then(Value::as_str);
+    let reasoning_fragments = direct_reasoning.map_or_else(
+        || {
+            value
+                .pointer("/choices/0/delta/reasoning_details")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|detail| detail.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+        },
+        |reasoning| vec![reasoning],
+    );
+    for next in reasoning_fragments
+        .into_iter()
         .filter(|_| capabilities.native_reasoning)
     {
         let delta = append_and_delta(
@@ -2199,6 +2218,7 @@ mod tests {
                     cumulative_stream: true,
                     supports_stream_usage: true,
                     native_reasoning: true,
+                    split_reasoning: false,
                     replay_reasoning_content: true,
                     think_tag_fallback: false,
                     parallel_tool_calls: true,
@@ -2321,7 +2341,7 @@ mod tests {
         let mut completed = false;
         let mut reason = ModelFinishReason::Other;
         for data in [
-            json!({ "choices": [{ "delta": { "reasoning_content": "plan" }, "finish_reason": null }] }),
+            json!({ "choices": [{ "delta": { "reasoning_details": [{ "text": "plan" }] }, "finish_reason": null }] }),
             json!({ "choices": [{ "delta": { "reasoning_content": "plan safely", "content": "Ready" }, "finish_reason": null }] }),
             json!({ "choices": [{ "delta": {
                 "reasoning_content": "plan safely",
@@ -2646,6 +2666,10 @@ mod tests {
             Some(true)
         );
         assert_eq!(
+            body.get("reasoning_split").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
             response.content,
             vec![ModelContentBlock::Text {
                 text: "READY".into()
@@ -2708,8 +2732,10 @@ mod tests {
         kind: AiProviderKind,
         default_base_url: &str,
         default_model: &str,
+        reasoning_effort: Option<crate::ai::AiReasoningEffort>,
         requires_api_key: bool,
         require_reasoning: bool,
+        forbid_reasoning: bool,
         require_usage: bool,
     ) {
         let base_url = std::env::var(format!("SHELLSPAN_LIVE_{prefix}_BASE_URL"))
@@ -2725,7 +2751,7 @@ mod tests {
             kind,
             base_url,
             model,
-            reasoning_effort: None,
+            reasoning_effort,
             requires_api_key,
             api_key: None,
         };
@@ -2735,7 +2761,11 @@ mod tests {
             replaced_through_seq: None,
             messages: vec![AgentSurfaceMessage::User {
                 message_id: "live-message".into(),
-                content: "Reply briefly with READY. Do not call a tool.".into(),
+                content: if require_reasoning {
+                    "Which is greater, 9.11 or 9.8? Answer briefly.".into()
+                } else {
+                    "Reply briefly with READY.".into()
+                },
                 source: crate::agent_runtime::AgentMessageSource::user(),
             }],
         };
@@ -2745,7 +2775,7 @@ mod tests {
                     "live-request".into(),
                     &surface,
                     "You are a concise test assistant.".into(),
-                    default_model_tools(),
+                    Vec::new(),
                 ),
                 CancellationToken::new(),
                 Arc::new(RecordingSink::default()),
@@ -2762,12 +2792,31 @@ mod tests {
             "live provider returned no answer text"
         );
         if require_reasoning {
+            let block_kinds = response
+                .content
+                .iter()
+                .map(|block| match block {
+                    ModelContentBlock::Text { .. } => "text",
+                    ModelContentBlock::Reasoning { .. } => "reasoning",
+                    ModelContentBlock::ToolCall { .. } => "toolCall",
+                })
+                .collect::<Vec<_>>();
             assert!(
                 response.content.iter().any(|block| matches!(
                     block,
                     ModelContentBlock::Reasoning { text, .. } if !text.trim().is_empty()
                 )),
-                "live provider returned no structured reasoning"
+                "live provider returned no structured reasoning; blocks={block_kinds:?}, reasoning_tokens={:?}, total_tokens={:?}",
+                response.usage.reasoning_tokens,
+                response.usage.total_tokens,
+            );
+        } else if forbid_reasoning {
+            assert!(
+                !response.content.iter().any(|block| matches!(
+                    block,
+                    ModelContentBlock::Reasoning { text, .. } if !text.trim().is_empty()
+                )),
+                "live provider returned reasoning while thinking was disabled"
             );
         }
         if require_usage {
@@ -2791,7 +2840,9 @@ mod tests {
             AiProviderKind::OpenAi,
             "https://api.openai.com",
             "gpt-5.4-mini",
+            None,
             true,
+            false,
             false,
             false,
         )
@@ -2805,8 +2856,27 @@ mod tests {
             "DEEPSEEK",
             AiProviderKind::OpenAiCompatible,
             "https://api.deepseek.com",
-            "deepseek-reasoner",
+            "deepseek-v4-flash",
+            Some(crate::ai::AiReasoningEffort::High),
             true,
+            true,
+            false,
+            true,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires SHELLSPAN_LIVE_DEEPSEEK_API_KEY and external network access"]
+    async fn live_provider_basic_round_deepseek_no_reasoning() {
+        run_live_provider_basic_round(
+            "DEEPSEEK",
+            AiProviderKind::OpenAiCompatible,
+            "https://api.deepseek.com",
+            "deepseek-v4-flash",
+            Some(crate::ai::AiReasoningEffort::Off),
+            true,
+            false,
             true,
             true,
         )
@@ -2821,7 +2891,9 @@ mod tests {
             AiProviderKind::OpenAiCompatible,
             "https://api.kimi.com/coding",
             "k3",
+            None,
             true,
+            false,
             false,
             false,
         )
@@ -2836,8 +2908,10 @@ mod tests {
             AiProviderKind::OpenAiCompatible,
             "https://api.minimaxi.com",
             "MiniMax-M2.7",
+            None,
             true,
             true,
+            false,
             true,
         )
         .await;
@@ -2851,6 +2925,8 @@ mod tests {
             AiProviderKind::Ollama,
             "http://127.0.0.1:11434",
             "qwen3",
+            None,
+            false,
             false,
             false,
             false,
@@ -2866,8 +2942,10 @@ mod tests {
             AiProviderKind::OpenAiCompatible,
             "http://127.0.0.1:1234",
             "generic-chat-model",
+            None,
             false,
             false,
+            true,
             false,
         )
         .await;

@@ -15,7 +15,13 @@ const providers = [
     test: 'agent_runtime::model::tests::live_provider_basic_round_deepseek',
   },
   {
-    name: 'OpenAI-compatible',
+    name: 'OpenAI-compatible no-reasoning (DeepSeek)',
+    ready: Boolean(process.env.SHELLSPAN_LIVE_DEEPSEEK_API_KEY),
+    missing: 'SHELLSPAN_LIVE_DEEPSEEK_API_KEY',
+    test: 'agent_runtime::model::tests::live_provider_basic_round_deepseek_no_reasoning',
+  },
+  {
+    name: 'Generic OpenAI-compatible',
     ready: Boolean(
       process.env.SHELLSPAN_LIVE_COMPATIBLE_BASE_URL
       && process.env.SHELLSPAN_LIVE_COMPATIBLE_MODEL,
