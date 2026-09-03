@@ -1,14 +1,17 @@
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use uuid::Uuid;
 
 use super::{
-    default_model_tools, estimate_model_surface_budget, recorded_tool_call, AgentActiveScope,
-    AgentCompactionManager, AgentEntry, AgentHookBus, AgentLifecyclePhase, AgentPreStepContext,
-    AgentPreStepDecision, AgentScopedPayload, AgentSessionEventPayload, AgentSessionStatus,
-    AgentSessionStore, AgentToolPipeline, ModelFinishReason, ModelMessage, ModelRequest,
-    ModelResponse, ModelStreamSink, NormalizedModelError, NormalizedModelErrorKind, StreamDelta,
+    assemble_model_input, default_model_tools, estimate_model_surface_budget, recorded_tool_call,
+    AgentActiveScope, AgentAssistantContentBlock, AgentCompactionManager, AgentEntry, AgentHookBus,
+    AgentLifecyclePhase, AgentPreStepContext, AgentPreStepDecision, AgentRequestReason,
+    AgentRequestSeries, AgentScopedPayload, AgentSessionEventPayload, AgentSessionStatus,
+    AgentSessionStore, AgentStopReason, AgentTokenUsage, AgentToolCallDelta, AgentToolPipeline,
+    ModelContentBlock, ModelFinishReason, ModelMessage, ModelRequest, ModelResponse,
+    ModelStreamSink, NormalizedModelError, NormalizedModelErrorKind, StreamDelta,
     ToolPipelineSettlement,
 };
 
@@ -197,6 +200,7 @@ async fn drive_agent_inner(
                 compactions,
                 &turn_id,
                 &current_step_id,
+                step_index,
                 config,
             )
             .await?
@@ -294,10 +298,20 @@ fn apply_pre_step_hooks(
 ) -> Result<Option<String>, String> {
     let snapshot = sessions.snapshot(&entry.session_id)?;
     let surface_generation = snapshot.surface.generation;
+    let assembly = assemble_model_input(&snapshot.header, model_tools_for(entry));
     let mut request = ModelRequest::from_surface(
         "pre-step-budget".into(),
         &snapshot.surface,
-        model_tools_for(entry),
+        assembly.system_prompt,
+        assembly.tools,
+    );
+    request.messages.extend(
+        assembly
+            .context
+            .into_iter()
+            .map(|injection| ModelMessage::User {
+                content: injection.content,
+            }),
     );
     let pending = if entry.scope()?.is_some() {
         snapshot.inbox.next_step
@@ -347,7 +361,7 @@ fn apply_pre_step_hooks(
                         message_id,
                         client_submission_id: None,
                         content,
-                        source: AgentMessageSource::Runtime { label },
+                        source: AgentMessageSource::runtime(label),
                     },
                 )?;
             }
@@ -383,9 +397,16 @@ async fn run_step(
     compactions: &AgentCompactionManager,
     turn_id: &str,
     step_id: &str,
+    step_index: usize,
     config: AgentDriverConfig,
 ) -> Result<StepSettlement, String> {
     let mut attempt = 1_u32;
+    let series_id = format!("series-{}", Uuid::new_v4().simple());
+    let mut request_reason = if step_index == 1 {
+        AgentRequestReason::Initial
+    } else {
+        AgentRequestReason::ToolContinuation
+    };
     let mut previous_request = None;
     loop {
         let request_id = format!("request-{}", Uuid::new_v4().simple());
@@ -402,13 +423,35 @@ async fn run_step(
                 },
             )?;
         }
+        let snapshot = sessions.snapshot(&entry.session_id)?;
+        let assembly = assemble_model_input(&snapshot.header, model_tools_for(entry));
+        ensure_model_context(
+            sessions,
+            entry,
+            turn_id,
+            step_id,
+            &snapshot.surface,
+            &assembly,
+        )?;
         let surface = sessions.snapshot(&entry.session_id)?.surface;
-        let mut request =
-            ModelRequest::from_surface(request_id.clone(), &surface, model_tools_for(entry));
-        if let Some(inherited) = sessions.inherited_surface(&entry.session_id)? {
+        let mut request = ModelRequest::from_surface(
+            request_id.clone(),
+            &surface,
+            assembly.system_prompt,
+            assembly.tools,
+        );
+        if let Some(mut inherited) = sessions.inherited_surface(&entry.session_id)? {
+            inherited.messages.retain(|message| {
+                !matches!(
+                    message,
+                    super::AgentSurfaceMessage::User { source, .. }
+                        if is_assembled_context_source(source)
+                )
+            });
             let mut inherited_messages = ModelRequest::from_surface(
                 format!("{request_id}-inherited"),
                 &inherited,
+                String::new(),
                 Vec::new(),
             )
             .messages;
@@ -418,6 +461,7 @@ async fn run_step(
         let request_surface_generation = request.surface_generation;
         let budget = estimate_model_surface_budget(&entry.provider, &request);
         let estimated_input_tokens = Some(budget.estimated_input_tokens);
+        let tool_schemas = request.tools.clone();
         sessions.append_batch(
             &entry.session_id,
             vec![
@@ -427,12 +471,20 @@ async fn run_step(
                     payload: AgentSessionEventPayload::RequestHeader {
                         request_id: request_id.clone(),
                         provider_id: entry.provider.id.clone(),
-                        model: Some(entry.provider.model.clone()),
+                        model: entry.provider.model.clone(),
                         reasoning_effort: entry
                             .provider
                             .reasoning_effort
                             .map(|effort| format!("{effort:?}").to_ascii_lowercase()),
-                        attempt: Some(attempt),
+                        reason: request_reason,
+                        series: AgentRequestSeries {
+                            series_id: series_id.clone(),
+                            request_index: attempt - 1,
+                            starts_series: attempt == 1,
+                        },
+                        system_prompt: request.system_prompt.clone(),
+                        tool_schemas,
+                        attempt,
                     },
                 },
                 AgentScopedPayload {
@@ -445,7 +497,7 @@ async fn run_step(
                         system_tokens: Some(budget.system_tokens),
                         tool_schema_tokens: Some(budget.tool_schema_tokens),
                         message_tokens: Some(budget.message_tokens),
-                        surface_generation: surface.generation,
+                        surface_generation: request.surface_generation,
                         limited: None,
                         omitted_messages: None,
                     },
@@ -453,7 +505,7 @@ async fn run_step(
             ],
         )?;
 
-        let collected = Arc::new(Mutex::new(String::new()));
+        let collected = Arc::new(Mutex::new(PartialContentAccumulator::default()));
         let sink: Arc<dyn ModelStreamSink> = Arc::new(DurableModelStreamSink {
             sessions: sessions.clone(),
             session_id: entry.session_id.clone(),
@@ -484,8 +536,15 @@ async fn run_step(
                 let partial = collected
                     .lock()
                     .map_err(|_| "model stream accumulator is unavailable".to_string())?
-                    .clone();
-                append_interrupted_message(sessions, entry, turn_id, step_id, partial)?;
+                    .content();
+                append_interrupted_message(
+                    sessions,
+                    entry,
+                    turn_id,
+                    step_id,
+                    partial,
+                    AgentStopReason::Cancelled,
+                )?;
                 return Ok(StepSettlement::Cancelled);
             }
             Err(error)
@@ -527,6 +586,7 @@ async fn run_step(
                     ),
                 ));
                 attempt += 1;
+                request_reason = AgentRequestReason::Recovery;
             }
             Err(error)
                 if error.retryable()
@@ -538,17 +598,71 @@ async fn run_step(
             {
                 previous_request = Some((request_id, "retryable provider failure".into()));
                 attempt += 1;
+                request_reason = AgentRequestReason::Retry;
             }
             Err(error) => {
                 let partial = collected
                     .lock()
                     .map_err(|_| "model stream accumulator is unavailable".to_string())?
-                    .clone();
-                append_interrupted_message(sessions, entry, turn_id, step_id, partial)?;
+                    .content();
+                append_interrupted_message(
+                    sessions,
+                    entry,
+                    turn_id,
+                    step_id,
+                    partial,
+                    AgentStopReason::Error,
+                )?;
                 return Ok(StepSettlement::Failed(model_error_reason(&error)));
             }
         }
     }
+}
+
+fn is_assembled_context_source(source: &super::AgentMessageSource) -> bool {
+    matches!(
+        source.producer_id.as_str(),
+        "shellspan.runtime-context.v1" | "shellspan.agent-instructions.v1"
+    )
+}
+
+fn ensure_model_context(
+    sessions: &AgentSessionStore,
+    entry: &AgentEntry,
+    turn_id: &str,
+    step_id: &str,
+    surface: &super::AgentSurfaceSnapshot,
+    assembly: &super::ModelInputAssembly,
+) -> Result<(), String> {
+    let existing_producers = surface
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            super::AgentSurfaceMessage::User { source, .. } => Some(source.producer_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let payloads = assembly
+        .context
+        .iter()
+        .filter(|injection| {
+            !existing_producers
+                .iter()
+                .any(|producer| *producer == injection.source.producer_id)
+        })
+        .cloned()
+        .map(|injection| AgentScopedPayload {
+            turn_id: Some(turn_id.to_string()),
+            step_id: Some(step_id.to_string()),
+            payload: AgentSessionEventPayload::UserMessage {
+                message: injection.into_message(format!("message-{}", Uuid::new_v4().simple())),
+            },
+        })
+        .collect::<Vec<_>>();
+    if !payloads.is_empty() {
+        sessions.append_batch(&entry.session_id, payloads)?;
+    }
+    Ok(())
 }
 
 fn model_tools_for(entry: &AgentEntry) -> Vec<super::ModelToolDefinition> {
@@ -582,7 +696,7 @@ fn subagent_budget_failure(
     let tokens = events
         .iter()
         .filter_map(|event| match event.payload {
-            AgentSessionEventPayload::RequestUsage { total_tokens, .. } => total_tokens,
+            AgentSessionEventPayload::RequestUsage { usage, .. } => usage.total_tokens,
             _ => None,
         })
         .fold(0_u64, u64::saturating_add);
@@ -618,30 +732,66 @@ async fn commit_response(
     request_id: &str,
     response: ModelResponse,
 ) -> Result<StepSettlement, String> {
-    if response.content.trim().is_empty() && response.tool_calls.is_empty() {
+    let ModelResponse {
+        content: model_content,
+        finish_reason,
+        usage: model_usage,
+    } = response;
+    let has_content = model_content.iter().any(|block| match block {
+        ModelContentBlock::Text { text } | ModelContentBlock::Reasoning { text, .. } => {
+            !text.is_empty()
+        }
+        ModelContentBlock::ToolCall { .. } => true,
+    });
+    if !has_content {
         return Ok(StepSettlement::Failed(
             "emptyResponse: AI provider returned no text or tool calls".into(),
         ));
     }
-    if response.finish_reason == ModelFinishReason::Length {
+    if finish_reason == ModelFinishReason::Length {
         return Ok(StepSettlement::Failed(
             "outputLimit: AI provider reached its output token limit".into(),
         ));
     }
-    let model_tool_calls = response.tool_calls;
+    let model_tool_calls = model_content
+        .iter()
+        .filter_map(|block| match block {
+            ModelContentBlock::ToolCall { call } => Some(call.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     let tool_calls = model_tool_calls
         .iter()
         .cloned()
         .map(recorded_tool_call)
         .collect::<Vec<_>>();
+    let usage = token_usage(model_usage);
+    let stop_reason = stop_reason(finish_reason);
+    let content = model_content
+        .into_iter()
+        .map(|block| match block {
+            ModelContentBlock::Text { text } => AgentAssistantContentBlock::Text { text },
+            ModelContentBlock::Reasoning {
+                text,
+                provider_item,
+            } => AgentAssistantContentBlock::Reasoning {
+                text,
+                provider_item,
+            },
+            ModelContentBlock::ToolCall { call } => AgentAssistantContentBlock::ToolCall {
+                call: Box::new(recorded_tool_call(call)),
+            },
+        })
+        .collect();
     let mut payloads = vec![
         AgentScopedPayload {
             turn_id: Some(turn_id.to_string()),
             step_id: Some(step_id.to_string()),
             payload: AgentSessionEventPayload::AssistantMessage {
                 message_id: format!("message-{}", Uuid::new_v4().simple()),
-                content: response.content,
-                tool_calls: tool_calls.clone(),
+                content,
+                usage,
+                stop_reason,
                 interrupted: false,
             },
         },
@@ -650,10 +800,8 @@ async fn commit_response(
             step_id: Some(step_id.to_string()),
             payload: AgentSessionEventPayload::RequestUsage {
                 request_id: request_id.to_string(),
-                input_tokens: response.usage.input_tokens,
-                output_tokens: response.usage.output_tokens,
-                total_tokens: response.usage.total_tokens,
-                finish_reason: response.finish_reason.as_wire_name().into(),
+                usage,
+                finish_reason: stop_reason,
             },
         },
     ];
@@ -689,11 +837,9 @@ fn append_interrupted_message(
     entry: &Arc<AgentEntry>,
     turn_id: &str,
     step_id: &str,
-    partial: String,
+    partial: Vec<AgentAssistantContentBlock>,
+    stop_reason: AgentStopReason,
 ) -> Result<(), String> {
-    if partial.is_empty() {
-        return Ok(());
-    }
     sessions.append(
         &entry.session_id,
         Some(turn_id.to_string()),
@@ -701,11 +847,33 @@ fn append_interrupted_message(
         AgentSessionEventPayload::AssistantMessage {
             message_id: format!("message-{}", Uuid::new_v4().simple()),
             content: partial,
-            tool_calls: Vec::new(),
+            usage: AgentTokenUsage::default(),
+            stop_reason,
             interrupted: true,
         },
     )?;
     Ok(())
+}
+
+fn token_usage(usage: super::ModelUsage) -> AgentTokenUsage {
+    AgentTokenUsage {
+        uncached_input_tokens: usage.uncached_input_tokens,
+        cache_read_tokens: usage.cache_read_tokens,
+        cache_write_tokens: usage.cache_write_tokens,
+        output_tokens: usage.output_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+        total_tokens: usage.total_tokens,
+    }
+}
+
+fn stop_reason(reason: ModelFinishReason) -> AgentStopReason {
+    match reason {
+        ModelFinishReason::Stop => AgentStopReason::Stop,
+        ModelFinishReason::ToolCalls => AgentStopReason::ToolCalls,
+        ModelFinishReason::Length => AgentStopReason::Length,
+        ModelFinishReason::ContentFilter => AgentStopReason::ContentFilter,
+        ModelFinishReason::Other => AgentStopReason::Other,
+    }
 }
 
 fn close_open_scope(
@@ -768,19 +936,82 @@ fn model_error_reason(error: &NormalizedModelError) -> String {
     format!("{prefix}: {}", error.message)
 }
 
+enum PartialContentBlock {
+    Text(String),
+    Reasoning(String),
+}
+
+#[derive(Default)]
+struct PartialContentAccumulator {
+    blocks: BTreeMap<u32, PartialContentBlock>,
+    has_output: bool,
+}
+
+impl PartialContentAccumulator {
+    fn push_text(&mut self, index: u32, text: &str) {
+        self.has_output = true;
+        match self
+            .blocks
+            .entry(index)
+            .or_insert_with(|| PartialContentBlock::Text(String::new()))
+        {
+            PartialContentBlock::Text(value) => value.push_str(text),
+            PartialContentBlock::Reasoning(_) => {}
+        }
+    }
+
+    fn push_reasoning(&mut self, index: u32, text: &str) {
+        self.has_output = true;
+        match self
+            .blocks
+            .entry(index)
+            .or_insert_with(|| PartialContentBlock::Reasoning(String::new()))
+        {
+            PartialContentBlock::Reasoning(value) => value.push_str(text),
+            PartialContentBlock::Text(_) => {}
+        }
+    }
+
+    fn mark_output(&mut self) {
+        self.has_output = true;
+    }
+
+    fn is_empty(&self) -> bool {
+        !self.has_output
+    }
+
+    fn content(&self) -> Vec<AgentAssistantContentBlock> {
+        self.blocks
+            .values()
+            .filter_map(|block| match block {
+                PartialContentBlock::Text(text) if !text.is_empty() => {
+                    Some(AgentAssistantContentBlock::Text { text: text.clone() })
+                }
+                PartialContentBlock::Reasoning(text) if !text.is_empty() => {
+                    Some(AgentAssistantContentBlock::Reasoning {
+                        text: text.clone(),
+                        provider_item: None,
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+}
+
 struct DurableModelStreamSink {
     sessions: AgentSessionStore,
     session_id: String,
     turn_id: String,
     step_id: String,
     request_id: String,
-    collected: Arc<Mutex<String>>,
+    collected: Arc<Mutex<PartialContentAccumulator>>,
 }
 
 impl ModelStreamSink for DurableModelStreamSink {
     fn emit(&self, delta: StreamDelta) -> Result<(), NormalizedModelError> {
         match delta {
-            StreamDelta::Text { text } => {
+            StreamDelta::Text { index, text } => {
                 self.sessions
                     .append(
                         &self.session_id,
@@ -788,7 +1019,10 @@ impl ModelStreamSink for DurableModelStreamSink {
                         Some(self.step_id.clone()),
                         AgentSessionEventPayload::AssistantChunk {
                             request_id: self.request_id.clone(),
-                            text: text.clone(),
+                            text_delta: Some(text.clone()),
+                            reasoning_delta: None,
+                            tool_call_delta: None,
+                            usage: None,
                         },
                     )
                     .map_err(|error| {
@@ -805,7 +1039,98 @@ impl ModelStreamSink for DurableModelStreamSink {
                             "model stream accumulator is unavailable",
                         )
                     })?
-                    .push_str(&text);
+                    .push_text(index, &text);
+            }
+            StreamDelta::Reasoning { index, text } => {
+                self.sessions
+                    .append(
+                        &self.session_id,
+                        Some(self.turn_id.clone()),
+                        Some(self.step_id.clone()),
+                        AgentSessionEventPayload::AssistantChunk {
+                            request_id: self.request_id.clone(),
+                            text_delta: None,
+                            reasoning_delta: Some(text.clone()),
+                            tool_call_delta: None,
+                            usage: None,
+                        },
+                    )
+                    .map_err(|error| {
+                        NormalizedModelError::new(
+                            NormalizedModelErrorKind::Terminal,
+                            format!("failed to commit model reasoning chunk: {error}"),
+                        )
+                    })?;
+                self.collected
+                    .lock()
+                    .map_err(|_| {
+                        NormalizedModelError::new(
+                            NormalizedModelErrorKind::Terminal,
+                            "model stream accumulator is unavailable",
+                        )
+                    })?
+                    .push_reasoning(index, &text);
+            }
+            StreamDelta::ToolCall {
+                index,
+                call_id,
+                name_delta,
+                arguments_delta,
+            } => {
+                self.sessions
+                    .append(
+                        &self.session_id,
+                        Some(self.turn_id.clone()),
+                        Some(self.step_id.clone()),
+                        AgentSessionEventPayload::AssistantChunk {
+                            request_id: self.request_id.clone(),
+                            text_delta: None,
+                            reasoning_delta: None,
+                            tool_call_delta: Some(AgentToolCallDelta {
+                                index,
+                                call_id,
+                                name_delta,
+                                arguments_delta,
+                            }),
+                            usage: None,
+                        },
+                    )
+                    .map_err(|error| {
+                        NormalizedModelError::new(
+                            NormalizedModelErrorKind::Terminal,
+                            format!("failed to commit model tool-call chunk: {error}"),
+                        )
+                    })?;
+                self.collected
+                    .lock()
+                    .map_err(|_| {
+                        NormalizedModelError::new(
+                            NormalizedModelErrorKind::Terminal,
+                            "model stream accumulator is unavailable",
+                        )
+                    })?
+                    .mark_output();
+            }
+            StreamDelta::Usage { usage } => {
+                self.sessions
+                    .append(
+                        &self.session_id,
+                        Some(self.turn_id.clone()),
+                        Some(self.step_id.clone()),
+                        AgentSessionEventPayload::AssistantChunk {
+                            request_id: self.request_id.clone(),
+                            text_delta: None,
+                            reasoning_delta: None,
+                            tool_call_delta: None,
+                            usage: Some(token_usage(usage)),
+                        },
+                    )
+                    .map_err(|error| {
+                        NormalizedModelError::new(
+                            NormalizedModelErrorKind::Terminal,
+                            format!("failed to commit model usage update: {error}"),
+                        )
+                    })?;
             }
         }
         Ok(())
@@ -867,5 +1192,24 @@ mod tests {
                 model_error_reason(&NormalizedModelError::new(kind, "failure")).starts_with(prefix)
             );
         }
+    }
+
+    #[test]
+    fn interrupted_stream_accumulator_preserves_reasoning_and_text_order() {
+        let mut partial = PartialContentAccumulator::default();
+        partial.push_reasoning(0, "checked constraints");
+        partial.push_text(1, "partial answer");
+        assert_eq!(
+            partial.content(),
+            vec![
+                AgentAssistantContentBlock::Reasoning {
+                    text: "checked constraints".into(),
+                    provider_item: None,
+                },
+                AgentAssistantContentBlock::Text {
+                    text: "partial answer".into(),
+                },
+            ]
+        );
     }
 }

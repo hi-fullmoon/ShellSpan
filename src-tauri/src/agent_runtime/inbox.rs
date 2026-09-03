@@ -236,7 +236,7 @@ mod tests {
             message_id: id.into(),
             client_submission_id: Some(id.into()),
             content: id.into(),
-            source: AgentMessageSource::User,
+            source: AgentMessageSource::user(),
         }
     }
 

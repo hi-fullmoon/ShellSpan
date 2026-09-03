@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ai::{AiProviderConfig, AiProviderKind, AGENT_MAX_OUTPUT_TOKENS};
 
-use super::{ModelMessage, ModelRequest, MODEL_SYSTEM_INSTRUCTIONS};
+use super::{ModelMessage, ModelRequest};
 
 const DEFAULT_OPENAI_CONTEXT_TOKENS: u64 = 128 * 1024;
 const DEFAULT_COMPATIBLE_CONTEXT_TOKENS: u64 = 64 * 1024;
@@ -52,7 +52,7 @@ pub(crate) fn estimate_model_surface_budget(
         usable_input_tokens.saturating_mul(COMPACTION_THRESHOLD_PERCENT) / 100;
     let compaction_target_tokens =
         usable_input_tokens.saturating_mul(COMPACTION_TARGET_PERCENT) / 100;
-    let system_bytes = MODEL_SYSTEM_INSTRUCTIONS.len() as u64;
+    let system_bytes = request.system_prompt.len() as u64;
     let tool_schema_bytes = serde_json::to_vec(&request.tools)
         .map(|value| value.len() as u64)
         .unwrap_or(u64::MAX / 8);
@@ -163,7 +163,7 @@ mod tests {
     use crate::ai::{AiProviderKind, AiReasoningEffort};
 
     use super::*;
-    use crate::agent_runtime::{ModelToolCall, ModelToolDefinition};
+    use crate::agent_runtime::{ModelContentBlock, ModelToolCall, ModelToolDefinition};
 
     fn provider(model: &str) -> AiProviderConfig {
         AiProviderConfig {
@@ -182,24 +182,31 @@ mod tests {
         let request = ModelRequest {
             request_id: "request".into(),
             surface_generation: 0,
+            system_prompt: "system prompt".into(),
             messages: vec![
                 ModelMessage::User {
                     content: "x".repeat(8_000),
                 },
                 ModelMessage::Assistant {
-                    content: "inspect".into(),
-                    tool_calls: vec![ModelToolCall {
-                        call_id: "call".into(),
-                        provider_call_id: None,
-                        name: "read_file".into(),
-                        arguments: json!({"path": "/tmp/example"}),
-                    }],
+                    content: vec![
+                        ModelContentBlock::Text {
+                            text: "inspect".into(),
+                        },
+                        ModelContentBlock::ToolCall {
+                            call: ModelToolCall {
+                                call_id: "call".into(),
+                                provider_call_id: None,
+                                name: "read_file".into(),
+                                arguments: json!({"path": "/tmp/example"}),
+                            },
+                        },
+                    ],
                 },
             ],
             tools: vec![ModelToolDefinition {
                 name: "read_file".into(),
                 description: "read".into(),
-                parameters: json!({"type": "object"}),
+                input_schema: json!({"type": "object"}),
             }],
         };
         let budget = estimate_model_surface_budget(&provider("fixture-context-16384"), &request);
@@ -218,6 +225,7 @@ mod tests {
         let request = ModelRequest {
             request_id: "request".into(),
             surface_generation: 0,
+            system_prompt: "system prompt".into(),
             messages: vec![ModelMessage::User {
                 content: "x".repeat(64 * 1024),
             }],

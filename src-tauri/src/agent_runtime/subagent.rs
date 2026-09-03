@@ -899,9 +899,7 @@ impl SubAgentManager {
                 message_id: format!("delegation-{}", Uuid::new_v4().simple()),
                 client_submission_id: None,
                 content: role_prompt(role, &goal),
-                source: AgentMessageSource::Subagent {
-                    session_id: parent_session_id.into(),
-                },
+                source: AgentMessageSource::session_reference(parent_session_id.into()),
             },
         )?;
         self.wake(&child_session_id)?;
@@ -934,9 +932,7 @@ impl SubAgentManager {
                 message_id: format!("child-input-{}", Uuid::new_v4().simple()),
                 client_submission_id: None,
                 content,
-                source: AgentMessageSource::Subagent {
-                    session_id: parent_session_id.into(),
-                },
+                source: AgentMessageSource::session_reference(parent_session_id.into()),
             },
         )?;
         self.wake(child_session_id)
@@ -1005,7 +1001,7 @@ impl SubAgentManager {
         let total_tokens = events
             .iter()
             .filter_map(|event| match event.payload {
-                AgentSessionEventPayload::RequestUsage { total_tokens, .. } => total_tokens,
+                AgentSessionEventPayload::RequestUsage { usage, .. } => usage.total_tokens,
                 _ => None,
             })
             .fold(0_u64, u64::saturating_add);
@@ -1655,9 +1651,9 @@ fn role_prompt(role: AgentSubagentRole, goal: &str) -> String {
 fn assistant_summary(events: &[super::AgentSessionEvent]) -> Option<String> {
     events.iter().rev().find_map(|event| match &event.payload {
         AgentSessionEventPayload::AssistantMessage { content, .. }
-            if !content.trim().is_empty() =>
+            if !super::assistant_content_text(content).trim().is_empty() =>
         {
-            Some(content.clone())
+            Some(super::assistant_content_text(content))
         }
         AgentSessionEventPayload::SessionEnded {
             reason: Some(reason),

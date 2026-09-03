@@ -1150,7 +1150,7 @@ impl AgentToolPipeline {
                             message_id,
                             client_submission_id: None,
                             content,
-                            source: AgentMessageSource::Runtime { label },
+                            source: AgentMessageSource::runtime(label),
                         }],
                     },
                 });
@@ -1550,12 +1550,12 @@ impl AgentToolPipeline {
                 .iter()
                 .filter(|event| event.step_id.as_deref() == Some(&step_id))
                 .find_map(|event| match &event.payload {
-                    AgentSessionEventPayload::AssistantMessage { tool_calls, .. }
-                        if tool_calls
+                    AgentSessionEventPayload::AssistantMessage { content, .. }
+                        if super::assistant_tool_calls(content)
                             .iter()
                             .any(|candidate| candidate.call_id == call_id) =>
                     {
-                        Some(tool_calls.clone())
+                        Some(super::assistant_tool_calls(content))
                     }
                     _ => None,
                 })

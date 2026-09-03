@@ -1,8 +1,9 @@
-use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-pub(crate) const LEGACY_AGENT_SESSION_EVENT_VERSION: u8 = 2;
-pub(crate) const AGENT_SESSION_EVENT_VERSION: u8 = 3;
+pub(crate) const AGENT_SESSION_EVENT_VERSION: u8 = 4;
 pub(crate) const MAX_AGENT_MESSAGE_BYTES: usize = 128 * 1024;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -37,18 +38,74 @@ pub(crate) enum AgentInboxOperation {
     Discarded,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub(crate) enum AgentMessageSource {
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum AgentMessageSourceKind {
     User,
-    Runtime { label: String },
-    Subagent { session_id: String },
-    LegacyImport,
+    Runtime,
+    Plugin,
+    SkillCatalog,
+    AgentInstructions,
+    SkillInvocation,
+    SessionReference,
+    Form,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentMessageSource {
+    pub(crate) kind: AgentMessageSourceKind,
+    pub(crate) label: String,
+    pub(crate) producer_id: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) metadata: BTreeMap<String, Value>,
+}
+
+impl AgentMessageSource {
+    pub(crate) fn user() -> Self {
+        Self {
+            kind: AgentMessageSourceKind::User,
+            label: "User".into(),
+            producer_id: "shellspan-user".into(),
+            metadata: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn runtime(label: String) -> Self {
+        Self {
+            kind: AgentMessageSourceKind::Runtime,
+            label,
+            producer_id: "shellspan-runtime".into(),
+            metadata: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn runtime_context() -> Self {
+        Self {
+            kind: AgentMessageSourceKind::Runtime,
+            label: "ShellSpan runtime context".into(),
+            producer_id: "shellspan.runtime-context.v1".into(),
+            metadata: BTreeMap::from([("form".into(), Value::String("snapshot".into()))]),
+        }
+    }
+
+    pub(crate) fn agent_instructions(label: String) -> Self {
+        Self {
+            kind: AgentMessageSourceKind::AgentInstructions,
+            label,
+            producer_id: "shellspan.agent-instructions.v1".into(),
+            metadata: BTreeMap::from([("form".into(), Value::String("instructions".into()))]),
+        }
+    }
+
+    pub(crate) fn session_reference(session_id: String) -> Self {
+        Self {
+            kind: AgentMessageSourceKind::SessionReference,
+            label: "Subagent session".into(),
+            producer_id: "shellspan-subagent".into(),
+            metadata: BTreeMap::from([("sessionId".into(), Value::String(session_id))]),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -208,6 +265,117 @@ pub(crate) struct RecordedToolCall {
     pub(crate) effect: Option<AgentSessionEffect>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) target: Option<AgentSessionTarget>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentTokenUsage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) uncached_input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cache_read_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cache_write_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) output_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reasoning_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) total_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AgentStopReason {
+    Stop,
+    ToolCalls,
+    Length,
+    ContentFilter,
+    Cancelled,
+    Error,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AgentRequestReason {
+    Initial,
+    Retry,
+    ToolContinuation,
+    Recovery,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentRequestSeries {
+    pub(crate) series_id: String,
+    pub(crate) request_index: u32,
+    pub(crate) starts_series: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentRequestToolSchema {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) input_schema: Value,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentToolCallDelta {
+    pub(crate) index: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) name_delta: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) arguments_delta: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub(crate) enum AgentAssistantContentBlock {
+    Text {
+        text: String,
+    },
+    Reasoning {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_item: Option<Value>,
+    },
+    ToolCall {
+        call: Box<RecordedToolCall>,
+    },
+}
+
+pub(crate) fn assistant_content_text(content: &[AgentAssistantContentBlock]) -> String {
+    content
+        .iter()
+        .filter_map(|block| match block {
+            AgentAssistantContentBlock::Text { text } => Some(text.as_str()),
+            AgentAssistantContentBlock::Reasoning { .. }
+            | AgentAssistantContentBlock::ToolCall { .. } => None,
+        })
+        .collect()
+}
+
+pub(crate) fn assistant_tool_calls(
+    content: &[AgentAssistantContentBlock],
+) -> Vec<RecordedToolCall> {
+    content
+        .iter()
+        .filter_map(|block| match block {
+            AgentAssistantContentBlock::ToolCall { call } => Some((**call).clone()),
+            AgentAssistantContentBlock::Text { .. }
+            | AgentAssistantContentBlock::Reasoning { .. } => None,
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -395,26 +563,37 @@ pub(crate) enum AgentSessionEventPayload {
     #[serde(rename = "user/message")]
     UserMessage { message: AgentInboxMessage },
     #[serde(rename = "assistant/chunk")]
-    AssistantChunk { request_id: String, text: String },
+    AssistantChunk {
+        request_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text_delta: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_delta: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_call_delta: Option<AgentToolCallDelta>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<AgentTokenUsage>,
+    },
     #[serde(rename = "assistant/message")]
     AssistantMessage {
         message_id: String,
-        content: String,
-        #[serde(default)]
-        tool_calls: Vec<RecordedToolCall>,
-        #[serde(default)]
+        content: Vec<AgentAssistantContentBlock>,
+        usage: AgentTokenUsage,
+        stop_reason: AgentStopReason,
         interrupted: bool,
     },
     #[serde(rename = "request/header")]
     RequestHeader {
         request_id: String,
         provider_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        model: Option<String>,
+        model: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reasoning_effort: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        attempt: Option<u32>,
+        reason: AgentRequestReason,
+        series: AgentRequestSeries,
+        system_prompt: String,
+        tool_schemas: Vec<AgentRequestToolSchema>,
+        attempt: u32,
     },
     #[serde(rename = "request/context")]
     RequestContext {
@@ -446,13 +625,8 @@ pub(crate) enum AgentSessionEventPayload {
     #[serde(rename = "request/usage")]
     RequestUsage {
         request_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        input_tokens: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        output_tokens: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        total_tokens: Option<u64>,
-        finish_reason: String,
+        usage: AgentTokenUsage,
+        finish_reason: AgentStopReason,
     },
     #[serde(rename = "tool/call")]
     ToolCall { call: RecordedToolCall },
@@ -591,6 +765,7 @@ pub(crate) enum AgentSessionEventPayload {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentSessionEvent {
+    #[serde(deserialize_with = "deserialize_event_version")]
     pub(crate) version: u8,
     pub(crate) session_id: String,
     pub(crate) seq: u64,
@@ -601,6 +776,20 @@ pub(crate) struct AgentSessionEvent {
     pub(crate) step_id: Option<String>,
     #[serde(flatten)]
     pub(crate) payload: AgentSessionEventPayload,
+}
+
+fn deserialize_event_version<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let version = u8::deserialize(deserializer)?;
+    if version == AGENT_SESSION_EVENT_VERSION {
+        Ok(version)
+    } else {
+        Err(de::Error::custom(format!(
+            "unsupported Agent Session event version {version}; expected {AGENT_SESSION_EVENT_VERSION}"
+        )))
+    }
 }
 
 impl AgentSessionEvent {
@@ -685,23 +874,73 @@ mod tests {
             Some("step-1".into()),
             AgentSessionEventPayload::RequestUsage {
                 request_id: "request-1".into(),
-                input_tokens: Some(10),
-                output_tokens: Some(2),
-                total_tokens: Some(12),
-                finish_reason: "toolCalls".into(),
+                usage: AgentTokenUsage {
+                    uncached_input_tokens: Some(10),
+                    output_tokens: Some(2),
+                    total_tokens: Some(12),
+                    ..AgentTokenUsage::default()
+                },
+                finish_reason: AgentStopReason::ToolCalls,
             },
         ))
         .unwrap();
         assert_eq!(value["type"], "request/usage");
         assert_eq!(value["data"]["requestId"], "request-1");
-        assert_eq!(value["data"]["totalTokens"], 12);
+        assert_eq!(value["data"]["usage"]["totalTokens"], 12);
         assert_eq!(value["data"]["finishReason"], "toolCalls");
+    }
+
+    #[test]
+    fn usage_preserves_unknown_and_real_zero() {
+        let value = serde_json::to_value(AgentTokenUsage {
+            uncached_input_tokens: None,
+            cache_read_tokens: Some(0),
+            cache_write_tokens: None,
+            output_tokens: Some(0),
+            reasoning_tokens: None,
+            total_tokens: Some(0),
+        })
+        .unwrap();
+        assert!(value.get("uncachedInputTokens").is_none());
+        assert_eq!(value["cacheReadTokens"], 0);
+        assert_eq!(value["outputTokens"], 0);
+        assert_eq!(value["totalTokens"], 0);
+    }
+
+    #[test]
+    fn decoder_rejects_pre_v4_envelopes() {
+        for version in [2, 3] {
+            let old = serde_json::json!({
+                "version": version,
+                "sessionId": "session-1",
+                "seq": 0,
+                "timeUnixMs": 1000,
+                "type": "turn/start"
+            });
+            let error = serde_json::from_value::<AgentSessionEvent>(old).unwrap_err();
+            assert!(error.to_string().contains("expected 4"));
+        }
+    }
+
+    #[test]
+    fn cross_language_v4_fixture_round_trips_without_field_loss() {
+        let raw = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/test/fixtures/agent-session-v4.json"
+        ));
+        let expected = serde_json::from_str::<Value>(raw).unwrap();
+        let events = serde_json::from_str::<Vec<AgentSessionEvent>>(raw).unwrap();
+        assert_eq!(events.len(), 15);
+        assert!(events
+            .iter()
+            .all(|event| event.version == AGENT_SESSION_EVENT_VERSION));
+        assert_eq!(serde_json::to_value(events).unwrap(), expected);
     }
 
     #[test]
     fn wire_decoder_rejects_unknown_envelope_and_payload_fields() {
         let unknown_envelope = serde_json::json!({
-            "version": 1,
+            "version": 4,
             "sessionId": "session-1",
             "seq": 0,
             "timeUnixMs": 1000,
@@ -711,7 +950,7 @@ mod tests {
         assert!(serde_json::from_value::<AgentSessionEvent>(unknown_envelope).is_err());
 
         let unknown_payload = serde_json::json!({
-            "version": 1,
+            "version": 4,
             "sessionId": "session-1",
             "seq": 0,
             "timeUnixMs": 1000,

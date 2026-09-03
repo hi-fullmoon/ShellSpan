@@ -62,30 +62,51 @@ pub(crate) struct AiProviderConfig {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ProviderUsage {
-    pub(crate) input_tokens: Option<u64>,
+    pub(crate) uncached_input_tokens: Option<u64>,
+    pub(crate) cache_read_tokens: Option<u64>,
+    pub(crate) cache_write_tokens: Option<u64>,
     pub(crate) output_tokens: Option<u64>,
+    pub(crate) reasoning_tokens: Option<u64>,
     pub(crate) total_tokens: Option<u64>,
 }
 
 impl ProviderUsage {
     pub(crate) fn is_empty(self) -> bool {
-        self.input_tokens.is_none() && self.output_tokens.is_none() && self.total_tokens.is_none()
+        self.uncached_input_tokens.is_none()
+            && self.cache_read_tokens.is_none()
+            && self.cache_write_tokens.is_none()
+            && self.output_tokens.is_none()
+            && self.reasoning_tokens.is_none()
+            && self.total_tokens.is_none()
     }
 
     pub(crate) fn merge_latest(&mut self, next: Self) {
-        if next.input_tokens.is_some() {
-            self.input_tokens = next.input_tokens;
+        if next.uncached_input_tokens.is_some() {
+            self.uncached_input_tokens = next.uncached_input_tokens;
+        }
+        if next.cache_read_tokens.is_some() {
+            self.cache_read_tokens = next.cache_read_tokens;
+        }
+        if next.cache_write_tokens.is_some() {
+            self.cache_write_tokens = next.cache_write_tokens;
         }
         if next.output_tokens.is_some() {
             self.output_tokens = next.output_tokens;
         }
+        if next.reasoning_tokens.is_some() {
+            self.reasoning_tokens = next.reasoning_tokens;
+        }
         if let Some(total_tokens) = next.total_tokens {
             self.total_tokens = Some(total_tokens);
         } else {
-            self.total_tokens = self
-                .input_tokens
-                .zip(self.output_tokens)
-                .and_then(|(input, output)| input.checked_add(output));
+            self.total_tokens =
+                self.uncached_input_tokens
+                    .zip(self.output_tokens)
+                    .and_then(|(input, output)| {
+                        input
+                            .checked_add(self.cache_read_tokens.unwrap_or_default())?
+                            .checked_add(output)
+                    });
         }
     }
 }
@@ -394,30 +415,67 @@ pub(crate) fn provider_usage_from_value(
         AiProviderKind::OpenAiCompatible => value.get("usage")?,
         AiProviderKind::Ollama => value,
     };
-    let (input_tokens, output_tokens, explicit_total) = match kind {
+    let (
+        input_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+        output_tokens,
+        reasoning_tokens,
+        explicit_total,
+    ) = match kind {
         AiProviderKind::OpenAi => (
             usage.get("input_tokens").and_then(Value::as_u64),
+            usage
+                .pointer("/input_tokens_details/cached_tokens")
+                .and_then(Value::as_u64),
+            None,
             usage.get("output_tokens").and_then(Value::as_u64),
+            usage
+                .pointer("/output_tokens_details/reasoning_tokens")
+                .and_then(Value::as_u64),
             usage.get("total_tokens").and_then(Value::as_u64),
         ),
         AiProviderKind::OpenAiCompatible => (
             usage.get("prompt_tokens").and_then(Value::as_u64),
+            usage
+                .get("prompt_cache_hit_tokens")
+                .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
+                .and_then(Value::as_u64),
+            usage
+                .get("prompt_cache_creation_tokens")
+                .or_else(|| usage.pointer("/prompt_tokens_details/cache_creation_tokens"))
+                .and_then(Value::as_u64),
             usage.get("completion_tokens").and_then(Value::as_u64),
+            usage
+                .pointer("/completion_tokens_details/reasoning_tokens")
+                .and_then(Value::as_u64),
             usage.get("total_tokens").and_then(Value::as_u64),
         ),
         AiProviderKind::Ollama => (
             usage.get("prompt_eval_count").and_then(Value::as_u64),
+            None,
+            None,
             usage.get("eval_count").and_then(Value::as_u64),
+            None,
             None,
         ),
     };
+    let uncached_input_tokens = usage
+        .get("prompt_cache_miss_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            input_tokens.map(|input| input.saturating_sub(cache_read_tokens.unwrap_or_default()))
+        });
     let total_tokens = explicit_total.or_else(|| match (input_tokens, output_tokens) {
         (Some(input), Some(output)) => input.checked_add(output),
         _ => None,
     });
     let usage = ProviderUsage {
-        input_tokens,
+        uncached_input_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
         output_tokens,
+        reasoning_tokens,
         total_tokens,
     };
     (!usage.is_empty()).then_some(usage)
@@ -914,8 +972,11 @@ mod tests {
                 }),
             ),
             Some(ProviderUsage {
-                input_tokens: Some(12),
+                uncached_input_tokens: Some(12),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
                 output_tokens: Some(7),
+                reasoning_tokens: None,
                 total_tokens: Some(19),
             }),
         );
@@ -925,8 +986,11 @@ mod tests {
                 &json!({ "usage": { "prompt_tokens": 4, "completion_tokens": 3 } }),
             ),
             Some(ProviderUsage {
-                input_tokens: Some(4),
+                uncached_input_tokens: Some(4),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
                 output_tokens: Some(3),
+                reasoning_tokens: None,
                 total_tokens: Some(7),
             }),
         );
@@ -936,8 +1000,11 @@ mod tests {
                 &json!({ "done": true, "prompt_eval_count": 5, "eval_count": 6 }),
             ),
             Some(ProviderUsage {
-                input_tokens: Some(5),
+                uncached_input_tokens: Some(5),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
                 output_tokens: Some(6),
+                reasoning_tokens: None,
                 total_tokens: Some(11),
             }),
         );
@@ -955,15 +1022,40 @@ mod tests {
         );
 
         let mut split_usage = ProviderUsage {
-            input_tokens: Some(8),
+            uncached_input_tokens: Some(8),
             output_tokens: Some(1),
             total_tokens: Some(9),
+            ..ProviderUsage::default()
         };
         split_usage.merge_latest(ProviderUsage {
             output_tokens: Some(5),
             ..ProviderUsage::default()
         });
         assert_eq!(split_usage.total_tokens, Some(13));
+
+        assert_eq!(
+            provider_usage_from_value(
+                AiProviderKind::OpenAiCompatible,
+                &json!({
+                    "usage": {
+                        "prompt_tokens": 20,
+                        "prompt_cache_hit_tokens": 12,
+                        "prompt_cache_miss_tokens": 8,
+                        "completion_tokens": 9,
+                        "completion_tokens_details": { "reasoning_tokens": 4 },
+                        "total_tokens": 29
+                    }
+                }),
+            ),
+            Some(ProviderUsage {
+                uncached_input_tokens: Some(8),
+                cache_read_tokens: Some(12),
+                cache_write_tokens: None,
+                output_tokens: Some(9),
+                reasoning_tokens: Some(4),
+                total_tokens: Some(29),
+            }),
+        );
     }
     #[tokio::test]
     async fn bounded_body_reader_accepts_exact_limit_and_rejects_the_next_chunk() {
