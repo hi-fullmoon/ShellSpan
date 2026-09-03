@@ -2672,9 +2672,10 @@ fn open_remote_file_inner(
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "remote-file".to_string());
 
-        // Local copies of remotely-opened files live under ~/.shellspan so
-        // they survive reboots (retention cleanup bounds their lifetime); fall
-        // back to the system temp dir if the home dir is unavailable.
+        // Local copies of remotely-opened files live under ShellSpan's
+        // build-specific data directory so they survive reboots (retention
+        // cleanup bounds their lifetime); fall back to the system temp dir if
+        // the home dir is unavailable.
         let open_root = open_root
             .map(Path::to_path_buf)
             .unwrap_or_else(fallback_open_root);

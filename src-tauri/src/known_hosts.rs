@@ -22,7 +22,7 @@ const KNOWN_HOSTS_FILENAME: &str = "known_hosts";
 pub(crate) static KNOWN_HOSTS_WRITE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 fn known_hosts_path_from_home(home: Result<PathBuf, String>) -> Result<PathBuf, String> {
-    home.map(|path| path.join(".shellspan").join(KNOWN_HOSTS_FILENAME))
+    home.map(|path| crate::shellspan_data_dir(&path).join(KNOWN_HOSTS_FILENAME))
 }
 
 pub(crate) fn known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -415,12 +415,12 @@ mod tests {
     }
 
     #[test]
-    fn known_hosts_path_uses_the_existing_shellspan_location() {
+    fn known_hosts_path_uses_the_build_specific_shellspan_location() {
         let home = PathBuf::from("test-home");
 
         assert_eq!(
             known_hosts_path_from_home(Ok(home.clone())).unwrap(),
-            home.join(".shellspan").join("known_hosts")
+            crate::shellspan_data_dir(&home).join("known_hosts")
         );
     }
 

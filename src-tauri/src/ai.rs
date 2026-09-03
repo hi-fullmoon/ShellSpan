@@ -7,9 +7,11 @@ use serde_json::{json, Value};
 use tauri::State;
 use tokio_util::sync::CancellationToken;
 
-use crate::{db::Database, keychain::CredentialManager};
+use crate::{
+    db::Database,
+    keychain::{CredentialManager, AI_KEY_SERVICE},
+};
 
-const AI_KEY_SERVICE: &str = "com.shellspan.ai-provider";
 const AI_KEY_MIGRATION_PREFERENCE: &str = "ai.apiKeyStorageMigrationV4";
 pub(crate) const AGENT_MAX_OUTPUT_TOKENS: u64 = 4_096;
 pub(crate) const MAX_ERROR_BODY_BYTES: usize = 4 * 1024;
