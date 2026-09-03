@@ -41,6 +41,14 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('Phase 6 Queue Dock', () => {
+  it('matches the single-row harness chrome without a redundant direction icon', () => {
+    const { container } = render(<AiQueueDock items={[queue[0]]} />);
+    const row = container.querySelector('.ai-queue-row');
+
+    expect(row?.querySelectorAll(':scope > svg')).toHaveLength(1);
+    expect(row?.querySelector('.ai-queue-row-content > svg')).toBeNull();
+  });
+
   it('supports keyboard edit, remove, and complete same-lane reorder intents', async () => {
     const user = userEvent.setup();
     const update = vi.fn();

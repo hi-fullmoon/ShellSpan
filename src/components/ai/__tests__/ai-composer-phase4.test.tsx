@@ -119,6 +119,24 @@ describe('AiComposerSeat Phase 4 behavior', () => {
       .toMatchObject({ reasoningEffort: 'high' });
   });
 
+  it('offers MiniMax M3 thinking as an on/off control', async () => {
+    const user = userEvent.setup();
+    const minimax = {
+      id: 'minimax-profile', preset: 'minimax' as const, name: 'MiniMax',
+      kind: 'openAiCompatible' as const, baseUrl: 'https://api.minimaxi.com',
+      model: 'MiniMax-M3', requiresApiKey: true,
+    };
+    useAiSettingsStore.setState({ providers: [minimax], defaultProviderId: minimax.id });
+    render(<AiComposerModelSelector />);
+
+    await user.click(screen.getByRole('button', { name: /Model selection: MiniMax-M3/ }));
+    await user.click(await screen.findByRole('menuitem', { name: /Reasoning effort.*Default/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'On' }));
+
+    expect(useAiSettingsStore.getState().providers[0])
+      .toMatchObject({ reasoningEffort: 'on' });
+  });
+
   it('shows the Runtime-backed context ring after model selection with an honest breakdown', async () => {
     const user = userEvent.setup();
     render(

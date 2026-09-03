@@ -34,12 +34,60 @@ describe('AI reasoning capabilities', () => {
     }))).toEqual(['off', 'low', 'high', 'max']);
   });
 
+  it('exposes a MiniMax M3 thinking toggle without inventing effort levels for M2.x', () => {
+    expect(reasoningCapability(provider({
+      preset: 'minimax',
+      baseUrl: 'https://api.minimaxi.com',
+      model: 'MiniMax-M3',
+    }))).toEqual({ kind: 'toggle', options: ['off', 'on'] });
+
+    expect(reasoningEffortOptions(provider({
+      preset: 'minimax',
+      baseUrl: 'https://api.minimax.io/v1',
+      model: 'MiniMax-M2.7',
+    }))).toEqual([]);
+  });
+
+  it('uses the official Qwen and GLM compatible-API reasoning controls', () => {
+    expect(reasoningCapability(provider({
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: 'qwen3.8-max',
+    }))).toEqual({ kind: 'toggle', options: ['off', 'on'] });
+    expect(reasoningEffortOptions(provider({
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: 'qwen3-235b-a22b-thinking-2507',
+    }))).toEqual([]);
+
+    expect(reasoningCapability(provider({
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      model: 'glm-4.7',
+    }))).toEqual({ kind: 'toggle', options: ['off', 'on'] });
+    expect(reasoningEffortOptions(provider({
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      model: 'glm-5.2',
+    }))).toEqual(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
   it('uses model-specific OpenAI effort levels', () => {
     expect(reasoningEffortOptions(provider({
       kind: 'openAi',
       preset: 'openai',
       baseUrl: 'https://api.openai.com',
       model: 'gpt-5.4-mini',
+    }))).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
+
+    expect(reasoningEffortOptions(provider({
+      kind: 'openAi',
+      preset: 'openai',
+      baseUrl: 'https://api.openai.com',
+      model: 'gpt-5.2',
+    }))).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
+
+    expect(reasoningEffortOptions(provider({
+      kind: 'openAi',
+      preset: 'openai',
+      baseUrl: 'https://api.openai.com',
+      model: 'gpt-5.3-codex-spark',
     }))).toEqual(['low', 'medium', 'high', 'xhigh']);
 
     expect(reasoningEffortOptions(provider({

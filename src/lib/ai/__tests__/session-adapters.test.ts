@@ -322,6 +322,8 @@ describe('AgentSessionAdapter', () => {
       requestId: 'request-1',
       callId: 'call-health',
       approvalId: 'approval-health',
+      risk: 'stateChange' as const,
+      arguments: { command: 'systemctl restart nginx' },
     };
     await adapter.approve(approval);
     await adapter.reject(approval);
@@ -347,8 +349,16 @@ describe('AgentSessionAdapter', () => {
       content: 'Run verification next.',
     });
     expect(dependencies.stop).toHaveBeenCalledWith({ sessionId: 'session-fixture' });
-    expect(dependencies.approve).toHaveBeenCalledWith(approval);
-    expect(dependencies.reject).toHaveBeenCalledWith(approval);
+    const approvalDecision = {
+      sessionId: 'session-fixture',
+      turnId: 'turn-1',
+      stepId: 'step-1',
+      requestId: 'request-1',
+      callId: 'call-health',
+      approvalId: 'approval-health',
+    };
+    expect(dependencies.approve).toHaveBeenCalledWith(approvalDecision);
+    expect(dependencies.reject).toHaveBeenCalledWith(approvalDecision);
     expect(dependencies.loadArtifact).toHaveBeenCalledWith({
       sessionId: 'session-fixture', artifactId: 'artifact-report', maxBytes: 4096,
     });

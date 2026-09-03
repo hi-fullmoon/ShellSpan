@@ -144,6 +144,18 @@ describe('aiSettingsStore', () => {
     useAiSettingsStore.getState().updateProvider(deepseekId, { reasoningEffort: undefined });
     expect(useAiSettingsStore.getState().providers.find((provider) => provider.id === deepseekId))
       .not.toHaveProperty('reasoningEffort');
+
+    const minimaxId = useAiSettingsStore.getState().addProvider('minimax');
+    useAiSettingsStore.getState().updateProvider(minimaxId, {
+      model: 'MiniMax-M3',
+      reasoningEffort: 'on',
+    });
+    expect(useAiSettingsStore.getState().getProviderConfig(minimaxId))
+      .toEqual(expect.objectContaining({ reasoningEffort: 'on' }));
+
+    useAiSettingsStore.getState().updateProvider(minimaxId, { model: 'MiniMax-M2.7' });
+    expect(useAiSettingsStore.getState().getProviderConfig(minimaxId))
+      .not.toHaveProperty('reasoningEffort');
   });
 
   it('drops legacy inline API keys from provider state and request configs', () => {
