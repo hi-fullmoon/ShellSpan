@@ -5,21 +5,11 @@ import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useConnectSession } from '@/hooks/useConnectSession';
 import { invokeCloseSession } from '@/lib/tauri';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { CompactPromptDialog } from '@/components/ui/compact-dialog';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import type { TerminalSession } from '@/stores/terminalStore';
-import { archiveTerminalAiSession } from '@/lib/ai-sessions';
 import type { TerminalSplitDirection } from './terminal-split';
 
 const MENU_WIDTH = 256;
@@ -157,7 +147,6 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   })();
 
   const closeSession = (sessionId: string): void => {
-    archiveTerminalAiSession(sessionId);
     removeSession(sessionId);
     invokeCloseSession(sessionId).catch(() => {});
   };
@@ -405,46 +394,24 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         cancelText={t('common.cancel')}
         defaultValue={renameTarget?.title ?? ''}
       />
-      <AlertDialog open={closeOthersConfirm} onOpenChange={(o) => { if (!o) dismissCloseOthersConfirm(); }}>
-        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
-          <AlertDialogHeader className="place-items-start px-4 py-3 text-left">
-            <AlertDialogTitle className="text-sm leading-5">
-              {t('terminal.tab.closeOthersConfirmTitle')}
-            </AlertDialogTitle>
-          </AlertDialogHeader>
-          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
-            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {t('terminal.tab.closeOthersConfirmMessage', { count: closeOthersIds.length })}
-            </AlertDialogDescription>
-          </div>
-          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 pb-4 pt-1">
-            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseOthers}>
-              {t('common.close')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={closeToRightConfirm} onOpenChange={(o) => { if (!o) dismissCloseToRightConfirm(); }}>
-        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
-          <AlertDialogHeader className="place-items-start px-4 py-3 text-left">
-            <AlertDialogTitle className="text-sm leading-5">
-              {t('terminal.tab.closeToRightConfirmTitle')}
-            </AlertDialogTitle>
-          </AlertDialogHeader>
-          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
-            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {t('terminal.tab.closeToRightConfirmMessage', { count: closeToRightIds.length })}
-            </AlertDialogDescription>
-          </div>
-          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 pb-4 pt-1">
-            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseToRight}>
-              {t('common.close')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmationDialog
+        open={closeOthersConfirm}
+        onOpenChange={(nextOpen) => { if (!nextOpen) dismissCloseOthersConfirm(); }}
+        title={t('terminal.tab.closeOthersConfirmTitle')}
+        description={t('terminal.tab.closeOthersConfirmMessage', { count: closeOthersIds.length })}
+        confirmLabel={t('common.close')}
+        confirmVariant="destructive"
+        onConfirm={confirmCloseOthers}
+      />
+      <ConfirmationDialog
+        open={closeToRightConfirm}
+        onOpenChange={(nextOpen) => { if (!nextOpen) dismissCloseToRightConfirm(); }}
+        title={t('terminal.tab.closeToRightConfirmTitle')}
+        description={t('terminal.tab.closeToRightConfirmMessage', { count: closeToRightIds.length })}
+        confirmLabel={t('common.close')}
+        confirmVariant="destructive"
+        onConfirm={confirmCloseToRight}
+      />
     </>,
     document.body,
   );

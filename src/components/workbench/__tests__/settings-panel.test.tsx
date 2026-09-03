@@ -297,8 +297,33 @@ describe('SettingsPanel', () => {
     const tabList = screen.getByRole('tablist', { name: 'settings.sectionNavigation' });
     expect(screen.getByRole('dialog', { name: 'workbench.settings.title' })).toBeInTheDocument();
     expect(tabList).toHaveAttribute('aria-orientation', 'vertical');
+    expect(tabList).toHaveAttribute('data-variant', 'sidebar');
     expect(tabList).toHaveClass('w-full', 'flex-col', 'items-stretch');
     expect(tabList.closest('aside')).toHaveClass('w-44');
+  });
+
+  it('gives the selected settings menu a clear accent fill without an indicator or border', async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+
+    const generalTab = screen.getByRole('tab', { name: 'settings.general.title' });
+    expect(generalTab).toHaveAttribute('data-active');
+    expect(generalTab).toHaveClass(
+      'group-data-[variant=sidebar]/tabs-list:data-active:bg-app-tab-active',
+      'group-data-[variant=sidebar]/tabs-list:data-active:text-app-tab-accent',
+      'group-data-[variant=sidebar]/tabs-list:data-active:font-semibold',
+      'group-data-[variant=sidebar]/tabs-list:data-active:border-transparent',
+      'group-data-[variant=sidebar]/tabs-list:data-active:hover:bg-app-tab-active',
+      'group-data-[variant=sidebar]/tabs-list:data-active:hover:text-app-tab-accent',
+    );
+    expect(generalTab.className).not.toContain('border-app-tab-accent');
+    expect(generalTab.className).not.toContain(
+      'group-data-[variant=sidebar]/tabs-list:data-active:after:opacity-100',
+    );
+
+    openSection('settings.ai.title');
+    expect(screen.getByRole('tab', { name: 'settings.ai.title' })).toHaveAttribute('data-active');
+    expect(generalTab).not.toHaveAttribute('data-active');
   });
 
   it('keeps settings inputs and selects at 32px', async () => {
@@ -318,6 +343,29 @@ describe('SettingsPanel', () => {
       'w-[min(64rem,calc(100vw-2rem))]',
       'max-w-none',
     );
+  });
+
+  it('uses the extra-small button scale throughout every settings section', async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+
+    const settingsDialog = screen.getByRole('dialog', { name: 'workbench.settings.title' });
+    const sectionTitles = [
+      'settings.general.title',
+      'settings.appearance.title',
+      'settings.terminal.title',
+      'settings.sftp.title',
+      'settings.ai.title',
+      'settings.shortcuts.title',
+      'settings.experimental.title',
+    ];
+
+    for (const title of sectionTitles) {
+      openSection(title);
+      within(settingsDialog).getAllByRole('button').forEach((button) => {
+        expect(button.className).toMatch(/(?:^|\s)(?:h-6|size-6)(?:\s|$)/);
+      });
+    }
   });
 
   it('shows the up-to-date status beside the current version', async () => {

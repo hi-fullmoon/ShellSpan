@@ -11,11 +11,13 @@ export interface EmptyStateProps {
 
 export const EmptyState: React.FC<EmptyStateProps> = ({ title, description, icon, action, className }) => {
   return (
-    <div className={cn('flex flex-col items-center justify-center gap-3 p-4 text-muted-foreground', className)}>
-      {icon && <div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">{icon}</div>}
-      <span className="text-sm font-medium text-foreground">{title}</span>
-      {description && <span className="max-w-sm text-center text-xs leading-5 text-muted-foreground">{description}</span>}
-      {action}
+    <div data-slot="empty-state" className={cn('flex flex-col items-center justify-center gap-3 p-4 text-muted-foreground', className)}>
+      <div data-slot="empty-state-heading" className="flex flex-col items-center gap-3">
+        {icon && <div data-slot="empty-state-icon" className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">{icon}</div>}
+        <span data-slot="empty-state-title" className="text-sm font-medium text-foreground">{title}</span>
+      </div>
+      {description && <span data-slot="empty-state-description" className="max-w-sm text-center text-xs leading-5 text-muted-foreground">{description}</span>}
+      {action && <div data-slot="empty-state-action">{action}</div>}
     </div>
   );
 };

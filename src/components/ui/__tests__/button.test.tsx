@@ -31,6 +31,18 @@ describe('Button', () => {
     expect(button.className).toContain('[&_svg]:size-3.5');
   });
 
+  it('provides compact square sizes for icon-only actions', () => {
+    render(
+      <Button size="icon-xs" aria-label="Download">
+        <DownloadIcon />
+      </Button>,
+    );
+
+    const button = screen.getByRole('button', { name: 'Download' });
+    expect(button).toHaveClass('size-6');
+    expect(button.className).toContain('[&_svg]:size-3');
+  });
+
   it('renders destructive outline actions without a filled background', () => {
     render(<Button variant="destructiveOutline">Delete</Button>);
 

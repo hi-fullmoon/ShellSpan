@@ -24,17 +24,7 @@ import { PinIcon, XIcon } from 'lucide-react';
 import { invokeCloseSession } from '@/lib/tauri';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
-import { archiveTerminalAiSession } from '@/lib/ai-sessions';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import type { SessionStatus } from '@/types';
 
 const DRAG_OVERLAY_CURSOR_GAP = 2;
@@ -447,7 +437,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
 
   const confirmCloseSession = (): void => {
     if (closingSessionId) {
-      archiveTerminalAiSession(closingSessionId);
       removeSession(closingSessionId);
       invokeCloseSession(closingSessionId).catch(() => {});
     }
@@ -721,29 +710,17 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
               document.body,
             )}
       </DndContext>
-      <AlertDialog
+      <ConfirmationDialog
         open={!!closingSessionId}
         onOpenChange={(open) => {
           if (!open) setClosingSessionId(null);
         }}
-      >
-        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
-          <AlertDialogHeader className="place-items-start px-4 py-3 text-left">
-            <AlertDialogTitle className="text-sm leading-5">{t('terminal.tab.closeConfirmTitle')}</AlertDialogTitle>
-          </AlertDialogHeader>
-          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
-            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {closingSession ? t('terminal.tab.closeConfirmMessage', { title: closingSession.title }) : ''}
-            </AlertDialogDescription>
-          </div>
-          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 pb-4 pt-1">
-            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseSession}>
-              {t('common.close')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title={t('terminal.tab.closeConfirmTitle')}
+        description={closingSession ? t('terminal.tab.closeConfirmMessage', { title: closingSession.title }) : ''}
+        confirmLabel={t('common.close')}
+        confirmVariant="destructive"
+        onConfirm={confirmCloseSession}
+      />
     </div>
   );
 };

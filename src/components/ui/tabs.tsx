@@ -28,6 +28,7 @@ const tabsListVariants = cva(
       variant: {
         default: "bg-muted",
         line: "gap-1 bg-transparent",
+        sidebar: "gap-0.5 bg-transparent",
       },
     },
     defaultVariants: {
@@ -60,6 +61,7 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
         "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
         "data-active:bg-background data-active:text-foreground dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground",
         "after:absolute after:bg-foreground after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:bottom-[-5px] group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
+        "group-data-[variant=sidebar]/tabs-list:text-muted-foreground group-data-[variant=sidebar]/tabs-list:hover:bg-accent/60 group-data-[variant=sidebar]/tabs-list:hover:text-foreground group-data-[variant=sidebar]/tabs-list:data-active:border-transparent group-data-[variant=sidebar]/tabs-list:data-active:bg-app-tab-active group-data-[variant=sidebar]/tabs-list:data-active:font-semibold group-data-[variant=sidebar]/tabs-list:data-active:text-app-tab-accent group-data-[variant=sidebar]/tabs-list:data-active:shadow-none group-data-[variant=sidebar]/tabs-list:data-active:hover:bg-app-tab-active group-data-[variant=sidebar]/tabs-list:data-active:hover:text-app-tab-accent",
         className
       )}
       {...props}

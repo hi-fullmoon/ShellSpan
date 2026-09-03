@@ -30,9 +30,8 @@ import { useAppShortcuts } from '@/hooks/useAppShortcuts';
 import { CredentialPromptDialog } from '@/components/terminal/credential-prompt-dialog';
 import { KeychainKeyPromptDialog } from '@/components/terminal/keychain-key-prompt-dialog';
 import { HostKeyDialogHost } from '@/components/terminal/host-key-dialog-host';
-import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { AiPanel } from '@/components/ai/ai-panel';
-import { finalizeAiSessionsBeforeExit } from '@/lib/ai-sessions';
 import { flushTerminalWorkspace } from '@/lib/terminal-workspace-persistence';
 import { flushSftpWorkspace } from '@/lib/sftp-workspace-persistence';
 import { flushAiSettingsPreferences } from '@/stores/aiSettingsStore';
@@ -126,9 +125,6 @@ export const App: React.FC = () => {
     void Promise.all([
       flushAiSettingsPreferences().catch((error) => {
         logger.warn('Failed to flush AI settings before exit', error);
-      }),
-      finalizeAiSessionsBeforeExit().catch((error) => {
-        logger.warn('Failed to flush AI session history before exit', error);
       }),
       flushTerminalWorkspace().catch((error) => {
         logger.warn('Failed to flush terminal workspace before exit', error);
@@ -258,7 +254,7 @@ export const App: React.FC = () => {
         </Suspense>
       )}
 
-      <ConfirmDeleteDialog
+      <ConfirmationDialog
         open={exitDialogOpen}
         onOpenChange={setExitDialogOpen}
         title={t('app.exitConfirm.title')}
@@ -269,6 +265,7 @@ export const App: React.FC = () => {
             })
           : t('app.exitConfirm.description')}
         confirmLabel={t('app.exitConfirm.confirm')}
+        confirmVariant="destructive"
         onConfirm={() => {
           setExitDialogOpen(false);
           requestAppExit();

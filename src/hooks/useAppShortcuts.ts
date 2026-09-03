@@ -7,7 +7,7 @@ import {
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutAction } from '@/types';
 import { useTerminalStore } from '@/stores/terminalStore';
-import { useAiStore } from '@/stores/aiStore';
+import { useAiPanelStore } from '@/stores/aiPanelStore';
 
 // The leader binding and its sub-keys live in the terminal input layer
 // (terminal-leader.ts), not at the document level.
@@ -65,7 +65,7 @@ export function useAppShortcuts(): void {
           break;
         case 'toggleAiPanel':
           if (activeSection === 'sftp') break;
-          useAiStore.getState().toggleOpen(activeSection);
+          useAiPanelStore.getState().toggleOpen(activeSection);
           break;
         case 'newTerminalTab':
           document.dispatchEvent(new Event('shellspan:new-terminal-tab'));

@@ -1,18 +1,7 @@
 import React from 'react';
 import { useI18n } from '@/hooks/useI18n';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogDescription,
-} from '@/components/ui/alert-dialog';
-import {
-  CompactAlertDialogBody,
-  CompactAlertDialogContent,
-  CompactAlertDialogFooter,
-  CompactAlertDialogHeader,
-  CompactAlertDialogTitle,
-} from '@/components/ui/compact-alert-dialog';
+import { AlertDialogAction } from '@/components/ui/alert-dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 interface ConfirmDeleteDialogProps {
   open: boolean;
@@ -22,9 +11,10 @@ interface ConfirmDeleteDialogProps {
   onConfirm: () => void;
   confirmLabel?: string;
   confirmVariant?: React.ComponentProps<typeof AlertDialogAction>['variant'];
+  buttonSize?: React.ComponentProps<typeof AlertDialogAction>['size'];
 }
 
-/** Shared destructive-action confirmation dialog (compact file-manager style). */
+/** Destructive-action preset for the shared confirmation dialog. */
 export const ConfirmDeleteDialog: React.FC<ConfirmDeleteDialogProps> = ({
   open,
   onOpenChange,
@@ -33,26 +23,19 @@ export const ConfirmDeleteDialog: React.FC<ConfirmDeleteDialogProps> = ({
   onConfirm,
   confirmLabel,
   confirmVariant = 'destructive',
+  buttonSize,
 }) => {
   const { t } = useI18n();
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <CompactAlertDialogContent>
-        <CompactAlertDialogHeader>
-          <CompactAlertDialogTitle>{title}</CompactAlertDialogTitle>
-        </CompactAlertDialogHeader>
-        <CompactAlertDialogBody>
-          <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-            {description}
-          </AlertDialogDescription>
-        </CompactAlertDialogBody>
-        <CompactAlertDialogFooter>
-          <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
-          <AlertDialogAction variant={confirmVariant} size="sm" onClick={onConfirm}>
-            {confirmLabel ?? t('common.delete')}
-          </AlertDialogAction>
-        </CompactAlertDialogFooter>
-      </CompactAlertDialogContent>
-    </AlertDialog>
+    <ConfirmationDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={title}
+      description={description}
+      confirmLabel={confirmLabel ?? t('common.delete')}
+      confirmVariant={confirmVariant}
+      buttonSize={buttonSize}
+      onConfirm={onConfirm}
+    />
   );
 };
