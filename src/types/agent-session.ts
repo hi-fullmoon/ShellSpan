@@ -285,6 +285,9 @@ export type AgentSessionEvent =
       requestId: string;
       inputTokens?: number;
       contextWindow?: number;
+      systemTokens?: number;
+      toolSchemaTokens?: number;
+      messageTokens?: number;
       surfaceGeneration: number;
       limited?: boolean;
       omittedMessages?: number;
