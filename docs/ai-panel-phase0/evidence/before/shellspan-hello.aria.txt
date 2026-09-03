@@ -1,0 +1,42 @@
+- main:
+  - complementary "ShellSpan AI Panel Phase 0 baseline":
+    - region "AI 工作区":
+      - heading "Hello with context and reasoning" [level=2]
+      - generic: 工作台
+      - generic: 已完成
+      - log "AI 对话记录":
+        - region "Messages":
+          - log:
+            - generic: 会话状态
+            - generic: hello
+            - generic: Agent 状态
+            - generic: Agent 状态
+            - generic: 回合状态
+            - generic: completed
+            - generic: 步骤状态
+            - generic: completed
+            - article "你的消息":
+              - generic: hello
+              - time: 08:00
+              - button "复制":
+            - generic: 模型请求
+            - generic: stop
+            - article "AI 助手消息":
+              - button "已思考":
+                - generic: 已思考
+                - generic: Read the frozen context. Answer directly.
+              - paragraph: Hello! How can I help?
+              - button "复制":
+              - time: 08:00
+            - generic: Agent 状态
+            - generic: 会话结束
+            - generic "回合统计":
+              - generic: 1 轮·1 步
+              - generic: "|LLM 0.5s"
+              - generic: "|首 token 平均 0.2s·48 tok/s"
+              - generic: "|输入 120·输出 24"
+        - button "滚动到最新消息":
+      - textbox "发送消息或做任务… · Enter 发送 · Shift+Enter 换行"
+      - button "模型选择：deepseek-reasoner" [disabled]:
+        - generic: deepseek-reasoner
+      - button "发送" [disabled]:

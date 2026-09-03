@@ -1,0 +1,24 @@
+Captured at Phase 0 start: 2026-09-03 Asia/Shanghai
+
+ShellSpan
+branch: codex/ai-panel
+HEAD: 59871858b4037513dd57560aa996e1c3e0efc6f4
+status --short:
+?? docs/ai-panel-deepseek-harness-alignment-plan.md
+
+Relevant source SHA-256 before implementation:
+6e84c69aae407421d22ed389cd2ecfc06c878bbc9767b45b05c8fae5b60c63f6  src/test/fixtures/agent-session.ts
+0e7d8dddedc95491fa5be43be4c00f8bc810f9ff8237de040cf5fcf11c8f8e81  src/types/agent-session.ts
+52ce79277470b99b539b82f9b393905fe987aed0d0036e3e19a97ea25f43b51c  src/lib/ai/conversation-projection.ts
+5f16bf520fd6dcd9f3dbd0e8d7e83cde391e19ba31ecf8f5e2b8612993bab06b  src/components/ai/workspace/ai-conversation-node-seat.tsx
+dcdc83f22f4c6d2b6cecdf4366c8a1b1ea80d7ffa2535752d8569b5f101ff616  src/components/ai/workspace/ai-conversation.tsx
+49d4d1ddab2a07ce88ab7d0bf9dac08e0c3f2f149e22fc41e3475a87eb558731  src/components/ai/ai-panel.css
+6440105a6abd6e2d24d47cabb17b4424fbea3f6220d33b57de9fc66c9545f152  package.json
+
+DeepSeek Harness reference
+branch: master
+HEAD: 49a606bc5b5934603f22a26957a07dc799ab0291
+status --short: clean
+
+The reference repository was read-only for this work. Later unrelated/concurrent
+ShellSpan worktree changes were preserved and are not claimed as Phase 0 changes.

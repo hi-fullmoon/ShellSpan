@@ -1,0 +1,74 @@
+{
+  "scene": {
+    "id": "max-tokens-400-light-completed-1x",
+    "scenario": "max-tokens",
+    "width": 400,
+    "height": 900,
+    "theme": "light",
+    "deviceScaleFactor": 1,
+    "expanded": false
+  },
+  "surface": {
+    "width": 400,
+    "height": 900
+  },
+  "nodeKinds": [
+    "systemPrompt",
+    "userMessage",
+    "turnProcess",
+    "assistantMessage",
+    "turnTail"
+  ],
+  "horizontalOverflow": [],
+  "clippedEssential": [],
+  "conversation": {
+    "bottomPadding": 28
+  },
+  "composer": {
+    "visible": true,
+    "overlapsConversation": false,
+    "bottomGap": 0,
+    "bottomPadding": 8
+  },
+  "process": {
+    "label": "过程失败1 个错误",
+    "expanded": false,
+    "status": "failed",
+    "separatorVisible": true,
+    "childKinds": [],
+    "visibleChildKinds": []
+  },
+  "reasoning": {
+    "state": null,
+    "expanded": false,
+    "statusRole": false
+  },
+  "icons": {
+    "systemPrompt": true,
+    "contextInjection": false,
+    "reasoning": false
+  },
+  "answerText": "First item. 2. Second item. 3. This item was cut 回复已中断08:00",
+  "answerBeforeStats": true,
+  "stats": {
+    "keys": [
+      "turn",
+      "steps",
+      "model",
+      "ttft",
+      "rate",
+      "cacheRead",
+      "outputTokens",
+      "totalTokens"
+    ],
+    "text": "1 轮·1 步LLM 0.3秒首 token 平均 0.2秒·640 tok/s缓存读取 0输出 64·184 tokens"
+  },
+  "alertCount": 0,
+  "colors": {
+    "workspace": "rgb(255, 255, 255)",
+    "workspaceMatchesSemantic": true,
+    "userBubble": "rgb(237, 243, 254)",
+    "userBubbleMatchesSemantic": true
+  },
+  "providerRequests": 0
+}

@@ -1,0 +1,14 @@
+{"type":"session","version":0,"id":"{{session:1}}","createdAt":1788393600000,"cwd":"{{cwd}}","agentPreset":"standard"}
+{"type":"permission/preset","data":{"preset":"workspace-write"}}
+{"type":"sandbox/mode","data":{"mode":"workspace-write"}}
+{"type":"approval/policy","data":{"policy":"ask"}}
+{"type":"turn/start","data":{"turn":1}}
+{"type":"user/message","data":{"content":[{"type":"text","text":"hello"}],"source":{"kind":"user","rpcId":"{{rpc:1}}","clientTimeZone":"Asia/Shanghai"},"role":"user","id":"{{message:1}}"},"surfaceOp":"append"}
+{"type":"user/message","data":{"content":[{"type":"text","text":"Workspace: /workspace/shellspan-fixture\nTarget: Production A (a.example.com:22)\nPermission: requestApproval"}],"source":{"kind":"plugin","plugin":"shellspan-phase0-target","form":"snapshot","sections":[{"name":"workspace","text":"Workspace: /workspace/shellspan-fixture"},{"name":"target","text":"Target: Production A (a.example.com:22)"},{"name":"permission","text":"Permission: requestApproval"}]},"role":"user","id":"{{message:2}}"},"surfaceOp":"append"}
+{"type":"session/title","data":{"title":"Phase 0 hello","messageSeqs":[4],"source":{"kind":"fallback"}}}
+{"type":"step/start","data":{"turn":1,"step":1}}
+{"type":"request/header","data":{"header":{"config":{"provider":"deepseek-official","model":"deepseek-v4-flash","reasoningEffort":"medium"},"system":"You are ShellSpan Agent running against the frozen Phase 0 fixture.\nUse only the declared read-only terminal tools and report durable evidence.","tools":[]},"reason":"initial"}}
+{"type":"request/context","data":{"provider":"deepseek-official","model":"deepseek-v4-flash","contextWindow":128000}}
+{"type":"assistant/message","data":{"turn":1,"step":1,"message":{"role":"assistant","content":[{"type":"reasoning","text":"Read the frozen context. Answer directly."},{"type":"text","text":"Hello! How can I help?"}],"source":{"kind":"model","provider":"deepseek-official","model":"deepseek-v4-flash"},"id":"{{message:3}}"},"usage":{"inputTokens":120,"outputTokens":24,"totalTokens":144,"cacheReadTokens":64,"cacheWriteTokens":8,"reasoningTokens":10}},"surfaceOp":"append"}
+{"type":"step/end","data":{"turn":1,"step":1}}
+{"type":"turn/end","data":{"turn":1,"reason":{"kind":"completed"}}}

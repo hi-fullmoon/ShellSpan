@@ -1,0 +1,70 @@
+{
+  "scene": {
+    "id": "missing-usage-400-light-completed-1x",
+    "scenario": "missing-usage",
+    "width": 400,
+    "height": 900,
+    "theme": "light",
+    "deviceScaleFactor": 1,
+    "expanded": false
+  },
+  "surface": {
+    "width": 400,
+    "height": 900
+  },
+  "nodeKinds": [
+    "systemPrompt",
+    "userMessage",
+    "turnProcess",
+    "assistantMessage",
+    "turnTail"
+  ],
+  "horizontalOverflow": [],
+  "clippedEssential": [],
+  "conversation": {
+    "bottomPadding": 28
+  },
+  "composer": {
+    "visible": true,
+    "overlapsConversation": false,
+    "bottomGap": 0,
+    "bottomPadding": 8
+  },
+  "process": {
+    "label": "已思考",
+    "expanded": false,
+    "status": "completed",
+    "separatorVisible": true,
+    "childKinds": [],
+    "visibleChildKinds": []
+  },
+  "reasoning": {
+    "state": null,
+    "expanded": false,
+    "statusRole": false
+  },
+  "icons": {
+    "systemPrompt": true,
+    "contextInjection": false,
+    "reasoning": false
+  },
+  "answerText": "Hello without provider usage.08:00",
+  "answerBeforeStats": true,
+  "stats": {
+    "keys": [
+      "turn",
+      "steps",
+      "model",
+      "ttft"
+    ],
+    "text": "1 轮·1 步LLM 0.3秒首 token 平均 0.2秒"
+  },
+  "alertCount": 0,
+  "colors": {
+    "workspace": "rgb(255, 255, 255)",
+    "workspaceMatchesSemantic": true,
+    "userBubble": "rgb(237, 243, 254)",
+    "userBubbleMatchesSemantic": true
+  },
+  "providerRequests": 0
+}
