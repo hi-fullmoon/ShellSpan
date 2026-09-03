@@ -1,0 +1,86 @@
+{
+  "scene": {
+    "id": "multiple-tools-720-light-expanded-1x",
+    "scenario": "multiple-tools",
+    "width": 720,
+    "height": 900,
+    "theme": "light",
+    "deviceScaleFactor": 1,
+    "expanded": true
+  },
+  "surface": {
+    "width": 720,
+    "height": 900
+  },
+  "nodeKinds": [
+    "systemPrompt",
+    "userMessage",
+    "turnProcess",
+    "assistantMessage",
+    "turnTail"
+  ],
+  "horizontalOverflow": [],
+  "clippedEssential": [],
+  "conversation": {
+    "bottomPadding": 28
+  },
+  "composer": {
+    "visible": true,
+    "overlapsConversation": false,
+    "bottomGap": 0,
+    "bottomPadding": 8
+  },
+  "process": {
+    "label": "已思考2 次工具调用",
+    "expanded": true,
+    "status": "completed",
+    "separatorVisible": true,
+    "childKinds": [
+      "contextInjection",
+      "assistantMessage",
+      "tool",
+      "tool"
+    ],
+    "visibleChildKinds": [
+      "contextInjection",
+      "tool",
+      "tool"
+    ]
+  },
+  "reasoning": {
+    "state": null,
+    "expanded": false,
+    "statusRole": false
+  },
+  "icons": {
+    "systemPrompt": true,
+    "contextInjection": true,
+    "reasoning": false
+  },
+  "answerText": "nginx is active and the installed version is 1.26.2.08:00",
+  "answerBeforeStats": true,
+  "stats": {
+    "keys": [
+      "turn",
+      "steps",
+      "model",
+      "tools",
+      "cacheRead",
+      "cacheWrite",
+      "cacheHit",
+      "inputTokens",
+      "outputTokens",
+      "reasoningTokens",
+      "totalTokens"
+    ],
+    "text": "1 轮·1 步LLM 0.9秒·工具调用 0.5秒缓存读取 64·缓存写入 8·缓存命中 50%输入 128·输出 24·思考 10·144 tokens"
+  },
+  "alertCount": 0,
+  "colors": {
+    "workspace": "rgb(255, 255, 255)",
+    "workspaceMatchesSemantic": true,
+    "userBubble": "rgb(237, 243, 254)",
+    "userBubbleMatchesSemantic": true
+  },
+  "providerRequests": 0
+}

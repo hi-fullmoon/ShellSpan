@@ -1,0 +1,77 @@
+{
+  "scene": {
+    "id": "retry-success-400-light-expanded-1x",
+    "scenario": "retry-success",
+    "width": 400,
+    "height": 900,
+    "theme": "light",
+    "deviceScaleFactor": 1,
+    "expanded": true
+  },
+  "surface": {
+    "width": 400,
+    "height": 900
+  },
+  "nodeKinds": [
+    "systemPrompt",
+    "userMessage",
+    "turnProcess",
+    "assistantMessage",
+    "turnTail"
+  ],
+  "horizontalOverflow": [],
+  "clippedEssential": [],
+  "conversation": {
+    "bottomPadding": 28
+  },
+  "composer": {
+    "visible": true,
+    "overlapsConversation": false,
+    "bottomGap": 0,
+    "bottomPadding": 8
+  },
+  "process": {
+    "label": "已思考1 次重试",
+    "expanded": true,
+    "status": "completed",
+    "separatorVisible": true,
+    "childKinds": [
+      "contextInjection",
+      "retry"
+    ],
+    "visibleChildKinds": [
+      "contextInjection",
+      "retry"
+    ]
+  },
+  "reasoning": {
+    "state": null,
+    "expanded": false,
+    "statusRole": false
+  },
+  "icons": {
+    "systemPrompt": true,
+    "contextInjection": true,
+    "reasoning": false
+  },
+  "answerText": "Hello after retry.08:00",
+  "answerBeforeStats": true,
+  "stats": {
+    "keys": [
+      "turn",
+      "steps",
+      "model",
+      "ttft",
+      "rate"
+    ],
+    "text": "1 轮·1 步LLM 0.4秒首 token 平均 0.1秒·240 tok/s"
+  },
+  "alertCount": 0,
+  "colors": {
+    "workspace": "rgb(255, 255, 255)",
+    "workspaceMatchesSemantic": true,
+    "userBubble": "rgb(237, 243, 254)",
+    "userBubbleMatchesSemantic": true
+  },
+  "providerRequests": 0
+}

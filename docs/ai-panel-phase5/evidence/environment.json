@@ -1,0 +1,18 @@
+{
+  "capturedAt": "2026-09-03T10:56:14.022Z",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "node": "v24.15.0",
+  "playwright": "1.62.0",
+  "browser": {
+    "engine": "chromium",
+    "version": "151.0.7922.34"
+  },
+  "locale": "zh-CN",
+  "timezone": "Asia/Shanghai",
+  "reducedMotion": "reduce",
+  "fixedNowUnixMs": 1788393630000,
+  "randomIds": "deterministic seeded Math.random and monotonic crypto.randomUUID",
+  "caretAndAnimation": "disabled before every capture",
+  "fonts": "document.fonts.ready awaited before every capture"
+}

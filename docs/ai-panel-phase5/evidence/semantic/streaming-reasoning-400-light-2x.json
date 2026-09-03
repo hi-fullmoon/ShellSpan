@@ -1,0 +1,69 @@
+{
+  "scene": {
+    "id": "streaming-reasoning-400-light-2x",
+    "scenario": "streaming-reasoning",
+    "width": 400,
+    "height": 900,
+    "theme": "light",
+    "deviceScaleFactor": 2,
+    "expanded": true
+  },
+  "surface": {
+    "width": 400,
+    "height": 900
+  },
+  "nodeKinds": [
+    "systemPrompt",
+    "userMessage",
+    "turnProcess"
+  ],
+  "horizontalOverflow": [],
+  "clippedEssential": [],
+  "conversation": {
+    "bottomPadding": 28
+  },
+  "composer": {
+    "visible": true,
+    "overlapsConversation": false,
+    "bottomGap": 0,
+    "bottomPadding": 8
+  },
+  "process": {
+    "label": "思考中",
+    "expanded": true,
+    "status": "running",
+    "separatorVisible": true,
+    "childKinds": [
+      "contextInjection",
+      "reasoning"
+    ],
+    "visibleChildKinds": [
+      "contextInjection",
+      "reasoning"
+    ]
+  },
+  "reasoning": {
+    "state": "running",
+    "expanded": false,
+    "statusRole": true
+  },
+  "icons": {
+    "systemPrompt": true,
+    "contextInjection": true,
+    "reasoning": true
+  },
+  "answerText": "",
+  "answerBeforeStats": false,
+  "stats": {
+    "keys": [],
+    "text": ""
+  },
+  "alertCount": 0,
+  "colors": {
+    "workspace": "rgb(255, 255, 255)",
+    "workspaceMatchesSemantic": true,
+    "userBubble": "rgb(237, 243, 254)",
+    "userBubbleMatchesSemantic": true
+  },
+  "providerRequests": 0
+}

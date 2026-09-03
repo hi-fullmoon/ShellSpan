@@ -1,0 +1,55 @@
+- button "新建会话":
+  - generic: DSH 本地构建
+  - generic: 0.1.2-alpha.5-49a606b
+- button "收起侧边栏":
+- button "新建会话":
+  - generic: 新会话
+- generic: 工作区
+- button "搜索会话":
+- textbox "搜索会话…"
+- button "视图选项":
+- button "添加工作区":
+- tree "会话":
+  - treeitem "未分组" [expanded]:
+    - generic: 未分组
+  - treeitem "Phase 0 hello 1分钟" [selected]:
+    - generic: Phase 0 hello
+    - generic: 1分钟
+- button "设置":
+  - generic: 设置
+- banner:
+  - navigation "会话层级":
+    - button "Phase 0 hello" [disabled]
+  - button "Session 日志":
+    - generic: Session 日志
+  - tablist:
+    - tab "对话" [selected]
+    - tab "轨迹"
+- button "系统提示词":
+  - generic: 系统提示词
+- generic: hello
+- generic: 08:00
+- button "复制":
+- button "已思考" [active]:
+  - generic: 已思考
+- paragraph: Hello! How can I help?
+- button "复制":
+- button "好的回答":
+- button "有问题的回答":
+- button "在新对话中分支":
+- button "用时 0秒":
+  - generic: 用时 0秒
+- generic: 08:00
+- textbox "发消息或做任务… / 调用指令 @ 文件或对话"
+- generic: 发消息或做任务… / 调用指令 @ 文件或对话
+- button "指令":
+- button "访问模式，当前：工作区内修改":
+  - generic: 工作区内修改
+- button "选择模型，当前 DeepSeek-V4-Flash":
+  - generic: DeepSeek-V4-Flash
+- button "上下文已用 0%":
+- button "发送消息" [disabled]:
+- generic: 1 轮 · 1 步| LLM 0秒| 缓存命中 33%| 输入 192 tok · 输出 24 tok
+- generic: 详情
+- button "关闭详情":
+- generic: 点击消息流中的工具行查看详情

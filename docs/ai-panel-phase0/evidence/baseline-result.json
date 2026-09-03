@@ -1,0 +1,18 @@
+{
+  "stable": true,
+  "runs": 2,
+  "environment": {
+    "viewport": { "width": 1280, "height": 900 },
+    "surface": { "width": 720, "height": 900 },
+    "deviceScaleFactor": 1,
+    "theme": "light",
+    "colorScheme": "light",
+    "fontSize": "16px",
+    "locale": "zh-CN",
+    "reducedMotion": "reduce"
+  },
+  "fixtureSha256": "9a14a295e42a36750e342667418b2c5935790aa2e260a9212cf68036f2d79c49",
+  "domSha256": "38897cc267311affe1682b7966fbb0b3be755c7695dab51a239e79b85b7629d6",
+  "screenshotSha256": "2c55fe099222f16f5c2177bf44d866a99f9544492b6219a5756fcf9ce21b8a0c",
+  "providerRequests": 0
+}
