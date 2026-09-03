@@ -6,7 +6,6 @@ import {
 } from '@/lib/ai/submission-policy';
 
 const base: AiSubmissionPolicyInput = {
-  sessionKind: 'agent',
   sessionStatus: 'idle',
   terminal: false,
   sessionId: 'session-1',
@@ -43,7 +42,6 @@ describe('resolveAiSubmission', () => {
     ['provider', { hasProvider: false }, 'providerUnavailable'],
     ['cannot create', { sessionId: null, canCreateSession: false }, 'sessionUnavailable'],
     ['running without session', { sessionStatus: 'running', sessionId: null }, 'sessionUnavailable'],
-    ['Ask streaming', { sessionKind: 'ask', sessionStatus: 'running' }, 'busyUnsupported'],
     ['submitting', { submitting: true }, 'submitting'],
   ] as const)('rejects %s', (_label, changes, reason) => {
     expect(resolveAiSubmission({ ...base, ...changes })).toEqual({ kind: 'reject', reason });
@@ -59,10 +57,9 @@ describe('resolveAiSubmission', () => {
     })).toEqual({ kind: 'stop' });
   });
 
-  it('allows a retryable Ask failure to submit again in the same conversation', () => {
+  it('allows a retryable Agent failure to submit again in the same session', () => {
     expect(resolveAiSubmission({
       ...base,
-      sessionKind: 'ask',
       sessionStatus: 'failed',
       terminal: false,
     })).toEqual({ kind: 'submit', mode: 'nextTurn' });

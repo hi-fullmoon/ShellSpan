@@ -5,7 +5,14 @@ import { AgentPermissionSelector } from '../agent-permission-selector';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 
-vi.mock('@/hooks/useI18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/hooks/useI18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => ({
+      'agent.permission.composer.readOnly': '仅可查看',
+      'agent.permission.composer.fullAccess': '完全权限',
+    })[key] ?? key,
+  }),
+}));
 
 const initialTerminalState = useTerminalStore.getState();
 const initialPermissionState = useAgentPermissionStore.getState();
@@ -28,13 +35,12 @@ describe('Agent permission selector', () => {
     connectSession();
   });
 
-  it('selects safer modes directly and confirms full access', async () => {
+  it('exposes only the two product modes and confirms full access', async () => {
     render(<AgentPermissionSelector sessionId="session-1" />);
-    fireEvent.click(screen.getByRole('button', { name: 'agent.permission' }));
-    fireEvent.click(await screen.findByRole('menuitemradio', { name: /agent\.permission\.autoApproveReadOnly/ }));
     expect(useAgentPermissionStore.getState().getMode('session-1')).toBe('autoApproveReadOnly');
-
     fireEvent.click(screen.getByRole('button', { name: 'agent.permission' }));
+    expect(await screen.findAllByRole('menuitemradio')).toHaveLength(2);
+    expect(screen.queryByRole('menuitemradio', { name: /agent\.permission\.requestApproval/ })).toBeNull();
     fireEvent.click(await screen.findByRole('menuitemradio', { name: /agent\.permission\.fullAccess/ }));
     expect(await screen.findByText('agent.permission.fullAccessWarning')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'agent.permission.fullAccessConfirm' }));
@@ -47,11 +53,17 @@ describe('Agent permission selector', () => {
       'data-variant',
       'composer',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'agent.permission' }));
-    expect(await screen.findByText('agent.permission.requestApprovalDescription')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'agent.permission.composerAria' }));
+    const options = await screen.findAllByRole('menuitemradio');
+    expect(options.map((option) => option.textContent)).toEqual([
+      '仅可查看',
+      '完全权限',
+    ]);
+    expect(screen.queryByText('工作区内修改')).toBeNull();
+    expect(screen.queryByRole('menuitemradio', { name: /agent\.permission\.requestApproval/ })).toBeNull();
   });
 
-  it('returns to request approval and disables elevation after disconnect', async () => {
+  it('returns to the read-only auto-approval default and disables elevation after disconnect', async () => {
     useAgentPermissionStore.getState().setMode('session-1', 'fullAccess');
     render(<AgentPermissionSelector sessionId="session-1" />);
     useTerminalStore.getState().setClosed('session-1', {
@@ -61,7 +73,7 @@ describe('Agent permission selector', () => {
     });
 
     await waitFor(() => {
-      expect(useAgentPermissionStore.getState().getMode('session-1')).toBe('requestApproval');
+      expect(useAgentPermissionStore.getState().getMode('session-1')).toBe('autoApproveReadOnly');
     });
     expect(screen.getByRole('button', { name: 'agent.permission' })).toBeDisabled();
   });

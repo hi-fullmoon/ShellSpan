@@ -50,17 +50,7 @@ import type {
   TransferBatchResult,
   UploadProgressEvent,
 } from '@/types';
-import type {
-  AiChatMessage,
-  AiConversation,
-  AiProviderConfig,
-  AiProviderConnectionConfig,
-  AiSessionFile,
-  AiSessionLocator,
-  AiSessionMeta,
-  AiStartRequest,
-  AiStreamEvent,
-} from '@/types/ai';
+import type { AiProviderConfig, AiProviderConnectionConfig } from '@/types/ai';
 import type {
   AgentArtifactRequest,
   AgentArtifactResponse,
@@ -246,14 +236,6 @@ export async function invokeDeleteAiApiKey(providerId: string): Promise<void> {
 
 export async function invokeListAiModels(provider: AiProviderConnectionConfig): Promise<string[]> {
   return invokeLogged<string[]>('ai_list_models', { provider });
-}
-
-export async function invokeStartAiRequest(request: AiStartRequest): Promise<void> {
-  return invokeLogged('ai_start_request', { request });
-}
-
-export async function invokeCancelAiRequest(requestId: string): Promise<void> {
-  return invokeLogged('ai_cancel_request', { requestId });
 }
 
 export async function invokeCreateAgentRuntimeSession(
@@ -847,14 +829,6 @@ export async function listenToAgentRuntimeSession(
   });
 }
 
-export async function listenToAiStream(
-  callback: EventCallback<AiStreamEvent>,
-): Promise<UnlistenFn> {
-  return listen<AiStreamEvent>('ai-stream', (event) => {
-    callback(event);
-  });
-}
-
 export async function listenToUploadProgress(
   operationId: string,
   callback: EventCallback<UploadProgressEvent>,
@@ -983,67 +957,6 @@ export async function invokeSaveSftpWorkspace(workspaceJson: string): Promise<vo
 
 export async function invokeClearSftpWorkspace(): Promise<void> {
   return invokeLogged('clear_sftp_workspace');
-}
-
-export async function invokeCreateAiSession(meta: AiSessionMeta): Promise<void> {
-  return invokeLogged('create_ai_session', { meta });
-}
-
-export async function invokeAppendAiSessionMessage(
-  conversationId: string,
-  startedAt: string,
-  message: AiChatMessage,
-): Promise<void> {
-  return invokeLogged('append_ai_session_message', {
-    conversationId,
-    startedAt,
-    timestamp: new Date().toISOString(),
-    message,
-  });
-}
-
-export async function invokeClearAiSessionLane(
-  conversationId: string,
-  startedAt: string,
-  lane: 'conversation' | 'command',
-): Promise<void> {
-  return invokeLogged('clear_ai_session_lane', {
-    conversationId,
-    startedAt,
-    timestamp: new Date().toISOString(),
-    lane,
-  });
-}
-
-export async function invokeArchiveAiSession(
-  conversationId: string,
-  startedAt: string,
-  reason: 'terminal_closed' | 'new_conversation' = 'terminal_closed',
-): Promise<void> {
-  return invokeLogged('archive_ai_session', {
-    conversationId,
-    startedAt,
-    timestamp: new Date().toISOString(),
-    reason,
-  });
-}
-
-export async function invokeDeleteAiSessions(sessions: AiSessionLocator[]): Promise<number> {
-  return invokeLogged<number>('delete_ai_sessions', { sessions });
-}
-
-export async function invokeListAiSessions(): Promise<AiConversation[]> {
-  return invokeLogged<AiConversation[]>('list_ai_sessions');
-}
-
-export async function invokeLoadAiSession(
-  conversationId: string,
-  startedAt: string,
-): Promise<AiSessionFile | null> {
-  return invokeLogged<AiSessionFile | null>('load_ai_session', {
-    conversationId,
-    startedAt,
-  });
 }
 
 export async function invokeGetSystemHealth(): Promise<SystemHealth> {

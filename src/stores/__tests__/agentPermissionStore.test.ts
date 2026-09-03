@@ -29,15 +29,15 @@ describe('connection-instance Agent permissions', () => {
     useAgentPermissionStore.setState(initialPermissionState, true);
   });
 
-  it('defaults every new connection to requestApproval and isolates identical hosts', () => {
+  it('defaults every new connection to autoApproveReadOnly and isolates identical hosts', () => {
     connectSession('session-a');
     connectSession('session-b');
     const permissions = useAgentPermissionStore.getState();
 
-    expect(permissions.getMode('session-a')).toBe('requestApproval');
+    expect(permissions.getMode('session-a')).toBe('autoApproveReadOnly');
     expect(permissions.setMode('session-a', 'fullAccess')).toBe(true);
     expect(permissions.getMode('session-a')).toBe('fullAccess');
-    expect(permissions.getMode('session-b')).toBe('requestApproval');
+    expect(permissions.getMode('session-b')).toBe('autoApproveReadOnly');
 
     useTerminalStore.getState().setActiveSession('session-b');
     expect(useAgentPermissionStore.getState().getMode('session-a')).toBe('fullAccess');
@@ -54,7 +54,7 @@ describe('connection-instance Agent permissions', () => {
         status,
       });
 
-      expect(useAgentPermissionStore.getState().getMode('session-a')).toBe('requestApproval');
+      expect(useAgentPermissionStore.getState().getMode('session-a')).toBe('autoApproveReadOnly');
       expect(useAgentPermissionStore.getState().bindings).not.toHaveProperty('session-a');
     },
   );
@@ -92,7 +92,7 @@ describe('connection-instance Agent permissions', () => {
     });
 
     expect(useAgentPermissionStore.getState().bindings).not.toHaveProperty('session-old');
-    expect(useAgentPermissionStore.getState().getMode('session-new')).toBe('requestApproval');
+    expect(useAgentPermissionStore.getState().getMode('session-new')).toBe('autoApproveReadOnly');
   });
 
   it('drops a binding if identity changes in place and rejects elevation while disconnected', () => {
@@ -104,7 +104,7 @@ describe('connection-instance Agent permissions', () => {
         : session),
     }));
 
-    expect(useAgentPermissionStore.getState().getMode('session-a')).toBe('requestApproval');
+    expect(useAgentPermissionStore.getState().getMode('session-a')).toBe('autoApproveReadOnly');
     useTerminalStore.getState().setStatus('session-a', {
       sessionId: 'session-a',
       status: 'disconnected',

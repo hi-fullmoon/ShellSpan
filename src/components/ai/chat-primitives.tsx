@@ -1,5 +1,11 @@
-import React, { useCallback, useLayoutEffect, useRef } from 'react';
-import { ArrowDownIcon } from 'lucide-react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { ArrowDownIcon, CheckIcon, CopyIcon } from 'lucide-react';
 import {
   Bubble as BubblePrimitive,
   BubbleContent,
@@ -22,6 +28,7 @@ import {
 } from '@/components/ui/message-scroller';
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export const MessageScroller: React.FC<{
@@ -106,7 +113,7 @@ export const MessageScroller: React.FC<{
         aria-label={ariaLabel}
       >
         <MessageScrollerViewport onScroll={readAnchor}>
-          <MessageScrollerContent className={cn('gap-5 px-3 py-4', contentClassName)}>
+          <MessageScrollerContent className={cn('gap-4 px-3 py-4', contentClassName)}>
             {React.Children.toArray(children).map((child, index) => {
               const itemKey = React.isValidElement(child) && child.key !== null
                 ? child.key
@@ -145,10 +152,11 @@ export const Message: React.FC<{
   return (
     <MessagePrimitive
       align={role === 'user' ? 'end' : 'start'}
+      className={cn('ai-message', `ai-message-${role}`)}
       role="article"
       aria-label={role === 'user' ? t('ai.message.user') : t('ai.message.assistant')}
     >
-      <MessageContent>
+      <MessageContent className="ai-message-content">
         {children}
       </MessageContent>
     </MessagePrimitive>
@@ -163,6 +171,8 @@ export const Bubble: React.FC<{
     align={role === 'user' ? 'end' : 'start'}
     variant={role === 'user' ? 'secondary' : 'ghost'}
     className={cn(
+      'ai-message-bubble',
+      `ai-message-bubble-${role}`,
       role === 'user'
         ? 'max-w-[84%] @max-[400px]/ai-workspace:max-w-[88%] @min-[560px]/ai-workspace:max-w-[80%]'
         : 'w-full max-w-full',
@@ -170,6 +180,7 @@ export const Bubble: React.FC<{
   >
     <BubbleContent
       className={cn(
+        'ai-message-bubble-content',
         role === 'user'
           ? 'whitespace-pre-wrap'
           : 'w-full',
@@ -185,8 +196,68 @@ export const Marker: React.FC<{
   variant?: React.ComponentProps<typeof MarkerPrimitive>['variant'];
 }> = ({ children, variant = 'default' }) => (
   <MarkerPrimitive variant={variant}>
-    <MarkerContent className={cn(variant === 'default' && 'w-full text-center')}>
+    <MarkerContent className={cn('ai-flow-marker', variant === 'default' && 'w-full')}>
       {children}
     </MarkerContent>
   </MarkerPrimitive>
 );
+
+export const MessageActions: React.FC<{
+  text: string;
+  align: 'start' | 'end';
+  timestamp?: string;
+  className?: string;
+}> = ({ text, align, timestamp, className }) => {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
+  }, []);
+
+  const copy = useCallback(() => {
+    if (copied || !navigator.clipboard) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = window.setTimeout(() => setCopied(false), 1_000);
+    }).catch(() => undefined);
+  }, [copied, text]);
+
+  const time = timestamp === undefined
+    ? null
+    : new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' })
+      .format(new Date(timestamp));
+
+  return (
+    <div
+      className={cn('ai-message-actions', className)}
+      data-align={align}
+      data-actions-reveal="hover"
+    >
+      {align === 'end' && time && <time dateTime={timestamp}>{time}</time>}
+      <Tooltip>
+        <TooltipTrigger
+          render={(
+            <Button
+              type="button"
+              variant="plain"
+              size="icon"
+              className="ai-message-action"
+              aria-label={copied ? t('common.copied') : t('common.copy')}
+              onClick={copy}
+            />
+          )}
+        >
+          {copied ? <CheckIcon /> : <CopyIcon />}
+        </TooltipTrigger>
+        <TooltipContent>{copied ? t('common.copied') : t('common.copy')}</TooltipContent>
+      </Tooltip>
+      {align === 'start' && time && <time dateTime={timestamp}>{time}</time>}
+      <span className="sr-only" aria-live="polite">
+        {copied ? t('common.copied') : ''}
+      </span>
+    </div>
+  );
+};

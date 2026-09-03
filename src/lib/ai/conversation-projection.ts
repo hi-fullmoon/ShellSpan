@@ -1,4 +1,3 @@
-import type { AiChatMessage, AiConversation } from '@/types/ai';
 import {
   isSupportedAgentSessionEventVersion,
   type AgentSessionEvent,
@@ -15,8 +14,35 @@ import type {
   AiLifecycleMarkerNode,
   AiSessionStatus,
   AiToolNode,
+  AiTurnStatsNode,
   AiUserMessageNode,
 } from './conversation-node';
+
+interface TurnMetricAccumulator {
+  readonly turnId: string;
+  readonly number: number;
+  readonly firstSeq: number;
+  readonly timestamp: string;
+  stepCount: number;
+  modelDurationMs: number;
+  modelDurationCount: number;
+  toolDurationMs: number;
+  toolDurationCount: number;
+  ttftTotalMs: number;
+  ttftCount: number;
+  inputTokens: number;
+  inputTokenCount: number;
+  outputTokens: number;
+  outputTokenCount: number;
+  totalTokens: number;
+  totalTokenCount: number;
+}
+
+interface CompletedTurnMetric {
+  readonly metrics: TurnMetricAccumulator;
+  readonly lastSeq: number;
+  readonly timestamp: string;
+}
 
 type AgentEventFamily =
   | 'session'
@@ -192,6 +218,10 @@ export function projectAgentConversationNodes(
   const toolKeys = new Map<string, string>();
   const toolKeysByCall = new Map<string, string>();
   const subagentKeys = new Map<string, string>();
+  const turnMetrics = new Map<string, TurnMetricAccumulator>();
+  const completedTurns: CompletedTurnMetric[] = [];
+  const requestStarts = new Map<string, { readonly turnId: string; readonly timeUnixMs: number; firstChunkSeen: boolean }>();
+  let turnCounter = 0;
   let activeCompactionKey: string | null = null;
   let activeRecoveryKey: string | null = null;
   let terminalErrorKey: string | null = null;
@@ -210,6 +240,33 @@ export function projectAgentConversationNodes(
   const get = (key: string): AiConversationNode | undefined => {
     const index = indexByKey.get(key);
     return index === undefined ? undefined : nodes[index];
+  };
+
+  const metricsFor = (event: RuntimeEventLike): TurnMetricAccumulator | null => {
+    if (!event.turnId) return null;
+    const existing = turnMetrics.get(event.turnId);
+    if (existing) return existing;
+    const metrics: TurnMetricAccumulator = {
+      turnId: event.turnId,
+      number: ++turnCounter,
+      firstSeq: event.seq,
+      timestamp: eventTimestamp(event),
+      stepCount: 0,
+      modelDurationMs: 0,
+      modelDurationCount: 0,
+      toolDurationMs: 0,
+      toolDurationCount: 0,
+      ttftTotalMs: 0,
+      ttftCount: 0,
+      inputTokens: 0,
+      inputTokenCount: 0,
+      outputTokens: 0,
+      outputTokenCount: 0,
+      totalTokens: 0,
+      totalTokenCount: 0,
+    };
+    turnMetrics.set(event.turnId, metrics);
+    return metrics;
   };
 
   const lifecycle = (
@@ -401,6 +458,7 @@ export function projectAgentConversationNodes(
       case 'session/renamed':
         break;
       case 'turn/start':
+        metricsFor(event);
         lifecycle(`marker:turn:${event.turnId ?? event.seq}`, event, 'turn', 'started');
         break;
       case 'turn/end': {
@@ -419,9 +477,19 @@ export function projectAgentConversationNodes(
         if (/max.?token/i.test(event.data.reason)) {
           lifecycle(`marker:turn-max-tokens:${event.seq}`, event, 'terminal', 'failed', event.data.reason);
         }
+        const metrics = metricsFor(event);
+        if (metrics) completedTurns.push({
+          metrics,
+          lastSeq: event.seq,
+          timestamp: eventTimestamp(event),
+        });
         break;
       }
       case 'step/start':
+        {
+          const metrics = metricsFor(event);
+          if (metrics) metrics.stepCount += 1;
+        }
         lifecycle(`marker:step:${event.stepId ?? event.seq}`, event, 'step', 'started');
         break;
       case 'step/end':
@@ -478,6 +546,15 @@ export function projectAgentConversationNodes(
         break;
       }
       case 'assistant/chunk': {
+        const request = requestStarts.get(event.data.requestId);
+        if (request && !request.firstChunkSeen) {
+          request.firstChunkSeen = true;
+          const metrics = turnMetrics.get(request.turnId);
+          if (metrics) {
+            metrics.ttftTotalMs += Math.max(0, event.timeUnixMs - request.timeUnixMs);
+            metrics.ttftCount += 1;
+          }
+        }
         const identity = event.stepId ?? event.data.requestId;
         const key = assistantKeys.get(identity)
           ?? `assistant:${event.turnId ?? 'unscoped'}:${identity}`;
@@ -540,6 +617,14 @@ export function projectAgentConversationNodes(
         break;
       }
       case 'request/header':
+        metricsFor(event);
+        if (event.turnId) {
+          requestStarts.set(event.data.requestId, {
+            turnId: event.turnId,
+            timeUnixMs: event.timeUnixMs,
+            firstChunkSeen: false,
+          });
+        }
         lifecycle(
           `marker:request:${event.data.requestId}`,
           event,
@@ -574,7 +659,25 @@ export function projectAgentConversationNodes(
           reason: event.data.reason,
         });
         break;
-      case 'request/usage':
+      case 'request/usage': {
+        const metrics = metricsFor(event);
+        const request = requestStarts.get(event.data.requestId);
+        if (metrics && request) {
+          metrics.modelDurationMs += Math.max(0, event.timeUnixMs - request.timeUnixMs);
+          metrics.modelDurationCount += 1;
+        }
+        if (metrics && event.data.inputTokens !== undefined) {
+          metrics.inputTokens += event.data.inputTokens;
+          metrics.inputTokenCount += 1;
+        }
+        if (metrics && event.data.outputTokens !== undefined) {
+          metrics.outputTokens += event.data.outputTokens;
+          metrics.outputTokenCount += 1;
+        }
+        if (metrics && event.data.totalTokens !== undefined) {
+          metrics.totalTokens += event.data.totalTokens;
+          metrics.totalTokenCount += 1;
+        }
         lifecycle(
           `marker:request:${event.data.requestId}`,
           event,
@@ -583,6 +686,7 @@ export function projectAgentConversationNodes(
           event.data.finishReason,
         );
         break;
+      }
       case 'tool/call': {
         const call = event.data.call;
         const scoped = `${event.stepId ?? 'unscoped'}\u0000${call.callId}`;
@@ -677,6 +781,13 @@ export function projectAgentConversationNodes(
         }
         break;
       case 'tool/result':
+        {
+          const metrics = metricsFor(event);
+          if (metrics && event.data.durationMs !== undefined) {
+            metrics.toolDurationMs += event.data.durationMs;
+            metrics.toolDurationCount += 1;
+          }
+        }
         if (!updateTool(event, event.data.callId, (tool) => ({
           ...tool,
           state: toolState(event.data.status),
@@ -797,95 +908,66 @@ export function projectAgentConversationNodes(
     }
   }
 
-  return nodes;
-}
-
-export interface AskConversationProjectionInput {
-  readonly conversation: AiConversation;
-  readonly messages: readonly AiChatMessage[];
-  readonly phase: 'idle' | 'streaming' | 'error';
-  readonly error?: string;
-  readonly errorRequestId?: string;
-}
-
-/** Project one Ask conversation into the same node union used by Agent. */
-export function projectAskConversationNodes(
-  input: AskConversationProjectionInput,
-): readonly AiConversationNode[] {
-  const nodes: AiConversationNode[] = [];
-  const indexByKey = new Map<string, number>();
-  const messages = input.messages.filter((message) => (
-    message.conversationId === input.conversation.id
-  ));
-
-  const put = (node: AiConversationNode): void => {
-    const index = indexByKey.get(node.key);
-    if (index === undefined) {
-      indexByKey.set(node.key, nodes.length);
-      nodes.push(node);
-    } else {
-      nodes[index] = node;
-    }
-  };
-
-  messages.forEach((message, seq) => {
-    const common = {
-      sourceKind: 'ask' as const,
-      sessionId: input.conversation.id,
-      turnId: message.requestId,
-      stepId: null,
-      firstSeq: seq,
-      lastSeq: seq,
-      timestamp: input.conversation.updatedAt,
-    };
-    if (message.role === 'user') {
-      const node: AiUserMessageNode = {
-        ...common,
-        kind: 'userMessage',
-        key: `user:${message.id}`,
-        messageId: message.id,
-        content: message.content,
-        delivery: message.status === 'failed'
-          || (input.phase === 'error' && message.requestId === input.errorRequestId)
-          ? 'failed'
-          : 'committed',
-      };
-      put(node);
-      return;
-    }
-    const key = `assistant:${message.requestId || message.id}`;
-    const previous = indexByKey.has(key) ? nodes[indexByKey.get(key)!] : undefined;
-    const node: AiAssistantMessageNode = {
-      ...common,
-      kind: 'assistantMessage',
-      key,
-      firstSeq: previous?.kind === 'assistantMessage' ? previous.firstSeq : seq,
-      messageId: message.id,
-      requestId: message.requestId,
-      content: message.content,
-      state: message.status,
-    };
-    put(node);
-  });
-
-  if (input.error) {
-    const requestId = input.errorRequestId ?? 'unscoped';
-    const seq = messages.length;
-    put({
-      kind: 'error',
-      key: `error:ask:${requestId}`,
-      sourceKind: 'ask',
-      sessionId: input.conversation.id,
-      turnId: requestId === 'unscoped' ? null : requestId,
-      stepId: null,
-      firstSeq: seq,
-      lastSeq: seq,
-      timestamp: input.conversation.updatedAt,
-      scope: 'ask',
-      message: input.error,
-      code: null,
-      state: 'failed',
+  const lastCompletedTurn = completedTurns[completedTurns.length - 1];
+  if (lastCompletedTurn) {
+    const aggregate = completedTurns.reduce((total, completed) => ({
+      stepCount: total.stepCount + completed.metrics.stepCount,
+      modelDurationMs: total.modelDurationMs + completed.metrics.modelDurationMs,
+      modelDurationCount: total.modelDurationCount + completed.metrics.modelDurationCount,
+      toolDurationMs: total.toolDurationMs + completed.metrics.toolDurationMs,
+      toolDurationCount: total.toolDurationCount + completed.metrics.toolDurationCount,
+      ttftTotalMs: total.ttftTotalMs + completed.metrics.ttftTotalMs,
+      ttftCount: total.ttftCount + completed.metrics.ttftCount,
+      inputTokens: total.inputTokens + completed.metrics.inputTokens,
+      inputTokenCount: total.inputTokenCount + completed.metrics.inputTokenCount,
+      outputTokens: total.outputTokens + completed.metrics.outputTokens,
+      outputTokenCount: total.outputTokenCount + completed.metrics.outputTokenCount,
+      totalTokens: total.totalTokens + completed.metrics.totalTokens,
+      totalTokenCount: total.totalTokenCount + completed.metrics.totalTokenCount,
+    }), {
+      stepCount: 0,
+      modelDurationMs: 0,
+      modelDurationCount: 0,
+      toolDurationMs: 0,
+      toolDurationCount: 0,
+      ttftTotalMs: 0,
+      ttftCount: 0,
+      inputTokens: 0,
+      inputTokenCount: 0,
+      outputTokens: 0,
+      outputTokenCount: 0,
+      totalTokens: 0,
+      totalTokenCount: 0,
     });
+    const modelDurationMs = aggregate.modelDurationCount > 0
+      ? aggregate.modelDurationMs
+      : null;
+    const outputTokens = aggregate.outputTokenCount > 0 ? aggregate.outputTokens : null;
+    const stats: AiTurnStatsNode = {
+      kind: 'turnStats',
+      key: `stats:${events[0]?.sessionId ?? lastCompletedTurn.metrics.turnId}`,
+      sourceKind: 'agent',
+      sessionId: events[0]?.sessionId ?? '',
+      turnId: lastCompletedTurn.metrics.turnId,
+      stepId: null,
+      firstSeq: completedTurns[0]?.metrics.firstSeq ?? lastCompletedTurn.metrics.firstSeq,
+      lastSeq: lastCompletedTurn.lastSeq,
+      timestamp: lastCompletedTurn.timestamp,
+      turnNumber: completedTurns.length,
+      stepCount: aggregate.stepCount,
+      modelDurationMs,
+      toolDurationMs: aggregate.toolDurationCount > 0 ? aggregate.toolDurationMs : null,
+      averageTimeToFirstTokenMs: aggregate.ttftCount > 0
+        ? Math.round(aggregate.ttftTotalMs / aggregate.ttftCount)
+        : null,
+      inputTokens: aggregate.inputTokenCount > 0 ? aggregate.inputTokens : null,
+      outputTokens,
+      totalTokens: aggregate.totalTokenCount > 0 ? aggregate.totalTokens : null,
+      tokensPerSecond: outputTokens !== null && modelDurationMs !== null && modelDurationMs > 0
+        ? outputTokens / (modelDurationMs / 1_000)
+        : null,
+    };
+    put(stats);
   }
 
   return nodes;

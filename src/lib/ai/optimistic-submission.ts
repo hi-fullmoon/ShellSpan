@@ -11,13 +11,7 @@ export interface AiOptimisticSubmission extends AiDetachedSubmission {
   readonly error?: string;
 }
 
-const ASK_RECONCILE_WINDOW_MS = 30_000;
-
-function normalizedContent(content: string): string {
-  return content.trim().replace(/\s+/g, ' ');
-}
-
-/** Prefer the Agent v3 submission id; retain a bounded content fallback for the formal Ask adapter. */
+/** Reconcile only against durable Agent Runtime submission identities. */
 export function committedOperationId(
   node: AiConversationNode,
   submission: AiOptimisticSubmission,
@@ -39,15 +33,7 @@ function observedOperationId(
   if (node.messageId === submission.clientOperationId || node.turnId === submission.clientOperationId) {
     return true;
   }
-  if (submission.expectedNextSeq !== null && node.firstSeq < submission.expectedNextSeq) return false;
-  const timestamp = Date.parse(node.timestamp);
-  if (
-    Number.isFinite(timestamp)
-    && Math.abs(timestamp - submission.createdAtUnixMs) > ASK_RECONCILE_WINDOW_MS
-  ) {
-    return false;
-  }
-  return normalizedContent(node.content) === normalizedContent(submission.content);
+  return false;
 }
 
 export function reconcileOptimisticSubmissions(
@@ -75,7 +61,7 @@ function optimisticNode(submission: AiOptimisticSubmission): AiUserMessageNode {
   return {
     kind: 'userMessage',
     key: `optimistic:${submission.clientOperationId}`,
-    sourceKind: submission.scopeKey.startsWith('ask:') ? 'ask' : 'agent',
+    sourceKind: 'agent',
     sessionId: submission.sessionId ?? submission.scopeKey,
     turnId: submission.clientOperationId,
     stepId: null,

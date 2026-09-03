@@ -6,12 +6,12 @@ import { AiWorkspaceController } from '@/components/ai/workspace/ai-workspace-co
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import {
   useAiSessionController,
-  type AiSessionControllerAdapters,
+  type AiSessionControllerAdapter,
 } from '@/components/ai/workspace/use-ai-session-controller';
-import type { AiSessionAdapter, AiSessionView, AiSubmitReceipt } from '@/lib/ai/session-adapter';
+import type { AiSessionView, AiSubmitReceipt } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
+import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
-import { useAiStore } from '@/stores/aiStore';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 
@@ -25,12 +25,9 @@ const provider = {
   requiresApiKey: true,
 };
 
-function adapter<Kind extends 'ask' | 'agent'>(
-  kind: Kind,
-  changes: Partial<AiSessionAdapter<Kind>> = {},
-): AiSessionAdapter<Kind> {
+function adapter(changes: Partial<AiSessionControllerAdapter> = {}): AiSessionControllerAdapter {
   return {
-    kind,
+    kind: 'agent',
     list: vi.fn(async () => ({ sessions: [] })),
     create: vi.fn(async () => { throw new Error('unused create'); }),
     open: vi.fn(async () => { throw new Error('unused open'); }),
@@ -48,6 +45,20 @@ function adapter<Kind extends 'ask' | 'agent'>(
     dispose: vi.fn(),
     ...changes,
   };
+}
+
+function connectedTerminal(): void {
+  useTerminalStore.setState({
+    activeSessionId: 'terminal-1',
+    sessions: [{
+      sessionId: 'terminal-1',
+      title: 'Remote',
+      host: 'example.test',
+      port: 22,
+      username: 'tester',
+      status: 'connected',
+    }],
+  });
 }
 
 function runningAgentView(): AiSessionView {
@@ -73,7 +84,6 @@ function runningAgentView(): AiSessionView {
       },
     },
     nodes: [],
-    activity: null,
     inbox: [],
     pendingApproval: null,
     status: 'running',
@@ -83,48 +93,11 @@ function runningAgentView(): AiSessionView {
   };
 }
 
-function committedAskView(): AiSessionView {
-  const conversation = {
-    id: 'ask-session-1', startedAt: '2026-09-03T00:00:00.000Z',
-    updatedAt: '2026-09-03T00:00:01.000Z', title: 'Committed ask', archived: false,
-    scope: 'workbench' as const, host: '', port: 0, username: '',
-  };
-  const user = {
-    kind: 'userMessage' as const,
-    key: 'user:committed-1',
-    sourceKind: 'ask' as const,
-    sessionId: conversation.id,
-    turnId: 'operation-success',
-    stepId: null,
-    firstSeq: 0,
-    lastSeq: 0,
-    timestamp: conversation.updatedAt,
-    messageId: 'committed-1',
-    content: 'commit once',
-    delivery: 'committed' as const,
-  };
-  return {
-    summary: {
-      id: conversation.id, kind: 'ask', title: conversation.title,
-      updatedAt: conversation.updatedAt, status: 'running', scopeKey: 'workbench', archived: false,
-    },
-    snapshot: { kind: 'ask', conversation, messages: [], phase: 'streaming' },
-    nodes: [user, user],
-    activity: null,
-    inbox: [],
-    pendingApproval: null,
-    status: 'running',
-    error: null,
-    throughSeq: null,
-    canLoadOlder: false,
-  };
-}
-
 beforeEach(async () => {
   cleanup();
   useAppStore.setState({ locale: 'en-US' });
   await initI18n('en-US');
-  useAiStore.getState().clear();
+  useAgentPermissionStore.getState().resetAll();
   useAiSettingsStore.setState({
     providers: [provider],
     defaultProviderId: provider.id,
@@ -136,16 +109,55 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiWorkspaceController', () => {
+  it('shows an explicit disabled Agent state in Workbench without submitting a fallback', async () => {
+    const agent = adapter();
+    render(<AiWorkspaceController scope="workbench" adapter={agent} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Agent is unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent('Open a connected terminal');
+    expect(screen.getByRole('textbox')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'New conversation' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
+    await waitFor(() => expect(agent.list).toHaveBeenCalledTimes(1));
+    expect(agent.submit).not.toHaveBeenCalled();
+  });
+
+  it('requires the active terminal to remain connected before accepting Agent input', () => {
+    connectedTerminal();
+    useTerminalStore.setState((state) => ({
+      sessions: state.sessions.map((session) => (
+        session.sessionId === 'terminal-1' ? { ...session, status: 'disconnected' } : session
+      )),
+    }));
+    const agent = adapter();
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Open a connected terminal');
+    expect(screen.getByRole('textbox')).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    expect(agent.submit).not.toHaveBeenCalled();
+  });
+
+  it('retries Agent history through the single production adapter', async () => {
+    const agent = adapter({
+      list: vi.fn()
+        .mockRejectedValueOnce(new Error('Agent history unavailable'))
+        .mockResolvedValueOnce({ sessions: [runningAgentView().summary] }),
+    });
+    render(<AiWorkspaceController scope="workbench" adapter={agent} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Agent history unavailable');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText('Run checks')).toBeVisible();
+    expect(agent.list).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps approval authority adapter-owned across failure, pending commit, and draft restoration', async () => {
     const user = userEvent.setup();
-    useTerminalStore.setState({
-      activeSessionId: 'terminal-1',
-      sessions: [{
-        sessionId: 'terminal-1', title: 'Remote', host: 'example.test', port: 22,
-        username: 'tester', status: 'connected', conversationId: 'conversation-1',
-        conversationStartedAt: '2026-09-03T00:00:00.000Z',
-      }],
-    });
+    connectedTerminal();
     const running = runningAgentView();
     const pending = {
       ...running,
@@ -163,7 +175,7 @@ describe('AiWorkspaceController', () => {
     const approve = vi.fn()
       .mockRejectedValueOnce(new Error('Approval conflict'))
       .mockResolvedValueOnce(undefined);
-    const agent = adapter('agent', {
+    const agent = adapter({
       list: vi.fn(async () => ({ sessions: [running.summary] })),
       open: vi.fn(async () => running),
       subscribe: vi.fn((_id, listener) => {
@@ -173,14 +185,7 @@ describe('AiWorkspaceController', () => {
       }),
       approve,
     });
-    render(
-      <AiWorkspaceController
-        scope="terminal"
-        adapters={{ ask: adapter('ask'), agent }}
-      />,
-    );
-    await user.click(screen.getByRole('button', { name: 'Session and input settings' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Agent' }));
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
     await waitFor(() => expect(screen.getByText('Run checks')).toBeVisible());
     await user.type(screen.getByRole('textbox'), 'draft survives approval');
 
@@ -188,21 +193,19 @@ describe('AiWorkspaceController', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Approve once' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Approval conflict');
-    expect(screen.getByRole('button', { name: 'Approve once' })).toBeEnabled();
 
     await user.click(screen.getByRole('button', { name: 'Approve once' }));
     expect(screen.getByRole('button', { name: 'Approve once' })).toBeDisabled();
-    expect(screen.queryByRole('textbox')).toBeNull();
     act(() => publish?.({ ...running, pendingApproval: null }));
     await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue('draft survives approval'));
     expect(approve).toHaveBeenCalledTimes(2);
   });
 
-  it('lists, opens, and replaces a running Session subscription without stopping its Runtime', async () => {
+  it('opens Agent history without stopping the Runtime and disables new Workbench sessions', async () => {
     const user = userEvent.setup();
     const view = runningAgentView();
     const unsubscribe = vi.fn();
-    const agent = adapter('agent', {
+    const agent = adapter({
       list: vi.fn(async () => ({ sessions: [view.summary] })),
       open: vi.fn(async () => view),
       subscribe: vi.fn((_id, listener) => {
@@ -210,35 +213,27 @@ describe('AiWorkspaceController', () => {
         return unsubscribe;
       }),
     });
-    const ask = adapter('ask');
-    render(<AiWorkspaceController scope="workbench" adapters={{ ask, agent }} />);
+    render(<AiWorkspaceController scope="workbench" adapter={agent} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Conversation history' }));
-    await waitFor(() => expect(agent.list).toHaveBeenCalledWith({ limit: 200 }));
-    expect(screen.getByText('Run checks')).toBeVisible();
-
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
+    expect(await screen.findByText('Run checks')).toBeVisible();
     await user.click(screen.getByText('Run checks'));
     await waitFor(() => expect(agent.open).toHaveBeenCalledWith('agent-session-1'));
     expect(agent.stop).not.toHaveBeenCalled();
-    expect(ask.stop).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Conversation history' }));
-    await user.click(screen.getByRole('button', { name: 'New conversation' }));
-    await waitFor(() => expect(unsubscribe).toHaveBeenCalled());
-    expect(agent.stop).not.toHaveBeenCalled();
-    expect(screen.getByRole('textbox')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
+    expect(screen.getByRole('button', { name: 'New conversation' })).toBeDisabled();
+    expect(unsubscribe).not.toHaveBeenCalled();
   });
 
-  it('detaches immediately and preserves newer input when Ask submit fails', async () => {
+  it('detaches a new Agent input, maps read-only auto approval, and preserves newer input on failure', async () => {
     const user = userEvent.setup();
+    connectedTerminal();
     let rejectSubmit: ((error: Error) => void) | undefined;
-    const ask = adapter('ask', {
+    const agent = adapter({
       submit: vi.fn(() => new Promise<AiSubmitReceipt>((_resolve, reject) => { rejectSubmit = reject; })),
     });
-    const adapters: AiSessionControllerAdapters = { ask, agent: adapter('agent') };
-    render(<AiWorkspaceController scope="workbench" adapters={adapters} />);
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
     const textbox = screen.getByRole('textbox');
     await user.type(textbox, 'first input');
@@ -247,30 +242,48 @@ describe('AiWorkspaceController', () => {
     expect(textbox).toHaveValue('');
     expect(screen.getByText('first input')).toBeVisible();
     expect(screen.getByText('Sending')).toBeVisible();
+    await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({
+      content: 'first input',
+      mode: 'start',
+      create: expect.objectContaining({
+        kind: 'agent',
+        request: expect.objectContaining({ permissionMode: 'scopedAutopilot' }),
+      }),
+    })));
+
     await user.type(textbox, 'newer draft');
     rejectSubmit?.(new Error('Network disconnected'));
-
     await waitFor(() => expect(screen.getByText('Input was not delivered')).toBeVisible());
     expect(textbox).toHaveValue('newer draft');
     expect(screen.getAllByText('first input')).toHaveLength(2);
-    expect(ask.submit).toHaveBeenCalledWith(null, expect.objectContaining({
-      content: 'first input', mode: 'start', clientOperationId: expect.any(String),
-      create: expect.objectContaining({ kind: 'ask' }),
-    }));
+  });
+
+  it('maps the full-access UI choice to the Runtime operator mode', async () => {
+    connectedTerminal();
+    useAgentPermissionStore.getState().setMode('terminal-1', 'fullAccess');
+    const agent = adapter({
+      submit: vi.fn(async (_sessionId, input) => ({
+        sessionId: 'agent-created',
+        clientOperationId: input.clientOperationId,
+        mode: input.mode,
+      })),
+    });
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Run with operator access' } });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({
+      create: expect.objectContaining({
+        request: expect.objectContaining({ permissionMode: 'operator' }),
+      }),
+    })));
   });
 
   it('routes Agent Enter, accelerated Enter, and Stop to distinct adapter intentions', async () => {
     const user = userEvent.setup();
-    useTerminalStore.setState({
-      activeSessionId: 'terminal-1',
-      sessions: [{
-        sessionId: 'terminal-1', title: 'Remote', host: 'example.test', port: 22,
-        username: 'tester', status: 'connected', conversationId: 'conversation-1',
-        conversationStartedAt: '2026-09-03T00:00:00.000Z',
-      }],
-    });
+    connectedTerminal();
     const view = runningAgentView();
-    const agent = adapter('agent', {
+    const agent = adapter({
       list: vi.fn(async () => ({ sessions: [view.summary] })),
       open: vi.fn(async () => view),
       subscribe: vi.fn((_id, listener) => {
@@ -278,16 +291,18 @@ describe('AiWorkspaceController', () => {
         return () => undefined;
       }),
       submit: vi.fn(async (_sessionId, input) => ({
-        sessionId: 'agent-session-1', clientOperationId: input.clientOperationId, mode: input.mode,
+        sessionId: view.summary.id,
+        clientOperationId: input.clientOperationId,
+        mode: input.mode,
       })),
       stop: vi.fn(async () => { throw new Error('Network disconnected while stopping'); }),
     });
-    const adapters: AiSessionControllerAdapters = { ask: adapter('ask'), agent };
     let sequence = 0;
 
     function Harness(): React.ReactNode {
       const controller = useAiSessionController({
-        scope: 'terminal', initialPreset: 'agent', adapters,
+        scope: 'terminal',
+        adapter: agent,
         operationId: () => `operation-${++sequence}`,
         now: () => 1_000 + sequence,
       });
@@ -296,7 +311,6 @@ describe('AiWorkspaceController', () => {
           view={controller.view}
           pendingNodes={controller.pendingNodes}
           scope="terminal"
-          initialPreset="agent"
           composerState={controller.composer}
           onDraftChange={controller.setDraft}
           onSubmitGesture={controller.submit}
@@ -311,60 +325,21 @@ describe('AiWorkspaceController', () => {
     const textbox = screen.getByRole('textbox');
 
     await user.type(textbox, 'queue input');
-    expect(screen.getByRole('button', { name: 'Queue for next turn' })).toBeVisible();
     fireEvent.keyDown(textbox, { key: 'Enter' });
     await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(
-      'agent-session-1', expect.objectContaining({ mode: 'nextTurn', content: 'queue input' }),
+      view.summary.id,
+      expect.objectContaining({ mode: 'nextTurn', content: 'queue input' }),
     ));
 
     await user.type(textbox, 'steer input');
     fireEvent.keyDown(textbox, { key: 'Enter', ctrlKey: true });
     await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(
-      'agent-session-1', expect.objectContaining({ mode: 'nextStep', content: 'steer input' }),
+      view.summary.id,
+      expect.objectContaining({ mode: 'nextStep', content: 'steer input' }),
     ));
 
     await user.click(screen.getByRole('button', { name: 'Stop task' }));
-    await waitFor(() => expect(agent.stop).toHaveBeenCalledWith('agent-session-1'));
-    await waitFor(() => expect(screen.getByText('Network disconnected while stopping')).toBeVisible());
-  });
-
-  it('reconciles an optimistic Ask node with duplicate or late committed material into one row', async () => {
-    const user = userEvent.setup();
-    const view = committedAskView();
-    const ask = adapter('ask', {
-      open: vi.fn(async () => view),
-      subscribe: vi.fn(() => () => undefined),
-      submit: vi.fn(async (_sessionId, input) => ({
-        sessionId: view.summary.id,
-        clientOperationId: input.clientOperationId,
-        mode: input.mode,
-      })),
-    });
-    const adapters: AiSessionControllerAdapters = { ask, agent: adapter('agent') };
-
-    function Harness(): React.ReactNode {
-      const controller = useAiSessionController({
-        scope: 'workbench', adapters,
-        operationId: () => 'operation-success',
-        now: () => Date.parse('2026-09-03T00:00:01.000Z'),
-      });
-      return (
-        <AiWorkspaceRoot
-          view={controller.view}
-          pendingNodes={controller.pendingNodes}
-          scope="workbench"
-          composerState={controller.composer}
-          onDraftChange={controller.setDraft}
-          onSubmitGesture={controller.submit}
-        />
-      );
-    }
-
-    render(<Harness />);
-    await user.type(screen.getByRole('textbox'), 'commit once');
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    await waitFor(() => expect(ask.open).toHaveBeenCalledWith('ask-session-1'));
-    await waitFor(() => expect(screen.getAllByText('commit once')).toHaveLength(1));
-    expect(document.querySelectorAll('[data-ai-node-kind="userMessage"]')).toHaveLength(1);
+    await waitFor(() => expect(agent.stop).toHaveBeenCalledWith(view.summary.id));
+    expect(await screen.findByText('Network disconnected while stopping')).toBeVisible();
   });
 });

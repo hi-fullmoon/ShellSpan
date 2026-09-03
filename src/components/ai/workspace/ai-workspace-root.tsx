@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { useI18n } from '@/hooks/useI18n';
-import type { AiSessionKind } from '@/lib/ai/conversation-node';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiInboxItem, AiSessionView } from '@/lib/ai/session-adapter';
@@ -14,12 +13,10 @@ import {
 } from '@/lib/ai/panel-route';
 import type { AgentArtifactResponse } from '@/types/agent-session';
 import type { AppSection } from '@/types';
-import { cn } from '@/lib/utils';
 import { AiComposerSeat } from './ai-composer-seat';
 import { AiEmptyHero } from './ai-empty-hero';
 import { AiConversation } from './ai-conversation';
 import { AiSessionHeader } from './ai-session-header';
-import { AiSessionTabs, type AiWorkspaceTab } from './ai-session-tabs';
 import { AiSessionBrowser } from './ai-session-browser';
 import { AiToolDetails } from './ai-tool-details';
 import { AiArtifactDetails } from './ai-artifact-details';
@@ -27,22 +24,18 @@ import type { AiQueueMutationState } from './use-ai-session-controller';
 
 export interface AiWorkspaceSubmitInput {
   readonly content: string;
-  readonly kind: AiSessionKind;
 }
 
 export interface AiWorkspaceRootProps {
   readonly view: AiSessionView | null;
   readonly scope: Extract<AppSection, 'terminal' | 'workbench'>;
-  readonly initialPreset?: AiSessionKind;
   readonly title?: string;
   readonly draft?: string;
   readonly defaultDraft?: string;
   readonly providerLabel?: string;
   readonly modelLabel?: string;
-  readonly contextLabel?: string;
+  readonly modelControl?: React.ReactNode;
   readonly permissionControl?: React.ReactNode;
-  readonly selectedTab?: AiWorkspaceTab;
-  readonly activityContent?: React.ReactNode;
   readonly composerState?: AiComposerState;
   readonly pendingNodes?: readonly AiConversationNode[];
   readonly announcement?: string | null;
@@ -57,6 +50,8 @@ export interface AiWorkspaceRootProps {
   readonly queueMutation?: AiQueueMutationState | null;
   readonly renamingSessionId?: string | null;
   readonly renameError?: string | null;
+  readonly canStartAgent?: boolean;
+  readonly agentUnavailableReason?: string | null;
   readonly onDraftChange?: (value: string) => void;
   readonly onSubmit?: (input: AiWorkspaceSubmitInput) => void | Promise<void>;
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
@@ -64,13 +59,10 @@ export interface AiWorkspaceRootProps {
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onRetryFailedDraft?: (failedDraftId: string) => void;
   readonly onDismissError?: () => void;
-  readonly onSelectPreset?: (kind: AiSessionKind) => void;
-  readonly onSelectedTabChange?: (tab: AiWorkspaceTab) => void;
-  readonly onOpenProvider?: () => void;
   readonly onOpenModel?: () => void;
-  readonly onOpenContext?: () => void;
   readonly onNewSession?: () => void;
   readonly onHistory?: () => void;
+  readonly onRefreshSessions?: () => void;
   readonly onClose?: () => void;
   readonly onOpenSession?: (summary: AiSessionSummary) => void;
   readonly onArchiveSession?: (summary: AiSessionSummary) => void;
@@ -93,16 +85,13 @@ export interface AiWorkspaceRootProps {
 export function AiWorkspaceRoot({
   view,
   scope,
-  initialPreset = 'ask',
   title,
   draft,
   defaultDraft,
   providerLabel,
   modelLabel,
-  contextLabel,
+  modelControl,
   permissionControl,
-  selectedTab,
-  activityContent,
   composerState,
   pendingNodes = [],
   announcement,
@@ -117,6 +106,8 @@ export function AiWorkspaceRoot({
   queueMutation = null,
   renamingSessionId = null,
   renameError = null,
+  canStartAgent = false,
+  agentUnavailableReason = null,
   onDraftChange,
   onSubmit,
   onSubmitGesture,
@@ -124,13 +115,10 @@ export function AiWorkspaceRoot({
   onBusyPreferenceChange,
   onRetryFailedDraft,
   onDismissError,
-  onSelectPreset,
-  onSelectedTabChange,
-  onOpenProvider,
   onOpenModel,
-  onOpenContext,
   onNewSession,
   onHistory,
+  onRefreshSessions,
   onClose,
   onOpenSession,
   onArchiveSession,
@@ -151,26 +139,22 @@ export function AiWorkspaceRoot({
 }: AiWorkspaceRootProps): React.ReactNode {
   const { t } = useI18n();
   const rootRef = useRef<HTMLElement>(null);
-  const [preset, setPreset] = useState<AiSessionKind>(initialPreset);
-  const sessionKind = view?.summary.kind ?? preset;
+  const sessionKind = view?.summary.kind ?? 'agent';
   const status = view?.status ?? composerState?.runtimeStatus ?? 'idle';
   const visibleNodes = view?.nodes ?? pendingNodes;
+  const taskSteps = view?.snapshot.kind === 'agent'
+    ? view.snapshot.value.task.plan?.steps ?? []
+    : [];
   const hero = visibleNodes.length === 0 && status === 'idle' && composerState?.phase !== 'submitting';
   const resolvedTitle = title ?? view?.summary.title ?? t('ai.newConversation');
-  const heroTitle = sessionKind === 'agent'
+  const heroTitle = scope === 'terminal'
     ? t('agent.emptyTitle')
-    : scope === 'terminal'
-      ? t('ai.terminal.emptyTitle')
-      : t('ai.workbench.emptyTitle');
-  const heroDescription = sessionKind === 'agent'
+    : t('ai.workbench.emptyTitle');
+  const heroDescription = scope === 'terminal'
     ? t('agent.emptyDescription')
-    : scope === 'terminal'
-      ? t('ai.terminal.empty')
-      : t('ai.workbench.empty');
+    : t('ai.workbench.empty');
   const route = navigation.route;
   const sessionLedgerKey = view ? sessionRouteKey(view.summary.kind, view.summary.id) : null;
-  const resolvedTab = selectedTab
-    ?? (sessionLedgerKey ? navigation.selectedTabBySession[sessionLedgerKey] : undefined);
   const scrollAnchor = sessionLedgerKey
     ? navigation.scrollAnchorBySession[sessionLedgerKey]
     : undefined;
@@ -193,31 +177,30 @@ export function AiWorkspaceRoot({
     return () => cancelAnimationFrame(frame);
   }, [navigation.returnFocus, onRouteReturnComplete, route.kind]);
 
-  const selectPreset = (kind: AiSessionKind): void => {
-    if (view) return;
-    setPreset(kind);
-    onSelectPreset?.(kind);
-  };
-
   return (
     <section
       ref={rootRef}
       data-slot="ai-workspace-root"
       data-phase={hero ? 'hero' : 'active'}
       data-session-kind={sessionKind}
-      className="@container/ai-workspace flex size-full min-h-0 min-w-0 flex-col overflow-x-hidden bg-background text-foreground"
+      className="ai-workspace-root"
       aria-label={t('ai.workspace')}
     >
       {route.kind === 'sessions' ? (
         <AiSessionBrowser
           sessions={sessions}
+          activeSessionKey={view ? sessionRouteKey(view.summary.kind, view.summary.id) : null}
           loading={sessionsLoading}
           error={sessionsError}
           archivingId={archivingSessionId}
           renamingId={renamingSessionId}
           renameError={renameError}
+          canStartAgent={canStartAgent}
+          agentUnavailableReason={agentUnavailableReason}
           onBack={() => onBack?.()}
+          onClose={onClose}
           onNew={() => onNewSession?.()}
+          onRefresh={() => onRefreshSessions?.()}
           onOpen={(summary) => onOpenSession?.(summary)}
           onArchive={(summary) => onArchiveSession?.(summary)}
           onRename={(summary, nextTitle) => onRenameSession?.(summary, nextTitle)}
@@ -226,6 +209,7 @@ export function AiWorkspaceRoot({
         <AiToolDetails
           node={toolDetailsNode?.kind === 'tool' ? toolDetailsNode : null}
           onBack={() => onBack?.()}
+          onClose={onClose}
         />
       ) : route.kind === 'artifactDetails' ? (
         <AiArtifactDetails
@@ -233,55 +217,33 @@ export function AiWorkspaceRoot({
           node={artifactDetailsNode?.kind === 'artifact' ? artifactDetailsNode : null}
           load={loadArtifact ?? (() => Promise.reject(new Error(t('ai.workspace.details.artifactUnavailable'))))}
           onBack={() => onBack?.()}
+          onClose={onClose}
         />
       ) : (
       <>
       <AiSessionHeader
         title={resolvedTitle}
+        context={t(scope === 'terminal' ? 'section.terminal' : 'section.workbench')}
         status={status}
         onClose={onClose}
         onHistory={onHistory}
-        onNewSession={onNewSession}
+        onNewSession={onNewSession && canStartAgent ? onNewSession : undefined}
       />
 
       <div
         data-slot="ai-workspace-body"
-        className={cn(
-          'relative flex min-h-0 min-w-0 flex-1 flex-col',
-          hero && 'justify-center',
-        )}
+        className="ai-workspace-body"
       >
         <div
           data-slot="ai-workspace-content"
-          className={cn(
-            'flex min-h-0 min-w-0 flex-col',
-            hero ? 'shrink justify-end' : 'flex-1',
-          )}
+          className="ai-workspace-content"
         >
           {hero ? (
             <AiEmptyHero
               title={heroTitle}
               description={heroDescription}
-              contextLabel={contextLabel}
-              presetLabel={sessionKind === 'agent' ? t('ai.mode.agent') : t('ai.mode.ask')}
             />
-          ) : view?.summary.kind === 'agent' ? (
-            <AiSessionTabs
-              view={view}
-              selectedTab={resolvedTab}
-              onSelectedTabChange={onSelectedTabChange}
-              activityContent={activityContent}
-              conversationProps={{
-                initialAnchor: scrollAnchor,
-                onAnchorChange: onScrollAnchorChange,
-                onOpenTool,
-                onOpenArtifact,
-                canLoadOlder: view.canLoadOlder,
-                loadingOlder,
-                onLoadOlder,
-              }}
-            />
-          ) : visibleNodes.length > 0 ? (
+          ) : (
             <AiConversation
               nodes={visibleNodes}
               status={status}
@@ -294,29 +256,30 @@ export function AiWorkspaceRoot({
               loadingOlder={loadingOlder}
               onLoadOlder={onLoadOlder}
             />
-          ) : null}
+          )}
         </div>
 
         <AiComposerSeat
           phase={hero ? 'hero' : 'active'}
-          sessionKind={sessionKind}
           status={status}
-          presetLocked={view !== null}
           draft={draft}
           defaultDraft={defaultDraft}
           providerLabel={providerLabel}
           modelLabel={modelLabel}
-          contextLabel={contextLabel}
+          modelControl={modelControl}
+          contextUsage={view?.contextUsage}
           permissionControl={permissionControl}
           composerState={composerState}
           inbox={view?.inbox}
+          taskSteps={taskSteps}
           queueMutation={queueMutation}
           announcement={announcement}
           pendingApproval={view?.pendingApproval}
           approvalDecision={approvalDecision}
           approvalError={approvalError}
+          unavailableReason={agentUnavailableReason}
           onDraftChange={onDraftChange}
-          onSubmit={onSubmit ? (content) => onSubmit({ content, kind: sessionKind }) : undefined}
+          onSubmit={onSubmit ? (content) => onSubmit({ content }) : undefined}
           onSubmitGesture={onSubmitGesture}
           onStop={onStop}
           onBusyPreferenceChange={onBusyPreferenceChange}
@@ -326,10 +289,7 @@ export function AiWorkspaceRoot({
           onRetryQueueMutation={onRetryQueueMutation}
           onRetryFailedDraft={onRetryFailedDraft}
           onDismissError={onDismissError}
-          onSelectPreset={selectPreset}
-          onOpenProvider={onOpenProvider}
           onOpenModel={onOpenModel}
-          onOpenContext={onOpenContext}
           onApprove={onApprove}
           onReject={onReject}
           onOpenApprovalDetails={() => {

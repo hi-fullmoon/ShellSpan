@@ -1,6 +1,6 @@
 import type { AiSessionError } from './session-adapter';
 
-/** Convert Ask, Agent, Tauri, and transport failures into one recoverable UI error. */
+/** Convert Agent Runtime, Tauri, and transport failures into one recoverable UI error. */
 export function normalizeAiSessionError(error: unknown): AiSessionError {
   const message = error instanceof Error
     ? error.message

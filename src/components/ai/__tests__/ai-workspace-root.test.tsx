@@ -1,62 +1,21 @@
 import { useState } from 'react';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
-import {
-  projectAgentConversationNodes,
-  projectAskConversationNodes,
-} from '@/lib/ai/conversation-projection';
-import { projectAgentActivity } from '@/lib/agent-session-projection';
+import { projectAgentConversationNodes } from '@/lib/ai/conversation-projection';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import type { AiSessionView } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import {
-  askStreamingConversationFixture,
-  askStreamingMessageFixture,
-} from '@/test/fixtures/ask-streaming';
 import { agentSessionEventFixture } from '@/test/fixtures/agent-session';
 
-function askView(status: AiSessionView['status'] = 'idle'): AiSessionView {
-  const nodes = projectAskConversationNodes({
-    conversation: askStreamingConversationFixture,
-    messages: askStreamingMessageFixture,
-    phase: status === 'running' ? 'streaming' : 'idle',
-  });
-  return {
-    summary: {
-      id: askStreamingConversationFixture.id,
-      kind: 'ask',
-      title: askStreamingConversationFixture.title,
-      updatedAt: askStreamingConversationFixture.updatedAt,
-      status,
-      scopeKey: 'workbench',
-      archived: false,
-    },
-    snapshot: {
-      kind: 'ask',
-      conversation: askStreamingConversationFixture,
-      messages: askStreamingMessageFixture,
-      phase: status === 'running' ? 'streaming' : 'idle',
-    },
-    nodes,
-    activity: null,
-    inbox: [],
-    pendingApproval: null,
-    status,
-    error: null,
-    throughSeq: null,
-    canLoadOlder: false,
-  };
-}
-
 function runningHierarchyView(): AiSessionView {
-  const base = askView('running');
-  const user = base.nodes[0];
-  const assistant = base.nodes[1];
-  if (!user || !assistant) throw new Error('Ask fixture must project two nodes');
+  const base = agentView('running');
+  const user = base.nodes.find((node) => node.kind === 'userMessage');
+  const assistant = base.nodes.find((node) => node.kind === 'assistantMessage');
+  if (!user || !assistant) throw new Error('Agent fixture must project conversation nodes');
   const nodes: readonly AiConversationNode[] = [
     user,
     {
@@ -104,8 +63,7 @@ function runningHierarchyView(): AiSessionView {
   return { ...base, nodes };
 }
 
-function agentView(): AiSessionView {
-  const activity = projectAgentActivity(agentSessionEventFixture);
+function agentView(status: AiSessionView['status'] = 'completed'): AiSessionView {
   const throughSeq = agentSessionEventFixture[agentSessionEventFixture.length - 1]?.seq ?? 0;
   return {
     summary: {
@@ -113,7 +71,7 @@ function agentView(): AiSessionView {
       kind: 'agent',
       title: 'Check nginx and report evidence.',
       updatedAt: '2026-09-02T08:00:02.000Z',
-      status: activity.status,
+      status,
       scopeKey: 'terminal-fixture',
       archived: false,
     },
@@ -126,8 +84,8 @@ function agentView(): AiSessionView {
           goal: 'Check nginx and report evidence.',
           createdAtUnixMs: 1_000,
         },
-        status: activity.status,
-        ended: false,
+        status,
+        ended: status === 'completed' || status === 'failed' || status === 'cancelled',
         archived: false,
         eventCount: agentSessionEventFixture.length,
         surface: { generation: 0, messages: [] },
@@ -142,10 +100,9 @@ function agentView(): AiSessionView {
       },
     },
     nodes: projectAgentConversationNodes(agentSessionEventFixture),
-    activity,
     inbox: [],
     pendingApproval: null,
-    status: activity.status,
+    status,
     error: null,
     throughSeq,
     canLoadOlder: false,
@@ -161,17 +118,17 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiWorkspaceRoot Phase 3 skeleton', () => {
-  it.each([320, 400, 720])(
+  it.each([320, 400, 560, 720])(
     'keeps the complete single-column workspace structure at %d px',
     (width) => {
       const { container } = render(
         <div style={{ width, height: 640 }}>
           <AiWorkspaceRoot
-            view={askView()}
+            view={agentView()}
             scope="workbench"
             providerLabel="Local provider"
             modelLabel="Model fixture"
-            contextLabel="Workbench context"
+            canStartAgent
             onClose={vi.fn()}
             onHistory={vi.fn()}
             onNewSession={vi.fn()}
@@ -181,19 +138,40 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       );
 
       const root = container.querySelector<HTMLElement>('[data-slot="ai-workspace-root"]');
-      expect(root).toHaveClass('min-w-0', 'overflow-x-hidden');
+      expect(root).toHaveClass('ai-workspace-root');
       expect(root).toHaveAttribute('data-phase', 'active');
-      expect(screen.getByText('Why did the deployment fail?')).toBeVisible();
-      expect(screen.getByText('Inspecting the deployment output.')).toBeVisible();
+      expect(screen.getByText('Check nginx now.')).toBeVisible();
+      expect(screen.getByText('Checking now.')).toBeVisible();
       expect(screen.getByRole('textbox')).toBeVisible();
-      expect(screen.getByRole('button', { name: 'Session actions' })).toBeVisible();
-      expect(screen.getByRole('button', { name: 'Session and input settings' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Conversation history' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
+      expect(root?.querySelector('.ai-composer-add')).toBeNull();
       expect(root?.querySelector('[data-slot="message-scroller"]'))
         .toContainElement(root?.querySelector('[data-message-scroller-viewport]') ?? null);
       expect(root?.querySelectorAll('[data-message-scroller-viewport]')).toHaveLength(1);
       expect(root?.querySelectorAll('[data-slot="ai-workspace-content"] > aside')).toHaveLength(0);
     },
   );
+
+  it('hides legacy mode chrome and always routes visible new-session actions to Agent', async () => {
+    const user = userEvent.setup();
+    const onNewSession = vi.fn();
+    const { container } = render(
+        <AiWorkspaceRoot
+          view={null}
+          scope="terminal"
+          canStartAgent
+          onNewSession={onNewSession}
+      />,
+    );
+
+    expect(screen.getByText('What should the Agent complete?')).toBeVisible();
+    expect(container.querySelector('.ai-session-context')).toHaveTextContent('Terminal');
+    expect(container.querySelector('[data-slot="badge"]')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'New conversation' }));
+    expect(onNewSession).toHaveBeenCalledOnce();
+  });
 
   it('moves the resident composer from Hero to Active without losing DOM identity or focus', async () => {
     const user = userEvent.setup();
@@ -209,7 +187,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
           modelLabel="Model fixture"
           onSubmit={({ content }) => {
             submitted.push(content);
-            setView(askView());
+            setView(agentView());
           }}
         />
       );
@@ -242,39 +220,46 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-ai-node-kind="reasoning"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-tool-state="running"]')).toHaveLength(1);
-    expect(container.querySelectorAll('.animate-spin')).toHaveLength(1);
+    expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('In progress');
   });
 
-  it('shows Agent Conversation and Activity from one throughSeq while Ask hides the tab row', async () => {
-    const user = userEvent.setup();
+  it('renders Agent sessions through the conversation-only surface', () => {
     const view = agentView();
-    const { container, rerender } = render(
+    render(
+      <AiWorkspaceRoot view={view} scope="terminal" />,
+    );
+
+    expect(screen.queryByRole('tab')).toBeNull();
+    expect(screen.getByRole('log', { name: 'AI conversation' })).toBeVisible();
+    expect(screen.getAllByText('Check nginx and report evidence.')).not.toHaveLength(0);
+
+  });
+
+  it('keeps the Agent conversation mounted before the first running node commits', async () => {
+    const view = agentView();
+    render(
       <AiWorkspaceRoot
-        view={view}
+        view={{
+          ...view,
+          nodes: [],
+          status: 'running',
+          summary: { ...view.summary, status: 'running' },
+        }}
         scope="terminal"
-        activityContent={<div data-testid="activity-fixture">Activity fixture</div>}
       />,
     );
 
-    expect(screen.getByRole('tab', { name: 'Conversation' })).toBeVisible();
-    expect(screen.getByRole('tab', { name: 'Activity' })).toBeVisible();
-    expect(container.querySelector('[data-slot="tabs"]')).toHaveAttribute(
-      'data-through-seq',
-      String(view.throughSeq),
-    );
-    await user.click(screen.getByRole('tab', { name: 'Activity' }));
-    expect(screen.getByTestId('activity-fixture')).toBeVisible();
-
-    rerender(<AiWorkspaceRoot view={askView()} scope="workbench" />);
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.getByRole('log', { name: 'AI conversation' })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('In progress'));
   });
 
   it('gives every icon-only workspace action an accessible name and tooltip', () => {
     const { container } = render(
       <AiWorkspaceRoot
-        view={askView()}
+        view={agentView()}
         scope="workbench"
+        canStartAgent
         onClose={vi.fn()}
         onHistory={vi.fn()}
         onNewSession={vi.fn()}
@@ -283,16 +268,17 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     );
 
     for (const name of [
-      'Session actions',
+      'Conversation history',
+      'New conversation',
       'Close AI assistant',
-      'Session and input settings',
       'Send',
       'Scroll to latest message',
     ]) {
       expect(screen.getByRole('button', { name })).toBeInTheDocument();
     }
-    expect(container.querySelectorAll('[data-base-ui-tooltip-trigger]')).toHaveLength(5);
-    expect(within(screen.getByRole('button', { name: 'Session actions' })).queryByText(/./))
+    expect(container.querySelectorAll('[data-base-ui-tooltip-trigger]').length).toBeGreaterThanOrEqual(5);
+    expect(container.querySelector('.ai-composer-add')).toBeNull();
+    expect(within(screen.getByRole('button', { name: 'Conversation history' })).queryByText(/./))
       .toBeNull();
   });
 });

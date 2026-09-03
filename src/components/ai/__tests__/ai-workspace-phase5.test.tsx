@@ -8,7 +8,6 @@ import { createAiComposerState } from '@/lib/ai/composer-machine';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import {
   createAiWorkspaceNavigationState,
-  sessionRouteKey,
   type AiWorkspaceNavigationState,
 } from '@/lib/ai/panel-route';
 import type { AiPendingApproval, AiSessionSummary, AiSessionView } from '@/lib/ai/session-adapter';
@@ -107,20 +106,20 @@ function agentView(approval: AiPendingApproval | null = null): AiSessionView {
         eventCount: 9,
         surface: { generation: 0, messages: [] },
         inbox: { nextTurn: [], nextStep: [] },
-        task: { evidence: [] },
+        task: {
+          plan: {
+            version: 1,
+            steps: [
+              { id: 'plan-1', title: 'Inspect service', status: 'completed' },
+              { id: 'plan-2', title: 'Restart safely', status: 'inProgress' },
+            ],
+          },
+          evidence: [],
+        },
         recovery: { kind: approval ? 'waitingApproval' : 'idle', status: 'none', summary: 'ok', lastCommittedSeq: 8 },
       },
     },
     nodes: [tool, artifact],
-    activity: {
-      sessionId: 'agent-phase5',
-      status: approval ? 'waiting' : 'running',
-      turns: [],
-      context: { surfaceGeneration: 0, compactionCount: 0, artifacts: [], inputTokens: 10 },
-      agents: [],
-      recovery: { status: 'none' },
-      evidenceCount: 1,
-    },
     inbox: [],
     pendingApproval: approval,
     status: approval ? 'waiting' : 'running',
@@ -139,6 +138,18 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AI workspace Phase 5 workflows', () => {
+  it('folds the committed Runtime task plan above the Composer', async () => {
+    const user = userEvent.setup();
+    render(<AiWorkspaceRoot view={agentView()} scope="terminal" />);
+    const toggle = screen.getByRole('button', { name: 'Toggle 2 tasks' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText('1 completed')).toBeVisible();
+    expect(screen.queryByText('Inspect service')).toBeNull();
+    await user.click(toggle);
+    expect(screen.getByText('Inspect service')).toBeVisible();
+    expect(screen.getByText('Restart safely')).toBeVisible();
+  });
+
   it('replaces the Composer with approval, keeps the draft, and exposes recoverable decisions', async () => {
     const user = userEvent.setup();
     const approve = vi.fn();
@@ -149,8 +160,6 @@ describe('AI workspace Phase 5 workflows', () => {
       runtimeStatus: 'waiting',
       waitingApproval: true,
       sessionId: 'agent-phase5',
-      preset: 'agent',
-      presetLocked: true,
       draft: 'preserved draft',
     });
     const { rerender } = render(
@@ -187,7 +196,7 @@ describe('AI workspace Phase 5 workflows', () => {
   it('shows approval pending and failure without reporting an approved result', () => {
     const composer = createAiComposerState({
       phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true,
-      sessionId: 'agent-phase5', preset: 'agent', draft: 'keep me',
+      sessionId: 'agent-phase5', draft: 'keep me',
     });
     const { rerender } = render(
       <AiWorkspaceRoot
@@ -238,7 +247,7 @@ describe('AI workspace Phase 5 workflows', () => {
     expect(container.querySelectorAll('[data-slot="ai-tool-details"]')).toHaveLength(1);
     expect(container.querySelectorAll('aside')).toHaveLength(0);
     await user.click(screen.getByRole('button', { name: 'Back' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Open details for terminal.exec' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Command: Restart nginx' })).toHaveFocus());
   });
 
   it('loads Artifact content only after entering its details route', async () => {
@@ -272,7 +281,7 @@ describe('AI workspace Phase 5 workflows', () => {
     const user = userEvent.setup();
     const archive = vi.fn();
     const sessions: readonly AiSessionSummary[] = [{
-      id: 'ask-history', kind: 'ask', title: 'Historical Ask', updatedAt: '2026-09-03T00:00:00.000Z',
+      id: 'agent-history', kind: 'agent', title: 'Historical task', updatedAt: '2026-09-03T00:00:00.000Z',
       status: 'idle', scopeKey: 'workbench', archived: false,
     }];
     const { container } = render(
@@ -287,28 +296,29 @@ describe('AI workspace Phase 5 workflows', () => {
       </div>,
     );
     expect(container.querySelectorAll('aside')).toHaveLength(0);
-    expect(screen.getByText('Historical Ask')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Archive Historical Ask' }));
+    expect(screen.getByText('Historical task')).toBeVisible();
+    await user.hover(screen.getByRole('treeitem'));
+    await user.click(screen.getByRole('button', { name: 'More actions for Historical task' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Archive' }));
     expect(screen.getByRole('alertdialog')).toHaveAccessibleName('Archive this session?');
     await user.click(screen.getByRole('button', { name: 'Archive' }));
     expect(archive).toHaveBeenCalledWith(sessions[0]);
   });
 
-  it('restores the per-session Activity tab without changing the committed throughSeq', () => {
-    const view = agentView();
-    const key = sessionRouteKey('agent', 'agent-phase5');
+  it('renders committed Agent nodes directly in the conversation-only surface', async () => {
+    const user = userEvent.setup();
     render(
       <AiWorkspaceRoot
-        view={view}
+        view={agentView()}
         scope="terminal"
-        navigation={{
-          ...createAiWorkspaceNavigationState('agent-phase5'),
-          selectedTabBySession: { [key]: 'activity' },
-        }}
+        navigation={createAiWorkspaceNavigationState('agent-phase5')}
+        onOpenTool={vi.fn()}
       />,
     );
-    expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByText('Session status')).toBeVisible();
-    expect(screen.getByRole('tablist').closest('[data-through-seq]')).toHaveAttribute('data-through-seq', '8');
+    expect(screen.queryByRole('tab')).toBeNull();
+    expect(screen.getByRole('log', { name: 'AI conversation' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Command: Restart nginx' }));
+    expect(screen.getByRole('button', { name: 'Open details for terminal.exec' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Open artifact Deployment report' })).toBeVisible();
   });
 });

@@ -49,15 +49,11 @@ describe('optimistic submission reconcile', () => {
       .toEqual([committed()]);
   });
 
-  it('uses bounded content/seq/time matching only for legacy nodes without a submission id', () => {
+  it('does not content-match legacy nodes without a durable submission id', () => {
     const node = committed({
       messageId: 'runtime-message', turnId: 'turn-1', clientSubmissionId: undefined,
     });
-    expect(reconcileOptimisticSubmissions([pending()], [node]).remaining).toEqual([]);
-    expect(reconcileOptimisticSubmissions(
-      [pending()],
-      [{ ...node, firstSeq: 10, lastSeq: 10 }],
-    ).remaining).toHaveLength(1);
+    expect(reconcileOptimisticSubmissions([pending()], [node]).remaining).toHaveLength(1);
   });
 
   it('never content-matches a v3 node carrying another durable submission id', () => {

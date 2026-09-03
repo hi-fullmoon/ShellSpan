@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { conversationFromTerminal } from '@/lib/ai-sessions';
 import { createAgentSessionAdapter } from '@/lib/ai/agent-session-adapter';
-import { createAskSessionAdapter } from '@/lib/ai/ask-session-adapter';
 import {
   createAiComposerState,
   reduceAiComposer,
@@ -16,7 +14,6 @@ import {
   type AiOptimisticSubmission,
 } from '@/lib/ai/optimistic-submission';
 import { normalizeAiSessionError } from '@/lib/ai/session-error';
-import type { AiSessionKind } from '@/lib/ai/conversation-node';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import {
@@ -24,7 +21,6 @@ import {
   sessionRouteKey,
   type AiScrollAnchor,
   type AiWorkspaceNavigationState,
-  type AiWorkspaceTab,
 } from '@/lib/ai/panel-route';
 import type {
   AiCreateSessionInput,
@@ -39,10 +35,9 @@ import { generateId } from '@/lib/utils';
 import { t } from '@/locales';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
-import { useAiStore } from '@/stores/aiStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import type { AppSection } from '@/types';
-import type { AiConversation } from '@/types/ai';
+import type { AgentPermissionMode } from '@/types/agent-approval';
 import type {
   AgentSessionPermissionMode,
   AgentSessionTarget,
@@ -50,15 +45,11 @@ import type {
 
 const OPTIMISTIC_COMMIT_TIMEOUT_MS = 15_000;
 
-export interface AiSessionControllerAdapters {
-  readonly ask: AiSessionAdapter<'ask'>;
-  readonly agent: AiSessionAdapter<'agent'>;
-}
+export type AiSessionControllerAdapter = AiSessionAdapter<'agent'>;
 
 export interface UseAiSessionControllerInput {
   readonly scope: Extract<AppSection, 'terminal' | 'workbench'>;
-  readonly initialPreset?: AiSessionKind;
-  readonly adapters?: AiSessionControllerAdapters;
+  readonly adapter?: AiSessionControllerAdapter;
   readonly now?: () => number;
   readonly operationId?: () => string;
 }
@@ -67,9 +58,10 @@ export interface AiSessionController {
   readonly view: AiSessionView | null;
   readonly pendingNodes: readonly AiConversationNode[];
   readonly composer: AiComposerState;
-  readonly preset: AiSessionKind;
   readonly providerLabel: string;
   readonly modelLabel: string;
+  readonly canStartAgent: boolean;
+  readonly agentUnavailableReason: string | null;
   readonly announcement: string | null;
   readonly navigation: AiWorkspaceNavigationState;
   readonly sessions: readonly AiSessionSummary[];
@@ -83,7 +75,6 @@ export interface AiSessionController {
   readonly renamingSessionId: string | null;
   readonly renameError: string | null;
   readonly setDraft: (value: string) => void;
-  readonly setPreset: (value: AiSessionKind) => void;
   readonly setBusyPreference: (value: 'queue' | 'steer') => void;
   readonly submit: (gesture: 'keyboard' | 'primary', accelerated?: boolean) => void;
   readonly stop: () => void;
@@ -92,6 +83,7 @@ export interface AiSessionController {
   readonly openSessions: () => void;
   readonly openSession: (summary: AiSessionSummary) => void;
   readonly newSession: () => void;
+  readonly refreshSessions: () => void;
   readonly archiveSession: (summary: AiSessionSummary) => void;
   readonly updateQueueItem: (item: AiInboxItem, content: string) => void;
   readonly removeQueueItem: (item: AiInboxItem) => void;
@@ -101,7 +93,6 @@ export interface AiSessionController {
   readonly back: () => void;
   readonly openToolDetails: (node: AiConversationNodeOf<'tool'>) => void;
   readonly openArtifactDetails: (node: AiConversationNodeOf<'artifact'>) => void;
-  readonly selectTab: (tab: AiWorkspaceTab) => void;
   readonly saveScrollAnchor: (anchor: AiScrollAnchor) => void;
   readonly completeRouteReturn: () => void;
   readonly approve: () => void;
@@ -134,42 +125,10 @@ function runtimeTarget(session: TerminalSession): AgentSessionTarget {
   };
 }
 
-function permissionMode(mode: string): AgentSessionPermissionMode {
+function permissionMode(mode: AgentPermissionMode): AgentSessionPermissionMode {
   if (mode === 'autoApproveReadOnly') return 'scopedAutopilot';
   if (mode === 'fullAccess') return 'operator';
   return 'requestApproval';
-}
-
-function newWorkbenchConversation(now: number): AiConversation {
-  const timestamp = new Date(now).toISOString();
-  return {
-    id: generateId(),
-    startedAt: timestamp,
-    updatedAt: timestamp,
-    title: t('ai.newConversation'),
-    archived: false,
-    scope: 'workbench',
-    host: '',
-    port: 0,
-    username: '',
-  };
-}
-
-function ensureTerminalConversation(session: TerminalSession): AiConversation {
-  let conversation = conversationFromTerminal(session);
-  if (conversation) return conversation;
-  useTerminalStore.getState().startNewConversation(session.sessionId);
-  const updated = useTerminalStore.getState().sessions.find((item) => item.sessionId === session.sessionId);
-  conversation = updated ? conversationFromTerminal(updated) : undefined;
-  if (!conversation) throw new Error(t('ai.workspace.error.conversationIdentity'));
-  return conversation;
-}
-
-function adaptersByKind(
-  adapters: AiSessionControllerAdapters,
-  kind: AiSessionKind,
-): AiSessionAdapter<'ask'> | AiSessionAdapter<'agent'> {
-  return kind === 'ask' ? adapters.ask : adapters.agent;
 }
 
 function sameOptimistic(
@@ -179,23 +138,17 @@ function sameOptimistic(
   return left.length === right.length && left.every((item, index) => item === right[index]);
 }
 
-/** Interpret Composer effects against Ask/Agent adapters while committed views stay adapter-owned. */
+/** Interpret Composer effects against the Agent adapter while committed views stay adapter-owned. */
 export function useAiSessionController({
   scope,
-  initialPreset = 'ask',
-  adapters: providedAdapters,
+  adapter: providedAdapter,
   now = Date.now,
   operationId = generateId,
 }: UseAiSessionControllerInput): AiSessionController {
-  const ownedAdapters = useMemo<AiSessionControllerAdapters | null>(() => (
-    providedAdapters ? null : {
-      ask: createAskSessionAdapter(),
-      agent: createAgentSessionAdapter(),
-    }
-  ), [providedAdapters]);
-  const adapters = providedAdapters ?? ownedAdapters!;
-  const conversations = useAiStore((state) => state.conversations);
-  const activeWorkbenchConversationId = useAiStore((state) => state.activeWorkbenchConversationId);
+  const ownedAdapter = useMemo<AiSessionControllerAdapter | null>(() => (
+    providedAdapter ? null : createAgentSessionAdapter()
+  ), [providedAdapter]);
+  const adapter = providedAdapter ?? ownedAdapter!;
   const terminalSessions = useTerminalStore((state) => state.sessions);
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
   const providers = useAiSettingsStore((state) => state.providers);
@@ -203,12 +156,11 @@ export function useAiSessionController({
   const agentEnabled = useAiSettingsStore((state) => state.agentEnabled);
   const provider = providers.find((item) => item.id === defaultProviderId) ?? providers[0];
   const activeTerminal = terminalSessions.find((item) => item.sessionId === activeTerminalId);
-  const [preset, setPresetState] = useState<AiSessionKind>(initialPreset);
   const [view, setView] = useState<AiSessionView | null>(null);
-  const [openedSession, setOpenedSession] = useState<{ kind: AiSessionKind; id: string } | null>(null);
+  const [openedSessionId, setOpenedSessionId] = useState<string | null>(null);
   const [optimistic, setOptimistic] = useState<readonly AiOptimisticSubmission[]>([]);
   const [announcement, setAnnouncement] = useState<string | null>(null);
-  const [composer, setComposer] = useState(() => createAiComposerState({ preset: initialPreset }));
+  const [composer, setComposer] = useState(() => createAiComposerState());
   const [navigation, setNavigation] = useState(() => createAiWorkspaceNavigationState());
   const [sessions, setSessions] = useState<readonly AiSessionSummary[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -227,10 +179,17 @@ export function useAiSessionController({
   const timeoutRef = useRef(new Map<string, number>());
   const effectExecutorRef = useRef<(effect: AiComposerEffect) => void>(() => undefined);
   const draftBySessionRef = useRef(new Map<string, string>());
+  const sessionListRequestRef = useRef(0);
 
-  const workspaceScopeKey = `${preset}:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`;
-  const canCreateSession = preset === 'ask'
-    || (scope === 'terminal' && activeTerminal?.status === 'connected' && agentEnabled);
+  const workspaceScopeKey = `agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`;
+  const canStartAgent = scope === 'terminal'
+    && activeTerminal?.status === 'connected'
+    && agentEnabled;
+  const agentUnavailableReason = canStartAgent
+    ? null
+    : agentEnabled
+      ? t('agent.availability.needsTerminal')
+      : t('agent.availability.userDisabled');
   const hasProvider = Boolean(provider?.model.trim());
 
   const updateOptimistic = useCallback((updater: (
@@ -250,41 +209,32 @@ export function useAiSessionController({
     for (const effect of transition.effects) effectExecutorRef.current(effect);
   }, []);
 
-  const navigationDraftKey = useCallback((kind: AiSessionKind, sessionId: string | null): string => (
+  const navigationDraftKey = useCallback((sessionId: string | null): string => (
     sessionId
-      ? sessionRouteKey(kind, sessionId)
-      : `new:${kind}:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`
+      ? sessionRouteKey('agent', sessionId)
+      : `new:agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`
   ), [activeTerminal?.sessionId, scope]);
 
   const saveCurrentDraft = useCallback((): void => {
-    draftBySessionRef.current.set(
-      navigationDraftKey(composerRef.current.preset, composerRef.current.sessionId),
-      composerRef.current.draft,
-    );
+    const key = navigationDraftKey(composerRef.current.sessionId);
+    draftBySessionRef.current.set(key, composerRef.current.draft);
   }, [navigationDraftKey]);
 
-  const restoreDraft = useCallback((kind: AiSessionKind, sessionId: string | null): void => {
+  const restoreDraft = useCallback((sessionId: string | null): void => {
+    const key = navigationDraftKey(sessionId);
     dispatch({
       type: 'draft.changed',
-      value: draftBySessionRef.current.get(navigationDraftKey(kind, sessionId)) ?? '',
+      value: draftBySessionRef.current.get(key) ?? '',
     });
   }, [dispatch, navigationDraftKey]);
 
   const createInput = useCallback((
-    kind: AiSessionKind,
     content: string,
-  ): AiCreateSessionInput => {
-    if (kind === 'ask') {
-      const conversation = scope === 'terminal'
-        ? ensureTerminalConversation(activeTerminal ?? (() => { throw new Error('No active terminal'); })())
-        : newWorkbenchConversation(now());
-      return { kind: 'ask', conversation };
-    }
-    if (!activeTerminal || activeTerminal.status !== 'connected') {
+  ): Extract<AiCreateSessionInput, { kind: 'agent' }> => {
+    if (scope !== 'terminal' || !activeTerminal || activeTerminal.status !== 'connected' || !agentEnabled) {
       throw new Error(t('ai.workspace.error.connectedTerminalRequired'));
     }
-    const conversation = ensureTerminalConversation(activeTerminal);
-    const sessionId = `agent-${conversation.id}-${operationId()}`;
+    const sessionId = `agent-${activeTerminal.sessionId}-${operationId()}`;
     return {
       kind: 'agent',
       request: {
@@ -298,7 +248,7 @@ export function useAiSessionController({
         successCriteria: [content],
       },
     };
-  }, [activeTerminal, now, operationId, scope]);
+  }, [activeTerminal, agentEnabled, operationId, scope]);
 
   effectExecutorRef.current = (effect): void => {
     if (effect.type === 'focusEditor') return;
@@ -307,7 +257,7 @@ export function useAiSessionController({
       return;
     }
     if (effect.type === 'stop') {
-      void adaptersByKind(adapters, composerRef.current.preset).stop(effect.sessionId).then(
+      void adapter.stop(effect.sessionId).then(
         () => dispatch({ type: 'stop.succeeded' }),
         (error: unknown) => dispatch({ type: 'stop.failed', error: normalizeAiSessionError(error) }),
       );
@@ -315,7 +265,6 @@ export function useAiSessionController({
     }
 
     const payload = effect.payload;
-    const kind = composerRef.current.preset;
     const expectedNextSeq = viewRef.current?.throughSeq === null || viewRef.current?.throughSeq === undefined
       ? null
       : viewRef.current.throughSeq + 1;
@@ -347,26 +296,19 @@ export function useAiSessionController({
           clientOperationId: payload.clientOperationId,
           provider: currentProvider,
         };
-        const receipt = kind === 'ask'
-          ? await adapters.ask.submit(payload.sessionId, {
-              ...base,
-              ...(payload.sessionId === null
-                ? { create: createInput('ask', payload.content) as Extract<AiCreateSessionInput, { kind: 'ask' }> }
-                : {}),
-            } satisfies AiSubmitInput<'ask'>)
-          : await adapters.agent.submit(payload.sessionId, {
-              ...base,
-              ...(payload.sessionId === null
-                ? { create: createInput('agent', payload.content) as Extract<AiCreateSessionInput, { kind: 'agent' }> }
-                : {}),
-            } satisfies AiSubmitInput<'agent'>);
+        const receipt = await adapter.submit(payload.sessionId, {
+          ...base,
+          ...(payload.sessionId === null
+            ? { create: createInput(payload.content) }
+            : {}),
+        } satisfies AiSubmitInput<'agent'>);
         if (!mountedRef.current) return;
         updateOptimistic((current) => current.map((item) => (
           item.clientOperationId === payload.clientOperationId
             ? { ...item, sessionId: receipt.sessionId, delivery: 'accepted' }
             : item
         )));
-        setOpenedSession({ kind, id: receipt.sessionId });
+        setOpenedSessionId(receipt.sessionId);
         setNavigation((current) => ({
           ...current,
           route: { kind: 'conversation', sessionId: receipt.sessionId },
@@ -406,21 +348,19 @@ export function useAiSessionController({
       mountedRef.current = false;
       for (const timeout of timeoutRef.current.values()) window.clearTimeout(timeout);
       timeoutRef.current.clear();
-      ownedAdapters?.ask.dispose();
-      ownedAdapters?.agent.dispose();
+      ownedAdapter?.dispose();
     };
-  }, [ownedAdapters]);
+  }, [ownedAdapter]);
 
   useEffect(() => {
     saveCurrentDraft();
-    setOpenedSession(null);
+    setOpenedSessionId(null);
     setView(null);
     setQueueMutation(null);
     viewRef.current = null;
     dispatch({
       type: 'runtime.synchronized',
       sessionId: null,
-      preset,
       status: 'idle',
       terminal: false,
       waitingApproval: false,
@@ -428,24 +368,13 @@ export function useAiSessionController({
     setNavigation(createAiWorkspaceNavigationState());
   }, [activeTerminal?.sessionId, dispatch, saveCurrentDraft, scope]);
 
-  const discoveredAskId = scope === 'workbench'
-    ? activeWorkbenchConversationId
-    : activeTerminal?.conversationId ?? null;
-
   useEffect(() => {
     let alive = true;
     let unsubscribe = (): void => undefined;
-    const adapter = adaptersByKind(adapters, preset);
     const open = async (): Promise<void> => {
-      let sessionId = openedSession?.kind === preset ? openedSession.id : null;
-      if (!sessionId && preset === 'ask') {
-        const exists = conversations.some((conversation) => (
-          conversation.id === discoveredAskId && !conversation.archived
-        ));
-        sessionId = exists ? discoveredAskId : null;
-      }
-      if (!sessionId && preset === 'agent' && activeTerminal) {
-        const page = await adapters.agent.list({
+      let sessionId = openedSessionId;
+      if (!sessionId && scope === 'terminal' && activeTerminal) {
+        const page = await adapter.list({
           scopeKey: `terminal-${activeTerminal.sessionId}`,
           archived: false,
           limit: 100,
@@ -470,25 +399,22 @@ export function useAiSessionController({
     };
   }, [
     activeTerminal,
-    adapters,
-    conversations,
-    discoveredAskId,
+    adapter,
     dispatch,
-    openedSession,
-    preset,
+    openedSessionId,
+    scope,
   ]);
 
   useEffect(() => {
     dispatch({
       type: 'runtime.synchronized',
       sessionId: view?.summary.id ?? null,
-      preset: view?.summary.kind ?? preset,
       status: view?.status ?? 'idle',
-      terminal: view?.summary.kind === 'agent'
+      terminal: view !== null
         && (view.status === 'completed' || view.status === 'cancelled' || view.status === 'failed'),
       waitingApproval: view?.pendingApproval !== null && view?.pendingApproval !== undefined,
     });
-  }, [dispatch, preset, view?.pendingApproval, view?.status, view?.summary.id, view?.summary.kind]);
+  }, [dispatch, view, view?.pendingApproval, view?.status, view?.summary.id]);
 
   useEffect(() => {
     if (!view) return;
@@ -535,22 +461,23 @@ export function useAiSessionController({
   }, [view?.pendingApproval?.approvalId]);
 
   const refreshSessions = useCallback(async (): Promise<void> => {
+    const requestId = ++sessionListRequestRef.current;
     setSessionsLoading(true);
     setSessionsError(null);
     try {
-      const [askPage, agentPage] = await Promise.all([
-        adapters.ask.list({ limit: 200 }),
-        adapters.agent.list({ limit: 200 }),
-      ]);
-      const combined = [...askPage.sessions, ...agentPage.sessions]
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-      setSessions(combined);
+      const page = await adapter.list({ limit: 200 });
+      if (!mountedRef.current || requestId !== sessionListRequestRef.current) return;
+      setSessions([...page.sessions].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
     } catch (error) {
-      setSessionsError(normalizeAiSessionError(error).message);
+      if (mountedRef.current && requestId === sessionListRequestRef.current) {
+        setSessionsError(normalizeAiSessionError(error).message);
+      }
     } finally {
-      setSessionsLoading(false);
+      if (mountedRef.current && requestId === sessionListRequestRef.current) {
+        setSessionsLoading(false);
+      }
     }
-  }, [adapters]);
+  }, [adapter]);
 
   const openSessions = useCallback((): void => {
     setNavigation((current) => ({ ...current, route: { kind: 'sessions' } }));
@@ -559,8 +486,7 @@ export function useAiSessionController({
 
   const openSession = useCallback((summary: AiSessionSummary): void => {
     saveCurrentDraft();
-    setPresetState(summary.kind);
-    setOpenedSession({ kind: summary.kind, id: summary.id });
+    setOpenedSessionId(summary.id);
     setView(null);
     setQueueMutation(null);
     viewRef.current = null;
@@ -572,17 +498,16 @@ export function useAiSessionController({
     dispatch({
       type: 'runtime.synchronized',
       sessionId: summary.id,
-      preset: summary.kind,
       status: summary.status,
       terminal: summary.status === 'completed' || summary.status === 'cancelled' || summary.status === 'failed',
       waitingApproval: summary.status === 'waiting',
     });
-    restoreDraft(summary.kind, summary.id);
+    restoreDraft(summary.id);
   }, [dispatch, restoreDraft, saveCurrentDraft]);
 
   const newSession = useCallback((): void => {
     saveCurrentDraft();
-    setOpenedSession(null);
+    setOpenedSessionId(null);
     setView(null);
     setQueueMutation(null);
     viewRef.current = null;
@@ -594,24 +519,23 @@ export function useAiSessionController({
     dispatch({
       type: 'runtime.synchronized',
       sessionId: null,
-      preset,
       status: 'idle',
       terminal: false,
       waitingApproval: false,
     });
-    restoreDraft(preset, null);
-  }, [dispatch, preset, restoreDraft, saveCurrentDraft]);
+    restoreDraft(null);
+  }, [dispatch, restoreDraft, saveCurrentDraft]);
 
   const archiveSession = useCallback((summary: AiSessionSummary): void => {
     setArchivingSessionId(summary.id);
-    void adaptersByKind(adapters, summary.kind).archive(summary.id).then(
+    void adapter.archive(summary.id).then(
       () => {
         if (viewRef.current?.summary.id === summary.id) newSession();
         void refreshSessions();
       },
       (error: unknown) => setSessionsError(normalizeAiSessionError(error).message),
     ).finally(() => setArchivingSessionId(null));
-  }, [adapters, newSession, refreshSessions]);
+  }, [adapter, newSession, refreshSessions]);
 
   const executeQueueMutation = useCallback((intent: AiQueueMutationIntent): void => {
     const current = viewRef.current;
@@ -636,13 +560,13 @@ export function useAiSessionController({
         ? { ...base, ...intent }
         : { ...base, ...intent };
     setQueueMutation({ intent, status: 'pending', error: null, conflict: false });
-    void adapters.agent.mutateInbox(input).then(
+    void adapter.mutateInbox(input).then(
       () => setQueueMutation(null),
       async (error: unknown) => {
         const normalized = normalizeAiSessionError(error);
         if (normalized.kind === 'conflict') {
           try {
-            const refreshed = await adapters.agent.refresh(current.summary.id);
+            const refreshed = await adapter.refresh(current.summary.id);
             if (viewRef.current?.summary.id === refreshed.summary.id) {
               viewRef.current = refreshed;
               setView(refreshed);
@@ -659,13 +583,9 @@ export function useAiSessionController({
         });
       },
     );
-  }, [adapters.agent, operationId]);
+  }, [adapter, operationId]);
 
   const renameSession = useCallback((summary: AiSessionSummary, rawTitle: string): void => {
-    if (summary.kind !== 'agent') {
-      setRenameError(t('ai.workspace.sessions.renameAgentOnly'));
-      return;
-    }
     const title = rawTitle.trim();
     if (!title) {
       setRenameError(t('ai.workspace.sessions.renameRequired'));
@@ -677,12 +597,12 @@ export function useAiSessionController({
       try {
         let revision = summary.revision;
         if (revision === null || revision === undefined) {
-          revision = (await adapters.agent.refresh(summary.id)).revision;
+          revision = (await adapter.refresh(summary.id)).revision;
         }
         if (revision === null || revision === undefined) {
           throw new Error(t('ai.workspace.sessions.renameRevisionUnavailable'));
         }
-        await adapters.agent.rename({
+        await adapter.rename({
           sessionId: summary.id,
           expectedRevision: revision,
           clientOperationId: operationId(),
@@ -693,7 +613,7 @@ export function useAiSessionController({
         const normalized = normalizeAiSessionError(error);
         if (normalized.kind === 'conflict') {
           try {
-            await adapters.agent.refresh(summary.id);
+            await adapter.refresh(summary.id);
             await refreshSessions();
           } catch {
             // The committed list refresh can be retried from the rename dialog.
@@ -704,7 +624,7 @@ export function useAiSessionController({
         setRenamingSessionId(null);
       }
     })();
-  }, [adapters.agent, operationId, refreshSessions]);
+  }, [adapter, operationId, refreshSessions]);
 
   const back = useCallback((): void => {
     setNavigation((current) => {
@@ -740,16 +660,6 @@ export function useAiSessionController({
     }));
   }, []);
 
-  const selectTab = useCallback((tab: AiWorkspaceTab): void => {
-    const session = viewRef.current?.summary;
-    if (!session) return;
-    const key = sessionRouteKey(session.kind, session.id);
-    setNavigation((current) => ({
-      ...current,
-      selectedTabBySession: { ...current.selectedTabBySession, [key]: tab },
-    }));
-  }, []);
-
   const saveScrollAnchor = useCallback((anchor: AiScrollAnchor): void => {
     const session = viewRef.current?.summary;
     if (!session) return;
@@ -765,19 +675,19 @@ export function useAiSessionController({
     if (!approval || approvalDecision !== null) return;
     setApprovalDecision(decision);
     setApprovalError(null);
-    const operation = decision === 'approve' ? adapters.agent.approve(approval) : adapters.agent.reject(approval);
+    const operation = decision === 'approve' ? adapter.approve(approval) : adapter.reject(approval);
     void operation.catch((error: unknown) => {
       setApprovalDecision(null);
       setApprovalError(normalizeAiSessionError(error).message);
     });
-  }, [adapters.agent, approvalDecision]);
+  }, [adapter, approvalDecision]);
 
   const loadOlder = useCallback((): void => {
     const current = viewRef.current;
     if (!current?.canLoadOlder || loadingOlder) return;
     setLoadingOlder(true);
     const firstSeq = current.nodes[0]?.firstSeq ?? 0;
-    void adaptersByKind(adapters, current.summary.kind).loadOlder(current.summary.id, String(firstSeq)).then(
+    void adapter.loadOlder(current.summary.id, String(firstSeq)).then(
       (older) => {
         if (older.length === 0 || viewRef.current?.summary.id !== current.summary.id) return;
         const keys = new Set(current.nodes.map((node) => node.key));
@@ -787,19 +697,20 @@ export function useAiSessionController({
       },
       (error: unknown) => setAnnouncement(normalizeAiSessionError(error).message),
     ).finally(() => setLoadingOlder(false));
-  }, [adapters, loadingOlder]);
+  }, [adapter, loadingOlder]);
 
   const loadArtifact = useCallback<AiSessionAdapter['loadArtifact']>((sessionId, artifactId, maxBytes) => (
-    adapters.agent.loadArtifact(sessionId, artifactId, maxBytes)
-  ), [adapters.agent]);
+    adapter.loadArtifact(sessionId, artifactId, maxBytes)
+  ), [adapter]);
 
   return {
     view: visibleView,
     pendingNodes,
     composer,
-    preset,
     providerLabel: provider?.name ?? '',
     modelLabel: provider?.model ?? '',
+    canStartAgent,
+    agentUnavailableReason,
     announcement,
     navigation,
     sessions,
@@ -813,47 +724,44 @@ export function useAiSessionController({
     renamingSessionId,
     renameError,
     setDraft: (value) => dispatch({ type: 'draft.changed', value }),
-    setPreset: (value) => {
-      saveCurrentDraft();
-      setOpenedSession(null);
-      setView(null);
-      viewRef.current = null;
-      setPresetState(value);
-      dispatch({ type: 'preset.changed', value });
-      dispatch({
-        type: 'runtime.synchronized',
-        sessionId: null,
-        preset: value,
-        status: 'idle',
-        terminal: false,
-        waitingApproval: false,
-      });
-      restoreDraft(value, null);
-      setNavigation((current) => ({ ...current, route: { kind: 'conversation', sessionId: null } }));
-    },
     setBusyPreference: (value) => dispatch({ type: 'preference.changed', value }),
-    submit: (gesture, accelerated = false) => dispatch({
-      type: 'submit.requested',
-      gesture,
-      accelerated,
-      clientOperationId: operationId(),
-      now: now(),
-      hasProvider,
-      canCreateSession,
-    }),
+    submit: (gesture, accelerated = false) => {
+      if (!canStartAgent) {
+        setAnnouncement('sessionUnavailable');
+        return;
+      }
+      const clientOperationId = operationId();
+      dispatch({
+        type: 'submit.requested',
+        gesture,
+        accelerated,
+        clientOperationId,
+        now: now(),
+        hasProvider,
+        canCreateSession: canStartAgent,
+      });
+    },
     stop: () => dispatch({ type: 'stop.requested' }),
-    retryFailedDraft: (failedDraftId) => dispatch({
-      type: 'retry.requested',
-      failedDraftId,
-      clientOperationId: operationId(),
-      now: now(),
-      hasProvider,
-      canCreateSession,
-    }),
+    retryFailedDraft: (failedDraftId) => {
+      if (!canStartAgent) {
+        setAnnouncement('sessionUnavailable');
+        return;
+      }
+      const clientOperationId = operationId();
+      dispatch({
+        type: 'retry.requested',
+        failedDraftId,
+        clientOperationId,
+        now: now(),
+        hasProvider,
+        canCreateSession: canStartAgent,
+      });
+    },
     dismissError: () => dispatch({ type: 'error.dismissed' }),
     openSessions,
     openSession,
     newSession,
+    refreshSessions: () => { void refreshSessions(); },
     archiveSession,
     updateQueueItem: (item, content) => executeQueueMutation({
       type: 'update', itemId: item.id, content,
@@ -869,7 +777,6 @@ export function useAiSessionController({
     back,
     openToolDetails,
     openArtifactDetails,
-    selectTab,
     saveScrollAnchor,
     completeRouteReturn: () => setNavigation((current) => ({ ...current, returnFocus: null })),
     approve: () => decideApproval('approve'),

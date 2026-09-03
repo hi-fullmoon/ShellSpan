@@ -350,7 +350,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <CompactDialogContent className="max-w-2xl">
+      <CompactDialogContent className="max-w-2xl [&_[data-slot=dialog-close]]:size-6">
         <CompactDialogHeader
           title={t(provider ? 'settings.ai.editProviderTitle' : 'settings.ai.addProviderTitle')}
         />
@@ -569,14 +569,14 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
           <CompactDialogFooter className="sm:justify-between">
             <div className="flex w-full min-w-0 items-center gap-2 sm:flex-1">
               {onDelete && (
-                <Button type="button" variant="destructiveOutline" size="sm" onClick={onDelete}>
+                <Button type="button" variant="destructiveOutline" size="xs" onClick={onDelete}>
                   {t('settings.ai.deleteProvider')}
                 </Button>
               )}
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
+                size="xs"
                 disabled={!canTest || busy}
                 onClick={() => void handleLoadModels()}
               >
@@ -619,10 +619,10 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
               )}
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => handleOpenChange(false)}>
+              <Button type="button" variant="outline" size="xs" onClick={() => handleOpenChange(false)}>
                 {t('common.cancel')}
               </Button>
-              <Button type="submit" size="sm" disabled={!canSave || busy}>
+              <Button type="submit" size="xs" disabled={!canSave || busy}>
                 {t('common.save')}
               </Button>
             </div>

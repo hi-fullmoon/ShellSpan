@@ -80,6 +80,9 @@ describe('ProviderSetupDialog', () => {
     expect(dialog).not.toHaveTextContent('settings.ai.addProviderDescription');
     expect(dialog).not.toHaveTextContent('settings.ai.connectionDetailsHint');
     expect(dialog).not.toHaveTextContent('settings.ai.credentialsHint');
+    expect(dialog).toHaveClass('[&_[data-slot=dialog-close]]:size-6');
+    expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveClass('h-6');
+    expect(screen.getByRole('button', { name: 'common.save' })).toHaveClass('h-6');
     expect(fieldGroups?.[0]).toHaveClass(
       '@min-[30rem]:grid',
       '@min-[30rem]:grid-cols-2',

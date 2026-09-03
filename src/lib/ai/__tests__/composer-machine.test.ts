@@ -17,8 +17,6 @@ function runningState(draft = 'Queue this'): AiComposerState {
   return createAiComposerState({
     phase: 'running',
     runtimeStatus: 'running',
-    preset: 'agent',
-    presetLocked: true,
     sessionId: 'session-1',
     draft,
   });
@@ -35,7 +33,6 @@ describe('reduceAiComposer', () => {
     const result = dispatch(createAiComposerState(), {
       type: 'runtime.synchronized',
       sessionId: 'session-1',
-      preset: 'agent',
       status,
       terminal: status === 'completed',
       waitingApproval,
@@ -121,12 +118,12 @@ describe('reduceAiComposer', () => {
   });
 
   it('adopts a newly created session view without discarding the in-flight detached payload', () => {
-    const started = dispatch(createAiComposerState({ preset: 'ask', draft: 'first message' }), {
+    const started = dispatch(createAiComposerState({ draft: 'first message' }), {
       type: 'submit.requested', gesture: 'keyboard', accelerated: false,
       clientOperationId: 'operation-1', now: 100, hasProvider: true, canCreateSession: true,
     }).state;
     const synchronized = dispatch(started, {
-      type: 'runtime.synchronized', sessionId: 'created-session', preset: 'ask',
+      type: 'runtime.synchronized', sessionId: 'created-session',
       status: 'running', waitingApproval: false,
       terminal: false,
     });
@@ -140,7 +137,7 @@ describe('reduceAiComposer', () => {
 
   it('keeps a newer editor draft while retrying a failed draft', () => {
     const state = createAiComposerState({
-      phase: 'error', runtimeStatus: 'running', preset: 'agent', presetLocked: true,
+      phase: 'error', runtimeStatus: 'running',
       sessionId: 'session-1', draft: 'new input', lastError: retryableError,
       failedDrafts: [{ id: 'failed-1', content: 'retry me', mode: 'nextTurn', error: retryableError }],
     });
@@ -192,7 +189,7 @@ describe('reduceAiComposer', () => {
       clientOperationId: 'operation-1', now: 100, hasProvider: true, canCreateSession: true,
     }).state;
     const switched = dispatch(started, {
-      type: 'runtime.synchronized', sessionId: 'session-2', preset: 'agent',
+      type: 'runtime.synchronized', sessionId: 'session-2',
       status: 'idle', waitingApproval: false,
       terminal: false,
     }).state;
@@ -205,11 +202,10 @@ describe('reduceAiComposer', () => {
     expect(stale.effects).toEqual([]);
   });
 
-  it('keeps preset identity locked after a session exists', () => {
-    const locked = dispatch(runningState(), { type: 'preset.changed', value: 'ask' });
-    expect(locked.state.preset).toBe('agent');
-    const unlocked = dispatch(createAiComposerState(), { type: 'preset.changed', value: 'agent' });
-    expect(unlocked.state.preset).toBe('agent');
+  it('has no mode-switching state in the product Composer contract', () => {
+    const state = createAiComposerState();
+    expect(state).not.toHaveProperty('preset');
+    expect(state).not.toHaveProperty('presetLocked');
   });
 
   it('emits explicit Stop only for the addressed session', () => {

@@ -1,13 +1,8 @@
 import type {
-  AiChatMessage,
-  AiContext,
-  AiConversation,
   AiProviderConfig,
-  AiTaskKind,
 } from '@/types/ai';
 import type {
   AgentArtifactResponse,
-  AgentActivityProjection,
   AgentSessionSnapshot,
   CreateAgentSessionRequest,
 } from '@/types/agent-session';
@@ -28,17 +23,10 @@ export interface AiSessionSummary {
   readonly revision?: number | null;
 }
 
-export type AiSessionSourceSnapshot =
-  | Readonly<{
-      kind: 'ask';
-      conversation: AiConversation;
-      messages: readonly AiChatMessage[];
-      phase: 'idle' | 'streaming' | 'error';
-    }>
-  | Readonly<{
-      kind: 'agent';
-      value: AgentSessionSnapshot;
-    }>;
+export type AiSessionSourceSnapshot = Readonly<{
+  kind: 'agent';
+  value: AgentSessionSnapshot;
+}>;
 
 export interface AiInboxItem {
   readonly id: string;
@@ -78,7 +66,6 @@ export interface AiSessionView {
   readonly summary: AiSessionSummary;
   readonly snapshot: AiSessionSourceSnapshot;
   readonly nodes: readonly AiConversationNode[];
-  readonly activity: AgentActivityProjection | null;
   readonly inbox: readonly AiInboxItem[];
   readonly pendingApproval: AiPendingApproval | null;
   readonly status: AiSessionStatus;
@@ -87,6 +74,7 @@ export interface AiSessionView {
   readonly revision?: number | null;
   readonly committedOperationIds?: readonly string[];
   readonly canLoadOlder: boolean;
+  readonly contextUsage?: AiContextUsage;
 }
 
 export type AiInboxMutationInput =
@@ -133,15 +121,21 @@ export interface AiSessionSummaryPage {
   readonly nextCursor?: string;
 }
 
-export type AiCreateSessionInput =
-  | Readonly<{
-      kind: 'ask';
-      conversation: AiConversation;
-    }>
-  | Readonly<{
-      kind: 'agent';
-      request: CreateAgentSessionRequest;
-    }>;
+export interface AiContextUsage {
+  readonly usedTokens: number;
+  readonly contextWindow: number;
+  readonly source: 'reported' | 'estimated';
+  readonly breakdown?: Readonly<{
+    readonly systemTokens: number;
+    readonly toolsTokens: number;
+    readonly messageTokens: number;
+  }>;
+}
+
+export type AiCreateSessionInput = Readonly<{
+  kind: 'agent';
+  request: CreateAgentSessionRequest;
+}>;
 
 export type AiSubmissionMode = 'start' | 'nextTurn' | 'nextStep';
 
@@ -150,8 +144,6 @@ export interface AiSubmitInput<Kind extends AiSessionKind = AiSessionKind> {
   readonly mode: AiSubmissionMode;
   readonly clientOperationId: string;
   readonly provider: AiProviderConfig;
-  readonly task?: AiTaskKind;
-  readonly context?: AiContext;
   readonly create?: Extract<AiCreateSessionInput, { readonly kind: Kind }>;
 }
 
@@ -172,7 +164,7 @@ export interface AiApprovalDecisionInput {
 
 export type AiSessionListener = (view: AiSessionView) => void;
 
-/** UI-facing session operations shared by the Ask and Agent adapters. */
+/** UI-facing operations backed exclusively by the Agent Runtime. */
 export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
   readonly kind: Kind;
   list(input: ListSessionsInput): Promise<AiSessionSummaryPage>;
