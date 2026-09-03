@@ -3,6 +3,31 @@ import {
   type AgentSessionEvent,
 } from '@/types/agent-session';
 
+const USER_SOURCE = {
+  kind: 'user',
+  label: 'User',
+  producerId: 'shellspan-user',
+} as const;
+
+const REQUEST_HEADER = {
+  providerId: 'openai',
+  model: 'gpt-test',
+  reasoningEffort: 'medium',
+  reason: 'initial',
+  series: { seriesId: 'series-fixture', requestIndex: 0, startsSeries: true },
+  systemPrompt: 'You are the ShellSpan Agent fixture.',
+  toolSchemas: [{
+    name: 'run_terminal_command',
+    description: 'Run a command on the frozen fixture target.',
+    inputSchema: {
+      type: 'object',
+      properties: { command: { type: 'string' } },
+      required: ['command'],
+    },
+  }],
+  attempt: 1,
+} as const;
+
 type EnvelopeKey = 'version' | 'sessionId' | 'seq' | 'timeUnixMs';
 type EventDraft<Type extends AgentSessionEvent['type']> = Omit<
   Extract<AgentSessionEvent, { type: Type }>,
@@ -70,7 +95,7 @@ export const agentSessionEventFixture: readonly AgentSessionEvent[] = [
         messageId: 'message-user',
         clientSubmissionId: 'submission-user',
         content: 'Check nginx now.',
-        source: { kind: 'user' },
+        source: USER_SOURCE,
       }],
     },
   }),
@@ -83,7 +108,7 @@ export const agentSessionEventFixture: readonly AgentSessionEvent[] = [
         messageId: 'message-user',
         clientSubmissionId: 'submission-user',
         content: 'Check nginx now.',
-        source: { kind: 'user' },
+        source: USER_SOURCE,
       }],
     },
   }),
@@ -98,7 +123,7 @@ export const agentSessionEventFixture: readonly AgentSessionEvent[] = [
         messageId: 'message-user',
         clientSubmissionId: 'submission-user',
         content: 'Check nginx now.',
-        source: { kind: 'user' },
+        source: USER_SOURCE,
       },
     },
   }),
@@ -108,10 +133,7 @@ export const agentSessionEventFixture: readonly AgentSessionEvent[] = [
     stepId: 'step-1',
     data: {
       requestId: 'request-1',
-      providerId: 'openai',
-      model: 'gpt-test',
-      reasoningEffort: 'medium',
-      attempt: 1,
+      ...REQUEST_HEADER,
     },
   }),
   sessionEvent(9, {
@@ -145,13 +167,13 @@ export const agentSessionEventFixture: readonly AgentSessionEvent[] = [
     type: 'assistant/chunk',
     turnId: 'turn-1',
     stepId: 'step-1',
-    data: { requestId: 'request-1', text: 'Checking ' },
+    data: { requestId: 'request-1', textDelta: 'Checking ' },
   }),
   sessionEvent(12, {
     type: 'assistant/chunk',
     turnId: 'turn-1',
     stepId: 'step-1',
-    data: { requestId: 'request-1', text: 'now.' },
+    data: { requestId: 'request-1', textDelta: 'now.' },
   }),
   sessionEvent(13, {
     type: 'assistant/message',
@@ -159,8 +181,12 @@ export const agentSessionEventFixture: readonly AgentSessionEvent[] = [
     stepId: 'step-1',
     data: {
       messageId: 'message-assistant',
-      content: 'Checking now.',
-      toolCalls: [call],
+      content: [
+        { type: 'text', text: 'Checking now.' },
+        { type: 'toolCall', call },
+      ],
+      usage: {},
+      stopReason: 'toolCalls',
       interrupted: false,
     },
   }),
@@ -375,9 +401,12 @@ const remainingEventFamilyFixture: readonly AgentSessionEvent[] = [
     stepId: 'step-1',
     data: {
       requestId: 'request-1',
-      inputTokens: 32_000,
-      outputTokens: 12,
-      totalTokens: 32_012,
+      usage: {
+        uncachedInputTokens: 32_000,
+        cacheReadTokens: 0,
+        outputTokens: 12,
+        totalTokens: 32_012,
+      },
       finishReason: 'stop',
     },
   }),
@@ -427,7 +456,7 @@ const remainingEventFamilyFixture: readonly AgentSessionEvent[] = [
       messages: [{
         messageId: 'discarded-steer',
         content: 'Obsolete steering input.',
-        source: { kind: 'user' },
+        source: USER_SOURCE,
       }],
     },
   }),
@@ -501,7 +530,7 @@ export const agentSessionFailedEventFixture: readonly AgentSessionEvent[] = [
       message: {
         messageId: 'message-failed',
         content: 'Why did deployment fail?',
-        source: { kind: 'user' },
+        source: USER_SOURCE,
       },
     },
   }),
@@ -509,13 +538,13 @@ export const agentSessionFailedEventFixture: readonly AgentSessionEvent[] = [
     type: 'request/header',
     turnId: 'turn-failed',
     stepId: 'step-failed',
-    data: { requestId: 'request-failed', providerId: 'openai', model: 'gpt-test' },
+    data: { requestId: 'request-failed', ...REQUEST_HEADER },
   }),
   sessionEvent(6, {
     type: 'assistant/chunk',
     turnId: 'turn-failed',
     stepId: 'step-failed',
-    data: { requestId: 'request-failed', text: 'The deployment check failed.' },
+    data: { requestId: 'request-failed', textDelta: 'The deployment check failed.' },
   }),
   sessionEvent(7, {
     type: 'step/end',

@@ -15,7 +15,12 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/setupTests.ts'],
     css: true,
-    exclude: ['node_modules', 'dist'],
+    exclude: [
+      'node_modules',
+      'dist',
+      // Interactive Phase 0 capture host; its dedicated config runs it explicitly.
+      'scripts/ai-panel-phase0-target-host.test.mjs',
+    ],
     maxWorkers: 4,
     testTimeout: 15_000,
   },

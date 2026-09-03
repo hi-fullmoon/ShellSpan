@@ -24,6 +24,19 @@ import { hydrateTransferResumeCandidates } from './lib/transfer-resume';
 initGlobalErrorLogging();
 
 async function bootstrap(): Promise<void> {
+  const params = new URLSearchParams(window.location.search);
+  const phase5Scenario = params.get('aiPhase5Visual');
+  if (import.meta.env.DEV && phase5Scenario !== null) {
+    const { mountAgentSessionPhase5Page } = await import('./test/agent-session-phase5-page');
+    await mountAgentSessionPhase5Page(document.getElementById('root')!);
+    return;
+  }
+  const baselineScenario = params.get('aiPhase0Baseline');
+  if (import.meta.env.DEV && baselineScenario !== null) {
+    const { mountAgentSessionBaselinePage } = await import('./test/agent-session-baseline-page');
+    await mountAgentSessionBaselinePage(document.getElementById('root')!);
+    return;
+  }
   await Promise.all([
     useAppStore.getState().hydrateFromDb(),
     useProfileStore.getState().hydrateFromDb(),
