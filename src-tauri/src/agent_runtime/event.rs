@@ -210,6 +210,10 @@ pub(crate) struct AgentSubagentBudget {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentSubagentModel {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) retry_policy: Option<serde_json::Value>,
     pub(crate) provider_id: String,
     pub(crate) provider_kind: String,
     pub(crate) base_url: String,
@@ -622,6 +626,29 @@ pub(crate) enum AgentSessionEventPayload {
         previous_request_id: Option<String>,
         attempt: u32,
         reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delay_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cumulative_delay_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        server_retry_after_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        server_hint_capped: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_kind: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_status: Option<u16>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_code: Option<String>,
+    },
+    #[serde(rename = "request/failure")]
+    RequestFailure {
+        request_id: String,
+        attempt: u32,
+        max_attempts: u32,
+        cumulative_delay_ms: u64,
+        interrupted: bool,
+        failure: super::model::NormalizedModelError,
     },
     #[serde(rename = "request/usage")]
     RequestUsage {

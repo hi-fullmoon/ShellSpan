@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Notify;
@@ -19,6 +20,65 @@ use super::{
 
 pub(crate) const DEFAULT_NATIVE_APPROVAL_TTL_MS: u64 = 60_000;
 const MAX_INLINE_TOOL_DATA_BYTES: usize = 8 * 1024;
+const DEFAULT_PARALLEL_TOOL_CALLS: usize = 4;
+const MAX_PARALLEL_TOOL_CALLS: usize = 16;
+
+/// Owns registry cleanup until execution consumes the token or pending approval takes ownership.
+struct PreparedLease {
+    native: Arc<dyn NativeToolRuntime>,
+    token: Option<String>,
+}
+
+impl PreparedLease {
+    fn new(native: Arc<dyn NativeToolRuntime>, token: &str) -> Self {
+        Self {
+            native,
+            token: Some(token.into()),
+        }
+    }
+
+    fn transfer(mut self) {
+        self.token = None;
+    }
+}
+
+impl Drop for PreparedLease {
+    fn drop(&mut self) {
+        if let Some(token) = &self.token {
+            self.native.abandon(token);
+        }
+    }
+}
+
+/// Synthetic skipped pairs do not consume child budget. All other accepted calls,
+/// including preparation rejection and pending approval, reserve exactly once.
+pub(crate) fn admitted_tool_calls(events: &[super::AgentSessionEvent]) -> u32 {
+    let skipped = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            AgentSessionEventPayload::ToolResult {
+                call_id,
+                data: Some(data),
+                ..
+            } if data.get("schedulerAdmission").and_then(Value::as_str) == Some("notStarted") => {
+                Some((event.step_id.as_deref(), call_id.as_str()))
+            }
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
+    events
+        .iter()
+        .filter(|event| match &event.payload {
+            AgentSessionEventPayload::ToolCall { call } => {
+                call.native_name.is_some()
+                    || !skipped.contains(&(event.step_id.as_deref(), call.call_id.as_str()))
+            }
+            _ => false,
+        })
+        .count()
+        .try_into()
+        .unwrap_or(u32::MAX)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NativeToolIdempotency {
@@ -267,11 +327,28 @@ enum PendingStatus {
 
 #[derive(Clone)]
 struct PendingTool {
+    _lease: Arc<PreparedLease>,
     request: NativeToolRequest,
     preparation: NativeToolPreparation,
     approval_id: String,
     remaining_calls: Vec<ModelToolCall>,
     status: PendingStatus,
+}
+
+struct PendingExecutionGuard<'a> {
+    pipeline: &'a AgentToolPipeline,
+    key: String,
+    token: String,
+}
+
+impl Drop for PendingExecutionGuard<'_> {
+    fn drop(&mut self) {
+        self.pipeline.native.abandon(&self.token);
+        if let Ok(mut pending) = self.pipeline.pending.lock() {
+            pending.remove(&self.key);
+        }
+        self.pipeline.changed.notify_waiters();
+    }
 }
 
 #[derive(Clone)]
@@ -283,6 +360,9 @@ pub(crate) struct AgentToolPipeline {
     orchestration: OrchestrationToolRuntimeSlot,
     pending: Arc<Mutex<HashMap<String, PendingTool>>>,
     changed: Arc<Notify>,
+    parallel_limit: Arc<std::sync::atomic::AtomicUsize>,
+    #[cfg(test)]
+    failure_observed: Arc<Notify>,
 }
 
 impl AgentToolPipeline {
@@ -301,7 +381,87 @@ impl AgentToolPipeline {
             orchestration,
             pending: Arc::new(Mutex::new(HashMap::new())),
             changed: Arc::new(Notify::new()),
+            parallel_limit: Arc::new(std::sync::atomic::AtomicUsize::new(
+                DEFAULT_PARALLEL_TOOL_CALLS,
+            )),
+            #[cfg(test)]
+            failure_observed: Arc::new(Notify::new()),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn wait_for_scheduler_failure(&self) {
+        self.failure_observed.notified().await;
+    }
+
+    pub(crate) fn configure_parallelism(&self, value: Option<&str>) -> Result<(), String> {
+        let limit = match value {
+            None => DEFAULT_PARALLEL_TOOL_CALLS,
+            Some(value) if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) => value
+                .parse::<usize>()
+                .map_err(|_| "invalid parallel tool limit")?,
+            Some(_) => return Err("invalid parallel tool limit: expected integer 1–16".into()),
+        };
+        if !(1..=MAX_PARALLEL_TOOL_CALLS).contains(&limit) {
+            return Err("invalid parallel tool limit: expected integer 1–16".into());
+        }
+        self.parallel_limit
+            .store(limit, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    pub(crate) fn mark_scheduler_failure(
+        &self,
+        entry: &AgentEntry,
+        message: &str,
+    ) -> Result<(), String> {
+        let scope = entry.scope()?;
+        let mut payloads = Vec::new();
+        if let Some(scope) = &scope {
+            if let Some(step_id) = &scope.step_id {
+                payloads.push(AgentScopedPayload {
+                    turn_id: Some(scope.turn_id.clone()),
+                    step_id: Some(step_id.clone()),
+                    payload: AgentSessionEventPayload::StepEnd {
+                        reason: "toolSchedulerRecoveryRequired".into(),
+                    },
+                });
+            }
+        }
+        payloads.extend([
+            AgentScopedPayload {
+                turn_id: None,
+                step_id: None,
+                payload: AgentSessionEventPayload::TaskState {
+                    status: "waiting".into(),
+                    phase: Some("reconciliation".into()),
+                    progress: None,
+                    fleet: None,
+                    recovery: Some(AgentRecoveryState {
+                        status: AgentRecoveryStatus::Required,
+                        summary: Some(message.into()),
+                    }),
+                },
+            },
+            AgentScopedPayload {
+                turn_id: None,
+                step_id: None,
+                payload: AgentSessionEventPayload::AgentStatus {
+                    status: AgentSessionStatus::Waiting,
+                    reason: Some("toolSchedulerRecoveryRequired".into()),
+                },
+            },
+        ]);
+        // Memory remains blocked even if the store cannot append the recovery notice.
+        entry.set_phase(AgentLifecyclePhase::Waiting)?;
+        self.sessions.append_batch(&entry.session_id, payloads)?;
+        if let Some(scope) = scope {
+            entry.set_scope(Some(AgentActiveScope {
+                turn_id: scope.turn_id,
+                step_id: None,
+            }))?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn process_model_calls(
@@ -319,187 +479,271 @@ impl AgentToolPipeline {
         let permission_mode = snapshot.header.permission_mode.ok_or_else(|| {
             "nativePermissionMissing: Session has no Rust permission mode".to_string()
         })?;
-        let mut calls = std::collections::VecDeque::from(calls);
-        let mut lookahead: Option<(NativeToolRequest, Result<NativeToolPreparation, String>)> =
-            None;
-        while !calls.is_empty() || lookahead.is_some() {
-            if entry.cancellation().is_cancelled() {
-                return Ok(ToolPipelineSettlement::Cancelled);
-            }
-            if let Some(subagent) = &entry.subagent {
-                let committed_calls = self
-                    .sessions
-                    .all_events(&entry.session_id)?
-                    .iter()
-                    .filter(|event| {
-                        matches!(event.payload, AgentSessionEventPayload::ToolCall { .. })
-                    })
-                    .count() as u32;
-                if committed_calls >= subagent.budget.max_tool_calls {
-                    return Err(format!(
-                        "subagentToolBudgetExceeded: maximum {} calls",
-                        subagent.budget.max_tool_calls
-                    ));
+        let request_for = |model_call: ModelToolCall| NativeToolRequest {
+            session_id: entry.session_id.clone(),
+            task_id: snapshot.header.task_id.clone(),
+            goal: snapshot.header.goal.clone(),
+            success_criteria: snapshot.header.success_criteria.clone(),
+            turn_id: turn_id.into(),
+            step_id: step_id.into(),
+            request_id: request_id.into(),
+            model_call,
+            target: target.clone(),
+            permission_mode,
+        };
+        let limit = self
+            .parallel_limit
+            .load(std::sync::atomic::Ordering::Acquire);
+        let mut next = 0;
+        let mut committed = 0;
+        let mut ready = std::collections::BTreeMap::new();
+        let mut running = futures_util::stream::FuturesUnordered::new();
+        let mut draining_barrier = false;
+        let mut budget_exhausted = false;
+        let outcome: Result<ToolPipelineSettlement, String> = async {
+            loop {
+                while let Some((request, preparation, result)) = ready.remove(&committed) {
+                    self.finish_native(&request, &preparation, result)?;
+                    committed += 1;
                 }
-            }
-            if lookahead.is_none()
-                && calls
-                    .front()
-                    .is_some_and(|call| is_session_tool(&call.name))
-            {
-                let call = calls.pop_front().expect("Session call remains queued");
-                self.process_session_call(
-                    entry,
-                    turn_id,
-                    step_id,
-                    request_id,
-                    target.clone(),
-                    call,
-                )?;
-                continue;
-            }
-            if lookahead.is_none()
-                && calls
-                    .front()
-                    .is_some_and(|call| is_orchestration_tool(&call.name))
-            {
-                let call = calls
-                    .pop_front()
-                    .expect("orchestration call remains queued");
-                self.process_orchestration_call(
-                    entry,
-                    turn_id,
-                    step_id,
-                    request_id,
-                    target.clone(),
-                    call,
-                )
-                .await?;
-                continue;
-            }
-            let (request, prepared) = match lookahead.take() {
-                Some(value) => value,
-                None => {
-                    let model_call = calls.pop_front().expect("non-empty tool queue has a call");
-                    let request = NativeToolRequest {
-                        session_id: entry.session_id.clone(),
-                        task_id: snapshot.header.task_id.clone(),
-                        goal: snapshot.header.goal.clone(),
-                        success_criteria: snapshot.header.success_criteria.clone(),
-                        turn_id: turn_id.to_string(),
-                        step_id: step_id.to_string(),
-                        request_id: request_id.to_string(),
-                        model_call,
-                        target: target.clone(),
-                        permission_mode,
-                    };
+                let cancelled = entry.cancellation().is_cancelled();
+                if !cancelled
+                    && !budget_exhausted
+                    && !draining_barrier
+                    && next < calls.len()
+                    && running.len() < limit
+                {
+                    let call = &calls[next];
+                    if let Some(subagent) = &entry.subagent {
+                        // Every dispatched or pending call already has a durable reservation.
+                        // Preparation is synchronous, so there is no unrecorded concurrent admission.
+                        let used =
+                            admitted_tool_calls(&self.sessions.all_events(&entry.session_id)?);
+                        if used >= subagent.budget.max_tool_calls {
+                            budget_exhausted = true;
+                            continue;
+                        }
+                    }
+                    if is_session_tool(&call.name) || is_orchestration_tool(&call.name) {
+                        if !running.is_empty() {
+                            draining_barrier = true;
+                            continue;
+                        }
+                        if is_session_tool(&call.name) {
+                            self.process_session_call(
+                                entry,
+                                turn_id,
+                                step_id,
+                                request_id,
+                                target.clone(),
+                                call.clone(),
+                            )?;
+                        } else {
+                            self.process_orchestration_call(
+                                entry,
+                                turn_id,
+                                step_id,
+                                request_id,
+                                target.clone(),
+                                call.clone(),
+                            )
+                            .await?;
+                        }
+                        next += 1;
+                        committed += 1;
+                        continue;
+                    }
+                    let request = request_for(call.clone());
+                    if !running.is_empty() {
+                        // Probe policy without lifecycle hooks. A barrier's before_tool must
+                        // observe every preceding committed result, exactly once at admission.
+                        let can_overlap = match self.prepare_native(&request) {
+                            Ok(probe) => {
+                                let _lease = PreparedLease::new(self.native.clone(), &probe.token);
+                                probe.parallel && !probe.requires_approval && !probe.exclusive
+                            }
+                            Err(_) => false,
+                        };
+                        if !can_overlap {
+                            draining_barrier = true;
+                            continue;
+                        }
+                    }
                     let prepared = self.prepare_request(&request);
-                    (request, prepared)
-                }
-            };
-            let preparation = match prepared {
-                Ok(preparation) => preparation,
-                Err(error) => {
-                    self.commit_prepare_failure(&request, &error)?;
+                    let preparation = match prepared {
+                        Ok(value) => value,
+                        Err(error) => {
+                            // A preparation failure is ordered behind all earlier results.
+                            // Hook infrastructure failures stop admission; policy/schema rejection is a result.
+                            if error.starts_with("beforeToolHookFailed:") {
+                                return Err(error);
+                            }
+                            while let Some((index, request, preparation, result)) =
+                                running.next().await
+                            {
+                                ready.insert(index, (request, preparation, result));
+                            }
+                            while let Some((request, preparation, result)) =
+                                ready.remove(&committed)
+                            {
+                                self.finish_native(&request, &preparation, result)?;
+                                committed += 1;
+                            }
+                            self.commit_prepare_failure(&request, &error)?;
+                            next += 1;
+                            committed += 1;
+                            continue;
+                        }
+                    };
+                    let lease = PreparedLease::new(self.native.clone(), &preparation.token);
+                    self.ensure_capability(
+                        entry,
+                        &request.model_call.name,
+                        preparation
+                            .call
+                            .effect
+                            .unwrap_or(AgentSessionEffect::Unknown),
+                        &request.target.target_id,
+                    )?;
+                    if entry.cancellation().is_cancelled() {
+                        continue;
+                    }
+                    let parallel = preparation.parallel
+                        && !preparation.requires_approval
+                        && !preparation.exclusive;
+                    if !parallel && !running.is_empty() {
+                        // Policy changed inside the admission hook itself. Do not reuse its
+                        // earlier allow decision after draining, or invoke it twice.
+                        while let Some((index, request, preparation, result)) = running.next().await
+                        {
+                            ready.insert(index, (request, preparation, result));
+                        }
+                        while let Some((request, preparation, result)) = ready.remove(&committed) {
+                            self.finish_native(&request, &preparation, result)?;
+                            committed += 1;
+                        }
+                        self.commit_prepare_failure(
+                            &request,
+                            "native policy changed during admission; request a fresh call",
+                        )?;
+                        next += 1;
+                        committed += 1;
+                        continue;
+                    }
+                    if preparation.requires_approval {
+                        let settlement = self
+                            .process_prepared(
+                                entry,
+                                request,
+                                preparation,
+                                calls[next + 1..].to_vec(),
+                            )
+                            .await?;
+                        lease.transfer();
+                        return Ok(settlement);
+                    }
+                    self.append_auto_approved_call(&request, &preparation)?;
+                    self.append_execution_dispatch(&request, &preparation)?;
+                    // spawn_blocking starts now; the pool owns its join until actual completion.
+                    let native = self.native.clone();
+                    let token = preparation.token.clone();
+                    let cancellation = entry.cancellation();
+                    let worker = tokio::task::spawn_blocking(move || {
+                        let _lease = lease;
+                        native.execute(&token, true, cancellation)
+                    });
+                    let index = next;
+                    running.push(async move {
+                        let result = worker
+                            .await
+                            .map_err(|error| format!("native tool worker failed: {error}"));
+                        (index, request, preparation, result)
+                    });
+                    next += 1;
+                    if !parallel {
+                        draining_barrier = true;
+                    }
                     continue;
                 }
-            };
-            self.ensure_capability(
-                entry,
-                &request.model_call.name,
-                preparation
-                    .call
-                    .effect
-                    .unwrap_or(AgentSessionEffect::Unknown),
-                &request.target.target_id,
-            )?;
-
-            if preparation.parallel && !preparation.requires_approval {
-                let mut group = vec![(request, preparation)];
-                while calls.front().is_some_and(|call| {
-                    !is_orchestration_tool(&call.name) && !is_session_tool(&call.name)
-                }) {
-                    let model_call = calls
-                        .pop_front()
-                        .expect("non-orchestration call remains queued");
-                    let request = NativeToolRequest {
-                        session_id: entry.session_id.clone(),
-                        task_id: snapshot.header.task_id.clone(),
-                        goal: snapshot.header.goal.clone(),
-                        success_criteria: snapshot.header.success_criteria.clone(),
-                        turn_id: turn_id.to_string(),
-                        step_id: step_id.to_string(),
-                        request_id: request_id.to_string(),
-                        model_call,
-                        target: target.clone(),
-                        permission_mode,
+                if let Some((index, request, preparation, result)) = running.next().await {
+                    // Infrastructure failure stops replenishment immediately, even if an
+                    // earlier model-order result is still blocked.
+                    if let Err(error) = &result {
+                        return Err(error.clone());
+                    }
+                    ready.insert(index, (request, preparation, result));
+                    if running.is_empty() {
+                        draining_barrier = false;
+                    }
+                    continue;
+                }
+                if cancelled || budget_exhausted {
+                    let reason = if cancelled {
+                        "cancelled"
+                    } else {
+                        "subagentToolBudgetExceeded"
                     };
-                    let prepared = self.prepare_request(&request);
-                    match prepared {
-                        Ok(preparation) => {
-                            self.ensure_capability(
-                                entry,
-                                &request.model_call.name,
-                                preparation
-                                    .call
-                                    .effect
-                                    .unwrap_or(AgentSessionEffect::Unknown),
-                                &request.target.target_id,
-                            )?;
-                            if preparation.parallel && !preparation.requires_approval {
-                                group.push((request, preparation));
-                            } else {
-                                lookahead = Some((request, Ok(preparation)));
-                                break;
-                            }
-                        }
-                        other => {
-                            lookahead = Some((request, other));
+                    for call in &calls[next..] {
+                        self.commit_not_started(&request_for(call.clone()), reason)?;
+                    }
+                    if budget_exhausted && !cancelled {
+                        return Err(
+                            "subagentToolBudgetExceeded: no remaining tool admissions".into()
+                        );
+                    }
+                    return Ok(ToolPipelineSettlement::Cancelled);
+                }
+                if next == calls.len() {
+                    return Ok(ToolPipelineSettlement::Completed);
+                }
+                draining_barrier = false;
+            }
+        }
+        .await;
+        // No early return may detach an already dispatched worker, even on storage/hook failure.
+        if outcome.is_err() {
+            #[cfg(test)]
+            self.failure_observed.notify_one();
+            while running.next().await.is_some() {}
+            // Dispatched calls without committed results intentionally stay uncertain on replay.
+            if !outcome
+                .as_ref()
+                .is_err_and(|error| error.starts_with("subagentToolBudgetExceeded:"))
+            {
+                let events = self.sessions.all_events(&entry.session_id);
+                if let Ok(events) = events {
+                    for call in &calls[next..] {
+                        if !events.iter().any(|event| event.step_id.as_deref() == Some(step_id)
+                            && matches!(&event.payload, AgentSessionEventPayload::ToolCall { call: accepted }
+                                if accepted.call_id == call.call_id))
+                            && self.commit_not_started(&request_for(call.clone()), "schedulerFailure").is_err()
+                        {
                             break;
                         }
                     }
                 }
-                for (request, preparation) in &group {
-                    self.append_auto_approved_call(request, preparation)?;
-                    self.append_execution_dispatch(request, preparation)?;
-                }
-                let results =
-                    futures_util::future::join_all(group.iter().map(|(_, preparation)| {
-                        self.execute_native(preparation, true, entry.cancellation())
-                    }))
-                    .await;
-                for ((request, preparation), result) in group.into_iter().zip(results) {
-                    self.finish_native(&request, &preparation, result)?;
-                }
-                continue;
-            }
-
-            let remaining_calls = if preparation.requires_approval {
-                calls.drain(..).collect()
-            } else {
-                Vec::new()
-            };
-            match self
-                .process_prepared(entry, request, preparation, remaining_calls)
-                .await?
-            {
-                ToolPipelineSettlement::Completed => {}
-                settlement => return Ok(settlement),
             }
         }
-        self.sessions.append(
-            &entry.session_id,
-            Some(turn_id.to_string()),
-            Some(step_id.to_string()),
-            AgentSessionEventPayload::StepEnd {
-                reason: "toolsCompleted".into(),
-            },
-        )?;
-        entry.set_scope(Some(AgentActiveScope {
-            turn_id: turn_id.to_string(),
-            step_id: None,
-        }))?;
-        Ok(ToolPipelineSettlement::Completed)
+        let settlement = match outcome {
+            Ok(value) => value,
+            Err(error) if error.starts_with("subagentToolBudgetExceeded:") => return Err(error),
+            Err(error) => return Err(format!("toolSchedulerFailure: {error}")),
+        };
+        if settlement == ToolPipelineSettlement::Completed {
+            self.sessions.append(
+                &entry.session_id,
+                Some(turn_id.into()),
+                Some(step_id.into()),
+                AgentSessionEventPayload::StepEnd {
+                    reason: "toolsCompleted".into(),
+                },
+            )?;
+            entry.set_scope(Some(AgentActiveScope {
+                turn_id: turn_id.into(),
+                step_id: None,
+            }))?;
+        }
+        Ok(settlement)
     }
 
     fn process_session_call(
@@ -772,8 +1016,15 @@ impl AgentToolPipeline {
                 return Err(format!("beforeToolRejected: {reason}"));
             }
         }
+        self.prepare_native(request)
+    }
+
+    fn prepare_native(&self, request: &NativeToolRequest) -> Result<NativeToolPreparation, String> {
         let preparation = self.native.prepare(request.clone())?;
-        self.validate_preparation(request, &preparation)?;
+        if let Err(error) = self.validate_preparation(request, &preparation) {
+            self.native.abandon(&preparation.token);
+            return Err(error);
+        }
         Ok(preparation)
     }
 
@@ -839,6 +1090,10 @@ impl AgentToolPipeline {
                         &request.model_call.call_id,
                     ),
                     PendingTool {
+                        _lease: Arc::new(PreparedLease::new(
+                            self.native.clone(),
+                            &preparation.token,
+                        )),
                         request,
                         preparation,
                         approval_id,
@@ -962,6 +1217,34 @@ impl AgentToolPipeline {
         Ok(ToolPipelineSettlement::Completed)
     }
 
+    fn commit_not_started(&self, request: &NativeToolRequest, reason: &str) -> Result<(), String> {
+        self.sessions.append_batch(&request.session_id, vec![
+            AgentScopedPayload {
+                turn_id: Some(request.turn_id.clone()), step_id: Some(request.step_id.clone()),
+                payload: AgentSessionEventPayload::ToolCall {
+                    call: RecordedToolCall {
+                        call_id: request.model_call.call_id.clone(),
+                        provider_call_id: request.model_call.provider_call_id.clone(),
+                        name: request.model_call.name.clone(), native_name: None,
+                        arguments: request.model_call.arguments.clone(), title: None,
+                        effect: Some(AgentSessionEffect::Unknown), target: Some(request.target.clone()),
+                    },
+                },
+            },
+            AgentScopedPayload {
+                turn_id: Some(request.turn_id.clone()), step_id: Some(request.step_id.clone()),
+                payload: AgentSessionEventPayload::ToolResult {
+                    call_id: request.model_call.call_id.clone(), name: request.model_call.name.clone(),
+                    status: AgentToolResultStatus::Rejected,
+                    summary: format!("Tool not started: {reason}"),
+                    data: Some(serde_json::json!({"schedulerAdmission": "notStarted", "reason": reason})),
+                    duration_ms: None, evidence_refs: Vec::new(),
+                },
+            },
+        ])?;
+        Ok(())
+    }
+
     fn validate_preparation(
         &self,
         request: &NativeToolRequest,
@@ -990,20 +1273,25 @@ impl AgentToolPipeline {
         preparation: &NativeToolPreparation,
         approved: bool,
         cancellation: CancellationToken,
-    ) -> Result<NativeToolResult, String> {
+    ) -> Result<Result<NativeToolResult, String>, String> {
         let native = Arc::clone(&self.native);
         let token = preparation.token.clone();
-        tokio::task::spawn_blocking(move || native.execute(&token, approved, cancellation))
-            .await
-            .map_err(|error| format!("native tool worker failed: {error}"))?
+        let lease = PreparedLease::new(native.clone(), &token);
+        tokio::task::spawn_blocking(move || {
+            let _lease = lease;
+            native.execute(&token, approved, cancellation)
+        })
+        .await
+        .map_err(|error| format!("native tool worker failed: {error}"))
     }
 
     fn finish_native(
         &self,
         request: &NativeToolRequest,
         preparation: &NativeToolPreparation,
-        result: Result<NativeToolResult, String>,
+        result: Result<Result<NativeToolResult, String>, String>,
     ) -> Result<(), String> {
+        let result = result?;
         let mut result = result.unwrap_or_else(|error| NativeToolResult {
             call_id: request.model_call.call_id.clone(),
             native_name: preparation.call.native_name.clone().unwrap_or_default(),
@@ -1167,7 +1455,7 @@ impl AgentToolPipeline {
         decision: AgentToolDecision,
     ) -> Result<(), String> {
         let key = approval_key(&input.session_id, &input.step_id, &input.call_id);
-        let pending = {
+        let mut pending = {
             let mut pending = self
                 .pending
                 .lock()
@@ -1185,12 +1473,13 @@ impl AgentToolPipeline {
             {
                 return Err("approval identity or state is stale".into());
             }
-            record.status = if decision == AgentToolDecision::Approve {
-                PendingStatus::Executing
-            } else {
-                PendingStatus::Cancelled
-            };
+            record.status = PendingStatus::Executing;
             record.clone()
+        };
+        let _owner = PendingExecutionGuard {
+            pipeline: self,
+            key: key.clone(),
+            token: pending.preparation.token.clone(),
         };
 
         if current_unix_ms() >= pending.preparation.expires_at_unix_ms {
@@ -1201,10 +1490,6 @@ impl AgentToolPipeline {
                 "native approval expired before the decision was committed",
             )?;
             self.native.abandon(&pending.preparation.token);
-            self.pending
-                .lock()
-                .map_err(|_| "native approval registry is unavailable".to_string())?
-                .remove(&key);
             self.changed.notify_waiters();
             self.continue_after_pending(entry, &pending).await?;
             return Err("approval expired".into());
@@ -1218,14 +1503,29 @@ impl AgentToolPipeline {
                 "native approval was rejected",
             )?;
             self.native.abandon(&pending.preparation.token);
-            self.pending
-                .lock()
-                .map_err(|_| "native approval registry is unavailable".to_string())?
-                .remove(&key);
             self.changed.notify_waiters();
             self.continue_after_pending(entry, &pending).await?;
             return Ok(());
         }
+
+        // Recheck live native policy without running before_tool again or charging again.
+        self.native.abandon(&pending.preparation.token);
+        let refreshed = self.prepare_native(&pending.request)?;
+        let refreshed_lease = PreparedLease::new(self.native.clone(), &refreshed.token);
+        self.ensure_capability(
+            entry,
+            &pending.request.model_call.name,
+            refreshed.call.effect.unwrap_or(AgentSessionEffect::Unknown),
+            &pending.request.target.target_id,
+        )?;
+        if refreshed.call != pending.preparation.call
+            || refreshed.idempotency != pending.preparation.idempotency
+            || refreshed.parallel != pending.preparation.parallel
+            || refreshed.exclusive != pending.preparation.exclusive
+        {
+            return Err("approval policy changed; explicit reconciliation is required".into());
+        }
+        pending.preparation = refreshed;
 
         self.sessions.append(
             &pending.request.session_id,
@@ -1246,6 +1546,7 @@ impl AgentToolPipeline {
         let result = self
             .execute_native(&pending.preparation, true, entry.cancellation())
             .await;
+        drop(refreshed_lease);
         let still_executing = self
             .pending
             .lock()
@@ -1254,10 +1555,6 @@ impl AgentToolPipeline {
             .is_some_and(|record| record.status == PendingStatus::Executing);
         if still_executing {
             self.finish_native(&pending.request, &pending.preparation, result)?;
-            self.pending
-                .lock()
-                .map_err(|_| "native approval registry is unavailable".to_string())?
-                .remove(&key);
             self.changed.notify_waiters();
             self.continue_after_pending(entry, &pending).await?;
         }
@@ -1270,14 +1567,29 @@ impl AgentToolPipeline {
         pending: &PendingTool,
     ) -> Result<ToolPipelineSettlement, String> {
         self.resume_after_tool(entry)?;
-        self.process_model_calls(
-            entry,
-            &pending.request.turn_id,
-            &pending.request.step_id,
-            &pending.request.request_id,
-            pending.remaining_calls.clone(),
-        )
-        .await
+        let outcome = self
+            .process_model_calls(
+                entry,
+                &pending.request.turn_id,
+                &pending.request.step_id,
+                &pending.request.request_id,
+                pending.remaining_calls.clone(),
+            )
+            .await;
+        if let Err(error) = &outcome {
+            if error.starts_with("subagentToolBudgetExceeded:") {
+                super::driver::close_open_scope(&self.sessions, entry, error)?;
+                self.sessions.terminate(
+                    &entry.session_id,
+                    AgentSessionStatus::Failed,
+                    error.clone(),
+                )?;
+                entry.set_phase(AgentLifecyclePhase::Stopping)?;
+            } else {
+                self.mark_scheduler_failure(entry, error)?;
+            }
+        }
+        outcome
     }
 
     fn append_terminal_approval(
@@ -1296,7 +1608,8 @@ impl AgentToolPipeline {
                     payload: AgentSessionEventPayload::ToolApproval {
                         request_id: pending.request.request_id.clone(),
                         call_id: pending.request.model_call.call_id.clone(),
-                        approval_id: Some(pending.approval_id.clone()),
+                        approval_id: (!pending.approval_id.is_empty())
+                            .then(|| pending.approval_id.clone()),
                         status: approval_status,
                         risk: pending.preparation.call.effect,
                         reason: Some(reason.into()),
@@ -1351,7 +1664,7 @@ impl AgentToolPipeline {
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
         for key in keys {
-            let (pending, was_executing) = {
+            let pending = {
                 let mut records = self
                     .pending
                     .lock()
@@ -1362,32 +1675,28 @@ impl AgentToolPipeline {
                 if record.status == PendingStatus::Cancelled {
                     continue;
                 }
-                let was_executing = record.status == PendingStatus::Executing;
+                if record.status == PendingStatus::Executing {
+                    // Its decision owner must join the worker and commit the actual outcome.
+                    continue;
+                }
                 record.status = PendingStatus::Cancelled;
-                (record.clone(), was_executing)
+                record.clone()
             };
-            if was_executing {
-                self.sessions.append(
-                    &pending.request.session_id,
-                    Some(pending.request.turn_id.clone()),
-                    Some(pending.request.step_id.clone()),
-                    AgentSessionEventPayload::ToolResult {
-                        call_id: pending.request.model_call.call_id.clone(),
-                        name: pending.request.model_call.name.clone(),
-                        status: AgentToolResultStatus::Cancelled,
-                        summary: "native tool execution was cancelled".into(),
-                        data: None,
-                        duration_ms: None,
-                        evidence_refs: Vec::new(),
-                    },
-                )?;
-            } else {
-                self.append_terminal_approval(
-                    &pending,
-                    AgentToolApprovalStatus::Cancelled,
-                    AgentToolResultStatus::Cancelled,
-                    "native tool call was cancelled",
-                )?;
+            let _owner = PendingExecutionGuard {
+                pipeline: self,
+                key: key.clone(),
+                token: pending.preparation.token.clone(),
+            };
+            self.append_terminal_approval(
+                &pending,
+                AgentToolApprovalStatus::Cancelled,
+                AgentToolResultStatus::Cancelled,
+                "native tool call was cancelled",
+            )?;
+            for call in &pending.remaining_calls {
+                let mut request = pending.request.clone();
+                request.model_call = call.clone();
+                self.commit_not_started(&request, "cancelled")?;
             }
             self.native.abandon(&pending.preparation.token);
             self.pending
@@ -1398,6 +1707,27 @@ impl AgentToolPipeline {
         }
         self.native
             .cancel_task(&self.sessions.snapshot(session_id)?.header.task_id)
+    }
+
+    pub(crate) async fn await_pending_executions(&self, entry: &AgentEntry) -> Result<(), String> {
+        loop {
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let executing = self
+                .pending
+                .lock()
+                .map_err(|_| "native approval registry is unavailable".to_string())?
+                .values()
+                .any(|record| {
+                    record.request.session_id == entry.session_id
+                        && record.status == PendingStatus::Executing
+                });
+            if !executing {
+                return Ok(());
+            }
+            changed.await;
+        }
     }
 
     pub(crate) async fn wait_for_expiry(&self, entry: &Arc<AgentEntry>) -> Result<bool, String> {
@@ -1428,6 +1758,9 @@ impl AgentToolPipeline {
                         }
                         record.status = PendingStatus::Cancelled;
                         record.clone()
+                    };
+                    let _owner = PendingExecutionGuard {
+                        pipeline: self, key: key.clone(), token: expired.preparation.token.clone(),
                     };
                     self.append_terminal_approval(
                         &expired,
@@ -1570,6 +1903,7 @@ impl AgentToolPipeline {
             let remaining_calls = raw_calls
                 .iter()
                 .skip(raw_index + 1)
+                .filter(|call| !results.contains_key(&(step_id.clone(), call.call_id.clone())))
                 .map(|call| ModelToolCall {
                     call_id: call.call_id.clone(),
                     provider_call_id: call.provider_call_id.clone(),
@@ -1598,16 +1932,21 @@ impl AgentToolPipeline {
                     .ok_or_else(|| "recovered tool call has no Rust permission mode".to_string())?,
             };
             let mut preparation = self.native.prepare(request.clone())?;
+            let lease = Arc::new(PreparedLease::new(self.native.clone(), &preparation.token));
             if preparation.call != *call {
                 self.native.abandon(&preparation.token);
                 return Err("recovered native preparation drifted from the durable call".into());
             }
+            if let Err(error) = self.validate_preparation(&request, &preparation) {
+                self.native.abandon(&preparation.token);
+                return Err(error);
+            }
             if status == AgentToolApprovalStatus::Requested {
                 preparation.expires_at_unix_ms = expires_at;
             }
-            self.validate_preparation(&request, &preparation)?;
             if status == AgentToolApprovalStatus::Requested && current_unix_ms() >= expires_at {
                 let pending = PendingTool {
+                    _lease: lease.clone(),
                     request,
                     preparation,
                     approval_id,
@@ -1620,6 +1959,11 @@ impl AgentToolPipeline {
                     AgentToolResultStatus::TimedOut,
                     "native approval expired while the app was not running",
                 )?;
+                for call in &pending.remaining_calls {
+                    let mut request = pending.request.clone();
+                    request.model_call = call.clone();
+                    self.commit_not_started(&request, "approvalExpiredDuringRecovery")?;
+                }
                 self.native.abandon(&pending.preparation.token);
                 resumable = true;
             } else {
@@ -1634,6 +1978,7 @@ impl AgentToolPipeline {
                     .insert(
                         approval_key(&entry.session_id, &step_id, &call_id),
                         PendingTool {
+                            _lease: lease.clone(),
                             request,
                             preparation,
                             approval_id,
@@ -1684,6 +2029,11 @@ impl AgentToolPipeline {
     }
 
     pub(crate) async fn resume_authorized(&self, entry: &Arc<AgentEntry>) -> Result<bool, String> {
+        if self.sessions.snapshot(&entry.session_id)?.recovery.status
+            == AgentRecoveryStatus::Required
+        {
+            return Err("unresolved tool execution requires reconciliation before resuming".into());
+        }
         let candidate = {
             let mut records = self
                 .pending
@@ -1701,9 +2051,32 @@ impl AgentToolPipeline {
                 });
             candidate
         };
-        let Some((key, pending)) = candidate else {
+        let Some((key, mut pending)) = candidate else {
             return Ok(false);
         };
+        let _owner = PendingExecutionGuard {
+            pipeline: self,
+            key: key.clone(),
+            token: pending.preparation.token.clone(),
+        };
+        self.native.abandon(&pending.preparation.token);
+        let refreshed = self.prepare_native(&pending.request)?;
+        let _lease = PreparedLease::new(self.native.clone(), &refreshed.token);
+        if refreshed.call != pending.preparation.call {
+            return Err("recovered authorization drifted before dispatch".into());
+        }
+        pending.preparation = refreshed;
+        self.ensure_capability(
+            entry,
+            &pending.request.model_call.name,
+            pending
+                .preparation
+                .call
+                .effect
+                .unwrap_or(AgentSessionEffect::Unknown),
+            &pending.request.target.target_id,
+        )?;
+        self.validate_preparation(&pending.request, &pending.preparation)?;
         self.append_execution_dispatch(&pending.request, &pending.preparation)?;
         let result = self
             .execute_native(&pending.preparation, true, entry.cancellation())

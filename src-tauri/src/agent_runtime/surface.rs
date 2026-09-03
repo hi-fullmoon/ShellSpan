@@ -139,6 +139,20 @@ pub(crate) fn derive_surface(events: &[AgentSessionEvent]) -> Result<AgentSurfac
     })
 }
 
+pub(crate) fn surface_messages_after(
+    events: &[AgentSessionEvent],
+    replaced_through_seq: u64,
+) -> Vec<AgentSurfaceMessage> {
+    let mut messages = Vec::new();
+    append_surface_events(
+        events
+            .iter()
+            .filter(|event| event.seq > replaced_through_seq),
+        &mut messages,
+    );
+    messages
+}
+
 fn append_surface_events<'a>(
     events: impl Iterator<Item = &'a AgentSessionEvent>,
     messages: &mut Vec<AgentSurfaceMessage>,

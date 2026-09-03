@@ -13,7 +13,8 @@ use crate::{
 };
 
 const AI_KEY_MIGRATION_PREFERENCE: &str = "ai.apiKeyStorageMigrationV4";
-pub(crate) const AGENT_MAX_OUTPUT_TOKENS: u64 = 4_096;
+#[cfg(test)]
+const AGENT_MAX_OUTPUT_TOKENS: u64 = 4_096;
 pub(crate) const MAX_ERROR_BODY_BYTES: usize = 4 * 1024;
 pub(crate) const MAX_PROVIDER_NON_STREAM_RESPONSE_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_PROVIDER_STREAM_EVENT_BYTES: usize = 1024 * 1024;
@@ -24,7 +25,7 @@ const ERROR_BODY_LIMIT_MESSAGE: &str =
 const NON_STREAM_BODY_LIMIT_MESSAGE: &str =
     "AI provider response exceeded the 1 MiB non-streaming limit";
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AiProviderKind {
     Ollama,
@@ -49,6 +50,13 @@ pub(crate) enum AiReasoningEffort {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AiProviderConfig {
+    #[serde(
+        default,
+        deserialize_with = "crate::agent_runtime::RetryPolicy::deserialize_optional"
+    )]
+    pub(crate) retry_policy: Option<crate::agent_runtime::RetryPolicy>,
+    #[serde(default)]
+    pub(crate) profile: Option<String>,
     pub(crate) id: String,
     pub(crate) kind: AiProviderKind,
     pub(crate) base_url: String,
@@ -518,6 +526,10 @@ pub(crate) fn validate_provider_config(
     require_model: bool,
 ) -> Result<(), String> {
     validate_provider_id(&provider.id)?;
+    if let Some(policy) = provider.retry_policy {
+        policy.validate()?;
+    }
+    crate::agent_runtime::provider::validate(provider)?;
     if require_model && provider.model.trim().is_empty() {
         return Err("AI model cannot be empty".to_string());
     }
@@ -552,118 +564,8 @@ fn is_loopback_host(host: Option<&str>) -> bool {
     matches!(host, Some("localhost" | "127.0.0.1" | "::1" | "[::1]"))
 }
 
-pub(crate) fn is_kimi_code_provider(provider: &AiProviderConfig) -> bool {
-    Url::parse(provider.base_url.trim())
-        .ok()
-        .is_some_and(|url| {
-            url.host_str()
-                .is_some_and(|host| host.eq_ignore_ascii_case("api.kimi.com"))
-                && (url.path() == "/coding" || url.path().starts_with("/coding/"))
-        })
-}
-
-fn is_deepseek_v4_provider(provider: &AiProviderConfig) -> bool {
-    provider
-        .model
-        .trim()
-        .to_ascii_lowercase()
-        .starts_with("deepseek-v4")
-        && Url::parse(provider.base_url.trim())
-            .ok()
-            .and_then(|url| url.host_str().map(str::to_owned))
-            .is_some_and(|host| host.eq_ignore_ascii_case("api.deepseek.com"))
-}
-
-fn is_minimax_m3_provider(provider: &AiProviderConfig) -> bool {
-    let model = provider.model.trim().to_ascii_lowercase();
-    (model == "minimax-m3" || model.starts_with("minimax-m3-"))
-        && Url::parse(provider.base_url.trim())
-            .ok()
-            .and_then(|url| url.host_str().map(str::to_owned))
-            .is_some_and(|host| {
-                host.eq_ignore_ascii_case("api.minimax.io")
-                    || host.eq_ignore_ascii_case("api.minimaxi.com")
-            })
-}
-
-pub(crate) fn is_dashscope_qwen_thinking_provider(provider: &AiProviderConfig) -> bool {
-    let model = provider.model.trim().to_ascii_lowercase();
-    (model == "qwen3" || model.starts_with("qwen3-") || model.starts_with("qwen3."))
-        && !model.split(['-', '.']).any(|segment| segment == "thinking")
-        && Url::parse(provider.base_url.trim())
-            .ok()
-            .and_then(|url| url.host_str().map(str::to_owned))
-            .is_some_and(|host| {
-                host.eq_ignore_ascii_case("dashscope.aliyuncs.com")
-                    || host.eq_ignore_ascii_case("dashscope-intl.aliyuncs.com")
-                    || host.to_ascii_lowercase().ends_with(".maas.aliyuncs.com")
-            })
-}
-
-pub(crate) fn is_glm_thinking_provider(provider: &AiProviderConfig) -> bool {
-    let model = provider.model.trim().to_ascii_lowercase();
-    let supported_model = [
-        "glm-4.5", "glm-4.6", "glm-4.7", "glm-5", "glm-5.1", "glm-5.2",
-    ]
-    .iter()
-    .any(|prefix| model == *prefix || model.starts_with(&format!("{prefix}-")));
-    supported_model
-        && Url::parse(provider.base_url.trim())
-            .ok()
-            .and_then(|url| url.host_str().map(str::to_owned))
-            .is_some_and(|host| host.eq_ignore_ascii_case("open.bigmodel.cn"))
-}
-
-fn is_glm_5_2_provider(provider: &AiProviderConfig) -> bool {
-    let model = provider.model.trim().to_ascii_lowercase();
-    is_glm_thinking_provider(provider) && (model == "glm-5.2" || model.starts_with("glm-5.2-"))
-}
-
 pub(crate) fn apply_reasoning_effort(body: &mut Value, provider: &AiProviderConfig) {
-    let Some(effort) = provider.reasoning_effort else {
-        return;
-    };
-    match provider.kind {
-        AiProviderKind::OpenAi => match effort {
-            AiReasoningEffort::Off => body["reasoning"] = json!({ "effort": "none" }),
-            AiReasoningEffort::On => {}
-            effort => body["reasoning"] = json!({ "effort": effort }),
-        },
-        AiProviderKind::OpenAiCompatible => {
-            if is_dashscope_qwen_thinking_provider(provider) {
-                match effort {
-                    AiReasoningEffort::Off | AiReasoningEffort::None => {
-                        body["enable_thinking"] = json!(false)
-                    }
-                    AiReasoningEffort::On => body["enable_thinking"] = json!(true),
-                    effort => body["reasoning_effort"] = json!(effort),
-                }
-            } else {
-                match effort {
-                    AiReasoningEffort::Off => body["thinking"] = json!({ "type": "disabled" }),
-                    AiReasoningEffort::On => {
-                        let thinking_type = if is_minimax_m3_provider(provider) {
-                            "adaptive"
-                        } else {
-                            "enabled"
-                        };
-                        body["thinking"] = json!({ "type": thinking_type });
-                    }
-                    effort => {
-                        body["reasoning_effort"] = json!(effort);
-                        if is_deepseek_v4_provider(provider) || is_glm_5_2_provider(provider) {
-                            body["thinking"] = json!({ "type": "enabled" });
-                        }
-                    }
-                }
-            }
-        }
-        AiProviderKind::Ollama => match effort {
-            AiReasoningEffort::Off | AiReasoningEffort::None => body["think"] = json!(false),
-            AiReasoningEffort::On => body["think"] = json!(true),
-            effort => body["think"] = json!(effort),
-        },
-    }
+    crate::agent_runtime::provider::apply_reasoning(body, provider);
 }
 
 pub(crate) fn apply_output_token_limit(
@@ -696,6 +598,7 @@ pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Ur
             .host_str()
             .is_some_and(|host| host.eq_ignore_ascii_case("open.bigmodel.cn"));
     let mut base_path = url.path().trim_end_matches('/').to_string();
+    let mut had_endpoint = false;
     for endpoint_suffix in [
         "/chat/completions",
         "/responses",
@@ -706,6 +609,7 @@ pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Ur
     ] {
         if let Some(api_root) = base_path.strip_suffix(endpoint_suffix) {
             base_path = api_root.to_string();
+            had_endpoint = true;
             break;
         }
     }
@@ -715,9 +619,13 @@ pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Ur
         if base_path.is_empty() || base_path == "/v1" {
             base_path = "/api/paas/v4".to_string();
         }
-    } else if !matches!(provider.kind, AiProviderKind::Ollama) && !base_path.ends_with("/v1") {
+    } else if !had_endpoint
+        && !matches!(provider.kind, AiProviderKind::Ollama)
+        && !base_path.ends_with("/v1")
+    {
         base_path = format!("{}/v1", base_path.trim_end_matches('/'));
     }
+    url.set_fragment(None);
     url.set_path(&format!(
         "{}/{}",
         base_path.trim_end_matches('/'),
@@ -780,6 +688,15 @@ pub(crate) fn build_client() -> Result<Client, String> {
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|error| format!("failed to create AI HTTP client: {error}"))
+}
+
+pub(crate) fn build_streaming_client() -> Result<Client, String> {
+    Client::builder()
+        .user_agent(concat!("ShellSpan/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("failed to create streaming AI HTTP client: {error}"))
 }
 
 async fn checked_response(response: Response) -> Result<Response, String> {
@@ -1246,6 +1163,8 @@ mod tests {
     #[test]
     fn validates_provider_url_security_contract() {
         let mut provider = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "ollama".to_string(),
             kind: AiProviderKind::Ollama,
             base_url: String::new(),
@@ -1284,6 +1203,8 @@ mod tests {
     #[test]
     fn builds_versioned_openai_endpoints_from_a_service_root() {
         let provider = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "minimax".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.minimaxi.com/v1/chat/completions".to_string(),
@@ -1305,6 +1226,8 @@ mod tests {
         );
 
         let api_root = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             base_url: "https://api.minimaxi.com/v1".to_string(),
             ..provider
         };
@@ -1316,6 +1239,8 @@ mod tests {
         );
 
         let service_root = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             base_url: "https://api.kimi.com/coding".to_string(),
             ..api_root
         };
@@ -1331,6 +1256,8 @@ mod tests {
         );
 
         let deepseek = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             base_url: "https://api.deepseek.com/v1/chat/completions".to_string(),
             model: "deepseek-v4-flash".to_string(),
             ..service_root
@@ -1347,6 +1274,8 @@ mod tests {
         );
 
         let glm = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
             model: "glm-5.2".to_string(),
             ..deepseek
@@ -1356,6 +1285,8 @@ mod tests {
             "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         );
         let glm_root = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             base_url: "https://open.bigmodel.cn".to_string(),
             ..glm
         };
@@ -1368,6 +1299,8 @@ mod tests {
     #[test]
     fn applies_reasoning_effort_in_each_supported_protocol_shape() {
         let compatible = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "kimi".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.kimi.com/coding".to_string(),
@@ -1384,13 +1317,18 @@ mod tests {
                 .and_then(Value::as_str),
             Some("max")
         );
-        assert!(is_kimi_code_provider(&compatible));
+        assert_eq!(
+            crate::agent_runtime::provider::profile_id(&compatible),
+            "kimi"
+        );
 
         let openai = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "openai".to_string(),
             kind: AiProviderKind::OpenAi,
             base_url: "https://api.openai.com".to_string(),
-            model: "gpt-test".to_string(),
+            model: "gpt-5.4-mini".to_string(),
             reasoning_effort: Some(AiReasoningEffort::High),
             requires_api_key: true,
             api_key: None,
@@ -1405,6 +1343,8 @@ mod tests {
         );
 
         let deepseek = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "deepseek".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.deepseek.com".to_string(),
@@ -1441,6 +1381,8 @@ mod tests {
         );
 
         let minimax = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "minimax".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.minimaxi.com".to_string(),
@@ -1459,6 +1401,8 @@ mod tests {
         );
 
         let qwen = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "qwen".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
@@ -1476,6 +1420,8 @@ mod tests {
         assert!(qwen_body.get("thinking").is_none());
 
         let glm = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "glm".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
@@ -1496,6 +1442,8 @@ mod tests {
         );
 
         let ollama = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "ollama".to_string(),
             kind: AiProviderKind::Ollama,
             base_url: "http://127.0.0.1:11434".to_string(),
@@ -1521,6 +1469,8 @@ mod tests {
             .unwrap()
             .insert("minimax".to_string(), "  keychain-key  ".to_string());
         let provider = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "minimax".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.minimaxi.com/v1".to_string(),
@@ -1542,6 +1492,8 @@ mod tests {
     fn rejects_a_required_provider_without_a_saved_api_key() {
         let credentials = MockAiCredentials::default();
         let provider = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "minimax".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.minimaxi.com/v1".to_string(),
@@ -1561,6 +1513,8 @@ mod tests {
     fn connection_test_can_use_an_ephemeral_inline_key() {
         let credentials = MockAiCredentials::default();
         let provider = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "provider-setup-draft".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.minimaxi.com/v1".to_string(),

@@ -994,10 +994,7 @@ impl SubAgentManager {
     ) -> Result<AgentChildInspection, String> {
         let snapshot = self.ensure_owned_child(parent_session_id, child_session_id)?;
         let events = self.sessions.all_events(child_session_id)?;
-        let tool_calls = events
-            .iter()
-            .filter(|event| matches!(event.payload, AgentSessionEventPayload::ToolCall { .. }))
-            .count() as u32;
+        let tool_calls = super::tool_pipeline::admitted_tool_calls(&events);
         let total_tokens = events
             .iter()
             .filter_map(|event| match event.payload {
@@ -1153,6 +1150,7 @@ impl SubAgentManager {
                 .remove(&session_id);
             if let Some(handle) = handle {
                 self.tools.cancel_session(&handle.entry())?;
+                self.tools.await_pending_executions(&handle.entry()).await?;
                 handle.dispose().await?;
             } else {
                 let snapshot = self.sessions.snapshot(&session_id)?;
@@ -1576,6 +1574,10 @@ fn default_subagent_budget() -> AgentSubagentBudget {
 
 fn provider_descriptor(provider: &AiProviderConfig) -> AgentSubagentModel {
     AgentSubagentModel {
+        profile: provider.profile.clone(),
+        retry_policy: provider
+            .retry_policy
+            .map(|policy| serde_json::to_value(policy).expect("validated retry policy")),
         provider_id: provider.id.clone(),
         provider_kind: match provider.kind {
             AiProviderKind::Ollama => "ollama",
@@ -1592,6 +1594,13 @@ fn provider_descriptor(provider: &AiProviderConfig) -> AgentSubagentModel {
 
 fn provider_config(provider: &AgentSubagentModel) -> Result<AiProviderConfig, String> {
     Ok(AiProviderConfig {
+        profile: provider.profile.clone(),
+        retry_policy: provider
+            .retry_policy
+            .clone()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| format!("persisted retry policy is invalid: {error}"))?,
         id: provider.provider_id.clone(),
         kind: match provider.provider_kind.as_str() {
             "ollama" => AiProviderKind::Ollama,
@@ -1781,4 +1790,31 @@ fn fleet_tool_result(
         evidence_refs: Vec::new(),
         result_committed: false,
     })
+}
+
+#[cfg(test)]
+mod retry_policy_tests {
+    use super::*;
+
+    #[test]
+    fn restored_child_keeps_proxy_profile_and_retry_policy_and_accepts_legacy_descriptor() {
+        let config: AiProviderConfig = serde_json::from_value(serde_json::json!({
+            "id":"proxy", "profile":"deepseek", "kind":"openAiCompatible", "baseUrl":"https://proxy.example/v1",
+            "model":"deepseek-v4-flash", "requiresApiKey":false,
+            "retryPolicy":{"maxAttempts":1,"initialDelayMs":0,"maxDelayMs":500,"maxServerDelayMs":1000,"jitterRatio":0.5}
+        })).unwrap();
+        let encoded = serde_json::to_value(provider_descriptor(&config)).unwrap();
+        let restored = provider_config(&serde_json::from_value(encoded.clone()).unwrap()).unwrap();
+        assert_eq!(restored.retry_policy, config.retry_policy);
+        assert_eq!(restored.profile, config.profile);
+        let mut legacy = encoded;
+        legacy.as_object_mut().unwrap().remove("retryPolicy");
+        legacy.as_object_mut().unwrap().remove("profile");
+        let restored = provider_config(&serde_json::from_value(legacy).unwrap()).unwrap();
+        assert!(restored.profile.is_none());
+        assert_eq!(
+            restored.retry_policy.unwrap_or_default(),
+            super::super::RetryPolicy::default()
+        );
+    }
 }

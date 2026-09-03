@@ -9,6 +9,7 @@ import {
   ServerIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { DEFAULT_RETRY_POLICY, RETRY_LIMITS, parseRetryPolicy } from '@/lib/retry-policy';
 import { Button } from '@/components/ui/button';
 import {
   Combobox,
@@ -25,7 +26,7 @@ import {
   CompactDialogFooter,
   CompactDialogHeader,
 } from '@/components/ui/compact-dialog';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import {
   InputGroup,
@@ -68,7 +69,13 @@ import {
   OpenAiBrandIcon,
 } from './provider-brand-icons';
 
+import { PROVIDER_PROFILE_IDS, resolveProviderProfile, providerCapabilities } from '@/lib/provider-contract';
+
 type ProviderDraft = Omit<AiProviderProfile, 'id'> & { apiKey?: string };
+
+function retryPolicyValid(value: unknown): boolean {
+  try { parseRetryPolicy(value); return true; } catch { return false; }
+}
 
 interface ProviderSetupDialogProps {
   open: boolean;
@@ -91,6 +98,8 @@ const PRESET_ICONS: Record<AiProviderPreset, React.ComponentType<React.SVGProps<
   deepseek: DeepSeekBrandIcon,
   minimax: MiniMaxBrandIcon,
   kimi: KimiBrandIcon,
+  qwen: ServerIcon,
+  glm: ServerIcon,
   custom: ServerIcon,
 };
 
@@ -134,13 +143,19 @@ export function buildProviderRequestEndpoint(
   const url = parseProviderBaseUrl(baseUrl);
   if (!url) return undefined;
   let basePath = url.pathname.replace(/\/$/, '');
+  let hadEndpoint = false;
   for (const suffix of ENDPOINT_SUFFIXES) {
     if (basePath.endsWith(suffix)) {
       basePath = basePath.slice(0, -suffix.length);
+      hadEndpoint = true;
       break;
     }
   }
-  if (kind !== 'ollama' && !basePath.endsWith('/v1')) {
+  if (kind === 'openAiCompatible' && url.hostname === 'api.deepseek.com') {
+    if (basePath === '/v1') basePath = '';
+  } else if (kind === 'openAiCompatible' && url.hostname === 'open.bigmodel.cn') {
+    if (!basePath || basePath === '/v1') basePath = '/api/paas/v4';
+  } else if (!hadEndpoint && kind !== 'ollama' && !basePath.endsWith('/v1')) {
     basePath = `${basePath.replace(/\/$/, '')}/v1`;
   }
   const requestPath = kind === 'ollama'
@@ -149,7 +164,6 @@ export function buildProviderRequestEndpoint(
       ? 'responses'
       : 'chat/completions';
   url.pathname = `${basePath.replace(/\/$/, '')}/${requestPath}`;
-  url.search = '';
   url.hash = '';
   return url.toString();
 }
@@ -160,7 +174,9 @@ function draftConfig(
 ): AiProviderConnectionConfig {
   return {
     id: providerId ?? 'provider-setup-draft',
+    retryPolicy: parseRetryPolicy(draft.retryPolicy),
     kind: draft.kind,
+    profile: resolveProviderProfile(draft),
     baseUrl: draft.baseUrl.trim(),
     model: draft.model.trim(),
     ...(draft.reasoningEffort ? { reasoningEffort: draft.reasoningEffort } : {}),
@@ -240,6 +256,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     : undefined;
   const canTest = Boolean(
     draft
+    && retryPolicyValid(draft.retryPolicy)
     && requestEndpoint
     && (!draft.requiresApiKey || draft.apiKey?.trim() || (provider && hasStoredApiKey)),
   );
@@ -307,8 +324,10 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     setBusy(true);
     setFeedback(undefined);
     const changes = {
+      retryPolicy: parseRetryPolicy(draft.retryPolicy),
       name: draft.name.trim(),
       kind: draft.kind,
+    profile: resolveProviderProfile(draft),
       baseUrl: draft.baseUrl.trim(),
       model: draft.model.trim(),
       ...(draft.reasoningEffort ? { reasoningEffort: draft.reasoningEffort } : {}),
@@ -427,6 +446,25 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
 
             <FieldGroup className="gap-2.5 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
               <Field data-disabled={!draft || undefined}>
+                <FieldLabel htmlFor="ai-provider-profile">{t('settings.ai.profile')}</FieldLabel>
+                <Combobox items={PROVIDER_PROFILE_IDS} value={draft ? resolveProviderProfile(draft) : null}
+                  onValueChange={(profile) => {
+                    if (!profile || !draft) return;
+                    const kind = providerCapabilities({ ...draft, profile }).kind;
+                    updateDraft({ profile, kind, reasoningEffort: undefined });
+                  }}>
+                  <ComboboxInput id="ai-provider-profile" className={SYSTEM_INPUT_GROUP_CLASS} disabled={!draft} />
+                  <ComboboxContent>
+                    <ComboboxEmpty>{t('settings.ai.providerNoResults')}</ComboboxEmpty>
+                    <ComboboxList>{(profile) => <ComboboxItem key={profile} value={profile}>{profile}</ComboboxItem>}</ComboboxList>
+                  </ComboboxContent>
+                </Combobox>
+                {draft && <FieldDescription>{t('settings.ai.profileLimits', {
+                  context: providerCapabilities(draft).contextWindow,
+                  output: providerCapabilities(draft).maxOutputTokens,
+                })}</FieldDescription>}
+              </Field>
+              <Field data-disabled={!draft || undefined}>
                 <FieldLabel htmlFor="ai-new-provider-protocol">{t('settings.ai.protocol')}</FieldLabel>
                 <Input
                   id="ai-new-provider-protocol"
@@ -524,6 +562,28 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
               </Field>
             </FieldGroup>
 
+            {draft && <FieldGroup className="gap-2.5 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
+              <FieldDescription className="@min-[30rem]:col-span-2">{t('settings.ai.retryDescription')}</FieldDescription>
+              {(Object.keys(DEFAULT_RETRY_POLICY) as (keyof typeof DEFAULT_RETRY_POLICY)[]).map(key => (
+                <Field key={key} data-invalid={!retryPolicyValid(draft.retryPolicy)}>
+                  <FieldLabel htmlFor={`retry-${key}`}>{t(`settings.ai.retry.${key}`)}</FieldLabel>
+                  <Input
+                    id={`retry-${key}`}
+                    type="number"
+                    min={key === 'maxAttempts' ? 1 : 0}
+                    max={key === 'maxAttempts' ? RETRY_LIMITS.maxAttempts : key === 'jitterRatio' ? 1 : RETRY_LIMITS.maxDelayMs}
+                    step={key === 'jitterRatio' ? 'any' : 1}
+                    value={Number.isFinite((draft.retryPolicy ?? DEFAULT_RETRY_POLICY)[key]) ? (draft.retryPolicy ?? DEFAULT_RETRY_POLICY)[key] : ''}
+                    aria-invalid={!retryPolicyValid(draft.retryPolicy)}
+                    onChange={event => setDraft(current => current ? {
+                      ...current,
+                      retryPolicy: { ...DEFAULT_RETRY_POLICY, ...current.retryPolicy, [key]: event.target.value === '' ? NaN : Number(event.target.value) },
+                    } : current)}
+                  />
+                </Field>
+              ))}
+              {!retryPolicyValid(draft.retryPolicy) && <FieldDescription role="alert">{t('settings.ai.retryInvalid')}</FieldDescription>}
+            </FieldGroup>}
             <FieldGroup className="gap-2.5">
               <Field data-disabled={!draft || undefined}>
                 <div className="flex items-center justify-between gap-2">

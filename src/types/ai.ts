@@ -1,5 +1,7 @@
+import type { ProviderProfileId } from '@/lib/provider-contract';
+import type { AiRetryPolicy } from '@/lib/retry-policy';
 export type AiProviderKind = 'ollama' | 'openAi' | 'openAiCompatible';
-export type AiProviderPreset = 'ollama' | 'openai' | 'deepseek' | 'minimax' | 'kimi' | 'custom';
+export type AiProviderPreset = 'ollama' | 'openai' | 'deepseek' | 'minimax' | 'kimi' | 'qwen' | 'glm' | 'custom';
 export type AiReasoningEffort =
   | 'none'
   | 'minimal'
@@ -11,10 +13,12 @@ export type AiReasoningEffort =
 export type AiReasoningOption = 'off' | 'on' | AiReasoningEffort;
 
 export interface AiProviderConfig {
+  retryPolicy?: AiRetryPolicy;
   id: string;
   kind: AiProviderKind;
   baseUrl: string;
   model: string;
+  profile?: ProviderProfileId;
   reasoningEffort?: AiReasoningOption;
   requiresApiKey: boolean;
 }

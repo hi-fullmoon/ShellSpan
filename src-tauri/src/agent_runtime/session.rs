@@ -332,6 +332,8 @@ struct AgentSessionStoreInner {
     sessions: HashMap<String, AgentSessionRecord>,
     recovery_notices: Vec<AgentSessionRecoveryNotice>,
     publisher: Option<EventPublisher>,
+    #[cfg(test)]
+    append_failure: Option<fn(&AgentSessionEventPayload) -> bool>,
 }
 
 #[derive(Clone, Default)]
@@ -340,6 +342,11 @@ pub(crate) struct AgentSessionStore {
 }
 
 impl AgentSessionStore {
+    #[cfg(test)]
+    pub(crate) fn fail_appends_matching(&self, predicate: fn(&AgentSessionEventPayload) -> bool) {
+        self.inner.lock().unwrap().append_failure = Some(predicate);
+    }
+
     pub(crate) fn configure(&self, app_data_root: PathBuf) -> Result<(), String> {
         let runtime_root = app_data_root.join("agent-runtime");
         // Earlier namespaces remain untouched. v4 logs are never migrated or dual-written.
@@ -1603,6 +1610,13 @@ fn append_payloads_locked(
     session_id: &str,
     payloads: Vec<(Option<String>, Option<String>, AgentSessionEventPayload)>,
 ) -> Result<(Vec<AgentSessionEvent>, Option<EventPublisher>), String> {
+    #[cfg(test)]
+    if inner
+        .append_failure
+        .is_some_and(|predicate| payloads.iter().any(|(_, _, payload)| predicate(payload)))
+    {
+        return Err("injected Session append failure".into());
+    }
     if payloads.is_empty() {
         return Err("Agent Session append batch cannot be empty".into());
     }
@@ -1925,6 +1939,18 @@ fn validate_tool_approval_transition(
         super::AgentToolApprovalStatus::Approved if approval_id.is_none() => {
             if latest_approval.is_some() {
                 return Err("automatic native approval cannot follow another decision".into());
+            }
+        }
+        super::AgentToolApprovalStatus::Cancelled
+            if latest_approval == Some((approval_id, super::AgentToolApprovalStatus::Approved)) =>
+        {
+            if record.events.iter().any(|previous| {
+                previous.step_id == event.step_id
+                    && matches!(&previous.payload, AgentSessionEventPayload::ToolExecution {
+                    call_id: dispatched, ..
+                } if dispatched == call_id)
+            }) {
+                return Err("dispatched tool must settle through its execution owner".into());
             }
         }
         super::AgentToolApprovalStatus::Approved
@@ -2278,6 +2304,9 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             previous_request_id,
             attempt,
             reason,
+            error_kind,
+            error_code,
+            ..
         } => {
             require_scope(event, true, true)?;
             validate_identifier(request_id, "requestId")?;
@@ -2288,10 +2317,32 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
                 return Err("request retry attempt must be positive".into());
             }
             validate_text(reason, "request retry reason", false, MAX_LABEL_BYTES)?;
+            validate_optional_text(error_kind.as_deref(), "request retry error kind")?;
+            validate_optional_text(error_code.as_deref(), "request retry error code")?;
         }
         Payload::RequestUsage { request_id, .. } => {
             require_scope(event, true, true)?;
             validate_identifier(request_id, "requestId")?;
+        }
+        Payload::RequestFailure {
+            request_id,
+            attempt,
+            max_attempts,
+            failure,
+            ..
+        } => {
+            require_scope(event, true, true)?;
+            validate_identifier(request_id, "requestId")?;
+            if *attempt == 0 || *max_attempts == 0 || *attempt > *max_attempts {
+                return Err("request failure attempts must be positive and bounded".into());
+            }
+            validate_text(
+                &failure.message,
+                "request failure message",
+                false,
+                MAX_AGENT_MESSAGE_BYTES,
+            )?;
+            validate_optional_text(failure.code.as_deref(), "request failure code")?;
         }
         Payload::ToolCall { call } => {
             require_scope(event, true, true)?;
@@ -2725,6 +2776,11 @@ fn validate_subagent_session(
         }
     }
     validate_subagent_budget(&subagent.budget)?;
+    if let Some(value) = &subagent.provider.retry_policy {
+        let policy: super::RetryPolicy = serde_json::from_value(value.clone())
+            .map_err(|error| format!("subagent retry policy is invalid: {error}"))?;
+        policy.validate()?;
+    }
     validate_text(
         &subagent.provider.provider_id,
         "subagent providerId",
@@ -3391,6 +3447,8 @@ mod tests {
             target_scope: vec![target()],
             budget: budget.clone(),
             provider: super::super::AgentSubagentModel {
+                profile: None,
+                retry_policy: None,
                 provider_id: "provider-1".into(),
                 provider_kind: "ollama".into(),
                 base_url: "http://127.0.0.1:11434".into(),

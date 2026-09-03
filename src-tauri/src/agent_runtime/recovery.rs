@@ -229,9 +229,33 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
         );
     }
     let mut ordered_tools = tools.iter().collect::<Vec<_>>();
-    ordered_tools.sort_by_key(|(_, boundary)| std::cmp::Reverse(boundary.last_seq));
+    // A later completed sibling must never hide an earlier unresolved dispatch.
+    ordered_tools.sort_by_key(|(_, boundary)| {
+        (
+            boundary.has_result,
+            boundary.dispatched.is_none(),
+            std::cmp::Reverse(boundary.last_seq),
+        )
+    });
     for (call_id, boundary) in ordered_tools {
         if boundary.has_result {
+            if let Some(recovery) = task_recovery.as_ref().filter(|recovery| {
+                recovery.status == AgentRecoveryStatus::Required
+                    && recovery
+                        .summary
+                        .as_deref()
+                        .is_some_and(|text| text.starts_with("toolSchedulerFailure:"))
+            }) {
+                return make(
+                    AgentRecoveryCheckpointKind::OpenModelRequest,
+                    AgentRecoveryStatus::Required,
+                    recovery.summary.as_deref().unwrap_or_default(),
+                    None,
+                    None,
+                    None,
+                    None,
+                );
+            }
             return make(
                 AgentRecoveryCheckpointKind::ToolResultCommitted,
                 AgentRecoveryStatus::Available,

@@ -76,8 +76,14 @@ jobs:
           cache-on-failure: true
       - name: Check formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-      - name: Run M6 native shell and PTY acceptance
-        run: pnpm test:agent:platform
+      - name: Run Provider contract and semantic compaction stage 4 gate
+        run: pnpm test:ai:stage4
+      - name: Run partial stream and Provider retry frontend gate
+        run: pnpm test:ai:stage3b:frontend
+      - name: Run AI Provider and Agent Runtime stage 3 gate
+        run: pnpm test:ai:stage3:rust
+      - name: Run bounded tool scheduler stage 5 gate
+        run: pnpm test:ai:stage5
       - name: Run Agent terminal contract tests
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml --locked agent::terminal -- --test-threads=1

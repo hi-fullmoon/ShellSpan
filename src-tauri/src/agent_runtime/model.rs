@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -9,11 +11,11 @@ use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 use crate::ai::{
-    append_provider_stream_chunk, apply_output_token_limit, apply_reasoning_effort, build_client,
-    endpoint_url, ensure_provider_stream_frame_size, format_transport_error,
-    provider_usage_from_value, read_bounded_response_body, sse_data, take_final_sse_event,
-    take_line, take_sse_event, AiProviderConfig, AiProviderKind, ProviderUsage,
-    AGENT_MAX_OUTPUT_TOKENS, MAX_ERROR_BODY_BYTES,
+    append_provider_stream_chunk, apply_output_token_limit, apply_reasoning_effort,
+    build_streaming_client, endpoint_url, ensure_provider_stream_frame_size,
+    format_transport_error, provider_usage_from_value, read_bounded_response_body, sse_data,
+    take_final_sse_event, take_line, take_sse_event, AiProviderConfig, AiProviderKind,
+    ProviderUsage, MAX_ERROR_BODY_BYTES,
 };
 use crate::redaction::redact_sensitive_text;
 
@@ -24,6 +26,23 @@ use super::{
 
 const MAX_PROVIDER_TOOL_CALL_ID_BYTES: usize = 256;
 const MAX_PROVIDER_TOOL_ARGUMENT_BYTES: usize = 64 * 1024;
+
+#[derive(Debug, Clone, Copy)]
+struct ModelTimeoutPolicy {
+    request_headers: Duration,
+    first_byte: Duration,
+    stream_idle: Duration,
+}
+
+impl Default for ModelTimeoutPolicy {
+    fn default() -> Self {
+        Self {
+            request_headers: Duration::from_secs(30),
+            first_byte: Duration::from_secs(30),
+            stream_idle: Duration::from_secs(300),
+        }
+    }
+}
 
 pub(crate) type ModelToolDefinition = AgentRequestToolSchema;
 
@@ -243,6 +262,10 @@ pub(crate) trait ModelStreamSink: Send + Sync {
 pub(crate) enum NormalizedModelErrorKind {
     Cancelled,
     Retryable,
+    Transport,
+    Timeout,
+    EmptyResponse,
+    Protocol,
     ContextTooLarge,
     Authentication,
     RateLimited,
@@ -284,7 +307,11 @@ impl NormalizedModelError {
     pub(crate) fn retryable(&self) -> bool {
         matches!(
             self.kind,
-            NormalizedModelErrorKind::Retryable | NormalizedModelErrorKind::RateLimited
+            NormalizedModelErrorKind::Retryable
+                | NormalizedModelErrorKind::Transport
+                | NormalizedModelErrorKind::Timeout
+                | NormalizedModelErrorKind::EmptyResponse
+                | NormalizedModelErrorKind::RateLimited
         )
     }
 }
@@ -316,10 +343,14 @@ impl ModelAdapterFactory for HttpModelAdapterFactory {
         provider: AiProviderConfig,
         api_key: Option<String>,
     ) -> Result<Arc<dyn ModelAdapter>, String> {
+        if let Some(policy) = provider.retry_policy {
+            policy.validate()?;
+        }
         Ok(Arc::new(HttpModelAdapter {
-            client: build_client()?,
+            client: build_streaming_client()?,
             provider,
             api_key,
+            timeouts: ModelTimeoutPolicy::default(),
         }))
     }
 }
@@ -348,6 +379,9 @@ impl ModelRegistry {
         provider: AiProviderConfig,
         api_key: Option<String>,
     ) -> Result<Arc<dyn ModelAdapter>, String> {
+        if let Some(policy) = provider.retry_policy {
+            policy.validate()?;
+        }
         self.factory.create(provider, api_key)
     }
 }
@@ -356,17 +390,7 @@ struct HttpModelAdapter {
     client: Client,
     provider: AiProviderConfig,
     api_key: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProviderProfile {
-    OpenAiResponses,
-    DeepSeek,
-    MiniMax,
-    Qwen,
-    Glm,
-    OpenAiCompatible,
-    Ollama,
+    timeouts: ModelTimeoutPolicy,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -381,54 +405,17 @@ struct ProviderCapabilities {
 }
 
 fn provider_capabilities(provider: &AiProviderConfig) -> ProviderCapabilities {
-    let model = provider.model.trim().to_ascii_lowercase();
-    let base_url = provider.base_url.trim().to_ascii_lowercase();
-    let profile = match provider.kind {
-        AiProviderKind::OpenAi => ProviderProfile::OpenAiResponses,
-        AiProviderKind::Ollama => ProviderProfile::Ollama,
-        AiProviderKind::OpenAiCompatible
-            if base_url.contains("api.deepseek.com") || model.starts_with("deepseek-") =>
-        {
-            ProviderProfile::DeepSeek
-        }
-        AiProviderKind::OpenAiCompatible
-            if base_url.contains("api.minimax.io")
-                || base_url.contains("api.minimaxi.com")
-                || model.starts_with("minimax-")
-                || model.contains("abab") =>
-        {
-            ProviderProfile::MiniMax
-        }
-        AiProviderKind::OpenAiCompatible
-            if crate::ai::is_dashscope_qwen_thinking_provider(provider) =>
-        {
-            ProviderProfile::Qwen
-        }
-        AiProviderKind::OpenAiCompatible if crate::ai::is_glm_thinking_provider(provider) => {
-            ProviderProfile::Glm
-        }
-        AiProviderKind::OpenAiCompatible => ProviderProfile::OpenAiCompatible,
-    };
+    let caps = super::provider::capabilities(provider);
     ProviderCapabilities {
-        cumulative_stream: profile == ProviderProfile::MiniMax,
-        supports_stream_usage: matches!(
-            profile,
-            ProviderProfile::DeepSeek
-                | ProviderProfile::MiniMax
-                | ProviderProfile::Qwen
-                | ProviderProfile::Glm
-        ),
-        native_reasoning: !matches!(profile, ProviderProfile::OpenAiCompatible),
-        split_reasoning: profile == ProviderProfile::MiniMax,
-        replay_reasoning_content: matches!(
-            profile,
-            ProviderProfile::DeepSeek | ProviderProfile::MiniMax | ProviderProfile::Qwen
-        ),
-        think_tag_fallback: matches!(
-            profile,
-            ProviderProfile::MiniMax | ProviderProfile::OpenAiCompatible | ProviderProfile::Ollama
-        ),
-        parallel_tool_calls: !crate::ai::is_kimi_code_provider(provider),
+        cumulative_stream: caps.cumulative_stream,
+        supports_stream_usage: caps.supports_stream_usage,
+        native_reasoning: caps.native_reasoning
+            && !(super::provider::profile_id(provider) == "qwen"
+                && provider.model.to_ascii_lowercase().contains("instruct")),
+        split_reasoning: caps.split_reasoning,
+        replay_reasoning_content: caps.replay_reasoning_content,
+        think_tag_fallback: caps.think_tag_fallback,
+        parallel_tool_calls: caps.parallel_tool_calls,
     }
 }
 
@@ -440,6 +427,9 @@ impl ModelAdapter for HttpModelAdapter {
         cancellation: CancellationToken,
         sink: Arc<dyn ModelStreamSink>,
     ) -> Result<ModelResponse, NormalizedModelError> {
+        super::provider::validate(&self.provider).map_err(|error| {
+            NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error)
+        })?;
         match self.provider.kind {
             AiProviderKind::OpenAi => {
                 self.stream_openai_responses(request, cancellation, sink)
@@ -469,7 +459,11 @@ impl HttpModelAdapter {
             "input": responses_input(&request.messages),
         });
         apply_reasoning_effort(&mut body, &self.provider);
-        apply_output_token_limit(&mut body, self.provider.kind, AGENT_MAX_OUTPUT_TOKENS);
+        apply_output_token_limit(
+            &mut body,
+            self.provider.kind,
+            super::provider::capabilities(&self.provider).max_output_tokens,
+        );
         if !request.tools.is_empty() {
             body["tools"] = Value::Array(
                 request
@@ -481,13 +475,14 @@ impl HttpModelAdapter {
                             "name": tool.name,
                             "description": tool.description,
                             "parameters": tool.input_schema,
-                            "strict": true,
+                            "strict": super::provider::capabilities(&self.provider).strict_schema,
                         })
                     })
                     .collect(),
             );
             body["tool_choice"] = json!("auto");
-            body["parallel_tool_calls"] = json!(true);
+            body["parallel_tool_calls"] =
+                json!(super::provider::capabilities(&self.provider).parallel_tool_calls);
         }
         let endpoint = endpoint_url(&self.provider, "responses").map_err(|error| {
             NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error)
@@ -501,10 +496,11 @@ impl HttpModelAdapter {
         let response = send_request(
             self.client.post(endpoint).bearer_auth(api_key).json(&body),
             &cancellation,
+            self.timeouts,
         )
         .await?;
-        let response = checked_stream_response(response, &cancellation).await?;
-        stream_responses(response, &cancellation, sink).await
+        let response = checked_stream_response(response, &cancellation, self.timeouts).await?;
+        stream_responses(response, &cancellation, sink, self.timeouts).await
     }
 
     async fn stream_chat_completions(
@@ -525,7 +521,11 @@ impl HttpModelAdapter {
             "messages": messages,
         });
         apply_reasoning_effort(&mut body, &self.provider);
-        apply_output_token_limit(&mut body, self.provider.kind, AGENT_MAX_OUTPUT_TOKENS);
+        apply_output_token_limit(
+            &mut body,
+            self.provider.kind,
+            super::provider::capabilities(&self.provider).max_output_tokens,
+        );
         if capabilities.supports_stream_usage {
             body["stream_options"] = json!({ "include_usage": true });
         }
@@ -561,9 +561,9 @@ impl HttpModelAdapter {
         if let Some(api_key) = self.api_key.as_deref() {
             request_builder = request_builder.bearer_auth(api_key);
         }
-        let response = send_request(request_builder, &cancellation).await?;
-        let response = checked_stream_response(response, &cancellation).await?;
-        stream_chat(response, &cancellation, sink, capabilities).await
+        let response = send_request(request_builder, &cancellation, self.timeouts).await?;
+        let response = checked_stream_response(response, &cancellation, self.timeouts).await?;
+        stream_chat(response, &cancellation, sink, capabilities, self.timeouts).await
     }
 
     async fn stream_ollama(
@@ -584,7 +584,11 @@ impl HttpModelAdapter {
             "messages": messages,
         });
         apply_reasoning_effort(&mut body, &self.provider);
-        apply_output_token_limit(&mut body, self.provider.kind, AGENT_MAX_OUTPUT_TOKENS);
+        apply_output_token_limit(
+            &mut body,
+            self.provider.kind,
+            super::provider::capabilities(&self.provider).max_output_tokens,
+        );
         if !request.tools.is_empty() {
             body["tools"] = Value::Array(
                 request
@@ -606,9 +610,14 @@ impl HttpModelAdapter {
         let endpoint = endpoint_url(&self.provider, "api/chat").map_err(|error| {
             NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error)
         })?;
-        let response = send_request(self.client.post(endpoint).json(&body), &cancellation).await?;
-        let response = checked_stream_response(response, &cancellation).await?;
-        stream_ollama(response, &cancellation, sink).await
+        let response = send_request(
+            self.client.post(endpoint).json(&body),
+            &cancellation,
+            self.timeouts,
+        )
+        .await?;
+        let response = checked_stream_response(response, &cancellation, self.timeouts).await?;
+        stream_ollama(response, &cancellation, sink, self.timeouts).await
     }
 }
 
@@ -690,7 +699,27 @@ fn chat_messages(
                     "role": "assistant",
                     "content": if text.is_empty() { Value::Null } else { Value::String(text) },
                 });
-                if capabilities.replay_reasoning_content && !reasoning.is_empty() {
+                if capabilities.split_reasoning {
+                    let details: Vec<Value> = content
+                        .iter()
+                        .filter_map(|block| match block {
+                            ModelContentBlock::Reasoning {
+                                provider_item: Some(item),
+                                ..
+                            } => item.get("reasoning_details").and_then(Value::as_array),
+                            _ => None,
+                        })
+                        .flatten()
+                        .cloned()
+                        .collect();
+                    if !details.is_empty() {
+                        value["reasoning_details"] = json!(details);
+                    }
+                }
+                if capabilities.replay_reasoning_content
+                    && !reasoning.is_empty()
+                    && value.get("reasoning_details").is_none()
+                {
                     value["reasoning_content"] = Value::String(reasoning);
                 }
                 if !tool_calls.is_empty() {
@@ -745,28 +774,65 @@ fn chat_messages(
 async fn send_request(
     request: reqwest::RequestBuilder,
     cancellation: &CancellationToken,
+    timeouts: ModelTimeoutPolicy,
 ) -> Result<Response, NormalizedModelError> {
+    if cancellation.is_cancelled() {
+        return Err(NormalizedModelError::cancelled());
+    }
     tokio::select! {
+        biased;
         _ = cancellation.cancelled() => Err(NormalizedModelError::cancelled()),
-        result = request.send() => result.map_err(normalize_transport_error),
+        result = tokio::time::timeout(timeouts.request_headers, request.send()) => match result {
+            Ok(result) => result.map_err(normalize_transport_error),
+            Err(_) => Err(coded_error(
+                NormalizedModelErrorKind::Timeout,
+                "AI provider timed out before returning response headers",
+                "REQUEST_HEADERS_TIMEOUT",
+            )),
+        },
     }
 }
 
 fn normalize_transport_error(error: reqwest::Error) -> NormalizedModelError {
-    let retryable = error.is_timeout() || error.is_connect();
-    NormalizedModelError::new(
-        if retryable {
-            NormalizedModelErrorKind::Retryable
-        } else {
-            NormalizedModelErrorKind::Terminal
-        },
-        format_transport_error(error),
-    )
+    let (kind, code) = if error.is_timeout() {
+        (NormalizedModelErrorKind::Timeout, "TRANSPORT_TIMEOUT")
+    } else if error.is_connect() {
+        (NormalizedModelErrorKind::Transport, "CONNECT")
+    } else if error.is_body() {
+        (NormalizedModelErrorKind::Transport, "STREAM_READ")
+    } else if error.is_decode() {
+        // reqwest reports a truncated Content-Length body as Decode. These calls
+        // read raw bytes; malformed provider JSON is classified by our parsers.
+        (NormalizedModelErrorKind::Transport, "STREAM_DECODE")
+    } else {
+        (NormalizedModelErrorKind::Terminal, "TRANSPORT_PERMANENT")
+    };
+    coded_error(kind, format_transport_error(error), code)
+}
+
+fn coded_error(
+    kind: NormalizedModelErrorKind,
+    message: impl Into<String>,
+    code: impl Into<String>,
+) -> NormalizedModelError {
+    let mut error = NormalizedModelError::new(kind, message);
+    error.code = Some(code.into());
+    error
+}
+
+fn parse_retry_after(value: &str, now: SystemTime) -> Option<u64> {
+    if let Ok(seconds) = value.trim().parse::<u64>() {
+        return seconds.checked_mul(1_000);
+    }
+    let deadline = httpdate::parse_http_date(value.trim()).ok()?;
+    let delay = deadline.duration_since(now).ok()?;
+    u64::try_from(delay.as_millis()).ok()
 }
 
 async fn checked_stream_response(
     response: Response,
     cancellation: &CancellationToken,
+    timeouts: ModelTimeoutPolicy,
 ) -> Result<Response, NormalizedModelError> {
     if response.status().is_success() {
         return Ok(response);
@@ -776,15 +842,34 @@ async fn checked_stream_response(
         .headers()
         .get(reqwest::header::RETRY_AFTER)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .and_then(|seconds| seconds.checked_mul(1_000));
-    let body = read_bounded_response_body(
-        response,
-        Some(cancellation),
-        MAX_ERROR_BODY_BYTES,
-        "AI provider HTTP error body exceeded the response limit",
+        .and_then(|value| parse_retry_after(value, SystemTime::now()))
+        .or_else(|| {
+            response
+                .headers()
+                .get("retry-after-ms")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.trim().parse::<u64>().ok())
+        });
+    let body = tokio::time::timeout(
+        timeouts.request_headers,
+        read_bounded_response_body(
+            response,
+            Some(cancellation),
+            MAX_ERROR_BODY_BYTES,
+            "AI provider HTTP error body exceeded the response limit",
+        ),
     )
     .await
+    .map_err(|_| {
+        let mut error = coded_error(
+            NormalizedModelErrorKind::Timeout,
+            "AI provider timed out while returning an HTTP error body",
+            "HTTP_ERROR_BODY_TIMEOUT",
+        );
+        error.status = Some(status.as_u16());
+        error.retry_after_ms = retry_after_ms;
+        error
+    })?
     .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?
     .ok_or_else(NormalizedModelError::cancelled)?;
     let text = String::from_utf8_lossy(&body).into_owned();
@@ -822,6 +907,7 @@ fn normalize_provider_error(status: u16, message: &str) -> NormalizedModelError 
     };
     let mut error = NormalizedModelError::new(kind, display);
     error.status = Some(status);
+    error.code = Some(format!("HTTP_{status}"));
     error
 }
 
@@ -869,13 +955,13 @@ fn normalized_calls(
         .map(|(ordinal, (provider_index, call))| {
             if call.name.trim().is_empty() {
                 return Err(NormalizedModelError::new(
-                    NormalizedModelErrorKind::Terminal,
+                    NormalizedModelErrorKind::Protocol,
                     "provider tool call is missing a function name",
                 ));
             }
             if require_id && call.id.as_deref().unwrap_or_default().is_empty() {
                 return Err(NormalizedModelError::new(
-                    NormalizedModelErrorKind::Terminal,
+                    NormalizedModelErrorKind::Protocol,
                     "provider tool call is missing an id",
                 ));
             }
@@ -885,25 +971,25 @@ fn normalized_calls(
                 .is_some_and(|id| id.len() > MAX_PROVIDER_TOOL_CALL_ID_BYTES)
             {
                 return Err(NormalizedModelError::new(
-                    NormalizedModelErrorKind::Terminal,
+                    NormalizedModelErrorKind::Protocol,
                     "provider tool call id exceeded the 256-byte limit",
                 ));
             }
             if call.arguments.len() > MAX_PROVIDER_TOOL_ARGUMENT_BYTES {
                 return Err(NormalizedModelError::new(
-                    NormalizedModelErrorKind::Terminal,
+                    NormalizedModelErrorKind::Protocol,
                     "provider tool arguments exceeded the 64 KiB limit",
                 ));
             }
             let arguments = serde_json::from_str::<Value>(&call.arguments).map_err(|error| {
                 NormalizedModelError::new(
-                    NormalizedModelErrorKind::Terminal,
+                    NormalizedModelErrorKind::Protocol,
                     format!("provider returned invalid tool arguments: {error}"),
                 )
             })?;
             if !arguments.is_object() {
                 return Err(NormalizedModelError::new(
-                    NormalizedModelErrorKind::Terminal,
+                    NormalizedModelErrorKind::Protocol,
                     "provider tool arguments must be a JSON object",
                 ));
             }
@@ -931,6 +1017,7 @@ enum ChatBlockKey {
 struct ChatAccumulator {
     order: Vec<ChatBlockKey>,
     reasoning: String,
+    reasoning_details: Vec<Value>,
     content: String,
     calls: BTreeMap<usize, ToolCallAccumulator>,
 }
@@ -956,7 +1043,8 @@ impl ChatAccumulator {
                 ChatBlockKey::Reasoning if !self.reasoning.is_empty() => {
                     blocks.push(ModelContentBlock::Reasoning {
                         text: self.reasoning.clone(),
-                        provider_item: None,
+                        provider_item: (!self.reasoning_details.is_empty())
+                            .then(|| json!({"reasoning_details": self.reasoning_details})),
                     });
                 }
                 ChatBlockKey::Text if !self.content.is_empty() => {
@@ -1032,11 +1120,95 @@ fn split_think_blocks(blocks: Vec<ModelContentBlock>) -> Vec<ModelContentBlock> 
     output
 }
 
+struct StreamDeadline {
+    timer: Pin<Box<tokio::time::Sleep>>,
+    first_byte_seen: bool,
+    first_byte_timeout: Duration,
+    idle_timeout: Duration,
+}
+
+impl StreamDeadline {
+    fn new(timeouts: ModelTimeoutPolicy) -> Self {
+        Self {
+            timer: Box::pin(tokio::time::sleep(timeouts.first_byte)),
+            first_byte_seen: false,
+            first_byte_timeout: timeouts.first_byte,
+            idle_timeout: timeouts.stream_idle,
+        }
+    }
+
+    fn observe_bytes(&mut self, bytes: usize) {
+        if bytes > 0 && !self.first_byte_seen {
+            self.first_byte_seen = true;
+            self.reset(self.idle_timeout);
+        }
+    }
+
+    fn observe_frame(&mut self) {
+        self.reset(self.idle_timeout);
+    }
+
+    fn reset(&mut self, timeout: Duration) {
+        self.timer
+            .as_mut()
+            .reset(tokio::time::Instant::now() + timeout);
+    }
+
+    fn timeout_error(&self) -> NormalizedModelError {
+        if self.first_byte_seen {
+            coded_error(
+                NormalizedModelErrorKind::Timeout,
+                format!(
+                    "AI provider stream was idle for {} ms",
+                    self.idle_timeout.as_millis()
+                ),
+                "STREAM_IDLE_TIMEOUT",
+            )
+        } else {
+            coded_error(
+                NormalizedModelErrorKind::Timeout,
+                format!(
+                    "AI provider returned no stream bytes within {} ms",
+                    self.first_byte_timeout.as_millis()
+                ),
+                "FIRST_BYTE_TIMEOUT",
+            )
+        }
+    }
+
+    fn empty_response_error(&self, stream_name: &str) -> NormalizedModelError {
+        coded_error(
+            NormalizedModelErrorKind::EmptyResponse,
+            format!("{stream_name} returned an empty response body"),
+            "EMPTY_RESPONSE",
+        )
+    }
+}
+
+fn ensure_nonempty_response(content: &[ModelContentBlock]) -> Result<(), NormalizedModelError> {
+    let has_output = content.iter().any(|block| match block {
+        ModelContentBlock::Text { text } | ModelContentBlock::Reasoning { text, .. } => {
+            !text.is_empty()
+        }
+        ModelContentBlock::ToolCall { .. } => true,
+    });
+    if has_output {
+        Ok(())
+    } else {
+        Err(coded_error(
+            NormalizedModelErrorKind::EmptyResponse,
+            "AI provider completed without text, reasoning, or tool calls",
+            "EMPTY_RESPONSE",
+        ))
+    }
+}
+
 async fn stream_chat(
     response: Response,
     cancellation: &CancellationToken,
     sink: Arc<dyn ModelStreamSink>,
     capabilities: ProviderCapabilities,
+    timeouts: ModelTimeoutPolicy,
 ) -> Result<ModelResponse, NormalizedModelError> {
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
@@ -1045,17 +1217,22 @@ async fn stream_chat(
     let mut usage = ProviderUsage::default();
     let mut completed = false;
     let mut finish_reason = ModelFinishReason::Other;
+    let mut deadline = StreamDeadline::new(timeouts);
     loop {
         tokio::select! {
+            biased;
             _ = cancellation.cancelled() => return Err(NormalizedModelError::cancelled()),
+            _ = deadline.timer.as_mut() => return Err(deadline.timeout_error()),
             next = stream.next() => {
                 let Some(chunk) = next else { break };
                 let chunk = chunk.map_err(normalize_transport_error)?;
+                deadline.observe_bytes(chunk.len());
                 append_provider_stream_chunk(&mut buffer, &chunk, &mut response_bytes)
-                    .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?;
+                    .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "STREAM_LIMIT"))?;
                 while let Some(event) = take_sse_event(&mut buffer)
-                    .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?
+                    .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "SSE_FRAMING"))?
                 {
+                    let effective = !sse_data(&event).is_empty();
                     process_chat_event(
                         &event,
                         capabilities,
@@ -1065,14 +1242,20 @@ async fn stream_chat(
                         &mut completed,
                         &mut finish_reason,
                     )?;
+                    if effective {
+                        deadline.observe_frame();
+                    }
                 }
                 ensure_provider_stream_frame_size(buffer.len())
-                    .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?;
+                    .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "STREAM_LIMIT"))?;
+                if completed {
+                    break;
+                }
             }
         }
     }
     if let Some(event) = take_final_sse_event(&mut buffer)
-        .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?
+        .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "SSE_FRAMING"))?
     {
         process_chat_event(
             &event,
@@ -1085,10 +1268,15 @@ async fn stream_chat(
         )?;
     }
     if !completed {
-        return Err(NormalizedModelError::new(
-            NormalizedModelErrorKind::Retryable,
-            "OpenAI-compatible stream ended before a completion signal",
-        ));
+        return Err(if deadline.first_byte_seen {
+            coded_error(
+                NormalizedModelErrorKind::Retryable,
+                "OpenAI-compatible stream ended before a completion signal",
+                "STREAM_CLOSED",
+            )
+        } else {
+            deadline.empty_response_error("OpenAI-compatible stream")
+        });
     }
     if finish_reason == ModelFinishReason::Length {
         return Err(NormalizedModelError::new(
@@ -1103,6 +1291,7 @@ async fn stream_chat(
     {
         finish_reason = ModelFinishReason::ToolCalls;
     }
+    ensure_nonempty_response(&content)?;
     Ok(ModelResponse {
         content,
         finish_reason,
@@ -1130,7 +1319,7 @@ fn process_chat_event(
     }
     let value: Value = serde_json::from_str(&data).map_err(|error| {
         NormalizedModelError::new(
-            NormalizedModelErrorKind::Terminal,
+            NormalizedModelErrorKind::Protocol,
             format!("invalid OpenAI-compatible stream event: {error}"),
         )
     })?;
@@ -1151,6 +1340,18 @@ fn process_chat_event(
     {
         *completed = true;
         *finish_reason = normalize_finish_reason(reason);
+    }
+    if capabilities.split_reasoning {
+        if let Some(details) = value
+            .pointer("/choices/0/delta/reasoning_details")
+            .and_then(Value::as_array)
+        {
+            if details.starts_with(&accumulated.reasoning_details) {
+                accumulated.reasoning_details = details.clone();
+            } else if !accumulated.reasoning_details.starts_with(details) {
+                accumulated.reasoning_details.extend(details.clone());
+            }
+        }
     }
     let direct_reasoning = value
         .pointer("/choices/0/delta/reasoning_content")
@@ -1268,6 +1469,7 @@ async fn stream_responses(
     response: Response,
     cancellation: &CancellationToken,
     sink: Arc<dyn ModelStreamSink>,
+    timeouts: ModelTimeoutPolicy,
 ) -> Result<ModelResponse, NormalizedModelError> {
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
@@ -1278,17 +1480,22 @@ async fn stream_responses(
     let mut streamed_calls = BTreeMap::<usize, ToolCallAccumulator>::new();
     let mut usage = ProviderUsage::default();
     let mut completed = false;
+    let mut deadline = StreamDeadline::new(timeouts);
     loop {
         tokio::select! {
+            biased;
             _ = cancellation.cancelled() => return Err(NormalizedModelError::cancelled()),
+            _ = deadline.timer.as_mut() => return Err(deadline.timeout_error()),
             next = stream.next() => {
                 let Some(chunk) = next else { break };
                 let chunk = chunk.map_err(normalize_transport_error)?;
+                deadline.observe_bytes(chunk.len());
                 append_provider_stream_chunk(&mut buffer, &chunk, &mut response_bytes)
-                    .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?;
+                    .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "STREAM_LIMIT"))?;
                 while let Some(event) = take_sse_event(&mut buffer)
-                    .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?
+                    .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "SSE_FRAMING"))?
                 {
+                    let effective = !sse_data(&event).is_empty();
                     process_responses_event(
                         &event,
                         &sink,
@@ -1299,14 +1506,20 @@ async fn stream_responses(
                         &mut usage,
                         &mut completed,
                     )?;
+                    if effective {
+                        deadline.observe_frame();
+                    }
                 }
                 ensure_provider_stream_frame_size(buffer.len())
-                    .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?;
+                    .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "STREAM_LIMIT"))?;
+                if completed {
+                    break;
+                }
             }
         }
     }
     if let Some(event) = take_final_sse_event(&mut buffer)
-        .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?
+        .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "SSE_FRAMING"))?
     {
         process_responses_event(
             &event,
@@ -1320,10 +1533,15 @@ async fn stream_responses(
         )?;
     }
     if !completed {
-        return Err(NormalizedModelError::new(
-            NormalizedModelErrorKind::Retryable,
-            "OpenAI stream ended before response.completed",
-        ));
+        return Err(if deadline.first_byte_seen {
+            coded_error(
+                NormalizedModelErrorKind::Retryable,
+                "OpenAI stream ended before response.completed",
+                "STREAM_CLOSED",
+            )
+        } else {
+            deadline.empty_response_error("OpenAI stream")
+        });
     }
     let content = if output.is_empty() {
         fallback_responses_blocks(streamed_text, streamed_reasoning, streamed_calls)?
@@ -1338,6 +1556,7 @@ async fn stream_responses(
     } else {
         ModelFinishReason::Stop
     };
+    ensure_nonempty_response(&content)?;
     Ok(ModelResponse {
         content,
         finish_reason,
@@ -1355,7 +1574,7 @@ fn response_function_call(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
             NormalizedModelError::new(
-                NormalizedModelErrorKind::Terminal,
+                NormalizedModelErrorKind::Protocol,
                 "OpenAI function call is missing call_id",
             )
         })?;
@@ -1365,7 +1584,7 @@ fn response_function_call(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
             NormalizedModelError::new(
-                NormalizedModelErrorKind::Terminal,
+                NormalizedModelErrorKind::Protocol,
                 "OpenAI function call is missing name",
             )
         })?;
@@ -1374,31 +1593,31 @@ fn response_function_call(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             NormalizedModelError::new(
-                NormalizedModelErrorKind::Terminal,
+                NormalizedModelErrorKind::Protocol,
                 "OpenAI function call is missing arguments",
             )
         })?;
     if provider_call_id.len() > MAX_PROVIDER_TOOL_CALL_ID_BYTES {
         return Err(NormalizedModelError::new(
-            NormalizedModelErrorKind::Terminal,
+            NormalizedModelErrorKind::Protocol,
             "OpenAI function call id exceeded the 256-byte limit",
         ));
     }
     if arguments.len() > MAX_PROVIDER_TOOL_ARGUMENT_BYTES {
         return Err(NormalizedModelError::new(
-            NormalizedModelErrorKind::Terminal,
+            NormalizedModelErrorKind::Protocol,
             "OpenAI function arguments exceeded the 64 KiB limit",
         ));
     }
     let arguments = serde_json::from_str::<Value>(arguments).map_err(|error| {
         NormalizedModelError::new(
-            NormalizedModelErrorKind::Terminal,
+            NormalizedModelErrorKind::Protocol,
             format!("OpenAI returned invalid tool arguments: {error}"),
         )
     })?;
     if !arguments.is_object() {
         return Err(NormalizedModelError::new(
-            NormalizedModelErrorKind::Terminal,
+            NormalizedModelErrorKind::Protocol,
             "OpenAI function arguments must be a JSON object",
         ));
     }
@@ -1507,7 +1726,7 @@ fn process_responses_event(
     }
     let value: Value = serde_json::from_str(&data).map_err(|error| {
         NormalizedModelError::new(
-            NormalizedModelErrorKind::Terminal,
+            NormalizedModelErrorKind::Protocol,
             format!("invalid OpenAI stream event: {error}"),
         )
     })?;
@@ -1631,6 +1850,7 @@ async fn stream_ollama(
     response: Response,
     cancellation: &CancellationToken,
     sink: Arc<dyn ModelStreamSink>,
+    timeouts: ModelTimeoutPolicy,
 ) -> Result<ModelResponse, NormalizedModelError> {
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
@@ -1639,16 +1859,20 @@ async fn stream_ollama(
     let mut usage = ProviderUsage::default();
     let mut completed = false;
     let mut finish_reason = ModelFinishReason::Other;
+    let mut deadline = StreamDeadline::new(timeouts);
     loop {
         tokio::select! {
+            biased;
             _ = cancellation.cancelled() => return Err(NormalizedModelError::cancelled()),
+            _ = deadline.timer.as_mut() => return Err(deadline.timeout_error()),
             next = stream.next() => {
                 let Some(chunk) = next else { break };
                 let chunk = chunk.map_err(normalize_transport_error)?;
+                deadline.observe_bytes(chunk.len());
                 append_provider_stream_chunk(&mut buffer, &chunk, &mut response_bytes)
-                    .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?;
+                    .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "STREAM_LIMIT"))?;
                 while let Some(line) = take_line(&mut buffer)
-                    .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?
+                    .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "OLLAMA_FRAMING"))?
                 {
                     if !line.trim().is_empty() {
                         process_ollama_line(
@@ -1659,17 +1883,21 @@ async fn stream_ollama(
                             &mut completed,
                             &mut finish_reason,
                         )?;
+                        deadline.observe_frame();
                     }
                 }
                 ensure_provider_stream_frame_size(buffer.len())
-                    .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?;
+                    .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "STREAM_LIMIT"))?;
+                if completed {
+                    break;
+                }
             }
         }
     }
     if !buffer.iter().all(u8::is_ascii_whitespace) {
         let line = String::from_utf8(buffer).map_err(|error| {
             NormalizedModelError::new(
-                NormalizedModelErrorKind::Terminal,
+                NormalizedModelErrorKind::Protocol,
                 format!("invalid UTF-8 in final Ollama event: {error}"),
             )
         })?;
@@ -1683,10 +1911,15 @@ async fn stream_ollama(
         )?;
     }
     if !completed {
-        return Err(NormalizedModelError::new(
-            NormalizedModelErrorKind::Retryable,
-            "Ollama stream ended before done=true",
-        ));
+        return Err(if deadline.first_byte_seen {
+            coded_error(
+                NormalizedModelErrorKind::Retryable,
+                "Ollama stream ended before done=true",
+                "STREAM_CLOSED",
+            )
+        } else {
+            deadline.empty_response_error("Ollama stream")
+        });
     }
     let content = accumulated.finish(false, true)?;
     if content
@@ -1695,6 +1928,7 @@ async fn stream_ollama(
     {
         finish_reason = ModelFinishReason::ToolCalls;
     }
+    ensure_nonempty_response(&content)?;
     Ok(ModelResponse {
         content,
         finish_reason,
@@ -1713,7 +1947,7 @@ fn process_ollama_line(
 ) -> Result<(), NormalizedModelError> {
     let value: Value = serde_json::from_str(line.trim()).map_err(|error| {
         NormalizedModelError::new(
-            NormalizedModelErrorKind::Terminal,
+            NormalizedModelErrorKind::Protocol,
             format!("invalid Ollama stream event: {error}"),
         )
     })?;
@@ -2127,6 +2361,47 @@ mod tests {
         }
     }
 
+    fn serve_stalled_response(
+        prefix: Option<&'static [u8]>,
+        headers: bool,
+    ) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request);
+            if headers {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                    )
+                    .unwrap();
+                if let Some(prefix) = prefix {
+                    write!(stream, "{:x}\r\n", prefix.len()).unwrap();
+                    stream.write_all(prefix).unwrap();
+                    stream.write_all(b"\r\n").unwrap();
+                }
+                stream.flush().unwrap();
+            }
+            thread::sleep(Duration::from_millis(100));
+            let _ = stream.write_all(b"0\r\n\r\n");
+        });
+        (format!("http://{address}"), server)
+    }
+
+    fn serve_raw_http(response: String) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request);
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        (format!("http://{address}"), server)
+    }
+
     #[test]
     fn model_exposes_only_strict_runtime_pipeline_tools() {
         let tools = default_model_tools();
@@ -2266,6 +2541,8 @@ mod tests {
         let recording = Arc::new(RecordingSink::default());
         let sink: Arc<dyn ModelStreamSink> = recording.clone();
         let provider = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "deepseek".into(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.deepseek.com".into(),
@@ -2339,6 +2616,8 @@ mod tests {
     #[test]
     fn qwen_and_glm_profiles_enable_native_reasoning_and_stream_usage() {
         let qwen = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "qwen".into(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
@@ -2348,6 +2627,8 @@ mod tests {
             api_key: None,
         };
         let glm = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "glm".into(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://open.bigmodel.cn/api/paas/v4".into(),
@@ -2365,7 +2646,7 @@ mod tests {
         let glm_capabilities = provider_capabilities(&glm);
         assert!(glm_capabilities.native_reasoning);
         assert!(glm_capabilities.supports_stream_usage);
-        assert!(!glm_capabilities.replay_reasoning_content);
+        assert!(glm_capabilities.replay_reasoning_content);
     }
 
     #[test]
@@ -2373,6 +2654,8 @@ mod tests {
         let recording = Arc::new(RecordingSink::default());
         let sink: Arc<dyn ModelStreamSink> = recording.clone();
         let provider = AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "minimax".into(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.minimaxi.com".into(),
@@ -2491,6 +2774,201 @@ mod tests {
             normalize_provider_error(400, "maximum context length exceeded").kind,
             NormalizedModelErrorKind::ContextTooLarge
         );
+        let permanent = normalize_provider_error(422, "invalid request");
+        assert_eq!(permanent.kind, NormalizedModelErrorKind::Terminal);
+        assert!(!permanent.retryable());
+        assert!(normalize_provider_error(503, "unavailable").retryable());
+    }
+
+    #[test]
+    fn retry_after_accepts_seconds_and_imf_fixdate() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        assert_eq!(parse_retry_after("7", now), Some(7_000));
+        let date = httpdate::fmt_http_date(now + Duration::from_secs(3));
+        assert_eq!(parse_retry_after(&date, now), Some(3_000));
+        assert_eq!(parse_retry_after("not-a-date", now), None);
+        assert_eq!(
+            parse_retry_after(&httpdate::fmt_http_date(now - Duration::from_secs(1)), now),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn http_429_and_503_preserve_retry_after_seconds_and_dates() {
+        let date = httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(3));
+        for (status, retry_after, expected_kind) in [
+            (429, "2".to_string(), NormalizedModelErrorKind::RateLimited),
+            (503, date, NormalizedModelErrorKind::Retryable),
+        ] {
+            let body = "busy";
+            let response = format!(
+                "HTTP/1.1 {status} Error\r\nContent-Length: {}\r\nRetry-After: {retry_after}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let (url, server) = serve_raw_http(response);
+            let response = build_streaming_client()
+                .unwrap()
+                .get(url)
+                .send()
+                .await
+                .unwrap();
+            let error = checked_stream_response(
+                response,
+                &CancellationToken::new(),
+                ModelTimeoutPolicy::default(),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.kind, expected_kind);
+            assert_eq!(error.status, Some(status));
+            if status == 429 {
+                assert_eq!(error.retry_after_ms, Some(2_000));
+            } else {
+                assert!(error.retry_after_ms.is_some_and(|delay| delay <= 3_000));
+                assert!(error.retry_after_ms.is_some_and(|delay| delay >= 1_000));
+            }
+            server.join().unwrap();
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stream_deadline_separates_first_byte_from_idle_timeout() {
+        let timeouts = ModelTimeoutPolicy {
+            request_headers: Duration::from_secs(1),
+            first_byte: Duration::from_secs(2),
+            stream_idle: Duration::from_secs(5),
+        };
+        let mut first_byte = StreamDeadline::new(timeouts);
+        first_byte.timer.as_mut().await;
+        assert_eq!(
+            first_byte.timeout_error().code.as_deref(),
+            Some("FIRST_BYTE_TIMEOUT")
+        );
+
+        let mut idle = StreamDeadline::new(timeouts);
+        idle.observe_bytes(1);
+        idle.timer.as_mut().await;
+        assert_eq!(
+            idle.timeout_error().code.as_deref(),
+            Some("STREAM_IDLE_TIMEOUT")
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn active_stream_can_run_beyond_the_removed_120_second_total_timeout() {
+        let timeouts = ModelTimeoutPolicy {
+            request_headers: Duration::from_secs(1),
+            first_byte: Duration::from_secs(10),
+            stream_idle: Duration::from_secs(61),
+        };
+        let mut deadline = StreamDeadline::new(timeouts);
+        deadline.observe_bytes(1);
+        for _ in 0..5 {
+            tokio::time::advance(Duration::from_secs(60)).await;
+            assert!(!deadline.timer.is_elapsed());
+            deadline.observe_frame();
+        }
+        assert!(!deadline.timer.is_elapsed());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancellation_wins_while_waiting_for_first_byte_or_idle() {
+        for first_byte_seen in [false, true] {
+            let cancellation = CancellationToken::new();
+            let mut deadline = StreamDeadline::new(ModelTimeoutPolicy {
+                request_headers: Duration::from_secs(1),
+                first_byte: Duration::from_secs(30),
+                stream_idle: Duration::from_secs(30),
+            });
+            if first_byte_seen {
+                deadline.observe_bytes(1);
+            }
+            cancellation.cancel();
+            let cancelled = tokio::select! {
+                _ = cancellation.cancelled() => true,
+                _ = deadline.timer.as_mut() => false,
+            };
+            assert!(cancelled);
+        }
+    }
+
+    #[tokio::test]
+    async fn connection_and_response_header_failures_are_retryable_and_typed() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let unused = listener.local_addr().unwrap();
+        drop(listener);
+        let timeouts = ModelTimeoutPolicy {
+            request_headers: Duration::from_millis(20),
+            first_byte: Duration::from_secs(1),
+            stream_idle: Duration::from_secs(1),
+        };
+        let connection = build_streaming_client()
+            .unwrap()
+            .get(format!("http://{unused}"))
+            .send()
+            .await
+            .map_err(normalize_transport_error)
+            .unwrap_err();
+        assert_eq!(connection.kind, NormalizedModelErrorKind::Transport);
+        assert_eq!(connection.code.as_deref(), Some("CONNECT"));
+
+        let (url, server) = serve_stalled_response(None, false);
+        let headers = send_request(
+            build_streaming_client().unwrap().get(url),
+            &CancellationToken::new(),
+            timeouts,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(headers.kind, NormalizedModelErrorKind::Timeout);
+        assert_eq!(headers.code.as_deref(), Some("REQUEST_HEADERS_TIMEOUT"));
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn live_stream_distinguishes_first_byte_and_idle_timeouts() {
+        let timeouts = ModelTimeoutPolicy {
+            request_headers: Duration::from_secs(1),
+            first_byte: Duration::from_millis(20),
+            stream_idle: Duration::from_millis(20),
+        };
+        for (prefix, expected) in [
+            (None, "FIRST_BYTE_TIMEOUT"),
+            (
+                Some(b"data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n".as_slice()),
+                "STREAM_IDLE_TIMEOUT",
+            ),
+        ] {
+            let (url, server) = serve_stalled_response(prefix, true);
+            let response = send_request(
+                build_streaming_client().unwrap().get(url),
+                &CancellationToken::new(),
+                timeouts,
+            )
+            .await
+            .unwrap();
+            let error = stream_chat(
+                response,
+                &CancellationToken::new(),
+                Arc::new(RecordingSink::default()),
+                provider_capabilities(&AiProviderConfig {
+                    profile: None,
+                    retry_policy: None,
+                    id: "timeout-test".into(),
+                    kind: AiProviderKind::OpenAiCompatible,
+                    base_url: "http://127.0.0.1".into(),
+                    model: "test".into(),
+                    reasoning_effort: None,
+                    requires_api_key: false,
+                    api_key: None,
+                }),
+                timeouts,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.code.as_deref(), Some(expected));
+            server.join().unwrap();
+        }
     }
 
     #[test]
@@ -2656,6 +3134,8 @@ mod tests {
         .to_string();
         let (base_url, body_receiver, server) = serve_recording_sse(sse);
         let provider = AiProviderConfig {
+            profile: Some("minimax".into()),
+            retry_policy: None,
             id: "wire-minimax".into(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url,
@@ -2684,9 +3164,10 @@ mod tests {
             tools: vec![tool.clone()],
         };
         let adapter = HttpModelAdapter {
-            client: build_client().unwrap(),
+            client: build_streaming_client().unwrap(),
             provider,
             api_key: None,
+            timeouts: ModelTimeoutPolicy::default(),
         };
         let response = adapter
             .stream(
@@ -2732,8 +3213,10 @@ mod tests {
         .to_string();
         let (base_url, body_receiver, server) = serve_recording_sse(sse);
         let adapter = HttpModelAdapter {
-            client: build_client().unwrap(),
+            client: build_streaming_client().unwrap(),
             provider: AiProviderConfig {
+                profile: None,
+                retry_policy: None,
                 id: "wire-compatible".into(),
                 kind: AiProviderKind::OpenAiCompatible,
                 base_url,
@@ -2743,6 +3226,7 @@ mod tests {
                 api_key: None,
             },
             api_key: None,
+            timeouts: ModelTimeoutPolicy::default(),
         };
         let response = adapter
             .stream(
@@ -2793,6 +3277,17 @@ mod tests {
             panic!("SHELLSPAN_LIVE_{prefix}_API_KEY is required for this ignored live test");
         }
         let provider = AiProviderConfig {
+            profile: match prefix {
+                "OPENAI" => Some("openai".into()),
+                "OLLAMA" => Some("ollama".into()),
+                "DEEPSEEK" => Some("deepseek".into()),
+                "MINIMAX" => Some("minimax".into()),
+                "QWEN" => Some("qwen".into()),
+                "GLM" => Some("glm".into()),
+                "KIMI" => Some("kimi".into()),
+                _ => None,
+            },
+            retry_policy: None,
             id: format!("live-{}", prefix.to_ascii_lowercase()),
             kind,
             base_url,
@@ -2995,5 +3490,178 @@ mod tests {
             false,
         )
         .await;
+    }
+    #[tokio::test]
+    #[ignore = "requires SHELLSPAN_LIVE_QWEN_API_KEY"]
+    async fn live_provider_basic_round_qwen() {
+        run_live_provider_basic_round(
+            "QWEN",
+            AiProviderKind::OpenAiCompatible,
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "qwen3-235b-a22b",
+            Some(crate::ai::AiReasoningEffort::On),
+            true,
+            true,
+            false,
+            true,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires SHELLSPAN_LIVE_GLM_API_KEY"]
+    async fn live_provider_basic_round_glm() {
+        run_live_provider_basic_round(
+            "GLM",
+            AiProviderKind::OpenAiCompatible,
+            "https://open.bigmodel.cn/api/paas/v4",
+            "glm-5",
+            Some(crate::ai::AiReasoningEffort::On),
+            true,
+            true,
+            false,
+            true,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn every_profile_proxy_request_stream_usage_and_history_fixture() {
+        let fixtures: Vec<Value> = serde_json::from_str(include_str!(
+            "../../../src/lib/__tests__/provider-contract-fixtures.json"
+        ))
+        .unwrap();
+        for fixture in fixtures {
+            let mut provider: AiProviderConfig =
+                serde_json::from_value(fixture["provider"].clone()).unwrap();
+            let profile = provider.profile.clone().unwrap();
+            let sse = match provider.kind {
+                AiProviderKind::OpenAi => concat!(
+                    "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"READY\"}\n\n",
+                    "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"READY\"}]}],\"usage\":{\"input_tokens\":8,\"output_tokens\":3,\"total_tokens\":11}}}\n\n").to_string(),
+                AiProviderKind::Ollama => "{\"message\":{\"role\":\"assistant\",\"content\":\"READY\",\"thinking\":\"plan\"},\"done\":true,\"prompt_eval_count\":8,\"eval_count\":3}\n".into(),
+                AiProviderKind::OpenAiCompatible => {
+                    let reasoning = if profile == "minimax" { json!({"reasoning_details":[{"type":"reasoning.text","text":"plan","signature":"opaque"}]}) }
+                        else { json!({"reasoning_content":"plan"}) };
+                    format!("data: {}\n\ndata: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                        json!({"choices":[{"delta":reasoning}]}),
+                        json!({"choices":[{"delta":{"content":"READY","tool_calls":[{"index":0,"id":"call-wire","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"x\"}"}}]},"finish_reason":"tool_calls"}]}),
+                        json!({"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}))
+                }
+            };
+            let (base_url, receiver, server) = serve_recording_sse(sse);
+            provider.base_url = base_url;
+            let adapter = HttpModelAdapter {
+                client: build_streaming_client().unwrap(),
+                provider: provider.clone(),
+                api_key: Some("fixture".into()),
+                timeouts: ModelTimeoutPolicy::default(),
+            };
+            let response = adapter.stream(ModelRequest { request_id: "profile-fixture".into(), surface_generation: 0,
+                system_prompt: "system".into(), messages: vec![ModelMessage::User { content: "inspect".into() }],
+                tools: vec![ModelToolDefinition { name: "read_file".into(), description: "read".into(), input_schema: json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}) }] },
+                CancellationToken::new(), Arc::new(RecordingSink::default())).await.unwrap();
+            let body = receiver.recv().unwrap();
+            server.join().unwrap();
+            for (key, expected) in fixture["reasoningBody"].as_object().unwrap() {
+                assert_eq!(&body[key], expected, "{profile} {key}");
+            }
+            for key in [
+                "thinking",
+                "think",
+                "reasoning",
+                "reasoning_effort",
+                "enable_thinking",
+            ] {
+                if fixture["reasoningBody"].get(key).is_none() {
+                    assert!(body.get(key).is_none(), "{profile} unexpected {key}");
+                }
+            }
+            assert_eq!(response.usage.output_tokens, Some(3), "{profile}");
+            if provider.kind == AiProviderKind::OpenAiCompatible {
+                let caps = provider_capabilities(&provider);
+                assert_eq!(
+                    body.get("stream_options").is_some(),
+                    caps.supports_stream_usage
+                );
+                assert!(!body
+                    .as_object()
+                    .unwrap()
+                    .contains_key("parallel_tool_calls"));
+                assert!(response
+                    .content
+                    .iter()
+                    .any(|b| matches!(b, ModelContentBlock::ToolCall { .. })));
+                assert_eq!(
+                    response
+                        .content
+                        .iter()
+                        .any(|b| matches!(b, ModelContentBlock::Reasoning { .. })),
+                    caps.native_reasoning
+                );
+                let encoded = serde_json::to_string(&response.content).unwrap();
+                let content: Vec<ModelContentBlock> = serde_json::from_str(&encoded).unwrap();
+                let messages = chat_messages(&[ModelMessage::Assistant { content }], false, caps);
+                if profile == "minimax" {
+                    assert_eq!(messages[0]["reasoning_details"][0]["signature"], "opaque");
+                } else if caps.replay_reasoning_content && caps.native_reasoning {
+                    assert_eq!(messages[0]["reasoning_content"], "plan");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn deepseek_replays_reasoning_on_all_assistant_messages_including_non_tool_turns() {
+        let provider: AiProviderConfig = serde_json::from_value(json!({"id":"x","profile":"deepseek","kind":"openAiCompatible","model":"deepseek-v4-flash","baseUrl":"https://proxy.example/v1","requiresApiKey":false})).unwrap();
+        let messages = (0..2)
+            .map(|index| ModelMessage::Assistant {
+                content: vec![
+                    ModelContentBlock::Reasoning {
+                        text: format!("reason {index}"),
+                        provider_item: None,
+                    },
+                    ModelContentBlock::Text {
+                        text: "answer".into(),
+                    },
+                ],
+            })
+            .collect::<Vec<_>>();
+        let wire = chat_messages(&messages, false, provider_capabilities(&provider));
+        assert_eq!(wire[0]["reasoning_content"], "reason 0");
+        assert_eq!(wire[1]["reasoning_content"], "reason 1");
+    }
+
+    #[tokio::test]
+    async fn qwen_thinking_only_sse_is_not_classified_as_empty() {
+        let sse = "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"reason only\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".into();
+        let (base_url, receiver, server) = serve_recording_sse(sse);
+        let provider: AiProviderConfig = serde_json::from_value(json!({"id":"qwen","profile":"qwen","kind":"openAiCompatible","model":"qwen3-thinking-2507","baseUrl":base_url,"requiresApiKey":false})).unwrap();
+        let adapter = HttpModelAdapter {
+            client: build_streaming_client().unwrap(),
+            provider,
+            api_key: None,
+            timeouts: ModelTimeoutPolicy::default(),
+        };
+        let response = adapter
+            .stream(
+                ModelRequest {
+                    request_id: "qwen".into(),
+                    surface_generation: 0,
+                    system_prompt: "system".into(),
+                    messages: vec![],
+                    tools: vec![],
+                },
+                CancellationToken::new(),
+                Arc::new(RecordingSink::default()),
+            )
+            .await
+            .unwrap();
+        let body = receiver.recv().unwrap();
+        server.join().unwrap();
+        assert!(body.get("enable_thinking").is_none());
+        assert!(
+            matches!(&response.content[0], ModelContentBlock::Reasoning { text, .. } if text == "reason only")
+        );
     }
 }

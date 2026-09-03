@@ -17,6 +17,16 @@
     "test:ai:phase5:visual": "node scripts/ai-panel-phase5-visual.mjs",
     "test:ai:phase5": "vitest run src/components/ai/__tests__/ai-workspace-phase5.test.tsx src/components/ai/__tests__/ai-workspace-controller.test.tsx src/components/ai/__tests__/chat-primitives.test.tsx src/components/ai/__tests__/ai-turn-process-phase4.test.tsx src/lib/ai/__tests__/conversation-projection.test.ts src/lib/ai/__tests__/session-adapters.test.ts --maxWorkers=1 && pnpm test:ai:phase5:visual",
     "test:ai:phase6": "vitest run src/test/fixtures/__tests__/agent-session-phase6-matrix.test.ts src/components/ai/__tests__/ai-workspace-phase6.test.tsx src/components/ai/__tests__/ai-workspace-controller.test.tsx src/lib/ai/__tests__/optimistic-submission.test.ts src/lib/ai/__tests__/conversation-projection.test.ts src/lib/ai/__tests__/session-adapters.test.ts src/lib/ai/__tests__/session-error.test.ts src/lib/__tests__/tauri-agent-runtime-phase6.test.ts --maxWorkers=1",
+    "test:ai:stage1:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib --locked ai::tests -- --test-threads=1 && cargo test --manifest-path src-tauri/Cargo.toml --lib --locked agent_runtime:: -- --test-threads=1",
+    "test:ai:stage1": "pnpm test:agent:runtime && pnpm test:ai:stage1:rust",
+    "test:ai:stage2:rust": "pnpm test:ai:stage1:rust",
+    "test:ai:stage2": "pnpm test:agent:runtime && pnpm test:ai:stage2:rust",
+    "test:ai:stage3:rust": "pnpm test:ai:stage2:rust",
+    "test:ai:stage3": "pnpm test:agent:runtime && pnpm test:ai:stage3:rust",
+    "test:ai:stage3b:frontend": "vitest run src/lib/__tests__/retry-policy.test.ts src/lib/ai/__tests__/retry-projection.test.ts src/stores/__tests__/aiSettingsStore.test.ts src/components/ai/__tests__/provider-setup-dialog.test.tsx --maxWorkers=1",
+    "test:ai:stage3b:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib --locked agent_runtime::runtime::tests && cargo test --manifest-path src-tauri/Cargo.toml --lib --locked agent_runtime::retry::tests && cargo test --manifest-path src-tauri/Cargo.toml --lib --locked agent_runtime::subagent::retry_policy_tests && cargo test --manifest-path src-tauri/Cargo.toml --lib --locked agent_runtime::compaction::tests",
+    "test:ai:stage3b": "pnpm test:ai:stage3b:frontend && pnpm test:ai:stage3b:rust",
+    "test:ai:stage5": "node scripts/ai-runtime-stage5.mjs",
     "test:agent:runtime": "vitest run src/lib/__tests__/agent-session-client.test.ts src/lib/__tests__/agent-session-projection.test.ts src/lib/ai/__tests__/conversation-projection.test.ts src/lib/ai/__tests__/session-adapters.test.ts src/components/ai/__tests__/ai-conversation-node-seat.test.tsx src/components/ai/__tests__/ai-workspace-phase5.test.tsx src/components/ai/__tests__/agent-permission-approval.test.tsx src/stores/__tests__/agentPermissionStore.test.ts --maxWorkers=1",
     "test:agent:providers:live": "node --env-file-if-exists=.env.local scripts/agent-provider-live-smoke.mjs",
     "check:agent-terminal": "pnpm test:agent:runtime",
@@ -34,7 +44,10 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "version": "node scripts/bump-version.mjs",
-    "changelog": "git-cliff -o CHANGELOG.md"
+    "changelog": "git-cliff -o CHANGELOG.md",
+    "test:ai:stage4:frontend": "vitest run src/lib/__tests__/provider-contract.test.ts src/lib/__tests__/ai-reasoning.test.ts src/stores/__tests__/aiSettingsStore.test.ts src/components/ai/__tests__/provider-setup-dialog.test.tsx --maxWorkers=1",
+    "test:ai:stage4:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib --locked agent_runtime::provider::tests && cargo test --manifest-path src-tauri/Cargo.toml --lib --locked agent_runtime::model::tests && cargo test --manifest-path src-tauri/Cargo.toml --lib --locked agent_runtime::compaction::tests",
+    "test:ai:stage4": "pnpm test:ai:stage4:frontend && pnpm test:ai:stage4:rust"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

@@ -369,6 +369,21 @@ function projectActivityNodesUnchecked(
         );
         break;
       }
+      case 'request/failure': {
+        const coordinates = requestCoordinates(event.data.requestId, event);
+        const streamKey = `activity:assistant-stream:${event.data.requestId}`;
+        if (indexByKey.has(streamKey)) {
+          upsert(streamKey, 'assistantStream', event, 'interrupted', 'assistant/stream',
+            event.data.failure.message, event.data, event.data.requestId, coordinates, true);
+        }
+        upsert(
+          `activity:request:${event.data.requestId}`,
+          'request', event, event.data.interrupted ? 'interrupted' : 'failed', 'request',
+          event.data.failure.message, event.data, event.data.requestId, coordinates,
+          true,
+        );
+        break;
+      }
       case 'assistant/chunk': {
         const coordinates = requestCoordinates(event.data.requestId, event);
         const detail = [
@@ -769,6 +784,14 @@ function projectActivityUnchecked(
           attempt: event.data.attempt,
           retryReason: event.data.reason,
         }));
+        break;
+      }
+      case 'request/failure': {
+        updateActivityRequest(event.data.requestId, event, (request) => withRequestTiming({
+          ...request,
+          finishReason: 'error',
+          failure: event.data,
+        }, event.timeUnixMs, event.data.interrupted));
         break;
       }
       case 'assistant/chunk': {

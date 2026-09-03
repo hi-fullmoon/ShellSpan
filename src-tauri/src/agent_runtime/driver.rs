@@ -11,8 +11,8 @@ use super::{
     AgentRequestSeries, AgentScopedPayload, AgentSessionEventPayload, AgentSessionStatus,
     AgentSessionStore, AgentStopReason, AgentTokenUsage, AgentToolCallDelta, AgentToolPipeline,
     ModelContentBlock, ModelFinishReason, ModelMessage, ModelRequest, ModelResponse,
-    ModelStreamSink, NormalizedModelError, NormalizedModelErrorKind, StreamDelta,
-    ToolPipelineSettlement, MAX_AGENT_STREAM_DELTA_BYTES,
+    ModelStreamSink, NormalizedModelError, NormalizedModelErrorKind, RetryPlan, RetryPolicy,
+    StreamDelta, ToolPipelineSettlement, MAX_AGENT_STREAM_DELTA_BYTES,
 };
 
 #[cfg(test)]
@@ -22,7 +22,7 @@ use super::{AgentInboxLane, AgentInboxMessage, AgentMessageSource};
 pub(crate) struct AgentDriverConfig {
     pub(crate) max_steps_per_turn: usize,
     pub(crate) max_turns_per_session: usize,
-    pub(crate) max_request_attempts: u32,
+    pub(crate) retry_policy: RetryPolicy,
 }
 
 impl Default for AgentDriverConfig {
@@ -30,7 +30,7 @@ impl Default for AgentDriverConfig {
         Self {
             max_steps_per_turn: 8,
             max_turns_per_session: 64,
-            max_request_attempts: 3,
+            retry_policy: RetryPolicy::default(),
         }
     }
 }
@@ -51,8 +51,26 @@ pub(crate) async fn drive_agent(
     compactions: AgentCompactionManager,
     config: AgentDriverConfig,
 ) -> AgentDriverSettlement {
+    // The entry owns an immutable Provider snapshot for this drive and its children.
+    let config = AgentDriverConfig {
+        retry_policy: entry.provider.retry_policy.unwrap_or(config.retry_policy),
+        ..config
+    };
+    let compactions = compactions.with_model(
+        entry.adapter.clone(),
+        entry.provider.clone(),
+        config.retry_policy,
+    );
     match drive_agent_inner(&sessions, &entry, &hooks, &tools, &compactions, config).await {
         Ok(settlement) => settlement,
+        Err(message) if message.starts_with("toolSchedulerFailure:") => {
+            let _ = tools.mark_scheduler_failure(&entry, &message);
+            AgentDriverSettlement::Waiting
+        }
+        Err(_) if entry.cancellation().is_cancelled() => {
+            let _ = close_open_scope(&sessions, &entry, "cancelled");
+            AgentDriverSettlement::Cancelled
+        }
         Err(message) => {
             let reason = format!("runtimeFailure: {message}");
             let _ = close_open_scope(&sessions, &entry, &reason);
@@ -79,7 +97,7 @@ async fn drive_agent_inner(
             max_turns_per_session: config
                 .max_turns_per_session
                 .min(subagent.budget.max_turns as usize),
-            max_request_attempts: config.max_request_attempts,
+            retry_policy: config.retry_policy,
         }
     } else {
         config
@@ -147,7 +165,9 @@ async fn drive_agent_inner(
                 &turn_id,
                 &step_id,
                 step_index,
-            )? {
+            )
+            .await?
+            {
                 close_open_scope(sessions, entry, &reason)?;
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
@@ -169,7 +189,8 @@ async fn drive_agent_inner(
             let turn_id = format!("turn-{}", Uuid::new_v4().simple());
             let step_id = format!("step-{}", Uuid::new_v4().simple());
             if let Some(reason) =
-                apply_pre_step_hooks(sessions, entry, hooks, compactions, &turn_id, &step_id, 1)?
+                apply_pre_step_hooks(sessions, entry, hooks, compactions, &turn_id, &step_id, 1)
+                    .await?
             {
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
@@ -257,7 +278,9 @@ async fn drive_agent_inner(
                 &turn_id,
                 &current_step_id,
                 step_index,
-            )? {
+            )
+            .await?
+            {
                 close_open_scope(sessions, entry, &reason)?;
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
@@ -287,7 +310,7 @@ async fn drive_agent_inner(
     }
 }
 
-fn apply_pre_step_hooks(
+async fn apply_pre_step_hooks(
     sessions: &AgentSessionStore,
     entry: &Arc<AgentEntry>,
     hooks: &AgentHookBus,
@@ -367,15 +390,19 @@ fn apply_pre_step_hooks(
             }
             AgentPreStepDecision::Compact { reason } => {
                 let active_turn_id = entry.scope()?.map(|scope| scope.turn_id);
-                compactions.compact(
-                    &entry.session_id,
-                    turn_id,
-                    step_id,
-                    active_turn_id.as_deref(),
-                    &reason,
-                    &budget,
-                    false,
-                )?;
+                let cancellation = entry.cancellation();
+                compactions
+                    .compact(
+                        &entry.session_id,
+                        turn_id,
+                        step_id,
+                        active_turn_id.as_deref(),
+                        &reason,
+                        &budget,
+                        false,
+                        &cancellation,
+                    )
+                    .await?;
             }
         }
     }
@@ -388,6 +415,36 @@ enum StepSettlement {
     Waiting,
     Cancelled,
     Failed(String),
+}
+
+struct PendingRetry {
+    previous_request_id: String,
+    reason: String,
+    plan: RetryPlan,
+    error: Option<NormalizedModelError>,
+}
+
+fn retry_random_sample() -> f64 {
+    let sample = Uuid::new_v4().as_u128() as u64;
+    (sample as f64) / (u64::MAX as f64)
+}
+
+fn model_response_has_output(response: &ModelResponse) -> bool {
+    response.content.iter().any(|block| match block {
+        ModelContentBlock::Text { text } | ModelContentBlock::Reasoning { text, .. } => {
+            !text.is_empty()
+        }
+        ModelContentBlock::ToolCall { .. } => true,
+    })
+}
+
+fn empty_model_response_error() -> NormalizedModelError {
+    let mut error = NormalizedModelError::new(
+        NormalizedModelErrorKind::EmptyResponse,
+        "AI provider completed without text, reasoning, or tool calls",
+    );
+    error.code = Some("EMPTY_RESPONSE".into());
+    error
 }
 
 async fn run_step(
@@ -407,21 +464,42 @@ async fn run_step(
     } else {
         AgentRequestReason::ToolContinuation
     };
-    let mut previous_request = None;
+    let mut pending_retry: Option<PendingRetry> = None;
+    let mut cumulative_delay_ms = 0_u64;
     loop {
+        if entry.cancellation().is_cancelled() {
+            return Ok(StepSettlement::Cancelled);
+        }
         let request_id = format!("request-{}", Uuid::new_v4().simple());
-        if let Some((previous, retry_reason)) = previous_request.take() {
+        if let Some(pending) = pending_retry.take() {
+            cumulative_delay_ms = cumulative_delay_ms.saturating_add(pending.plan.delay_ms);
+            let error_kind = pending
+                .error
+                .as_ref()
+                .map(|error| format!("{:?}", error.kind).to_ascii_lowercase());
+            let error_status = pending.error.as_ref().and_then(|error| error.status);
+            let error_code = pending.error.as_ref().and_then(|error| error.code.clone());
             sessions.append(
                 &entry.session_id,
                 Some(turn_id.to_string()),
                 Some(step_id.to_string()),
                 AgentSessionEventPayload::RequestRetry {
                     request_id: request_id.clone(),
-                    previous_request_id: Some(previous),
+                    previous_request_id: Some(pending.previous_request_id),
                     attempt,
-                    reason: retry_reason,
+                    reason: pending.reason,
+                    delay_ms: Some(pending.plan.delay_ms),
+                    cumulative_delay_ms: Some(cumulative_delay_ms),
+                    server_retry_after_ms: pending.plan.server_retry_after_ms,
+                    server_hint_capped: pending.plan.server_hint_capped,
+                    error_kind,
+                    error_status,
+                    error_code,
                 },
             )?;
+            if !super::cancellable_retry_delay(pending.plan.delay_ms, &entry.cancellation()).await {
+                return Ok(StepSettlement::Cancelled);
+            }
         }
         let snapshot = sessions.snapshot(&entry.session_id)?;
         let assembly = assemble_model_input(&snapshot.header, model_tools_for(entry));
@@ -462,6 +540,9 @@ async fn run_step(
         let budget = estimate_model_surface_budget(&entry.provider, &request);
         let estimated_input_tokens = Some(budget.estimated_input_tokens);
         let tool_schemas = request.tools.clone();
+        if entry.cancellation().is_cancelled() {
+            return Ok(StepSettlement::Cancelled);
+        }
         sessions.append_batch(
             &entry.session_id,
             vec![
@@ -506,6 +587,7 @@ async fn run_step(
         )?;
 
         let collected = Arc::new(Mutex::new(PartialContentAccumulator::default()));
+        let cancellation = entry.cancellation();
         let sink: Arc<dyn ModelStreamSink> = Arc::new(DurableModelStreamSink {
             sessions: sessions.clone(),
             session_id: entry.session_id.clone(),
@@ -513,12 +595,19 @@ async fn run_step(
             step_id: step_id.to_string(),
             request_id: request_id.clone(),
             collected: Arc::clone(&collected),
+            cancellation: cancellation.clone(),
         });
-        let cancellation = entry.cancellation();
         let response = entry
             .adapter
             .stream(request, cancellation.clone(), sink)
             .await;
+        let response = match response {
+            _ if cancellation.is_cancelled() => Err(NormalizedModelError::cancelled()),
+            Ok(response) if !model_response_has_output(&response) => {
+                Err(empty_model_response_error())
+            }
+            other => other,
+        };
         match response {
             Ok(response) => {
                 return commit_response(
@@ -533,39 +622,61 @@ async fn run_step(
                 .await
             }
             Err(error) if error.kind == NormalizedModelErrorKind::Cancelled => {
-                let partial = collected
-                    .lock()
-                    .map_err(|_| "model stream accumulator is unavailable".to_string())?
-                    .content();
-                append_interrupted_message(
-                    sessions,
-                    entry,
-                    turn_id,
-                    step_id,
-                    partial,
-                    AgentStopReason::Cancelled,
-                )?;
+                let (had_output, partial) = {
+                    let collected = collected
+                        .lock()
+                        .map_err(|_| "model stream accumulator is unavailable".to_string())?;
+                    (!collected.is_empty(), collected.content())
+                };
+                if had_output {
+                    append_interrupted_message(
+                        sessions,
+                        entry,
+                        turn_id,
+                        step_id,
+                        partial,
+                        AgentStopReason::Cancelled,
+                    )?;
+                }
                 return Ok(StepSettlement::Cancelled);
             }
             Err(error)
                 if error.kind == NormalizedModelErrorKind::ContextTooLarge
-                    && attempt < config.max_request_attempts
+                    && attempt < config.retry_policy.max_attempts()
                     && collected
                         .lock()
                         .map_err(|_| "model stream accumulator is unavailable".to_string())?
                         .is_empty() =>
             {
                 let before = request_surface_generation;
-                let outcome = match compactions.compact(
+                sessions.append(
                     &entry.session_id,
-                    turn_id,
-                    step_id,
-                    Some(turn_id),
-                    "providerContextTooLarge",
-                    &budget,
-                    true,
-                ) {
+                    Some(turn_id.to_string()),
+                    Some(step_id.to_string()),
+                    request_failure_payload(
+                        &request_id,
+                        &error,
+                        attempt,
+                        config.retry_policy.max_attempts(),
+                        cumulative_delay_ms,
+                        false,
+                    ),
+                )?;
+                let outcome = match compactions
+                    .compact(
+                        &entry.session_id,
+                        turn_id,
+                        step_id,
+                        Some(turn_id),
+                        "providerContextTooLarge",
+                        &budget,
+                        true,
+                        &cancellation,
+                    )
+                    .await
+                {
                     Ok(outcome) => outcome,
+                    Err(_) if cancellation.is_cancelled() => return Ok(StepSettlement::Cancelled),
                     Err(compaction_error) => {
                         return Ok(StepSettlement::Failed(format!(
                             "contextTooLargeRecoveryFailed: {compaction_error}"
@@ -578,42 +689,97 @@ async fn run_step(
                             .into(),
                     ));
                 }
-                previous_request = Some((
-                    request_id,
-                    format!(
+                pending_retry = Some(PendingRetry {
+                    previous_request_id: request_id,
+                    reason: format!(
                         "context compacted from generation {} to {}",
                         before, outcome.surface_generation
                     ),
-                ));
+                    plan: RetryPlan {
+                        delay_ms: 0,
+                        server_retry_after_ms: None,
+                        server_hint_capped: false,
+                    },
+                    error: Some(error),
+                });
                 attempt += 1;
                 request_reason = AgentRequestReason::Recovery;
             }
-            Err(error)
-                if error.retryable()
-                    && attempt < config.max_request_attempts
-                    && collected
-                        .lock()
-                        .map_err(|_| "model stream accumulator is unavailable".to_string())?
-                        .is_empty() =>
-            {
-                previous_request = Some((request_id, "retryable provider failure".into()));
-                attempt += 1;
-                request_reason = AgentRequestReason::Retry;
-            }
-            Err(error) => {
-                let partial = collected
+            Err(error) if error.retryable() => {
+                let partial_is_empty = collected
                     .lock()
                     .map_err(|_| "model stream accumulator is unavailable".to_string())?
-                    .content();
-                append_interrupted_message(
-                    sessions,
-                    entry,
-                    turn_id,
-                    step_id,
-                    partial,
-                    AgentStopReason::Error,
+                    .is_empty();
+                sessions.append(
+                    &entry.session_id,
+                    Some(turn_id.to_string()),
+                    Some(step_id.to_string()),
+                    request_failure_payload(
+                        &request_id,
+                        &error,
+                        attempt,
+                        config.retry_policy.max_attempts(),
+                        cumulative_delay_ms,
+                        !partial_is_empty,
+                    ),
                 )?;
-                return Ok(StepSettlement::Failed(model_error_reason(&error)));
+                if !cancellation.is_cancelled() {
+                    if let Some(plan) =
+                        config
+                            .retry_policy
+                            .plan(&error, attempt, retry_random_sample())
+                    {
+                        pending_retry = Some(PendingRetry {
+                            previous_request_id: request_id,
+                            reason: format!(
+                                "retryable model failure: kind={:?} code={}",
+                                error.kind,
+                                error.code.as_deref().unwrap_or("unspecified")
+                            ),
+                            plan,
+                            error: Some(error),
+                        });
+                        attempt += 1;
+                        request_reason = AgentRequestReason::Retry;
+                        continue;
+                    }
+                }
+                if cancellation.is_cancelled() {
+                    return Ok(StepSettlement::Cancelled);
+                }
+                return Ok(StepSettlement::Failed(model_error_reason(
+                    &error,
+                    attempt,
+                    config.retry_policy.max_attempts(),
+                    cumulative_delay_ms,
+                )));
+            }
+            Err(error) => {
+                let had_output = {
+                    let collected = collected
+                        .lock()
+                        .map_err(|_| "model stream accumulator is unavailable".to_string())?;
+                    !collected.is_empty()
+                };
+                sessions.append(
+                    &entry.session_id,
+                    Some(turn_id.to_string()),
+                    Some(step_id.to_string()),
+                    request_failure_payload(
+                        &request_id,
+                        &error,
+                        attempt,
+                        config.retry_policy.max_attempts(),
+                        cumulative_delay_ms,
+                        had_output,
+                    ),
+                )?;
+                return Ok(StepSettlement::Failed(model_error_reason(
+                    &error,
+                    attempt,
+                    config.retry_policy.max_attempts(),
+                    cumulative_delay_ms,
+                )));
             }
         }
     }
@@ -683,10 +849,7 @@ fn subagent_budget_failure(
     let Some(subagent) = &entry.subagent else {
         return Ok(None);
     };
-    let tool_calls = events
-        .iter()
-        .filter(|event| matches!(event.payload, AgentSessionEventPayload::ToolCall { .. }))
-        .count() as u32;
+    let tool_calls = super::tool_pipeline::admitted_tool_calls(events);
     if tool_calls > subagent.budget.max_tool_calls {
         return Ok(Some(format!(
             "subagentToolBudgetExceeded: maximum {} calls",
@@ -732,6 +895,9 @@ async fn commit_response(
     request_id: &str,
     response: ModelResponse,
 ) -> Result<StepSettlement, String> {
+    if entry.cancellation().is_cancelled() {
+        return Ok(StepSettlement::Cancelled);
+    }
     let ModelResponse {
         content: model_content,
         finish_reason,
@@ -805,6 +971,9 @@ async fn commit_response(
             },
         },
     ];
+    if entry.cancellation().is_cancelled() {
+        return Ok(StepSettlement::Cancelled);
+    }
     if tool_calls.is_empty() {
         payloads.push(AgentScopedPayload {
             turn_id: Some(turn_id.to_string()),
@@ -876,7 +1045,7 @@ fn stop_reason(reason: ModelFinishReason) -> AgentStopReason {
     }
 }
 
-fn close_open_scope(
+pub(crate) fn close_open_scope(
     sessions: &AgentSessionStore,
     entry: &Arc<AgentEntry>,
     reason: &str,
@@ -924,16 +1093,52 @@ fn append_status(
     Ok(())
 }
 
-fn model_error_reason(error: &NormalizedModelError) -> String {
+fn request_failure_payload(
+    request_id: &str,
+    error: &NormalizedModelError,
+    attempt: u32,
+    max_attempts: u32,
+    cumulative_delay_ms: u64,
+    interrupted: bool,
+) -> AgentSessionEventPayload {
+    AgentSessionEventPayload::RequestFailure {
+        request_id: request_id.to_string(),
+        attempt,
+        max_attempts,
+        cumulative_delay_ms,
+        interrupted,
+        failure: error.clone(),
+    }
+}
+
+fn model_error_reason(
+    error: &NormalizedModelError,
+    attempt: u32,
+    max_attempts: u32,
+    cumulative_delay_ms: u64,
+) -> String {
     let prefix = match error.kind {
         NormalizedModelErrorKind::Cancelled => "cancelled",
-        NormalizedModelErrorKind::Retryable => "providerRetryExhausted",
+        NormalizedModelErrorKind::Retryable
+        | NormalizedModelErrorKind::Transport
+        | NormalizedModelErrorKind::Timeout
+        | NormalizedModelErrorKind::EmptyResponse => "providerRetryExhausted",
+        NormalizedModelErrorKind::Protocol => "providerProtocolFailure",
         NormalizedModelErrorKind::ContextTooLarge => "contextTooLarge",
         NormalizedModelErrorKind::Authentication => "authenticationFailed",
         NormalizedModelErrorKind::RateLimited => "rateLimited",
         NormalizedModelErrorKind::Terminal => "providerFailure",
     };
-    format!("{prefix}: {}", error.message)
+    format!(
+        "{prefix}: attempt={attempt} maxAttempts={max_attempts} cumulativeDelayMs={cumulative_delay_ms} kind={:?} status={} code={} message={}",
+        error.kind,
+        error
+            .status
+            .map(|status| status.to_string())
+            .unwrap_or_else(|| "none".into()),
+        error.code.as_deref().unwrap_or("none"),
+        error.message
+    )
 }
 
 enum PartialContentBlock {
@@ -1006,6 +1211,7 @@ struct DurableModelStreamSink {
     step_id: String,
     request_id: String,
     collected: Arc<Mutex<PartialContentAccumulator>>,
+    cancellation: tokio_util::sync::CancellationToken,
 }
 
 fn utf8_chunks(value: &str, max_bytes: usize) -> Vec<&str> {
@@ -1028,9 +1234,15 @@ fn utf8_chunks(value: &str, max_bytes: usize) -> Vec<&str> {
 
 impl ModelStreamSink for DurableModelStreamSink {
     fn emit(&self, delta: StreamDelta) -> Result<(), NormalizedModelError> {
+        if self.cancellation.is_cancelled() {
+            return Err(NormalizedModelError::cancelled());
+        }
         match delta {
             StreamDelta::Text { index, text } => {
                 for chunk in utf8_chunks(&text, MAX_AGENT_STREAM_DELTA_BYTES) {
+                    if self.cancellation.is_cancelled() {
+                        return Err(NormalizedModelError::cancelled());
+                    }
                     self.sessions
                         .append(
                             &self.session_id,
@@ -1050,19 +1262,22 @@ impl ModelStreamSink for DurableModelStreamSink {
                                 format!("failed to commit model stream chunk: {error}"),
                             )
                         })?;
+                    self.collected
+                        .lock()
+                        .map_err(|_| {
+                            NormalizedModelError::new(
+                                NormalizedModelErrorKind::Terminal,
+                                "model stream accumulator is unavailable",
+                            )
+                        })?
+                        .push_text(index, chunk);
                 }
-                self.collected
-                    .lock()
-                    .map_err(|_| {
-                        NormalizedModelError::new(
-                            NormalizedModelErrorKind::Terminal,
-                            "model stream accumulator is unavailable",
-                        )
-                    })?
-                    .push_text(index, &text);
             }
             StreamDelta::Reasoning { index, text } => {
                 for chunk in utf8_chunks(&text, MAX_AGENT_STREAM_DELTA_BYTES) {
+                    if self.cancellation.is_cancelled() {
+                        return Err(NormalizedModelError::cancelled());
+                    }
                     self.sessions
                         .append(
                             &self.session_id,
@@ -1082,16 +1297,16 @@ impl ModelStreamSink for DurableModelStreamSink {
                                 format!("failed to commit model reasoning chunk: {error}"),
                             )
                         })?;
+                    self.collected
+                        .lock()
+                        .map_err(|_| {
+                            NormalizedModelError::new(
+                                NormalizedModelErrorKind::Terminal,
+                                "model stream accumulator is unavailable",
+                            )
+                        })?
+                        .push_reasoning(index, chunk);
                 }
-                self.collected
-                    .lock()
-                    .map_err(|_| {
-                        NormalizedModelError::new(
-                            NormalizedModelErrorKind::Terminal,
-                            "model stream accumulator is unavailable",
-                        )
-                    })?
-                    .push_reasoning(index, &text);
             }
             StreamDelta::ToolCall {
                 index,
@@ -1105,6 +1320,9 @@ impl ModelStreamSink for DurableModelStreamSink {
                     .unwrap_or_default();
                 let chunk_count = argument_chunks.len().max(1);
                 for position in 0..chunk_count {
+                    if self.cancellation.is_cancelled() {
+                        return Err(NormalizedModelError::cancelled());
+                    }
                     self.sessions
                         .append(
                             &self.session_id,
@@ -1135,16 +1353,16 @@ impl ModelStreamSink for DurableModelStreamSink {
                                 format!("failed to commit model tool-call chunk: {error}"),
                             )
                         })?;
+                    self.collected
+                        .lock()
+                        .map_err(|_| {
+                            NormalizedModelError::new(
+                                NormalizedModelErrorKind::Terminal,
+                                "model stream accumulator is unavailable",
+                            )
+                        })?
+                        .mark_output();
                 }
-                self.collected
-                    .lock()
-                    .map_err(|_| {
-                        NormalizedModelError::new(
-                            NormalizedModelErrorKind::Terminal,
-                            "model stream accumulator is unavailable",
-                        )
-                    })?
-                    .mark_output();
             }
             StreamDelta::Usage { usage } => {
                 self.sessions
@@ -1224,7 +1442,8 @@ mod tests {
             (NormalizedModelErrorKind::Terminal, "providerFailure"),
         ] {
             assert!(
-                model_error_reason(&NormalizedModelError::new(kind, "failure")).starts_with(prefix)
+                model_error_reason(&NormalizedModelError::new(kind, "failure"), 1, 3, 0,)
+                    .starts_with(prefix)
             );
         }
     }

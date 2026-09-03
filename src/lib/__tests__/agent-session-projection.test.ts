@@ -7,11 +7,47 @@ import {
 import {
   agentSessionAllEventFamiliesFixture,
   agentSessionEventFixture,
+  sessionEvent,
 } from '@/test/fixtures/agent-session';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
 import type { AgentSessionEvent } from '@/types/agent-session';
 
 describe('Agent committed Activity projection', () => {
+  it('preserves the structured final retry failure without adding assistant text', () => {
+    const headerIndex = agentSessionEventFixture.findIndex((event) => event.type === 'request/header');
+    const header = agentSessionEventFixture[headerIndex];
+    if (header?.type !== 'request/header') throw new Error('request fixture missing');
+    const failure = sessionEvent(header.seq + 1, {
+      type: 'request/failure',
+      turnId: header.turnId,
+      stepId: header.stepId,
+      data: {
+        requestId: header.data.requestId,
+        attempt: 3,
+        maxAttempts: 3,
+        cumulativeDelayMs: 750,
+        interrupted: false,
+        failure: {
+          kind: 'rateLimited',
+          message: 'provider busy',
+          status: 429,
+          code: 'HTTP_429',
+          retryAfterMs: 500,
+        },
+      },
+    });
+    const events = [...agentSessionEventFixture.slice(0, headerIndex + 1), failure];
+    const activity = projectAgentActivity(events);
+    expect(activity.turns[0]?.steps[0]?.requests[0]).toMatchObject({
+      finishReason: 'error',
+      failure: failure.data,
+    });
+    expect(projectAgentActivityNodes(events).find((node) => node.kind === 'request'))
+      .toMatchObject({ status: 'failed', detail: 'provider busy' });
+    expect(projectAgentActivityNodes(events).some((node) => node.kind === 'assistantMessage'))
+      .toBe(false);
+  });
+
   it('projects status, turns, every request attempt, tools, plan, context, agents and evidence', () => {
     const activity = projectAgentActivity(agentSessionEventFixture);
 
