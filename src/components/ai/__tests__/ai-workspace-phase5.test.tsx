@@ -13,6 +13,7 @@ import {
 import type { AiPendingApproval, AiSessionSummary, AiSessionView } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import '@/components/ai/ai-panel.css';
 
 const tool: AiConversationNodeOf<'tool'> = {
   kind: 'tool',
@@ -298,8 +299,13 @@ describe('AI workspace Phase 5 workflows', () => {
     );
     expect(container.querySelectorAll('aside')).toHaveLength(0);
     expect(screen.getByText('Historical task')).toBeVisible();
-    await user.hover(screen.getByRole('treeitem'));
-    await user.click(screen.getByRole('button', { name: 'More actions for Historical task' }));
+    const sessionRow = screen.getByRole('treeitem');
+    const actionsButton = container.querySelector<HTMLButtonElement>('.ai-session-row-menu');
+    expect(actionsButton).not.toBeNull();
+    fireEvent.click(actionsButton!);
+    fireEvent.mouseLeave(sessionRow);
+    expect(actionsButton).toHaveAttribute('data-popup-open');
+    expect(actionsButton).toBeVisible();
     await user.click(await screen.findByRole('menuitem', { name: 'Archive' }));
     expect(screen.getByRole('alertdialog')).toHaveAccessibleName('Archive this session?');
     await user.click(screen.getByRole('button', { name: 'Archive' }));
