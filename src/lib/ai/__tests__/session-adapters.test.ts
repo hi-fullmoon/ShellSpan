@@ -110,8 +110,14 @@ describe('AgentSessionAdapter', () => {
         turnId: 'turn-1',
         stepId: 'step-1',
         data: {
-          requestId: 'request-1', inputTokens: 31_500, outputTokens: 12,
-          totalTokens: 31_512, finishReason: 'stop',
+          requestId: 'request-1',
+          usage: {
+            uncachedInputTokens: 30_000,
+            cacheReadTokens: 1_500,
+            outputTokens: 12,
+            totalTokens: 31_512,
+          },
+          finishReason: 'stop',
         },
       },
     ];
@@ -133,8 +139,14 @@ describe('AgentSessionAdapter', () => {
         timeUnixMs: 1, type: 'agent/inbox/spliced',
         data: {
           operation: 'enqueued', lane: 'nextTurn', messages: [
-            { messageId: 'a', clientSubmissionId: 'submission-a', content: 'A', source: { kind: 'user' } },
-            { messageId: 'b', clientSubmissionId: 'submission-b', content: 'B', source: { kind: 'user' } },
+            {
+              messageId: 'a', clientSubmissionId: 'submission-a', content: 'A',
+              source: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
+            },
+            {
+              messageId: 'b', clientSubmissionId: 'submission-b', content: 'B',
+              source: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
+            },
           ],
         },
       },
@@ -166,6 +178,7 @@ describe('AgentSessionAdapter', () => {
     expect(projectAgentInbox(events)).toEqual([{
       id: 'b', clientSubmissionId: 'submission-b', lane: 'nextTurn',
       content: 'B updated', state: 'queued', source: 'user',
+      provenance: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
     }]);
   });
 
@@ -256,9 +269,13 @@ describe('AgentSessionAdapter', () => {
     expect(view.throughSeq).toBe(
       agentSessionWaitingApprovalEventFixture[agentSessionWaitingApprovalEventFixture.length - 1]?.seq,
     );
-    expect(view.nodes.some((node) => node.kind === 'approvalMarker')).toBe(true);
+    expect(view.nodes.some((node) => (
+      node.kind === 'turnProcess'
+      && node.children.some((child) => child.kind === 'approvalMarker')
+    ))).toBe(true);
     expect(view.status).toBe('running');
     expect(view).not.toHaveProperty('activity');
+    expect(view.activityNodes.some((node) => node.kind === 'request')).toBe(true);
     expect(view.contextUsage).toEqual({
       usedTokens: 32_000,
       contextWindow: 64_000,

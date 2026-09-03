@@ -84,6 +84,7 @@ function runningAgentView(): AiSessionView {
       },
     },
     nodes: [],
+    activityNodes: [],
     inbox: [],
     pendingApproval: null,
     status: 'running',

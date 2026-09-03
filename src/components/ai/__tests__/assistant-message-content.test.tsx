@@ -14,77 +14,53 @@ vi.mock('@/hooks/useI18n', () => ({
 }));
 
 describe('AssistantMessageContent', () => {
-  it('expands reasoning when thinking content starts streaming', async () => {
+  it('renders an empty structured stream without parsing text for reasoning', () => {
     const { rerender } = render(
-      <AssistantMessageContent content="" streaming />,
+      <AssistantMessageContent blocks={[]} streaming />,
     );
 
-    expect(screen.queryByRole('button', { name: 'ai.thinking.inProgress' })).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('ai.thinking.inProgress');
 
     rerender(
-      <AssistantMessageContent content="<think>Check the terminal state." streaming />,
+      <AssistantMessageContent
+        blocks={[{ type: 'reasoning', text: 'Check the terminal state.' }]}
+        streaming
+      />,
     );
 
-    const trigger = await screen.findByRole('button', { name: 'ai.thinking.inProgress' });
-    expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(document.querySelector('.ai-reasoning-body')).toHaveTextContent('Check the terminal state.');
+    expect(screen.getByRole('status')).toHaveTextContent('ai.thinking.inProgress');
+    expect(screen.queryByText('Check the terminal state.')).not.toBeInTheDocument();
   });
 
-  it('keeps the compact reasoning disclosure semantic while expanding and collapsing', () => {
-    const { container } = render(
+  it('consumes ordered text blocks and leaves reasoning to the Turn Process renderer', () => {
+    render(
       <AssistantMessageContent
-        content="<think>Check the terminal state.</think>Final answer."
+        blocks={[
+          { type: 'reasoning', text: 'Check the terminal state.' },
+          { type: 'text', text: 'First ' },
+          { type: 'toolCall', call: { callId: 'call-1', name: 'read_file', arguments: {} } },
+          { type: 'text', text: '**answer**.' },
+        ]}
         streaming={false}
       />,
     );
-    const trigger = screen.getByRole('button', { name: 'ai.thinking' });
-    const arrow = container.querySelector('.ai-disclosure-chevron');
-    const brain = container.querySelector('.lucide-brain');
-    const row = container.querySelector('.ai-reasoning-row');
 
-    expect(trigger).toHaveClass('ai-disclosure-row');
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(brain).toBeInTheDocument();
-    expect(trigger.lastElementChild).toBe(arrow);
-    expect(row).not.toHaveAttribute('data-expanded');
-    expect(container.querySelector('.ai-reasoning-body')).not.toBeInTheDocument();
-
-    fireEvent.click(trigger);
-
-    expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(row).toHaveAttribute('data-expanded');
-    expect(container.querySelector('.ai-reasoning-body')).toHaveTextContent('Check the terminal state.');
-
-    fireEvent.click(trigger);
-
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(row).not.toHaveAttribute('data-expanded');
-    expect(container.querySelector('.ai-reasoning-body')).not.toBeInTheDocument();
+    expect(screen.getByText('answer').tagName).toBe('STRONG');
+    expect(screen.getByText('answer').closest('.ai-assistant-answer')).toHaveTextContent('First answer.');
+    expect(screen.queryByText('Check the terminal state.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /thinking/u })).not.toBeInTheDocument();
   });
 
-  it('shows the elapsed thinking time after reasoning completes', async () => {
-    let now = new Date('2026-08-30T00:00:00Z').getTime();
-    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  it('does not treat think tags in a durable text block as structured reasoning', () => {
+    render(
+      <AssistantMessageContent
+        blocks={[{ type: 'text', text: '<think>Provider text</think>\n\nFinal answer.' }]}
+        streaming={false}
+      />,
+    );
 
-    try {
-      const { rerender } = render(
-        <AssistantMessageContent content="" streaming />,
-      );
-      now += 2_100;
-
-      rerender(
-        <AssistantMessageContent
-          content="<think>Check the terminal state.</think>Final answer."
-          streaming={false}
-        />,
-      );
-
-      expect(await screen.findByRole('button', {
-        name: 'ai.thinking.completed:3',
-      })).toBeInTheDocument();
-    } finally {
-      nowSpy.mockRestore();
-    }
+    expect(screen.getByText('Final answer.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /thinking/u })).not.toBeInTheDocument();
   });
 
   it('copies fenced code blocks', async () => {
@@ -95,7 +71,7 @@ describe('AssistantMessageContent', () => {
     });
     render(
       <AssistantMessageContent
-        content={'Run:\n```bash\ndf -h\n```'}
+        blocks={[{ type: 'text', text: 'Run:\n```bash\ndf -h\n```' }]}
         streaming={false}
       />,
     );
@@ -114,7 +90,7 @@ describe('AssistantMessageContent', () => {
   it('renders fenced code blocks without actions when disabled', () => {
     render(
       <AssistantMessageContent
-        content={'Review:\n```bash\ndf -h\n```'}
+        blocks={[{ type: 'text', text: 'Review:\n```bash\ndf -h\n```' }]}
         streaming={false}
         showCodeBlockActions={false}
       />,
@@ -127,7 +103,7 @@ describe('AssistantMessageContent', () => {
   it('renders Markdown while streaming', () => {
     const content = '## Run\n\n```bash\ndf -h\n```';
     render(
-      <AssistantMessageContent content={content} streaming />,
+      <AssistantMessageContent blocks={[{ type: 'text', text: content }]} streaming />,
     );
 
     expect(screen.getByRole('heading', { name: 'Run' })).toBeInTheDocument();
@@ -141,7 +117,7 @@ describe('AssistantMessageContent', () => {
       (_, index) => `${index + 1}. Item ${index + 1}\n\n`,
     ).join('')}After the list.\n`;
     const { container } = render(
-      <AssistantMessageContent content={content} streaming />,
+      <AssistantMessageContent blocks={[{ type: 'text', text: content }]} streaming />,
     );
 
     expect(container.querySelectorAll('ol')).toHaveLength(1);

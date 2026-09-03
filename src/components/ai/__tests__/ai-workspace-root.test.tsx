@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
-import { projectAgentConversationNodes } from '@/lib/ai/conversation-projection';
-import type { AiConversationNode } from '@/lib/ai/conversation-node';
+import { projectAgentActivity } from '@/lib/agent-session-projection';
+import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AiSessionView } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
@@ -13,54 +13,15 @@ import { agentSessionEventFixture } from '@/test/fixtures/agent-session';
 
 function runningHierarchyView(): AiSessionView {
   const base = agentView('running');
-  const user = base.nodes.find((node) => node.kind === 'userMessage');
-  const assistant = base.nodes.find((node) => node.kind === 'assistantMessage');
-  if (!user || !assistant) throw new Error('Agent fixture must project conversation nodes');
-  const nodes: readonly AiConversationNode[] = [
-    user,
-    {
-      kind: 'reasoning',
-      key: 'reasoning:turn-1:step-1',
-      sourceKind: 'agent',
-      sessionId: base.summary.id,
-      turnId: 'turn-1',
-      stepId: 'step-1',
-      firstSeq: 3,
-      lastSeq: 3,
-      timestamp: base.summary.updatedAt,
-      requestId: 'request-1',
-      summary: 'Checked the deployment state',
-      content: 'Checked the deployment state and selected the next safe read.',
-      state: 'streaming',
-    },
-    {
-      kind: 'tool',
-      key: 'tool:call-1',
-      sourceKind: 'agent',
-      sessionId: base.summary.id,
-      turnId: 'turn-1',
-      stepId: 'step-1',
-      firstSeq: 4,
-      lastSeq: 4,
-      timestamp: base.summary.updatedAt,
-      callId: 'call-1',
-      name: 'terminal.read',
-      summary: 'Read nginx status',
-      state: 'running',
-      effect: 'readOnly',
-      durationMs: null,
-      detailRef: { kind: 'agentTool', sessionId: base.summary.id, callId: 'call-1' },
-      evidenceRefs: [],
-      input: { command: 'systemctl status nginx' },
-      output: null,
-      error: null,
-      target: null,
-      idempotency: null,
-      approval: null,
-    },
-    assistant,
-  ];
-  return { ...base, nodes };
+  const nodes = base.nodes.map((node) => (
+    node.kind === 'turnProcess' ? { ...node, status: 'running' as const } : node
+  ));
+  return {
+    ...base,
+    nodes,
+    status: 'running',
+    summary: { ...base.summary, status: 'running' },
+  };
 }
 
 function agentView(status: AiSessionView['status'] = 'completed'): AiSessionView {
@@ -99,7 +60,8 @@ function agentView(status: AiSessionView['status'] = 'completed'): AiSessionView
         },
       },
     },
-    nodes: projectAgentConversationNodes(agentSessionEventFixture),
+    nodes: projectAgentChatNodes(agentSessionEventFixture),
+    activityNodes: projectAgentActivity(agentSessionEventFixture).nodes,
     inbox: [],
     pendingApproval: null,
     status,
@@ -141,7 +103,8 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       expect(root).toHaveClass('ai-workspace-root');
       expect(root).toHaveAttribute('data-phase', 'active');
       expect(screen.getByText('Check nginx now.')).toBeVisible();
-      expect(screen.getByText('Checking now.')).toBeVisible();
+      expect(root?.querySelector('[data-ai-node-kind="turnProcess"]')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute('aria-expanded', 'false');
       expect(screen.getByRole('textbox')).toBeVisible();
       expect(screen.getByRole('button', { name: 'Conversation history' })).toBeVisible();
       expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
@@ -212,14 +175,15 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       .toHaveAttribute('data-phase', 'active');
   });
 
-  it('shows one Turn-level running indicator while reasoning and a tool are active', () => {
+  it('shows one Turn-level running indicator without exposing process children as top-level rows', () => {
     const { container } = render(
       <AiWorkspaceRoot view={runningHierarchyView()} scope="workbench" />,
     );
 
     expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
-    expect(container.querySelectorAll('[data-ai-node-kind="reasoning"]')).toHaveLength(1);
-    expect(container.querySelectorAll('[data-tool-state="running"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-ai-node-kind="turnProcess"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-ai-node-kind="reasoning"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-tool-state="running"]')).toHaveLength(0);
     expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('In progress');
   });
 

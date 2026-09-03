@@ -120,6 +120,7 @@ function agentView(approval: AiPendingApproval | null = null): AiSessionView {
       },
     },
     nodes: [tool, artifact],
+    activityNodes: [],
     inbox: [],
     pendingApproval: approval,
     status: approval ? 'waiting' : 'running',

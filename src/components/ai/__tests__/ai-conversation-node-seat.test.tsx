@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -7,13 +7,14 @@ import {
   type AiConversationNodeRendererMap,
 } from '@/components/ai/workspace/ai-conversation-node-seat';
 import { classifyAiTool } from '@/components/ai/workspace/ai-tool-presentation';
-import { projectAgentConversationNodes } from '@/lib/ai/conversation-projection';
+import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import {
   agentSessionEventFixture,
   agentSessionFailedEventFixture,
+  agentSessionRunningEventFixture,
 } from '@/test/fixtures/agent-session';
 import '@/components/ai/ai-panel.css';
 
@@ -48,6 +49,10 @@ function toolNode(
   };
 }
 
+function assistantText(node: AiConversationNodeOf<'assistantMessage'>): string {
+  return node.blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('');
+}
+
 describe('AiConversationNodeList', () => {
   beforeEach(async () => {
     cleanup();
@@ -55,36 +60,50 @@ describe('AiConversationNodeList', () => {
     await initI18n('en-US');
   });
 
-  it('renders Agent projections through the keyed node seat', () => {
-    const agentNodes = projectAgentConversationNodes(agentSessionEventFixture);
+  it('renders Agent projections through the keyed node seat', async () => {
+    const agentNodes = projectAgentChatNodes(agentSessionEventFixture);
     render(<AiConversationNodeList nodes={agentNodes} />);
 
     expect(screen.getByText('Check nginx now.')).toBeVisible();
-    expect(screen.getByText('Checking now.')).toBeVisible();
-    expect(document.querySelector('[data-ai-node-key="tool:call-health"]'))
-      .toHaveAttribute('data-ai-node-kind', 'tool');
+    expect(document.querySelector('[data-ai-node-key="turn-process:turn-1"]'))
+      .toHaveAttribute('data-ai-node-kind', 'turnProcess');
+    expect(document.querySelector('[data-ai-node-key="tool:call-health"]')).not.toBeInTheDocument();
+    const process = screen.getByRole('button', { name: 'Thought' });
+    expect(process).toHaveAttribute('aria-expanded', 'false');
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Command: active' })).not.toBeInTheDocument();
+    });
+    fireEvent.click(process);
+    expect(await screen.findByRole('button', { name: 'Command: active' })).toBeVisible();
   });
 
-  it('renders lifecycle markers and terminal errors as distinct stable node views', () => {
-    const nodes = projectAgentConversationNodes(agentSessionFailedEventFixture);
+  it('keeps lifecycle copy out of Conversation and terminal errors inside Turn Process', () => {
+    const nodes = projectAgentChatNodes(agentSessionFailedEventFixture);
     const { container } = render(<AiConversationNodeList nodes={nodes} />);
+    const process = nodes.find((node) => node.kind === 'turnProcess');
 
     expect(container.querySelector('[data-ai-node-kind="lifecycleMarker"]'))
-      .toBeInTheDocument();
-    expect(container.querySelector('[data-ai-node-kind="error"] [role="alert"]'))
-      .toHaveTextContent('Provider connection failed.');
+      .not.toBeInTheDocument();
+    expect(process?.kind === 'turnProcess' ? process.children : []).toEqual([
+      expect.objectContaining({
+        kind: 'error',
+        message: 'Provider connection failed.',
+      }),
+    ]);
     expect(container.querySelectorAll('[data-ai-node-key]')).toHaveLength(nodes.length);
   });
 
   it('rerenders only the changed streaming node across 20 projection revisions', () => {
-    const projected = projectAgentConversationNodes(agentSessionEventFixture);
+    const projected = projectAgentChatNodes(agentSessionRunningEventFixture);
     const user = projected.find((node) => node.kind === 'userMessage');
     const assistant = projected.find((node) => node.kind === 'assistantMessage');
     if (!user || user.kind !== 'userMessage' || !assistant || assistant.kind !== 'assistantMessage') {
       throw new Error('Agent fixture did not project the expected messages');
     }
     const renderUser = vi.fn(({ node }: { node: typeof user }) => <span>{node.content}</span>);
-    const renderAssistant = vi.fn(({ node }: { node: typeof assistant }) => <span>{node.content}</span>);
+    const renderAssistant = vi.fn(({ node }: { node: typeof assistant }) => (
+      <span>{assistantText(node)}</span>
+    ));
     const renderers = {
       ...aiConversationNodeRenderers,
       userMessage: renderUser,
@@ -95,11 +114,15 @@ describe('AiConversationNodeList', () => {
     );
 
     for (let revision = 1; revision <= 20; revision += 1) {
+      const text = `${assistantText(assistant)}${'.'.repeat(revision)}`;
       rerender(
         <AiConversationNodeList
           nodes={[
             { ...user },
-            { ...assistant, content: `${assistant.content}${'.'.repeat(revision)}` },
+            {
+              ...assistant,
+              blocks: [{ type: 'text', text }],
+            },
           ]}
           renderers={renderers}
         />,
@@ -111,8 +134,11 @@ describe('AiConversationNodeList', () => {
   });
 
   it('keeps 50 tool payloads out of the conversation DOM until details open', () => {
-    const base = projectAgentConversationNodes(agentSessionEventFixture)
-      .find((node) => node.kind === 'tool');
+    const process = projectAgentChatNodes(agentSessionEventFixture)
+      .find((node) => node.kind === 'turnProcess');
+    const base = process?.kind === 'turnProcess'
+      ? process.children.find((node) => node.kind === 'tool')
+      : undefined;
     if (!base || base.kind !== 'tool') throw new Error('Agent fixture did not project a tool');
     const sentinel = 'TOOL_INPUT_MUST_STAY_LAZY';
     const tools = Array.from({ length: 50 }, (_, index) => ({
@@ -160,7 +186,7 @@ describe('AiConversationNodeList', () => {
       timestamp: '2026-09-03T00:00:01.000Z',
       messageId: 'assistant-layout',
       requestId: 'request-layout',
-      content: '## Safe result\n\nThe service is **ready**.',
+      blocks: [{ type: 'text', text: '## Safe result\n\nThe service is **ready**.' }],
       state: 'completed',
     };
     render(<AiConversationNodeList nodes={[userNode, assistantNode]} />);
@@ -173,11 +199,11 @@ describe('AiConversationNodeList', () => {
     expect(within(assistantArticle).getByRole('heading', { name: 'Safe result' })).toBeVisible();
 
     await user.click(within(assistantArticle).getByRole('button', { name: 'Copy' }));
-    expect(writeText).toHaveBeenCalledWith(assistantNode.content);
+    expect(writeText).toHaveBeenCalledWith(assistantText(assistantNode));
     expect(await within(assistantArticle).findByRole('button', { name: 'Copied' })).toBeVisible();
   });
 
-  it('expands and collapses projected reasoning without duplicating a running indicator', async () => {
+  it('renders projected reasoning as a semantic nested disclosure', async () => {
     const user = userEvent.setup();
     const reasoning: AiConversationNodeOf<'reasoning'> = {
       kind: 'reasoning',
@@ -196,12 +222,13 @@ describe('AiConversationNodeList', () => {
     };
     const { container } = render(<AiConversationNodeList nodes={[reasoning]} />);
 
-    expect(container.querySelector('.ai-reasoning-body')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Expand thinking summary' }));
+    const disclosure = screen.getByRole('button', { name: 'Reasoning Inspect the service state' });
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelector('.ai-reasoning-body')).toBeNull();
+    await user.click(disclosure);
     expect(container.querySelector('.ai-reasoning-body'))
       .toHaveTextContent('Inspect the service state Choose the safe read-only command.');
-    await user.click(screen.getByRole('button', { name: 'Collapse thinking summary' }));
-    expect(container.querySelector('.ai-reasoning-body')).not.toBeInTheDocument();
+    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
     expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(0);
   });
 
@@ -306,25 +333,27 @@ describe('AiConversationNodeList', () => {
       input: { path: longValue },
       output: { value: longValue },
     });
-    const stats: AiConversationNodeOf<'turnStats'> = {
-      kind: 'turnStats',
-      key: 'stats:session-fixture',
-      sourceKind: 'agent',
-      sessionId: 'session-fixture',
-      turnId: 'turn-1',
-      stepId: null,
-      firstSeq: 1,
-      lastSeq: 10,
-      timestamp: '2026-09-03T00:00:10.000Z',
-      turnNumber: 1,
-      stepCount: 2,
-      modelDurationMs: null,
-      toolDurationMs: 220,
-      averageTimeToFirstTokenMs: null,
-      inputTokens: null,
-      outputTokens: null,
-      totalTokens: null,
-      tokensPerSecond: null,
+    const projectedTail = projectAgentChatNodes(agentSessionEventFixture)
+      .find((node): node is AiConversationNodeOf<'turnTail'> => node.kind === 'turnTail');
+    expect(projectedTail).toBeDefined();
+    if (!projectedTail) return;
+    const stats: AiConversationNodeOf<'turnTail'> = {
+      ...projectedTail,
+      stats: {
+        ...projectedTail.stats,
+        stepCount: 2,
+        modelDurationMs: null,
+        toolDurationMs: 220,
+        averageTimeToFirstTokenMs: null,
+        uncachedInputTokens: null,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        outputTokens: null,
+        reasoningTokens: null,
+        totalTokens: null,
+        tokensPerSecond: null,
+        usageComplete: false,
+      },
     };
     const { container } = render(
       <div className="ai-panel-shell" style={{ width: 240 }}>
@@ -349,8 +378,9 @@ describe('AiConversationNodeList', () => {
     for (const missing of ['model', 'ttft', 'rate', 'tokens']) {
       expect(statsRow.querySelector(`[data-stat="${missing}"]`)).not.toBeInTheDocument();
     }
-    expect(getComputedStyle(statsRow).overflow).toBe('hidden');
-    expect(getComputedStyle(statsRow).textOverflow).toBe('ellipsis');
+    expect(getComputedStyle(statsRow).display).toBe('flex');
+    expect(getComputedStyle(statsRow).flexWrap).toBe('wrap');
+    expect(getComputedStyle(statsRow).overflow).toBe('visible');
     await waitFor(() => expect(payload).toHaveTextContent('/very-long-segment'));
   });
 });
