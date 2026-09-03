@@ -4,7 +4,6 @@ use super::types::{PetdexEvent, PetdexState, StateCommand};
 
 const SSH_CONNECTING_PRIORITY: u8 = 40;
 const SFTP_ACTIVE_PRIORITY: u8 = 50;
-const AI_ACTIVE_PRIORITY: u8 = 60;
 const SUCCESS_PRIORITY: u8 = 80;
 const FAILURE_PRIORITY: u8 = 100;
 
@@ -45,7 +44,6 @@ pub(super) struct PetdexArbiter {
     ssh_known: HashSet<String>,
     ssh_connecting: HashSet<String>,
     sftp_active: HashSet<String>,
-    ai_active: HashSet<String>,
     waving: Option<TemporaryState>,
     jumping: Option<TemporaryState>,
     failed: Option<TemporaryState>,
@@ -89,22 +87,6 @@ impl PetdexArbiter {
             }
             PetdexEvent::SftpCancelled(operation_id) => {
                 self.sftp_active.remove(&operation_id);
-            }
-            PetdexEvent::AiStarted(operation_id) => {
-                self.ai_active.insert(operation_id);
-            }
-            PetdexEvent::AiSucceeded(operation_id) => {
-                if self.ai_active.remove(&operation_id) {
-                    self.pulse(PetdexState::Jumping, now);
-                }
-            }
-            PetdexEvent::AiFailed(operation_id) => {
-                if self.ai_active.remove(&operation_id) {
-                    self.pulse(PetdexState::Failed, now);
-                }
-            }
-            PetdexEvent::AiCancelled(operation_id) => {
-                self.ai_active.remove(&operation_id);
             }
         }
     }
@@ -157,9 +139,8 @@ impl PetdexArbiter {
             };
         }
 
-        // Persistent priorities are AI waiting (60), transfer running (50),
-        // then SSH connecting (40). Waiting has a single wire value, but the
-        // separate sets preserve the priority and independent lifecycles.
+        // Persistent priorities are transfer running (50), then SSH connecting
+        // (40). Separate sets preserve independent lifecycles.
         let state = [
             (
                 !self.ssh_connecting.is_empty(),
@@ -170,11 +151,6 @@ impl PetdexArbiter {
                 !self.sftp_active.is_empty(),
                 PetdexState::Running,
                 SFTP_ACTIVE_PRIORITY,
-            ),
-            (
-                !self.ai_active.is_empty(),
-                PetdexState::Waiting,
-                AI_ACTIVE_PRIORITY,
             ),
         ]
         .into_iter()

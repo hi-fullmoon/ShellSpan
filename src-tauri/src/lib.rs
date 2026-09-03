@@ -2,7 +2,6 @@
 
 mod agent_runtime;
 mod ai;
-mod ai_sessions;
 mod commands;
 mod connection;
 mod db;
@@ -237,7 +236,6 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .manage(SessionManager::default())
-        .manage(ai::AiRequestRegistry::default())
         .manage(agent_runtime::AgentRuntime::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
@@ -257,8 +255,6 @@ pub fn run() {
             ai::ai_has_api_key,
             ai::ai_delete_api_key,
             ai::ai_list_models,
-            ai::ai_start_request,
-            ai::ai_cancel_request,
             agent_runtime::agent_runtime_create_session,
             agent_runtime::agent_runtime_start,
             agent_runtime::agent_runtime_spawn_subagent,
@@ -289,13 +285,6 @@ pub fn run() {
             agent_runtime::agent_runtime_resume_recovery,
             agent_runtime::agent_runtime_reconcile_recovery,
             agent_runtime::agent_runtime_abort_recovery,
-            ai_sessions::create_ai_session,
-            ai_sessions::append_ai_session_message,
-            ai_sessions::clear_ai_session_lane,
-            ai_sessions::archive_ai_session,
-            ai_sessions::delete_ai_sessions,
-            ai_sessions::list_ai_sessions,
-            ai_sessions::load_ai_session,
             petdex::petdex_set_enabled,
             petdex::petdex_get_status,
             petdex::petdex_test_connection,
