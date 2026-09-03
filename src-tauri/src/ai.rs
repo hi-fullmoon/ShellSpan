@@ -562,6 +562,18 @@ pub(crate) fn is_kimi_code_provider(provider: &AiProviderConfig) -> bool {
         })
 }
 
+fn is_deepseek_v4_provider(provider: &AiProviderConfig) -> bool {
+    provider
+        .model
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("deepseek-v4")
+        && Url::parse(provider.base_url.trim())
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .is_some_and(|host| host.eq_ignore_ascii_case("api.deepseek.com"))
+}
+
 pub(crate) fn apply_reasoning_effort(body: &mut Value, provider: &AiProviderConfig) {
     let Some(effort) = provider.reasoning_effort else {
         return;
@@ -575,7 +587,12 @@ pub(crate) fn apply_reasoning_effort(body: &mut Value, provider: &AiProviderConf
         AiProviderKind::OpenAiCompatible => match effort {
             AiReasoningEffort::Off => body["thinking"] = json!({ "type": "disabled" }),
             AiReasoningEffort::On => body["thinking"] = json!({ "type": "enabled" }),
-            effort => body["reasoning_effort"] = json!(effort),
+            effort => {
+                body["reasoning_effort"] = json!(effort);
+                if is_deepseek_v4_provider(provider) {
+                    body["thinking"] = json!({ "type": "enabled" });
+                }
+            }
         },
         AiProviderKind::Ollama => match effort {
             AiReasoningEffort::Off | AiReasoningEffort::None => body["think"] = json!(false),
@@ -606,6 +623,10 @@ pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Ur
     validate_provider_config(provider, false)?;
     let mut url = Url::parse(provider.base_url.trim())
         .map_err(|_| "failed to build AI provider endpoint".to_string())?;
+    let is_official_deepseek = matches!(provider.kind, AiProviderKind::OpenAiCompatible)
+        && url
+            .host_str()
+            .is_some_and(|host| host.eq_ignore_ascii_case("api.deepseek.com"));
     let mut base_path = url.path().trim_end_matches('/').to_string();
     for endpoint_suffix in [
         "/chat/completions",
@@ -620,7 +641,9 @@ pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Ur
             break;
         }
     }
-    if !matches!(provider.kind, AiProviderKind::Ollama) && !base_path.ends_with("/v1") {
+    if is_official_deepseek && base_path == "/v1" {
+        base_path.clear();
+    } else if !matches!(provider.kind, AiProviderKind::Ollama) && !base_path.ends_with("/v1") {
         base_path = format!("{}/v1", base_path.trim_end_matches('/'));
     }
     url.set_path(&format!(
@@ -1234,6 +1257,22 @@ mod tests {
                 .as_str(),
             "https://api.kimi.com/coding/v1/chat/completions"
         );
+
+        let deepseek = AiProviderConfig {
+            base_url: "https://api.deepseek.com/v1/chat/completions".to_string(),
+            model: "deepseek-v4-flash".to_string(),
+            ..service_root
+        };
+        assert_eq!(
+            endpoint_url(&deepseek, "chat/completions")
+                .unwrap()
+                .as_str(),
+            "https://api.deepseek.com/chat/completions"
+        );
+        assert_eq!(
+            endpoint_url(&deepseek, "models").unwrap().as_str(),
+            "https://api.deepseek.com/models"
+        );
     }
 
     #[test]
@@ -1293,6 +1332,23 @@ mod tests {
             Some("disabled")
         );
         assert!(deepseek_body.get("reasoning_effort").is_none());
+
+        let mut deepseek_high = deepseek.clone();
+        deepseek_high.reasoning_effort = Some(AiReasoningEffort::High);
+        let mut deepseek_high_body = json!({ "model": "deepseek-v4-flash" });
+        apply_reasoning_effort(&mut deepseek_high_body, &deepseek_high);
+        assert_eq!(
+            deepseek_high_body
+                .pointer("/thinking/type")
+                .and_then(Value::as_str),
+            Some("enabled")
+        );
+        assert_eq!(
+            deepseek_high_body
+                .get("reasoning_effort")
+                .and_then(Value::as_str),
+            Some("high")
+        );
 
         let ollama = AiProviderConfig {
             id: "ollama".to_string(),

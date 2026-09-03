@@ -1,6 +1,6 @@
 # ShellSpan AI Panel 向 DeepSeek Harness 对齐计划清单
 
-> 状态：Phase 0–6 的实现与离线门禁已完成；外部 provider live smoke 因当前环境无凭证而未执行，最终 DoD 未完全关闭  
+> 状态：Phase 0–6、离线发布门禁及 MiniMax/DeepSeek live provider 验收均已完成
 > 决策：一次性切换事件协议，不兼容、不迁移、不读取旧 Agent 会话  
 > 范围：Agent Runtime、会话事件、Conversation/Activity 投影、AI Panel 对话渲染与统计  
 > 参考实现：`/Users/zhengbiwen/Developer/deepseek-harness`
@@ -391,10 +391,10 @@ Phase 6 清理、文档与发布门禁
 
 ### 11.3 真实 provider smoke tests
 
-- [ ] MiniMax：简单回答、reasoning、usage。
-- [ ] DeepSeek：简单回答、reasoning、usage。
-- [ ] OpenAI-compatible：无 reasoning 降级路径。
-- [ ] provider 不支持流式 usage 时仍能正常完成请求。
+- [x] MiniMax：简单回答、reasoning、usage。
+- [x] DeepSeek：简单回答、reasoning、usage。
+- [x] OpenAI-compatible：无 reasoning 降级路径（DeepSeek V4 thinking-disabled live smoke）。
+- [x] provider 不支持流式 usage 时仍能正常完成请求（录制 HTTP provider 合同）。
 - [x] 对比日志中的 system/tools 与实际请求 body。
 
 ### Phase 6 验收
@@ -485,7 +485,7 @@ git diff --check
 补充门禁：
 
 - [x] 新增 Playwright 视觉回归命令并纳入最终门禁。
-- [ ] `pnpm test:agent:providers:live` 在具备密钥时完成 MiniMax/DeepSeek smoke。
+- [x] `pnpm test:agent:providers:live` 在具备密钥时完成 MiniMax/DeepSeek smoke。
 - [x] 5,000 节点 projection 和 streaming benchmark 无明显退化。
 - [x] Rust clippy 无 warning。
 - [x] TypeScript 无死分支、无未使用兼容类型。
@@ -511,7 +511,7 @@ git diff --check
 
 - [x] fixture 场景矩阵全部通过。
 - [x] 视觉矩阵全部通过。
-- [ ] MiniMax 与 DeepSeek live smoke 通过。
+- [x] MiniMax 与 DeepSeek live smoke 通过。
 - [x] accessibility、locale、light/dark、reduced-motion 通过审计。
 - [x] 全量 TypeScript、Vitest、Vite、Rust fmt/clippy/test 门禁通过。
 - [x] 实现结果与本文档同步更新，不保留已完成但未勾选或未完成却已勾选的项目。
@@ -524,4 +524,4 @@ git diff --check
 - 视觉：18 个 Playwright 场景的像素与语义 DOM 矩阵连续两次通过；新增场景均按单场景、带原因方式建立基线。
 - 性能：5,000 节点 restore/revision，以及 5,000 节点窗口 20 次 streaming 重投影 benchmark 通过。
 - 全量门禁：Vitest 162 files / 1380 tests、scripts 29 tests、Vite build、Rust fmt、clippy `-D warnings`、Rust 461 unit + 5 contract probe、`git diff --check` 均通过。
-- Live smoke：`pnpm test:agent:providers:live` 报告 MiniMax、DeepSeek、OpenAI-compatible 均因当前环境没有对应配置而 SKIP（0 executed / 3 skipped）；未把 SKIP 记为通过，因此相关复选框与最终 live DoD 保持未勾选。
+- Live smoke：`pnpm test:agent:providers:live` 真实执行 MiniMax-M2.7 reasoning、DeepSeek-V4-Flash reasoning，以及 DeepSeek-V4-Flash thinking-disabled OpenAI-compatible 降级（3 executed / 1 optional skipped）。reasoning 路径验证非空回答、结构化 reasoning 与 provider usage；禁用 thinking 的路径验证非空回答、无 reasoning 与 usage。独立 Generic OpenAI-compatible Base URL/Model 未配置，因此可选扩展 smoke 保持 SKIP；不支持流式 usage 的必需行为由录制 HTTP provider 合同验证请求不发送 `stream_options` 且仍正常完成。
