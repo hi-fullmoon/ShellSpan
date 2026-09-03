@@ -1,9 +1,11 @@
 # ShellSpan AI Panel 向 DeepSeek Harness 对齐计划清单
 
-> 状态：Phase 0–6、离线发布门禁及 MiniMax/DeepSeek live provider 验收均已完成
+> 历史状态：本页记录此前 AI Panel Phase 0–6 与当时的离线/live 验收，不代表 2026-09-04 Runtime 补齐目标全部完成。
 > 决策：一次性切换事件协议，不兼容、不迁移、不读取旧 Agent 会话  
 > 范围：Agent Runtime、会话事件、Conversation/Activity 投影、AI Panel 对话渲染与统计  
 > 参考实现：`/Users/zhengbiwen/Developer/deepseek-harness`
+
+> 当前交接：阶段 1–5 Runtime 修复已合入 main；6A 未验收 WIP 独立保存，Skills/图片/@file 与最终累计验收仍待完成。用户已要求停止本机开发。请以 [跨设备交接](ai-runtime-handoff.md) 和 [Runtime 完整范围清单](ai-runtime-harness-remediation-plan.md) 为本轮状态依据；本页历史勾选项及 live 记录不能替代新累计代码验收。
 
 ## 1. 目标结果
 
