@@ -1,12 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::ai::{AiProviderConfig, AiProviderKind, AGENT_MAX_OUTPUT_TOKENS};
+use crate::ai::AiProviderConfig;
 
 use super::{ModelMessage, ModelRequest};
 
-const DEFAULT_OPENAI_CONTEXT_TOKENS: u64 = 128 * 1024;
-const DEFAULT_COMPATIBLE_CONTEXT_TOKENS: u64 = 64 * 1024;
-const DEFAULT_OLLAMA_CONTEXT_TOKENS: u64 = 32 * 1024;
 const MIN_CONTEXT_TOKENS: u64 = 8 * 1024;
 const MAX_CONTEXT_TOKENS: u64 = 2 * 1024 * 1024;
 const FIXED_SAFETY_TOKENS: u64 = 1_024;
@@ -42,7 +39,9 @@ pub(crate) fn estimate_model_surface_budget(
     request: &ModelRequest,
 ) -> ModelSurfaceBudget {
     let context_window = provider_model_context_window(provider);
-    let output_reserve_tokens = AGENT_MAX_OUTPUT_TOKENS.min(context_window / 4);
+    let output_reserve_tokens = super::provider::capabilities(provider)
+        .max_output_tokens
+        .min(context_window / 4);
     let safety_reserve_tokens = (context_window / 20).max(FIXED_SAFETY_TOKENS);
     let usable_input_tokens = context_window
         .saturating_sub(output_reserve_tokens)
@@ -97,29 +96,7 @@ pub(crate) fn provider_model_context_window(provider: &AiProviderConfig) -> u64 
     {
         return explicit.clamp(MIN_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS);
     }
-    let model = provider.model.trim().to_ascii_lowercase();
-    match provider.kind {
-        AiProviderKind::OpenAi if model.starts_with("gpt-4.1") => 1_047_576,
-        AiProviderKind::OpenAi
-            if model.starts_with("gpt-5") || model.starts_with("o3") || model.starts_with("o4") =>
-        {
-            400_000
-        }
-        AiProviderKind::OpenAi => DEFAULT_OPENAI_CONTEXT_TOKENS,
-        AiProviderKind::OpenAiCompatible
-            if model.starts_with("minimax-") || model.contains("abab") =>
-        {
-            204_800
-        }
-        AiProviderKind::OpenAiCompatible
-            if model.contains("kimi") || model.contains("moonshot") =>
-        {
-            131_072
-        }
-        AiProviderKind::OpenAiCompatible if model.contains("deepseek") => 65_536,
-        AiProviderKind::OpenAiCompatible => DEFAULT_COMPATIBLE_CONTEXT_TOKENS,
-        AiProviderKind::Ollama => DEFAULT_OLLAMA_CONTEXT_TOKENS,
-    }
+    super::provider::context_window(provider)
 }
 
 fn context_window_hint(value: &str) -> Option<u64> {
@@ -145,6 +122,15 @@ fn model_message_bytes(message: &ModelMessage) -> u64 {
         .unwrap_or(u64::MAX / 16)
 }
 
+pub(crate) fn measure_model_messages(messages: &[ModelMessage]) -> (u64, u64) {
+    messages.iter().fold((0, 0), |(tokens, bytes), message| {
+        (
+            tokens.saturating_add(model_message_tokens(message)),
+            bytes.saturating_add(model_message_bytes(message)),
+        )
+    })
+}
+
 fn model_message_tokens(message: &ModelMessage) -> u64 {
     // Four bytes per token is deliberately conservative for mixed prose,
     // paths, JSON arguments and tool output. The per-message framing reserve
@@ -167,6 +153,8 @@ mod tests {
 
     fn provider(model: &str) -> AiProviderConfig {
         AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "fixture".into(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "http://127.0.0.1".into(),

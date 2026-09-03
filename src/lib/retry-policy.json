@@ -1,0 +1,11 @@
+{
+  "defaults": {
+    "maxAttempts": 3,
+    "initialDelayMs": 250,
+    "maxDelayMs": 4000,
+    "maxServerDelayMs": 30000,
+    "jitterRatio": 0.2
+  },
+  "maxAttempts": 8,
+  "maxDelayMs": 300000
+}

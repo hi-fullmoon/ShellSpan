@@ -44,6 +44,8 @@ const PRESET_DESCRIPTION_KEYS: Record<AiProviderPreset, LocaleKey> = {
   deepseek: 'settings.ai.preset.deepseek',
   minimax: 'settings.ai.preset.minimax',
   kimi: 'settings.ai.preset.kimi',
+  qwen: 'settings.ai.preset.qwen',
+  glm: 'settings.ai.preset.glm',
   custom: 'settings.ai.preset.custom',
 };
 
@@ -53,6 +55,8 @@ const PRESET_ICONS: Record<AiProviderPreset, React.ComponentType<React.SVGProps<
   deepseek: DeepSeekBrandIcon,
   minimax: MiniMaxBrandIcon,
   kimi: KimiBrandIcon,
+  qwen: ServerIcon,
+  glm: ServerIcon,
   custom: ServerIcon,
 };
 

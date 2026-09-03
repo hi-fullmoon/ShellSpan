@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_RETRY_POLICY } from '@/lib/retry-policy';
 import {
   flushAiSettingsPreferences,
   parseAiPreferences,
@@ -28,6 +29,32 @@ describe('aiSettingsStore', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('persists distinct Provider policies and snapshots each transmitted request config', async () => {
+    useAiSettingsStore.setState({ initialized: true });
+    const first = useAiSettingsStore.getState().providers[0].id;
+    const second = useAiSettingsStore.getState().providers[1].id;
+    useAiSettingsStore.getState().updateProvider(first, { retryPolicy: { ...DEFAULT_RETRY_POLICY, maxAttempts: 1 } });
+    useAiSettingsStore.getState().updateProvider(second, { retryPolicy: { ...DEFAULT_RETRY_POLICY, maxAttempts: 8, maxServerDelayMs: 1000 } });
+    const snapshot = useAiSettingsStore.getState().getProviderConfig(first);
+    useAiSettingsStore.getState().updateProvider(first, { retryPolicy: { ...DEFAULT_RETRY_POLICY, maxAttempts: 4 } });
+    expect(snapshot.retryPolicy?.maxAttempts).toBe(1);
+    await flushAiSettingsPreferences();
+    const calls = tauri.invokeSavePreferences.mock.calls;
+    const entries = calls[calls.length - 1][0] as [string, string][];
+    const restored = parseAiPreferences(entries);
+    expect(restored.providers.find(p => p.id === first)?.retryPolicy?.maxAttempts).toBe(4);
+    expect(restored.providers.find(p => p.id === second)?.retryPolicy).toEqual({ ...DEFAULT_RETRY_POLICY, maxAttempts: 8, maxServerDelayMs: 1000 });
+  });
+
+  it('keeps invalid stored policy visible and rejects it when building a request', () => {
+    const provider = initialState.providers[0];
+    const restored = parseAiPreferences([preference('providers', [{ ...provider, retryPolicy: { ...DEFAULT_RETRY_POLICY, maxAttempts: 999 } }])]);
+    useAiSettingsStore.setState(restored);
+    expect(() => useAiSettingsStore.getState().getProviderConfig(provider.id)).toThrow('Invalid AI retry policy');
+    expect(() => useAiSettingsStore.getState().updateProvider(provider.id, { retryPolicy: { ...DEFAULT_RETRY_POLICY, jitterRatio: Infinity } })).toThrow();
+    expect(parseAiPreferences([preference('providers', [provider])]).providers[0].retryPolicy).toBeUndefined();
   });
 
   it('migrates the legacy single-provider preferences without losing values', () => {
@@ -102,6 +129,7 @@ describe('aiSettingsStore', () => {
 
     expect(useAiSettingsStore.getState().getProviderConfig()).toEqual({
       id,
+      profile: 'deepseek',
       kind: 'openAiCompatible',
       baseUrl: 'https://api.deepseek.com',
       model: 'deepseek-v4-flash',
@@ -178,6 +206,7 @@ describe('aiSettingsStore', () => {
     expect(preferences.providers[0]).not.toHaveProperty('apiKey');
     expect(useAiSettingsStore.getState().getProviderConfig()).toEqual({
       id: 'minimax',
+      profile: 'minimax',
       kind: 'openAiCompatible',
       baseUrl: 'https://api.minimaxi.com',
       model: 'MiniMax-M3',

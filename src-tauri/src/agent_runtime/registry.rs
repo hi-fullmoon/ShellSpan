@@ -350,6 +350,8 @@ mod tests {
 
     fn provider() -> AiProviderConfig {
         AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "fake".into(),
             kind: AiProviderKind::Ollama,
             base_url: "http://127.0.0.1:11434".into(),

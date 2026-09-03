@@ -1,0 +1,144 @@
+[
+  {
+    "provider": {
+      "profile": "openai",
+      "model": "gpt-5.4-mini",
+      "kind": "openAi",
+      "baseUrl": "http://127.0.0.1:1234/proxy/v1",
+      "id": "fixture",
+      "requiresApiKey": false,
+      "reasoningEffort": "high"
+    },
+    "reasoningBody": {
+      "reasoning": {
+        "effort": "high"
+      }
+    }
+  },
+  {
+    "provider": {
+      "profile": "ollama",
+      "model": "qwen3",
+      "kind": "ollama",
+      "baseUrl": "http://127.0.0.1:1234/proxy/v1",
+      "id": "fixture",
+      "requiresApiKey": false,
+      "reasoningEffort": "off"
+    },
+    "reasoningBody": {
+      "think": false
+    }
+  },
+  {
+    "provider": {
+      "profile": "deepseek",
+      "model": "deepseek-v4-flash",
+      "kind": "openAiCompatible",
+      "baseUrl": "http://127.0.0.1:1234/proxy/v1",
+      "id": "fixture",
+      "requiresApiKey": false,
+      "reasoningEffort": "high"
+    },
+    "reasoningBody": {
+      "thinking": {
+        "type": "enabled"
+      },
+      "reasoning_effort": "high"
+    }
+  },
+  {
+    "provider": {
+      "profile": "minimax",
+      "model": "MiniMax-M3",
+      "kind": "openAiCompatible",
+      "baseUrl": "http://127.0.0.1:1234/proxy/v1",
+      "id": "fixture",
+      "requiresApiKey": false,
+      "reasoningEffort": "on"
+    },
+    "reasoningBody": {
+      "thinking": {
+        "type": "adaptive"
+      }
+    }
+  },
+  {
+    "provider": {
+      "profile": "qwen",
+      "model": "qwen3-235b-a22b",
+      "kind": "openAiCompatible",
+      "baseUrl": "http://127.0.0.1:1234/proxy/v1",
+      "id": "fixture",
+      "requiresApiKey": false,
+      "reasoningEffort": "on"
+    },
+    "reasoningBody": {
+      "enable_thinking": true
+    }
+  },
+  {
+    "provider": {
+      "profile": "qwen",
+      "model": "qwen3-235b-a22b-thinking-2507",
+      "kind": "openAiCompatible",
+      "baseUrl": "http://127.0.0.1:1234/proxy/v1",
+      "id": "fixture",
+      "requiresApiKey": false
+    },
+    "reasoningBody": {}
+  },
+  {
+    "provider": {
+      "profile": "qwen",
+      "model": "qwen3-235b-a22b-instruct-2507",
+      "kind": "openAiCompatible",
+      "baseUrl": "http://127.0.0.1:1234/proxy/v1",
+      "id": "fixture",
+      "requiresApiKey": false
+    },
+    "reasoningBody": {}
+  },
+  {
+    "provider": {
+      "profile": "glm",
+      "model": "glm-5.2",
+      "kind": "openAiCompatible",
+      "baseUrl": "http://127.0.0.1:1234/proxy/v1",
+      "id": "fixture",
+      "requiresApiKey": false,
+      "reasoningEffort": "high"
+    },
+    "reasoningBody": {
+      "thinking": {
+        "type": "enabled",
+        "clear_thinking": false
+      },
+      "reasoning_effort": "high"
+    }
+  },
+  {
+    "provider": {
+      "profile": "kimi",
+      "model": "k3",
+      "kind": "openAiCompatible",
+      "baseUrl": "http://127.0.0.1:1234/proxy/v1",
+      "id": "fixture",
+      "requiresApiKey": false,
+      "reasoningEffort": "high"
+    },
+    "reasoningBody": {
+      "reasoning_effort": "high"
+    }
+  },
+  {
+    "provider": {
+      "profile": "generic",
+      "model": "generic-chat",
+      "kind": "openAiCompatible",
+      "baseUrl": "http://127.0.0.1:1234/proxy/v1",
+      "id": "fixture",
+      "requiresApiKey": false
+    },
+    "reasoningBody": {}
+  }
+]

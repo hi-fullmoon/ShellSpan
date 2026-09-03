@@ -202,6 +202,13 @@ impl AgentRuntime {
     }
 
     pub(crate) fn configure(&self, app_data_root: PathBuf) -> Result<(), String> {
+        let parallelism = std::env::var("SHELLSPAN_MAX_PARALLEL_TOOL_CALLS")
+            .map(Some)
+            .or_else(|error| match error {
+                std::env::VarError::NotPresent => Ok(None),
+                _ => Err("invalid parallel tool limit environment value".to_string()),
+            })?;
+        self.tools.configure_parallelism(parallelism.as_deref())?;
         self.sessions.configure(app_data_root.clone())?;
         self.artifacts.configure(&app_data_root)?;
         self.reconcile_artifacts()
@@ -230,6 +237,9 @@ impl AgentRuntime {
         if self.agents.get(session_id)?.is_some() {
             self.wake(session_id)?;
             return self.sessions.snapshot(session_id);
+        }
+        if let Some(policy) = provider.retry_policy {
+            policy.validate()?;
         }
         let adapter = self.models.resolve(provider.clone(), api_key)?;
         let handle = self.agents.attach(
@@ -377,6 +387,7 @@ impl AgentRuntime {
             .remove(session_id);
         if let Some(handle) = handle {
             self.tools.cancel_session(&handle.entry())?;
+            self.tools.await_pending_executions(&handle.entry()).await?;
             match handle.dispose().await {
                 Ok(snapshot) => return Ok(snapshot),
                 Err(error) => {
@@ -1010,6 +1021,7 @@ impl AgentRuntime {
 
 #[cfg(test)]
 mod tests {
+    include!("scheduler_tests.rs");
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -1034,6 +1046,7 @@ mod tests {
         NativeToolPreparation, NativeToolRequest, NativeToolResult, NativeToolRuntime,
         NormalizedModelError, NormalizedModelErrorKind, RecordedToolCall, StreamDelta,
     };
+    use crate::agent_runtime::{AgentStopReason, RetryPolicy};
 
     #[derive(Default)]
     struct FakeNativeRuntime;
@@ -1278,6 +1291,15 @@ mod tests {
             response: ModelResponse,
         },
         Error(NormalizedModelError),
+        PartialError {
+            deltas: Vec<StreamDelta>,
+            error: NormalizedModelError,
+        },
+        CancelThenReply {
+            delta: Option<StreamDelta>,
+            response: ModelResponse,
+        },
+        PartialThenCancelError,
         Wait {
             response: Option<ModelResponse>,
         },
@@ -1337,6 +1359,17 @@ mod tests {
                 .pop_front()
                 .expect("fake adapter received an unexpected request");
             match script {
+                FakeScript::PartialThenCancelError => {
+                    sink.emit(StreamDelta::Text {
+                        index: 0,
+                        text: "cancelled partial".into(),
+                    })?;
+                    cancellation.cancel();
+                    Err(NormalizedModelError::new(
+                        NormalizedModelErrorKind::Transport,
+                        "ready failure",
+                    ))
+                }
                 FakeScript::Reply { chunks, response } => {
                     for text in chunks {
                         sink.emit(StreamDelta::Text { index: 0, text })?;
@@ -1344,6 +1377,19 @@ mod tests {
                     Ok(response)
                 }
                 FakeScript::Error(error) => Err(error),
+                FakeScript::PartialError { deltas, error } => {
+                    for delta in deltas {
+                        sink.emit(delta)?;
+                    }
+                    Err(error)
+                }
+                FakeScript::CancelThenReply { delta, response } => {
+                    cancellation.cancel();
+                    if let Some(delta) = delta {
+                        sink.emit(delta)?;
+                    }
+                    Ok(response)
+                }
                 FakeScript::Wait { response } => {
                     tokio::select! {
                         _ = cancellation.cancelled() => Err(NormalizedModelError::cancelled()),
@@ -1460,6 +1506,8 @@ mod tests {
 
     fn provider() -> AiProviderConfig {
         AiProviderConfig {
+            profile: None,
+            retry_policy: None,
             id: "fake".into(),
             kind: AiProviderKind::Ollama,
             base_url: "http://127.0.0.1:11434".into(),
@@ -1476,7 +1524,13 @@ mod tests {
             AgentDriverConfig {
                 max_steps_per_turn: 8,
                 max_turns_per_session: 64,
-                max_request_attempts: 2,
+                retry_policy: RetryPolicy {
+                    max_attempts: 2,
+                    initial_delay_ms: 1,
+                    max_delay_ms: 1,
+                    max_server_delay_ms: 1,
+                    jitter_ratio: 0.0,
+                },
             },
         )
     }
@@ -2399,6 +2453,7 @@ mod tests {
 
     #[tokio::test]
     async fn adjacent_parallel_reads_preserve_model_order_and_stop_at_write_barriers() {
+        scheduler_tests::verify_write_barrier().await;
         let native = RecordingNativeRuntime::new(false);
         let calls = vec![
             native_call("read-1", "list_directory"),
@@ -3014,6 +3069,733 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retry_exhaustion_preserves_attempt_wait_and_server_hint_diagnostics() {
+        let mut limited = NormalizedModelError::new(
+            NormalizedModelErrorKind::RateLimited,
+            "provider rate limited the request",
+        );
+        limited.status = Some(429);
+        limited.code = Some("HTTP_429".into());
+        limited.retry_after_ms = Some(50);
+        let adapter = FakeAdapter::new(vec![
+            FakeScript::Error(limited.clone()),
+            FakeScript::Error(limited),
+        ]);
+        let (_root, runtime) = configured(adapter.clone());
+        create(&runtime, "session-retry-exhausted");
+        runtime
+            .followup(
+                "session-retry-exhausted",
+                "message-retry-exhausted".into(),
+                "retry".into(),
+            )
+            .unwrap();
+        runtime
+            .start("session-retry-exhausted", provider(), None)
+            .unwrap();
+        runtime.await_idle("session-retry-exhausted").await.unwrap();
+        assert_eq!(adapter.request_count(), 2);
+        let events = all_events(&runtime, "session-retry-exhausted");
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::RequestRetry {
+                attempt: 2,
+                delay_ms: Some(1),
+                cumulative_delay_ms: Some(1),
+                server_retry_after_ms: Some(50),
+                server_hint_capped: true,
+                error_status: Some(429),
+                error_code: Some(code),
+                ..
+            } if code == "HTTP_429"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::RequestFailure {
+                attempt: 2,
+                max_attempts: 2,
+                cumulative_delay_ms: 1,
+                interrupted: false,
+                failure,
+                ..
+            } if failure.status == Some(429)
+                && failure.code.as_deref() == Some("HTTP_429")
+                && failure.retry_after_ms == Some(50)
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
+                if reason.contains("attempt=2")
+                    && reason.contains("maxAttempts=2")
+                    && reason.contains("cumulativeDelayMs=1")
+                    && reason.contains("code=HTTP_429")
+        )));
+    }
+
+    #[tokio::test]
+    async fn cancelling_retry_backoff_prevents_a_new_attempt_and_empty_message() {
+        let mut retry_after =
+            NormalizedModelError::new(NormalizedModelErrorKind::Transport, "connection reset");
+        retry_after.retry_after_ms = Some(30_000);
+        let adapter = FakeAdapter::new(vec![FakeScript::PartialError {
+            deltas: vec![StreamDelta::Text {
+                index: 0,
+                text: "failed draft before backoff".into(),
+            }],
+            error: retry_after,
+        }]);
+        let (_root, runtime) = configured_with(
+            adapter.clone(),
+            AgentDriverConfig {
+                retry_policy: RetryPolicy {
+                    max_attempts: 3,
+                    initial_delay_ms: 30_000,
+                    max_delay_ms: 30_000,
+                    max_server_delay_ms: 30_000,
+                    jitter_ratio: 0.0,
+                },
+                ..AgentDriverConfig::default()
+            },
+        );
+        create(&runtime, "session-cancel-backoff");
+        let backoff_started = Arc::new(Notify::new());
+        let backoff_signal = backoff_started.clone();
+        runtime
+            .sessions
+            .set_publisher(Arc::new(move |event| {
+                if matches!(event.payload, AgentSessionEventPayload::RequestRetry { .. }) {
+                    backoff_signal.notify_one();
+                }
+            }))
+            .unwrap();
+        runtime
+            .followup(
+                "session-cancel-backoff",
+                "message-cancel-backoff".into(),
+                "retry".into(),
+            )
+            .unwrap();
+        runtime
+            .start("session-cancel-backoff", provider(), None)
+            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            backoff_started.notified(),
+        )
+        .await
+        .unwrap();
+        runtime.cancel("session-cancel-backoff").await.unwrap();
+        assert_eq!(adapter.request_count(), 1);
+        assert!(!all_events(&runtime, "session-cancel-backoff")
+            .iter()
+            .any(|event| matches!(
+                event.payload,
+                AgentSessionEventPayload::AssistantMessage { .. }
+            )));
+    }
+
+    #[tokio::test]
+    async fn cancellation_rejects_a_ready_chunk_and_a_ready_success_response() {
+        for emit_delta in [false, true] {
+            let adapter = FakeAdapter::new(vec![FakeScript::CancelThenReply {
+                delta: emit_delta.then(|| StreamDelta::Text {
+                    index: 0,
+                    text: "late output".into(),
+                }),
+                response: response("late output"),
+            }]);
+            let session_id = format!("session-ready-cancel-{emit_delta}");
+            let (_root, runtime) = configured(adapter.clone());
+            create(&runtime, &session_id);
+            runtime
+                .followup(&session_id, format!("message-{emit_delta}"), "go".into())
+                .unwrap();
+            runtime.start(&session_id, provider(), None).unwrap();
+            runtime.await_idle(&session_id).await.unwrap();
+            assert_eq!(adapter.request_count(), 1);
+            assert!(!all_events(&runtime, &session_id)
+                .iter()
+                .any(|event| matches!(
+                    event.payload,
+                    AgentSessionEventPayload::AssistantChunk { .. }
+                        | AgentSessionEventPayload::AssistantMessage { .. }
+                        | AgentSessionEventPayload::RequestRetry { .. }
+                )));
+        }
+    }
+
+    #[tokio::test]
+    async fn partial_text_reasoning_and_tool_call_streams_recover_in_the_same_step() {
+        let cases = [
+            (
+                "text",
+                StreamDelta::Text {
+                    index: 0,
+                    text: "partial once".into(),
+                },
+            ),
+            (
+                "reasoning",
+                StreamDelta::Reasoning {
+                    index: 0,
+                    text: "failed reasoning".into(),
+                },
+            ),
+            (
+                "tool",
+                StreamDelta::ToolCall {
+                    index: 0,
+                    call_id: Some("call-partial".into()),
+                    name_delta: Some("read_file".into()),
+                    arguments_delta: Some("{\"path\":".into()),
+                },
+            ),
+        ];
+        for (label, delta) in cases {
+            let mut error = NormalizedModelError::new(
+                NormalizedModelErrorKind::Transport,
+                "stream connection closed",
+            );
+            error.code = Some("STREAM_READ".into());
+            let adapter = FakeAdapter::new(vec![
+                FakeScript::PartialError {
+                    deltas: vec![delta],
+                    error,
+                },
+                reply("recovered answer", &["recovered answer"]),
+            ]);
+            let session_id = format!("session-partial-{label}");
+            let (_root, runtime) = configured(adapter.clone());
+            create(&runtime, &session_id);
+            runtime
+                .followup(&session_id, format!("message-{label}"), "go".into())
+                .unwrap();
+            runtime.start(&session_id, provider(), None).unwrap();
+            runtime.await_idle(&session_id).await.unwrap();
+            assert_eq!(adapter.request_count(), 2);
+            let requests = adapter.requests.lock().unwrap();
+            assert_ne!(requests[0].request_id, requests[1].request_id);
+            assert_eq!(requests[0].messages, requests[1].messages);
+            drop(requests);
+            let events = all_events(&runtime, &session_id);
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(
+                        event.payload,
+                        AgentSessionEventPayload::AssistantChunk { .. }
+                    ))
+                    .count(),
+                2
+            );
+            assert!(events.iter().any(|event| matches!(
+                &event.payload,
+                AgentSessionEventPayload::AssistantMessage {
+                    interrupted: false,
+                    stop_reason: AgentStopReason::Stop,
+                    ..
+                }
+            )));
+            assert!(events.iter().any(|event| matches!(
+                event.payload,
+                AgentSessionEventPayload::RequestRetry { .. }
+            )));
+            assert!(events.iter().any(|event| matches!(
+                event.payload,
+                AgentSessionEventPayload::RequestFailure {
+                    attempt: 1,
+                    interrupted: true,
+                    ..
+                }
+            )));
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event.payload, AgentSessionEventPayload::StepStart))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(
+                        event.payload,
+                        AgentSessionEventPayload::AssistantMessage { .. }
+                    ))
+                    .count(),
+                1
+            );
+            assert!(!events.iter().any(|event| matches!(
+                event.payload,
+                AgentSessionEventPayload::ToolExecution { .. }
+                    | AgentSessionEventPayload::ToolCall { .. }
+            )));
+            assert_eq!(
+                runtime.session(&session_id).unwrap().status,
+                AgentSessionStatus::Idle
+            );
+        }
+    }
+
+    fn instant_policy(max_attempts: u32) -> RetryPolicy {
+        RetryPolicy {
+            max_attempts,
+            initial_delay_ms: 0,
+            max_delay_ms: 0,
+            max_server_delay_ms: 0,
+            jitter_ratio: 0.0,
+        }
+    }
+
+    #[tokio::test]
+    async fn real_http_partial_sse_then_503_then_success_retains_audit_and_clean_history() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for delta in [
+            json!({"content":"failed wire text"}),
+            json!({"reasoning_content":"failed wire reasoning"}),
+            json!({"tool_calls":[{"index":0,"id":"incomplete","function":{"name":"apply_patch","arguments":"{\"patch\":"}}]}),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let bodies = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+            let captured = bodies.clone();
+            let server = tokio::spawn(async move {
+                for attempt in 1..=3 {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut bytes = Vec::new();
+                    let mut buffer = [0u8; 8192];
+                    let (end, length) = loop {
+                        let n = socket.read(&mut buffer).await.unwrap();
+                        assert!(n > 0);
+                        bytes.extend_from_slice(&buffer[..n]);
+                        if let Some(end) = bytes
+                            .windows(4)
+                            .position(|part| part == b"\r\n\r\n")
+                            .map(|i| i + 4)
+                        {
+                            let headers =
+                                String::from_utf8_lossy(&bytes[..end]).to_ascii_lowercase();
+                            let length = headers
+                                .lines()
+                                .find_map(|line| line.strip_prefix("content-length: "))
+                                .unwrap()
+                                .parse::<usize>()
+                                .unwrap();
+                            break (end, length);
+                        }
+                    };
+                    while bytes.len() < end + length {
+                        let n = socket.read(&mut buffer).await.unwrap();
+                        assert!(n > 0);
+                        bytes.extend_from_slice(&buffer[..n]);
+                    }
+                    captured
+                        .lock()
+                        .unwrap()
+                        .push(serde_json::from_slice(&bytes[end..end + length]).unwrap());
+                    let (status, body, truncated) = match attempt {
+                        1 => ("200 OK", format!("data: {}\n\n", json!({"choices":[{"delta":delta}]})), true),
+                        2 => ("503 Service Unavailable", "{\"error\":{\"message\":\"temporary\"}}".into(), false),
+                        _ => ("200 OK", "data: {\"choices\":[{\"delta\":{\"content\":\"wire recovered\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".into(), false),
+                    };
+                    let response = format!("HTTP/1.1 {status}\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nRetry-After: 0\r\nConnection: close\r\n\r\n{body}", body.len() + if truncated { 1000 } else { 0 });
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                    socket.shutdown().await.unwrap();
+                }
+            });
+            let root = tempfile::tempdir().unwrap();
+            let runtime = AgentRuntimeBuilder::new().build();
+            runtime.configure(root.path().to_path_buf()).unwrap();
+            create(&runtime, "wire");
+            runtime
+                .followup("wire", "wire-message".into(), "go".into())
+                .unwrap();
+            let mut config = provider();
+            config.kind = AiProviderKind::OpenAiCompatible;
+            config.profile = Some("deepseek".into());
+            config.model = "deepseek-v4-flash".into();
+            config.reasoning_effort = None;
+            config.base_url = url;
+            config.retry_policy = Some(instant_policy(3));
+            runtime.start("wire", config, None).unwrap();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                runtime.await_idle("wire"),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(
+                bodies.lock().unwrap().len(),
+                3,
+                "events: {:?}",
+                all_events(&runtime, "wire")
+            );
+            tokio::time::timeout(std::time::Duration::from_secs(2), server)
+                .await
+                .unwrap()
+                .unwrap();
+            let bodies = bodies.lock().unwrap();
+            assert_eq!(bodies.len(), 3);
+            assert_eq!(bodies[0]["messages"], bodies[1]["messages"]);
+            assert_eq!(bodies[1]["messages"], bodies[2]["messages"]);
+            let events = all_events(&runtime, "wire");
+            assert!(events.iter().any(|event| matches!(
+                event.payload,
+                AgentSessionEventPayload::RequestFailure {
+                    attempt: 1,
+                    interrupted: true,
+                    ..
+                }
+            )));
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(
+                        event.payload,
+                        AgentSessionEventPayload::RequestFailure { .. }
+                    ))
+                    .count(),
+                2
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(
+                        event.payload,
+                        AgentSessionEventPayload::AssistantMessage { .. }
+                    ))
+                    .count(),
+                1
+            );
+            assert!(!events
+                .iter()
+                .any(|event| matches!(event.payload, AgentSessionEventPayload::ToolCall { .. })));
+            assert_eq!(
+                runtime.session("wire").unwrap().status,
+                AgentSessionStatus::Idle
+            );
+        }
+    }
+
+    fn partial_failure(kind: NormalizedModelErrorKind) -> FakeScript {
+        FakeScript::PartialError {
+            deltas: vec![StreamDelta::Text {
+                index: 0,
+                text: "uncommitted attempt".into(),
+            }],
+            error: NormalizedModelError::new(kind, "stream failed"),
+        }
+    }
+
+    #[tokio::test]
+    async fn cancellation_before_retry_decision_wins_over_ready_partial_transport_failure() {
+        let adapter = FakeAdapter::new(vec![FakeScript::PartialThenCancelError]);
+        let (_root, runtime) = configured(adapter.clone());
+        create(&runtime, "cancel-failure");
+        runtime
+            .followup("cancel-failure", "message".into(), "go".into())
+            .unwrap();
+        runtime.start("cancel-failure", provider(), None).unwrap();
+        runtime.await_idle("cancel-failure").await.unwrap();
+        assert_eq!(adapter.request_count(), 1);
+        let events = all_events(&runtime, "cancel-failure");
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event.payload, AgentSessionEventPayload::RequestRetry { .. })));
+        assert!(events.iter().any(|event| matches!(
+            event.payload,
+            AgentSessionEventPayload::AssistantMessage {
+                interrupted: true,
+                stop_reason: AgentStopReason::Cancelled,
+                ..
+            }
+        )));
+    }
+
+    #[tokio::test]
+    async fn provider_snapshot_survives_config_change_during_partial_retry_backoff() {
+        let adapter = FakeAdapter::new(vec![
+            partial_failure(NormalizedModelErrorKind::Transport),
+            reply("recovered", &[]),
+        ]);
+        let (_root, runtime) = configured(adapter.clone());
+        create(&runtime, "snapshot");
+        runtime
+            .followup("snapshot", "message".into(), "go".into())
+            .unwrap();
+        let mut config = provider();
+        config.retry_policy = Some(RetryPolicy {
+            initial_delay_ms: 30_000,
+            max_delay_ms: 30_000,
+            ..instant_policy(2)
+        });
+        runtime.start("snapshot", config.clone(), None).unwrap();
+        // A long backoff keeps the retry pending until the changed config is submitted.
+        for _ in 0..1000 {
+            if event_types(&runtime, "snapshot")
+                .iter()
+                .any(|kind| kind == "request/retry")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        config.retry_policy = Some(instant_policy(1));
+        assert!(event_types(&runtime, "snapshot")
+            .iter()
+            .any(|kind| kind == "request/retry"));
+        runtime.start("snapshot", config, None).unwrap();
+        assert_eq!(
+            runtime
+                .agents
+                .get("snapshot")
+                .unwrap()
+                .unwrap()
+                .provider
+                .retry_policy
+                .unwrap()
+                .max_attempts,
+            2
+        );
+        runtime.cancel("snapshot").await.unwrap();
+        assert_eq!(adapter.request_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn child_inherits_provider_attempt_budget_and_persisted_descriptor() {
+        for limit in [1, 3] {
+            let scripts = (0..limit)
+                .map(|_| partial_failure(NormalizedModelErrorKind::Transport))
+                .collect();
+            let adapter = FakeAdapter::new(scripts);
+            let (_root, runtime) = configured(adapter.clone());
+            create(&runtime, "parent-policy");
+            let mut config = provider();
+            config.retry_policy = Some(instant_policy(limit));
+            config.profile = Some("ollama".into());
+            runtime.start("parent-policy", config, None).unwrap();
+            runtime.await_idle("parent-policy").await.unwrap();
+            let child = runtime
+                .spawn_subagent(AgentSubagentSpawnRequest {
+                    parent_session_id: "parent-policy".into(),
+                    goal: "inspect".into(),
+                    role: AgentSubagentRole::Explorer,
+                    inheritance_mode: "blank".into(),
+                    target_ids: vec!["target-local".into()],
+                    budget: None,
+                    continuable: true,
+                })
+                .await
+                .unwrap();
+            runtime.await_idle(&child.header.session_id).await.unwrap();
+            assert_eq!(adapter.request_count(), limit as usize);
+            let descriptor = child.header.subagent.as_ref().unwrap();
+            assert_eq!(
+                descriptor.provider.retry_policy.as_ref().unwrap()["maxAttempts"],
+                limit
+            );
+            assert_eq!(descriptor.provider.profile.as_deref(), Some("ollama"));
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_provider_policy_is_rejected_before_the_model_factory_or_network() {
+        let adapter = FakeAdapter::new(vec![]);
+        let (_root, runtime) = configured(adapter.clone());
+        create(&runtime, "invalid-policy");
+        runtime
+            .followup("invalid-policy", "message".into(), "go".into())
+            .unwrap();
+        for policy in [
+            instant_policy(0),
+            instant_policy(9),
+            RetryPolicy {
+                jitter_ratio: f64::NAN,
+                ..instant_policy(2)
+            },
+        ] {
+            let mut config = provider();
+            config.retry_policy = Some(policy);
+            assert!(runtime.start("invalid-policy", config, None).is_err());
+        }
+        assert_eq!(adapter.request_count(), 0);
+        assert!(!event_types(&runtime, "invalid-policy")
+            .iter()
+            .any(|kind| kind == "request/header"));
+    }
+
+    #[tokio::test]
+    async fn parent_cancellation_stops_a_childs_partial_retry_backoff() {
+        let adapter = FakeAdapter::new(vec![partial_failure(NormalizedModelErrorKind::Transport)]);
+        let (_root, runtime) = configured(adapter.clone());
+        create(&runtime, "cancel-parent");
+        let mut config = provider();
+        config.retry_policy = Some(RetryPolicy {
+            initial_delay_ms: 30_000,
+            max_delay_ms: 30_000,
+            ..instant_policy(3)
+        });
+        runtime.start("cancel-parent", config, None).unwrap();
+        runtime.await_idle("cancel-parent").await.unwrap();
+        let child = runtime
+            .spawn_subagent(AgentSubagentSpawnRequest {
+                parent_session_id: "cancel-parent".into(),
+                goal: "inspect".into(),
+                role: AgentSubagentRole::Explorer,
+                inheritance_mode: "blank".into(),
+                target_ids: vec!["target-local".into()],
+                budget: None,
+                continuable: true,
+            })
+            .await
+            .unwrap();
+        let id = &child.header.session_id;
+        for _ in 0..1000 {
+            if event_types(&runtime, id)
+                .iter()
+                .any(|kind| kind == "request/retry")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(event_types(&runtime, id)
+            .iter()
+            .any(|kind| kind == "request/retry"));
+        runtime.cancel("cancel-parent").await.unwrap();
+        runtime.await_idle(id).await.unwrap();
+        assert_eq!(adapter.request_count(), 1);
+        assert_eq!(
+            runtime.session(id).unwrap().status,
+            AgentSessionStatus::Cancelled
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_attempt_budgets_cover_disabled_last_attempt_exhaustion_and_terminal_errors() {
+        for (limit, failures, terminal) in
+            [(1, 1, false), (3, 2, false), (3, 3, false), (8, 1, true)]
+        {
+            let success = !terminal && failures < limit;
+            let mut scripts = (0..failures)
+                .map(|_| {
+                    partial_failure(if terminal {
+                        NormalizedModelErrorKind::Authentication
+                    } else {
+                        NormalizedModelErrorKind::Timeout
+                    })
+                })
+                .collect::<Vec<_>>();
+            if success {
+                scripts.push(reply("success", &["success"]));
+            }
+            let adapter = FakeAdapter::new(scripts);
+            let (_root, runtime) = configured(adapter.clone());
+            create(&runtime, "budget");
+            runtime
+                .followup("budget", "message".into(), "go".into())
+                .unwrap();
+            let mut config = provider();
+            config.retry_policy = Some(instant_policy(limit));
+            runtime.start("budget", config, None).unwrap();
+            runtime.await_idle("budget").await.unwrap();
+            assert_eq!(
+                adapter.request_count(),
+                (failures + u32::from(success)) as usize
+            );
+            let events = all_events(&runtime, "budget");
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(
+                        event.payload,
+                        AgentSessionEventPayload::RequestFailure { .. }
+                    ))
+                    .count(),
+                failures as usize
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(
+                        event.payload,
+                        AgentSessionEventPayload::AssistantMessage { .. }
+                    ))
+                    .count(),
+                usize::from(success)
+            );
+            assert!(
+                !serde_json::to_string(&runtime.session("budget").unwrap().surface)
+                    .unwrap()
+                    .contains("uncommitted attempt")
+            );
+            let requests = adapter.requests.lock().unwrap();
+            for request in requests.iter().skip(1) {
+                assert_eq!(request.messages, requests[0].messages);
+            }
+            assert_eq!(
+                runtime.session("budget").unwrap().status,
+                if success {
+                    AgentSessionStatus::Idle
+                } else {
+                    AgentSessionStatus::Failed
+                }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn recovery_and_reload_do_not_repeat_a_previous_steps_write_tool() {
+        let native = RecordingNativeRuntime::new(false);
+        let adapter = FakeAdapter::new(vec![
+            tool_response(vec![native_call("write-once", "apply_patch")]),
+            partial_failure(NormalizedModelErrorKind::Transport),
+            reply("write finished", &["write finished"]),
+        ]);
+        let (root, runtime) = configured_with_native(
+            adapter.clone(),
+            AgentDriverConfig::default(),
+            native.clone(),
+        );
+        create(&runtime, "write-retry");
+        runtime
+            .followup("write-retry", "message".into(), "write".into())
+            .unwrap();
+        let mut config = provider();
+        config.retry_policy = Some(instant_policy(2));
+        runtime.start("write-retry", config.clone(), None).unwrap();
+        runtime.await_idle("write-retry").await.unwrap();
+        assert_eq!(native.executions.load(Ordering::Acquire), 1);
+        assert_eq!(adapter.request_count(), 3);
+        {
+            let requests = adapter.requests.lock().unwrap();
+            assert_eq!(requests[1].messages, requests[2].messages);
+            assert!(requests[2]
+                .messages
+                .iter()
+                .any(|message| matches!(message, ModelMessage::Tool { .. })));
+        }
+        let before = runtime.session("write-retry").unwrap();
+        let audit = all_events(&runtime, "write-retry");
+        let reloaded = AgentRuntimeBuilder::new()
+            .model_factory(Arc::new(FakeFactory(adapter.clone())))
+            .native_tool_runtime(native.clone())
+            .build();
+        reloaded.configure(root.path().to_path_buf()).unwrap();
+        assert_eq!(
+            reloaded.session("write-retry").unwrap().surface,
+            before.surface
+        );
+        reloaded.start("write-retry", config, None).unwrap();
+        reloaded.await_idle("write-retry").await.unwrap();
+        assert_eq!(native.executions.load(Ordering::Acquire), 1);
+        assert_eq!(adapter.request_count(), 3);
+        let after = all_events(&reloaded, "write-retry");
+        assert_eq!(&after[..audit.len()], audit.as_slice());
+    }
+
+    #[tokio::test]
     async fn cancellation_closes_step_and_turn_before_session_end() {
         let adapter = FakeAdapter::new(vec![FakeScript::Wait { response: None }]);
         let (_root, runtime) = configured(adapter.clone());
@@ -3037,16 +3819,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_response_and_step_and_turn_limits_have_explicit_terminal_events() {
-        let empty = FakeAdapter::new(vec![reply("", &[])]);
-        let (_root, runtime) = configured(empty);
+    async fn empty_response_retries_and_step_and_turn_limits_have_explicit_boundaries() {
+        let empty = FakeAdapter::new(vec![reply("", &[]), reply("recovered", &["recovered"])]);
+        let (_root, runtime) = configured(empty.clone());
         create(&runtime, "session-empty");
         runtime
             .followup("session-empty", "message-empty".into(), "empty".into())
             .unwrap();
         runtime.start("session-empty", provider(), None).unwrap();
         runtime.await_idle("session-empty").await.unwrap();
-        assert!(runtime.session("session-empty").unwrap().ended);
+        assert!(!runtime.session("session-empty").unwrap().ended);
+        assert_eq!(empty.request_count(), 2);
         assert!(runtime
             .events(AgentSessionEventsRequest {
                 session_id: "session-empty".into(),
@@ -3058,8 +3841,8 @@ mod tests {
             .iter()
             .any(|event| matches!(
                 &event.payload,
-                AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
-                    if reason.starts_with("emptyResponse")
+                AgentSessionEventPayload::RequestRetry { error_code, .. }
+                    if error_code.as_deref() == Some("EMPTY_RESPONSE")
             )));
 
         let step_limited = FakeAdapter::new(vec![FakeScript::Wait {

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { parseRetryPolicy, type AiRetryPolicy } from '@/lib/retry-policy';
 import { shallow } from 'zustand/shallow';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type {
@@ -17,6 +18,8 @@ import {
   effectiveReasoningEffort,
   isAiReasoningOption,
 } from '@/lib/ai-reasoning';
+
+import { isProviderProfile, resolveProviderProfile, validateProviderCapabilities } from '@/lib/provider-contract';
 
 const logger = createLogger('aiSettingsStore');
 
@@ -70,6 +73,8 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     model: 'k3',
     requiresApiKey: true,
   },
+  { preset: 'qwen', name: 'Qwen', kind: 'openAiCompatible', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3', requiresApiKey: true },
+  { preset: 'glm', name: 'GLM', kind: 'openAiCompatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5', requiresApiKey: true },
   {
     preset: 'custom',
     name: 'Custom Provider',
@@ -118,7 +123,7 @@ function createProviderProfile(
   const id = existing.some((provider) => provider.id === baseId)
     ? `${baseId}-${generateId()}`
     : baseId;
-  return { id, ...definition };
+  return { id, ...definition, ...(preset !== 'custom' ? { profile: preset } : {}) };
 }
 
 const initialProviders = [
@@ -144,7 +149,7 @@ function isProviderKind(value: unknown): value is AiProviderKind {
 }
 
 function isProviderPreset(value: unknown): value is AiProviderPreset {
-  return ['ollama', 'openai', 'deepseek', 'minimax', 'kimi', 'custom'].includes(String(value));
+  return ['ollama', 'openai', 'deepseek', 'minimax', 'kimi', 'qwen', 'glm', 'custom'].includes(String(value));
 }
 
 function sanitizeProviders(value: unknown): AiProviderProfile[] {
@@ -165,10 +170,13 @@ function sanitizeProviders(value: unknown): AiProviderProfile[] {
       || !isProviderKind(provider.kind)
     ) continue;
     providers.push({
+      // Preserve invalid persisted values so request validation fails visibly.
+      ...(provider.retryPolicy !== undefined ? { retryPolicy: provider.retryPolicy as AiRetryPolicy } : {}),
       id,
       name,
       kind: provider.kind,
       preset,
+      ...(isProviderProfile(provider.profile) ? { profile: provider.profile } : {}),
       baseUrl: typeof provider.baseUrl === 'string' ? provider.baseUrl : '',
       model: typeof provider.model === 'string' ? provider.model : '',
       ...(isAiReasoningOption(provider.reasoningEffort)
@@ -179,7 +187,7 @@ function sanitizeProviders(value: unknown): AiProviderProfile[] {
         : provider.kind !== 'ollama',
     });
   }
-  return providers;
+  return providers.map(provider => ({ ...provider, profile: resolveProviderProfile(provider) }));
 }
 
 function parseRawEntries(entries: [string, string][]): Record<string, unknown> {
@@ -326,6 +334,7 @@ export const useAiSettingsStore = create<AiSettingsState>()(
       }
     },
     addProvider: (preset, changes) => {
+      if (changes?.retryPolicy !== undefined) parseRetryPolicy(changes.retryPolicy);
       const provider = {
         ...createProviderProfile(preset, get().providers),
         ...changes,
@@ -337,6 +346,7 @@ export const useAiSettingsStore = create<AiSettingsState>()(
       providers: state.providers.map((provider) => {
         if (provider.id !== id) return provider;
         const updated = { ...provider, ...changes, id };
+        if (changes.retryPolicy !== undefined) parseRetryPolicy(changes.retryPolicy);
         if ('reasoningEffort' in changes && changes.reasoningEffort === undefined) {
           delete updated.reasoningEffort;
         }
@@ -367,14 +377,18 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         ?? state.providers[0];
       if (!provider) throw new Error('No AI provider is configured');
       const reasoningEffort = effectiveReasoningEffort(provider);
-      return {
+      const config: AiProviderConfig = {
+        ...(provider.retryPolicy !== undefined ? { retryPolicy: parseRetryPolicy(provider.retryPolicy) } : {}),
         id: provider.id,
         kind: provider.kind,
+        profile: resolveProviderProfile(provider),
         baseUrl: provider.baseUrl.trim(),
         model: provider.model.trim(),
         ...(reasoningEffort ? { reasoningEffort } : {}),
         requiresApiKey: provider.requiresApiKey,
       };
+      validateProviderCapabilities(config);
+      return config;
     },
   })),
 );

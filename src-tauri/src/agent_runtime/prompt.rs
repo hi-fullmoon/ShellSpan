@@ -232,15 +232,18 @@ mod tests {
         ]
     }
 
+    fn normalize_line_endings(value: &str) -> String {
+        value.replace("\r\n", "\n")
+    }
+
     #[test]
     fn prompt_assembly_is_stable_and_matches_the_golden() {
         let first = assemble_model_input(&header(), tools());
         let second = assemble_model_input(&header(), tools());
+        let golden =
+            normalize_line_endings(include_str!("testdata/prompt-scoped-autopilot.golden.txt"));
         assert_eq!(first, second);
-        assert_eq!(
-            first.system_prompt,
-            include_str!("testdata/prompt-scoped-autopilot.golden.txt").trim_end(),
-        );
+        assert_eq!(first.system_prompt, golden.trim_end_matches('\n'));
     }
 
     #[test]

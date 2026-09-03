@@ -658,6 +658,25 @@ export function projectAgentChatNodes(
         putProcessChild(eventTurnId(event), node);
         break;
       }
+      case 'request/failure': {
+        const request = requests.get(event.data.requestId);
+        if (request) {
+          request.completedAt = event.timeUnixMs;
+          request.stopReason = 'error';
+        }
+        // Failed chunks remain in the audit log, but are not an assistant answer.
+        const turn = event.turnId ? turns.get(event.turnId) : undefined;
+        for (const nodes of [turn?.assistants, turn?.children, unscopedNodes]) {
+          if (!nodes) continue;
+          for (const [key, node] of nodes) {
+            if ((node.kind === 'assistantMessage' || node.kind === 'reasoning')
+              && node.requestId === event.data.requestId && node.state === 'streaming') {
+              nodes.delete(key);
+            }
+          }
+        }
+        break;
+      }
       case 'assistant/chunk': {
         const request = requests.get(event.data.requestId);
         if (request && request.firstResponseAt === undefined

@@ -2,6 +2,13 @@ import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 
 const providers = [
+  ...[
+    ['Qwen', 'QWEN', 'qwen'], ['GLM', 'GLM', 'glm'], ['Kimi', 'KIMI', 'kimi'], ['OpenAI', 'OPENAI', 'openai'],
+  ].map(([name, prefix, suffix]) => ({ name,
+    ready: Boolean(process.env[`SHELLSPAN_LIVE_${prefix}_API_KEY`]),
+    missing: `SHELLSPAN_LIVE_${prefix}_API_KEY`,
+    test: `agent_runtime::model::tests::live_provider_basic_round_${suffix}`,
+  })),
   {
     name: 'MiniMax',
     ready: Boolean(process.env.SHELLSPAN_LIVE_MINIMAX_API_KEY),

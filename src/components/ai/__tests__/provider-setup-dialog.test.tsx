@@ -6,6 +6,7 @@ import {
   ProviderSetupDialog,
 } from '../provider-setup-dialog';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { DEFAULT_RETRY_POLICY } from '@/lib/retry-policy';
 
 const mocks = vi.hoisted(() => ({
   invokeDeleteAiApiKey: vi.fn(),
@@ -57,6 +58,25 @@ describe('ProviderSetupDialog', () => {
     useAiSettingsStore.setState({ ...initialState, initialized: false }, true);
   });
 
+  it('saves a disabled retry policy and blocks invalid values before connection testing', async () => {
+    const user = userEvent.setup();
+    const provider = useAiSettingsStore.getState().providers[0];
+    const onSaved = vi.fn();
+    render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={onSaved} />);
+    const attempts = screen.getByRole('spinbutton', { name: 'settings.ai.retry.maxAttempts' });
+    await user.clear(attempts);
+    await user.type(attempts, '9');
+    expect(attempts).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('button', { name: 'common.save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'settings.ai.verifyConnection' })).toBeDisabled();
+    expect(mocks.invokeListAiModels).not.toHaveBeenCalled();
+    await user.clear(attempts);
+    await user.type(attempts, '1');
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(provider.id));
+    expect(useAiSettingsStore.getState().getProviderConfig(provider.id).retryPolicy).toEqual({ ...DEFAULT_RETRY_POLICY, maxAttempts: 1 });
+  });
+
   it('uses the shared compact shell and grouped responsive form layout', () => {
     render(
       <ProviderSetupDialog open onOpenChange={vi.fn()} onSaved={vi.fn()} />,
@@ -96,7 +116,7 @@ describe('ProviderSetupDialog', () => {
       'has-[[data-slot=input-group-control]:focus-visible]:border-ring',
       'has-[[data-slot=input-group-control]:focus-visible]:ring-3',
     );
-    expect(inputGroups).toHaveLength(3);
+    expect(inputGroups).toHaveLength(4);
     inputGroups.forEach((inputGroup) => {
       expect(inputGroup).toHaveClass(
         'h-9',
@@ -146,7 +166,7 @@ describe('ProviderSetupDialog', () => {
     expect(screen.getByLabelText('settings.ai.providerName')).toHaveValue('DeepSeek');
     expect(screen.getByLabelText('settings.ai.baseUrl')).toHaveValue('https://api.deepseek.com');
     expect(screen.getByLabelText('settings.ai.model')).toHaveValue('deepseek-v4-flash');
-    const endpointLabel = 'settings.ai.requestEndpoint:https://api.deepseek.com/v1/chat/completions';
+    const endpointLabel = 'settings.ai.requestEndpoint:https://api.deepseek.com/chat/completions';
     const endpointButton = screen.getByRole('button', { name: endpointLabel });
     expect(endpointButton).toHaveClass(
       'relative',
@@ -261,6 +281,8 @@ describe('ProviderSetupDialog', () => {
 
     await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledWith({
       id: 'provider-setup-draft',
+      retryPolicy: DEFAULT_RETRY_POLICY,
+      profile: 'ollama',
       kind: 'ollama',
       baseUrl: 'http://127.0.0.1:11434',
       model: 'qwen3',
@@ -480,7 +502,7 @@ describe('buildProviderRequestEndpoint', () => {
     expect(buildProviderRequestEndpoint(
       'https://api.deepseek.com',
       'openAiCompatible',
-    )).toBe('https://api.deepseek.com/v1/chat/completions');
+    )).toBe('https://api.deepseek.com/chat/completions');
     expect(buildProviderRequestEndpoint(
       'https://api.minimaxi.com/v1/chat/completions',
       'openAiCompatible',

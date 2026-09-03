@@ -98,6 +98,8 @@ export interface AgentSubagentBudget {
 }
 
 export interface AgentSubagentModel {
+  readonly profile?: string;
+  readonly retryPolicy?: import('@/lib/retry-policy').AiRetryPolicy;
   readonly providerId: string;
   readonly providerKind: 'ollama' | 'openAi' | 'openAiCompatible';
   readonly baseUrl: string;
@@ -369,11 +371,33 @@ export type AgentSessionEvent =
       previousRequestId?: string;
       attempt: number;
       reason: string;
+      delayMs?: number;
+      cumulativeDelayMs?: number;
+      serverRetryAfterMs?: number;
+      serverHintCapped?: boolean;
+      errorKind?: string;
+      errorStatus?: number;
+      errorCode?: string;
     }>
   | AgentSessionEventWithData<'request/usage', {
       requestId: string;
       usage: AgentSessionTokenUsage;
       finishReason: AgentSessionStopReason;
+    }>
+  | AgentSessionEventWithData<'request/failure', {
+      requestId: string;
+      attempt: number;
+      maxAttempts: number;
+      cumulativeDelayMs: number;
+      interrupted: boolean;
+      failure: {
+        kind: 'cancelled' | 'retryable' | 'transport' | 'timeout' | 'emptyResponse'
+          | 'protocol' | 'contextTooLarge' | 'authentication' | 'rateLimited' | 'terminal';
+        message: string;
+        status?: number;
+        code?: string;
+        retryAfterMs?: number;
+      };
     }>
   | AgentSessionEventWithData<'tool/call', { call: AgentSessionRecordedToolCall }>
   | AgentSessionEventWithData<'tool/approval', {
@@ -782,6 +806,7 @@ export interface AgentActivityRequest {
   readonly totalTokens?: number;
   readonly finishReason?: AgentSessionStopReason;
   readonly retryReason?: string;
+  readonly failure?: Extract<AgentSessionEvent, { type: 'request/failure' }>['data'];
 }
 
 export interface AgentActivityTool {
