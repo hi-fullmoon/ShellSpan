@@ -1,4 +1,15 @@
-export const AGENT_SESSION_EVENT_VERSION = 2 as const;
+export const LEGACY_AGENT_SESSION_EVENT_VERSION = 2 as const;
+export const AGENT_SESSION_EVENT_VERSION = 3 as const;
+export type AgentSessionEventVersion =
+  | typeof LEGACY_AGENT_SESSION_EVENT_VERSION
+  | typeof AGENT_SESSION_EVENT_VERSION;
+
+export function isSupportedAgentSessionEventVersion(
+  version: number,
+): version is AgentSessionEventVersion {
+  return version === LEGACY_AGENT_SESSION_EVENT_VERSION
+    || version === AGENT_SESSION_EVENT_VERSION;
+}
 
 export type AgentSessionRuntimeStatus =
   | 'idle'
@@ -40,6 +51,7 @@ export type AgentSessionMessageSource =
 
 export interface AgentSessionInboxMessage {
   readonly messageId: string;
+  readonly clientSubmissionId?: string;
   readonly content: string;
   readonly source: AgentSessionMessageSource;
 }
@@ -175,7 +187,7 @@ export interface AgentSessionFleetState {
 }
 
 interface AgentSessionEventBase {
-  readonly version: typeof AGENT_SESSION_EVENT_VERSION;
+  readonly version: AgentSessionEventVersion;
   readonly sessionId: string;
   readonly seq: number;
   readonly timeUnixMs: number;
@@ -225,6 +237,30 @@ export type AgentSessionEvent =
       operation: AgentSessionInboxOperation;
       lane: AgentSessionInboxLane;
       messages: readonly AgentSessionInboxMessage[];
+    }>
+  | AgentSessionEventWithData<'agent/inbox/item_updated', {
+      itemId: string;
+      lane: AgentSessionInboxLane;
+      content: string;
+      previousRevision: number;
+      clientOperationId: string;
+    }>
+  | AgentSessionEventWithData<'agent/inbox/item_removed', {
+      itemId: string;
+      lane: AgentSessionInboxLane;
+      previousRevision: number;
+      clientOperationId: string;
+    }>
+  | AgentSessionEventWithData<'agent/inbox/reordered', {
+      lane: AgentSessionInboxLane;
+      orderedItemIds: readonly string[];
+      previousRevision: number;
+      clientOperationId: string;
+    }>
+  | AgentSessionEventWithData<'session/renamed', {
+      title: string;
+      previousRevision: number;
+      clientOperationId: string;
     }>
   | AgentSessionEventWithoutData<'turn/start'>
   | AgentSessionEventWithData<'turn/end', { reason: string }>
@@ -418,6 +454,7 @@ export interface AgentSessionHeader {
   readonly sessionId: string;
   readonly taskId: string;
   readonly goal: string;
+  readonly title?: string;
   readonly parentSessionId?: string;
   readonly target?: AgentSessionTarget;
   readonly permissionMode?: AgentSessionPermissionMode;
@@ -538,7 +575,31 @@ export interface AgentRecoveryReconcileInput {
 export interface AgentSessionMessageInput {
   readonly sessionId: string;
   readonly messageId: string;
+  readonly clientSubmissionId?: string;
   readonly content: string;
+}
+
+export type AgentInboxMutation =
+  | Readonly<{ type: 'update'; itemId: string; content: string }>
+  | Readonly<{ type: 'remove'; itemId: string }>
+  | Readonly<{
+      type: 'reorder';
+      lane: AgentSessionInboxLane;
+      orderedItemIds: readonly string[];
+    }>;
+
+export interface AgentInboxMutationInput {
+  readonly sessionId: string;
+  readonly expectedRevision: number;
+  readonly clientOperationId: string;
+  readonly mutation: AgentInboxMutation;
+}
+
+export interface AgentSessionRenameInput {
+  readonly sessionId: string;
+  readonly expectedRevision: number;
+  readonly clientOperationId: string;
+  readonly title: string;
 }
 
 export interface AgentRuntimeInjectionInput extends AgentSessionMessageInput {
@@ -620,76 +681,6 @@ export interface AgentFleetInspection {
   readonly fleet: AgentSessionFleetState;
   readonly failureThreshold: number;
   readonly failures: number;
-}
-
-export type AgentConversationMarkerKind =
-  | 'steer'
-  | 'runtime'
-  | 'retry'
-  | 'compaction'
-  | 'contextLimited'
-  | 'artifact'
-  | 'recovery'
-  | 'subagentSettled'
-  | 'failed'
-  | 'cancelled'
-  | 'maxTokens'
-  | 'discarded'
-  | 'status';
-
-export interface AgentConversationMessageItem {
-  readonly kind: 'message';
-  readonly id: string;
-  readonly role: 'user' | 'assistant';
-  readonly content: string;
-  readonly status: 'streaming' | 'completed' | 'interrupted';
-  readonly turnId?: string;
-  readonly stepId?: string;
-}
-
-export interface AgentConversationToolItem {
-  readonly kind: 'tool';
-  readonly id: string;
-  readonly callId: string;
-  readonly name: string;
-  readonly title: string;
-  readonly summary?: string;
-  readonly arguments: unknown;
-  readonly effect: AgentSessionEffect;
-  readonly target?: AgentSessionTarget;
-  readonly status: AgentSessionToolStatus;
-  readonly approvalId?: string;
-  readonly approvalRequestId?: string;
-  readonly approvalExpiresAtUnixMs?: number;
-  readonly approvalPrompt?: string;
-  readonly result?: unknown;
-  readonly resultSummary?: string;
-  readonly evidenceRefs: readonly string[];
-  readonly turnId?: string;
-  readonly stepId?: string;
-}
-
-export interface AgentConversationMarkerItem {
-  readonly kind: 'marker';
-  readonly id: string;
-  readonly marker: AgentConversationMarkerKind;
-  readonly detail?: string;
-  readonly count?: number;
-  readonly sessionId?: string;
-  readonly status?: AgentSessionRuntimeStatus;
-  readonly turnId?: string;
-  readonly stepId?: string;
-}
-
-export type AgentConversationItem =
-  | AgentConversationMessageItem
-  | AgentConversationToolItem
-  | AgentConversationMarkerItem;
-
-export interface AgentConversationProjection {
-  readonly sessionId?: string;
-  readonly items: readonly AgentConversationItem[];
-  readonly followKey: string;
 }
 
 export interface AgentActivityRequest {
@@ -785,16 +776,4 @@ export interface AgentActivityProjection {
   readonly recovery: AgentSessionRecoveryState;
   readonly fleet?: AgentSessionFleetState;
   readonly evidenceCount: number;
-}
-
-export interface AgentSessionProjection {
-  readonly sessionId?: string;
-  readonly taskId?: string;
-  readonly goal?: string;
-  readonly permissionMode?: AgentSessionPermissionMode;
-  readonly status: AgentSessionRuntimeStatus;
-  readonly statusReason?: string;
-  readonly latestRequestId?: string;
-  readonly conversation: AgentConversationProjection;
-  readonly activity: AgentActivityProjection;
 }

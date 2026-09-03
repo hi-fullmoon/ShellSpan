@@ -59,6 +59,7 @@ import type {
   AiSessionLocator,
   AiSessionMeta,
   AiStartRequest,
+  AiStreamEvent,
 } from '@/types/ai';
 import type {
   AgentArtifactRequest,
@@ -71,6 +72,7 @@ import type {
   AgentFleetInspection,
   AgentFleetPlanRequest,
   AgentFleetReconcileRequest,
+  AgentInboxMutationInput,
   AgentRecoveryCheckpoint,
   AgentRecoveryReconcileInput,
   AgentRuntimeInjectionInput,
@@ -83,6 +85,7 @@ import type {
   AgentSessionListPage,
   AgentSessionListRequest,
   AgentSessionMessageInput,
+  AgentSessionRenameInput,
   AgentSessionSnapshot,
   AgentSubagentSpawnRequest,
   CreateAgentSessionRequest,
@@ -335,6 +338,18 @@ export async function invokeAgentRuntimeSteer(
   input: AgentSessionMessageInput,
 ): Promise<AgentSessionSnapshot> {
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_steer', { input });
+}
+
+export async function invokeMutateAgentRuntimeInbox(
+  input: AgentInboxMutationInput,
+): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_mutate_inbox', { input });
+}
+
+export async function invokeRenameAgentRuntimeSession(
+  input: AgentSessionRenameInput,
+): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_rename_session', { input });
 }
 
 export async function invokeAgentRuntimeInject(
@@ -828,6 +843,14 @@ export async function listenToAgentRuntimeSession(
   callback: EventCallback<AgentSessionEvent>,
 ): Promise<UnlistenFn> {
   return listen<AgentSessionEvent>('agent-runtime-session-event', (event) => {
+    callback(event);
+  });
+}
+
+export async function listenToAiStream(
+  callback: EventCallback<AiStreamEvent>,
+): Promise<UnlistenFn> {
+  return listen<AiStreamEvent>('ai-stream', (event) => {
     callback(event);
   });
 }

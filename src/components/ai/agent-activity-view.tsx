@@ -4,14 +4,6 @@ import { ActivityIcon, ChevronRightIcon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -62,9 +54,9 @@ function AgentTree({
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="truncate font-medium">{agent.role} · {agent.sessionId}</span>
             <span className="text-xs text-muted-foreground">
-              {agent.continuable ? 'continuable' : 'one-shot'}
+              {agent.continuable ? t('agent.session.agent.continuable') : t('agent.session.agent.oneShot')}
               {agent.targetScope?.[0] ? ` · ${agent.targetScope[0].targetId}` : ''}
-              {agent.detached ? ' · released' : ''}
+              {agent.detached ? ` · ${t('agent.session.agent.released')}` : ''}
             </span>
             {agent.summary && <span className="text-xs text-muted-foreground">{agent.summary}</span>}
           </div>
@@ -92,14 +84,19 @@ function FleetTargetMatrix({ projection }: { readonly projection: AgentActivityP
   return (
     <div className="grid gap-px overflow-hidden rounded-md border bg-border text-sm" data-testid="agent-fleet-matrix">
       <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
-        <span>Target</span><span>Wave</span><span>State</span>
+        <span>{t('agent.session.fleet.target')}</span>
+        <span>{t('agent.session.fleet.waveLabel')}</span>
+        <span>{t('agent.session.fleet.state')}</span>
       </div>
       {targets.map((target) => (
         <div key={target.targetId} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 bg-background px-2 py-1.5">
           <div className="min-w-0">
             <div className="truncate">{target.targetId}</div>
             <div className="truncate text-xs text-muted-foreground">
-              {target.childSessionIds?.length ?? 0} agents · {target.evidenceRefs?.length ?? 0} evidence
+              {t('agent.session.fleet.targetCounts', {
+                agents: target.childSessionIds?.length ?? 0,
+                evidence: target.evidenceRefs?.length ?? 0,
+              })}
             </div>
           </div>
           <span className="text-muted-foreground">{target.wave}</span>
@@ -152,31 +149,27 @@ function ActivitySection({
   const [open, setOpen] = useState(defaultOpen);
   const { t } = useI18n();
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <Card size="sm" variant="outline">
-        <CardHeader>
-          <CardTitle>{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
-          <CardAction>
-            <CollapsibleTrigger
-              render={(
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  aria-label={open
-                    ? t('agent.session.section.collapse', { section: title })
-                    : t('agent.session.section.expand', { section: title })}
-                />
-              )}
-            >
-              <ChevronRightIcon className={cn('transition-transform', open && 'rotate-90')} />
-            </CollapsibleTrigger>
-          </CardAction>
-        </CardHeader>
+    <Collapsible open={open} onOpenChange={setOpen} className="border-b border-border py-1">
+      <CollapsibleTrigger
+        render={(
+          <Button
+            variant="ghost"
+            className="h-auto w-full min-w-0 justify-start px-1 py-2 text-left"
+            aria-label={open
+              ? t('agent.session.section.collapse', { section: title })
+              : t('agent.session.section.expand', { section: title })}
+          />
+        )}
+      >
+        <ChevronRightIcon data-icon="inline-start" className={cn('transition-transform', open && 'rotate-90')} />
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="font-medium text-foreground">{title}</span>
+          <span className="truncate text-xs text-muted-foreground">{description}</span>
+        </span>
+      </CollapsibleTrigger>
         <CollapsibleContent>
-          <CardContent>{children}</CardContent>
+          <div className="min-w-0 pb-3 pl-7 pr-1">{children}</div>
         </CollapsibleContent>
-      </Card>
     </Collapsible>
   );
 }
@@ -194,20 +187,18 @@ function ActivityTimeline({ projection }: { readonly projection: AgentActivityPr
   }
 
   return projection.turns.map((turn) => (
-    <Card key={turn.id} size="sm" variant="outline" data-agent-turn-id={turn.id}>
-      <CardHeader>
-        <CardTitle>{t('agent.session.turn', { number: turn.index })}</CardTitle>
-        <CardDescription>
-          {[durationLabel(turn.durationMs), turn.endReason].filter(Boolean).join(' · ')
-            || t('agent.session.timeline.inProgress')}
-        </CardDescription>
-        <CardAction>
-          <Badge variant={runtimeStatusVariant(turn.status)}>
-            {t(runtimeStatusLabel(turn.status))}
-          </Badge>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+    <section key={turn.id} className="flex min-w-0 flex-col gap-3 border-b border-border py-3" data-agent-turn-id={turn.id}>
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="font-medium">{t('agent.session.turn', { number: turn.index })}</h3>
+          <p className="truncate text-xs text-muted-foreground">
+            {[durationLabel(turn.durationMs), turn.endReason].filter(Boolean).join(' · ')
+              || t('agent.session.timeline.inProgress')}
+          </p>
+        </div>
+        <Badge variant={runtimeStatusVariant(turn.status)}>{t(runtimeStatusLabel(turn.status))}</Badge>
+      </div>
+      <div className="flex flex-col gap-3 pl-2">
         {turn.steps.map((step, index) => (
           <div key={step.id} className="flex flex-col gap-2" data-agent-step-id={step.id}>
             {index > 0 && <Separator />}
@@ -244,8 +235,8 @@ function ActivityTimeline({ projection }: { readonly projection: AgentActivityPr
             )}
           </div>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   ));
 }
 
@@ -263,7 +254,16 @@ export function AgentActivityView({
 
   return (
     <ScrollArea className="min-h-0 flex-1" aria-label={t('agent.session.activity')}>
-      <ScrollAreaContent className="flex min-w-0 flex-col gap-3 p-3">
+      <ScrollAreaContent className="flex min-w-0 flex-col px-3 pb-4 @min-[400px]/ai-workspace:px-4 @min-[560px]/ai-workspace:px-5">
+        <section className="flex min-w-0 items-start justify-between gap-3 border-b border-border py-3">
+          <div className="min-w-0">
+            <h3 className="font-medium">{t('agent.session.activity.statusTitle')}</h3>
+            <p className="truncate text-xs text-muted-foreground">
+              {projection.statusReason ?? t('agent.session.activity.statusDescription')}
+            </p>
+          </div>
+          <Badge variant={runtimeStatusVariant(projection.status)}>{t(runtimeStatusLabel(projection.status))}</Badge>
+        </section>
         <ActivityTimeline projection={projection} />
 
         <ActivitySection
