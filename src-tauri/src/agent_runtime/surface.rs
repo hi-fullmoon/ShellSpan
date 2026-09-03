@@ -167,16 +167,30 @@ fn append_surface_events<'a>(
                 name,
                 status,
                 summary,
+                data,
                 ..
             } => messages.push(AgentSurfaceMessage::Tool {
                 call_id: call_id.clone(),
                 name: name.clone(),
                 status: *status,
-                content: summary.clone(),
+                content: tool_result_content(*status, summary, data.as_ref()),
             }),
             _ => {}
         }
     }
+}
+
+fn tool_result_content(
+    status: AgentToolResultStatus,
+    summary: &str,
+    data: Option<&serde_json::Value>,
+) -> String {
+    serde_json::to_string(&serde_json::json!({
+        "status": status,
+        "summary": summary,
+        "data": data,
+    }))
+    .unwrap_or_else(|_| summary.to_string())
 }
 
 #[cfg(test)]
@@ -241,6 +255,45 @@ mod tests {
             surface.messages[1],
             AgentSurfaceMessage::Assistant { .. }
         ));
+    }
+
+    #[test]
+    fn surface_preserves_structured_tool_data_for_the_next_model_request() {
+        let events = vec![event(
+            0,
+            AgentSessionEventPayload::ToolResult {
+                call_id: "call-1".into(),
+                name: "run_terminal_command".into(),
+                status: AgentToolResultStatus::Completed,
+                summary: "Direct command reached Exited.".into(),
+                data: Some(serde_json::json!({
+                    "exitCode": 0,
+                    "stdout": "Mem: 3.6Gi total\n/dev/vda1 72% /\n",
+                    "stderr": "",
+                    "truncated": false,
+                })),
+                duration_ms: Some(1251),
+                evidence_refs: Vec::new(),
+            },
+        )];
+
+        let surface = derive_surface(&events).unwrap();
+        let AgentSurfaceMessage::Tool {
+            status, content, ..
+        } = &surface.messages[0]
+        else {
+            panic!("expected a tool surface message");
+        };
+        let content: serde_json::Value = serde_json::from_str(content).unwrap();
+
+        assert_eq!(*status, AgentToolResultStatus::Completed);
+        assert_eq!(content["status"], "completed");
+        assert_eq!(content["summary"], "Direct command reached Exited.");
+        assert_eq!(content["data"]["exitCode"], 0);
+        assert_eq!(
+            content["data"]["stdout"],
+            "Mem: 3.6Gi total\n/dev/vda1 72% /\n"
+        );
     }
 
     #[test]

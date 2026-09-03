@@ -201,15 +201,11 @@ impl NativeToolEngine {
             return Err("capability TTL is outside the native limit".into());
         }
         let preview = preview_file_call_native(&call, database, credentials, known_hosts_path)?;
-        let requires_native_confirmation = context.request.permission_mode
-            == AgentPermissionModeNative::RequestApproval
-            || scope.sensitive_path_count > 0
-            || matches!(
-                effect.kind,
-                AgentEffectKindNative::StateChange
-                    | AgentEffectKindNative::Destructive
-                    | AgentEffectKindNative::ExternalSideEffect
-            );
+        let requires_native_confirmation = requires_native_confirmation(
+            context.request.permission_mode,
+            effect.kind,
+            scope.sensitive_path_count,
+        );
         Ok(PreparedAuthorizationNative {
             native_prompt: native_prompt(&context, &call, &effect, &scope, &preview, ttl_ms),
             context,
@@ -1081,6 +1077,26 @@ fn exec_process_result(
     }
 }
 
+fn requires_native_confirmation(
+    permission_mode: AgentPermissionModeNative,
+    effect: AgentEffectKindNative,
+    sensitive_path_count: usize,
+) -> bool {
+    match permission_mode {
+        AgentPermissionModeNative::RequestApproval => true,
+        AgentPermissionModeNative::ScopedAutopilot => {
+            sensitive_path_count > 0
+                || matches!(
+                    effect,
+                    AgentEffectKindNative::StateChange
+                        | AgentEffectKindNative::Destructive
+                        | AgentEffectKindNative::ExternalSideEffect
+                )
+        }
+        AgentPermissionModeNative::Operator => false,
+    }
+}
+
 fn completed_result(
     request: &AgentRequestNative,
     call: &AgentToolCallNative,
@@ -1139,5 +1155,43 @@ mod tests {
             step_id: String::new(),
         };
         assert_eq!(context.validate(), Err("invalid native step id".into()));
+    }
+
+    #[test]
+    fn native_confirmation_respects_the_frozen_permission_mode() {
+        assert!(requires_native_confirmation(
+            AgentPermissionModeNative::RequestApproval,
+            AgentEffectKindNative::ReadOnly,
+            0,
+        ));
+        assert!(requires_native_confirmation(
+            AgentPermissionModeNative::ScopedAutopilot,
+            AgentEffectKindNative::StateChange,
+            0,
+        ));
+        assert!(requires_native_confirmation(
+            AgentPermissionModeNative::ScopedAutopilot,
+            AgentEffectKindNative::ReadOnly,
+            1,
+        ));
+        assert!(!requires_native_confirmation(
+            AgentPermissionModeNative::ScopedAutopilot,
+            AgentEffectKindNative::ReadOnly,
+            0,
+        ));
+
+        for effect in [
+            AgentEffectKindNative::ReadOnly,
+            AgentEffectKindNative::SensitiveRead,
+            AgentEffectKindNative::StateChange,
+            AgentEffectKindNative::Destructive,
+            AgentEffectKindNative::ExternalSideEffect,
+        ] {
+            assert!(!requires_native_confirmation(
+                AgentPermissionModeNative::Operator,
+                effect,
+                1,
+            ));
+        }
     }
 }

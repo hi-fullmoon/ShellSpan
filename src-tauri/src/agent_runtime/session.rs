@@ -16,6 +16,7 @@ use super::{
     AgentSessionEvent, AgentSessionEventPayload, AgentSessionPermissionMode, AgentSessionStatus,
     AgentSessionTarget, AgentSubagentSession, AgentSurfaceSnapshot, AgentTaskProjection,
     RecordedToolCall, AGENT_SESSION_EVENT_VERSION, MAX_AGENT_MESSAGE_BYTES,
+    MAX_AGENT_STREAM_DELTA_BYTES,
 };
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
@@ -2177,12 +2178,15 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
         } => {
             require_scope(event, true, true)?;
             validate_identifier(request_id, "requestId")?;
-            validate_optional_text(text_delta.as_deref(), "assistant text delta")?;
-            validate_optional_text(reasoning_delta.as_deref(), "assistant reasoning delta")?;
+            validate_optional_stream_delta(text_delta.as_deref(), "assistant text delta")?;
+            validate_optional_stream_delta(
+                reasoning_delta.as_deref(),
+                "assistant reasoning delta",
+            )?;
             if let Some(delta) = tool_call_delta {
                 validate_optional_text(delta.call_id.as_deref(), "tool call delta id")?;
                 validate_optional_text(delta.name_delta.as_deref(), "tool call name delta")?;
-                validate_optional_text(
+                validate_optional_stream_delta(
                     delta.arguments_delta.as_deref(),
                     "tool call arguments delta",
                 )?;
@@ -3158,6 +3162,20 @@ fn validate_optional_text(value: Option<&str>, label: &str) -> Result<(), String
     Ok(())
 }
 
+fn validate_optional_stream_delta(value: Option<&str>, label: &str) -> Result<(), String> {
+    if let Some(value) = value {
+        // Stream boundaries are provider-controlled. A valid JSON argument stream may
+        // contain an empty, whitespace-only, or newline-only delta, so only enforce the
+        // durable event byte bound here. Semantic validation happens after reassembly.
+        if value.len() > MAX_AGENT_STREAM_DELTA_BYTES {
+            return Err(format!(
+                "{label} exceeds {MAX_AGENT_STREAM_DELTA_BYTES} bytes"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_collection<T>(values: &[T], label: &str) -> Result<(), String> {
     if values.is_empty() || values.len() > MAX_COLLECTION_ITEMS {
         return Err(format!(
@@ -3266,6 +3284,35 @@ fn sync_parent(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_delta_validation_accepts_provider_whitespace_but_rejects_oversized_chunks() {
+        assert_eq!(validate_optional_stream_delta(None, "stream delta"), Ok(()));
+        assert_eq!(
+            validate_optional_stream_delta(Some(""), "stream delta"),
+            Ok(())
+        );
+        assert_eq!(
+            validate_optional_stream_delta(Some(" \r\n\t"), "stream delta"),
+            Ok(())
+        );
+        assert_eq!(
+            validate_optional_stream_delta(
+                Some(&"x".repeat(MAX_AGENT_STREAM_DELTA_BYTES)),
+                "stream delta",
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            validate_optional_stream_delta(
+                Some(&"x".repeat(MAX_AGENT_STREAM_DELTA_BYTES + 1)),
+                "stream delta",
+            ),
+            Err(format!(
+                "stream delta exceeds {MAX_AGENT_STREAM_DELTA_BYTES} bytes"
+            ))
+        );
+    }
 
     fn configured() -> (tempfile::TempDir, AgentSessionStore) {
         let root = tempfile::tempdir().unwrap();
