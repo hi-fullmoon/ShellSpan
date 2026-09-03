@@ -146,8 +146,6 @@ fn arbiter_honors_priority_ttl_and_persistent_recovery() {
     assert_eq!(arbiter.target(start).state, PetdexState::Waiting);
     arbiter.apply(PetdexEvent::SftpStarted("sftp-1".into()), start);
     assert_eq!(arbiter.target(start).state, PetdexState::Running);
-    arbiter.apply(PetdexEvent::AiStarted("ai-1".into()), start);
-    assert_eq!(arbiter.target(start).state, PetdexState::Waiting);
 
     let failure_at = start + Duration::from_millis(20);
     arbiter.apply(PetdexEvent::SftpFailed("sftp-1".into()), failure_at);
@@ -157,13 +155,11 @@ fn arbiter_honors_priority_ttl_and_persistent_recovery() {
         PetdexState::Waiting
     );
 
-    let ai_done_at = failure_at + FAILURE_TTL + Duration::from_millis(1);
-    arbiter.apply(PetdexEvent::AiCancelled("ai-1".into()), ai_done_at);
-    assert_eq!(arbiter.target(ai_done_at).state, PetdexState::Waiting);
-    arbiter.apply(PetdexEvent::SshConnected("ssh-1".into()), ai_done_at);
-    assert_eq!(arbiter.target(ai_done_at).state, PetdexState::Waving);
+    let connected_at = failure_at + FAILURE_TTL + Duration::from_millis(1);
+    arbiter.apply(PetdexEvent::SshConnected("ssh-1".into()), connected_at);
+    assert_eq!(arbiter.target(connected_at).state, PetdexState::Waving);
     assert_eq!(
-        arbiter.target(ai_done_at + SUCCESS_TTL).state,
+        arbiter.target(connected_at + SUCCESS_TTL).state,
         PetdexState::Idle
     );
 }
@@ -195,22 +191,6 @@ fn concurrent_operations_end_independently_and_cancel_is_neutral() {
         start + SUCCESS_TTL,
     );
     assert!(!arbiter.has_failure());
-}
-
-#[test]
-fn ai_completion_restores_a_remaining_transfer_after_ttl() {
-    let start = Instant::now();
-    let mut arbiter = PetdexArbiter::default();
-    arbiter.apply(PetdexEvent::SftpStarted("transfer".into()), start);
-    arbiter.apply(PetdexEvent::AiStarted("ai".into()), start);
-    assert_eq!(arbiter.target(start).state, PetdexState::Waiting);
-
-    arbiter.apply(PetdexEvent::AiSucceeded("ai".into()), start);
-    assert_eq!(arbiter.target(start).state, PetdexState::Jumping);
-    assert_eq!(
-        arbiter.target(start + SUCCESS_TTL).state,
-        PetdexState::Running
-    );
 }
 
 #[test]
@@ -428,7 +408,7 @@ fn a_full_control_queue_still_records_the_latest_business_state() {
         .try_send(CoordinatorMessage::Test(reply))
         .expect("fill control queue");
 
-    adapter.queue_event(PetdexEvent::AiStarted("ai-1".into()));
+    adapter.queue_event(PetdexEvent::SshConnecting("ssh-1".into()));
 
     let mut control = adapter
         .inner

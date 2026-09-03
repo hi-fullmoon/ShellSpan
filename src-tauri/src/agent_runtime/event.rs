@@ -423,6 +423,12 @@ pub(crate) enum AgentSessionEventPayload {
         input_tokens: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context_window: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        system_tokens: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_schema_tokens: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_tokens: Option<u64>,
         surface_generation: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         limited: Option<bool>,
@@ -634,6 +640,9 @@ mod tests {
                 request_id: "request-1".into(),
                 input_tokens: Some(42),
                 context_window: Some(128),
+                system_tokens: Some(8),
+                tool_schema_tokens: Some(12),
+                message_tokens: Some(22),
                 surface_generation: 3,
                 limited: Some(true),
                 omitted_messages: Some(2),
@@ -645,6 +654,9 @@ mod tests {
         assert_eq!(value["type"], "request/context");
         assert_eq!(value["data"]["requestId"], "request-1");
         assert_eq!(value["data"]["surfaceGeneration"], 3);
+        assert_eq!(value["data"]["systemTokens"], 8);
+        assert_eq!(value["data"]["toolSchemaTokens"], 12);
+        assert_eq!(value["data"]["messageTokens"], 22);
         assert!(value["data"].get("request_id").is_none());
     }
 

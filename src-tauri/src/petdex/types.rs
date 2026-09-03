@@ -35,10 +35,6 @@ pub(crate) enum PetdexEvent {
     SftpSucceeded(String),
     SftpFailed(String),
     SftpCancelled(String),
-    AiStarted(String),
-    AiSucceeded(String),
-    AiFailed(String),
-    AiCancelled(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
