@@ -412,15 +412,9 @@ fn surface_tokens_between(
         })
         .filter_map(|event| match &event.payload {
             AgentSessionEventPayload::UserMessage { message } => Some(message.content.len()),
-            AgentSessionEventPayload::AssistantMessage {
-                content,
-                tool_calls,
-                ..
-            } => Some(
-                content
-                    .len()
-                    .saturating_add(serde_json::to_vec(tool_calls).map_or(0, |value| value.len())),
-            ),
+            AgentSessionEventPayload::AssistantMessage { content, .. } => {
+                Some(serde_json::to_vec(content).map_or(0, |value| value.len()))
+            }
             AgentSessionEventPayload::ToolResult { summary, .. } => Some(summary.len()),
             _ => None,
         })
@@ -629,7 +623,7 @@ mod tests {
                         message_id: "message-old".into(),
                         client_submission_id: None,
                         content: "old context ".repeat(2_000),
-                        source: AgentMessageSource::User,
+                        source: AgentMessageSource::user(),
                     },
                 },
             ),
@@ -673,7 +667,7 @@ mod tests {
                         message_id: "message-a".into(),
                         client_submission_id: None,
                         content: "x".repeat(20_000),
-                        source: AgentMessageSource::User,
+                        source: AgentMessageSource::user(),
                     },
                 },
             ),

@@ -19,8 +19,8 @@ use super::{
 
 #[cfg(test)]
 use super::{
-    AgentAfterToolHook, AgentBeforeToolHook, AgentPreStepHook, AgentSessionEventPayload,
-    AgentToolFailedHook, ModelAdapterFactory,
+    assistant_content_text, AgentAfterToolHook, AgentBeforeToolHook, AgentPreStepHook,
+    AgentRequestReason, AgentSessionEventPayload, AgentToolFailedHook, ModelAdapterFactory,
 };
 
 pub(crate) struct AgentRuntimeBuilder {
@@ -285,7 +285,7 @@ impl AgentRuntime {
                 message_id,
                 client_submission_id: Some(client_submission_id),
                 content,
-                source: AgentMessageSource::User,
+                source: AgentMessageSource::user(),
             },
         )?;
         self.wake(session_id)?;
@@ -317,7 +317,7 @@ impl AgentRuntime {
                 message_id,
                 client_submission_id: Some(client_submission_id),
                 content,
-                source: AgentMessageSource::User,
+                source: AgentMessageSource::user(),
             },
         )?;
         self.wake(session_id)?;
@@ -349,7 +349,7 @@ impl AgentRuntime {
                 message_id,
                 client_submission_id: None,
                 content,
-                source: AgentMessageSource::Runtime { label },
+                source: AgentMessageSource::runtime(label),
             },
         )
     }
@@ -1028,11 +1028,11 @@ mod tests {
         AgentFleetPlanRequest, AgentFleetTargetRequest, AgentPreStepContext, AgentPreStepDecision,
         AgentRecoveryStatus, AgentSessionEffect, AgentSessionPermissionMode, AgentSessionStatus,
         AgentSessionTarget, AgentSubagentRole, AgentSubagentSpawnRequest, AgentToolApprovalStatus,
-        AgentToolFailedHook, AgentToolResultStatus, ModelAdapter, ModelFinishReason, ModelMessage,
-        ModelRequest, ModelResponse, ModelStreamSink, ModelToolCall, ModelUsage,
-        NativeToolArtifact, NativeToolIdempotency, NativeToolPreparation, NativeToolRequest,
-        NativeToolResult, NativeToolRuntime, NormalizedModelError, NormalizedModelErrorKind,
-        RecordedToolCall, StreamDelta,
+        AgentToolFailedHook, AgentToolResultStatus, ModelAdapter, ModelContentBlock,
+        ModelFinishReason, ModelMessage, ModelRequest, ModelResponse, ModelStreamSink,
+        ModelToolCall, ModelUsage, NativeToolArtifact, NativeToolIdempotency,
+        NativeToolPreparation, NativeToolRequest, NativeToolResult, NativeToolRuntime,
+        NormalizedModelError, NormalizedModelErrorKind, RecordedToolCall, StreamDelta,
     };
 
     #[derive(Default)]
@@ -1339,7 +1339,7 @@ mod tests {
             match script {
                 FakeScript::Reply { chunks, response } => {
                     for text in chunks {
-                        sink.emit(StreamDelta::Text { text })?;
+                        sink.emit(StreamDelta::Text { index: 0, text })?;
                     }
                     Ok(response)
                 }
@@ -1427,15 +1427,28 @@ mod tests {
 
     fn response(content: &str) -> ModelResponse {
         ModelResponse {
-            content: content.into(),
-            tool_calls: Vec::new(),
+            content: (!content.is_empty())
+                .then(|| ModelContentBlock::Text {
+                    text: content.into(),
+                })
+                .into_iter()
+                .collect(),
             finish_reason: ModelFinishReason::Stop,
             usage: ModelUsage {
-                input_tokens: Some(10),
+                uncached_input_tokens: Some(10),
                 output_tokens: Some(2),
                 total_tokens: Some(12),
+                ..ModelUsage::default()
             },
         }
+    }
+
+    fn set_tool_calls(response: &mut ModelResponse, calls: Vec<ModelToolCall>) {
+        response.content.extend(
+            calls
+                .into_iter()
+                .map(|call| ModelContentBlock::ToolCall { call }),
+        );
     }
 
     fn reply(content: &str, chunks: &[&str]) -> FakeScript {
@@ -1524,7 +1537,7 @@ mod tests {
             reply("first child answer", &[]),
             reply("second child answer", &[]),
         ]);
-        let (_root, runtime) = configured(adapter);
+        let (_root, runtime) = configured(adapter.clone());
         create(&runtime, "parent-1");
         runtime.start("parent-1", provider(), None).unwrap();
         runtime.await_idle("parent-1").await.unwrap();
@@ -1568,7 +1581,7 @@ mod tests {
     #[tokio::test]
     async fn one_shot_child_budget_is_forced_to_one_turn() {
         let adapter = FakeAdapter::new(vec![reply("child answer", &[])]);
-        let (_root, runtime) = configured(adapter);
+        let (_root, runtime) = configured(adapter.clone());
         create(&runtime, "parent-oneshot");
         runtime.start("parent-oneshot", provider(), None).unwrap();
         runtime.await_idle("parent-oneshot").await.unwrap();
@@ -1705,7 +1718,7 @@ mod tests {
     fn tool_response(calls: Vec<ModelToolCall>) -> FakeScript {
         let mut response = response("");
         response.finish_reason = ModelFinishReason::ToolCalls;
-        response.tool_calls = calls;
+        set_tool_calls(&mut response, calls);
         FakeScript::Reply {
             chunks: Vec::new(),
             response,
@@ -1848,17 +1861,20 @@ mod tests {
     async fn tool_calls_commit_a_typed_waiting_boundary_without_execution() {
         let mut tool_response = response("");
         tool_response.finish_reason = ModelFinishReason::ToolCalls;
-        tool_response.tool_calls = vec![ModelToolCall {
-            call_id: "call-1".into(),
-            provider_call_id: Some("provider-call-1".into()),
-            name: "run_terminal_command".into(),
-            arguments: json!({ "command": "pwd", "explanation": "inspect" }),
-        }];
+        set_tool_calls(
+            &mut tool_response,
+            vec![ModelToolCall {
+                call_id: "call-1".into(),
+                provider_call_id: Some("provider-call-1".into()),
+                name: "run_terminal_command".into(),
+                arguments: json!({ "command": "pwd", "explanation": "inspect" }),
+            }],
+        );
         let adapter = FakeAdapter::new(vec![FakeScript::Reply {
             chunks: Vec::new(),
             response: tool_response,
         }]);
-        let (_root, runtime) = configured(adapter);
+        let (_root, runtime) = configured(adapter.clone());
         create(&runtime, "session-tool");
         runtime
             .followup("session-tool", "message-tool".into(), "inspect".into())
@@ -1887,6 +1903,73 @@ mod tests {
             .iter()
             .position(|event| matches!(event.payload, AgentSessionEventPayload::ToolCall { .. }));
         assert!(assistant < call);
+        let request = adapter.requests.lock().unwrap()[0].clone();
+        let header = events
+            .iter()
+            .find_map(|event| match &event.payload {
+                AgentSessionEventPayload::RequestHeader {
+                    provider_id,
+                    model,
+                    reason,
+                    series,
+                    system_prompt,
+                    tool_schemas,
+                    ..
+                } => Some((
+                    provider_id,
+                    model,
+                    reason,
+                    series,
+                    system_prompt,
+                    tool_schemas,
+                )),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(header.0, "fake");
+        assert_eq!(header.1, "fake-model");
+        assert_eq!(*header.2, AgentRequestReason::Initial);
+        assert!(header.3.starts_series);
+        assert_eq!(header.3.request_index, 0);
+        assert_eq!(header.4, &request.system_prompt);
+        assert_eq!(header.5.len(), request.tools.len());
+        for (recorded, sent) in header.5.iter().zip(&request.tools) {
+            assert_eq!(recorded.name, sent.name);
+            assert_eq!(recorded.description, sent.description);
+            assert_eq!(recorded.input_schema, sent.input_schema);
+        }
+        let context_sources = events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                AgentSessionEventPayload::UserMessage { message }
+                    if message.source.producer_id.starts_with("shellspan.") =>
+                {
+                    Some(&message.source)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(context_sources
+            .iter()
+            .any(|source| source.producer_id == "shellspan.runtime-context.v1"));
+        assert!(context_sources
+            .iter()
+            .any(|source| source.producer_id == "shellspan.agent-instructions.v1"));
+        assert!(context_sources.iter().all(|source| !matches!(
+            source.kind,
+            crate::agent_runtime::AgentMessageSourceKind::Plugin
+                | crate::agent_runtime::AgentMessageSourceKind::SkillCatalog
+        )));
+        assert!(request.messages.iter().any(|message| matches!(
+            message,
+            ModelMessage::User { content }
+                if content.contains("Current ShellSpan runtime context")
+        )));
+        assert!(request.messages.iter().any(|message| matches!(
+            message,
+            ModelMessage::User { content }
+                if content.contains("command result is recorded")
+        )));
         assert!(events.iter().any(|event| matches!(
             &event.payload,
             AgentSessionEventPayload::ToolCall { call }
@@ -1901,20 +1984,23 @@ mod tests {
     async fn update_plan_commits_in_primary_session_pipeline_and_continues_the_turn() {
         let mut plan_response = response("");
         plan_response.finish_reason = ModelFinishReason::ToolCalls;
-        plan_response.tool_calls = vec![ModelToolCall {
-            call_id: "call-plan".into(),
-            provider_call_id: Some("provider-plan".into()),
-            name: "update_plan".into(),
-            arguments: json!({
-                "planVersion": 1,
-                "explanation": "Plan the bounded work",
-                "steps": [{
-                    "id": "inspect",
-                    "title": "Inspect the target",
-                    "status": "inProgress"
-                }]
-            }),
-        }];
+        set_tool_calls(
+            &mut plan_response,
+            vec![ModelToolCall {
+                call_id: "call-plan".into(),
+                provider_call_id: Some("provider-plan".into()),
+                name: "update_plan".into(),
+                arguments: json!({
+                    "planVersion": 1,
+                    "explanation": "Plan the bounded work",
+                    "steps": [{
+                        "id": "inspect",
+                        "title": "Inspect the target",
+                        "status": "inProgress"
+                    }]
+                }),
+            }],
+        );
         let adapter = FakeAdapter::new(vec![
             FakeScript::Reply {
                 chunks: Vec::new(),
@@ -1955,12 +2041,15 @@ mod tests {
     async fn restart_restores_a_committed_tool_boundary_without_reissuing_the_model_request() {
         let mut tool_response = response("");
         tool_response.finish_reason = ModelFinishReason::ToolCalls;
-        tool_response.tool_calls = vec![ModelToolCall {
-            call_id: "call-1".into(),
-            provider_call_id: Some("provider-call-1".into()),
-            name: "run_terminal_command".into(),
-            arguments: json!({ "command": "pwd", "explanation": "inspect" }),
-        }];
+        set_tool_calls(
+            &mut tool_response,
+            vec![ModelToolCall {
+                call_id: "call-1".into(),
+                provider_call_id: Some("provider-call-1".into()),
+                name: "run_terminal_command".into(),
+                arguments: json!({ "command": "pwd", "explanation": "inspect" }),
+            }],
+        );
         let first_adapter = FakeAdapter::new(vec![FakeScript::Reply {
             chunks: Vec::new(),
             response: tool_response,
@@ -1998,12 +2087,15 @@ mod tests {
     async fn approved_native_call_records_evidence_and_continues_in_the_same_turn() {
         let mut command = response("");
         command.finish_reason = ModelFinishReason::ToolCalls;
-        command.tool_calls = vec![ModelToolCall {
-            call_id: "call-approved".into(),
-            provider_call_id: Some("provider-approved".into()),
-            name: "run_terminal_command".into(),
-            arguments: json!({ "command": "pwd", "explanation": "inspect" }),
-        }];
+        set_tool_calls(
+            &mut command,
+            vec![ModelToolCall {
+                call_id: "call-approved".into(),
+                provider_call_id: Some("provider-approved".into()),
+                name: "run_terminal_command".into(),
+                arguments: json!({ "command": "pwd", "explanation": "inspect" }),
+            }],
+        );
         let adapter = FakeAdapter::new(vec![
             FakeScript::Reply {
                 chunks: Vec::new(),
@@ -2075,7 +2167,7 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             &event.payload,
             AgentSessionEventPayload::AssistantMessage { content, .. }
-                if content == "The command completed."
+                if assistant_content_text(content) == "The command completed."
         )));
         assert!(adapter.requests.lock().unwrap()[1]
             .messages
@@ -2854,6 +2946,22 @@ mod tests {
             types.iter().filter(|kind| *kind == "request/retry").count(),
             1
         );
+        let headers = all_events(&runtime, "session-retry")
+            .into_iter()
+            .filter_map(|event| match event.payload {
+                AgentSessionEventPayload::RequestHeader { reason, series, .. } => {
+                    Some((reason, series))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers[0].0, AgentRequestReason::Initial);
+        assert_eq!(headers[1].0, AgentRequestReason::Retry);
+        assert_eq!(headers[0].1.series_id, headers[1].1.series_id);
+        assert!(headers[0].1.starts_series);
+        assert!(!headers[1].1.starts_series);
+        assert_eq!(headers[1].1.request_index, 1);
         assert_eq!(
             runtime.session("session-retry").unwrap().status,
             AgentSessionStatus::Idle

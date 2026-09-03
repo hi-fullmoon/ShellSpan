@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AgentCompactionStatus, AgentSessionEvent, AgentSessionEventPayload, AgentToolResultStatus,
-    RecordedToolCall,
+    AgentAssistantContentBlock, AgentCompactionStatus, AgentMessageSource, AgentSessionEvent,
+    AgentSessionEventPayload, AgentToolResultStatus,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -15,11 +15,11 @@ pub(crate) enum AgentSurfaceMessage {
     User {
         message_id: String,
         content: String,
+        source: AgentMessageSource,
     },
     Assistant {
         message_id: String,
-        content: String,
-        tool_calls: Vec<RecordedToolCall>,
+        content: Vec<AgentAssistantContentBlock>,
         interrupted: bool,
     },
     Tool {
@@ -79,6 +79,7 @@ pub(crate) fn derive_surface(events: &[AgentSessionEvent]) -> Result<AgentSurfac
                 replacement = Some(AgentSurfaceMessage::User {
                     message_id: format!("compaction-{surface_generation}"),
                     content: summary.clone(),
+                    source: AgentMessageSource::runtime("Compaction summary".into()),
                 });
                 pending_summary = Some((*surface_generation, *through));
             }
@@ -148,17 +149,17 @@ fn append_surface_events<'a>(
                 messages.push(AgentSurfaceMessage::User {
                     message_id: message.message_id.clone(),
                     content: message.content.clone(),
+                    source: message.source.clone(),
                 });
             }
             AgentSessionEventPayload::AssistantMessage {
                 message_id,
                 content,
-                tool_calls,
                 interrupted,
+                ..
             } => messages.push(AgentSurfaceMessage::Assistant {
                 message_id: message_id.clone(),
                 content: content.clone(),
-                tool_calls: tool_calls.clone(),
                 interrupted: *interrupted,
             }),
             AgentSessionEventPayload::ToolResult {
@@ -181,7 +182,10 @@ fn append_surface_events<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_runtime::{AgentInboxMessage, AgentMessageSource};
+    use crate::agent_runtime::{
+        AgentAssistantContentBlock, AgentInboxMessage, AgentMessageSource, AgentStopReason,
+        AgentTokenUsage,
+    };
 
     fn event(seq: u64, payload: AgentSessionEventPayload) -> AgentSessionEvent {
         AgentSessionEvent::new("session".into(), seq, 1_000 + seq, None, None, payload)
@@ -193,7 +197,7 @@ mod tests {
                 message_id: id.into(),
                 client_submission_id: None,
                 content: content.into(),
-                source: AgentMessageSource::User,
+                source: AgentMessageSource::user(),
             },
         }
     }
@@ -207,15 +211,21 @@ mod tests {
                 2,
                 AgentSessionEventPayload::AssistantChunk {
                     request_id: "request".into(),
-                    text: "par".into(),
+                    text_delta: Some("par".into()),
+                    reasoning_delta: None,
+                    tool_call_delta: None,
+                    usage: None,
                 },
             ),
             event(
                 3,
                 AgentSessionEventPayload::AssistantMessage {
                     message_id: "assistant".into(),
-                    content: "partial".into(),
-                    tool_calls: vec![],
+                    content: vec![AgentAssistantContentBlock::Text {
+                        text: "partial".into(),
+                    }],
+                    usage: AgentTokenUsage::default(),
+                    stop_reason: AgentStopReason::Stop,
                     interrupted: false,
                 },
             ),

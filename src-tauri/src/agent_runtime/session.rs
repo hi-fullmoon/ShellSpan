@@ -11,11 +11,11 @@ use uuid::Uuid;
 use crate::redaction::{redact_json_value, redact_sensitive_text};
 
 use super::{
-    derive_surface, derive_task, AgentInbox, AgentInboxLane, AgentInboxMessage,
-    AgentInboxOperation, AgentMessageSource, AgentRecoveryCheckpoint, AgentSessionEvent,
-    AgentSessionEventPayload, AgentSessionPermissionMode, AgentSessionStatus, AgentSessionTarget,
-    AgentSubagentSession, AgentSurfaceSnapshot, AgentTaskProjection, RecordedToolCall,
-    AGENT_SESSION_EVENT_VERSION, LEGACY_AGENT_SESSION_EVENT_VERSION, MAX_AGENT_MESSAGE_BYTES,
+    derive_surface, derive_task, AgentAssistantContentBlock, AgentInbox, AgentInboxLane,
+    AgentInboxMessage, AgentInboxOperation, AgentMessageSource, AgentRecoveryCheckpoint,
+    AgentSessionEvent, AgentSessionEventPayload, AgentSessionPermissionMode, AgentSessionStatus,
+    AgentSessionTarget, AgentSubagentSession, AgentSurfaceSnapshot, AgentTaskProjection,
+    RecordedToolCall, AGENT_SESSION_EVENT_VERSION, MAX_AGENT_MESSAGE_BYTES,
 };
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
@@ -341,10 +341,9 @@ pub(crate) struct AgentSessionStore {
 impl AgentSessionStore {
     pub(crate) fn configure(&self, app_data_root: PathBuf) -> Result<(), String> {
         let runtime_root = app_data_root.join("agent-runtime");
-        // v1 is intentionally left untouched as a read-only import source.
-        // Executable Agent Runtime logs are never migrated in-place or dual-written.
-        let root = runtime_root.join("sessions-v2");
-        let archive_root = runtime_root.join("archives-v2");
+        // Earlier namespaces remain untouched. v4 logs are never migrated or dual-written.
+        let root = runtime_root.join("sessions-v4");
+        let archive_root = runtime_root.join("archives-v4");
         let mut inner = self
             .inner
             .lock()
@@ -657,9 +656,7 @@ impl AgentSessionStore {
                         message_id: format!("subagent-{settlement_id}"),
                         client_submission_id: None,
                         content: summary,
-                        source: AgentMessageSource::Subagent {
-                            session_id: child_session_id.to_string(),
-                        },
+                        source: AgentMessageSource::session_reference(child_session_id.to_string()),
                     }],
                 },
             ));
@@ -1729,22 +1726,11 @@ fn validate_event_envelope(
     record: &AgentSessionRecord,
     event: &AgentSessionEvent,
 ) -> Result<(), String> {
-    if !matches!(
-        event.version,
-        LEGACY_AGENT_SESSION_EVENT_VERSION | AGENT_SESSION_EVENT_VERSION
-    ) {
-        return Err("Agent session event version is unsupported".into());
-    }
-    if event.version == LEGACY_AGENT_SESSION_EVENT_VERSION
-        && matches!(
-            &event.payload,
-            AgentSessionEventPayload::InboxItemUpdated { .. }
-                | AgentSessionEventPayload::InboxItemRemoved { .. }
-                | AgentSessionEventPayload::InboxReordered { .. }
-                | AgentSessionEventPayload::SessionRenamed { .. }
-        )
-    {
-        return Err("Agent Session v3 mutation event used a legacy envelope version".into());
+    if event.version != AGENT_SESSION_EVENT_VERSION {
+        return Err(format!(
+            "Agent session event version {} is unsupported; expected {AGENT_SESSION_EVENT_VERSION}",
+            event.version
+        ));
     }
     validate_identifier(&event.session_id, "sessionId")?;
     if event.session_id != record.header.session_id {
@@ -2182,28 +2168,58 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             require_scope(event, true, true)?;
             validate_inbox_message(message)?;
         }
-        Payload::AssistantChunk { request_id, text } => {
+        Payload::AssistantChunk {
+            request_id,
+            text_delta,
+            reasoning_delta,
+            tool_call_delta,
+            usage,
+        } => {
             require_scope(event, true, true)?;
             validate_identifier(request_id, "requestId")?;
-            validate_text(text, "assistant chunk", false, MAX_AGENT_MESSAGE_BYTES)?;
+            validate_optional_text(text_delta.as_deref(), "assistant text delta")?;
+            validate_optional_text(reasoning_delta.as_deref(), "assistant reasoning delta")?;
+            if let Some(delta) = tool_call_delta {
+                validate_optional_text(delta.call_id.as_deref(), "tool call delta id")?;
+                validate_optional_text(delta.name_delta.as_deref(), "tool call name delta")?;
+                validate_optional_text(
+                    delta.arguments_delta.as_deref(),
+                    "tool call arguments delta",
+                )?;
+            }
+            if text_delta.is_none()
+                && reasoning_delta.is_none()
+                && tool_call_delta.is_none()
+                && usage.is_none()
+            {
+                return Err("assistant chunk must contain a delta or usage update".into());
+            }
         }
         Payload::AssistantMessage {
             message_id,
             content,
-            tool_calls,
+            interrupted,
             ..
         } => {
             require_scope(event, true, true)?;
             validate_identifier(message_id, "messageId")?;
-            validate_text(
-                content,
-                "assistant message",
-                !tool_calls.is_empty(),
-                MAX_AGENT_MESSAGE_BYTES,
-            )?;
-            validate_collection_allow_empty(tool_calls, "tool calls")?;
-            for call in tool_calls {
-                validate_tool_call(call)?;
+            validate_collection_allow_empty(content, "assistant content blocks")?;
+            if content.is_empty() && !interrupted {
+                return Err("completed assistant message requires a content block".into());
+            }
+            for block in content {
+                match block {
+                    AgentAssistantContentBlock::Text { text } => {
+                        validate_text(text, "assistant text block", false, MAX_AGENT_MESSAGE_BYTES)?
+                    }
+                    AgentAssistantContentBlock::Reasoning { text, .. } => validate_text(
+                        text,
+                        "assistant reasoning block",
+                        false,
+                        MAX_AGENT_MESSAGE_BYTES,
+                    )?,
+                    AgentAssistantContentBlock::ToolCall { call } => validate_tool_call(call)?,
+                }
             }
         }
         Payload::RequestHeader {
@@ -2211,15 +2227,42 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             provider_id,
             model,
             reasoning_effort,
+            series,
+            system_prompt,
+            tool_schemas,
             attempt,
+            ..
         } => {
             require_scope(event, true, true)?;
             validate_identifier(request_id, "requestId")?;
             validate_text(provider_id, "providerId", false, MAX_LABEL_BYTES)?;
-            validate_optional_text(model.as_deref(), "model")?;
+            validate_text(model, "model", false, MAX_LABEL_BYTES)?;
             validate_optional_text(reasoning_effort.as_deref(), "reasoning effort")?;
-            if attempt.is_some_and(|value| value == 0) {
+            validate_identifier(&series.series_id, "seriesId")?;
+            validate_text(
+                system_prompt,
+                "system prompt",
+                false,
+                MAX_AGENT_MESSAGE_BYTES,
+            )?;
+            validate_collection_allow_empty(tool_schemas, "request tool schemas")?;
+            for schema in tool_schemas {
+                validate_text(&schema.name, "tool schema name", false, MAX_LABEL_BYTES)?;
+                validate_text(
+                    &schema.description,
+                    "tool schema description",
+                    true,
+                    MAX_AGENT_MESSAGE_BYTES,
+                )?;
+            }
+            if *attempt == 0 {
                 return Err("request attempt must be positive".into());
+            }
+            if series.request_index.saturating_add(1) != *attempt {
+                return Err("request series index does not match its attempt".into());
+            }
+            if series.starts_series != (*attempt == 1) {
+                return Err("request series boundary does not match its attempt".into());
             }
         }
         Payload::RequestContext { request_id, .. } => {
@@ -2242,25 +2285,9 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             }
             validate_text(reason, "request retry reason", false, MAX_LABEL_BYTES)?;
         }
-        Payload::RequestUsage {
-            request_id,
-            finish_reason,
-            ..
-        } => {
+        Payload::RequestUsage { request_id, .. } => {
             require_scope(event, true, true)?;
             validate_identifier(request_id, "requestId")?;
-            validate_text(
-                finish_reason,
-                "request finish reason",
-                false,
-                MAX_LABEL_BYTES,
-            )?;
-            if !matches!(
-                finish_reason.as_str(),
-                "stop" | "toolCalls" | "length" | "contentFilter" | "other"
-            ) {
-                return Err("request finish reason is unsupported".into());
-            }
         }
         Payload::ToolCall { call } => {
             require_scope(event, true, true)?;
@@ -2518,7 +2545,7 @@ fn validate_mutation_event_identity(
     client_operation_id: &str,
 ) -> Result<(), String> {
     if event.version != AGENT_SESSION_EVENT_VERSION {
-        return Err("Agent Runtime mutation events require the v3 event contract".into());
+        return Err("Agent Runtime mutation events require the v4 event contract".into());
     }
     if previous_revision != event.seq {
         return Err("Agent Runtime mutation previous revision does not match its sequence".into());
@@ -2553,15 +2580,18 @@ fn validate_inbox_message(message: &AgentInboxMessage) -> Result<(), String> {
         false,
         MAX_AGENT_MESSAGE_BYTES,
     )?;
-    match &message.source {
-        AgentMessageSource::Runtime { label } => {
-            validate_text(label, "runtime source label", false, MAX_LABEL_BYTES)?
-        }
-        AgentMessageSource::Subagent { session_id } => {
-            validate_identifier(session_id, "subagent sessionId")?
-        }
-        AgentMessageSource::User | AgentMessageSource::LegacyImport => {}
-    }
+    validate_text(
+        &message.source.label,
+        "message source label",
+        false,
+        MAX_LABEL_BYTES,
+    )?;
+    validate_text(
+        &message.source.producer_id,
+        "message source producer id",
+        false,
+        MAX_LABEL_BYTES,
+    )?;
     Ok(())
 }
 
@@ -3265,13 +3295,13 @@ mod tests {
             message_id: id.into(),
             client_submission_id: Some(id.into()),
             content: content.into(),
-            source: AgentMessageSource::User,
+            source: AgentMessageSource::user(),
         }
     }
 
     fn log_path(root: &tempfile::TempDir) -> PathBuf {
         root.path()
-            .join("agent-runtime/sessions-v2/session-1.jsonl")
+            .join("agent-runtime/sessions-v4/session-1.jsonl")
     }
 
     fn target() -> AgentSessionTarget {
@@ -3467,7 +3497,7 @@ mod tests {
         assert!(!log_path(&root).exists());
         assert!(root
             .path()
-            .join("agent-runtime/archives-v2/session-1.jsonl")
+            .join("agent-runtime/archives-v4/session-1.jsonl")
             .is_file());
         assert!(store
             .append(
@@ -3488,18 +3518,19 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v1_logs_remain_byte_for_byte_read_only() {
+    fn previous_namespaces_remain_byte_for_byte_isolated() {
         let root = tempfile::tempdir().unwrap();
-        let legacy_root = root.path().join("agent-runtime/sessions-v1");
-        fs::create_dir_all(&legacy_root).unwrap();
-        let legacy_path = legacy_root.join("session-legacy.jsonl");
-        let sentinel = b"{\"version\":1,\"legacy\":true}\n";
-        fs::write(&legacy_path, sentinel).unwrap();
+        let previous_root = root.path().join("agent-runtime/sessions-v2");
+        fs::create_dir_all(&previous_root).unwrap();
+        let previous_path = previous_root.join("session-previous.jsonl");
+        let sentinel = b"{\"version\":3,\"sessionId\":\"session-previous\"}\n";
+        fs::write(&previous_path, sentinel).unwrap();
 
         let store = AgentSessionStore::default();
         store.configure(root.path().to_path_buf()).unwrap();
-        assert_eq!(fs::read(&legacy_path).unwrap(), sentinel);
-        assert!(store.snapshot("session-legacy").is_err());
+        assert_eq!(fs::read(&previous_path).unwrap(), sentinel);
+        assert!(store.snapshot("session-previous").is_err());
+        assert!(root.path().join("agent-runtime/sessions-v4").is_dir());
     }
 
     #[test]
@@ -3895,30 +3926,6 @@ mod tests {
     }
 
     #[test]
-    fn v2_event_history_remains_readable_after_the_v3_contract_upgrade() {
-        let (root, store) = configured();
-        create(&store);
-        drop(store);
-        let path = log_path(&root);
-        let legacy = fs::read_to_string(&path)
-            .unwrap()
-            .lines()
-            .map(|line| {
-                let mut value = serde_json::from_str::<serde_json::Value>(line).unwrap();
-                value["version"] = serde_json::json!(LEGACY_AGENT_SESSION_EVENT_VERSION);
-                serde_json::to_string(&value).unwrap()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-            + "\n";
-        fs::write(&path, legacy).unwrap();
-
-        let restarted = AgentSessionStore::default();
-        restarted.configure(root.path().to_path_buf()).unwrap();
-        assert_eq!(restarted.snapshot("session-1").unwrap().event_count, 2);
-    }
-
-    #[test]
     fn oversized_event_is_rejected_before_persistence() {
         let (_root, store) = configured();
         create(&store);
@@ -4069,7 +4076,7 @@ mod tests {
         );
         assert!(root
             .path()
-            .join("agent-runtime/sessions-v2")
+            .join("agent-runtime/sessions-v4")
             .read_dir()
             .unwrap()
             .any(|entry| entry
@@ -4323,7 +4330,7 @@ mod tests {
         let (root, store) = configured();
         create(&store);
         assert_eq!(
-            fs::metadata(root.path().join("agent-runtime/sessions-v2"))
+            fs::metadata(root.path().join("agent-runtime/sessions-v4"))
                 .unwrap()
                 .permissions()
                 .mode()
@@ -4351,7 +4358,7 @@ mod tests {
         symlink(
             &external,
             root.path()
-                .join("agent-runtime/sessions-v2/session-link.jsonl"),
+                .join("agent-runtime/sessions-v4/session-link.jsonl"),
         )
         .unwrap();
 
