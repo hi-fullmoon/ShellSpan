@@ -4,7 +4,7 @@ import {
   AgentSessionCommittedClient,
   type AgentSessionStreamTransport,
 } from '@/lib/agent-session-client';
-import { sessionEvent } from './agent-session-fixture';
+import { sessionEvent } from '@/test/fixtures/agent-session';
 import type {
   AgentSessionEvent,
   AgentSessionSnapshot,
