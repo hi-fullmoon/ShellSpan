@@ -16,15 +16,28 @@ impl AgentInbox {
     pub(crate) fn replay(events: &[AgentSessionEvent]) -> Result<Self, String> {
         let mut inbox = Self::default();
         for event in events {
-            let AgentSessionEventPayload::InboxSpliced {
-                operation,
-                lane,
-                messages,
-            } = &event.payload
-            else {
-                continue;
-            };
-            inbox.apply(*operation, *lane, messages)?;
+            match &event.payload {
+                AgentSessionEventPayload::InboxSpliced {
+                    operation,
+                    lane,
+                    messages,
+                } => inbox.apply(*operation, *lane, messages)?,
+                AgentSessionEventPayload::InboxItemUpdated {
+                    item_id,
+                    lane,
+                    content,
+                    ..
+                } => inbox.update(*lane, item_id, content.clone())?,
+                AgentSessionEventPayload::InboxItemRemoved { item_id, lane, .. } => {
+                    inbox.remove(*lane, item_id)?
+                }
+                AgentSessionEventPayload::InboxReordered {
+                    lane,
+                    ordered_item_ids,
+                    ..
+                } => inbox.reorder(*lane, ordered_item_ids)?,
+                _ => {}
+            }
         }
         Ok(inbox)
     }
@@ -112,6 +125,82 @@ impl AgentInbox {
         }
     }
 
+    pub(crate) fn message(
+        &self,
+        lane: AgentInboxLane,
+        item_id: &str,
+    ) -> Option<&AgentInboxMessage> {
+        self.lane(lane)
+            .iter()
+            .find(|message| message.message_id == item_id)
+    }
+
+    pub(crate) fn locate(&self, item_id: &str) -> Option<(AgentInboxLane, &AgentInboxMessage)> {
+        [AgentInboxLane::NextTurn, AgentInboxLane::NextStep]
+            .into_iter()
+            .find_map(|lane| self.message(lane, item_id).map(|message| (lane, message)))
+    }
+
+    pub(crate) fn update(
+        &mut self,
+        lane: AgentInboxLane,
+        item_id: &str,
+        content: String,
+    ) -> Result<(), String> {
+        let message = self
+            .queue_mut(lane)
+            .iter_mut()
+            .find(|message| message.message_id == item_id)
+            .ok_or_else(|| "Agent inbox item is not queued in the requested lane".to_string())?;
+        message.content = content;
+        Ok(())
+    }
+
+    pub(crate) fn remove(&mut self, lane: AgentInboxLane, item_id: &str) -> Result<(), String> {
+        let queue = self.queue_mut(lane);
+        let index = queue
+            .iter()
+            .position(|message| message.message_id == item_id)
+            .ok_or_else(|| "Agent inbox item is not queued in the requested lane".to_string())?;
+        queue.remove(index);
+        Ok(())
+    }
+
+    pub(crate) fn reorder(
+        &mut self,
+        lane: AgentInboxLane,
+        ordered_item_ids: &[String],
+    ) -> Result<(), String> {
+        let queue = self.lane(lane);
+        if ordered_item_ids.len() != queue.len() {
+            return Err("Agent inbox reorder must include every queued item in the lane".into());
+        }
+        let mut requested = HashSet::with_capacity(ordered_item_ids.len());
+        if ordered_item_ids
+            .iter()
+            .any(|item_id| !requested.insert(item_id))
+        {
+            return Err("Agent inbox reorder contains duplicate item identities".into());
+        }
+        let current = queue
+            .iter()
+            .map(|message| &message.message_id)
+            .collect::<HashSet<_>>();
+        if requested != current {
+            return Err("Agent inbox reorder identities do not match the queued lane".into());
+        }
+        let by_id = queue
+            .iter()
+            .cloned()
+            .map(|message| (message.message_id.clone(), message))
+            .collect::<std::collections::HashMap<_, _>>();
+        *self.queue_mut(lane) = ordered_item_ids
+            .iter()
+            .map(|item_id| by_id[item_id].clone())
+            .collect();
+        Ok(())
+    }
+
     pub(crate) fn next_turn(&self) -> Vec<AgentInboxMessage> {
         self.next_turn.iter().cloned().collect()
     }
@@ -145,6 +234,7 @@ mod tests {
     fn message(id: &str) -> AgentInboxMessage {
         AgentInboxMessage {
             message_id: id.into(),
+            client_submission_id: Some(id.into()),
             content: id.into(),
             source: AgentMessageSource::User,
         }

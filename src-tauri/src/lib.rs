@@ -273,6 +273,8 @@ pub fn run() {
             agent_runtime::agent_runtime_fleet_reconcile,
             agent_runtime::agent_runtime_followup,
             agent_runtime::agent_runtime_steer,
+            agent_runtime::agent_runtime_mutate_inbox,
+            agent_runtime::agent_runtime_rename_session,
             agent_runtime::agent_runtime_inject,
             agent_runtime::agent_runtime_cancel,
             agent_runtime::agent_runtime_approve_tool,

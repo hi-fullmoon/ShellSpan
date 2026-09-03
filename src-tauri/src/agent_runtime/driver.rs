@@ -345,6 +345,7 @@ fn apply_pre_step_hooks(
                     AgentInboxLane::NextStep,
                     AgentInboxMessage {
                         message_id,
+                        client_submission_id: None,
                         content,
                         source: AgentMessageSource::Runtime { label },
                     },

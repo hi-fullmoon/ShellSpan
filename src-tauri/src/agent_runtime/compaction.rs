@@ -627,6 +627,7 @@ mod tests {
                 AgentSessionEventPayload::UserMessage {
                     message: AgentInboxMessage {
                         message_id: "message-old".into(),
+                        client_submission_id: None,
                         content: "old context ".repeat(2_000),
                         source: AgentMessageSource::User,
                     },
@@ -670,6 +671,7 @@ mod tests {
                 AgentSessionEventPayload::UserMessage {
                     message: AgentInboxMessage {
                         message_id: "message-a".into(),
+                        client_submission_id: None,
                         content: "x".repeat(20_000),
                         source: AgentMessageSource::User,
                     },

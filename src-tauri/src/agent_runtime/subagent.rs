@@ -897,6 +897,7 @@ impl SubAgentManager {
             AgentInboxLane::NextTurn,
             AgentInboxMessage {
                 message_id: format!("delegation-{}", Uuid::new_v4().simple()),
+                client_submission_id: None,
                 content: role_prompt(role, &goal),
                 source: AgentMessageSource::Subagent {
                     session_id: parent_session_id.into(),
@@ -931,6 +932,7 @@ impl SubAgentManager {
             AgentInboxLane::NextTurn,
             AgentInboxMessage {
                 message_id: format!("child-input-{}", Uuid::new_v4().simple()),
+                client_submission_id: None,
                 content,
                 source: AgentMessageSource::Subagent {
                     session_id: parent_session_id.into(),

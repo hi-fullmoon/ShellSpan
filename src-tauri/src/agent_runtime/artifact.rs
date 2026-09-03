@@ -439,9 +439,19 @@ fn sync_parent(path: &Path) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "Agent artifact has no parent directory".to_string())?;
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| format!("failed to flush Agent artifact directory: {error}"))
+    #[cfg(unix)]
+    {
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| format!("failed to flush Agent artifact directory: {error}"))
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows cannot open directory handles through std::fs::File without
+        // backup-semantics flags. The artifact file itself is already synced.
+        let _ = parent;
+        Ok(())
+    }
 }
 
 fn current_unix_ms() -> u64 {

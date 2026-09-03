@@ -1148,6 +1148,7 @@ impl AgentToolPipeline {
                         lane: AgentInboxLane::NextStep,
                         messages: vec![AgentInboxMessage {
                             message_id,
+                            client_submission_id: None,
                             content,
                             source: AgentMessageSource::Runtime { label },
                         }],
