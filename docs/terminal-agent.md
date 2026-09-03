@@ -1,6 +1,6 @@
 # 终端 Agent 使用指南
 
-ShellSpan 的 Agent 现在只有一条执行路径：Rust Agent Runtime。AI 面板默认且仅使用 V2 Workspace；
+ShellSpan 的 Agent 现在只有一条执行路径：Rust Agent Runtime。AI 面板仅使用 Agent Workspace；
 对话、Activity、审批、恢复、Queue、子 Agent 和 Fleet 都来自同一份有序 Agent Session 日志，
 不存在独立的只读会话 adapter 或失败后的降级路径。
 
@@ -30,7 +30,7 @@ API Key 只保存在操作系统钥匙串中。不要把密钥放进命令、聊
 
 运行时 Queue 可以在 Composer 上方编辑、删除和同 lane 重排。每次 mutation 都带 expected revision；
 若别处先改变了 Session，界面刷新 committed snapshot、显示冲突并保留重试入口。历史列表中的 Agent
-Session 也可重命名。Queue 与标题只有在 v3 committed event 到达后才视为完成，刷新不会恢复旧值。
+Session 也可重命名。Queue 与标题只有在 v4 committed event 到达后才视为完成，刷新不会恢复旧值。
 
 ## 权限模式
 
@@ -59,7 +59,7 @@ Session 也可重命名。Queue 与标题只有在 v3 committed event 到达后�
 
 ## Conversation 与 Activity
 
-Conversation 展示稳定 keyed 的用户/助手、推理、工具、Artifact、Marker、retry、审批和错误节点；
+Conversation 展示稳定 keyed 的系统提示词、上下文、用户/助手、推理、工具、Artifact、retry、审批和错误节点；
 主列表不预渲染工具 JSON 或 Artifact body。Activity 展示 Turn/Step、请求耗时与 token、Plan、
 Context/Artifact、Recovery、Agent 树和 Fleet target matrix。两个页签由同一 committed event window
 投影，因此刷新或回放时 through-seq 保持一致。
@@ -76,8 +76,9 @@ Plan、Task、子 Agent 或 Fleet 状态，只接收当前 Session/Turn/Step 的
 新 Agent 任务只写 Agent Runtime Session 日志。遇到非幂等操作的未知结果时，Runtime 会要求明确的
 reconciliation 证据，不会自动重放。
 
-新日志使用 event contract v3；v2 日志继续可读。v3 的 `clientSubmissionId` 用于把乐观用户消息与
-committed `user/message`/Inbox 精确合并，Inbox update/remove/reorder 和 `session/renamed` 使用
-`clientOperationId`、revision check 与 commit-before-publish。
+新日志只使用 Event v4；v2/v3 日志不读取、不迁移，也不会出现在 Session Browser。v4 的
+`clientSubmissionId` 用于把乐观用户消息与 committed `user/message`/Inbox 精确合并，Inbox
+update/remove/reorder 和 `session/renamed` 使用 `clientOperationId`、revision check 与
+commit-before-publish。存储和可选人工清理方式见架构文档。
 
 完整实现约束见 [Agent Runtime 架构](agent-runtime-vnext.md)。
