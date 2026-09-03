@@ -1,37 +1,45 @@
 import { bench, describe } from 'vitest';
 
 import { aiConversationNodeRevision } from '@/components/ai/workspace/ai-conversation-node-seat';
-import { projectAskConversationNodes } from '@/lib/ai/conversation-projection';
-import {
-  askStreamingConversationFixture,
-  askStreamingMessageFixture,
-} from '@/test/fixtures/ask-streaming';
+import { projectAgentConversationNodes } from '@/lib/ai/conversation-projection';
+import { sessionEvent } from '@/test/fixtures/agent-session';
 
-const user = askStreamingMessageFixture.find((message) => message.role === 'user');
-const assistant = askStreamingMessageFixture.find((message) => message.role === 'assistant');
-if (!user || !assistant) throw new Error('Ask performance fixture is incomplete');
-
-const messages = Array.from({ length: 2_500 }, (_, index) => {
-  const requestId = `restore-${index}`;
+const events = Array.from({ length: 2_500 }, (_, index) => {
+  const turnId = `turn-${index}`;
+  const stepId = `step-${index}`;
   return [
-    { ...user, id: `user-${index}`, requestId, content: `Question ${index}` },
-    { ...assistant, id: `assistant-${index}`, requestId, content: `Answer ${index}` },
+    sessionEvent(index * 2, {
+      type: 'user/message',
+      turnId,
+      stepId,
+      data: {
+        message: {
+          messageId: `user-${index}`,
+          clientSubmissionId: `submission-${index}`,
+          content: `Goal ${index}`,
+          source: { kind: 'user' },
+        },
+      },
+    }),
+    sessionEvent(index * 2 + 1, {
+      type: 'assistant/message',
+      turnId,
+      stepId,
+      data: {
+        messageId: `assistant-${index}`,
+        content: `Result ${index}`,
+        toolCalls: [],
+        interrupted: false,
+      },
+    }),
   ];
 }).flat();
 
-const nodes = projectAskConversationNodes({
-  conversation: askStreamingConversationFixture,
-  messages,
-  phase: 'idle',
-});
+const nodes = projectAgentConversationNodes(events);
 
 describe('AI panel long-conversation diagnostics', () => {
-  bench('project a 5,000-message Ask restore into stable keyed nodes', () => {
-    const restored = projectAskConversationNodes({
-      conversation: askStreamingConversationFixture,
-      messages,
-      phase: 'idle',
-    });
+  bench('project a 5,000-message Agent restore into stable keyed nodes', () => {
+    const restored = projectAgentConversationNodes(events);
     if (restored.length !== 5_000) throw new Error(`Expected 5,000 nodes, received ${restored.length}`);
   }, { iterations: 5, time: 500, warmupIterations: 1, warmupTime: 100 });
 
