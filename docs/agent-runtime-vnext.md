@@ -56,13 +56,14 @@ idle → running ↔ waiting → completed | failed | cancelled
   one terminal event.
 - an ended session cannot execute again; a new task receives a new Session identity.
 
-## 3. Event log contract
+## 3. Event log contract (v3)
 
 The append-only log is the sole durable business-state source. Every event has a version,
 `sessionId`, contiguous `seq`, timestamp, and optional Turn/Step identity. Important families are:
 
 - lifecycle: `session/created`, `agent/status`, `session/ended`;
-- control: `agent/inbox/spliced`, `user/message`, `turn/*`, `step/*`;
+- control: `agent/inbox/spliced`, `agent/inbox/item_updated`, `agent/inbox/item_removed`,
+  `agent/inbox/reordered`, `user/message`, `session/renamed`, `turn/*`, `step/*`;
 - model: `request/header`, `request/context`, `request/retry`, `assistant/chunk`,
   `assistant/message`;
 - tools: `tool/call`, `tool/approval`, `tool/execution`, `tool/result`;
@@ -72,6 +73,19 @@ The append-only log is the sole durable business-state source. Every event has a
 Durability follows commit-before-publish. A failed append does not publish an event or advance the
 in-memory state. Terminal events are idempotent. Snapshots are projections and never replace event
 ordering authority.
+
+New logs use envelope version 3. Version 2 events remain readable. Version 3 adds:
+
+- optional `clientSubmissionId` on user/inbox messages for exact optimistic reconciliation;
+- revision-checked Inbox update/remove/same-lane reorder events;
+- revision-checked Session rename events;
+- a required `clientOperationId` on mutations so command retries can observe an already committed
+  operation without duplicating it.
+
+Mutation commands validate the expected event-count revision and lifecycle before append. Claimed
+Inbox items cannot be edited, removed, or reordered as queued work. Persistence failure leaves both
+the snapshot and published stream unchanged. A v3 mutation payload inside a v2 envelope is rejected;
+older v2 logs are read without rewriting them.
 
 The browser client subscribes first, reads the snapshot, pages committed events with `afterSeq`,
 then merges buffered live frames. Gaps trigger bounded backfill or a full resync. A terminal state
@@ -123,26 +137,35 @@ recovery rules. Capability and target scopes may narrow but never widen. Fleet c
 real per-target children, durable canary/wave state, failure thresholds, and independent verifier
 evidence.
 
-## 6. React projection
+## 6. V2 UI and adapter boundary
 
-`src/lib/agent-session-client.ts` is the subscribe-first committed-stream client.
-`src/lib/agent-session-projection.ts` contains pure Conversation and Activity projections.
-`src/components/ai/agent-session-view.tsx` renders shadcn `Tabs` with:
+`src/lib/agent-session-client.ts` is the subscribe-first committed-stream client. It subscribes,
+loads snapshot/backfill, merges buffered live frames, and repairs gaps without owning Runtime
+lifecycle. Disconnecting a view subscription never cancels the Agent task.
 
-- Conversation: user/assistant messages, markers, collapsible tool cards, and approval dialogs;
-- Activity: Agent tree, Turn/Step timeline, request usage, plan, context/artifacts, recovery, and
-  Fleet state.
+`src/lib/ai/agent-session-adapter.ts` is the only Agent-to-workspace adapter. It combines:
 
-The existing approval card content and its collapsible interaction are preserved. Settings and the
-composer call only typed `agent_runtime_*` commands. Ask remains a separate read-only AI feature and
-is never an Agent fallback.
+- stable Conversation nodes from `src/lib/ai/conversation-projection.ts`;
+- Activity from `src/lib/agent-session-projection.ts` over the same committed event window;
+- Runtime Inbox and unresolved approval projection;
+- typed start/followup/steer/cancel/approve/reject/archive/artifact/mutation/rename commands.
+
+`AiPanel` directly mounts `AiWorkspaceController`; the former Agent Session/Conversation/Tool UI
+tree and `aiPanelV2` switch are removed. Conversation, Activity, approval takeover, history, Queue,
+rename, tool details, Artifact details, settings, and connection-scoped permission selection are
+reachable from the normal product entry.
+
+Ask remains a formal separate adapter over `aiStore` and the Ask stream. It shares the Workspace,
+node and Composer contracts but is not written to the Agent log and is never an Agent fallback.
 
 ## 7. Persistence and compatibility
 
 New Agent data is written only to the Agent Runtime Session log and bounded artifact stores.
 Former AI-session Agent records are exposed as opaque read-only import data; there is no append,
-approval, execution, resume, or dual-write path for them. Runtime rollback is performed by
-installing an earlier application version, not by switching engines in-process.
+approval, execution, resume, or dual-write path for them. Runtime/UI rollback is performed by
+installing a Git/versioned release known to understand the stored event versions, not by switching
+engines or reviving a Legacy React tree in-process. Incompatible downgrade across v3 mutation logs
+must be blocked rather than rewriting committed history.
 
 ## 8. Verification
 
@@ -153,6 +176,7 @@ pnpm test:agent:runtime
 pnpm test:scripts
 pnpm test
 pnpm build
+pnpm benchmark:ai-panel
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --all-features --no-fail-fast
