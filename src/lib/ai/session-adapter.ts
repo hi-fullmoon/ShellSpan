@@ -3,6 +3,7 @@ import type {
 } from '@/types/ai';
 import type {
   AgentArtifactResponse,
+  AgentActivityNode,
   AgentSessionSnapshot,
   CreateAgentSessionRequest,
 } from '@/types/agent-session';
@@ -34,7 +35,8 @@ export interface AiInboxItem {
   readonly lane: 'nextTurn' | 'nextStep';
   readonly content: string;
   readonly state: 'queued' | 'pending' | 'claimed';
-  readonly source: 'user' | 'runtime' | 'subagent' | 'legacyImport';
+  readonly source: import('@/types/agent-session').AgentSessionProvenanceKind;
+  readonly provenance?: import('@/types/agent-session').AgentSessionMessageSource;
 }
 
 export interface AiPendingApproval {
@@ -66,6 +68,7 @@ export interface AiSessionView {
   readonly summary: AiSessionSummary;
   readonly snapshot: AiSessionSourceSnapshot;
   readonly nodes: readonly AiConversationNode[];
+  readonly activityNodes: readonly AgentActivityNode[];
   readonly inbox: readonly AiInboxItem[];
   readonly pendingApproval: AiPendingApproval | null;
   readonly status: AiSessionStatus;

@@ -1,137 +1,105 @@
 import {
-  isSupportedAgentSessionEventVersion,
-  type AgentSessionEvent,
-  type AgentSessionRuntimeStatus,
-  type AgentSessionToolStatus,
+  agentEventTimestamp,
+  validateCommittedAgentEventWindow,
+} from '@/lib/agent-session-event-window';
+import type {
+  AgentSessionAssistantContentBlock,
+  AgentSessionEvent,
+  AgentSessionRuntimeStatus,
+  AgentSessionStopReason,
+  AgentSessionTokenUsage,
+  AgentSessionToolStatus,
 } from '@/types/agent-session';
 import type {
   AiApprovalMarkerNode,
   AiArtifactNode,
   AiAssistantMessageNode,
+  AiContextInjectionNode,
   AiConversationNode,
+  AiDurableSessionStats,
+  AiDurableTurnStats,
   AiErrorNode,
-  AiLifecycleMarkerCategory,
-  AiLifecycleMarkerNode,
-  AiSessionStatus,
+  AiReasoningNode,
+  AiRetryNode,
+  AiSystemPromptNode,
   AiToolNode,
-  AiTurnStatsNode,
+  AiTurnProcessChildNode,
+  AiTurnProcessNode,
+  AiTurnProcessStatus,
+  AiTurnTailNode,
   AiUserMessageNode,
 } from './conversation-node';
 
-interface TurnMetricAccumulator {
-  readonly turnId: string;
-  readonly number: number;
+type RuntimeEventLike = Readonly<{
+  type: string;
+  sessionId: string;
+  seq: number;
+  timeUnixMs: number;
+  turnId?: string;
+  stepId?: string;
+}>;
+
+interface RequestFacts {
+  readonly requestId: string;
+  readonly turnId: string | null;
+  readonly stepId: string | null;
+  readonly startedAt: number;
+  firstResponseAt?: number;
+  completedAt?: number;
+  usage?: AgentSessionTokenUsage;
+  stopReason?: AgentSessionStopReason;
+}
+
+interface TurnState {
+  readonly id: string;
+  readonly sessionId: string;
   readonly firstSeq: number;
   readonly timestamp: string;
-  stepCount: number;
-  modelDurationMs: number;
-  modelDurationCount: number;
-  toolDurationMs: number;
-  toolDurationCount: number;
-  ttftTotalMs: number;
-  ttftCount: number;
-  inputTokens: number;
-  inputTokenCount: number;
-  outputTokens: number;
-  outputTokenCount: number;
-  totalTokens: number;
-  totalTokenCount: number;
+  readonly steps: Set<string>;
+  readonly requestIds: string[];
+  readonly children: Map<string, AiTurnProcessChildNode>;
+  readonly assistants: Map<string, AiAssistantMessageNode>;
+  lastSeq: number;
+  startSeq?: number;
+  endSeq?: number;
+  endTimestamp?: string;
+  endReason?: string;
+  status?: Exclude<AiTurnProcessStatus, 'running' | 'partial'>;
 }
 
-interface CompletedTurnMetric {
-  readonly metrics: TurnMetricAccumulator;
-  readonly lastSeq: number;
-  readonly timestamp: string;
-}
+const PROCESS_CHILD_ORDER = {
+  contextInjection: 0,
+  reasoning: 1,
+  assistantMessage: 2,
+  retry: 3,
+  tool: 4,
+  approvalMarker: 5,
+  error: 6,
+} satisfies Record<AiTurnProcessChildNode['kind'], number>;
 
-type AgentEventFamily =
-  | 'session'
-  | 'agent'
-  | 'inbox'
-  | 'turn'
-  | 'step'
-  | 'user'
-  | 'assistant'
-  | 'request'
-  | 'tool'
-  | 'artifact'
-  | 'compaction'
-  | 'subagent'
-  | 'task';
-
-const AGENT_EVENT_FAMILIES = {
-  'session/created': 'session',
-  'agent/created': 'agent',
-  'agent/status': 'agent',
-  'session/ended': 'session',
-  'agent/inbox/spliced': 'inbox',
-  'agent/inbox/item_updated': 'inbox',
-  'agent/inbox/item_removed': 'inbox',
-  'agent/inbox/reordered': 'inbox',
-  'session/renamed': 'session',
-  'turn/start': 'turn',
-  'turn/end': 'turn',
-  'step/start': 'step',
-  'step/end': 'step',
-  'user/message': 'user',
-  'assistant/chunk': 'assistant',
-  'assistant/message': 'assistant',
-  'request/header': 'request',
-  'request/context': 'request',
-  'request/retry': 'request',
-  'request/usage': 'request',
-  'tool/call': 'tool',
-  'tool/approval': 'tool',
-  'tool/execution': 'tool',
-  'tool/result': 'tool',
-  'context/artifact': 'artifact',
-  'compaction/start': 'compaction',
-  'compaction/summary': 'compaction',
-  'compaction/end': 'compaction',
-  'subagent/descriptor': 'subagent',
-  'subagent/message': 'subagent',
-  'subagent/settled': 'subagent',
-  'subagent/detached': 'subagent',
-  'task/linked': 'task',
-  'task/plan': 'task',
-  'task/state': 'task',
-  'task/evidence': 'task',
-} satisfies { readonly [Type in AgentSessionEvent['type']]: AgentEventFamily };
-
-interface RuntimeEventLike {
-  readonly type: string;
-  readonly sessionId: string;
-  readonly seq: number;
-  readonly timeUnixMs: number;
-  readonly turnId?: string;
-  readonly stepId?: string;
-  readonly data?: unknown;
-}
-
-function eventTimestamp(event: RuntimeEventLike): string {
-  return new Date(event.timeUnixMs).toISOString();
-}
-
-function turnId(event: RuntimeEventLike): string | null {
+function eventTurnId(event: RuntimeEventLike): string | null {
   return event.turnId ?? null;
 }
 
-function stepId(event: RuntimeEventLike): string | null {
+function eventStepId(event: RuntimeEventLike): string | null {
   return event.stepId ?? null;
 }
 
-function normalizeStatus(value: string): AiSessionStatus | 'info' | 'unknown' {
-  switch (value) {
-    case 'idle':
-    case 'running':
-    case 'waiting':
-    case 'completed':
-    case 'failed':
-    case 'cancelled':
-      return value;
-    default:
-      return 'unknown';
-  }
+function terminalStatusFromReason(
+  reason: string,
+): Exclude<AiTurnProcessStatus, 'running' | 'partial'> {
+  if (/waiting/i.test(reason)) return 'waiting';
+  if (/cancel|stop|interrupt/i.test(reason)) return 'cancelled';
+  if (/fail|error|limit|max.?token/i.test(reason)) return 'failed';
+  return 'completed';
+}
+
+function errorState(
+  status: AgentSessionRuntimeStatus | Exclude<AiTurnProcessStatus, 'running' | 'partial'>,
+): AiErrorNode['state'] {
+  if (status === 'failed') return 'failed';
+  if (status === 'cancelled') return 'cancelled';
+  return 'unknown';
 }
 
 function toolState(status: AgentSessionToolStatus): AiToolNode['state'] {
@@ -148,6 +116,19 @@ function toolState(status: AgentSessionToolStatus): AiToolNode['state'] {
   }
 }
 
+function approvalToolState(
+  status: Extract<AgentSessionEvent, { type: 'tool/approval' }>['data']['status'],
+): AiToolNode['state'] {
+  switch (status) {
+    case 'requested': return 'approval';
+    case 'approved': return 'running';
+    case 'rejected': return 'rejected';
+    case 'expired':
+    case 'cancelled':
+      return 'failed';
+  }
+}
+
 function toolSummary(argumentsValue: unknown): string {
   if (!argumentsValue || typeof argumentsValue !== 'object') return '';
   const record = argumentsValue as Record<string, unknown>;
@@ -155,155 +136,308 @@ function toolSummary(argumentsValue: unknown): string {
   return typeof summary === 'string' ? summary : '';
 }
 
-function errorState(status: AgentSessionRuntimeStatus): AiErrorNode['state'] {
-  if (status === 'failed') return 'failed';
-  if (status === 'cancelled') return 'cancelled';
-  return 'unknown';
+function textContent(blocks: readonly AgentSessionAssistantContentBlock[]): string {
+  return blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('');
 }
 
-function validateAgentEventWindow(events: readonly AgentSessionEvent[]): void {
-  if (events.length === 0) return;
-  const first = events[0];
-  for (let index = 0; index < events.length; index += 1) {
-    const event = events[index];
-    if (!isSupportedAgentSessionEventVersion(event.version)) {
-      throw new Error(`Unsupported Agent Session event version at seq ${event.seq}`);
-    }
-    if (event.sessionId !== first.sessionId) {
-      throw new Error('Agent Session node projection cannot mix session ids');
-    }
-    if (!Number.isSafeInteger(event.seq) || event.seq !== first.seq + index) {
-      throw new Error('Agent Session node events must be ordered and contiguous');
-    }
-    if (!Number.isSafeInteger(event.timeUnixMs) || event.timeUnixMs <= 0) {
-      throw new Error(`Agent Session event ${event.seq} has an invalid timestamp`);
-    }
-  }
+function reasoningContent(blocks: readonly AgentSessionAssistantContentBlock[]): string {
+  return blocks.flatMap((block) => block.type === 'reasoning' ? [block.text] : []).join('');
 }
 
-function unknownRuntimeNode(event: RuntimeEventLike): AiLifecycleMarkerNode {
-  return {
-    kind: 'lifecycleMarker',
-    key: `marker:unknown:${event.type}:${event.seq}`,
-    sourceKind: 'agent',
-    sessionId: event.sessionId,
-    turnId: turnId(event),
-    stepId: stepId(event),
-    firstSeq: event.seq,
-    lastSeq: event.seq,
-    timestamp: eventTimestamp(event),
-    category: 'unknown',
-    state: 'unknown',
-    label: event.type,
-    detail: null,
-    eventTypes: [event.type],
-    eventSeqs: [event.seq],
+function hasToolCall(blocks: readonly AgentSessionAssistantContentBlock[]): boolean {
+  return blocks.some((block) => block.type === 'toolCall');
+}
+
+function usageField(
+  requests: readonly RequestFacts[],
+  field: keyof AgentSessionTokenUsage,
+): number | null {
+  if (requests.length === 0) return null;
+  const reported = requests.map((request) => request.usage?.[field]);
+  if (reported.some((value) => value === undefined)) return null;
+  return reported.reduce<number>((sum, value) => sum + (value as number), 0);
+}
+
+function hasReportedUsage(usage: AgentSessionTokenUsage | undefined): boolean {
+  return usage !== undefined && Object.values(usage).some((value) => value !== undefined);
+}
+
+function aggregateUsage(stats: AiDurableTurnStats): AgentSessionTokenUsage | null {
+  const usage = {
+    ...(stats.uncachedInputTokens === null ? {} : { uncachedInputTokens: stats.uncachedInputTokens }),
+    ...(stats.cacheReadTokens === null ? {} : { cacheReadTokens: stats.cacheReadTokens }),
+    ...(stats.cacheWriteTokens === null ? {} : { cacheWriteTokens: stats.cacheWriteTokens }),
+    ...(stats.outputTokens === null ? {} : { outputTokens: stats.outputTokens }),
+    ...(stats.reasoningTokens === null ? {} : { reasoningTokens: stats.reasoningTokens }),
+    ...(stats.totalTokens === null ? {} : { totalTokens: stats.totalTokens }),
   };
+  return Object.keys(usage).length === 0 ? null : usage;
+}
+
+function sumComplete(
+  stats: readonly AiDurableTurnStats[],
+  field: 'uncachedInputTokens' | 'cacheReadTokens' | 'cacheWriteTokens'
+    | 'outputTokens' | 'reasoningTokens' | 'totalTokens',
+): number | null {
+  if (stats.length === 0 || stats.some((value) => value[field] === null)) return null;
+  return stats.reduce((sum, value) => sum + (value[field] ?? 0), 0);
+}
+
+/** Aggregate the same durable facts used by each Turn tail into a session-wide reading. */
+export function aggregateDurableSessionStats(
+  turns: readonly AiDurableTurnStats[],
+  historyComplete = true,
+): AiDurableSessionStats {
+  const timeToFirstTokenCount = turns.reduce(
+    (sum, value) => sum + value.timeToFirstTokenCount,
+    0,
+  );
+  const timeToFirstTokenMs = timeToFirstTokenCount === 0
+    ? null
+    : turns.reduce((sum, value) => sum + (value.timeToFirstTokenMs ?? 0), 0);
+  const decodePairs = turns.filter((value) => (
+    value.decodeDurationMs !== null && value.decodeTokens !== null
+  ));
+  const decodeDurationMs = decodePairs.length === 0
+    ? null
+    : decodePairs.reduce((sum, value) => sum + (value.decodeDurationMs ?? 0), 0);
+  const decodeTokens = decodePairs.length === 0
+    ? null
+    : decodePairs.reduce((sum, value) => sum + (value.decodeTokens ?? 0), 0);
+  const requestCount = turns.reduce((sum, value) => sum + value.requestCount, 0);
+  const toolCount = turns.reduce((sum, value) => sum + value.toolCount, 0);
+  const modelDurationMs = requestCount === 0
+    || turns.some((value) => value.requestCount > 0 && value.modelDurationMs === null)
+    ? null
+    : turns.reduce((sum, value) => sum + (value.modelDurationMs ?? 0), 0);
+  const toolDurationMs = toolCount === 0
+    || turns.some((value) => value.toolCount > 0 && value.toolDurationMs === null)
+    ? null
+    : turns.reduce((sum, value) => sum + (value.toolDurationMs ?? 0), 0);
+  return {
+    historyComplete,
+    turnCount: turns.length,
+    stepCount: turns.reduce((sum, value) => sum + value.stepCount, 0),
+    requestCount,
+    toolCount,
+    modelDurationMs,
+    toolDurationMs,
+    timeToFirstTokenMs,
+    timeToFirstTokenCount,
+    averageTimeToFirstTokenMs: timeToFirstTokenMs === null
+      ? null
+      : Math.round(timeToFirstTokenMs / timeToFirstTokenCount),
+    decodeDurationMs,
+    decodeTokens,
+    uncachedInputTokens: sumComplete(turns, 'uncachedInputTokens'),
+    cacheReadTokens: sumComplete(turns, 'cacheReadTokens'),
+    cacheWriteTokens: sumComplete(turns, 'cacheWriteTokens'),
+    outputTokens: sumComplete(turns, 'outputTokens'),
+    reasoningTokens: sumComplete(turns, 'reasoningTokens'),
+    totalTokens: sumComplete(turns, 'totalTokens'),
+    tokensPerSecond: decodeTokens !== null && decodeDurationMs !== null && decodeDurationMs > 0
+      ? decodeTokens / (decodeDurationMs / 1_000)
+      : null,
+    usageComplete: turns.length > 0 && turns.every((value) => value.usageComplete),
+  };
+}
+
+function processChildSort(
+  left: AiTurnProcessChildNode,
+  right: AiTurnProcessChildNode,
+): number {
+  return left.firstSeq - right.firstSeq
+    || PROCESS_CHILD_ORDER[left.kind] - PROCESS_CHILD_ORDER[right.kind]
+    || left.key.localeCompare(right.key);
+}
+
+function topLevelSort(left: AiConversationNode, right: AiConversationNode): number {
+  return left.firstSeq - right.firstSeq || left.key.localeCompare(right.key);
 }
 
 /**
- * Fold one complete committed Agent event window into stable UI-facing nodes.
- * Known event coverage is compile-time checked by AGENT_EVENT_FAMILIES; an
- * unknown runtime event becomes an explicit audit marker with unknown state.
+ * Project one committed Event v4 window into chat-readable nodes only.
+ * Lifecycle and request diagnostics are projected independently by Activity.
  */
-export function projectAgentConversationNodes(
+export function projectAgentChatNodes(
   events: readonly AgentSessionEvent[],
 ): readonly AiConversationNode[] {
-  validateAgentEventWindow(events);
-  const nodes: AiConversationNode[] = [];
-  const indexByKey = new Map<string, number>();
-  const messageKeys = new Map<string, string>();
-  const assistantKeys = new Map<string, string>();
-  const assistantKeysByTurn = new Map<string, string>();
-  const toolKeys = new Map<string, string>();
-  const toolKeysByCall = new Map<string, string>();
-  const subagentKeys = new Map<string, string>();
-  const turnMetrics = new Map<string, TurnMetricAccumulator>();
-  const completedTurns: CompletedTurnMetric[] = [];
-  const requestStarts = new Map<string, { readonly turnId: string; readonly timeUnixMs: number; firstChunkSeen: boolean }>();
-  let turnCounter = 0;
-  let activeCompactionKey: string | null = null;
-  let activeRecoveryKey: string | null = null;
-  let terminalErrorKey: string | null = null;
-  let taskKey = 'marker:task:unscoped';
+  validateCommittedAgentEventWindow(events);
+  if (events.length === 0) return [];
 
-  const put = (node: AiConversationNode): void => {
-    const index = indexByKey.get(node.key);
-    if (index === undefined) {
-      indexByKey.set(node.key, nodes.length);
-      nodes.push(node);
-    } else {
-      nodes[index] = node;
+  const turns = new Map<string, TurnState>();
+  const userMessages = new Map<string, AiUserMessageNode>();
+  const systemPrompts = new Map<string, AiSystemPromptNode>();
+  const seriesPromptKeys = new Map<string, string>();
+  const artifacts = new Map<string, AiArtifactNode>();
+  const requests = new Map<string, RequestFacts>();
+  const activeRequestByStep = new Map<string, string>();
+  const tools = new Map<string, AiToolNode>();
+  const toolTurnIds = new Map<string, string>();
+  const unscopedNodes = new Map<string, AiConversationNode>();
+  let latestTurnId: string | null = null;
+
+  const ensureTurn = (event: RuntimeEventLike, explicitTurnId = event.turnId): TurnState | null => {
+    const id = explicitTurnId ?? null;
+    if (id === null) return null;
+    latestTurnId = id;
+    const existing = turns.get(id);
+    if (existing) {
+      existing.lastSeq = Math.max(existing.lastSeq, event.seq);
+      if (event.stepId) existing.steps.add(event.stepId);
+      return existing;
     }
-  };
-
-  const get = (key: string): AiConversationNode | undefined => {
-    const index = indexByKey.get(key);
-    return index === undefined ? undefined : nodes[index];
-  };
-
-  const metricsFor = (event: RuntimeEventLike): TurnMetricAccumulator | null => {
-    if (!event.turnId) return null;
-    const existing = turnMetrics.get(event.turnId);
-    if (existing) return existing;
-    const metrics: TurnMetricAccumulator = {
-      turnId: event.turnId,
-      number: ++turnCounter,
+    const turn: TurnState = {
+      id,
+      sessionId: event.sessionId,
       firstSeq: event.seq,
-      timestamp: eventTimestamp(event),
-      stepCount: 0,
-      modelDurationMs: 0,
-      modelDurationCount: 0,
-      toolDurationMs: 0,
-      toolDurationCount: 0,
-      ttftTotalMs: 0,
-      ttftCount: 0,
-      inputTokens: 0,
-      inputTokenCount: 0,
-      outputTokens: 0,
-      outputTokenCount: 0,
-      totalTokens: 0,
-      totalTokenCount: 0,
+      lastSeq: event.seq,
+      timestamp: agentEventTimestamp(event.timeUnixMs),
+      steps: new Set(event.stepId ? [event.stepId] : []),
+      requestIds: [],
+      children: new Map(),
+      assistants: new Map(),
     };
-    turnMetrics.set(event.turnId, metrics);
-    return metrics;
+    turns.set(id, turn);
+    return turn;
   };
 
-  const lifecycle = (
-    key: string,
-    event: RuntimeEventLike,
-    category: AiLifecycleMarkerCategory,
-    state: AiLifecycleMarkerNode['state'],
-    detail: string | null = null,
+  const putProcessChild = (
+    turnId: string | null,
+    node: AiTurnProcessChildNode,
   ): void => {
-    const previous = get(key);
-    if (previous?.kind === 'lifecycleMarker') {
-      put({
-        ...previous,
-        lastSeq: event.seq,
-        state,
-        detail,
-        eventTypes: [...previous.eventTypes, event.type],
-        eventSeqs: [...previous.eventSeqs, event.seq],
-      });
+    if (turnId === null) {
+      unscopedNodes.set(node.key, node);
       return;
     }
-    put({
-      kind: 'lifecycleMarker',
+    const turn = turns.get(turnId);
+    if (turn) turn.children.set(node.key, node);
+  };
+
+  const putAssistant = (turnId: string | null, node: AiAssistantMessageNode): void => {
+    if (turnId === null) {
+      unscopedNodes.set(node.key, node);
+      return;
+    }
+    turns.get(turnId)?.assistants.set(node.key, node);
+  };
+
+  const updateRequestUsage = (
+    requestId: string,
+    usage: AgentSessionTokenUsage,
+    stopReason?: AgentSessionStopReason,
+    completedAt?: number,
+  ): void => {
+    const request = requests.get(requestId);
+    if (!request) return;
+    request.usage = usage;
+    if (stopReason !== undefined) request.stopReason = stopReason;
+    if (completedAt !== undefined) request.completedAt = completedAt;
+  };
+
+  const upsertReasoning = (
+    event: RuntimeEventLike,
+    content: string,
+    state: AiReasoningNode['state'],
+    replace: boolean,
+  ): void => {
+    if (!content) return;
+    const turn = ensureTurn(event);
+    const turnId = eventTurnId(event);
+    const identity = event.stepId ?? 'unscoped-step';
+    const key = `reasoning:${turnId ?? 'unscoped'}:${identity}`;
+    const previous = turn?.children.get(key) ?? unscopedNodes.get(key);
+    const previousReasoning = previous?.kind === 'reasoning' ? previous : undefined;
+    const nextContent = replace ? content : `${previousReasoning?.content ?? ''}${content}`;
+    const node: AiReasoningNode = {
+      kind: 'reasoning',
       key,
       sourceKind: 'agent',
       sessionId: event.sessionId,
-      turnId: turnId(event),
-      stepId: stepId(event),
-      firstSeq: event.seq,
+      turnId,
+      stepId: eventStepId(event),
+      firstSeq: previousReasoning?.firstSeq ?? event.seq,
       lastSeq: event.seq,
-      timestamp: eventTimestamp(event),
-      category,
+      timestamp: previousReasoning?.timestamp ?? agentEventTimestamp(event.timeUnixMs),
+      requestId: event.stepId ? activeRequestByStep.get(event.stepId) ?? null : null,
+      summary: nextContent.trim().split('\n')[0] ?? '',
+      content: nextContent,
       state,
-      label: event.type,
-      detail,
-      eventTypes: [event.type],
-      eventSeqs: [event.seq],
+    };
+    putProcessChild(turnId, node);
+  };
+
+  const upsertAssistantText = (
+    event: RuntimeEventLike,
+    requestId: string | null,
+    text: string,
+    state: AiAssistantMessageNode['state'],
+    blocks?: readonly AgentSessionAssistantContentBlock[],
+    messageId?: string,
+  ): void => {
+    const turn = ensureTurn(event);
+    const turnId = eventTurnId(event);
+    const identity = event.stepId ?? requestId ?? messageId ?? 'unscoped-step';
+    let key = `assistant:${turnId ?? 'unscoped'}:${identity}`;
+    let previous = turn?.assistants.get(key) ?? unscopedNodes.get(key);
+    let previousAssistant = previous?.kind === 'assistantMessage' ? previous : undefined;
+    if (blocks !== undefined
+      && previousAssistant !== undefined
+      && previousAssistant.state !== 'streaming'
+      && messageId !== undefined
+      && previousAssistant.messageId !== messageId) {
+      key = `assistant:${turnId ?? 'unscoped'}:${messageId}`;
+      previous = turn?.assistants.get(key) ?? unscopedNodes.get(key);
+      previousAssistant = previous?.kind === 'assistantMessage' ? previous : undefined;
+    }
+    const content = blocks === undefined
+      ? `${previousAssistant ? textContent(previousAssistant.blocks) : ''}${text}`
+      : text;
+    const node: AiAssistantMessageNode = {
+      kind: 'assistantMessage',
+      key,
+      sourceKind: 'agent',
+      sessionId: event.sessionId,
+      turnId,
+      stepId: eventStepId(event),
+      firstSeq: previousAssistant?.firstSeq ?? event.seq,
+      lastSeq: event.seq,
+      timestamp: previousAssistant?.timestamp ?? agentEventTimestamp(event.timeUnixMs),
+      messageId: messageId ?? previousAssistant?.messageId ?? identity,
+      requestId: requestId ?? previousAssistant?.requestId ?? null,
+      blocks: blocks ?? [{ type: 'text', text: content }],
+      state,
+    };
+    putAssistant(turnId, node);
+  };
+
+  const upsertTurnError = (
+    event: RuntimeEventLike,
+    status: AgentSessionRuntimeStatus | Exclude<AiTurnProcessStatus, 'running' | 'partial'>,
+    message: string,
+    scope: AiErrorNode['scope'],
+  ): void => {
+    const resolvedTurnId = event.turnId ?? latestTurnId;
+    if (resolvedTurnId === null) return;
+    const turn = ensureTurn(event, resolvedTurnId);
+    if (!turn) return;
+    const key = `error:turn:${resolvedTurnId}`;
+    const previous = turn.children.get(key);
+    const previousError = previous?.kind === 'error' ? previous : undefined;
+    putProcessChild(resolvedTurnId, {
+      kind: 'error',
+      key,
+      sourceKind: 'agent',
+      sessionId: event.sessionId,
+      turnId: resolvedTurnId,
+      stepId: eventStepId(event),
+      firstSeq: previousError?.firstSeq ?? event.seq,
+      lastSeq: event.seq,
+      timestamp: previousError?.timestamp ?? agentEventTimestamp(event.timeUnixMs),
+      scope,
+      message,
+      code: null,
+      state: errorState(status),
     });
   };
 
@@ -311,401 +445,283 @@ export function projectAgentConversationNodes(
     event: RuntimeEventLike,
     callId: string,
     update: (node: AiToolNode) => AiToolNode,
-  ): boolean => {
-    const scoped = `${event.stepId ?? 'unscoped'}\u0000${callId}`;
-    const key = toolKeys.get(scoped) ?? toolKeysByCall.get(callId);
-    const previous = key ? get(key) : undefined;
-    if (previous?.kind !== 'tool') return false;
-    put({ ...update(previous), lastSeq: event.seq });
-    return true;
-  };
-
-  const upsertTerminalError = (
-    event: RuntimeEventLike,
-    status: AgentSessionRuntimeStatus,
-    message: string | undefined,
   ): void => {
-    const key = terminalErrorKey ?? `error:session:${event.seq}`;
-    terminalErrorKey = key;
-    const previous = get(key);
-    if (previous?.kind === 'error') {
-      put({
-        ...previous,
-        lastSeq: event.seq,
-        message: message ?? previous.message,
-        state: errorState(status),
-      });
-      return;
-    }
-    put({
-      kind: 'error',
-      key,
-      sourceKind: 'agent',
-      sessionId: event.sessionId,
-      turnId: turnId(event),
-      stepId: stepId(event),
-      firstSeq: event.seq,
-      lastSeq: event.seq,
-      timestamp: eventTimestamp(event),
-      scope: 'session',
-      message: message ?? status,
-      code: null,
-      state: errorState(status),
-    });
+    const previous = tools.get(callId);
+    if (!previous) return;
+    const next = { ...update(previous), lastSeq: event.seq };
+    tools.set(callId, next);
+    putProcessChild(toolTurnIds.get(callId) ?? eventTurnId(event), next);
   };
 
   for (const event of events) {
-    const family = (AGENT_EVENT_FAMILIES as Readonly<Record<string, AgentEventFamily | undefined>>)[event.type];
-    if (family === undefined) {
-      put(unknownRuntimeNode(event));
-      continue;
-    }
-
+    if (event.turnId) ensureTurn(event);
     switch (event.type) {
       case 'session/created':
-        taskKey = `marker:task:${event.data.taskId}`;
-        lifecycle(`marker:session/created:${event.seq}`, event, 'session', 'started', event.data.goal);
-        break;
       case 'agent/created':
-        lifecycle(`marker:agent:${event.data.agentId}`, event, 'agent', 'started', null);
+      case 'agent/inbox/reordered':
+      case 'session/renamed':
+      case 'request/context':
+      case 'compaction/start':
+      case 'compaction/summary':
+      case 'compaction/end':
+      case 'subagent/descriptor':
+      case 'subagent/message':
+      case 'subagent/settled':
+      case 'subagent/detached':
+      case 'task/linked':
+      case 'task/plan':
+      case 'task/state':
+      case 'task/evidence':
         break;
       case 'agent/status':
         if (event.data.status === 'failed' || event.data.status === 'cancelled') {
-          upsertTerminalError(event, event.data.status, event.data.reason);
-        } else {
-          lifecycle(
-            `marker:agent/status:${event.seq}`,
-            event,
-            'agent',
-            normalizeStatus(event.data.status),
-            event.data.reason ?? null,
-          );
+          upsertTurnError(event, event.data.status, event.data.reason ?? event.data.status, 'session');
         }
         break;
       case 'session/ended':
-        lifecycle(
-          `marker:terminal:${event.seq}`,
-          event,
-          'terminal',
-          event.data.status,
-          event.data.reason ?? null,
-        );
         if (event.data.status !== 'completed') {
-          upsertTerminalError(event, event.data.status, event.data.reason);
+          upsertTurnError(event, event.data.status, event.data.reason ?? event.data.status, 'session');
         }
         break;
       case 'agent/inbox/spliced':
         for (const message of event.data.messages) {
-          const existingKey = messageKeys.get(message.messageId);
-          if (event.data.lane === 'nextTurn' && message.source.kind === 'user') {
-            const key = existingKey ?? `user:${message.messageId}`;
-            messageKeys.set(message.messageId, key);
-            const previous = get(key);
-            if (previous?.kind === 'userMessage') {
-              put({ ...previous, lastSeq: event.seq, content: message.content });
-            } else {
-              put({
-                kind: 'userMessage',
-                key,
-                sourceKind: 'agent',
-                sessionId: event.sessionId,
-                turnId: null,
-                stepId: null,
-                firstSeq: event.seq,
-                lastSeq: event.seq,
-                timestamp: eventTimestamp(event),
-                messageId: message.messageId,
-                ...(message.clientSubmissionId
-                  ? { clientSubmissionId: message.clientSubmissionId }
-                  : {}),
-                content: message.content,
-                delivery: 'committed',
-              });
-            }
-          } else {
-            const key = existingKey ?? `marker:inbox:${message.messageId}`;
-            messageKeys.set(message.messageId, key);
-            lifecycle(
-              key,
-              event,
-              'inbox',
-              event.data.operation === 'discarded' ? 'cancelled' : 'info',
-              message.content,
-            );
+          if (event.data.lane !== 'nextTurn' || message.source.kind !== 'user') continue;
+          if (event.data.operation === 'discarded') {
+            userMessages.delete(message.messageId);
+            continue;
           }
-        }
-        break;
-      case 'agent/inbox/item_updated': {
-        const key = messageKeys.get(event.data.itemId);
-        const previous = key ? get(key) : undefined;
-        if (previous?.kind === 'userMessage') {
-          put({ ...previous, lastSeq: event.seq, content: event.data.content });
-        } else if (previous?.kind === 'lifecycleMarker') {
-          put({ ...previous, lastSeq: event.seq, detail: event.data.content });
-        }
-        break;
-      }
-      case 'agent/inbox/item_removed':
-        lifecycle(
-          `marker:inbox-removed:${event.data.itemId}`,
-          event,
-          'inbox',
-          'cancelled',
-          event.data.itemId,
-        );
-        break;
-      case 'agent/inbox/reordered':
-      case 'session/renamed':
-        break;
-      case 'turn/start':
-        metricsFor(event);
-        lifecycle(`marker:turn:${event.turnId ?? event.seq}`, event, 'turn', 'started');
-        break;
-      case 'turn/end': {
-        const status = /cancel|stop|interrupt/i.test(event.data.reason)
-          ? 'cancelled'
-          : /fail|error/i.test(event.data.reason)
-            ? 'failed'
-            : 'completed';
-        lifecycle(
-          `marker:turn:${event.turnId ?? event.seq}`,
-          event,
-          'turn',
-          status,
-          event.data.reason,
-        );
-        if (/max.?token/i.test(event.data.reason)) {
-          lifecycle(`marker:turn-max-tokens:${event.seq}`, event, 'terminal', 'failed', event.data.reason);
-        }
-        const metrics = metricsFor(event);
-        if (metrics) completedTurns.push({
-          metrics,
-          lastSeq: event.seq,
-          timestamp: eventTimestamp(event),
-        });
-        break;
-      }
-      case 'step/start':
-        {
-          const metrics = metricsFor(event);
-          if (metrics) metrics.stepCount += 1;
-        }
-        lifecycle(`marker:step:${event.stepId ?? event.seq}`, event, 'step', 'started');
-        break;
-      case 'step/end':
-        lifecycle(
-          `marker:step:${event.stepId ?? event.seq}`,
-          event,
-          'step',
-          /waiting/i.test(event.data.reason)
-            ? 'waiting'
-            : /cancel|stop|interrupt/i.test(event.data.reason)
-              ? 'cancelled'
-              : /fail|error|max.?token/i.test(event.data.reason)
-                ? 'failed'
-                : 'completed',
-          event.data.reason,
-        );
-        break;
-      case 'user/message': {
-        const message = event.data.message;
-        const key = messageKeys.get(message.messageId) ?? `user:${message.messageId}`;
-        messageKeys.set(message.messageId, key);
-        if (message.source.kind === 'user' || message.source.kind === 'legacyImport') {
-          const previous = get(key);
-          const firstSeq = previous?.kind === 'userMessage' ? previous.firstSeq : event.seq;
-          const timestamp = previous?.kind === 'userMessage'
-            ? previous.timestamp
-            : eventTimestamp(event);
-          put({
+          const key = `user:${message.messageId}`;
+          const previous = userMessages.get(message.messageId);
+          userMessages.set(message.messageId, {
             kind: 'userMessage',
             key,
             sourceKind: 'agent',
             sessionId: event.sessionId,
-            turnId: turnId(event),
-            stepId: stepId(event),
-            firstSeq,
+            turnId: previous?.turnId ?? null,
+            stepId: previous?.stepId ?? null,
+            firstSeq: previous?.firstSeq ?? event.seq,
             lastSeq: event.seq,
-            timestamp,
+            timestamp: previous?.timestamp ?? agentEventTimestamp(event.timeUnixMs),
             messageId: message.messageId,
-            ...(message.clientSubmissionId
-              ? { clientSubmissionId: message.clientSubmissionId }
-              : {}),
+            ...(message.clientSubmissionId ? { clientSubmissionId: message.clientSubmissionId } : {}),
+            content: message.content,
+            delivery: 'committed',
+          });
+        }
+        break;
+      case 'agent/inbox/item_updated': {
+        const previous = userMessages.get(event.data.itemId);
+        if (previous) {
+          userMessages.set(event.data.itemId, {
+            ...previous,
+            lastSeq: event.seq,
+            content: event.data.content,
+          });
+        }
+        break;
+      }
+      case 'agent/inbox/item_removed':
+        userMessages.delete(event.data.itemId);
+        break;
+      case 'turn/start': {
+        const turn = ensureTurn(event);
+        if (turn) turn.startSeq = event.seq;
+        break;
+      }
+      case 'turn/end': {
+        const turn = ensureTurn(event);
+        if (!turn) break;
+        turn.endSeq = event.seq;
+        turn.endTimestamp = agentEventTimestamp(event.timeUnixMs);
+        turn.endReason = event.data.reason;
+        turn.status = terminalStatusFromReason(event.data.reason);
+        if (turn.status === 'failed' || turn.status === 'cancelled') {
+          upsertTurnError(event, turn.status, event.data.reason, 'turn');
+        }
+        break;
+      }
+      case 'step/start': {
+        const turn = ensureTurn(event);
+        if (event.stepId) turn?.steps.add(event.stepId);
+        break;
+      }
+      case 'step/end': {
+        const status = terminalStatusFromReason(event.data.reason);
+        if (status === 'failed' || status === 'cancelled') {
+          upsertTurnError(event, status, event.data.reason, 'step');
+        }
+        break;
+      }
+      case 'user/message': {
+        const message = event.data.message;
+        if (message.source.kind === 'user') {
+          const previous = userMessages.get(message.messageId);
+          userMessages.set(message.messageId, {
+            kind: 'userMessage',
+            key: `user:${message.messageId}`,
+            sourceKind: 'agent',
+            sessionId: event.sessionId,
+            turnId: eventTurnId(event),
+            stepId: eventStepId(event),
+            firstSeq: previous?.firstSeq ?? event.seq,
+            lastSeq: event.seq,
+            timestamp: previous?.timestamp ?? agentEventTimestamp(event.timeUnixMs),
+            messageId: message.messageId,
+            ...(message.clientSubmissionId ? { clientSubmissionId: message.clientSubmissionId } : {}),
             content: message.content,
             delivery: 'committed',
           });
         } else {
-          lifecycle(
-            key,
-            event,
-            message.source.kind === 'subagent' ? 'subagent' : 'inbox',
-            'info',
-            message.content,
-          );
+          const node: AiContextInjectionNode = {
+            kind: 'contextInjection',
+            key: `context:${message.messageId}`,
+            sourceKind: 'agent',
+            sessionId: event.sessionId,
+            turnId: eventTurnId(event),
+            stepId: eventStepId(event),
+            firstSeq: event.seq,
+            lastSeq: event.seq,
+            timestamp: agentEventTimestamp(event.timeUnixMs),
+            messageId: message.messageId,
+            content: message.content,
+            provenance: message.source,
+          };
+          putProcessChild(eventTurnId(event), node);
         }
         break;
       }
-      case 'assistant/chunk': {
-        const request = requestStarts.get(event.data.requestId);
-        if (request && !request.firstChunkSeen) {
-          request.firstChunkSeen = true;
-          const metrics = turnMetrics.get(request.turnId);
-          if (metrics) {
-            metrics.ttftTotalMs += Math.max(0, event.timeUnixMs - request.timeUnixMs);
-            metrics.ttftCount += 1;
-          }
-        }
-        const identity = event.stepId ?? event.data.requestId;
-        const key = assistantKeys.get(identity)
-          ?? `assistant:${event.turnId ?? 'unscoped'}:${identity}`;
-        assistantKeys.set(identity, key);
-        if (event.turnId) assistantKeysByTurn.set(event.turnId, key);
-        const previous = get(key);
-        const content = previous?.kind === 'assistantMessage'
-          ? previous.content + event.data.text
-          : event.data.text;
-        const node: AiAssistantMessageNode = {
-          kind: 'assistantMessage',
-          key,
-          sourceKind: 'agent',
-          sessionId: event.sessionId,
-          turnId: turnId(event),
-          stepId: stepId(event),
-          firstSeq: previous?.kind === 'assistantMessage' ? previous.firstSeq : event.seq,
-          lastSeq: event.seq,
-          timestamp: previous?.kind === 'assistantMessage'
-            ? previous.timestamp
-            : eventTimestamp(event),
-          messageId: previous?.kind === 'assistantMessage' ? previous.messageId : identity,
+      case 'request/header': {
+        const turn = ensureTurn(event);
+        const facts: RequestFacts = {
           requestId: event.data.requestId,
-          content,
-          state: 'streaming',
+          turnId: eventTurnId(event),
+          stepId: eventStepId(event),
+          startedAt: event.timeUnixMs,
         };
-        put(node);
-        break;
-      }
-      case 'assistant/message': {
-        const identity = event.stepId ?? event.data.messageId;
-        const key = assistantKeys.get(identity)
-          ?? (event.turnId ? assistantKeysByTurn.get(event.turnId) : undefined)
-          ?? `assistant:${event.turnId ?? 'unscoped'}:${identity}`;
-        const previous = get(key);
-        if (!event.data.content && previous?.kind !== 'assistantMessage') {
-          lifecycle(`marker:assistant/message:${event.seq}`, event, 'request', 'info');
-          break;
-        }
-        const node: AiAssistantMessageNode = {
-          kind: 'assistantMessage',
+        requests.set(event.data.requestId, facts);
+        if (event.stepId) activeRequestByStep.set(event.stepId, event.data.requestId);
+        if (turn && !turn.requestIds.includes(event.data.requestId)) turn.requestIds.push(event.data.requestId);
+
+        const seriesScope = `${event.turnId ?? 'unscoped'}:${event.data.series.seriesId}`;
+        const seriesKey = `system-prompt:${event.turnId ?? 'unscoped'}:${event.data.series.seriesId}`;
+        const existingKey = seriesPromptKeys.get(seriesScope);
+        const existing = existingKey ? systemPrompts.get(existingKey) : undefined;
+        const samePrompt = existing?.content === event.data.systemPrompt
+          && JSON.stringify(existing.toolSchemas) === JSON.stringify(event.data.toolSchemas);
+        const key = existing === undefined || samePrompt
+          ? existingKey ?? seriesKey
+          : `system-prompt:${event.data.requestId}`;
+        seriesPromptKeys.set(seriesScope, key);
+        systemPrompts.set(key, {
+          kind: 'systemPrompt',
           key,
           sourceKind: 'agent',
           sessionId: event.sessionId,
-          turnId: turnId(event),
-          stepId: stepId(event),
-          firstSeq: previous?.kind === 'assistantMessage' ? previous.firstSeq : event.seq,
+          turnId: eventTurnId(event),
+          stepId: eventStepId(event),
+          firstSeq: samePrompt && existing ? existing.firstSeq : event.seq,
           lastSeq: event.seq,
-          timestamp: previous?.kind === 'assistantMessage'
-            ? previous.timestamp
-            : eventTimestamp(event),
-          messageId: event.data.messageId,
-          requestId: previous?.kind === 'assistantMessage' ? previous.requestId : null,
-          content: event.data.content || (previous?.kind === 'assistantMessage' ? previous.content : ''),
-          state: event.data.interrupted ? 'interrupted' : 'completed',
-        };
-        assistantKeys.set(identity, key);
-        if (event.turnId) assistantKeysByTurn.set(event.turnId, key);
-        put(node);
+          timestamp: samePrompt && existing ? existing.timestamp : agentEventTimestamp(event.timeUnixMs),
+          requestId: event.data.requestId,
+          requestIds: samePrompt && existing
+            ? [...existing.requestIds, event.data.requestId]
+            : [event.data.requestId],
+          providerId: event.data.providerId,
+          model: event.data.model,
+          reasoningEffort: event.data.reasoningEffort ?? null,
+          seriesId: event.data.series.seriesId,
+          content: event.data.systemPrompt,
+          toolSchemas: event.data.toolSchemas,
+        });
         break;
       }
-      case 'request/header':
-        metricsFor(event);
-        if (event.turnId) {
-          requestStarts.set(event.data.requestId, {
-            turnId: event.turnId,
-            timeUnixMs: event.timeUnixMs,
-            firstChunkSeen: false,
-          });
-        }
-        lifecycle(
-          `marker:request:${event.data.requestId}`,
-          event,
-          'request',
-          'started',
-          event.data.model ?? event.data.providerId,
-        );
-        break;
-      case 'request/context':
-        lifecycle(
-          `marker:request:${event.data.requestId}`,
-          event,
-          'context',
-          event.data.limited ? 'waiting' : 'info',
-          event.data.limited ? `omittedMessages=${event.data.omittedMessages ?? 0}` : null,
-        );
-        break;
-      case 'request/retry':
-        put({
+      case 'request/retry': {
+        const previous = event.data.previousRequestId
+          ? requests.get(event.data.previousRequestId)
+          : undefined;
+        if (previous && previous.completedAt === undefined) previous.completedAt = event.timeUnixMs;
+        const node: AiRetryNode = {
           kind: 'retry',
-          key: `retry:${event.turnId ?? event.data.requestId}:${event.data.attempt}`,
+          key: `retry:${event.data.requestId}:${event.data.attempt}`,
           sourceKind: 'agent',
           sessionId: event.sessionId,
-          turnId: turnId(event),
-          stepId: stepId(event),
+          turnId: eventTurnId(event),
+          stepId: eventStepId(event),
           firstSeq: event.seq,
           lastSeq: event.seq,
-          timestamp: eventTimestamp(event),
+          timestamp: agentEventTimestamp(event.timeUnixMs),
           requestId: event.data.requestId,
           previousRequestId: event.data.previousRequestId ?? null,
           attempt: event.data.attempt,
           reason: event.data.reason,
-        });
-        break;
-      case 'request/usage': {
-        const metrics = metricsFor(event);
-        const request = requestStarts.get(event.data.requestId);
-        if (metrics && request) {
-          metrics.modelDurationMs += Math.max(0, event.timeUnixMs - request.timeUnixMs);
-          metrics.modelDurationCount += 1;
-        }
-        if (metrics && event.data.inputTokens !== undefined) {
-          metrics.inputTokens += event.data.inputTokens;
-          metrics.inputTokenCount += 1;
-        }
-        if (metrics && event.data.outputTokens !== undefined) {
-          metrics.outputTokens += event.data.outputTokens;
-          metrics.outputTokenCount += 1;
-        }
-        if (metrics && event.data.totalTokens !== undefined) {
-          metrics.totalTokens += event.data.totalTokens;
-          metrics.totalTokenCount += 1;
-        }
-        lifecycle(
-          `marker:request:${event.data.requestId}`,
-          event,
-          'request',
-          'completed',
-          event.data.finishReason,
-        );
+        };
+        putProcessChild(eventTurnId(event), node);
         break;
       }
+      case 'assistant/chunk': {
+        const request = requests.get(event.data.requestId);
+        if (request && request.firstResponseAt === undefined
+          && (event.data.reasoningDelta || event.data.textDelta || event.data.toolCallDelta)) {
+          request.firstResponseAt = event.timeUnixMs;
+        }
+        if (event.data.usage) updateRequestUsage(event.data.requestId, event.data.usage);
+        if (event.data.reasoningDelta) {
+          upsertReasoning(event, event.data.reasoningDelta, 'streaming', false);
+        }
+        if (event.data.textDelta) {
+          upsertAssistantText(event, event.data.requestId, event.data.textDelta, 'streaming');
+        }
+        break;
+      }
+      case 'assistant/message': {
+        const requestId = event.stepId ? activeRequestByStep.get(event.stepId) ?? null : null;
+        const reasoning = reasoningContent(event.data.content);
+        if (reasoning) {
+          upsertReasoning(
+            event,
+            reasoning,
+            event.data.interrupted ? 'interrupted' : 'completed',
+            true,
+          );
+        }
+        upsertAssistantText(
+          event,
+          requestId,
+          textContent(event.data.content),
+          event.data.interrupted ? 'interrupted' : 'completed',
+          event.data.content,
+          event.data.messageId,
+        );
+        if (requestId) {
+          updateRequestUsage(
+            requestId,
+            event.data.usage,
+            event.data.stopReason,
+            event.timeUnixMs,
+          );
+        }
+        break;
+      }
+      case 'request/usage':
+        updateRequestUsage(
+          event.data.requestId,
+          event.data.usage,
+          event.data.finishReason,
+          requests.get(event.data.requestId)?.completedAt ?? event.timeUnixMs,
+        );
+        break;
       case 'tool/call': {
         const call = event.data.call;
-        const scoped = `${event.stepId ?? 'unscoped'}\u0000${call.callId}`;
-        const existingCallKey = toolKeysByCall.get(call.callId);
-        const key = existingCallKey === undefined
-          ? `tool:${call.callId}`
-          : `tool:${call.callId}:${event.stepId ?? event.seq}`;
-        toolKeys.set(scoped, key);
-        toolKeysByCall.set(call.callId, key);
-        put({
+        const node: AiToolNode = {
           kind: 'tool',
-          key,
+          key: `tool:${call.callId}`,
           sourceKind: 'agent',
           sessionId: event.sessionId,
-          turnId: turnId(event),
-          stepId: stepId(event),
+          turnId: eventTurnId(event),
+          stepId: eventStepId(event),
           firstSeq: event.seq,
           lastSeq: event.seq,
-          timestamp: eventTimestamp(event),
+          timestamp: agentEventTimestamp(event.timeUnixMs),
           callId: call.callId,
           name: call.name,
           summary: toolSummary(call.arguments),
@@ -720,25 +736,29 @@ export function projectAgentConversationNodes(
           target: call.target ?? null,
           idempotency: null,
           approval: null,
-        });
+        };
+        tools.set(call.callId, node);
+        if (event.turnId) toolTurnIds.set(call.callId, event.turnId);
+        putProcessChild(eventTurnId(event), node);
         break;
       }
       case 'tool/approval': {
         const approvalId = event.data.approvalId ?? `${event.data.requestId}:${event.data.callId}`;
+        const turnId = toolTurnIds.get(event.data.callId) ?? eventTurnId(event);
+        const turn = turnId ? turns.get(turnId) : undefined;
         const key = `approval:${approvalId}`;
-        const previous = get(key);
+        const previous = turn?.children.get(key) ?? unscopedNodes.get(key);
+        const previousApproval = previous?.kind === 'approvalMarker' ? previous : undefined;
         const node: AiApprovalMarkerNode = {
           kind: 'approvalMarker',
           key,
           sourceKind: 'agent',
           sessionId: event.sessionId,
-          turnId: turnId(event),
-          stepId: stepId(event),
-          firstSeq: previous?.kind === 'approvalMarker' ? previous.firstSeq : event.seq,
+          turnId,
+          stepId: eventStepId(event),
+          firstSeq: previousApproval?.firstSeq ?? event.seq,
           lastSeq: event.seq,
-          timestamp: previous?.kind === 'approvalMarker'
-            ? previous.timestamp
-            : eventTimestamp(event),
+          timestamp: previousApproval?.timestamp ?? agentEventTimestamp(event.timeUnixMs),
           approvalId,
           requestId: event.data.requestId,
           callId: event.data.callId,
@@ -748,16 +768,10 @@ export function projectAgentConversationNodes(
           reason: event.data.reason ?? null,
           expiresAtUnixMs: event.data.expiresAtUnixMs ?? null,
         };
-        put(node);
+        putProcessChild(turnId, node);
         updateTool(event, event.data.callId, (tool) => ({
           ...tool,
-          state: event.data.status === 'requested'
-            ? 'approval'
-            : event.data.status === 'approved'
-              ? 'running'
-              : event.data.status === 'rejected'
-                ? 'rejected'
-                : 'failed',
+          state: approvalToolState(event.data.status),
           effect: event.data.risk ?? tool.effect,
           approval: {
             approvalId,
@@ -772,47 +786,71 @@ export function projectAgentConversationNodes(
         break;
       }
       case 'tool/execution':
-        if (!updateTool(event, event.data.callId, (tool) => ({
+        updateTool(event, event.data.callId, (tool) => ({
           ...tool,
           state: 'running',
           idempotency: event.data.idempotency,
-        }))) {
-          lifecycle(`marker:tool/execution:${event.seq}`, event, 'unknown', 'unknown', event.data.callId);
+        }));
+        break;
+      case 'tool/result': {
+        if (!tools.has(event.data.callId)) {
+          const node: AiToolNode = {
+            kind: 'tool',
+            key: `tool:${event.data.callId}`,
+            sourceKind: 'agent',
+            sessionId: event.sessionId,
+            turnId: eventTurnId(event),
+            stepId: eventStepId(event),
+            firstSeq: event.seq,
+            lastSeq: event.seq,
+            timestamp: agentEventTimestamp(event.timeUnixMs),
+            callId: event.data.callId,
+            name: event.data.name,
+            summary: event.data.summary,
+            state: toolState(event.data.status),
+            effect: 'unknown',
+            durationMs: event.data.durationMs ?? null,
+            detailRef: { kind: 'agentTool', sessionId: event.sessionId, callId: event.data.callId },
+            evidenceRefs: event.data.evidenceRefs ?? [],
+            input: null,
+            output: event.data.data ?? event.data.summary,
+            error: event.data.status === 'failed' || event.data.status === 'timedOut'
+              ? event.data.summary
+              : null,
+            target: null,
+            idempotency: null,
+            approval: null,
+          };
+          tools.set(event.data.callId, node);
+          if (event.turnId) toolTurnIds.set(event.data.callId, event.turnId);
+          putProcessChild(eventTurnId(event), node);
+        } else {
+          updateTool(event, event.data.callId, (tool) => ({
+            ...tool,
+            state: toolState(event.data.status),
+            summary: event.data.summary,
+            durationMs: event.data.durationMs ?? null,
+            evidenceRefs: event.data.evidenceRefs ?? [],
+            output: event.data.data ?? event.data.summary,
+            error: event.data.status === 'failed' || event.data.status === 'timedOut'
+              ? event.data.summary
+              : null,
+          }));
         }
         break;
-      case 'tool/result':
-        {
-          const metrics = metricsFor(event);
-          if (metrics && event.data.durationMs !== undefined) {
-            metrics.toolDurationMs += event.data.durationMs;
-            metrics.toolDurationCount += 1;
-          }
-        }
-        if (!updateTool(event, event.data.callId, (tool) => ({
-          ...tool,
-          state: toolState(event.data.status),
-          summary: event.data.summary,
-          durationMs: event.data.durationMs ?? null,
-          evidenceRefs: event.data.evidenceRefs ?? [],
-          output: event.data.data ?? event.data.summary,
-          error: event.data.status === 'failed' || event.data.status === 'timedOut'
-            ? event.data.summary
-            : null,
-        }))) {
-          lifecycle(`marker:tool/result:${event.seq}`, event, 'unknown', 'unknown', event.data.callId);
-        }
-        break;
+      }
       case 'context/artifact': {
-        const node: AiArtifactNode = {
+        const previous = artifacts.get(event.data.artifactId);
+        artifacts.set(event.data.artifactId, {
           kind: 'artifact',
           key: `artifact:${event.data.artifactId}`,
           sourceKind: 'agent',
           sessionId: event.sessionId,
-          turnId: turnId(event),
-          stepId: stepId(event),
-          firstSeq: event.seq,
+          turnId: eventTurnId(event),
+          stepId: eventStepId(event),
+          firstSeq: previous?.firstSeq ?? event.seq,
           lastSeq: event.seq,
-          timestamp: eventTimestamp(event),
+          timestamp: previous?.timestamp ?? agentEventTimestamp(event.timeUnixMs),
           artifactId: event.data.artifactId,
           artifactKind: event.data.kind,
           title: event.data.title,
@@ -820,154 +858,186 @@ export function projectAgentConversationNodes(
           mediaType: event.data.mediaType ?? null,
           sha256: event.data.sha256 ?? null,
           sensitivity: event.data.sensitivity ?? null,
-        };
-        put(node);
+        });
         break;
       }
-      case 'compaction/start':
-        activeCompactionKey = `marker:compaction:${event.seq}`;
-        lifecycle(activeCompactionKey, event, 'compaction', 'started', event.data.reason);
-        break;
-      case 'compaction/summary':
-        activeCompactionKey ??= `marker:compaction:${event.seq}`;
-        lifecycle(activeCompactionKey, event, 'compaction', 'info', event.data.summary);
-        break;
-      case 'compaction/end':
-        activeCompactionKey ??= `marker:compaction:${event.seq}`;
-        lifecycle(
-          activeCompactionKey,
-          event,
-          'compaction',
-          event.data.status,
-          `surfaceGeneration=${event.data.surfaceGeneration}`,
-        );
-        activeCompactionKey = null;
-        break;
-      case 'subagent/descriptor': {
-        const key = `marker:subagent:${event.data.descriptorId}`;
-        subagentKeys.set(event.data.descriptorId, key);
-        lifecycle(key, event, 'subagent', 'started', event.data.childSessionId);
-        break;
-      }
-      case 'subagent/message': {
-        const key = subagentKeys.get(event.data.descriptorId)
-          ?? `marker:subagent:${event.data.descriptorId}`;
-        subagentKeys.set(event.data.descriptorId, key);
-        lifecycle(key, event, 'subagent', 'running', event.data.summary);
-        break;
-      }
-      case 'subagent/settled': {
-        const key = subagentKeys.get(event.data.descriptorId)
-          ?? `marker:subagent:${event.data.descriptorId}`;
-        subagentKeys.set(event.data.descriptorId, key);
-        lifecycle(key, event, 'subagent', normalizeStatus(event.data.status), event.data.summary);
-        break;
-      }
-      case 'subagent/detached': {
-        const key = subagentKeys.get(event.data.descriptorId)
-          ?? `marker:subagent:${event.data.descriptorId}`;
-        subagentKeys.set(event.data.descriptorId, key);
-        lifecycle(key, event, 'subagent', 'cancelled', event.data.reason);
-        break;
-      }
-      case 'task/linked':
-        taskKey = `marker:task:${event.data.taskId}`;
-        lifecycle(taskKey, event, 'task', 'started', event.data.goal ?? null);
-        break;
-      case 'task/plan':
-        lifecycle(taskKey, event, 'task', 'info', `planVersion=${event.data.version}`);
-        break;
-      case 'task/state':
-        lifecycle(taskKey, event, 'task', normalizeStatus(event.data.status), event.data.phase ?? null);
-        if (event.data.recovery && event.data.recovery.status !== 'none') {
-          activeRecoveryKey ??= `marker:recovery:${event.seq}`;
-          lifecycle(
-            activeRecoveryKey,
-            event,
-            'recovery',
-            event.data.recovery.status === 'completed' ? 'completed' : 'waiting',
-            event.data.recovery.summary ?? event.data.recovery.status,
-          );
-        } else if (activeRecoveryKey !== null) {
-          lifecycle(activeRecoveryKey, event, 'recovery', 'completed', null);
-          activeRecoveryKey = null;
-        }
-        break;
-      case 'task/evidence':
-        lifecycle(
-          `marker:evidence:${event.data.evidenceId}`,
-          event,
-          'task',
-          'completed',
-          event.data.summary,
-        );
-        break;
       default:
-        put(unknownRuntimeNode(event as RuntimeEventLike));
+        // Future Event v4 extensions remain visible in Activity, never as guessed chat copy.
         break;
     }
   }
 
-  const lastCompletedTurn = completedTurns[completedTurns.length - 1];
-  if (lastCompletedTurn) {
-    const aggregate = completedTurns.reduce((total, completed) => ({
-      stepCount: total.stepCount + completed.metrics.stepCount,
-      modelDurationMs: total.modelDurationMs + completed.metrics.modelDurationMs,
-      modelDurationCount: total.modelDurationCount + completed.metrics.modelDurationCount,
-      toolDurationMs: total.toolDurationMs + completed.metrics.toolDurationMs,
-      toolDurationCount: total.toolDurationCount + completed.metrics.toolDurationCount,
-      ttftTotalMs: total.ttftTotalMs + completed.metrics.ttftTotalMs,
-      ttftCount: total.ttftCount + completed.metrics.ttftCount,
-      inputTokens: total.inputTokens + completed.metrics.inputTokens,
-      inputTokenCount: total.inputTokenCount + completed.metrics.inputTokenCount,
-      outputTokens: total.outputTokens + completed.metrics.outputTokens,
-      outputTokenCount: total.outputTokenCount + completed.metrics.outputTokenCount,
-      totalTokens: total.totalTokens + completed.metrics.totalTokens,
-      totalTokenCount: total.totalTokenCount + completed.metrics.totalTokenCount,
-    }), {
-      stepCount: 0,
-      modelDurationMs: 0,
-      modelDurationCount: 0,
-      toolDurationMs: 0,
-      toolDurationCount: 0,
-      ttftTotalMs: 0,
-      ttftCount: 0,
-      inputTokens: 0,
-      inputTokenCount: 0,
-      outputTokens: 0,
-      outputTokenCount: 0,
-      totalTokens: 0,
-      totalTokenCount: 0,
+  const completedStats = (turn: TurnState): AiDurableTurnStats => {
+    const turnRequests = turn.requestIds
+      .map((requestId) => requests.get(requestId))
+      .filter((request): request is RequestFacts => request !== undefined);
+    const modelDurations = turnRequests.flatMap((request) => (
+      request.completedAt === undefined
+        ? []
+        : [Math.max(0, request.completedAt - request.startedAt)]
+    ));
+    const ttfts = turnRequests.flatMap((request) => (
+      request.firstResponseAt === undefined
+        ? []
+        : [Math.max(0, request.firstResponseAt - request.startedAt)]
+    ));
+    const toolChildren = [...turn.children.values()].filter((child) => child.kind === 'tool');
+    const toolDurations = toolChildren.flatMap((child) => (
+      child.durationMs === null ? [] : [child.durationMs]
+    ));
+    const modelDurationMs = modelDurations.length === 0
+      || modelDurations.length !== turnRequests.length
+      ? null
+      : modelDurations.reduce((sum, duration) => sum + duration, 0);
+    const timeToFirstTokenMs = ttfts.length === 0
+      ? null
+      : ttfts.reduce((sum, duration) => sum + duration, 0);
+    const decodePairs = turnRequests.flatMap((request) => {
+      const outputTokens = request.usage?.outputTokens;
+      if (request.firstResponseAt === undefined || request.completedAt === undefined
+        || outputTokens === undefined) return [];
+      return [{
+        durationMs: Math.max(0, request.completedAt - request.firstResponseAt),
+        outputTokens,
+      }];
     });
-    const modelDurationMs = aggregate.modelDurationCount > 0
-      ? aggregate.modelDurationMs
-      : null;
-    const outputTokens = aggregate.outputTokenCount > 0 ? aggregate.outputTokens : null;
-    const stats: AiTurnStatsNode = {
-      kind: 'turnStats',
-      key: `stats:${events[0]?.sessionId ?? lastCompletedTurn.metrics.turnId}`,
-      sourceKind: 'agent',
-      sessionId: events[0]?.sessionId ?? '',
-      turnId: lastCompletedTurn.metrics.turnId,
-      stepId: null,
-      firstSeq: completedTurns[0]?.metrics.firstSeq ?? lastCompletedTurn.metrics.firstSeq,
-      lastSeq: lastCompletedTurn.lastSeq,
-      timestamp: lastCompletedTurn.timestamp,
-      turnNumber: completedTurns.length,
-      stepCount: aggregate.stepCount,
+    const decodeDurationMs = decodePairs.length === 0
+      ? null
+      : decodePairs.reduce((sum, value) => sum + value.durationMs, 0);
+    const decodeTokens = decodePairs.length === 0
+      ? null
+      : decodePairs.reduce((sum, value) => sum + value.outputTokens, 0);
+    return {
+      turnCount: 1,
+      stepCount: turn.steps.size,
+      requestCount: turnRequests.length,
+      toolCount: toolChildren.length,
       modelDurationMs,
-      toolDurationMs: aggregate.toolDurationCount > 0 ? aggregate.toolDurationMs : null,
-      averageTimeToFirstTokenMs: aggregate.ttftCount > 0
-        ? Math.round(aggregate.ttftTotalMs / aggregate.ttftCount)
+      toolDurationMs: toolDurations.length === 0 || toolDurations.length !== toolChildren.length
+        ? null
+        : toolDurations.reduce((sum, duration) => sum + duration, 0),
+      timeToFirstTokenMs,
+      timeToFirstTokenCount: ttfts.length,
+      averageTimeToFirstTokenMs: timeToFirstTokenMs === null
+        ? null
+        : Math.round(timeToFirstTokenMs / ttfts.length),
+      decodeDurationMs,
+      decodeTokens,
+      uncachedInputTokens: usageField(turnRequests, 'uncachedInputTokens'),
+      cacheReadTokens: usageField(turnRequests, 'cacheReadTokens'),
+      cacheWriteTokens: usageField(turnRequests, 'cacheWriteTokens'),
+      outputTokens: usageField(turnRequests, 'outputTokens'),
+      reasoningTokens: usageField(turnRequests, 'reasoningTokens'),
+      totalTokens: usageField(turnRequests, 'totalTokens'),
+      tokensPerSecond: decodeTokens !== null && decodeDurationMs !== null && decodeDurationMs > 0
+        ? decodeTokens / (decodeDurationMs / 1_000)
         : null,
-      inputTokens: aggregate.inputTokenCount > 0 ? aggregate.inputTokens : null,
-      outputTokens,
-      totalTokens: aggregate.totalTokenCount > 0 ? aggregate.totalTokens : null,
-      tokensPerSecond: outputTokens !== null && modelDurationMs !== null && modelDurationMs > 0
-        ? outputTokens / (modelDurationMs / 1_000)
-        : null,
+      usageComplete: turnRequests.length > 0
+        && turnRequests.every((request) => hasReportedUsage(request.usage)),
     };
-    put(stats);
+  };
+
+  const scopedUsers = new Map<string, AiUserMessageNode[]>();
+  for (const node of userMessages.values()) {
+    if (node.turnId === null) {
+      unscopedNodes.set(node.key, node);
+      continue;
+    }
+    const values = scopedUsers.get(node.turnId) ?? [];
+    values.push(node);
+    scopedUsers.set(node.turnId, values);
+  }
+
+  const scopedPrompts = new Map<string, AiSystemPromptNode[]>();
+  for (const node of systemPrompts.values()) {
+    if (node.turnId === null) {
+      unscopedNodes.set(node.key, node);
+      continue;
+    }
+    const values = scopedPrompts.get(node.turnId) ?? [];
+    values.push(node);
+    scopedPrompts.set(node.turnId, values);
+  }
+
+  const scopedArtifacts = new Map<string, AiArtifactNode[]>();
+  for (const node of artifacts.values()) {
+    if (node.turnId === null) {
+      unscopedNodes.set(node.key, node);
+      continue;
+    }
+    const values = scopedArtifacts.get(node.turnId) ?? [];
+    values.push(node);
+    scopedArtifacts.set(node.turnId, values);
+  }
+
+  const nodes: AiConversationNode[] = [...unscopedNodes.values()].sort(topLevelSort);
+  const orderedTurns = [...turns.values()].sort((left, right) => (
+    left.firstSeq - right.firstSeq || left.id.localeCompare(right.id)
+  ));
+  const settledTurnStats: AiDurableTurnStats[] = [];
+  for (const turn of orderedTurns) {
+    nodes.push(...(scopedPrompts.get(turn.id) ?? []).sort(topLevelSort));
+    nodes.push(...(scopedUsers.get(turn.id) ?? []).sort(topLevelSort));
+
+    const assistants = [...turn.assistants.values()].sort(topLevelSort);
+    const closing = [...assistants].reverse().find((assistant) => (
+      textContent(assistant.blocks).trim() !== '' && !hasToolCall(assistant.blocks)
+    ));
+    for (const assistant of assistants) {
+      if (assistant.key !== closing?.key) turn.children.set(assistant.key, assistant);
+    }
+    const children = [...turn.children.values()].sort(processChildSort);
+    const status: AiTurnProcessStatus = turn.startSeq === undefined
+      ? 'partial'
+      : turn.endSeq === undefined ? 'running' : turn.status ?? 'completed';
+    const answerGeneration = [...turn.requestIds].reverse()[0] ?? `turn:${turn.id}`;
+    const process: AiTurnProcessNode = {
+      kind: 'turnProcess',
+      key: `turn-process:${turn.id}`,
+      sourceKind: 'agent',
+      sessionId: turn.sessionId,
+      turnId: turn.id,
+      stepId: null,
+      firstSeq: turn.startSeq ?? turn.firstSeq,
+      lastSeq: turn.endSeq ?? turn.lastSeq,
+      timestamp: turn.timestamp,
+      status,
+      answerGeneration,
+      hasStartBoundary: turn.startSeq !== undefined,
+      hasEndBoundary: turn.endSeq !== undefined,
+      childKeys: children.map((child) => child.key),
+      children,
+    };
+    nodes.push(process);
+    if (closing) nodes.push(closing);
+    nodes.push(...(scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort));
+
+    if (turn.startSeq !== undefined && turn.endSeq !== undefined && turn.endReason && turn.endTimestamp) {
+      const stats = completedStats(turn);
+      settledTurnStats.push(stats);
+      const latestRequest = [...turn.requestIds]
+        .reverse()
+        .map((requestId) => requests.get(requestId))
+        .find((request) => request !== undefined);
+      const tail: AiTurnTailNode = {
+        kind: 'turnTail',
+        key: `turn-tail:${turn.id}`,
+        sourceKind: 'agent',
+        sessionId: turn.sessionId,
+        turnId: turn.id,
+        stepId: null,
+        firstSeq: turn.endSeq,
+        lastSeq: turn.endSeq,
+        timestamp: turn.endTimestamp,
+        status: turn.status ?? 'completed',
+        endReason: turn.endReason,
+        stopReason: latestRequest?.stopReason ?? null,
+        usage: aggregateUsage(stats),
+        stats,
+        sessionStats: aggregateDurableSessionStats(settledTurnStats, events[0]?.seq === 0),
+      };
+      nodes.push(tail);
+    }
   }
 
   return nodes;

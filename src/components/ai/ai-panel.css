@@ -699,6 +699,7 @@
   min-width: 0;
   margin-inline: auto;
   gap: 16px;
+  padding-inline: 0;
   padding-block: 20px 28px;
 }
 
@@ -1053,6 +1054,7 @@
 }
 
 .ai-disclosure-row[data-slot='button'],
+.ai-disclosure-row[data-reasoning-header],
 .ai-tool-row {
   position: relative;
   display: flex;
@@ -1071,6 +1073,77 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.ai-semantic-note,
+.ai-turn-process,
+.ai-turn-process-body,
+.ai-turn-process-child,
+.ai-turn-tail {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ai-semantic-note-marker {
+  min-width: 0;
+}
+
+.ai-semantic-note-marker .ai-disclosure-row[data-slot='button'] {
+  flex: 1;
+}
+
+.ai-semantic-note-heading {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+}
+
+.ai-semantic-note-separator[data-slot='separator'] {
+  display: none;
+}
+
+.ai-semantic-note-body {
+  box-sizing: border-box;
+  width: calc(100% - 22px);
+  max-height: 141px;
+  margin: 4px 0 0 22px;
+  overflow: auto;
+  padding: 10px 16px 12px 12px;
+  border-radius: 8px;
+  background: var(--dsw-alias-markdown-code-block);
+  color: var(--dsw-alias-label-tertiary);
+  font: 400 11px/16px var(--ds-font-family-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-disclosure-row[data-reasoning-header] {
+  cursor: default;
+}
+
+.ai-turn-process-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0 2px;
+}
+
+.ai-turn-process-trigger[data-slot='button'] {
+  height: 24px;
+}
+
+.ai-turn-process-separator[data-slot='separator'] {
+  height: 0.5px;
+  background: var(--dsw-alias-border-l2);
+}
+
+.ai-turn-process:not([data-expanded]) .ai-turn-process-separator {
+  margin-bottom: 8px;
+}
+
+.ai-turn-process-child:empty {
+  display: none;
 }
 
 .ai-disclosure-leading {
@@ -1137,6 +1210,8 @@
   transition: transform 100ms ease;
 }
 
+.ai-semantic-note[data-expanded] .ai-disclosure-chevron,
+.ai-turn-process[data-expanded] .ai-disclosure-chevron,
 .ai-reasoning-row[data-expanded] .ai-disclosure-chevron,
 .ai-tool-row-root:has([data-slot='collapsible-trigger'][aria-expanded='true']) .ai-disclosure-chevron {
   transform: rotate(0deg);
@@ -1561,27 +1636,31 @@
 }
 
 .ai-turn-stats {
-  display: block;
+  display: flex;
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  column-gap: 16px;
+  overflow: visible;
   color: var(--dsw-alias-label-tertiary);
   font-size: 13px;
   line-height: 20px;
   text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .ai-turn-stats > [data-stat-group] {
+  display: inline-flex;
+  align-items: center;
   white-space: nowrap;
 }
 
 .ai-turn-stats > [data-stat-group] + [data-stat-group]::before {
-  margin: 0 8px;
-  color: var(--dsw-alias-border-l4);
-  content: '|';
+  content: none;
 }
 
 .ai-turn-stats-inner-separator {
