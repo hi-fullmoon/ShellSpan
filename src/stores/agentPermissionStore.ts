@@ -6,7 +6,7 @@ import {
   type AgentApprovalTarget,
 } from '@/types/agent-approval';
 
-const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = 'requestApproval';
+const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = 'autoApproveReadOnly';
 
 export interface AgentPermissionBinding {
   readonly mode: AgentPermissionMode;

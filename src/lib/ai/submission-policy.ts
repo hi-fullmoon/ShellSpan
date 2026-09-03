@@ -1,4 +1,4 @@
-import type { AiSessionKind, AiSessionStatus } from './conversation-node';
+import type { AiSessionStatus } from './conversation-node';
 import type { AiSubmissionMode } from './session-adapter';
 
 export type AiBusyPreference = 'queue' | 'steer';
@@ -9,8 +9,7 @@ export type AiSubmissionRejection =
   | 'waitingApproval'
   | 'terminal'
   | 'providerUnavailable'
-  | 'sessionUnavailable'
-  | 'busyUnsupported';
+  | 'sessionUnavailable';
 
 export type AiSubmissionDecision =
   | Readonly<{ kind: 'submit'; mode: AiSubmissionMode }>
@@ -18,7 +17,6 @@ export type AiSubmissionDecision =
   | Readonly<{ kind: 'reject'; reason: AiSubmissionRejection }>;
 
 export interface AiSubmissionPolicyInput {
-  readonly sessionKind: AiSessionKind;
   readonly sessionStatus: AiSessionStatus;
   readonly terminal: boolean;
   readonly sessionId: string | null;
@@ -49,8 +47,6 @@ export function resolveAiSubmission(input: AiSubmissionPolicyInput): AiSubmissio
   if (!input.hasProvider) return { kind: 'reject', reason: 'providerUnavailable' };
 
   if (running) {
-    // Ask has cancellation while streaming, but no durable Queue/Steer lane.
-    if (input.sessionKind === 'ask') return { kind: 'reject', reason: 'busyUnsupported' };
     if (input.sessionId === null) return { kind: 'reject', reason: 'sessionUnavailable' };
     const busyMode = input.accelerated
       ? opposite(input.preferredBusyMode)

@@ -1,4 +1,4 @@
-import type { AiSessionKind, AiSessionStatus } from './conversation-node';
+import type { AiSessionStatus } from './conversation-node';
 import {
   resolveAiSubmission,
   type AiBusyPreference,
@@ -31,8 +31,6 @@ export interface AiComposerState {
   readonly runtimeStatus: AiSessionStatus;
   readonly terminal: boolean;
   readonly sessionId: string | null;
-  readonly preset: AiSessionKind;
-  readonly presetLocked: boolean;
   readonly draft: string;
   readonly detached: AiDetachedSubmission | null;
   readonly pendingSubmissions: readonly AiPendingSubmission[];
@@ -51,11 +49,9 @@ export type AiComposerEffect =
 export type AiComposerEvent =
   | Readonly<{ type: 'draft.changed'; value: string }>
   | Readonly<{ type: 'preference.changed'; value: AiBusyPreference }>
-  | Readonly<{ type: 'preset.changed'; value: AiSessionKind }>
   | Readonly<{
       type: 'runtime.synchronized';
       sessionId: string | null;
-      preset: AiSessionKind;
       status: AiSessionStatus;
       terminal: boolean;
       waitingApproval: boolean;
@@ -102,8 +98,6 @@ export function createAiComposerState(input?: Partial<AiComposerState>): AiCompo
     runtimeStatus: 'idle',
     terminal: false,
     sessionId: null,
-    preset: 'ask',
-    presetLocked: false,
     draft: '',
     detached: null,
     pendingSubmissions: [],
@@ -183,21 +177,14 @@ export function reduceAiComposer(
       return { state: { ...state, draft: event.value }, effects: [] };
     case 'preference.changed':
       return { state: { ...state, preferredBusyMode: event.value }, effects: [] };
-    case 'preset.changed':
-      if (state.presetLocked) return { state, effects: [] };
-      return { state: { ...state, preset: event.value }, effects: [] };
     case 'runtime.synchronized': {
       const adoptsCreatedSession = state.sessionId === null
         && event.sessionId !== null
-        && state.pendingSubmissions.some((item) => item.sessionId === null)
-        && state.preset === event.preset;
-      const sessionChanged = (state.sessionId !== event.sessionId || state.preset !== event.preset)
-        && !adoptsCreatedSession;
+        && state.pendingSubmissions.some((item) => item.sessionId === null);
+      const sessionChanged = state.sessionId !== event.sessionId && !adoptsCreatedSession;
       const next = {
         ...state,
         sessionId: event.sessionId,
-        preset: event.preset,
-        presetLocked: event.sessionId !== null,
         runtimeStatus: event.status,
         terminal: event.terminal,
         waitingApproval: event.waitingApproval,
@@ -228,7 +215,6 @@ export function reduceAiComposer(
     }
     case 'submit.requested': {
       const decision = resolveAiSubmission({
-        sessionKind: state.preset,
         sessionStatus: state.runtimeStatus,
         terminal: state.terminal,
         sessionId: state.sessionId,
@@ -261,7 +247,6 @@ export function reduceAiComposer(
       const failed = state.failedDrafts.find((entry) => entry.id === event.failedDraftId);
       if (!failed) return { state, effects: [] };
       const decision = resolveAiSubmission({
-        sessionKind: state.preset,
         sessionStatus: state.runtimeStatus,
         terminal: state.terminal,
         sessionId: state.sessionId,
@@ -307,7 +292,6 @@ export function reduceAiComposer(
           }),
           runtimeStatus: state.runtimeStatus === 'idle' ? 'running' : state.runtimeStatus,
           sessionId: event.receipt.sessionId,
-          presetLocked: true,
           detached: state.detached?.clientOperationId === event.receipt.clientOperationId
             ? null
             : state.detached,

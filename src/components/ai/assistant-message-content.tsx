@@ -6,9 +6,10 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { AtomIcon, CheckIcon, ChevronRightIcon, ClipboardIcon } from 'lucide-react';
+import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
 import { Button } from '@/components/ui/button';
 import {
   Collapsible,
@@ -30,6 +31,60 @@ function textFromNode(node: React.ReactNode): string {
   return '';
 }
 
+function languageFromNode(node: React.ReactNode): string {
+  const child = React.Children.toArray(node).find(React.isValidElement);
+  if (!React.isValidElement<{ className?: string }>(child)) return '';
+  return /language-([^\s]+)/u.exec(child.props.className ?? '')?.[1] ?? '';
+}
+
+function MarkdownCodeBlock({
+  children,
+  copiedLabel,
+  copyLabel,
+  showActions,
+}: {
+  children: React.ReactNode;
+  copiedLabel: string;
+  copyLabel: string;
+  showActions: boolean;
+}) {
+  const code = textFromNode(children).replace(/\n$/, '');
+  const language = languageFromNode(children);
+  const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
+  }, []);
+
+  const copy = useCallback(() => {
+    if (copied || !navigator.clipboard) return;
+    void navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      resetTimerRef.current = window.setTimeout(() => setCopied(false), 1_000);
+    }).catch(() => undefined);
+  }, [code, copied]);
+
+  return (
+    <div className="ai-code-block" data-language={language || undefined}>
+      <div className="ai-code-block-banner">
+        <span className="ai-code-block-language">{language}</span>
+        {showActions && (
+          <button
+            type="button"
+            className="ai-code-block-copy"
+            aria-label={copied ? copiedLabel : copyLabel}
+            onClick={copy}
+          >
+            {copied ? copiedLabel : copyLabel}
+          </button>
+        )}
+      </div>
+      <pre className="ai-code-block-pre">{children}</pre>
+    </div>
+  );
+}
+
 const MarkdownContent = React.memo(function MarkdownContent({
   children,
   copiedLabel,
@@ -41,107 +96,57 @@ const MarkdownContent = React.memo(function MarkdownContent({
   copyLabel: string;
   showCodeBlockActions: boolean;
 }): React.JSX.Element {
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
-  const copyResetTimerRef = useRef<number | null>(null);
-  const copyCode = useCallback((code: string): void => {
-    void navigator.clipboard.writeText(code).then(() => {
-      setCopiedCode(code);
-      if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
-      copyResetTimerRef.current = window.setTimeout(() => setCopiedCode(null), 1600);
-    }).catch(() => undefined);
-  }, []);
-
-  useEffect(() => () => {
-    if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
-  }, []);
-
   return (
-    <Markdown
-      remarkPlugins={[remarkGfm]}
-      skipHtml
-      components={{
-        a: ({ children: linkChildren, href }) => (
-          <a href={href} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-4">
-            {linkChildren}
-          </a>
-        ),
-        blockquote: ({ children: quoteChildren }) => (
-          <blockquote className="border-l-2 border-border pl-3 text-muted-foreground">
-            {quoteChildren}
-          </blockquote>
-        ),
-        code: ({ children: codeChildren, className }) => (
-          <code className={cn('rounded bg-muted px-1 py-0.5 font-mono text-[0.9em]', className)}>
-            {codeChildren}
-          </code>
-        ),
-        h1: ({ children: headingChildren }) => (
-          <h1 className="text-base font-semibold leading-6">{headingChildren}</h1>
-        ),
-        h2: ({ children: headingChildren }) => (
-          <h2 className="text-sm font-semibold leading-6">{headingChildren}</h2>
-        ),
-        h3: ({ children: headingChildren }) => (
-          <h3 className="text-sm font-medium leading-6">{headingChildren}</h3>
-        ),
-        hr: () => <Separator />,
-        img: ({ alt }) => <span className="text-muted-foreground">[{alt || 'image'}]</span>,
-        ol: ({ children: listChildren }) => (
-          <ol className="flex list-decimal flex-col gap-1 pl-5">{listChildren}</ol>
-        ),
-        p: ({ children: paragraphChildren }) => (
-          <p className="leading-6">{paragraphChildren}</p>
-        ),
-        pre: ({ children: codeChildren }) => {
-          const code = textFromNode(codeChildren).replace(/\n$/, '');
-          const copied = copiedCode === code;
-          return (
-            <div className="group/code-block relative">
-              {showCodeBlockActions && (
-                <Button
-                  variant="outline"
-                  size="xs"
-                  className={cn(
-                    'absolute right-1.5 top-1.5 size-6 p-0 transition-opacity',
-                    !copied && 'pointer-events-none opacity-0 group-hover/code-block:pointer-events-auto group-hover/code-block:opacity-100 group-focus-within/code-block:pointer-events-auto group-focus-within/code-block:opacity-100',
-                  )}
-                  onClick={() => copyCode(code)}
-                  aria-label={copied ? copiedLabel : copyLabel}
-                >
-                  {copied
-                    ? <CheckIcon data-icon="inline-start" />
-                    : <ClipboardIcon data-icon="inline-start" />}
-                  <span className="sr-only" aria-live="polite">
-                    {copied ? copiedLabel : copyLabel}
-                  </span>
-                </Button>
-              )}
-              <pre className="overflow-x-auto rounded-lg border border-border bg-muted/50 p-3 text-xs leading-5 [&_code]:bg-transparent [&_code]:p-0">
-                {codeChildren}
-              </pre>
+    <div className="ai-assistant-markdown">
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+        components={{
+          a: ({ children: linkChildren, href }) => (
+            <a href={href} target="_blank" rel="noreferrer">
+              {linkChildren}
+            </a>
+          ),
+          blockquote: ({ children: quoteChildren }) => (
+            <blockquote>{quoteChildren}</blockquote>
+          ),
+          code: ({ children: codeChildren, className }) => (
+            <code className={cn(!className && 'ai-markdown-inline-code', className)}>
+              {codeChildren}
+            </code>
+          ),
+          hr: () => <Separator />,
+          img: ({ alt }) => <span className="ai-markdown-image-alt">[{alt || 'image'}]</span>,
+          pre: ({ children: codeChildren }) => (
+            <MarkdownCodeBlock
+              copiedLabel={copiedLabel}
+              copyLabel={copyLabel}
+              showActions={showCodeBlockActions}
+            >
+              {codeChildren}
+            </MarkdownCodeBlock>
+          ),
+          table: ({ children: tableChildren }) => (
+            <div className="ai-markdown-table-scroll" tabIndex={0}>
+              <table>{tableChildren}</table>
             </div>
-          );
-        },
-        table: ({ children: tableChildren }) => (
-          <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full border-collapse text-left text-xs">{tableChildren}</table>
-          </div>
-        ),
-        td: ({ children: cellChildren }) => (
-          <td className="border-t border-border px-2 py-1.5 align-top">{cellChildren}</td>
-        ),
-        th: ({ children: cellChildren }) => (
-          <th className="bg-muted px-2 py-1.5 font-medium">{cellChildren}</th>
-        ),
-        ul: ({ children: listChildren }) => (
-          <ul className="flex list-disc flex-col gap-1 pl-5">{listChildren}</ul>
-        ),
-      }}
-    >
-      {children}
-    </Markdown>
+          ),
+        }}
+      >
+        {children}
+      </Markdown>
+    </div>
   );
 });
+
+function firstLine(text: string): string {
+  return text.trim().split('\n')[0] ?? text;
+}
+
+function latestLine(text: string): string {
+  const lines = text.trimEnd().split('\n');
+  return lines[lines.length - 1] ?? text;
+}
 
 const AssistantMessageContentComponent: React.FC<{
   content: string;
@@ -169,9 +174,7 @@ const AssistantMessageContentComponent: React.FC<{
   }, [hasAnswer, hasReasoning]);
 
   useEffect(() => {
-    if (streaming && reasoningStartedAt.current === null) {
-      reasoningStartedAt.current = Date.now();
-    }
+    if (streaming && reasoningStartedAt.current === null) reasoningStartedAt.current = Date.now();
     if (
       !hasReasoning
       || reasoningDurationSeconds !== null
@@ -181,43 +184,57 @@ const AssistantMessageContentComponent: React.FC<{
 
     setReasoningDurationSeconds(Math.max(
       1,
-      Math.ceil((Date.now() - reasoningStartedAt.current) / 1000),
+      Math.ceil((Date.now() - reasoningStartedAt.current) / 1_000),
     ));
   }, [hasReasoning, reasoningComplete, reasoningDurationSeconds, streaming]);
 
   if (!renderedContent) {
-    return <span className="shimmer text-xs">{t('ai.thinking.inProgress')}</span>;
+    return <span className="ai-turn-status shimmer" role="status">{t('ai.thinking.inProgress')}</span>;
   }
 
+  const reasoningRunning = streaming && !reasoningComplete;
+  const reasoningSummary = reasoningRunning ? latestLine(reasoning) : firstLine(reasoning);
+  const reasoningLabel = reasoningRunning
+    ? t('ai.thinking.inProgress')
+    : reasoningDurationSeconds === null
+      ? t('ai.thinking')
+      : t('ai.thinking.completed', { seconds: reasoningDurationSeconds });
+
   return (
-    <div className="flex min-w-0 flex-col gap-3">
+    <div className="ai-assistant-content" data-streaming={streaming || undefined}>
       {reasoning && (
         <Collapsible open={reasoningOpen} onOpenChange={setReasoningOpen}>
-          <CollapsibleTrigger
-            render={<Button variant="plain" size="xs" className="justify-start px-0" />}
+          <div
+            className={cn('ai-reasoning-row', reasoningRunning && 'shimmer')}
+            data-state={reasoningRunning ? 'running' : 'ok'}
+            data-expanded={reasoningOpen || undefined}
           >
-            <AtomIcon data-icon="inline-start" className="text-primary" />
-            <span className={cn(streaming && !reasoningComplete && 'shimmer')}>
-              {streaming && !reasoningComplete
-                ? t('ai.thinking.inProgress')
-                : reasoningDurationSeconds === null
-                  ? t('ai.thinking')
-                  : t('ai.thinking.completed', { seconds: reasoningDurationSeconds })}
-            </span>
-            <ChevronRightIcon
-              data-icon="inline-end"
-              className={cn('transition-transform', reasoningOpen && 'rotate-90')}
-            />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pl-3">
-            <div className="border-l border-border py-1 pl-3 text-xs leading-5 text-muted-foreground whitespace-pre-wrap">
-              {reasoning}
-            </div>
-          </CollapsibleContent>
+            <CollapsibleTrigger
+              render={(
+                <Button
+                  variant="plain"
+                  size="sm"
+                  className="ai-disclosure-row"
+                  aria-label={reasoningLabel}
+                />
+              )}
+            >
+              <span className="ai-disclosure-leading" aria-hidden="true">
+                <BrainIcon />
+              </span>
+              <span className="ai-disclosure-title">{reasoningLabel}</span>
+              <span className="ai-disclosure-separator" aria-hidden="true" />
+              <span className="ai-disclosure-summary">{reasoningSummary}</span>
+              <ChevronDownIcon className="ai-disclosure-chevron" aria-hidden="true" />
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="ai-reasoning-body">{reasoning}</div>
+            </CollapsibleContent>
+          </div>
         </Collapsible>
       )}
       {hasAnswer && (
-        <div className="flex min-w-0 flex-col gap-3 [&>*]:min-w-0">
+        <div className="ai-assistant-answer">
           {answerChunks.map((chunk, index) => (
             <MarkdownContent
               key={index}

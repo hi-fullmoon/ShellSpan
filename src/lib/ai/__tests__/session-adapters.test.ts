@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AgentSessionCommittedClient } from '@/lib/agent-session-client';
 import {
   agentSessionView,
@@ -7,20 +7,9 @@ import {
   type AgentSessionAdapterDependencies,
 } from '@/lib/ai/agent-session-adapter';
 import {
-  createAskSessionAdapter,
-  type AskSessionAdapterDependencies,
-} from '@/lib/ai/ask-session-adapter';
-import type { AiSessionView } from '@/lib/ai/session-adapter';
-import { useAiStore } from '@/stores/aiStore';
-import {
   agentSessionEventFixture,
   agentSessionWaitingApprovalEventFixture,
 } from '@/test/fixtures/agent-session';
-import {
-  ASK_STREAM_REQUEST_ID,
-  askStreamingConversationFixture,
-} from '@/test/fixtures/ask-streaming';
-import type { AiStreamEvent } from '@/types/ai';
 import type {
   AgentSessionEvent,
   AgentSessionSnapshot,
@@ -108,11 +97,35 @@ function agentDependencies(
   };
 }
 
-afterEach(() => {
-  useAiStore.getState().clear();
-});
-
 describe('AgentSessionAdapter', () => {
+  it('prefers provider-reported prompt usage while retaining Runtime-estimated categories', () => {
+    const events: readonly AgentSessionEvent[] = [
+      ...agentSessionEventFixture.slice(0, 10),
+      {
+        version: AGENT_SESSION_EVENT_VERSION,
+        sessionId: 'session-fixture',
+        seq: 10,
+        timeUnixMs: 2_000,
+        type: 'request/usage',
+        turnId: 'turn-1',
+        stepId: 'step-1',
+        data: {
+          requestId: 'request-1', inputTokens: 31_500, outputTokens: 12,
+          totalTokens: 31_512, finishReason: 'stop',
+        },
+      },
+    ];
+    const view = agentSessionView({
+      snapshot: snapshot(), events, lastCommittedSeq: 10, hasTerminalEvent: false,
+    });
+    expect(view.contextUsage).toEqual({
+      usedTokens: 31_500,
+      contextWindow: 64_000,
+      source: 'reported',
+      breakdown: { systemTokens: 1_200, toolsTokens: 6_800, messageTokens: 24_000 },
+    });
+  });
+
   it('projects committed Inbox mutations in Runtime order', () => {
     const events: AgentSessionEvent[] = [
       {
@@ -244,7 +257,14 @@ describe('AgentSessionAdapter', () => {
       agentSessionWaitingApprovalEventFixture[agentSessionWaitingApprovalEventFixture.length - 1]?.seq,
     );
     expect(view.nodes.some((node) => node.kind === 'approvalMarker')).toBe(true);
-    expect(view.activity?.sessionId).toBe('session-fixture');
+    expect(view.status).toBe('running');
+    expect(view).not.toHaveProperty('activity');
+    expect(view.contextUsage).toEqual({
+      usedTokens: 32_000,
+      contextWindow: 64_000,
+      source: 'estimated',
+      breakdown: { systemTokens: 1_200, toolsTokens: 6_800, messageTokens: 24_000 },
+    });
     expect(view.pendingApproval).toEqual(expect.objectContaining({
       approvalId: 'approval-health',
       callId: 'call-health',
@@ -349,97 +369,5 @@ describe('AgentSessionAdapter', () => {
     });
     expect(view.status).toBe('running');
     expect(view.error).toBeNull();
-  });
-});
-
-describe('AskSessionAdapter', () => {
-  it('subscribes before submit and projects stream/error state through aiStore', async () => {
-    const order: string[] = [];
-    let streamListener: ((event: AiStreamEvent) => void) | undefined;
-    const dependencies: AskSessionAdapterDependencies = {
-      store: useAiStore,
-      start: vi.fn(async () => { order.push('start'); }),
-      stop: vi.fn(async () => undefined),
-      listen: vi.fn(async (listener) => {
-        order.push('listen');
-        streamListener = listener;
-        return () => { streamListener = undefined; };
-      }),
-      create: vi.fn(async () => undefined),
-      archive: vi.fn(async () => undefined),
-      persistMessage: vi.fn(async () => undefined),
-    };
-    const adapter = createAskSessionAdapter(dependencies);
-    await adapter.create({ kind: 'ask', conversation: askStreamingConversationFixture });
-    const views: AiSessionView[] = [];
-    const unsubscribe = adapter.subscribe(askStreamingConversationFixture.id, (view) => {
-      views.push(view);
-    });
-
-    await adapter.submit(askStreamingConversationFixture.id, {
-      content: 'Why did the deployment fail?',
-      mode: 'start',
-      clientOperationId: ASK_STREAM_REQUEST_ID,
-      provider,
-    });
-    streamListener?.({ type: 'textDelta', requestId: ASK_STREAM_REQUEST_ID, text: 'Inspecting ' });
-    streamListener?.({
-      type: 'textDelta',
-      requestId: ASK_STREAM_REQUEST_ID,
-      text: 'the deployment output.',
-    });
-    streamListener?.({ type: 'completed', requestId: ASK_STREAM_REQUEST_ID });
-
-    expect(order).toEqual(['listen', 'start']);
-    const completedView = views[views.length - 1];
-    expect(completedView?.status).toBe('idle');
-    expect(completedView?.nodes.find((node) => node.kind === 'assistantMessage'))
-      .toEqual(expect.objectContaining({
-        key: 'assistant:ask-stream-request',
-        content: 'Inspecting the deployment output.',
-        state: 'completed',
-      }));
-
-    useAiStore.getState().beginRequest({
-      requestId: 'request-error',
-      task: 'ask',
-      userContent: 'Retry?',
-      providerId: provider.id,
-      conversationId: askStreamingConversationFixture.id,
-    });
-    streamListener?.({ type: 'error', requestId: 'request-error', message: 'Provider disconnected.' });
-    const failedView = views[views.length - 1];
-    expect(failedView?.error).toEqual(expect.objectContaining({
-      message: 'Provider disconnected.',
-      retryable: true,
-    }));
-    expect(failedView?.nodes.some((node) => node.kind === 'error')).toBe(true);
-
-    unsubscribe();
-    adapter.dispose();
-  });
-
-  it('routes a streaming Stop through the Ask cancel adapter and propagates errors', async () => {
-    const dependencies: AskSessionAdapterDependencies = {
-      store: useAiStore,
-      start: vi.fn(async () => undefined),
-      stop: vi.fn(async () => { throw new Error('cancel disconnected'); }),
-      listen: vi.fn(async () => () => undefined),
-      create: vi.fn(async () => undefined),
-      archive: vi.fn(async () => undefined),
-      persistMessage: vi.fn(async () => undefined),
-    };
-    const adapter = createAskSessionAdapter(dependencies);
-    await adapter.create({ kind: 'ask', conversation: askStreamingConversationFixture });
-    useAiStore.getState().beginRequest({
-      requestId: 'request-cancel',
-      task: 'ask',
-      userContent: 'Stop this',
-      providerId: provider.id,
-      conversationId: askStreamingConversationFixture.id,
-    });
-    await expect(adapter.stop(askStreamingConversationFixture.id)).rejects.toThrow('cancel disconnected');
-    expect(dependencies.stop).toHaveBeenCalledWith('request-cancel');
-    adapter.dispose();
   });
 });

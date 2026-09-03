@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiPanel } from '@/components/ai/ai-panel';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
-import { useAiStore } from '@/stores/aiStore';
+import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 
@@ -11,7 +11,7 @@ vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({ locale: 'en-US', ready: true, setLocale: vi.fn(), t: (key: string) => key }),
 }));
 
-const initialAiState = useAiStore.getState();
+const initialAiState = useAiPanelStore.getState();
 const initialAiSettingsState = useAiSettingsStore.getState();
 const initialTerminalState = useTerminalStore.getState();
 
@@ -62,11 +62,11 @@ beforeEach(() => {
     writable: true,
     value: (id: number) => animationFrames.delete(id),
   });
-  useAiStore.setState(initialAiState, true);
+  useAiPanelStore.setState(initialAiState, true);
   useAiSettingsStore.setState(initialAiSettingsState, true);
   useTerminalStore.setState(initialTerminalState, true);
   useAppStore.setState({ activeSection: 'workbench' });
-  useAiStore.setState({ panelOpenBySection: { workbench: true, terminal: false } });
+  useAiPanelStore.setState({ panelOpenBySection: { workbench: true, terminal: false } });
 });
 
 afterEach(() => {
@@ -76,15 +76,32 @@ afterEach(() => {
 
 describe('AI panel production path and immutable shell', () => {
   it('renders the real V2 workspace by default with no content-selection seam', () => {
-    render(<div><AiPanel /></div>);
+    render(<div data-testid="outside-ai-scope"><AiPanel /></div>);
 
     const panel = screen.getByRole('complementary', { name: 'ai.workbench.title' });
-    expect(panel.querySelector('[data-slot="ai-workspace-root"]')).toHaveAttribute('data-phase', 'hero');
-    expect(within(panel).getByRole('textbox')).toHaveAttribute('placeholder', 'ai.askPlaceholder');
+    const workspace = panel.querySelector('[data-slot="ai-workspace-root"]');
+    expect(panel).toHaveClass('ai-panel-shell');
+    expect(getComputedStyle(panel).maxWidth).toBe('100%');
+    expect(getComputedStyle(panel).getPropertyValue('--dsw-alias-bg-base').trim())
+      .toBe('rgb(255,255,255)');
+    expect(getComputedStyle(screen.getByTestId('outside-ai-scope'))
+      .getPropertyValue('--dsw-alias-bg-base').trim()).toBe('');
+    expect(workspace).toHaveAttribute('data-phase', 'hero');
+    expect(workspace).toHaveClass('ai-workspace-root');
+    expect(getComputedStyle(workspace as Element).overflowX).toBe('hidden');
+    expect(panel.querySelector('[data-slot="ai-empty-hero"]')).toHaveClass('ai-empty-hero');
+    expect(panel.querySelector('[data-slot="empty-state-title"]')).toHaveTextContent('ai.workbench.emptyTitle');
+    const header = panel.querySelector('[data-slot="ai-workspace-header"]');
+    expect(getComputedStyle(header as Element).height).toBe('48px');
+    expect(getComputedStyle(header as Element).alignItems).toBe('center');
+    expect(getComputedStyle(header as Element).paddingBlockStart).toMatch(/^0(?:px)?$/);
+    expect(getComputedStyle(header as Element).paddingBlockEnd).toMatch(/^0(?:px)?$/);
+    expect(within(panel).getByRole('textbox'))
+      .toHaveAttribute('placeholder', 'ai.workspace.composerPlaceholder');
     expect(panel.querySelector('[data-slot="panel-empty-state"]')).toBeNull();
   });
 
-  it.each([320, 400, 720])('restores a persisted %d px desktop width', (width) => {
+  it.each([320, 400, 560, 720])('restores a persisted %d px desktop width', (width) => {
     window.localStorage.setItem('shellspan.aiPanelWidth', String(width));
     render(<div><AiPanel /></div>);
 
@@ -97,6 +114,9 @@ describe('AI panel production path and immutable shell', () => {
     window.localStorage.setItem('shellspan.aiPanelWidth', '400');
     render(<div><AiPanel /></div>);
     const handle = screen.getByRole('separator', { name: 'ai.resize' });
+    expect(handle).toHaveClass('ai-panel-resize-handle');
+    expect(handle.querySelector('[data-slot="ai-panel-resize-indicator"]'))
+      .toHaveClass('ai-panel-resize-indicator');
     Object.defineProperties(handle, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },
@@ -133,6 +153,7 @@ describe('AI panel production path and immutable shell', () => {
     const panel = screen.getByRole('complementary', { name: 'ai.workbench.title' });
     expect(drawer).toContainElement(panel);
     expect(panel).toHaveStyle({ width: '100%' });
+    expect(panel).toHaveAttribute('data-compact');
     expect(screen.queryByRole('separator', { name: 'ai.resize' })).toBeNull();
     expect(drawer?.querySelector('[data-slot="drawer-title"]')).toHaveTextContent('ai.workbench.title');
   });

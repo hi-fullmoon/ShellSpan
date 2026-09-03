@@ -1,4 +1,3 @@
-import { Spinner } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNode, AiConversationNodeOf, AiSessionStatus } from '@/lib/ai/conversation-node';
@@ -11,7 +10,7 @@ function followKey(nodes: readonly AiConversationNode[], throughSeq: number | nu
   const contentRevision = last?.kind === 'assistantMessage' || last?.kind === 'reasoning'
     ? last.content.length
     : 0;
-  return `${throughSeq ?? 'ask'}:${last?.key ?? 'empty'}:${last?.lastSeq ?? 0}:${contentRevision}`;
+  return `${throughSeq ?? 'uncommitted'}:${last?.key ?? 'empty'}:${last?.lastSeq ?? 0}:${contentRevision}`;
 }
 
 export interface AiConversationProps {
@@ -44,14 +43,14 @@ export function AiConversation({
   return (
     <MessageScroller
       className="min-h-0 flex-1"
-      contentClassName="gap-4 px-3 pb-5 pt-4 @min-[400px]/ai-workspace:px-4 @min-[560px]/ai-workspace:px-5"
+      contentClassName="ai-conversation-content"
       followKey={followKey(nodes, throughSeq)}
       ariaLabel={t('ai.conversation')}
       initialAnchor={initialAnchor}
       onAnchorChange={onAnchorChange}
     >
       {canLoadOlder && (
-        <div className="flex justify-center">
+        <div className="ai-load-older">
           <Button variant="ghost" size="sm" disabled={loadingOlder} onClick={onLoadOlder}>
             {loadingOlder ? t('common.loading') : t('ai.workspace.loadOlder')}
           </Button>
@@ -68,12 +67,11 @@ export function AiConversation({
       ))}
       {running && (
         <div
-          className="flex min-h-8 min-w-0 items-center gap-2 text-xs text-muted-foreground"
+          className="ai-turn-status shimmer"
           role="status"
           aria-live="polite"
           data-ai-running-indicator=""
         >
-          <Spinner aria-hidden="true" />
           <span>{status === 'waiting' ? t('agent.session.status.waiting') : t('agent.outcome.running')}</span>
         </div>
       )}

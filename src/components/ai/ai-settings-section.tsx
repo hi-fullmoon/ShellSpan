@@ -6,19 +6,10 @@ import {
   Trash2Icon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Field } from '@/components/ui/field';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
@@ -34,11 +25,8 @@ import {
   invokeListAgentRuntimeSessions,
   isTauriRuntime,
 } from '@/lib/tauri';
-import { deletePersistedAiConversations } from '@/lib/ai-sessions';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
-import { useAiStore } from '@/stores/aiStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
-import { useTerminalStore } from '@/stores/terminalStore';
 import type { AiProviderPreset } from '@/types/ai';
 import {
   DeepSeekBrandIcon,
@@ -83,35 +71,17 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const setContextLines = useAiSettingsStore((state) => state.setContextLines);
   const agentEnabled = useAiSettingsStore((state) => state.agentEnabled);
   const setAgentEnabled = useAiSettingsStore((state) => state.setAgentEnabled);
-  const conversations = useAiStore((state) => state.conversations);
-  const activeWorkbenchConversationId = useAiStore((state) => (
-    state.activeWorkbenchConversationId
-  ));
-  const terminalSessions = useTerminalStore((state) => state.sessions);
   const [selectedProviderId, setSelectedProviderId] = useState(defaultProviderId);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [agentActionBusy, setAgentActionBusy] = useState(false);
   const [clearAgentOpen, setClearAgentOpen] = useState(false);
-  const [historyActionBusy, setHistoryActionBusy] = useState(false);
-  const [clearHistoryOpen, setClearHistoryOpen] = useState(false);
 
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId) ?? providers[0],
     [providers, selectedProviderId],
   );
-  const historicalConversations = useMemo(() => {
-    const currentConversationIds = new Set(
-      terminalSessions
-        .map((session) => session.conversationId)
-        .filter((id): id is string => Boolean(id)),
-    );
-    if (activeWorkbenchConversationId) {
-      currentConversationIds.add(activeWorkbenchConversationId);
-    }
-    return conversations.filter((conversation) => !currentConversationIds.has(conversation.id));
-  }, [activeWorkbenchConversationId, conversations, terminalSessions]);
 
   useEffect(() => {
     if (selectedProvider && selectedProvider.id !== selectedProviderId) {
@@ -179,23 +149,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
     }
   };
 
-  const handleClearConversationHistory = async (): Promise<void> => {
-    const conversationsToDelete = historicalConversations;
-    if (conversationsToDelete.length === 0) return;
-    setHistoryActionBusy(true);
-    setClearHistoryOpen(false);
-    try {
-      const count = await deletePersistedAiConversations(conversationsToDelete);
-      const conversationIds = conversationsToDelete.map((conversation) => conversation.id);
-      useAiStore.getState().removeConversations(conversationIds);
-      showSuccess(t('ai.history.deleted', { count }));
-    } catch {
-      showError(t('ai.history.deleteFailed'));
-    } finally {
-      setHistoryActionBusy(false);
-    }
-  };
-
   return (
     <div className={cn('@container flex flex-col', embedded ? 'gap-4' : 'gap-5 px-4 py-4')}>
       {!embedded && (
@@ -245,7 +198,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                 {!isDefault && (
                   <Button
                     variant="outline"
-                    size="sm"
+                    size="xs"
                     onClick={() => setDefaultProvider(provider.id)}
                   >
                     {t('settings.ai.setDefault')}
@@ -253,7 +206,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                 )}
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="xs"
                   onClick={() => {
                     setSelectedProviderId(provider.id);
                     setEditOpen(true);
@@ -316,37 +269,13 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           <Button
             className="w-full @min-[32rem]:w-auto"
             variant="destructiveOutline"
-            size="sm"
+            size="xs"
             disabled={agentActionBusy}
             onClick={() => setClearAgentOpen(true)}
           >
             {agentActionBusy ? <Spinner data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
             {t('settings.ai.agent.clearSessions')}
           </Button>
-        </SettingRow>
-      </SettingsGroup>
-
-      <SettingsGroup title={t('ai.history')} titleId="conversation-history-heading">
-        <SettingRow
-          label={t('ai.history.localData')}
-          description={t('ai.history.description', { count: historicalConversations.length })}
-        >
-          {historicalConversations.length === 0 ? (
-            <Badge variant="outline">{t('ai.history.empty')}</Badge>
-          ) : (
-            <Button
-              className="w-full @min-[32rem]:w-auto"
-              variant="destructiveOutline"
-              size="sm"
-              disabled={historyActionBusy}
-              onClick={() => setClearHistoryOpen(true)}
-            >
-              {historyActionBusy
-                ? <Spinner data-icon="inline-start" />
-                : <Trash2Icon data-icon="inline-start" />}
-              {t('ai.history.deleteAll')}
-            </Button>
-          )}
         </SettingRow>
       </SettingsGroup>
 
@@ -375,41 +304,19 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         title={t('settings.ai.deleteProviderTitle', { name: selectedProvider.name })}
         description={t('settings.ai.deleteProviderDescription')}
         onConfirm={() => void handleDeleteProvider()}
-        confirmVariant="destructiveOutline"
+        buttonSize="xs"
       />
 
-      <ConfirmDeleteDialog
-        open={clearHistoryOpen}
-        onOpenChange={setClearHistoryOpen}
-        title={t('ai.history.deleteAllConfirmTitle')}
-        description={t('ai.history.deleteAllConfirmDescription', {
-          count: historicalConversations.length,
-        })}
-        onConfirm={() => void handleClearConversationHistory()}
-        confirmLabel={t('ai.history.deleteAll')}
-        confirmVariant="destructiveOutline"
+      <ConfirmationDialog
+        open={clearAgentOpen}
+        onOpenChange={setClearAgentOpen}
+        title={t('settings.ai.agent.clearTitle')}
+        description={t('settings.ai.agent.clearActiveDescription')}
+        confirmLabel={t('settings.ai.agent.clearConfirm')}
+        confirmVariant="destructive"
+        buttonSize="xs"
+        onConfirm={() => void handleClearAgentSessions()}
       />
-
-      <AlertDialog open={clearAgentOpen} onOpenChange={setClearAgentOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.ai.agent.clearTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('settings.ai.agent.clearActiveDescription')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructiveOutline"
-              size="sm"
-              onClick={() => void handleClearAgentSessions()}
-            >
-              {t('settings.ai.agent.clearConfirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 };

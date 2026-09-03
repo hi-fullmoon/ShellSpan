@@ -27,10 +27,10 @@ describe('AssistantMessageContent', () => {
 
     const trigger = await screen.findByRole('button', { name: 'ai.thinking.inProgress' });
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('Check the terminal state.')).toBeVisible();
+    expect(document.querySelector('.ai-reasoning-body')).toHaveTextContent('Check the terminal state.');
   });
 
-  it('places the reasoning arrow after the status and rotates it with the expanded state', () => {
+  it('keeps the compact reasoning disclosure semantic while expanding and collapsing', () => {
     const { container } = render(
       <AssistantMessageContent
         content="<think>Check the terminal state.</think>Final answer."
@@ -38,26 +38,28 @@ describe('AssistantMessageContent', () => {
       />,
     );
     const trigger = screen.getByRole('button', { name: 'ai.thinking' });
-    const arrow = container.querySelector('.lucide-chevron-right');
-    const atom = container.querySelector('.lucide-atom');
+    const arrow = container.querySelector('.ai-disclosure-chevron');
+    const brain = container.querySelector('.lucide-brain');
+    const row = container.querySelector('.ai-reasoning-row');
 
-    expect(trigger).not.toHaveClass('-ml-2');
-    expect(trigger).toHaveClass('bg-transparent', 'px-0', 'rounded-md', 'leading-none');
-    expect(trigger).not.toHaveClass('px-2', 'hover:bg-accent', 'hover:text-accent-foreground');
+    expect(trigger).toHaveClass('ai-disclosure-row');
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(atom).toHaveClass('text-primary');
+    expect(brain).toBeInTheDocument();
     expect(trigger.lastElementChild).toBe(arrow);
-    expect(arrow).not.toHaveClass('rotate-90');
+    expect(row).not.toHaveAttribute('data-expanded');
+    expect(container.querySelector('.ai-reasoning-body')).not.toBeInTheDocument();
 
     fireEvent.click(trigger);
 
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(arrow).toHaveClass('rotate-90');
+    expect(row).toHaveAttribute('data-expanded');
+    expect(container.querySelector('.ai-reasoning-body')).toHaveTextContent('Check the terminal state.');
 
     fireEvent.click(trigger);
 
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(arrow).not.toHaveClass('rotate-90');
+    expect(row).not.toHaveAttribute('data-expanded');
+    expect(container.querySelector('.ai-reasoning-body')).not.toBeInTheDocument();
   });
 
   it('shows the elapsed thinking time after reasoning completes', async () => {
@@ -99,17 +101,14 @@ describe('AssistantMessageContent', () => {
     );
 
     const copyButton = screen.getByRole('button', { name: 'common.copy' });
-    expect(copyButton).toHaveClass('size-6', 'p-0', 'opacity-0');
-    expect(copyButton).toHaveClass(
-      'group-hover/code-block:opacity-100',
-      'group-focus-within/code-block:opacity-100',
-    );
+    expect(copyButton).toHaveClass('ai-code-block-copy');
+    expect(copyButton.closest('.ai-code-block')).toHaveAttribute('data-language', 'bash');
 
     fireEvent.click(copyButton);
 
     expect(writeText).toHaveBeenCalledWith('df -h');
     const copiedButton = await screen.findByRole('button', { name: 'common.copied' });
-    expect(copiedButton).not.toHaveClass('opacity-0');
+    expect(copiedButton).toHaveTextContent('common.copied');
   });
 
   it('renders fenced code blocks without actions when disabled', () => {

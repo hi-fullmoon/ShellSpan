@@ -3,7 +3,7 @@ import type {
   AgentSessionRuntimeStatus,
 } from '@/types/agent-session';
 
-export type AiSessionKind = 'ask' | 'agent';
+export type AiSessionKind = 'agent';
 
 export type AiSessionStatus = AgentSessionRuntimeStatus;
 
@@ -133,10 +133,23 @@ export interface AiRetryNode extends AiConversationNodeBase {
 
 export interface AiErrorNode extends AiConversationNodeBase {
   readonly kind: 'error';
-  readonly scope: 'ask' | 'request' | 'turn' | 'step' | 'session' | 'unknown';
+  readonly scope: 'request' | 'turn' | 'step' | 'session' | 'unknown';
   readonly message: string;
   readonly code: string | null;
   readonly state: 'failed' | 'cancelled' | 'unknown';
+}
+
+export interface AiTurnStatsNode extends AiConversationNodeBase {
+  readonly kind: 'turnStats';
+  readonly turnNumber: number;
+  readonly stepCount: number;
+  readonly modelDurationMs: number | null;
+  readonly toolDurationMs: number | null;
+  readonly averageTimeToFirstTokenMs: number | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly totalTokens: number | null;
+  readonly tokensPerSecond: number | null;
 }
 
 export type AiConversationNode =
@@ -148,7 +161,8 @@ export type AiConversationNode =
   | AiApprovalMarkerNode
   | AiLifecycleMarkerNode
   | AiRetryNode
-  | AiErrorNode;
+  | AiErrorNode
+  | AiTurnStatsNode;
 
 export type AiConversationNodeOf<Kind extends AiConversationNode['kind']> = Extract<
   AiConversationNode,

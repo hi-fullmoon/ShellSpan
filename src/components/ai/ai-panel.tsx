@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
-import { cn } from '@/lib/utils';
-import { useAiStore } from '@/stores/aiStore';
+import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useAppStore } from '@/stores/appStore';
 import type { AppSection } from '@/types';
 import { AiWorkspaceController } from './workspace/ai-workspace-controller';
+import './ai-panel.css';
 
 const AI_PANEL_DEFAULT_WIDTH = 400;
 const AI_PANEL_MIN_WIDTH = 320;
@@ -91,7 +91,7 @@ export const AiPanelResizeHandle: React.FC<AiPanelResizeHandleProps> = ({
       aria-valuenow={width}
       tabIndex={0}
       data-resizing={resizing || undefined}
-      className="group absolute inset-y-0 -left-0.5 z-10 w-1 cursor-col-resize touch-none outline-none"
+      className="ai-panel-resize-handle"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -101,7 +101,7 @@ export const AiPanelResizeHandle: React.FC<AiPanelResizeHandleProps> = ({
     >
       <div
         data-slot="ai-panel-resize-indicator"
-        className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent shadow-none transition-all duration-150 delay-0 group-hover:w-1 group-hover:bg-app-primary group-hover:delay-200 group-focus-visible:w-1 group-focus-visible:bg-app-primary group-data-[resizing]:w-1 group-data-[resizing]:bg-app-primary"
+        className="ai-panel-resize-indicator"
       />
     </div>
   );
@@ -213,11 +213,8 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
       ref={panelRef}
       data-slot="ai-panel"
       data-ai-scope={scope}
-      className={cn(
-        'relative flex h-full min-w-0 shrink-0 flex-col',
-        scope === 'terminal' ? 'bg-background' : 'bg-muted/20',
-        !compactViewport && 'border-l border-app-border',
-      )}
+      data-compact={compactViewport || undefined}
+      className="ai-panel-shell"
       style={{ width: compactViewport ? '100%' : panelWidth }}
       aria-label={panelTitle}
     >
@@ -285,8 +282,8 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
         <Drawer open={open} onOpenChange={onOpenChange}>
           <DrawerContent
             showCloseButton={false}
-            className="max-w-none gap-0 overflow-hidden rounded-none border-l p-0"
-            style={{ width: `min(100vw, ${panelWidth}px)` }}
+            className="ai-panel-drawer max-w-none gap-0 overflow-hidden rounded-none border-l-0 bg-transparent p-0 shadow-[var(--shadow-dialog)]"
+            style={{ width: `min(100vw, ${Math.max(panelWidth, AI_PANEL_MIN_WIDTH)}px)` }}
           >
             <DrawerTitle className="sr-only">{panelTitle}</DrawerTitle>
             {panelContent}
@@ -301,10 +298,10 @@ export const AiPanel: React.FC = () => {
   const { t } = useI18n();
   const activeSection = useAppStore((state) => state.activeSection);
   const panelSection = activeSection === 'terminal' ? 'terminal' : 'workbench';
-  const open = useAiStore((state) => (
+  const open = useAiPanelStore((state) => (
     activeSection !== 'sftp' && state.panelOpenBySection[panelSection]
   ));
-  const setOpen = useAiStore((state) => state.setOpen);
+  const setOpen = useAiPanelStore((state) => state.setOpen);
   const panelTitle = activeSection === 'terminal'
     ? t('ai.terminal.title')
     : t('ai.workbench.title');

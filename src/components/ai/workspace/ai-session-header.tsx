@@ -1,34 +1,17 @@
 import {
-  EllipsisIcon,
   HistoryIcon,
   PanelRightCloseIcon,
   SquarePenIcon,
 } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 
-function statusVariant(
-  status: AiSessionStatus,
-): 'default' | 'secondary' | 'outline' | 'destructive' {
-  if (status === 'completed') return 'default';
-  if (status === 'running' || status === 'waiting') return 'secondary';
-  if (status === 'failed' || status === 'cancelled') return 'destructive';
-  return 'outline';
-}
-
 export interface AiSessionHeaderProps {
   readonly title: string;
+  readonly context: string;
   readonly status: AiSessionStatus;
   readonly onClose?: () => void;
   readonly onHistory?: () => void;
@@ -37,6 +20,7 @@ export interface AiSessionHeaderProps {
 
 export function AiSessionHeader({
   title,
+  context,
   status,
   onClose,
   onHistory,
@@ -52,73 +36,73 @@ export function AiSessionHeader({
   return (
     <header
       data-slot="ai-workspace-header"
-      className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b border-border px-3 @min-[400px]/ai-workspace:px-4 @min-[560px]/ai-workspace:px-5"
+      data-session-status={status}
+      className="ai-session-header"
     >
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <h2 className="truncate text-sm font-medium">{title}</h2>
-        <Badge variant={statusVariant(status)} size="sm" className="shrink-0">
-          {statusLabel}
-        </Badge>
+      <div className="ai-session-title-cluster">
+        <span className="ai-session-status-dot" data-state={status} aria-hidden="true" />
+        <span className="ai-session-heading">
+          <h2 className="ai-session-title">{title}</h2>
+          <span className="ai-session-context">{context}</span>
+        </span>
+        <span className="sr-only">{statusLabel}</span>
       </div>
 
-      {(onHistory || onNewSession) && (
-        <DropdownMenu>
+      <div className="ai-session-actions">
+        {onHistory && (
           <Tooltip>
             <TooltipTrigger
               render={(
-                <DropdownMenuTrigger
-                  render={(
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 shrink-0"
-                      aria-label={t('ai.workspace.sessionActions')}
-                    />
-                  )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onHistory}
+                  aria-label={t('ai.history')}
                 />
               )}
             >
-              <EllipsisIcon />
+              <HistoryIcon />
             </TooltipTrigger>
-            <TooltipContent>{t('ai.workspace.sessionActions')}</TooltipContent>
+            <TooltipContent>{t('ai.history')}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end">
-            <DropdownMenuGroup>
-              {onHistory && (
-                <DropdownMenuItem onClick={onHistory}>
-                  <HistoryIcon />
-                  {t('ai.history')}
-                </DropdownMenuItem>
-              )}
-              {onNewSession && (
-                <DropdownMenuItem onClick={onNewSession}>
-                  <SquarePenIcon />
-                  {t('ai.newConversation')}
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+        )}
 
-      {onClose && (
-        <Tooltip>
-          <TooltipTrigger
-            render={(
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-8 shrink-0"
-                onClick={onClose}
-                aria-label={t('ai.close')}
-              />
-            )}
-          >
-            <PanelRightCloseIcon />
-          </TooltipTrigger>
-          <TooltipContent>{t('ai.close')}</TooltipContent>
-        </Tooltip>
-      )}
+        {onNewSession && (
+          <Tooltip>
+            <TooltipTrigger
+              render={(
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onNewSession}
+                  aria-label={t('ai.newConversation')}
+                />
+              )}
+            >
+              <SquarePenIcon />
+            </TooltipTrigger>
+            <TooltipContent>{t('ai.newConversation')}</TooltipContent>
+          </Tooltip>
+        )}
+
+        {onClose && (
+          <Tooltip>
+            <TooltipTrigger
+              render={(
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onClose}
+                  aria-label={t('ai.close')}
+                />
+              )}
+            >
+              <PanelRightCloseIcon />
+            </TooltipTrigger>
+            <TooltipContent>{t('ai.close')}</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
     </header>
   );
 }

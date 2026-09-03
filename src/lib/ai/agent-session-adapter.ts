@@ -23,6 +23,7 @@ import { projectAgentConversationNodes } from './conversation-projection';
 import type { AiConversationNode } from './conversation-node';
 import type {
   AiApprovalDecisionInput,
+  AiContextUsage,
   AiCreateSessionInput,
   AiInboxMutationInput,
   AiInboxItem,
@@ -38,6 +39,32 @@ import type {
   AiSubmitReceipt,
   ListSessionsInput,
 } from './session-adapter';
+
+function contextUsage(events: readonly AgentSessionEvent[]): AiContextUsage | undefined {
+  const latestContext = [...events].reverse().find((event) => event.type === 'request/context');
+  if (latestContext?.type !== 'request/context') return undefined;
+  const estimated = latestContext.data.inputTokens;
+  const contextWindow = latestContext.data.contextWindow;
+  if (estimated === undefined || contextWindow === undefined || contextWindow <= 0) return undefined;
+  const reported = [...events].reverse().find((event) => (
+    event.type === 'request/usage'
+    && event.data.requestId === latestContext.data.requestId
+    && event.data.inputTokens !== undefined
+  ));
+  const systemTokens = latestContext.data.systemTokens;
+  const toolsTokens = latestContext.data.toolSchemaTokens;
+  const messageTokens = latestContext.data.messageTokens;
+  return {
+    usedTokens: reported?.type === 'request/usage' && reported.data.inputTokens !== undefined
+      ? reported.data.inputTokens
+      : estimated,
+    contextWindow,
+    source: reported ? 'reported' : 'estimated',
+    ...(systemTokens !== undefined && toolsTokens !== undefined && messageTokens !== undefined
+      ? { breakdown: { systemTokens, toolsTokens, messageTokens } }
+      : {}),
+  };
+}
 
 interface AgentCommittedClientLike {
   state(): AgentSessionStreamState;
@@ -195,7 +222,6 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
     summary: sessionSummary(state.snapshot, events, activity.status),
     snapshot: { kind: 'agent', value: state.snapshot },
     nodes,
-    activity,
     inbox: projectAgentInbox(events),
     pendingApproval: pendingApproval(nodes),
     status: activity.status,
@@ -214,6 +240,7 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
       }
     }),
     canLoadOlder: false,
+    contextUsage: contextUsage(events),
   };
 }
 

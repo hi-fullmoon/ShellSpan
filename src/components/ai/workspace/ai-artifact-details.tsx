@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { CheckIcon, CopyIcon, FileOutputIcon } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import type { AgentArtifactResponse } from '@/types/agent-session';
@@ -16,16 +18,80 @@ function decodeBody(bodyBase64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+function displayBody(artifact: AgentArtifactResponse): string {
+  const decoded = decodeBody(artifact.bodyBase64);
+  if (!artifact.metadata.mediaType.toLowerCase().includes('json')) return decoded;
+  try {
+    return JSON.stringify(JSON.parse(decoded), null, 2);
+  } catch {
+    return decoded;
+  }
+}
+
+function ArtifactCopy({ text }: { readonly text: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={(
+          <Button
+            type="button"
+            variant="plain"
+            size="icon"
+            className="ai-detail-copy"
+            aria-label={copied ? t('common.copied') : t('common.copy')}
+            onClick={() => {
+              if (!navigator.clipboard || copied) return;
+              void navigator.clipboard.writeText(text).then(() => {
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1_000);
+              }).catch(() => undefined);
+            }}
+          />
+        )}
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </TooltipTrigger>
+      <TooltipContent>{copied ? t('common.copied') : t('common.copy')}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ArtifactBody({ artifact }: { readonly artifact: AgentArtifactResponse }) {
+  const { t } = useI18n();
+  const text = useMemo(() => displayBody(artifact), [artifact]);
+  const image = artifact.metadata.mediaType.toLowerCase().startsWith('image/');
+  if (image) {
+    return (
+      <div className="ai-artifact-image-surface">
+        <img
+          src={`data:${artifact.metadata.mediaType};base64,${artifact.bodyBase64}`}
+          alt={artifact.metadata.title}
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="ai-detail-code-wrap">
+      <pre className="ai-detail-code">{text || t('ai.workspace.details.emptyArtifact')}</pre>
+      {text && <ArtifactCopy text={text} />}
+    </div>
+  );
+}
+
 export function AiArtifactDetails({
   sessionId,
   node,
   load,
   onBack,
+  onClose,
 }: {
   readonly sessionId: string;
   readonly node: AiConversationNodeOf<'artifact'> | null;
   readonly load: (sessionId: string, artifactId: string, maxBytes: number) => Promise<AgentArtifactResponse>;
   readonly onBack: () => void;
+  readonly onClose?: () => void;
 }): React.ReactNode {
   const { t } = useI18n();
   const [state, setState] = useState<
@@ -54,38 +120,38 @@ export function AiArtifactDetails({
   }, [load, node, sessionId, t]);
 
   return (
-    <div className="flex size-full min-h-0 min-w-0 flex-col" data-slot="ai-artifact-details">
+    <div className="ai-details-root" data-slot="ai-artifact-details">
       <AiRouteHeader
         title={node?.title ?? t('ai.workspace.details.artifactTitle')}
         description={t('ai.workspace.details.artifactDescription')}
         onBack={onBack}
+        onClose={onClose}
       />
       <ScrollArea className="min-h-0 min-w-0 flex-1" aria-label={t('ai.workspace.details.artifactTitle')}>
-        <ScrollAreaContent className="flex min-w-0 flex-col gap-4 p-3 @min-[400px]/ai-workspace:p-4 @min-[560px]/ai-workspace:p-5">
+        <ScrollAreaContent className="ai-details-body">
           {state.kind === 'loading' && (
-            <div className="flex flex-col gap-2" role="status" aria-label={t('common.loading')}>
+            <div className="ai-artifact-loading" role="status" aria-label={t('common.loading')}>
               <Skeleton className="h-5 w-2/3" />
               <Skeleton className="h-32 w-full" />
             </div>
           )}
-          {state.kind === 'error' && <p className="break-words text-sm text-destructive" role="alert">{state.message}</p>}
+          {state.kind === 'error' && <p className="ai-detail-error" role="alert">{state.message}</p>}
           {state.kind === 'loaded' && (
             <>
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary">{state.artifact.metadata.kind}</Badge>
-                <Badge variant="outline">{state.artifact.metadata.mediaType}</Badge>
-                <Badge variant="outline">{state.artifact.metadata.sizeBytes} B</Badge>
-                {state.artifact.truncated && <Badge variant="outline">{t('ai.workspace.details.truncated')}</Badge>}
+              <div className="ai-artifact-summary">
+                <FileOutputIcon aria-hidden="true" />
+                <span>{state.artifact.metadata.kind}</span>
+                <small>{state.artifact.metadata.mediaType}</small>
+                <small>{state.artifact.metadata.sizeBytes} B</small>
+                {state.artifact.truncated && <small>{t('ai.workspace.details.truncated')}</small>}
               </div>
-              <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
-                <dt className="text-muted-foreground">SHA-256</dt>
-                <dd className="break-all font-mono text-xs">{state.artifact.metadata.sha256}</dd>
-                <dt className="text-muted-foreground">{t('ai.workspace.details.sensitivity')}</dt>
+              <ArtifactBody artifact={state.artifact} />
+              <dl className="ai-artifact-metadata">
+                <dt>SHA-256</dt>
+                <dd>{state.artifact.metadata.sha256}</dd>
+                <dt>{t('ai.workspace.details.sensitivity')}</dt>
                 <dd>{state.artifact.metadata.sensitivity}</dd>
               </dl>
-              <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/40 p-3 text-xs">
-                {decodeBody(state.artifact.bodyBase64) || t('ai.workspace.details.emptyArtifact')}
-              </pre>
             </>
           )}
         </ScrollAreaContent>

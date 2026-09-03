@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -79,6 +78,7 @@ export function AiQueueDock({
   const { t } = useI18n();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [collapsed, setCollapsed] = useState(false);
   const pending = mutation?.status === 'pending';
 
   useEffect(() => {
@@ -89,6 +89,7 @@ export function AiQueueDock({
   }, [editingId, items]);
 
   if (items.length === 0) return null;
+  const expanded = items.length === 1 || !collapsed || editingId !== null;
 
   const move = (item: AiInboxItem, offset: -1 | 1): void => {
     const laneItems = items.filter((candidate) => (
@@ -106,14 +107,24 @@ export function AiQueueDock({
     <section
       data-slot="ai-queue-dock"
       aria-label={t('ai.workspace.queue.title')}
-      className="flex min-w-0 flex-col gap-2 rounded-2xl border border-border bg-muted/40 px-3 py-2"
+      className="ai-queue-dock"
     >
-      <div className="flex min-w-0 items-center gap-2 text-xs font-medium">
-        <ListEndIcon aria-hidden="true" />
-        <span>{t('ai.workspace.queue.count', { count: items.length })}</span>
-        {pending && <Spinner className="ms-auto" aria-label={t('ai.workspace.queue.pending')} />}
-      </div>
-      <ul className="flex min-w-0 flex-col gap-1">
+      {items.length > 1 && (
+        <Button
+          type="button"
+          variant="plain"
+          className="ai-queue-header"
+          aria-expanded={expanded}
+          disabled={editingId !== null}
+          onClick={() => setCollapsed((value) => !value)}
+        >
+          <ListEndIcon aria-hidden="true" />
+          <span>{t('ai.workspace.queue.count', { count: items.length })}</span>
+          {pending && <Spinner aria-label={t('ai.workspace.queue.pending')} />}
+          {expanded ? <ChevronDownIcon aria-hidden="true" /> : <ChevronUpIcon aria-hidden="true" />}
+        </Button>
+      )}
+      {expanded && <ul className="ai-queue-list">
         {items.map((item) => {
           const laneItems = items.filter((candidate) => (
             candidate.lane === item.lane && candidate.state === 'queued'
@@ -122,10 +133,11 @@ export function AiQueueDock({
           const editable = item.state === 'queued' && item.source === 'user';
           const editing = editingId === item.id;
           return (
-            <li key={item.id} className="flex min-w-0 flex-col gap-1 rounded-md py-0.5">
+            <li key={item.id} className="ai-queue-row" data-state={item.state}>
+              {items.length === 1 && <ListEndIcon aria-hidden="true" />}
               {editing ? (
                 <form
-                  className="flex min-w-0 items-start gap-1"
+                  className="ai-queue-editor"
                   onSubmit={(event) => {
                     event.preventDefault();
                     const content = editValue.trim();
@@ -173,17 +185,18 @@ export function AiQueueDock({
                   </IconAction>
                 </form>
               ) : (
-                <div className="flex min-w-0 items-center gap-1 text-xs">
+                <div className="ai-queue-row-content">
                   <CornerDownRightIcon aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate">{item.content}</span>
-                  <Badge variant="outline" className="shrink-0">
-                    {t(`ai.workspace.queue.lane.${item.lane}` as LocaleKey)}
-                  </Badge>
+                  {item.state === 'pending' && (
+                    <Spinner aria-label={t('ai.workspace.queue.state.pending')} />
+                  )}
                   <span className="sr-only">
+                    {t(`ai.workspace.queue.lane.${item.lane}` as LocaleKey)} ·{' '}
                     {t(`ai.workspace.queue.state.${item.state}` as LocaleKey)}
                   </span>
                   {editable && (
-                    <div className="flex shrink-0 items-center gap-0.5">
+                    <div className="ai-queue-actions">
                       <IconAction
                         label={t('ai.workspace.queue.moveUp')}
                         disabled={pending || laneIndex <= 0}
@@ -223,7 +236,7 @@ export function AiQueueDock({
             </li>
           );
         })}
-      </ul>
+      </ul>}
       {mutation?.status === 'failed' && (
         <Alert variant="destructive" size="sm">
           <AlertTitle>

@@ -4,9 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiComposerSeat } from '@/components/ai/workspace/ai-composer-seat';
+import { AiComposerModelSelector } from '@/components/ai/workspace/ai-composer-model-selector';
 import { createAiComposerState, type AiComposerState } from '@/lib/ai/composer-machine';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 
 function Harness({
   initial,
@@ -24,7 +26,6 @@ function Harness({
     <div className="@container/ai-workspace">
       <AiComposerSeat
         phase="active"
-        sessionKind={state.preset}
         status={state.runtimeStatus}
         composerState={state}
         inbox={[
@@ -71,11 +72,102 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     ]);
   });
 
+  it('ignores Safari-style Enter immediately after composition ends', () => {
+    const submit = vi.fn();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(100);
+    render(<Harness initial={createAiComposerState({ draft: '中文输入' })} onSubmitGesture={submit} />);
+    const textbox = screen.getByRole('textbox');
+
+    fireEvent.compositionStart(textbox);
+    fireEvent.keyDown(textbox, { key: 'Enter' });
+    fireEvent.compositionEnd(textbox);
+    fireEvent.keyDown(textbox, { key: 'Enter' });
+    expect(submit).not.toHaveBeenCalled();
+
+    clock.mockReturnValue(111);
+    fireEvent.keyDown(textbox, { key: 'Enter' });
+    expect(submit).toHaveBeenCalledWith('keyboard', false);
+    clock.mockRestore();
+  });
+
+  it('selects persisted provider profiles and supported reasoning effort', async () => {
+    const user = userEvent.setup();
+    const deepseek = {
+      id: 'deepseek-profile', preset: 'deepseek' as const, name: 'DeepSeek',
+      kind: 'openAiCompatible' as const, baseUrl: 'https://api.deepseek.com',
+      model: 'deepseek-v4', requiresApiKey: true,
+    };
+    const openai = {
+      id: 'openai-profile', preset: 'openai' as const, name: 'OpenAI',
+      kind: 'openAi' as const, baseUrl: 'https://api.openai.com',
+      model: 'gpt-5.6', requiresApiKey: true,
+    };
+    useAiSettingsStore.setState({ providers: [deepseek, openai], defaultProviderId: deepseek.id });
+    render(<AiComposerModelSelector />);
+
+    await user.click(screen.getByRole('button', { name: /Model selection: deepseek-v4/ }));
+    await user.click(await screen.findByRole('menuitem', { name: /Model.*deepseek-v4/ }));
+    expect(screen.getByText('DeepSeek')).toBeVisible();
+    expect(screen.getByText('OpenAI')).toBeVisible();
+    await user.click(screen.getByRole('menuitemradio', { name: 'gpt-5.6' }));
+    expect(useAiSettingsStore.getState().defaultProviderId).toBe(openai.id);
+
+    await user.click(screen.getByRole('button', { name: /Model selection: gpt-5.6/ }));
+    await user.click(await screen.findByRole('menuitem', { name: /Reasoning effort.*Default/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'High' }));
+    expect(useAiSettingsStore.getState().providers.find((item) => item.id === openai.id))
+      .toMatchObject({ reasoningEffort: 'high' });
+  });
+
+  it('shows the Runtime-backed context ring after model selection with an honest breakdown', async () => {
+    const user = userEvent.setup();
+    render(
+      <AiComposerSeat
+        phase="active"
+        status="idle"
+        defaultDraft=""
+        modelControl={<button type="button">Model fixture</button>}
+        contextUsage={{
+          usedTokens: 61_800,
+          contextWindow: 1_000_000,
+          source: 'estimated',
+          breakdown: { systemTokens: 1_700, toolsTokens: 6_600, messageTokens: 45_800 },
+        }}
+      />,
+    );
+    const model = screen.getByRole('button', { name: 'Model fixture' });
+    const meter = screen.getByRole('button', { name: 'Estimated context usage 6%' });
+    expect(model.compareDocumentPosition(meter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await user.click(meter);
+    const panel = screen.getByRole('dialog', { name: 'Context usage' });
+    expect(panel).toHaveTextContent('Context used6%~61.8K / 1M');
+    expect(panel).toHaveTextContent('System prompt~1.7K');
+    expect(panel).toHaveTextContent('Tools~6.6K');
+    expect(panel).toHaveTextContent('Conversation messages~45.8K');
+    expect(panel).toHaveTextContent('Total usage and categories are stable Runtime estimates.');
+    expect(document.querySelectorAll('.ai-context-meter-bar > span')).toHaveLength(3);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Context usage' })).toBeNull();
+  });
+
+  it('omits the context meter when the protocol has no capacity and usage pair', () => {
+    render(
+      <AiComposerSeat
+        phase="active"
+        status="idle"
+        defaultDraft=""
+        modelControl={<button type="button">Model fixture</button>}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /context usage/i })).toBeNull();
+  });
+
   it('uses an unambiguous Stop button for an empty running Composer', async () => {
     const user = userEvent.setup();
     const stop = vi.fn();
     render(<Harness initial={createAiComposerState({
-      phase: 'running', runtimeStatus: 'running', preset: 'agent', presetLocked: true,
+      phase: 'running', runtimeStatus: 'running',
       sessionId: 'session-1', draft: '',
     })} onStop={stop} />);
 
@@ -87,7 +179,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
   it('keeps approval drafts visible but disabled without implementing takeover actions', () => {
     render(<Harness initial={createAiComposerState({
       phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true,
-      preset: 'agent', presetLocked: true, sessionId: 'session-1', draft: 'keep this draft',
+      sessionId: 'session-1', draft: 'keep this draft',
     })} />);
     expect(screen.getByRole('textbox')).toBeDisabled();
     expect(screen.getByRole('textbox')).toHaveValue('keep this draft');
@@ -97,10 +189,11 @@ describe('AiComposerSeat Phase 4 behavior', () => {
 
   it('renders Runtime Inbox with lane, state, and Phase 6 mutation controls', () => {
     render(<Harness initial={createAiComposerState()} />);
-    expect(screen.getByRole('region', { name: 'Queued input' })).toBeVisible();
+    const queue = screen.getByRole('region', { name: 'Queued input' });
+    expect(queue).toBeVisible();
     expect(screen.getByText('Run tests next')).toBeVisible();
-    expect(screen.getByText('Next turn')).toBeVisible();
-    expect(screen.getByText('Claimed')).toBeVisible();
+    expect(queue).toHaveTextContent('Next turn · Queued');
+    expect(queue).toHaveTextContent('Next step · Claimed');
     expect(screen.getAllByRole('button', { name: /edit|remove/i })).toHaveLength(2);
   });
 

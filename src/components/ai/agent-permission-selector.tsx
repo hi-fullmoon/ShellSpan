@@ -1,23 +1,13 @@
 import { useState } from 'react';
 import {
   ChevronDownIcon,
-  HandIcon,
+  ShieldAlertIcon,
   ShieldCheckIcon,
   TriangleAlertIcon,
 } from 'lucide-react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogMedia,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,31 +23,28 @@ import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { AgentPermissionMode } from '@/types/agent-approval';
 
-const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = 'requestApproval';
+const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = 'autoApproveReadOnly';
 
 const PERMISSION_OPTIONS = [
-  {
-    mode: 'requestApproval',
-    icon: HandIcon,
-    iconClassName: 'bg-muted text-foreground',
-    label: 'agent.permission.requestApproval',
-    description: 'agent.permission.requestApprovalDescription',
-  },
   {
     mode: 'autoApproveReadOnly',
     icon: ShieldCheckIcon,
     iconClassName: 'bg-app-primary/10 text-app-primary',
     label: 'agent.permission.autoApproveReadOnly',
+    composerLabel: 'agent.permission.composer.readOnly',
     description: 'agent.permission.autoApproveReadOnlyDescription',
   },
   {
     mode: 'fullAccess',
-    icon: TriangleAlertIcon,
+    icon: ShieldAlertIcon,
     iconClassName: 'bg-app-warning/10 text-app-warning',
     label: 'agent.permission.fullAccess',
+    composerLabel: 'agent.permission.composer.fullAccess',
     description: 'agent.permission.fullAccessDescription',
   },
 ] as const;
+
+const COMPOSER_PERMISSION_OPTIONS = PERMISSION_OPTIONS;
 
 export interface AgentPermissionSelectorProps {
   readonly sessionId: string;
@@ -77,14 +64,15 @@ export function AgentPermissionSelector({
     (session) => session.sessionId === sessionId && session.status === 'connected',
   ));
   const [fullAccessDialogOpen, setFullAccessDialogOpen] = useState(false);
+  const composer = variant === 'composer';
   const mode = binding?.mode ?? DEFAULT_AGENT_PERMISSION_MODE;
-  const current = PERMISSION_OPTIONS.find((option) => option.mode === mode)
+  const visibleMode = mode === 'fullAccess' ? mode : DEFAULT_AGENT_PERMISSION_MODE;
+  const current = PERMISSION_OPTIONS.find((option) => option.mode === visibleMode)
     ?? PERMISSION_OPTIONS[0];
   const CurrentIcon = current.icon;
-  const composer = variant === 'composer';
-  const triggerLabel = mode === 'fullAccess'
-    ? 'agent.permission.fullAccessSelected'
-    : current.label;
+  const triggerLabel = visibleMode === 'fullAccess'
+    ? composer ? current.composerLabel : 'agent.permission.fullAccessSelected'
+    : composer ? current.composerLabel : current.label;
 
   const selectMode = (value: string): void => {
     const nextMode = value as AgentPermissionMode;
@@ -108,9 +96,11 @@ export function AgentPermissionSelector({
             <Button
               variant={composer ? 'ghost' : 'outline'}
               size={composer ? 'xs' : 'sm'}
-              className={cn(composer && 'max-w-40')}
+              className={cn(composer && 'ai-permission-trigger')}
               disabled={disabled || !connected}
-              aria-label={t('agent.permission')}
+              aria-label={composer
+                ? t('agent.permission.composerAria', { mode: t(triggerLabel) })
+                : t('agent.permission')}
             />
           )}
         >
@@ -119,48 +109,72 @@ export function AgentPermissionSelector({
             className={cn(
               'flex items-center leading-none',
               composer ? 'min-w-0 gap-1' : 'gap-2',
-              mode === 'fullAccess' && 'text-app-warning',
+              visibleMode === 'fullAccess' && !composer && 'text-app-warning',
             )}
           >
             <CurrentIcon
               data-icon="inline-start"
               strokeWidth={1.75}
-              className={cn(mode === 'fullAccess' && 'text-app-warning')}
+              className={cn(visibleMode === 'fullAccess' && !composer && 'text-app-warning')}
             />
-            <span className={cn('leading-none', composer && 'truncate')}>
+            <span className={cn('leading-none', composer && 'ai-permission-trigger-label truncate')}>
               {t(triggerLabel)}
             </span>
             <ChevronDownIcon data-icon="inline-end" />
           </span>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-96 max-w-[calc(100vw-1rem)]">
+        <DropdownMenuContent
+          side={composer ? 'top' : 'bottom'}
+          sideOffset={composer ? 8 : 4}
+          align="start"
+          className={cn(
+            composer
+              ? 'ai-permission-menu'
+              : 'w-96 max-w-[calc(100vw-1rem)]',
+          )}
+        >
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-[11px]">{t('agent.permission')}</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={mode} onValueChange={selectMode}>
-              {PERMISSION_OPTIONS.map((option) => {
+            {!composer && (
+              <DropdownMenuLabel className="text-[11px]">{t('agent.permission')}</DropdownMenuLabel>
+            )}
+            <DropdownMenuRadioGroup value={visibleMode} onValueChange={selectMode}>
+              {(composer ? COMPOSER_PERMISSION_OPTIONS : PERMISSION_OPTIONS).map((option) => {
                 const Icon = option.icon;
                 return (
                   <DropdownMenuRadioItem
                     key={option.mode}
                     value={option.mode}
                     closeOnClick
-                    className="items-start gap-2.5 py-2 text-[13px]"
+                    className={cn(
+                      composer
+                        ? 'ai-permission-menu-option'
+                        : 'items-start gap-2.5 py-2 text-[13px]',
+                    )}
                   >
-                    <span
-                      data-slot="agent-permission-option-icon"
-                      className={cn(
-                        'mt-px flex size-5 shrink-0 items-center justify-center rounded-md',
-                        option.iconClassName,
-                      )}
-                    >
-                      <Icon strokeWidth={1.75} />
-                    </span>
-                    <span className="min-w-0 leading-tight">
-                      <span className="block font-medium">{t(option.label)}</span>
-                      <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground sm:whitespace-nowrap">
-                        {t(option.description)}
-                      </span>
-                    </span>
+                    {composer ? (
+                      <>
+                        <Icon strokeWidth={1.6} />
+                        <span>{t(option.composerLabel)}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span
+                          data-slot="agent-permission-option-icon"
+                          className={cn(
+                            'mt-px flex size-5 shrink-0 items-center justify-center rounded-md',
+                            option.iconClassName,
+                          )}
+                        >
+                          <Icon strokeWidth={1.75} />
+                        </span>
+                        <span className="min-w-0 leading-tight">
+                          <span className="block font-medium">{t(option.label)}</span>
+                          <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground sm:whitespace-nowrap">
+                            {t(option.description)}
+                          </span>
+                        </span>
+                      </>
+                    )}
                   </DropdownMenuRadioItem>
                 );
               })}
@@ -177,31 +191,19 @@ export function AgentPermissionSelector({
         </Alert>
       )}
 
-      <AlertDialog open={fullAccessDialogOpen} onOpenChange={setFullAccessDialogOpen}>
-        <AlertDialogContent className="p-4">
-          <AlertDialogHeader>
-            <AlertDialogMedia>
-              <TriangleAlertIcon className="text-app-warning" />
-            </AlertDialogMedia>
-            <AlertDialogTitle>{t('agent.permission.fullAccessTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('agent.permission.fullAccessWarning')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              size="sm"
-              onClick={() => {
-                setMode(sessionId, 'fullAccess');
-                setFullAccessDialogOpen(false);
-              }}
-            >
-              {t('agent.permission.fullAccessConfirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmationDialog
+        open={fullAccessDialogOpen}
+        onOpenChange={setFullAccessDialogOpen}
+        title={t('agent.permission.fullAccessTitle')}
+        description={t('agent.permission.fullAccessWarning')}
+        confirmLabel={t('agent.permission.fullAccessConfirm')}
+        confirmVariant="warning"
+        media={<TriangleAlertIcon className="text-app-warning" />}
+        onConfirm={() => {
+          setMode(sessionId, 'fullAccess');
+          setFullAccessDialogOpen(false);
+        }}
+      />
     </div>
   );
 }

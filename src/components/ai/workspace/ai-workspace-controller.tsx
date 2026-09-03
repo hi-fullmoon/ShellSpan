@@ -2,32 +2,33 @@ import type { AppSection } from '@/types';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { AgentPermissionSelector } from '../agent-permission-selector';
+import { AiComposerModelSelector } from './ai-composer-model-selector';
 import { AiWorkspaceRoot } from './ai-workspace-root';
 import {
   useAiSessionController,
-  type AiSessionControllerAdapters,
+  type AiSessionControllerAdapter,
 } from './use-ai-session-controller';
 
 export interface AiWorkspaceControllerProps {
   readonly scope: Extract<AppSection, 'terminal' | 'workbench'>;
-  readonly adapters?: AiSessionControllerAdapters;
+  readonly adapter?: AiSessionControllerAdapter;
   readonly onClose?: () => void;
 }
 
 export function AiWorkspaceController({
   scope,
-  adapters,
+  adapter,
   onClose,
 }: AiWorkspaceControllerProps): React.ReactNode {
-  const controller = useAiSessionController({ scope, adapters });
+  const controller = useAiSessionController({ scope, adapter });
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
+  const agentSessionLocked = controller.view?.summary.kind === 'agent';
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
   return (
     <AiWorkspaceRoot
       view={controller.view}
       pendingNodes={controller.pendingNodes}
       scope={scope}
-      initialPreset={controller.preset}
       composerState={controller.composer}
       announcement={controller.announcement}
       navigation={controller.navigation}
@@ -41,21 +42,31 @@ export function AiWorkspaceController({
       queueMutation={controller.queueMutation}
       renamingSessionId={controller.renamingSessionId}
       renameError={controller.renameError}
+      canStartAgent={controller.canStartAgent}
+      agentUnavailableReason={controller.agentUnavailableReason}
       providerLabel={controller.providerLabel}
       modelLabel={controller.modelLabel}
+      modelControl={(
+        <AiComposerModelSelector disabled={agentSessionLocked || !controller.canStartAgent} />
+      )}
       permissionControl={scope === 'terminal' && activeTerminalId
-        ? <AgentPermissionSelector sessionId={activeTerminalId} variant="composer" />
+        ? (
+            <AgentPermissionSelector
+              sessionId={activeTerminalId}
+              variant="composer"
+              disabled={agentSessionLocked || !controller.canStartAgent}
+            />
+          )
         : undefined}
       onDraftChange={controller.setDraft}
       onSubmitGesture={controller.submit}
       onStop={controller.stop}
-      onSelectPreset={controller.setPreset}
       onBusyPreferenceChange={controller.setBusyPreference}
       onRetryFailedDraft={controller.retryFailedDraft}
       onDismissError={controller.dismissError}
-      onOpenProvider={openAiSettings}
       onOpenModel={openAiSettings}
       onHistory={controller.openSessions}
+      onRefreshSessions={controller.refreshSessions}
       onNewSession={controller.newSession}
       onOpenSession={controller.openSession}
       onArchiveSession={controller.archiveSession}
@@ -67,7 +78,6 @@ export function AiWorkspaceController({
       onBack={controller.back}
       onOpenTool={controller.openToolDetails}
       onOpenArtifact={controller.openArtifactDetails}
-      onSelectedTabChange={controller.selectTab}
       onScrollAnchorChange={controller.saveScrollAnchor}
       onRouteReturnComplete={controller.completeRouteReturn}
       onApprove={controller.approve}

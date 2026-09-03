@@ -1,18 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import {
-  projectAgentConversationNodes,
-  projectAskConversationNodes,
-} from '@/lib/ai/conversation-projection';
+import { projectAgentConversationNodes } from '@/lib/ai/conversation-projection';
 import {
   agentSessionAllEventFamiliesFixture,
   agentSessionEventFixture,
   agentSessionWaitingApprovalEventFixture,
 } from '@/test/fixtures/agent-session';
-import {
-  askFailedMessageFixture,
-  askStreamingConversationFixture,
-  askStreamingMessageFixture,
-} from '@/test/fixtures/ask-streaming';
 import type { AgentSessionEvent } from '@/types/agent-session';
 
 const ALL_AGENT_EVENT_TYPES = [
@@ -75,6 +67,7 @@ describe('AI conversation node projection', () => {
       'approvalMarker',
       'lifecycleMarker',
       'retry',
+      'turnStats',
     ]));
     expect([...categories]).toEqual(expect.arrayContaining([
       'session',
@@ -109,6 +102,37 @@ describe('AI conversation node projection', () => {
       && node.category === 'compaction'
       && node.state === 'completed'
     ))).toBe(true);
+    expect(nodes[nodes.length - 1]).toEqual(expect.objectContaining({
+      kind: 'turnStats',
+      key: 'stats:session-fixture',
+      turnNumber: 1,
+      stepCount: 1,
+      modelDurationMs: 190,
+      toolDurationMs: 220,
+      averageTimeToFirstTokenMs: 30,
+      inputTokens: 32_000,
+      outputTokens: 12,
+      totalTokens: 32_012,
+      tokensPerSecond: 12 / 0.19,
+    }));
+  });
+
+  it('keeps the tail statistics limited to metrics present in committed events', () => {
+    const nodes = projectAgentConversationNodes(agentSessionEventFixture);
+    const stats = nodes[nodes.length - 1];
+
+    expect(stats).toEqual(expect.objectContaining({
+      kind: 'turnStats',
+      turnNumber: 1,
+      stepCount: 1,
+      modelDurationMs: null,
+      toolDurationMs: 220,
+      averageTimeToFirstTokenMs: 30,
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+      tokensPerSecond: null,
+    }));
   });
 
   it('updates one Assistant node across chunks and the committed message', () => {
@@ -175,52 +199,4 @@ describe('AI conversation node projection', () => {
     ]);
   });
 
-  it.each([
-    ['streaming', askStreamingMessageFixture, undefined],
-    ['failed', askFailedMessageFixture, 'Provider disconnected.'],
-  ] as const)('projects Ask %s state into the shared union', (_label, messages, error) => {
-    const nodes = projectAskConversationNodes({
-      conversation: askStreamingConversationFixture,
-      messages,
-      phase: error ? 'error' : 'streaming',
-      error,
-      errorRequestId: error ? messages[1].requestId : undefined,
-    });
-    expect(nodes[0]).toEqual(expect.objectContaining({
-      kind: 'userMessage',
-      key: 'user:ask-stream-user',
-      delivery: error ? 'failed' : 'committed',
-    }));
-    expect(nodes[1]).toEqual(expect.objectContaining({
-      kind: 'assistantMessage',
-      key: 'assistant:ask-stream-request',
-      content: messages[1].content,
-      state: messages[1].status,
-    }));
-    expect(nodes.some((node) => node.kind === 'error')).toBe(Boolean(error));
-  });
-
-  it('keeps the Ask assistant key stable as cumulative stream content changes', () => {
-    const partial = projectAskConversationNodes({
-      conversation: askStreamingConversationFixture,
-      messages: [
-        askStreamingMessageFixture[0],
-        { ...askStreamingMessageFixture[1], content: 'Inspecting ' },
-      ],
-      phase: 'streaming',
-    });
-    const complete = projectAskConversationNodes({
-      conversation: askStreamingConversationFixture,
-      messages: [
-        askStreamingMessageFixture[0],
-        { ...askStreamingMessageFixture[1], status: 'completed' },
-      ],
-      phase: 'idle',
-    });
-    expect(partial[1].key).toBe(complete[1].key);
-    expect(complete[1]).toEqual(expect.objectContaining({
-      content: 'Inspecting the deployment output.',
-      state: 'completed',
-    }));
-  });
 });

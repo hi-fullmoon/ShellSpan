@@ -6,8 +6,6 @@ export type AiPanelRoute =
   | Readonly<{ kind: 'toolDetails'; sessionId: string; nodeKey: string }>
   | Readonly<{ kind: 'artifactDetails'; sessionId: string; artifactId: string }>;
 
-export type AiWorkspaceTab = 'conversation' | 'activity';
-
 export interface AiScrollAnchor {
   readonly nodeKey: string;
   readonly offset: number;
@@ -21,7 +19,6 @@ export interface AiRouteReturnFocus {
 
 export interface AiWorkspaceNavigationState {
   readonly route: AiPanelRoute;
-  readonly selectedTabBySession: Readonly<Record<string, AiWorkspaceTab>>;
   readonly scrollAnchorBySession: Readonly<Record<string, AiScrollAnchor | undefined>>;
   readonly returnFocus: AiRouteReturnFocus | null;
 }
@@ -31,7 +28,6 @@ export function createAiWorkspaceNavigationState(
 ): AiWorkspaceNavigationState {
   return {
     route: { kind: 'conversation', sessionId },
-    selectedTabBySession: {},
     scrollAnchorBySession: {},
     returnFocus: null,
   };

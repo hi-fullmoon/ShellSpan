@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArchiveIcon, BotIcon, BrainCircuitIcon, PencilIcon, SquarePenIcon } from 'lucide-react';
+import {
+  ArchiveIcon,
+  EllipsisIcon,
+  FilterIcon,
+  PencilIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  SquarePenIcon,
+} from 'lucide-react';
 
 import {
   AlertDialog,
@@ -11,59 +19,257 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { PanelEmptyState, Spinner } from '@/components/ui/empty-state';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from '@/components/ui/input-group';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
+import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
+import type { LocaleKey } from '@/locales';
 import { AiRouteHeader } from './ai-route-header';
 
-type SessionFilter = 'all' | 'ask' | 'agent' | 'running' | 'archived';
+type SessionFilter = 'all' | 'running' | 'archived';
+
+const FILTERS = ['all', 'running', 'archived'] as const;
 
 function matches(summary: AiSessionSummary, filter: SessionFilter): boolean {
-  if (filter === 'all') return true;
-  if (filter === 'ask' || filter === 'agent') return summary.kind === filter;
   if (filter === 'archived') return summary.archived;
-  return summary.status === 'running' || summary.status === 'waiting';
+  if (filter === 'all') return !summary.archived;
+  return !summary.archived && (summary.status === 'running' || summary.status === 'waiting');
+}
+
+function sessionStatusLabel(status: AiSessionStatus, t: (key: LocaleKey) => string): string {
+  if (status === 'idle') return t('agent.session.status.idle');
+  if (status === 'waiting') return t('agent.session.status.waiting');
+  return t(`agent.outcome.${status}`);
+}
+
+function relativeTimeLabel(timestamp: string, locale: string): string {
+  const then = Date.parse(timestamp);
+  if (!Number.isFinite(then)) return timestamp;
+  const deltaSeconds = Math.round((then - Date.now()) / 1_000);
+  const absoluteSeconds = Math.abs(deltaSeconds);
+  const [value, unit]: [number, Intl.RelativeTimeFormatUnit] = absoluteSeconds < 60
+    ? [deltaSeconds, 'second']
+    : absoluteSeconds < 3_600
+      ? [Math.round(deltaSeconds / 60), 'minute']
+      : absoluteSeconds < 86_400
+        ? [Math.round(deltaSeconds / 3_600), 'hour']
+        : [Math.round(deltaSeconds / 86_400), 'day'];
+  return new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'narrow' }).format(value, unit);
+}
+
+function SessionBrowserLoading({ label }: { readonly label: string }): React.ReactNode {
+  return (
+    <div className="ai-session-browser-loading" role="status" aria-label={label}>
+      {[0, 1, 2, 3, 4].map((index) => (
+        <div className="ai-session-browser-skeleton" key={index}>
+          <Skeleton className="size-3 rounded-full" />
+          <Skeleton className="h-4 min-w-0 flex-1" />
+          <Skeleton className="h-3 w-10" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NewSessionButton({
+  canStartAgent,
+  unavailableReason,
+  onNew,
+}: {
+  readonly canStartAgent: boolean;
+  readonly unavailableReason?: string | null;
+  readonly onNew: () => void;
+}): React.ReactNode {
+  const { t } = useI18n();
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={(
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={!canStartAgent}
+            onClick={onNew}
+            aria-label={t('ai.newConversation')}
+          />
+        )}
+      >
+        <SquarePenIcon />
+      </TooltipTrigger>
+      <TooltipContent>
+        {canStartAgent ? t('ai.newConversation') : unavailableReason ?? t('agent.availability.needsTerminal')}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function SessionRow({
+  summary,
+  selected,
+  busy,
+  locale,
+  onOpen,
+  onArchive,
+  onRename,
+}: {
+  readonly summary: AiSessionSummary;
+  readonly selected: boolean;
+  readonly busy: boolean;
+  readonly locale: string;
+  readonly onOpen: () => void;
+  readonly onArchive: () => void;
+  readonly onRename: () => void;
+}): React.ReactNode {
+  const { t } = useI18n();
+  const active = summary.status === 'running' || summary.status === 'waiting';
+  const terminal = summary.status === 'completed'
+    || summary.status === 'failed'
+    || summary.status === 'cancelled';
+  const canRename = summary.kind === 'agent' && !summary.archived && !terminal;
+  const canArchive = !summary.archived && !active;
+  const hasActions = canRename || canArchive;
+  const status = sessionStatusLabel(summary.status, t);
+  const title = `${summary.title} · ${status}`;
+
+  return (
+    <div
+      className="ai-session-row"
+      data-selected={selected || undefined}
+      data-menu-busy={busy || undefined}
+      data-status={summary.status}
+      role="treeitem"
+      aria-selected={selected}
+    >
+      <button
+        type="button"
+        className="ai-session-row-main"
+        onClick={onOpen}
+        aria-current={selected ? 'page' : undefined}
+        title={title}
+      >
+        <span className="ai-session-row-status" data-state={summary.status} aria-hidden="true" />
+        <span className="ai-session-row-title">{summary.title}</span>
+        <span className="ai-session-row-time">{relativeTimeLabel(summary.updatedAt, locale)}</span>
+        <span className="sr-only">{status} · {summary.scopeKey}</span>
+      </button>
+      {hasActions && (
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger
+              render={(
+                <DropdownMenuTrigger
+                  render={(
+                    <button
+                      type="button"
+                      className="ai-session-row-menu"
+                      aria-label={t('ai.workspace.sessions.actions', { title: summary.title })}
+                      disabled={busy}
+                    />
+                  )}
+                />
+              )}
+            >
+              {busy ? <Spinner /> : <EllipsisIcon />}
+            </TooltipTrigger>
+            <TooltipContent>{t('ai.workspace.sessions.actions', { title: summary.title })}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+              {canRename && (
+                <DropdownMenuItem onClick={onRename}>
+                  <PencilIcon />
+                  {t('ai.workspace.sessions.rename')}
+                </DropdownMenuItem>
+              )}
+              {canArchive && (
+                <DropdownMenuItem onClick={onArchive}>
+                  <ArchiveIcon />
+                  {t('ai.workspace.sessions.archive')}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
+  );
 }
 
 export function AiSessionBrowser({
   sessions,
+  activeSessionKey = null,
   loading,
   error,
   archivingId,
   renamingId = null,
   renameError = null,
+  canStartAgent = false,
+  agentUnavailableReason = null,
   onBack,
+  onClose,
   onNew,
+  onRefresh = () => undefined,
   onOpen,
   onArchive,
   onRename,
 }: {
   readonly sessions: readonly AiSessionSummary[];
+  readonly activeSessionKey?: string | null;
   readonly loading: boolean;
   readonly error: string | null;
   readonly archivingId: string | null;
   readonly renamingId?: string | null;
   readonly renameError?: string | null;
+  readonly canStartAgent?: boolean;
+  readonly agentUnavailableReason?: string | null;
   readonly onBack: () => void;
+  readonly onClose?: () => void;
   readonly onNew: () => void;
+  readonly onRefresh?: () => void;
   readonly onOpen: (summary: AiSessionSummary) => void;
   readonly onArchive: (summary: AiSessionSummary) => void;
   readonly onRename?: (summary: AiSessionSummary, title: string) => void;
 }): React.ReactNode {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const [filter, setFilter] = useState<SessionFilter>('all');
+  const [query, setQuery] = useState('');
   const [archiveTarget, setArchiveTarget] = useState<AiSessionSummary | null>(null);
   const [renameTarget, setRenameTarget] = useState<AiSessionSummary | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [submittedTitle, setSubmittedTitle] = useState<string | null>(null);
-  const visible = useMemo(() => sessions.filter((summary) => matches(summary, filter)), [filter, sessions]);
+  const visible = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase(locale);
+    return sessions.filter((summary) => (
+      matches(summary, filter)
+      && (
+        normalizedQuery.length === 0
+        || summary.title.toLocaleLowerCase(locale).includes(normalizedQuery)
+        || summary.scopeKey.toLocaleLowerCase(locale).includes(normalizedQuery)
+      )
+    ));
+  }, [filter, locale, query, sessions]);
 
   useEffect(() => {
     if (!renameTarget || !submittedTitle || renamingId !== null) return;
@@ -79,154 +285,154 @@ export function AiSessionBrowser({
   }, [renameTarget, renamingId, sessions, submittedTitle]);
 
   return (
-    <div className="flex size-full min-h-0 min-w-0 flex-col" data-slot="ai-session-browser">
+    <div className="ai-session-browser" data-slot="ai-session-browser">
       <AiRouteHeader
         title={t('ai.workspace.sessions.title')}
         description={t('ai.workspace.sessions.description')}
         onBack={onBack}
+        onClose={onClose}
         actions={(
+          <NewSessionButton
+            canStartAgent={canStartAgent}
+            unavailableReason={agentUnavailableReason}
+            onNew={onNew}
+          />
+        )}
+      />
+
+      <div className="ai-session-browser-toolbar">
+        <InputGroup className="ai-session-search">
+          <InputGroupAddon>
+            <SearchIcon aria-hidden="true" />
+          </InputGroupAddon>
+          <InputGroupInput
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            aria-label={t('ai.workspace.sessions.search')}
+            placeholder={t('common.search')}
+          />
+        </InputGroup>
+        <DropdownMenu>
           <Tooltip>
             <TooltipTrigger
               render={(
-                <Button variant="ghost" size="icon" className="size-8" onClick={onNew} aria-label={t('ai.newConversation')} />
+                <DropdownMenuTrigger
+                  render={(
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t('ai.workspace.sessions.filter')}
+                    />
+                  )}
+                />
               )}
             >
-              <SquarePenIcon />
+              <FilterIcon />
             </TooltipTrigger>
-            <TooltipContent>{t('ai.newConversation')}</TooltipContent>
+            <TooltipContent>{t(`ai.workspace.sessions.filter.${filter}`)}</TooltipContent>
           </Tooltip>
-        )}
-      />
-      <div className="shrink-0 overflow-x-auto border-b border-border p-2">
-        <ToggleGroup
-          value={[filter]}
-          onValueChange={(value) => setFilter((value[0] as SessionFilter | undefined) ?? 'all')}
-          aria-label={t('ai.workspace.sessions.filter')}
-          size="sm"
-          variant="outline"
-          className="w-max"
-        >
-          {(['all', 'ask', 'agent', 'running', 'archived'] as const).map((value) => (
-            <ToggleGroupItem key={value} value={value} aria-label={t(`ai.workspace.sessions.filter.${value}`)}>
-              {t(`ai.workspace.sessions.filter.${value}`)}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>{t('ai.workspace.sessions.filter')}</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={filter}
+                onValueChange={(value) => setFilter(value as SessionFilter)}
+              >
+                {FILTERS.map((value) => (
+                  <DropdownMenuRadioItem key={value} value={value}>
+                    {t(`ai.workspace.sessions.filter.${value}`)}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger
+            render={(
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={loading}
+                onClick={onRefresh}
+                aria-label={t('common.refresh')}
+              />
+            )}
+          >
+            {loading ? <Spinner /> : <RefreshCwIcon />}
+          </TooltipTrigger>
+          <TooltipContent>{t('common.refresh')}</TooltipContent>
+        </Tooltip>
       </div>
-      <ScrollArea className="min-h-0 min-w-0 flex-1" aria-label={t('ai.workspace.sessions.title')}>
-        <ScrollAreaContent className="flex min-w-0 flex-col gap-1 p-2">
-          {loading && (
-            <div className="flex min-h-24 items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
-              <Spinner /> {t('common.loading')}
-            </div>
-          )}
-          {error && <p className="break-words p-2 text-sm text-destructive" role="alert">{error}</p>}
+
+      {error && (
+        <div className="ai-session-browser-error" role="alert">
+          <span>{error}</span>
+          <Button variant="ghost" size="sm" onClick={onRefresh} disabled={loading}>
+            <RefreshCwIcon data-icon="inline-start" />
+            {t('common.retry')}
+          </Button>
+        </div>
+      )}
+
+      <ScrollArea className="ai-session-browser-scroll" aria-label={t('ai.workspace.sessions.title')}>
+        <ScrollAreaContent className="ai-session-browser-list">
+          {loading && sessions.length === 0 && <SessionBrowserLoading label={t('common.loading')} />}
           {!loading && !error && visible.length === 0 && (
             <PanelEmptyState
-              icon={<ArchiveIcon />}
-              title={t('ai.workspace.sessions.emptyTitle')}
-              description={t('ai.workspace.sessions.emptyDescription')}
+              icon={query ? <SearchIcon /> : <ArchiveIcon />}
+              title={query ? t('common.noSearchResults') : t('ai.workspace.sessions.emptyTitle')}
+              description={query ? undefined : t('ai.workspace.sessions.emptyDescription')}
+              action={(
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!canStartAgent}
+                  onClick={onNew}
+                >
+                  <SquarePenIcon data-icon="inline-start" />
+                  {t('ai.newConversation')}
+                </Button>
+              )}
             />
           )}
-          {visible.map((summary) => {
-            const active = summary.status === 'running' || summary.status === 'waiting';
-            const KindIcon = summary.kind === 'agent' ? BrainCircuitIcon : BotIcon;
-            return (
-              <div key={`${summary.kind}:${summary.id}`} className="flex min-w-0 items-center gap-1 rounded-md hover:bg-muted/50">
-                <button
-                  type="button"
-                  className="flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-md px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => onOpen(summary)}
-                >
-                  <KindIcon className="shrink-0" aria-hidden="true" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{summary.title}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {new Date(summary.updatedAt).toLocaleString()} · {summary.scopeKey}
-                    </span>
-                  </span>
-                  <Badge variant={active ? 'secondary' : summary.archived ? 'outline' : 'default'}>{summary.status}</Badge>
-                </button>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={(
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 shrink-0"
-                        disabled={
-                          summary.kind !== 'agent'
-                          || summary.archived
-                          || ['completed', 'failed', 'cancelled'].includes(summary.status)
-                          || renamingId !== null
-                        }
-                        onClick={() => {
-                          setRenameTarget(summary);
-                          setRenameValue(summary.title);
-                          setSubmittedTitle(null);
-                        }}
-                        aria-label={t('ai.workspace.sessions.rename')}
-                      />
-                    )}
-                  >
-                    {renamingId === summary.id ? <Spinner /> : <PencilIcon />}
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {summary.kind !== 'agent'
-                      ? t('ai.workspace.sessions.renameAgentOnly')
-                      : summary.archived
-                        ? t('ai.workspace.sessions.renameArchivedDisabled')
-                        : ['completed', 'failed', 'cancelled'].includes(summary.status)
-                          ? t('ai.workspace.sessions.renameTerminalDisabled')
-                          : t('ai.workspace.sessions.rename')}
-                  </TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={(
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 shrink-0"
-                        disabled={active || archivingId === summary.id}
-                        onClick={() => setArchiveTarget(summary)}
-                        aria-label={t('ai.workspace.sessions.archiveLabel', { title: summary.title })}
-                      />
-                    )}
-                  >
-                    {archivingId === summary.id ? <Spinner /> : <ArchiveIcon />}
-                  </TooltipTrigger>
-                  <TooltipContent>{active ? t('ai.workspace.sessions.archiveRunningDisabled') : t('ai.workspace.sessions.archive')}</TooltipContent>
-                </Tooltip>
-              </div>
-            );
-          })}
+          {visible.length > 0 && (
+            <div role="tree" aria-label={t('ai.workspace.sessions.title')}>
+              {visible.map((summary) => (
+                <SessionRow
+                  key={`${summary.kind}:${summary.id}`}
+                  summary={summary}
+                  selected={`${summary.kind}:${summary.id}` === activeSessionKey}
+                  busy={archivingId === summary.id || renamingId === summary.id}
+                  locale={locale}
+                  onOpen={() => onOpen(summary)}
+                  onArchive={() => setArchiveTarget(summary)}
+                  onRename={() => {
+                    setRenameTarget(summary);
+                    setRenameValue(summary.title);
+                    setSubmittedTitle(null);
+                  }}
+                />
+              ))}
+            </div>
+          )}
         </ScrollAreaContent>
       </ScrollArea>
 
-      <AlertDialog open={archiveTarget !== null} onOpenChange={(open) => { if (!open) setArchiveTarget(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('ai.workspace.sessions.archiveConfirmTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('ai.workspace.sessions.archiveConfirmDescription', { title: archiveTarget?.title ?? '' })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={!archiveTarget || archivingId !== null}
-              onClick={() => {
-                if (archiveTarget) onArchive(archiveTarget);
-                setArchiveTarget(null);
-              }}
-            >
-              {t('ai.workspace.sessions.archive')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmationDialog
+        open={archiveTarget !== null}
+        onOpenChange={(open) => { if (!open) setArchiveTarget(null); }}
+        title={t('ai.workspace.sessions.archiveConfirmTitle')}
+        description={t('ai.workspace.sessions.archiveConfirmDescription', { title: archiveTarget?.title ?? '' })}
+        confirmLabel={t('ai.workspace.sessions.archive')}
+        confirmVariant="destructive"
+        confirmDisabled={!archiveTarget || archivingId !== null}
+        onConfirm={() => {
+          if (archiveTarget) onArchive(archiveTarget);
+          setArchiveTarget(null);
+        }}
+      />
 
       <AlertDialog
         open={renameTarget !== null}
