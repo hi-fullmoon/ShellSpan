@@ -19,7 +19,7 @@ import type {
   AgentSessionListPage,
   AgentSessionSnapshot,
 } from '@/types/agent-session';
-import { projectAgentConversationNodes } from './conversation-projection';
+import { projectAgentChatNodes } from './conversation-projection';
 import type { AiConversationNode } from './conversation-node';
 import type {
   AiApprovalDecisionInput,
@@ -49,14 +49,15 @@ function contextUsage(events: readonly AgentSessionEvent[]): AiContextUsage | un
   const reported = [...events].reverse().find((event) => (
     event.type === 'request/usage'
     && event.data.requestId === latestContext.data.requestId
-    && event.data.inputTokens !== undefined
+    && event.data.usage.uncachedInputTokens !== undefined
+    && event.data.usage.cacheReadTokens !== undefined
   ));
   const systemTokens = latestContext.data.systemTokens;
   const toolsTokens = latestContext.data.toolSchemaTokens;
   const messageTokens = latestContext.data.messageTokens;
   return {
-    usedTokens: reported?.type === 'request/usage' && reported.data.inputTokens !== undefined
-      ? reported.data.inputTokens
+    usedTokens: reported?.type === 'request/usage'
+      ? reported.data.usage.uncachedInputTokens! + reported.data.usage.cacheReadTokens!
       : estimated,
     contextWindow,
     source: reported ? 'reported' : 'estimated',
@@ -153,6 +154,7 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
             content: message.content,
             state: 'queued',
             source: inboxSource(message.source),
+            provenance: message.source,
           });
         } else if (event.data.operation === 'claimed') {
           const previous = items.get(message.messageId);
@@ -178,12 +180,22 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
   return [...items.values()];
 }
 
+function flattenChatNodes(nodes: readonly AiConversationNode[]): readonly AiConversationNode[] {
+  const readable: AiConversationNode[] = [];
+  for (const node of nodes) {
+    readable.push(node);
+    if (node.kind === 'turnProcess') readable.push(...node.children);
+  }
+  return readable;
+}
+
 function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApproval | null {
-  const node = nodes.find((candidate) => (
+  const readable = flattenChatNodes(nodes);
+  const node = readable.find((candidate) => (
     candidate.kind === 'approvalMarker' && candidate.status === 'requested'
   ));
   if (node?.kind !== 'approvalMarker' || node.turnId === null || node.stepId === null) return null;
-  const tool = nodes.find((candidate) => candidate.kind === 'tool' && candidate.callId === node.callId);
+  const tool = readable.find((candidate) => candidate.kind === 'tool' && candidate.callId === node.callId);
   return {
     sessionId: node.sessionId,
     turnId: node.turnId,
@@ -204,7 +216,8 @@ function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApprova
 }
 
 function terminalError(nodes: readonly AiConversationNode[]): AiSessionError | null {
-  const node = [...nodes].reverse().find((candidate) => candidate.kind === 'error');
+  const readable = flattenChatNodes(nodes);
+  const node = [...readable].reverse().find((candidate) => candidate.kind === 'error');
   if (node?.kind !== 'error') return null;
   return {
     kind: node.state === 'cancelled' ? 'cancelled' : 'terminal',
@@ -217,11 +230,12 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
   if (!state.snapshot) throw new Error('Agent Session snapshot is unavailable');
   const events = state.events;
   const activity = projectAgentActivity(events);
-  const nodes = projectAgentConversationNodes(events);
+  const nodes = projectAgentChatNodes(events);
   return {
     summary: sessionSummary(state.snapshot, events, activity.status),
     snapshot: { kind: 'agent', value: state.snapshot },
     nodes,
+    activityNodes: activity.nodes,
     inbox: projectAgentInbox(events),
     pendingApproval: pendingApproval(nodes),
     status: activity.status,

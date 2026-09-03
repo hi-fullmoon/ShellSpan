@@ -7,9 +7,11 @@ import { AiConversationNodeSeat } from './ai-conversation-node-seat';
 
 function followKey(nodes: readonly AiConversationNode[], throughSeq: number | null): string {
   const last = nodes[nodes.length - 1];
-  const contentRevision = last?.kind === 'assistantMessage' || last?.kind === 'reasoning'
-    ? last.content.length
-    : 0;
+  const contentRevision = last?.kind === 'assistantMessage'
+    ? last.blocks.reduce((sum, block) => (
+      block.type === 'text' || block.type === 'reasoning' ? sum + block.text.length : sum
+    ), 0)
+    : last?.kind === 'reasoning' ? last.content.length : 0;
   return `${throughSeq ?? 'uncommitted'}:${last?.key ?? 'empty'}:${last?.lastSeq ?? 0}:${contentRevision}`;
 }
 

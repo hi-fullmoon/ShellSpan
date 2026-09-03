@@ -6,20 +6,13 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-import { Button } from '@/components/ui/button';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
-import { parseAssistantContent } from '@/lib/ai-content';
 import { splitStreamingMarkdown } from '@/lib/streaming-markdown';
+import type { AgentSessionAssistantContentBlock } from '@/types/agent-session';
 import { cn } from '@/lib/utils';
 
 function textFromNode(node: React.ReactNode): string {
@@ -139,114 +132,41 @@ const MarkdownContent = React.memo(function MarkdownContent({
   );
 });
 
-function firstLine(text: string): string {
-  return text.trim().split('\n')[0] ?? text;
-}
-
-function latestLine(text: string): string {
-  const lines = text.trimEnd().split('\n');
-  return lines[lines.length - 1] ?? text;
+function answerFromBlocks(blocks: readonly AgentSessionAssistantContentBlock[]): string {
+  return blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('');
 }
 
 const AssistantMessageContentComponent: React.FC<{
-  content: string;
+  blocks: readonly AgentSessionAssistantContentBlock[];
   streaming: boolean;
   showCodeBlockActions?: boolean;
-}> = ({ content, streaming, showCodeBlockActions = true }) => {
+}> = ({ blocks, streaming, showCodeBlockActions = true }) => {
   const { t } = useI18n();
-  const deferredContent = useDeferredValue(content);
-  const renderedContent = streaming ? deferredContent : content;
-  const { answer, reasoning, reasoningComplete } = parseAssistantContent(renderedContent);
-  const answerChunks = useMemo(() => splitStreamingMarkdown(answer), [answer]);
-  const hasAnswer = Boolean(answer.trim());
-  const hasReasoning = Boolean(reasoning);
-  const hadAnswer = useRef(hasAnswer);
-  const hadReasoning = useRef(hasReasoning);
-  const reasoningStartedAt = useRef<number | null>(streaming ? Date.now() : null);
-  const [reasoningDurationSeconds, setReasoningDurationSeconds] = useState<number | null>(null);
-  const [reasoningOpen, setReasoningOpen] = useState(!hasAnswer && hasReasoning);
+  const answer = useMemo(() => answerFromBlocks(blocks), [blocks]);
+  const deferredAnswer = useDeferredValue(answer);
+  const renderedAnswer = streaming ? deferredAnswer : answer;
+  const answerChunks = useMemo(() => splitStreamingMarkdown(renderedAnswer), [renderedAnswer]);
 
-  useEffect(() => {
-    if (!hadReasoning.current && hasReasoning && !hasAnswer) setReasoningOpen(true);
-    if (!hadAnswer.current && hasAnswer) setReasoningOpen(false);
-    hadReasoning.current = hasReasoning;
-    hadAnswer.current = hasAnswer;
-  }, [hasAnswer, hasReasoning]);
-
-  useEffect(() => {
-    if (streaming && reasoningStartedAt.current === null) reasoningStartedAt.current = Date.now();
-    if (
-      !hasReasoning
-      || reasoningDurationSeconds !== null
-      || reasoningStartedAt.current === null
-      || (streaming && !reasoningComplete)
-    ) return;
-
-    setReasoningDurationSeconds(Math.max(
-      1,
-      Math.ceil((Date.now() - reasoningStartedAt.current) / 1_000),
-    ));
-  }, [hasReasoning, reasoningComplete, reasoningDurationSeconds, streaming]);
-
-  if (!renderedContent) {
-    return <span className="ai-turn-status shimmer" role="status">{t('ai.thinking.inProgress')}</span>;
+  if (!renderedAnswer) {
+    return streaming
+      ? <span className="ai-turn-status shimmer" role="status">{t('ai.thinking.inProgress')}</span>
+      : null;
   }
-
-  const reasoningRunning = streaming && !reasoningComplete;
-  const reasoningSummary = reasoningRunning ? latestLine(reasoning) : firstLine(reasoning);
-  const reasoningLabel = reasoningRunning
-    ? t('ai.thinking.inProgress')
-    : reasoningDurationSeconds === null
-      ? t('ai.thinking')
-      : t('ai.thinking.completed', { seconds: reasoningDurationSeconds });
 
   return (
     <div className="ai-assistant-content" data-streaming={streaming || undefined}>
-      {reasoning && (
-        <Collapsible open={reasoningOpen} onOpenChange={setReasoningOpen}>
-          <div
-            className={cn('ai-reasoning-row', reasoningRunning && 'shimmer')}
-            data-state={reasoningRunning ? 'running' : 'ok'}
-            data-expanded={reasoningOpen || undefined}
+      <div className="ai-assistant-answer">
+        {answerChunks.map((chunk, index) => (
+          <MarkdownContent
+            key={index}
+            copiedLabel={t('common.copied')}
+            copyLabel={t('common.copy')}
+            showCodeBlockActions={showCodeBlockActions}
           >
-            <CollapsibleTrigger
-              render={(
-                <Button
-                  variant="plain"
-                  size="sm"
-                  className="ai-disclosure-row"
-                  aria-label={reasoningLabel}
-                />
-              )}
-            >
-              <span className="ai-disclosure-leading" aria-hidden="true">
-                <BrainIcon />
-              </span>
-              <span className="ai-disclosure-title">{reasoningLabel}</span>
-              <span className="ai-disclosure-separator" aria-hidden="true" />
-              <span className="ai-disclosure-summary">{reasoningSummary}</span>
-              <ChevronDownIcon className="ai-disclosure-chevron" aria-hidden="true" />
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <div className="ai-reasoning-body">{reasoning}</div>
-            </CollapsibleContent>
-          </div>
-        </Collapsible>
-      )}
-      {hasAnswer && (
-        <div className="ai-assistant-answer">
-          {answerChunks.map((chunk, index) => (
-            <MarkdownContent
-              key={index}
-              copiedLabel={t('common.copied')}
-              copyLabel={t('common.copy')}
-              showCodeBlockActions={showCodeBlockActions}
-            >
-              {chunk}
-            </MarkdownContent>
-          ))}
-        </div>
-      )}
+            {chunk}
+          </MarkdownContent>
+        ))}
+      </div>
     </div>
   );
 };

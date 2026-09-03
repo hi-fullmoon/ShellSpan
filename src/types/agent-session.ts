@@ -1,14 +1,10 @@
-export const LEGACY_AGENT_SESSION_EVENT_VERSION = 2 as const;
-export const AGENT_SESSION_EVENT_VERSION = 3 as const;
-export type AgentSessionEventVersion =
-  | typeof LEGACY_AGENT_SESSION_EVENT_VERSION
-  | typeof AGENT_SESSION_EVENT_VERSION;
+export const AGENT_SESSION_EVENT_VERSION = 4 as const;
+export type AgentSessionEventVersion = typeof AGENT_SESSION_EVENT_VERSION;
 
 export function isSupportedAgentSessionEventVersion(
   version: number,
 ): version is AgentSessionEventVersion {
-  return version === LEGACY_AGENT_SESSION_EVENT_VERSION
-    || version === AGENT_SESSION_EVENT_VERSION;
+  return version === AGENT_SESSION_EVENT_VERSION;
 }
 
 export type AgentSessionRuntimeStatus =
@@ -43,11 +39,22 @@ export type AgentSessionPermissionMode = 'requestApproval' | 'scopedAutopilot' |
 export type AgentSessionInboxLane = 'nextTurn' | 'nextStep';
 export type AgentSessionInboxOperation = 'enqueued' | 'claimed' | 'discarded';
 
-export type AgentSessionMessageSource =
-  | Readonly<{ kind: 'user' }>
-  | Readonly<{ kind: 'runtime'; label: string }>
-  | Readonly<{ kind: 'subagent'; sessionId: string }>
-  | Readonly<{ kind: 'legacyImport' }>;
+export type AgentSessionProvenanceKind =
+  | 'user'
+  | 'runtime'
+  | 'plugin'
+  | 'skill-catalog'
+  | 'agent-instructions'
+  | 'skill-invocation'
+  | 'session-reference'
+  | 'form';
+
+export interface AgentSessionMessageSource {
+  readonly kind: AgentSessionProvenanceKind;
+  readonly label: string;
+  readonly producerId: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
 
 export interface AgentSessionInboxMessage {
   readonly messageId: string;
@@ -122,6 +129,60 @@ export interface AgentSessionRecordedToolCall {
   readonly effect?: AgentSessionEffect;
   readonly target?: AgentSessionTarget;
 }
+
+export interface AgentSessionTokenUsage {
+  /** Provider-reported input tokens that were not read from cache. Missing means unknown. */
+  readonly uncachedInputTokens?: number;
+  /** Provider-reported input tokens served from cache. Missing means unknown. */
+  readonly cacheReadTokens?: number;
+  /** Provider-reported input tokens written to cache. Missing means unknown. */
+  readonly cacheWriteTokens?: number;
+  /** Provider-reported generated output tokens. Missing means unknown. */
+  readonly outputTokens?: number;
+  /** Provider-reported reasoning tokens. Missing means unknown. */
+  readonly reasoningTokens?: number;
+  /** Provider-reported total tokens. Missing means unknown. */
+  readonly totalTokens?: number;
+}
+
+export type AgentSessionStopReason =
+  | 'stop'
+  | 'toolCalls'
+  | 'length'
+  | 'contentFilter'
+  | 'cancelled'
+  | 'error'
+  | 'other';
+
+export type AgentSessionRequestReason =
+  | 'initial'
+  | 'retry'
+  | 'toolContinuation'
+  | 'recovery';
+
+export interface AgentSessionRequestSeries {
+  readonly seriesId: string;
+  readonly requestIndex: number;
+  readonly startsSeries: boolean;
+}
+
+export interface AgentSessionRequestToolSchema {
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: unknown;
+}
+
+export interface AgentSessionToolCallDelta {
+  readonly index: number;
+  readonly callId?: string;
+  readonly nameDelta?: string;
+  readonly argumentsDelta?: string;
+}
+
+export type AgentSessionAssistantContentBlock =
+  | Readonly<{ type: 'text'; text: string }>
+  | Readonly<{ type: 'reasoning'; text: string; providerItem?: unknown }>
+  | Readonly<{ type: 'toolCall'; call: AgentSessionRecordedToolCall }>;
 
 export interface AgentSessionPlanStep {
   readonly id: string;
@@ -207,8 +268,8 @@ type AgentSessionEventWithoutData<Type extends string> = AgentSessionEventBase &
 
 /**
  * Canonical UI wire contract for the append-only Agent Session Event Log.
- * The envelope deliberately matches the Rust serde representation so Phase B
- * can replace the Phase A fixture source without a second UI data model.
+ * The envelope deliberately matches the Rust serde representation so fixtures,
+ * durable replay, and live events all use the same v4 data model.
  */
 export type AgentSessionEvent =
   | AgentSessionEventWithData<'session/created', {
@@ -267,19 +328,30 @@ export type AgentSessionEvent =
   | AgentSessionEventWithoutData<'step/start'>
   | AgentSessionEventWithData<'step/end', { reason: string }>
   | AgentSessionEventWithData<'user/message', { message: AgentSessionInboxMessage }>
-  | AgentSessionEventWithData<'assistant/chunk', { requestId: string; text: string }>
+  | AgentSessionEventWithData<'assistant/chunk', {
+      requestId: string;
+      textDelta?: string;
+      reasoningDelta?: string;
+      toolCallDelta?: AgentSessionToolCallDelta;
+      usage?: AgentSessionTokenUsage;
+    }>
   | AgentSessionEventWithData<'assistant/message', {
       messageId: string;
-      content: string;
-      toolCalls: readonly AgentSessionRecordedToolCall[];
+      content: readonly AgentSessionAssistantContentBlock[];
+      usage: AgentSessionTokenUsage;
+      stopReason: AgentSessionStopReason;
       interrupted: boolean;
     }>
   | AgentSessionEventWithData<'request/header', {
       requestId: string;
       providerId: string;
-      model?: string;
+      model: string;
       reasoningEffort?: string;
-      attempt?: number;
+      reason: AgentSessionRequestReason;
+      series: AgentSessionRequestSeries;
+      systemPrompt: string;
+      toolSchemas: readonly AgentSessionRequestToolSchema[];
+      attempt: number;
     }>
   | AgentSessionEventWithData<'request/context', {
       requestId: string;
@@ -300,10 +372,8 @@ export type AgentSessionEvent =
     }>
   | AgentSessionEventWithData<'request/usage', {
       requestId: string;
-      inputTokens?: number;
-      outputTokens?: number;
-      totalTokens?: number;
-      finishReason: 'stop' | 'toolCalls' | 'length' | 'contentFilter' | 'other';
+      usage: AgentSessionTokenUsage;
+      finishReason: AgentSessionStopReason;
     }>
   | AgentSessionEventWithData<'tool/call', { call: AgentSessionRecordedToolCall }>
   | AgentSessionEventWithData<'tool/approval', {
@@ -406,12 +476,12 @@ export type AgentModelSurfaceMessage =
       role: 'user';
       messageId: string;
       content: string;
+      source: AgentSessionMessageSource;
     }>
   | Readonly<{
       role: 'assistant';
       messageId: string;
-      content: string;
-      toolCalls: readonly AgentSessionRecordedToolCall[];
+      content: readonly AgentSessionAssistantContentBlock[];
       interrupted: boolean;
     }>
   | Readonly<{
@@ -689,15 +759,29 @@ export interface AgentFleetInspection {
 export interface AgentActivityRequest {
   readonly requestId: string;
   readonly providerId: string;
-  readonly model?: string;
+  readonly model: string;
   readonly reasoningEffort?: string;
+  readonly reason: AgentSessionRequestReason;
+  readonly series: AgentSessionRequestSeries;
+  readonly systemPrompt: string;
+  readonly toolSchemas: readonly AgentSessionRequestToolSchema[];
   readonly attempt: number;
+  readonly startedAt: number;
+  readonly firstReasoningAt?: number;
+  readonly firstTextAt?: number;
+  readonly completedAt?: number;
+  readonly interruptedAt?: number;
+  readonly ttftMs?: number;
+  readonly reasoningDurationMs?: number;
+  readonly llmDurationMs?: number;
   readonly inputTokens?: number;
   readonly contextWindow?: number;
   readonly surfaceGeneration: number;
+  readonly usage?: AgentSessionTokenUsage;
   readonly outputTokens?: number;
   readonly totalTokens?: number;
-  readonly finishReason?: 'stop' | 'toolCalls' | 'length' | 'contentFilter' | 'other';
+  readonly finishReason?: AgentSessionStopReason;
+  readonly retryReason?: string;
 }
 
 export interface AgentActivityTool {
@@ -717,7 +801,7 @@ export interface AgentActivityStep {
   readonly endedAt?: number;
   readonly durationMs?: number;
   readonly endReason?: string;
-  readonly request?: AgentActivityRequest;
+  readonly requests: readonly AgentActivityRequest[];
   readonly tools: readonly AgentActivityTool[];
 }
 
@@ -765,6 +849,63 @@ export interface AgentActivityAgent {
   readonly summary?: string;
 }
 
+export type AgentActivityNodeKind =
+  | 'session'
+  | 'agent'
+  | 'inbox'
+  | 'turn'
+  | 'step'
+  | 'request'
+  | 'requestContext'
+  | 'requestUsage'
+  | 'assistantStream'
+  | 'assistantMessage'
+  | 'tool'
+  | 'approval'
+  | 'retry'
+  | 'artifact'
+  | 'compaction'
+  | 'subagent'
+  | 'task'
+  | 'evidence'
+  | 'error'
+  | 'cancellation'
+  | 'unknown';
+
+export type AgentActivityNodeStatus =
+  | AgentSessionRuntimeStatus
+  | AgentSessionToolStatus
+  | 'started'
+  | 'updated'
+  | 'info'
+  | 'interrupted'
+  | 'unknown';
+
+/** Stable, ordered audit row derived from one committed event window. */
+export interface AgentActivityNode {
+  readonly key: string;
+  readonly kind: AgentActivityNodeKind;
+  readonly sessionId: string;
+  readonly turnId: string | null;
+  readonly stepId: string | null;
+  readonly requestId: string | null;
+  readonly firstSeq: number;
+  readonly lastSeq: number;
+  readonly timestamp: string;
+  readonly status: AgentActivityNodeStatus;
+  readonly label: string;
+  readonly detail: string | null;
+  readonly eventTypes: readonly string[];
+  readonly eventSeqs: readonly number[];
+  readonly records: readonly Readonly<{
+    type: string;
+    seq: number;
+    timeUnixMs: number;
+    data: unknown;
+  }>[];
+  readonly data: unknown;
+}
+
 export interface AgentActivityProjection {
   readonly sessionId?: string;
   readonly status: AgentSessionRuntimeStatus;
@@ -779,4 +920,5 @@ export interface AgentActivityProjection {
   readonly recovery: AgentSessionRecoveryState;
   readonly fleet?: AgentSessionFleetState;
   readonly evidenceCount: number;
+  readonly nodes: readonly AgentActivityNode[];
 }
