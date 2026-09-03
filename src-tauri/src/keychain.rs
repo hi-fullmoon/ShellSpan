@@ -45,13 +45,53 @@ pub(crate) const KEY_SERVICE: &str = "com.shellspan.key";
 pub(crate) const PROFILE_PASSWORD_SERVICE: &str = "com.shellspan.profile-password";
 pub(crate) const PROFILE_SECRET_SERVICE: &str = "com.shellspan.profile-secret";
 
+const fn credential_service_for_mode(
+    production: &'static str,
+    development: &'static str,
+    development_mode: bool,
+) -> &'static str {
+    if development_mode {
+        development
+    } else {
+        production
+    }
+}
+
+const KEY_CREDENTIAL_SERVICE: &str =
+    credential_service_for_mode(KEY_SERVICE, "com.shellspan.dev.key", cfg!(debug_assertions));
+const PROFILE_PASSWORD_CREDENTIAL_SERVICE: &str = credential_service_for_mode(
+    PROFILE_PASSWORD_SERVICE,
+    "com.shellspan.dev.profile-password",
+    cfg!(debug_assertions),
+);
+const PROFILE_SECRET_CREDENTIAL_SERVICE: &str = credential_service_for_mode(
+    PROFILE_SECRET_SERVICE,
+    "com.shellspan.dev.profile-secret",
+    cfg!(debug_assertions),
+);
+pub(crate) const AI_KEY_SERVICE: &str = credential_service_for_mode(
+    "com.shellspan.ai-provider",
+    "com.shellspan.dev.ai-provider",
+    cfg!(debug_assertions),
+);
+pub(crate) const MCP_CREDENTIAL_SERVICE: &str = credential_service_for_mode(
+    "com.shellspan.mcp",
+    "com.shellspan.dev.mcp",
+    cfg!(debug_assertions),
+);
+
 /// macOS Keychain authorizes access per item. Keeping every ShellSpan secret in
 /// one item means the user authorizes ShellSpan once while the logical
 /// service/account pairs remain isolated inside the vault payload.
 #[cfg(any(target_os = "macos", test))]
-const CREDENTIAL_VAULT_SERVICE: &str = "com.shellspan.credential-vault";
+const CREDENTIAL_VAULT_SERVICE: &str = credential_service_for_mode(
+    "com.shellspan.credential-vault",
+    "com.shellspan.dev.credential-vault",
+    cfg!(debug_assertions),
+);
 #[cfg(any(target_os = "macos", test))]
-const CREDENTIAL_VAULT_ACCOUNT: &str = "shellspan-v1";
+const CREDENTIAL_VAULT_ACCOUNT: &str =
+    credential_service_for_mode("shellspan-v1", "shellspan-dev-v1", cfg!(debug_assertions));
 #[cfg(any(target_os = "macos", test))]
 const CREDENTIAL_VAULT_VERSION: u32 = 1;
 
@@ -469,11 +509,15 @@ impl CredentialManager {
     // --- Key credentials ---
 
     pub(crate) fn store_key_credential(&self, key_id: &str, value: &str) -> Result<(), String> {
-        self.set_credential(KEY_SERVICE, key_id, value)
+        self.set_credential(KEY_CREDENTIAL_SERVICE, key_id, value)
     }
 
     pub(crate) fn retrieve_key_credential(&self, key_id: &str) -> Result<Option<String>, String> {
-        self.get_credential(KEY_SERVICE, key_id)
+        self.get_credential(KEY_CREDENTIAL_SERVICE, key_id)
+    }
+
+    pub(crate) fn delete_key_credential(&self, key_id: &str) -> Result<(), String> {
+        self.delete_credential(KEY_CREDENTIAL_SERVICE, key_id)
     }
 
     // --- Profile passwords ---
@@ -483,18 +527,18 @@ impl CredentialManager {
         profile_id: &str,
         password: &str,
     ) -> Result<(), String> {
-        self.set_credential(PROFILE_PASSWORD_SERVICE, profile_id, password)
+        self.set_credential(PROFILE_PASSWORD_CREDENTIAL_SERVICE, profile_id, password)
     }
 
     pub(crate) fn retrieve_profile_password(
         &self,
         profile_id: &str,
     ) -> Result<Option<String>, String> {
-        self.get_credential(PROFILE_PASSWORD_SERVICE, profile_id)
+        self.get_credential(PROFILE_PASSWORD_CREDENTIAL_SERVICE, profile_id)
     }
 
     pub(crate) fn delete_profile_password(&self, profile_id: &str) -> Result<(), String> {
-        self.delete_credential(PROFILE_PASSWORD_SERVICE, profile_id)
+        self.delete_credential(PROFILE_PASSWORD_CREDENTIAL_SERVICE, profile_id)
     }
 
     // --- Profile secrets (key passphrases, jump-host credentials) ---
@@ -505,7 +549,11 @@ impl CredentialManager {
         kind: ProfileSecretKind,
         value: &str,
     ) -> Result<(), String> {
-        self.set_credential(PROFILE_SECRET_SERVICE, &kind.key_for(profile_id), value)
+        self.set_credential(
+            PROFILE_SECRET_CREDENTIAL_SERVICE,
+            &kind.key_for(profile_id),
+            value,
+        )
     }
 
     pub(crate) fn retrieve_profile_secret(
@@ -513,7 +561,7 @@ impl CredentialManager {
         profile_id: &str,
         kind: ProfileSecretKind,
     ) -> Result<Option<String>, String> {
-        self.get_credential(PROFILE_SECRET_SERVICE, &kind.key_for(profile_id))
+        self.get_credential(PROFILE_SECRET_CREDENTIAL_SERVICE, &kind.key_for(profile_id))
     }
 
     /// Deletes every secret belonging to a profile: the main password plus
@@ -544,7 +592,7 @@ impl CredentialManager {
         profile_id: &str,
         kind: ProfileSecretKind,
     ) -> Result<(), String> {
-        self.delete_credential(PROFILE_SECRET_SERVICE, &kind.key_for(profile_id))
+        self.delete_credential(PROFILE_SECRET_CREDENTIAL_SERVICE, &kind.key_for(profile_id))
     }
 }
 
@@ -848,6 +896,54 @@ mod tests {
     }
 
     #[test]
+    fn credential_service_selection_preserves_the_production_namespace() {
+        assert_eq!(
+            credential_service_for_mode("production", "development", false),
+            "production"
+        );
+        assert_eq!(
+            credential_service_for_mode("production", "development", true),
+            "development"
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_build_uses_development_credential_namespaces() {
+        assert_eq!(KEY_CREDENTIAL_SERVICE, "com.shellspan.dev.key");
+        assert_eq!(
+            PROFILE_PASSWORD_CREDENTIAL_SERVICE,
+            "com.shellspan.dev.profile-password"
+        );
+        assert_eq!(
+            PROFILE_SECRET_CREDENTIAL_SERVICE,
+            "com.shellspan.dev.profile-secret"
+        );
+        assert_eq!(AI_KEY_SERVICE, "com.shellspan.dev.ai-provider");
+        assert_eq!(MCP_CREDENTIAL_SERVICE, "com.shellspan.dev.mcp");
+        assert_eq!(
+            CREDENTIAL_VAULT_SERVICE,
+            "com.shellspan.dev.credential-vault"
+        );
+        assert_eq!(CREDENTIAL_VAULT_ACCOUNT, "shellspan-dev-v1");
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn release_build_uses_production_credential_namespaces() {
+        assert_eq!(KEY_CREDENTIAL_SERVICE, KEY_SERVICE);
+        assert_eq!(
+            PROFILE_PASSWORD_CREDENTIAL_SERVICE,
+            PROFILE_PASSWORD_SERVICE
+        );
+        assert_eq!(PROFILE_SECRET_CREDENTIAL_SERVICE, PROFILE_SECRET_SERVICE);
+        assert_eq!(AI_KEY_SERVICE, "com.shellspan.ai-provider");
+        assert_eq!(MCP_CREDENTIAL_SERVICE, "com.shellspan.mcp");
+        assert_eq!(CREDENTIAL_VAULT_SERVICE, "com.shellspan.credential-vault");
+        assert_eq!(CREDENTIAL_VAULT_ACCOUNT, "shellspan-v1");
+    }
+
+    #[test]
     fn vault_backend_stores_all_logical_credentials_in_one_native_item() {
         let backend = Arc::new(MockBackend::default());
         let manager = CredentialManager::with_vault_backend(backend.clone());
@@ -1009,8 +1105,17 @@ mod tests {
         let loaded = manager.retrieve_key_credential("key-1").unwrap();
 
         assert_eq!(loaded.as_deref(), Some("private-key-data"));
+        assert!(backend
+            .credentials
+            .lock()
+            .unwrap()
+            .get(KEY_CREDENTIAL_SERVICE)
+            .is_some_and(|entries| entries.contains_key("key-1")));
         assert_eq!(backend.set_calls.load(Ordering::SeqCst), 1);
         assert_eq!(backend.get_calls.load(Ordering::SeqCst), 1);
+
+        manager.delete_key_credential("key-1").unwrap();
+        assert_eq!(manager.retrieve_key_credential("key-1").unwrap(), None);
     }
 
     #[test]

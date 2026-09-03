@@ -1470,7 +1470,7 @@ pub(crate) async fn open_remote_file(
         .path()
         .home_dir()
         .ok()
-        .map(|home| home.join(".shellspan").join("open-cache"));
+        .map(|home| crate::shellspan_data_dir(&home).join("open-cache"));
     let cancel_flag = remote_file_reads
         .register(operation_id.clone())
         .map_err(|message| RemoteFsError::Other { message })?;
@@ -1716,7 +1716,7 @@ pub(crate) fn store_key_credential(
         );
         let rollback_result = match previous_payload {
             Some(previous) => credentials.store_key_credential(&request.id, &previous),
-            None => credentials.delete_credential(crate::keychain::KEY_SERVICE, &request.id),
+            None => credentials.delete_key_credential(&request.id),
         };
         if let Err(rollback_error) = rollback_result {
             warn!(
@@ -1793,7 +1793,11 @@ pub(crate) fn delete_key_credential(
     } else {
         Vec::new()
     };
-    credentials.delete_credential(&service, &id)?;
+    if service == crate::keychain::KEY_SERVICE {
+        credentials.delete_key_credential(&id)?;
+    } else {
+        credentials.delete_credential(&service, &id)?;
+    }
     database.delete_key_credential(&id)?;
     if service == crate::keychain::KEY_SERVICE {
         database.clear_keychain_key_id_references(&id)?;

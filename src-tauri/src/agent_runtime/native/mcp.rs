@@ -9,10 +9,9 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::keychain::CredentialManager;
+use crate::keychain::{CredentialManager, MCP_CREDENTIAL_SERVICE};
 use crate::redaction::{redact_json_value, redact_sensitive_text};
 
-pub(crate) const MCP_CREDENTIAL_SERVICE: &str = "com.shellspan.mcp";
 const MAX_CONFIG_BYTES: u64 = 256 * 1024;
 const MAX_SERVERS: usize = 16;
 const MAX_TOOLS: usize = 256;
