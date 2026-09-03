@@ -4,6 +4,12 @@
 > loop, compatibility readers, dual-write paths, and lifecycle-as-conversation rendering are not
 > part of the product.
 
+> 2026-09-04 handoff: verified runtime hardening through Stage 5 is integrated into main.
+> Structured questions remain unfinished on `codex/ai-runtime-stage6a-wip`; Skills, images,
+> and file-reference completion are not implemented on main. Development stopped at the user's
+> request. See [handoff and remaining acceptance](ai-runtime-handoff.md); supported source kinds
+> and UI fixtures are not proof that a corresponding runtime producer exists.
+
 ## 1. Ownership
 
 Rust owns Agent business state:
@@ -50,7 +56,7 @@ v2/v3 branch, partial recovery, or compatibility parser.
 Important event families are:
 
 - lifecycle/control: `session/*`, `agent/*`, `turn/*`, `step/*`, `user/message`;
-- model: `request/header`, `request/context`, `request/retry`, `assistant/chunk`,
+- model: `request/header`, `request/context`, `request/retry`, `request/failure`, `assistant/chunk`,
   `assistant/message`, `request/usage`;
 - tools: `tool/call`, `tool/approval`, `tool/execution`, `tool/result`;
 - memory: `context/artifact`, `compaction/*`;
@@ -143,7 +149,7 @@ a durable text block is not parsed by React.
 | OpenAI Responses | `/responses` SSE | Structured response reasoning items | No Chat `stream_options`; response usage events are parsed | input/cache-read/output/reasoning/total when reported | Opaque provider reasoning item plus ordered text/tool blocks |
 | DeepSeek | OpenAI-compatible Chat SSE at the unversioned official root | V4 `thinking` + `reasoning_effort`; native `reasoning_content` | `stream_options.include_usage=true` | prompt/cache hit/cache miss/output/reasoning/total when reported | `reasoning_content`, text, tools in provider order |
 | MiniMax | OpenAI-compatible cumulative Chat SSE | M3 `thinking.type=adaptive/disabled`; M2.x keeps mandatory thinking; `reasoning_split=true`; cumulative `reasoning_content` / `reasoning_details` deduplicated | `stream_options.include_usage=true` | available prompt/cache/output/reasoning/total fields | deduplicated reasoning/text/tools in provider order; oversized UTF-8 deltas are durably chunked |
-| Qwen on Model Studio | OpenAI-compatible Chat SSE | Hybrid Qwen3 models use `enable_thinking=true/false`; thinking-only slugs keep their fixed behavior | `stream_options.include_usage=true` | available prompt/cache/output/reasoning/total fields | native `reasoning_content` is preserved for later turns |
+| Qwen on Model Studio | OpenAI-compatible Chat SSE | Hybrid Qwen3 models use `enable_thinking=true/false`; thinking-only and instruct slugs have no toggle | `stream_options.include_usage=true` | available prompt/cache/output/reasoning/total fields | native `reasoning_content` retained in history; no general cross-turn preservation guarantee or unsupported `preserve_thinking` flag |
 | GLM | OpenAI-compatible Chat SSE | GLM 4.5+ uses `thinking.type=enabled/disabled`; GLM 5.2 also accepts reasoning effort | `stream_options.include_usage=true` | available prompt/cache/output/reasoning/total fields | native `reasoning_content`, text, and tools in provider order |
 | Generic OpenAI-compatible | Chat SSE | No native reasoning capability; Runtime `<think>` fallback only | Omitted to avoid incompatible parameters | any usage object supplied by the service; otherwise unknown | text/tools; no fabricated reasoning |
 | Ollama | `/api/chat` JSON stream | `message.thinking` / equivalent, with Runtime `<think>` fallback | Not applicable | prompt/output counts when reported | ordered text/tool history |
@@ -151,6 +157,17 @@ a durable text block is not parsed by React.
 Kimi uses the OpenAI-compatible path but disables `parallel_tool_calls` for its service contract.
 Provider capability only controls request and parser behavior; the UI always consumes the same v4
 events.
+
+The executable source is the shared `src/lib/provider-contract.json` loaded by TypeScript and
+Rust. An explicit profile takes precedence over host inference. Context values are operational
+admission budgets, not verified vendor maxima for every model alias. See the [Stage 4 contract
+and semantic checkpoint details](ai-runtime-stage4.md) and [Stage 3B request recovery](ai-runtime-stage3b.md).
+
+Request retries retain failed attempts as audit facts without replaying their partial output as
+committed assistant/tool content. Provider policy is configurable and restored for child sessions;
+connection, first-byte and idle deadlines do not impose a fixed total lifetime on an active stream.
+The Stage 5 local scheduler uses a bounded rolling pool with ordered commits; a Provider's
+parallel-tool request flag does not authorize local parallel execution. See [scheduler behavior](ai-runtime-stage5.md).
 
 ## 5. Persistence and incompatibility
 
