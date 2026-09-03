@@ -143,4 +143,15 @@ describe('AgentSessionCommittedClient', () => {
     expect(state.snapshot?.ended).toBe(true);
     expect(state.hasTerminalEvent).toBe(false);
   });
+
+  it('rejects a live pre-v4 envelope without appending it', async () => {
+    const source = transport([created]);
+    const client = new AgentSessionCommittedClient('session-fixture', source);
+    await client.connect();
+    source.publish({ ...created, seq: 1, version: 3 } as unknown as AgentSessionEvent);
+    await expect(client.settled()).rejects.toThrow(
+      'Committed Agent event has an incompatible identity or version',
+    );
+    expect(client.state().events).toEqual([created]);
+  });
 });

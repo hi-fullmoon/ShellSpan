@@ -49,14 +49,14 @@ describe('optimistic submission reconcile', () => {
       .toEqual([committed()]);
   });
 
-  it('does not content-match legacy nodes without a durable submission id', () => {
+  it('does not content-match nodes without a durable submission id', () => {
     const node = committed({
       messageId: 'runtime-message', turnId: 'turn-1', clientSubmissionId: undefined,
     });
     expect(reconcileOptimisticSubmissions([pending()], [node]).remaining).toHaveLength(1);
   });
 
-  it('never content-matches a v3 node carrying another durable submission id', () => {
+  it('never content-matches a node carrying another durable submission id', () => {
     const node = committed({
       messageId: 'runtime-message',
       clientSubmissionId: 'operation-other',
