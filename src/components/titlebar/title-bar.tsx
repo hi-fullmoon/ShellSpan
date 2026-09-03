@@ -5,7 +5,7 @@ import { SectionNav } from './section-nav';
 import { WindowControls } from './window-controls';
 import { SparklesIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useAiStore } from '@/stores/aiStore';
+import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/hooks/useI18n';
 
@@ -15,10 +15,10 @@ export const TitleBar: React.FC = () => {
   const { t } = useI18n();
   const activeSection = useAppStore((state) => state.activeSection);
   const panelSection = activeSection === 'terminal' ? 'terminal' : 'workbench';
-  const aiOpen = useAiStore((state) => (
+  const aiOpen = useAiPanelStore((state) => (
     activeSection !== 'sftp' && state.panelOpenBySection[panelSection]
   ));
-  const toggleAi = useAiStore((state) => state.toggleOpen);
+  const toggleAi = useAiPanelStore((state) => state.toggleOpen);
   const aiLabel = activeSection === 'terminal'
     ? t('ai.terminal.toggle')
     : t('ai.workbench.toggle');

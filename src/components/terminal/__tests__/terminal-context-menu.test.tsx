@@ -32,8 +32,6 @@ vi.mock('@/hooks/useConnectSession', () => ({
 
 vi.mock('@/lib/tauri', () => ({
   invokeCloseSession: vi.fn().mockResolvedValue(undefined),
-  invokeArchiveAiSession: vi.fn().mockResolvedValue(undefined),
-  invokeCancelAiRequest: vi.fn().mockResolvedValue(undefined),
   invokeListAgentRuntimeSessions: vi.fn().mockResolvedValue({
     sessions: [],
     nextCursor: null,

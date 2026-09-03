@@ -73,7 +73,7 @@ export const UpdateSection: React.FC = () => {
 
       <div data-slot="update-actions" className="flex min-h-8 w-full flex-col items-stretch justify-center gap-2 @min-[32rem]:w-auto @min-[32rem]:min-w-44 @min-[32rem]:shrink-0 @min-[32rem]:items-end">
         {!downloading && !downloaded && (
-          <Button size="sm" disabled={checking} onClick={() => void runCheck('manual')}>
+          <Button size="xs" disabled={checking} onClick={() => void runCheck('manual')}>
             <RefreshCwIcon data-icon="inline-start" className={cn(checking && 'animate-spin')} />
             {checking ? t('settings.general.checkingUpdate') : t('settings.general.checkUpdate')}
           </Button>
@@ -99,7 +99,7 @@ export const UpdateSection: React.FC = () => {
             <p className="min-w-0 text-xs text-muted-foreground">
               {targetVersion ? t('update.restartDialog.description', { version: targetVersion }) : t('update.downloaded')}
             </p>
-            <Button size="sm" onClick={() => void installNow()}>
+            <Button size="xs" onClick={() => void installNow()}>
               <DownloadIcon data-icon="inline-start" />
               {t('update.restartDialog.installNow')}
             </Button>
@@ -114,7 +114,7 @@ export const UpdateSection: React.FC = () => {
               </TooltipTrigger>
               <TooltipContent className="break-all">{error ?? t('update.failed', { error: '' })}</TooltipContent>
             </Tooltip>
-            <Button variant="outline" size="sm" onClick={() => void runCheck('manual')}>
+            <Button variant="outline" size="xs" onClick={() => void runCheck('manual')}>
               <RotateCcwIcon data-icon="inline-start" />
               {t('settings.general.retry')}
             </Button>

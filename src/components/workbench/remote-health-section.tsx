@@ -8,12 +8,6 @@ import {
   ShieldCheckIcon,
   SquareIcon,
 } from 'lucide-react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogMedia,
-} from '@/components/ui/alert-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,14 +22,7 @@ import {
 import { Spinner } from '@/components/ui/empty-state';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
-import {
-  CompactAlertDialogBody,
-  CompactAlertDialogContent,
-  CompactAlertDialogDescription,
-  CompactAlertDialogFooter,
-  CompactAlertDialogHeader,
-  CompactAlertDialogTitle,
-} from '@/components/ui/compact-alert-dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   Select,
   SelectContent,
@@ -378,43 +365,28 @@ export function RemoteHealthSection(): React.JSX.Element {
         </CardContent>
       </Card>
 
-      <AlertDialog
+      <ConfirmationDialog
         open={Boolean(authorizationProfile)}
         onOpenChange={(open) => !open && setAuthorizationProfileId(undefined)}
+        title={t('remoteHealth.authorization.title')}
+        description={t('remoteHealth.authorization.description', {
+          host: authorizationProfile
+            ? `${authorizationProfile.username}@${authorizationProfile.host}:${authorizationProfile.port}`
+            : '',
+        })}
+        confirmLabel={t('remoteHealth.authorization.confirm')}
+        media={<ShieldCheckIcon />}
+        onConfirm={() => {
+          if (authorizationProfile) void collect(authorizationProfile, true);
+          setAuthorizationProfileId(undefined);
+        }}
       >
-        <CompactAlertDialogContent className="max-w-md">
-          <CompactAlertDialogHeader>
-            <AlertDialogMedia className="mb-0"><ShieldCheckIcon /></AlertDialogMedia>
-            <CompactAlertDialogTitle>{t('remoteHealth.authorization.title')}</CompactAlertDialogTitle>
-            <CompactAlertDialogDescription>
-              {t('remoteHealth.authorization.description', {
-                host: authorizationProfile
-                  ? `${authorizationProfile.username}@${authorizationProfile.host}:${authorizationProfile.port}`
-                  : '',
-              })}
-            </CompactAlertDialogDescription>
-          </CompactAlertDialogHeader>
-          <CompactAlertDialogBody>
-            <Alert variant="default">
-              <ShieldCheckIcon />
-              <AlertTitle>{t('remoteHealth.authorization.scopeTitle')}</AlertTitle>
-              <AlertDescription>{t('remoteHealth.authorization.scope')}</AlertDescription>
-            </Alert>
-          </CompactAlertDialogBody>
-          <CompactAlertDialogFooter>
-            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              size="sm"
-              onClick={() => {
-                if (authorizationProfile) void collect(authorizationProfile, true);
-                setAuthorizationProfileId(undefined);
-              }}
-            >
-              {t('remoteHealth.authorization.confirm')}
-            </AlertDialogAction>
-          </CompactAlertDialogFooter>
-        </CompactAlertDialogContent>
-      </AlertDialog>
+        <Alert variant="default">
+          <ShieldCheckIcon />
+          <AlertTitle>{t('remoteHealth.authorization.scopeTitle')}</AlertTitle>
+          <AlertDescription>{t('remoteHealth.authorization.scope')}</AlertDescription>
+        </Alert>
+      </ConfirmationDialog>
     </section>
   );
 }

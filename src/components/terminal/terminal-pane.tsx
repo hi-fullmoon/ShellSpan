@@ -2,16 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore }
 import { Spinner } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Input } from '@/components/ui/input';
 import { useActiveController } from '@/components/terminal/hooks/use-active-controller';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
@@ -382,35 +373,22 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         <ReconnectingIndicator label={t('terminal.notice.reconnectingLabel')} />
       )}
       <div ref={paneRef} className="h-full w-full p-0" />
-      <AlertDialog open={Boolean(pendingPaste)} onOpenChange={(open) => { if (!open) setPendingPaste(null); }}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('terminal.pasteWarning.title')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('terminal.pasteWarning.description', {
-                lines: pendingPaste ? pendingPaste.text.split(/\r?\n/).length : 0,
-                characters: pendingPaste?.text.length ?? 0,
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel size="sm" onClick={() => setPendingPaste(null)}>
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              size="sm"
-              onClick={() => {
-                if (pendingPaste) {
-                  terminalRegistry.get(pendingPaste.sessionId)?.terminal.paste(pendingPaste.text);
-                }
-                setPendingPaste(null);
-              }}
-            >
-              {t('terminal.pasteWarning.confirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmationDialog
+        open={Boolean(pendingPaste)}
+        onOpenChange={(open) => { if (!open) setPendingPaste(null); }}
+        title={t('terminal.pasteWarning.title')}
+        description={t('terminal.pasteWarning.description', {
+          lines: pendingPaste ? pendingPaste.text.split(/\r?\n/).length : 0,
+          characters: pendingPaste?.text.length ?? 0,
+        })}
+        confirmLabel={t('terminal.pasteWarning.confirm')}
+        onConfirm={() => {
+          if (pendingPaste) {
+            terminalRegistry.get(pendingPaste.sessionId)?.terminal.paste(pendingPaste.text);
+          }
+          setPendingPaste(null);
+        }}
+      />
     </div>
   );
 };

@@ -22,16 +22,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { countActiveTransfersForOwners, useTransferStore } from '@/stores/transferStore';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 const DRAG_OVERLAY_CURSOR_GAP = 2;
 
@@ -558,36 +549,24 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
               document.body,
             )}
       </DndContext>
-      <AlertDialog
+      <ConfirmationDialog
         open={!!closingConnectionId}
         onOpenChange={(open) => {
           if (!open) setClosingConnectionId(null);
         }}
-      >
-        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
-          <AlertDialogHeader className="place-items-start px-4 py-3 text-left">
-            <AlertDialogTitle className="text-sm leading-5">{t('sftp.tab.closeConfirmTitle')}</AlertDialogTitle>
-          </AlertDialogHeader>
-          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
-            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {closingConnection
-                ? closingTransferCount > 0
-                  ? t('sftp.tab.closeTransferWarning', {
-                      title: closingConnection.title,
-                      count: closingTransferCount,
-                    })
-                  : t('sftp.tab.closeConfirmMessage', { title: closingConnection.title })
-                : ''}
-            </AlertDialogDescription>
-          </div>
-          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 pb-4 pt-1">
-            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseConnection}>
-              {t('common.close')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title={t('sftp.tab.closeConfirmTitle')}
+        description={closingConnection
+          ? closingTransferCount > 0
+            ? t('sftp.tab.closeTransferWarning', {
+                title: closingConnection.title,
+                count: closingTransferCount,
+              })
+            : t('sftp.tab.closeConfirmMessage', { title: closingConnection.title })
+          : ''}
+        confirmLabel={t('common.close')}
+        confirmVariant="destructive"
+        onConfirm={confirmCloseConnection}
+      />
     </div>
   );
 };

@@ -19,8 +19,6 @@ describe('terminalStore', () => {
     const state = useTerminalStore.getState();
     expect(state.sessions).toHaveLength(1);
     expect(state.activeSessionId).toBe('s1');
-    expect(state.sessions[0]?.conversationId).toBeTruthy();
-    expect(state.sessions[0]?.conversationStartedAt).toBeTruthy();
   });
 
   it('tracks concurrent connection attempts independently', () => {
@@ -48,8 +46,6 @@ describe('terminalStore', () => {
       { title: 'Pending', host: 'h', port: 22, username: 'u', profileId: 'p1' },
       'attempt-1',
     );
-    const conversationId = useTerminalStore.getState().sessions[0]?.conversationId;
-
     store.resolveConnectionAttempt('attempt-1', {
       sessionId: 's1', title: 'Connected', host: 'h', port: 22, username: 'u',
     }, 'p1');
@@ -59,28 +55,10 @@ describe('terminalStore', () => {
       title: 'Connected',
       profileId: 'p1',
       status: 'connecting',
-      conversationId,
+      replacesSessionId: 'attempt-1',
     }]);
     expect(useTerminalStore.getState().sessions[0]?.pendingConnection).toBeUndefined();
     expect(useTerminalStore.getState().activeSessionId).toBe('s1');
-  });
-
-  it('starts a new AI conversation without replacing the terminal session', () => {
-    useTerminalStore.getState().addSession({
-      sessionId: 's1',
-      title: 'Test',
-      host: 'h',
-      port: 22,
-      username: 'u',
-    });
-    const previous = useTerminalStore.getState().sessions[0];
-
-    useTerminalStore.getState().startNewConversation('s1');
-
-    const next = useTerminalStore.getState().sessions[0];
-    expect(next?.sessionId).toBe('s1');
-    expect(next?.conversationId).not.toBe(previous?.conversationId);
-    expect(next?.conversationStartedAt).toBeTruthy();
   });
 
   it('removes a session and updates active session', () => {
@@ -170,8 +148,6 @@ describe('terminalStore', () => {
     store.updateTitle('s1', 'Renamed');
     store.togglePin('s1');
     store.setTabColor('s1', '#ef4444');
-    const conversationId = useTerminalStore.getState().sessions[0]?.conversationId;
-
     store.reconnectSession(
       's1',
       { sessionId: 's2', title: 'New', host: 'h2', port: 2222, username: 'u2' },
@@ -181,7 +157,7 @@ describe('terminalStore', () => {
     const state = useTerminalStore.getState();
     expect(state.sessions).toHaveLength(1);
     expect(state.sessions[0]?.sessionId).toBe('s2');
-    expect(state.sessions[0]?.conversationId).toBe(conversationId);
+    expect(state.sessions[0]?.replacesSessionId).toBe('s1');
     expect(state.sessions[0]?.title).toBe('Renamed');
     expect(state.sessions[0]?.profileId).toBe('profile-1');
     expect(state.sessions[0]?.pinned).toBe(true);

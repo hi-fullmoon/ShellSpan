@@ -24,16 +24,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { useI18n } from '@/hooks/useI18n';
 import { useViewportConstrainedPosition } from '@/hooks/useViewportConstrainedPosition';
 import type { SftpSide } from '@/stores/sftpStore';
@@ -286,33 +277,15 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
       </MenuItem>
       </div>
       )}
-      <AlertDialog
+      <ConfirmDeleteDialog
         open={deleteTargets.length > 0}
-        onOpenChange={(next) => {
-          if (!next) setDeleteTargets([]);
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setDeleteTargets([]);
         }}
-      >
-        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
-          <AlertDialogHeader className="place-items-start px-4 py-3 text-left">
-            <AlertDialogTitle className="text-sm leading-5">
-              {t('sftp.deleteConfirm.title')}
-            </AlertDialogTitle>
-          </AlertDialogHeader>
-          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
-            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {deleteDescription}
-            </AlertDialogDescription>
-          </div>
-          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 pb-4 pt-1">
-            <AlertDialogCancel size="sm">
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction variant="destructive" size="sm" onClick={confirmDelete}>
-              {t('common.delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title={t('sftp.deleteConfirm.title')}
+        description={deleteDescription}
+        onConfirm={confirmDelete}
+      />
     </>,
     document.body,
   );

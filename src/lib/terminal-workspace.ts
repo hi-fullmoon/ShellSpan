@@ -28,8 +28,6 @@ export function serializeTerminalWorkspace(
       profileId,
       pinned,
       color,
-      conversationId,
-      conversationStartedAt,
     }) => ({
       sessionId,
       title,
@@ -39,8 +37,6 @@ export function serializeTerminalWorkspace(
       profileId,
       pinned,
       color,
-      conversationId,
-      conversationStartedAt,
     }));
   return JSON.stringify({ version: TERMINAL_WORKSPACE_VERSION, sessions: snapshots, layout });
 }
@@ -88,11 +84,7 @@ function isTerminalWorkspaceSession(value: unknown): value is TerminalWorkspaceS
     && session.profileId.length > 0
     && session.profileId.length <= MAX_STRING_LENGTH
     && (session.pinned === undefined || typeof session.pinned === 'boolean')
-    && (session.color === undefined || (typeof session.color === 'string' && session.color.length <= MAX_STRING_LENGTH))
-    && (session.conversationId === undefined
-      || (typeof session.conversationId === 'string' && session.conversationId.length <= MAX_STRING_LENGTH))
-    && (session.conversationStartedAt === undefined
-      || (typeof session.conversationStartedAt === 'string' && session.conversationStartedAt.length <= MAX_STRING_LENGTH));
+    && (session.color === undefined || (typeof session.color === 'string' && session.color.length <= MAX_STRING_LENGTH));
 }
 
 function isTerminalLayoutNode(value: unknown, depth: number): value is TerminalLayoutNode {

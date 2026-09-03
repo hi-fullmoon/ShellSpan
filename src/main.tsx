@@ -3,14 +3,13 @@ import ReactDOM from 'react-dom/client';
 import './styles/base.css';
 import { App } from './App';
 import { AppErrorBoundary } from './components/app-error-boundary';
-import { createLogger, initGlobalErrorLogging } from './lib/logger';
+import { initGlobalErrorLogging } from './lib/logger';
 import { applyTheme } from './lib/theme';
 import { parseTerminalWorkspace } from './lib/terminal-workspace';
 import { parseSftpWorkspace } from './lib/sftp-workspace';
 import {
   invokeClearSftpWorkspace,
   invokeClearTerminalWorkspace,
-  invokeListAiSessions,
   invokeLoadSftpWorkspace,
   invokeLoadTerminalWorkspace,
 } from './lib/tauri';
@@ -19,25 +18,10 @@ import { useProfileStore } from './stores/profileStore';
 import { useRecentProfilesStore } from './stores/recentProfilesStore';
 import { useTerminalStore } from './stores/terminalStore';
 import { useAiSettingsStore } from './stores/aiSettingsStore';
-import { useAiStore } from './stores/aiStore';
 import { useSftpStore } from './stores/sftpStore';
 import { hydrateTransferResumeCandidates } from './lib/transfer-resume';
 
 initGlobalErrorLogging();
-
-const logger = createLogger('bootstrap');
-
-function auditRecoveredAiSessionIndex(
-  sessions: Awaited<ReturnType<typeof invokeListAiSessions>>,
-): void {
-  for (const session of sessions) {
-    if (!session.recovery) continue;
-    logger.warn(
-      `AI session index includes recovered history conversation_id=${session.id}`,
-      session.recovery,
-    );
-  }
-}
 
 async function bootstrap(): Promise<void> {
   await Promise.all([
@@ -46,14 +30,6 @@ async function bootstrap(): Promise<void> {
     useRecentProfilesStore.getState().hydrateFromDb(),
     useAiSettingsStore.getState().hydrateFromDb(),
   ]);
-  try {
-    const sessions = await invokeListAiSessions();
-    auditRecoveredAiSessionIndex(sessions);
-    useAiStore.getState().hydrateSessionIndex(sessions);
-  } catch (error) {
-    // Local AI history is best-effort and must not block application startup.
-    logger.warn('Failed to load the local AI session index during startup', error);
-  }
   if (useAppStore.getState().restoreWorkspace) {
     await Promise.all([
       invokeLoadTerminalWorkspace()

@@ -183,13 +183,13 @@ const Terminal: React.FC = () => {
     if (!split) return;
     let nextLayout: TerminalLayoutNode = split;
 
-    // Reconnects preserve conversation identity while replacing sessionId.
+    // Connection replacements carry their predecessor id while replacing sessionId.
     // Apply those replacements before filtering unavailable ids so the tab
     // stays in the same terminal group, including during automatic reconnect.
     for (const session of sessions) {
-      if (!session.conversationId) continue;
+      if (!session.replacesSessionId) continue;
       const previous = previousSessions.find(
-        (candidate) => candidate.conversationId === session.conversationId,
+        (candidate) => candidate.sessionId === session.replacesSessionId,
       );
       if (previous && previous.sessionId !== session.sessionId) {
         nextLayout = replaceTerminalSessionId(

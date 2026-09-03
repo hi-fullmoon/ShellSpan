@@ -1,15 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
@@ -264,78 +255,45 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
         confirmText={t('common.save')}
         defaultValue={renameTarget?.title ?? ''}
       />
-      <AlertDialog open={closeConfirm} onOpenChange={(o) => { if (!o) dismissCloseConfirm(); }}>
-        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
-          <AlertDialogHeader className="place-items-start px-4 py-3 text-left">
-            <AlertDialogTitle className="text-sm leading-5">
-              {t('sftp.tab.closeConfirmTitle')}
-            </AlertDialogTitle>
-          </AlertDialogHeader>
-          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
-            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {closeTransferCount > 0
-                ? t('sftp.tab.closeTransferWarning', { title: target.title, count: closeTransferCount })
-                : t('sftp.tab.closeConfirmMessage', { title: target.title })}
-            </AlertDialogDescription>
-          </div>
-          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 pb-4 pt-1">
-            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" size="sm" onClick={confirmClose}>
-              {t('common.close')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={closeOthersConfirm} onOpenChange={(o) => { if (!o) dismissCloseOthersConfirm(); }}>
-        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
-          <AlertDialogHeader className="place-items-start px-4 py-3 text-left">
-            <AlertDialogTitle className="text-sm leading-5">
-              {t('sftp.tab.closeOthersConfirmTitle')}
-            </AlertDialogTitle>
-          </AlertDialogHeader>
-          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
-            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {closeOthersTransferCount > 0
-                ? t('sftp.tab.closeManyTransferWarning', {
-                    tabs: closeOthersCount,
-                    count: closeOthersTransferCount,
-                  })
-                : t('sftp.tab.closeOthersConfirmMessage', { count: closeOthersCount })}
-            </AlertDialogDescription>
-          </div>
-          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 pb-4 pt-1">
-            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseOthers}>
-              {t('common.close')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={closeToRightConfirm} onOpenChange={(o) => { if (!o) dismissCloseToRightConfirm(); }}>
-        <AlertDialogContent className="min-w-0 max-w-sm gap-0 overflow-hidden border-app-border bg-app-surface p-0">
-          <AlertDialogHeader className="place-items-start px-4 py-3 text-left">
-            <AlertDialogTitle className="text-sm leading-5">
-              {t('sftp.tab.closeToRightConfirmTitle')}
-            </AlertDialogTitle>
-          </AlertDialogHeader>
-          <div className="min-w-0 max-w-full overflow-hidden px-4 py-3">
-            <AlertDialogDescription className="block min-w-0 max-w-full break-all text-left leading-5 text-app-text">
-              {closeToRightTransferCount > 0
-                ? t('sftp.tab.closeManyTransferWarning', {
-                    tabs: closeToRightCount,
-                    count: closeToRightTransferCount,
-                  })
-                : t('sftp.tab.closeToRightConfirmMessage', { count: closeToRightCount })}
-            </AlertDialogDescription>
-          </div>
-          <AlertDialogFooter className="mx-0 mb-0 rounded-none border-t-0 bg-app-surface px-4 pb-4 pt-1">
-            <AlertDialogCancel size="sm">{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" size="sm" onClick={confirmCloseToRight}>
-              {t('common.close')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmationDialog
+        open={closeConfirm}
+        onOpenChange={(nextOpen) => { if (!nextOpen) dismissCloseConfirm(); }}
+        title={t('sftp.tab.closeConfirmTitle')}
+        description={closeTransferCount > 0
+          ? t('sftp.tab.closeTransferWarning', { title: target.title, count: closeTransferCount })
+          : t('sftp.tab.closeConfirmMessage', { title: target.title })}
+        confirmLabel={t('common.close')}
+        confirmVariant="destructive"
+        onConfirm={confirmClose}
+      />
+      <ConfirmationDialog
+        open={closeOthersConfirm}
+        onOpenChange={(nextOpen) => { if (!nextOpen) dismissCloseOthersConfirm(); }}
+        title={t('sftp.tab.closeOthersConfirmTitle')}
+        description={closeOthersTransferCount > 0
+          ? t('sftp.tab.closeManyTransferWarning', {
+              tabs: closeOthersCount,
+              count: closeOthersTransferCount,
+            })
+          : t('sftp.tab.closeOthersConfirmMessage', { count: closeOthersCount })}
+        confirmLabel={t('common.close')}
+        confirmVariant="destructive"
+        onConfirm={confirmCloseOthers}
+      />
+      <ConfirmationDialog
+        open={closeToRightConfirm}
+        onOpenChange={(nextOpen) => { if (!nextOpen) dismissCloseToRightConfirm(); }}
+        title={t('sftp.tab.closeToRightConfirmTitle')}
+        description={closeToRightTransferCount > 0
+          ? t('sftp.tab.closeManyTransferWarning', {
+              tabs: closeToRightCount,
+              count: closeToRightTransferCount,
+            })
+          : t('sftp.tab.closeToRightConfirmMessage', { count: closeToRightCount })}
+        confirmLabel={t('common.close')}
+        confirmVariant="destructive"
+        onConfirm={confirmCloseToRight}
+      />
     </>,
     document.body,
   );

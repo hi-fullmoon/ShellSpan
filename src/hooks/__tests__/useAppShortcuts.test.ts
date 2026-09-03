@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppShortcuts } from '../useAppShortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import { useAiStore } from '@/stores/aiStore';
+import { useAiPanelStore } from '@/stores/aiPanelStore';
 
 describe('useAppShortcuts', () => {
   beforeEach(() => {
@@ -12,7 +12,7 @@ describe('useAppShortcuts', () => {
       activeWorkbenchTab: 'connections',
       shortcuts: { ...DEFAULT_SHORTCUTS },
     });
-    useAiStore.getState().setOpen(false);
+    useAiPanelStore.getState().setOpen(false);
   });
 
   it('navigates between app sections', () => {
@@ -57,7 +57,7 @@ describe('useAppShortcuts', () => {
       key: 'a', ctrlKey: true, shiftKey: true, bubbles: true,
     }));
 
-    expect(useAiStore.getState().panelOpenBySection).toEqual({
+    expect(useAiPanelStore.getState().panelOpenBySection).toEqual({
       workbench: false,
       terminal: false,
     });
