@@ -366,7 +366,14 @@ export function createAgentSessionAdapter(
     }
   };
 
-  const decision = (input: AiApprovalDecisionInput) => ({ ...input });
+  const decision = (input: AiApprovalDecisionInput) => ({
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    stepId: input.stepId,
+    requestId: input.requestId,
+    callId: input.callId,
+    approvalId: input.approvalId,
+  });
 
   const createSession = async (
     input: Extract<AiCreateSessionInput, { readonly kind: 'agent' }>,

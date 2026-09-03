@@ -17,6 +17,18 @@ const DEEPSEEK_V4_REASONING_OPTIONS: readonly AiReasoningOption[] = [
   'max',
 ];
 
+const MINIMAX_M3_REASONING_OPTIONS: readonly AiReasoningOption[] = ['off', 'on'];
+
+const GLM_5_2_REASONING_OPTIONS: readonly AiReasoningOption[] = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
 const OPENAI_GPT_5_6_REASONING_EFFORTS: readonly AiReasoningEffort[] = [
   'none',
   'low',
@@ -26,7 +38,15 @@ const OPENAI_GPT_5_6_REASONING_EFFORTS: readonly AiReasoningEffort[] = [
   'max',
 ];
 
-const OPENAI_GPT_5_4_REASONING_EFFORTS: readonly AiReasoningEffort[] = [
+const OPENAI_NONE_TO_XHIGH_REASONING_EFFORTS: readonly AiReasoningEffort[] = [
+  'none',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+];
+
+const OPENAI_CODEX_REASONING_EFFORTS: readonly AiReasoningEffort[] = [
   'low',
   'medium',
   'high',
@@ -122,12 +142,68 @@ function isDeepSeekV4Provider(
     && (provider.preset === 'deepseek' || providerHostname(provider) === 'api.deepseek.com');
 }
 
+export function isMiniMaxM3Provider(
+  provider: Pick<AiProviderProfile, 'kind' | 'preset' | 'baseUrl' | 'model'>,
+): boolean {
+  if (provider.kind !== 'openAiCompatible') return false;
+  const model = provider.model.trim().toLowerCase();
+  if (model !== 'minimax-m3' && !model.startsWith('minimax-m3-')) return false;
+  if (provider.preset === 'minimax') return true;
+  const hostname = providerHostname(provider);
+  return hostname === 'api.minimax.io' || hostname === 'api.minimaxi.com';
+}
+
+function isDashScopeHostname(hostname: string | undefined): boolean {
+  return hostname === 'dashscope.aliyuncs.com'
+    || hostname === 'dashscope-intl.aliyuncs.com'
+    || hostname?.endsWith('.maas.aliyuncs.com') === true;
+}
+
+function isDashScopeQwenThinkingProvider(
+  provider: Pick<AiProviderProfile, 'kind' | 'baseUrl' | 'model'>,
+): boolean {
+  if (provider.kind !== 'openAiCompatible' || !isDashScopeHostname(providerHostname(provider))) {
+    return false;
+  }
+  const model = provider.model.trim().toLowerCase();
+  return /^qwen3(?:[.-]|$)/.test(model) && !/(?:^|[-.])thinking(?:[-.]|$)/.test(model);
+}
+
+function isGlmThinkingProvider(
+  provider: Pick<AiProviderProfile, 'kind' | 'baseUrl' | 'model'>,
+): boolean {
+  if (
+    provider.kind !== 'openAiCompatible'
+    || providerHostname(provider) !== 'open.bigmodel.cn'
+  ) {
+    return false;
+  }
+  return /^glm-(?:4\.(?:5|6|7)|5(?:\.(?:1|2))?)(?:-|$)/
+    .test(provider.model.trim().toLowerCase());
+}
+
+function isGlm52Provider(
+  provider: Pick<AiProviderProfile, 'kind' | 'baseUrl' | 'model'>,
+): boolean {
+  return isGlmThinkingProvider(provider)
+    && /^glm-5\.2(?:-|$)/.test(provider.model.trim().toLowerCase());
+}
+
 function openAiReasoningEfforts(model: string): readonly AiReasoningEffort[] {
   if (model === 'gpt-5.6' || model.startsWith('gpt-5.6-')) {
     return OPENAI_GPT_5_6_REASONING_EFFORTS;
   }
+  if (model === 'gpt-5.3-codex' || model.startsWith('gpt-5.3-codex-')) {
+    return OPENAI_CODEX_REASONING_EFFORTS;
+  }
+  if (model === 'gpt-5.2-codex' || model.startsWith('gpt-5.2-codex-')) {
+    return OPENAI_CODEX_REASONING_EFFORTS;
+  }
+  if (model === 'gpt-5.2' || model.startsWith('gpt-5.2-')) {
+    return OPENAI_NONE_TO_XHIGH_REASONING_EFFORTS;
+  }
   if (/^gpt-5\.(4|5)(?:-|$)/.test(model)) {
-    return OPENAI_GPT_5_4_REASONING_EFFORTS;
+    return OPENAI_NONE_TO_XHIGH_REASONING_EFFORTS;
   }
   if (model === 'gpt-5.1' || model.startsWith('gpt-5.1-')) {
     return OPENAI_GPT_5_1_REASONING_EFFORTS;
@@ -164,6 +240,15 @@ function ollamaReasoningCapability(model: string): AiReasoningCapability {
 export function reasoningCapability(
   provider: Pick<AiProviderProfile, 'kind' | 'preset' | 'baseUrl' | 'model'>,
 ): AiReasoningCapability {
+  if (isMiniMaxM3Provider(provider)) {
+    return { kind: 'toggle', options: MINIMAX_M3_REASONING_OPTIONS };
+  }
+  if (isGlm52Provider(provider)) {
+    return { kind: 'effort', options: GLM_5_2_REASONING_OPTIONS };
+  }
+  if (isGlmThinkingProvider(provider) || isDashScopeQwenThinkingProvider(provider)) {
+    return { kind: 'toggle', options: OLLAMA_THINKING_TOGGLE_OPTIONS };
+  }
   if (isKimiK3Provider(provider)) {
     return { kind: 'effort', options: KIMI_K3_REASONING_EFFORTS };
   }
