@@ -5,6 +5,7 @@ use serde_json::Value;
 
 pub(crate) const AGENT_SESSION_EVENT_VERSION: u8 = 4;
 pub(crate) const MAX_AGENT_MESSAGE_BYTES: usize = 128 * 1024;
+pub(crate) const MAX_AGENT_STREAM_DELTA_BYTES: usize = 4 * 1024;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
