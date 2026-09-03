@@ -3,7 +3,6 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
-  CornerDownRightIcon,
   ListEndIcon,
   PencilIcon,
   RotateCcwIcon,
@@ -186,7 +185,6 @@ export function AiQueueDock({
                 </form>
               ) : (
                 <div className="ai-queue-row-content">
-                  <CornerDownRightIcon aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate">{item.content}</span>
                   {item.state === 'pending' && (
                     <Spinner aria-label={t('ai.workspace.queue.state.pending')} />

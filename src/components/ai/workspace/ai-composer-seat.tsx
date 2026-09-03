@@ -185,14 +185,6 @@ export function AiComposerSeat({
             <AlertDescription>{unavailableReason}</AlertDescription>
           </Alert>
         )}
-        <AiQueueDock
-          items={queueItems}
-          mutation={queueMutation}
-          onUpdate={onUpdateQueueItem}
-          onRemove={onRemoveQueueItem}
-          onReorder={onReorderQueueLane}
-          onRetry={onRetryQueueMutation}
-        />
         {waitingApproval && !pendingApproval && (
           <Alert size="sm">
             <AlertTitle>{t('ai.workspace.approvalWaiting')}</AlertTitle>
@@ -235,6 +227,14 @@ export function AiComposerSeat({
           </Alert>
         ))}
       </div>
+      <AiQueueDock
+        items={queueItems}
+        mutation={queueMutation}
+        onUpdate={onUpdateQueueItem}
+        onRemove={onRemoveQueueItem}
+        onReorder={onReorderQueueLane}
+        onRetry={onRetryQueueMutation}
+      />
       {waitingApproval && pendingApproval ? (
         <AiApprovalPanel
           approval={pendingApproval}
