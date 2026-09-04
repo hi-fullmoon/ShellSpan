@@ -321,6 +321,11 @@ export type AgentSessionEvent =
       previousRevision: number;
       clientOperationId: string;
     }>
+  | AgentSessionEventWithData<'agent/inbox/item_steered', {
+      itemId: string;
+      previousRevision: number;
+      clientOperationId: string;
+    }>
   | AgentSessionEventWithData<'session/renamed', {
       title: string;
       previousRevision: number;
@@ -705,6 +710,7 @@ export interface AgentSessionMessageInput {
 export type AgentInboxMutation =
   | Readonly<{ type: 'update'; itemId: string; content: string }>
   | Readonly<{ type: 'remove'; itemId: string }>
+  | Readonly<{ type: 'steer'; itemId: string }>
   | Readonly<{
       type: 'reorder';
       lane: AgentSessionInboxLane;
