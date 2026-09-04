@@ -88,6 +88,29 @@ function projectionKeys(nodes: readonly AiConversationNode[]): readonly string[]
   ));
 }
 
+function requestHeader(
+  seq: number,
+  changes: Partial<Extract<AgentSessionEvent, { type: 'request/header' }>['data']> = {},
+): Extract<AgentSessionEvent, { type: 'request/header' }> {
+  const header = agentSessionBaselineScenarios.hello.events.find(
+    (event) => event.type === 'request/header',
+  );
+  if (!header) throw new Error('Missing baseline request header');
+  return {
+    ...header,
+    seq,
+    stepId: `step-${seq}`,
+    timeUnixMs: header.timeUnixMs + seq * 100,
+    data: {
+      ...header.data,
+      requestId: `request-${seq}`,
+      reason: seq === 0 ? 'initial' : 'toolContinuation',
+      series: { seriesId: `series-${seq}`, requestIndex: 0, startsSeries: true },
+      ...changes,
+    },
+  };
+}
+
 describe('AI Phase 3 chat projection', () => {
   it('keeps the fixture exhaustive over the current Event v4 union', () => {
     expect(new Set(agentSessionAllEventFamiliesFixture.map((event) => event.type)))
@@ -165,6 +188,53 @@ describe('AI Phase 3 chat projection', () => {
     expect(nodes.find((node) => node.kind === 'assistantMessage')).toMatchObject({
       blocks: [{ type: 'text', text: 'Hello! How can I help?' }],
     });
+  });
+
+  it('shows one prompt across five request series and retains every request reference', () => {
+    const events = Array.from({ length: 5 }, (_, index) => requestHeader(index));
+    const initial = projectAgentChatNodes(events.slice(0, 1))[0];
+    const nodes = projectAgentChatNodes(events);
+    const prompts = nodes.filter((node) => node.kind === 'systemPrompt');
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toMatchObject({
+      key: initial.key,
+      firstSeq: 0,
+      lastSeq: 4,
+      timestamp: initial.timestamp,
+      requestId: 'request-4',
+      requestIds: events.map((event) => event.data.requestId),
+      content: events[0].data.systemPrompt,
+      toolSchemas: events[0].data.toolSchemas,
+    });
+    expect(projectAgentChatNodes(events.slice(2))[0].key).toBe(initial.key);
+  });
+
+  it.each([
+    ['prompt content', { systemPrompt: 'Updated execution policy.' }],
+    ['tool schemas', { toolSchemas: [] }],
+  ] as const)('preserves %s changes and subsequent reversions', (_, changes) => {
+    const events = [requestHeader(0), requestHeader(1, changes), requestHeader(2)];
+    const prompts = projectAgentChatNodes(events).filter((node) => node.kind === 'systemPrompt');
+
+    expect(prompts).toHaveLength(3);
+    expect(new Set(prompts.map((node) => node.key)).size).toBe(3);
+    expect(prompts.map((node) => ({ content: node.content, toolSchemas: node.toolSchemas })))
+      .toEqual(events.map((event) => ({
+        content: event.data.systemPrompt,
+        toolSchemas: event.data.toolSchemas,
+      })));
+    expect(prompts.map((node) => node.requestIds)).toEqual([
+      ['request-0'], ['request-1'], ['request-2'],
+    ]);
+  });
+
+  it('keeps identical prompts in separate Turns', () => {
+    const events = [requestHeader(0), { ...requestHeader(1), turnId: 'turn-02' }];
+    const prompts = projectAgentChatNodes(events).filter((node) => node.kind === 'systemPrompt');
+
+    expect(prompts.map((node) => node.turnId)).toEqual(['turn-01', 'turn-02']);
+    expect(prompts.map((node) => node.requestIds)).toEqual([['request-0'], ['request-1']]);
   });
 
   it('keeps omitted usage unknown instead of projecting zeroes', () => {
