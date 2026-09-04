@@ -1384,6 +1384,9 @@ impl AgentRuntime {
 
 #[cfg(test)]
 mod tests {
+    mod response_tests {
+        include!("runtime_response_tests.rs");
+    }
     mod inbox_steer_tests {
         include!("runtime_inbox_steer_tests.rs");
     }

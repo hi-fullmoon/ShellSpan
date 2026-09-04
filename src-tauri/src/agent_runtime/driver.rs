@@ -316,7 +316,11 @@ async fn drive_agent_inner(
                     current_step_id.clone(),
                 )?;
             } else if sessions
-                .begin_step_or_end_turn(&entry.session_id, turn_id.clone(), current_step_id.clone())?
+                .begin_step_or_end_turn(
+                    &entry.session_id,
+                    turn_id.clone(),
+                    current_step_id.clone(),
+                )?
                 .is_none()
             {
                 // An operator may remove the final queued input while hooks
@@ -452,13 +456,17 @@ fn retry_random_sample() -> f64 {
     (sample as f64) / (u64::MAX as f64)
 }
 
-fn model_response_has_output(response: &ModelResponse) -> bool {
-    response.content.iter().any(|block| match block {
+fn model_block_has_output(block: &ModelContentBlock) -> bool {
+    match block {
         ModelContentBlock::Text { text } | ModelContentBlock::Reasoning { text, .. } => {
-            !text.is_empty()
+            !text.trim().is_empty()
         }
         ModelContentBlock::ToolCall { .. } => true,
-    })
+    }
+}
+
+fn model_response_has_output(response: &ModelResponse) -> bool {
+    response.content.iter().any(model_block_has_output)
 }
 
 fn empty_model_response_error() -> NormalizedModelError {
@@ -951,13 +959,14 @@ async fn commit_response(
         finish_reason,
         usage: model_usage,
     } = response;
-    let has_content = model_content.iter().any(|block| match block {
-        ModelContentBlock::Text { text } | ModelContentBlock::Reasoning { text, .. } => {
-            !text.is_empty()
-        }
-        ModelContentBlock::ToolCall { .. } => true,
-    });
-    if !has_content {
+    // Providers may emit whitespace-only text beside valid reasoning/tool calls.
+    // Drop only empty blocks before durable validation; retain all whitespace in
+    // meaningful content, including code and formatted answers.
+    let model_content = model_content
+        .into_iter()
+        .filter(model_block_has_output)
+        .collect::<Vec<_>>();
+    if model_content.is_empty() {
         return Ok(StepSettlement::Failed(
             "emptyResponse: AI provider returned no text or tool calls".into(),
         ));
@@ -1237,10 +1246,10 @@ impl PartialContentAccumulator {
         self.blocks
             .values()
             .filter_map(|block| match block {
-                PartialContentBlock::Text(text) if !text.is_empty() => {
+                PartialContentBlock::Text(text) if !text.trim().is_empty() => {
                     Some(AgentAssistantContentBlock::Text { text: text.clone() })
                 }
-                PartialContentBlock::Reasoning(text) if !text.is_empty() => {
+                PartialContentBlock::Reasoning(text) if !text.trim().is_empty() => {
                     Some(AgentAssistantContentBlock::Reasoning {
                         text: text.clone(),
                         provider_item: None,
