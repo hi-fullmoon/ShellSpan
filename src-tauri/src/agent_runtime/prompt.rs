@@ -229,6 +229,7 @@ mod tests {
 
     fn header() -> AgentSessionHeader {
         AgentSessionHeader {
+            model_selection: None,
             session_id: "session-golden".into(),
             task_id: "task-golden".into(),
             goal: "Inspect the workspace safely".into(),

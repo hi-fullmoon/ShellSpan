@@ -257,6 +257,8 @@ pub fn run() {
             ai::ai_list_models,
             agent_runtime::agent_runtime_create_session,
             agent_runtime::agent_runtime_start,
+            agent_runtime::agent_runtime_select_model,
+            agent_runtime::agent_runtime_set_permission,
             agent_runtime::agent_runtime_answer_question,
             agent_runtime::agent_runtime_list_skills,
             agent_runtime::agent_runtime_list_file_references,

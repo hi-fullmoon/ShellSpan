@@ -39,6 +39,8 @@ type EventPublisher = Arc<dyn Fn(&AgentSessionEvent) + Send + Sync>;
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentSessionHeader {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) model_selection: Option<super::AgentSubagentModel>,
     pub(crate) session_id: String,
     pub(crate) task_id: String,
     pub(crate) goal: String,
@@ -262,6 +264,7 @@ impl AgentSessionRecord {
             return Err("Agent session log does not start with session/created".into());
         };
         let header = AgentSessionHeader {
+            model_selection: None,
             session_id: first.session_id.clone(),
             task_id: task_id.clone(),
             goal: goal.clone(),
@@ -2477,6 +2480,12 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
             ordered_item_ids,
             ..
         } => record.inbox.reorder(*lane, ordered_item_ids)?,
+        AgentSessionEventPayload::SessionModelSelected { provider } => {
+            record.header.model_selection = Some(provider.clone());
+        }
+        AgentSessionEventPayload::SessionPermissionChanged { mode } => {
+            record.header.permission_mode = Some(*mode);
+        }
         AgentSessionEventPayload::SessionRenamed { title, .. } => {
             record.header.title = Some(title.clone())
         }
@@ -2595,6 +2604,18 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
                     return Err("ordered inbox item ids contain duplicates".into());
                 }
             }
+        }
+        Payload::SessionModelSelected { provider } => {
+            require_scope(event, false, false)?;
+            // Replay validates the recorded values, independently of today's model catalog.
+            super::subagent::provider_config(provider)?;
+            validate_text(&provider.provider_id, "providerId", false, MAX_LABEL_BYTES)?;
+            validate_text(&provider.base_url, "provider URL", false, MAX_LABEL_BYTES)?;
+            validate_text(&provider.model, "model", false, MAX_LABEL_BYTES)?;
+            validate_optional_text(provider.reasoning_effort.as_deref(), "reasoning effort")?;
+        }
+        Payload::SessionPermissionChanged { .. } => {
+            require_scope(event, false, false)?;
         }
         Payload::SessionRenamed {
             title,

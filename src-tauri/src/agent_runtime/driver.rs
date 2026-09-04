@@ -20,7 +20,8 @@ use super::{AgentInboxLane, AgentInboxMessage, AgentMessageSource};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AgentDriverConfig {
-    pub(crate) max_steps_per_turn: usize,
+    /// No default step cap; explicit budgets may bound a turn.
+    pub(crate) max_steps_per_turn: Option<usize>,
     pub(crate) max_turns_per_session: usize,
     pub(crate) retry_policy: RetryPolicy,
 }
@@ -28,7 +29,7 @@ pub(crate) struct AgentDriverConfig {
 impl Default for AgentDriverConfig {
     fn default() -> Self {
         Self {
-            max_steps_per_turn: 8,
+            max_steps_per_turn: None,
             max_turns_per_session: 64,
             retry_policy: RetryPolicy::default(),
         }
@@ -51,16 +52,6 @@ pub(crate) async fn drive_agent(
     compactions: AgentCompactionManager,
     config: AgentDriverConfig,
 ) -> AgentDriverSettlement {
-    // The entry owns an immutable Provider snapshot for this drive and its children.
-    let config = AgentDriverConfig {
-        retry_policy: entry.provider.retry_policy.unwrap_or(config.retry_policy),
-        ..config
-    };
-    let compactions = compactions.with_model(
-        entry.adapter.clone(),
-        entry.provider.clone(),
-        config.retry_policy,
-    );
     match drive_agent_inner(&sessions, &entry, &hooks, &tools, &compactions, config).await {
         Ok(settlement) => settlement,
         Err(message) if message.starts_with("toolSchedulerFailure:") => {
@@ -91,9 +82,10 @@ async fn drive_agent_inner(
 ) -> Result<AgentDriverSettlement, String> {
     let config = if let Some(subagent) = &entry.subagent {
         AgentDriverConfig {
-            max_steps_per_turn: config
-                .max_steps_per_turn
-                .min(subagent.budget.max_steps_per_turn as usize),
+            max_steps_per_turn: Some(config.max_steps_per_turn.map_or(
+                subagent.budget.max_steps_per_turn as usize,
+                |limit| limit.min(subagent.budget.max_steps_per_turn as usize),
+            )),
             max_turns_per_session: config
                 .max_turns_per_session
                 .min(subagent.budget.max_turns as usize),
@@ -176,10 +168,10 @@ async fn drive_agent_inner(
                 })
                 .count()
                 .saturating_add(1);
-            if step_index > config.max_steps_per_turn {
+            if let Some(limit) = config.max_steps_per_turn.filter(|limit| step_index > *limit) {
                 let reason = format!(
                     "stepLimitExceeded: maximum {} Steps per Turn",
-                    config.max_steps_per_turn
+                    limit
                 );
                 close_open_scope(sessions, entry, &reason)?;
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
@@ -195,6 +187,7 @@ async fn drive_agent_inner(
                 &turn_id,
                 &step_id,
                 step_index,
+                config.retry_policy,
             )
             .await?
             {
@@ -219,7 +212,7 @@ async fn drive_agent_inner(
             let turn_id = format!("turn-{}", Uuid::new_v4().simple());
             let step_id = format!("step-{}", Uuid::new_v4().simple());
             if let Some(reason) =
-                apply_pre_step_hooks(sessions, entry, hooks, compactions, &turn_id, &step_id, 1)
+                apply_pre_step_hooks(sessions, entry, hooks, compactions, &turn_id, &step_id, 1, config.retry_policy)
                     .await?
             {
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
@@ -281,10 +274,10 @@ async fn drive_agent_inner(
                 entry.set_scope(None)?;
                 break;
             }
-            if step_index >= config.max_steps_per_turn {
+            if let Some(limit) = config.max_steps_per_turn.filter(|limit| step_index >= *limit) {
                 let reason = format!(
                     "stepLimitExceeded: maximum {} Steps per Turn",
-                    config.max_steps_per_turn
+                    limit
                 );
                 close_open_scope(sessions, entry, &reason)?;
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
@@ -301,6 +294,7 @@ async fn drive_agent_inner(
                 &turn_id,
                 &current_step_id,
                 step_index,
+                config.retry_policy,
             )
             .await?
             {
@@ -344,7 +338,11 @@ async fn apply_pre_step_hooks(
     turn_id: &str,
     step_id: &str,
     step_index: usize,
+    retry_policy: RetryPolicy,
 ) -> Result<Option<String>, String> {
+    let model = entry.model()?;
+    let compactions = compactions.clone().with_model(model.adapter, model.provider.clone(),
+        model.provider.retry_policy.unwrap_or(retry_policy));
     let snapshot = sessions.snapshot(&entry.session_id)?;
     let surface_generation = snapshot.surface.generation;
     let assembly = assemble_model_input(&snapshot.header, model_tools_for(entry));
@@ -378,7 +376,7 @@ async fn apply_pre_step_hooks(
         .extend(pending.into_iter().map(|message| ModelMessage::User {
             content: message.content,
         }));
-    let budget = estimate_model_surface_budget(&entry.provider, &request);
+    let budget = estimate_model_surface_budget(&model.provider, &request);
     let context = AgentPreStepContext {
         session_id: entry.session_id.clone(),
         turn_id: turn_id.to_string(),
@@ -488,6 +486,16 @@ async fn run_step(
     step_index: usize,
     config: AgentDriverConfig,
 ) -> Result<StepSettlement, String> {
+    // A step and all its retries retain one provider/adapter pair.
+    let model = entry.model()?;
+    let config = AgentDriverConfig {
+        retry_policy: model.provider.retry_policy.unwrap_or(config.retry_policy),
+        ..config
+    };
+    let compactions = compactions.clone().with_model(
+        model.adapter.clone(), model.provider.clone(), config.retry_policy,
+    );
+    let permission_mode = sessions.snapshot(&entry.session_id)?.header.permission_mode;
     let mut attempt = 1_u32;
     let mut request_reason = if step_index == 1 {
         AgentRequestReason::Initial
@@ -531,7 +539,8 @@ async fn run_step(
                 return Ok(StepSettlement::Cancelled);
             }
         }
-        let snapshot = sessions.snapshot(&entry.session_id)?;
+        let mut snapshot = sessions.snapshot(&entry.session_id)?;
+        snapshot.header.permission_mode = permission_mode;
         let assembly = assemble_model_input(&snapshot.header, model_tools_for(entry));
         ensure_model_context(
             sessions,
@@ -577,7 +586,7 @@ async fn run_step(
             request.messages = inherited_messages;
         }
         let request_surface_generation = request.surface_generation;
-        let budget = estimate_model_surface_budget(&entry.provider, &request);
+        let budget = estimate_model_surface_budget(&model.provider, &request);
         if budget.requires_compaction() {
             let before = surface.generation;
             compactions
@@ -610,6 +619,7 @@ async fn run_step(
         let mut request_events = super::request_log::request_events(
             &sessions.all_events(&entry.session_id)?,
             entry,
+            &model.provider,
             &request,
             request_reason,
             attempt,
@@ -648,7 +658,7 @@ async fn run_step(
             collected: Arc::clone(&collected),
             cancellation: cancellation.clone(),
         });
-        let response = entry
+        let response = model
             .adapter
             .stream(request, cancellation.clone(), sink)
             .await;
@@ -851,21 +861,15 @@ fn ensure_model_context(
     surface: &super::AgentSurfaceSnapshot,
     assembly: &super::ModelInputAssembly,
 ) -> Result<(), String> {
-    let existing_producers = surface
-        .messages
-        .iter()
-        .filter_map(|message| match message {
-            super::AgentSurfaceMessage::User { source, .. } => Some(source.producer_id.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
     let payloads = assembly
         .context
         .iter()
         .filter(|injection| {
-            !existing_producers
-                .iter()
-                .any(|producer| *producer == injection.source.producer_id)
+            surface.messages.iter().rev().find_map(|message| match message {
+                super::AgentSurfaceMessage::User { source, content, .. }
+                    if source.producer_id == injection.source.producer_id => Some(content),
+                _ => None,
+            }) != Some(&injection.content)
         })
         .cloned()
         .map(|injection| AgentScopedPayload {

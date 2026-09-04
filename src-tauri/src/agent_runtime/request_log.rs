@@ -7,6 +7,7 @@ use super::{
 pub(super) fn request_events(
     events: &[AgentSessionEvent],
     entry: &AgentEntry,
+    provider: &crate::ai::AiProviderConfig,
     request: &ModelRequest,
     reason: AgentRequestReason,
     attempt: u32,
@@ -31,8 +32,7 @@ pub(super) fn request_events(
         header @ Payload::RequestHeader { .. } => Some(header),
         _ => None,
     });
-    let reasoning_effort = entry
-        .provider
+    let reasoning_effort = provider
         .reasoning_effort
         .map(|effort| format!("{effort:?}").to_ascii_lowercase());
     let mut header_request_id = request.request_id.clone();
@@ -55,8 +55,8 @@ pub(super) fn request_events(
             Some(AgentRequestSnapshotReason::Resume)
         } else if series.starts_series {
             Some(AgentRequestSnapshotReason::Series)
-        } else if provider_id != &entry.provider.id
-            || model != &entry.provider.model
+        } else if provider_id != &provider.id
+            || model != &provider.model
             || previous_effort != &reasoning_effort
             || system_prompt != &request.system_prompt
             || tool_schemas != &request.tools
@@ -73,8 +73,8 @@ pub(super) fn request_events(
         header_request_id.clone_from(&request.request_id);
         payloads.push(Payload::RequestHeader {
             request_id: request.request_id.clone(),
-            provider_id: entry.provider.id.clone(),
-            model: entry.provider.model.clone(),
+            provider_id: provider.id.clone(),
+            model: provider.model.clone(),
             reasoning_effort: reasoning_effort.clone(),
             reason,
             series: series.clone(),
@@ -87,8 +87,8 @@ pub(super) fn request_events(
     payloads.push(Payload::RequestStart {
         request_id: request.request_id.clone(),
         header_request_id,
-        provider_id: entry.provider.id.clone(),
-        model: entry.provider.model.clone(),
+        provider_id: provider.id.clone(),
+        model: provider.model.clone(),
         reasoning_effort,
         reason,
         series,

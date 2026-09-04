@@ -538,7 +538,7 @@ impl super::AgentToolPipeline {
                     AgentSessionEventPayload::QuestionRequested {
                         identity: identity.clone(),
                         arguments,
-                        provider: super::subagent::provider_descriptor(&entry.provider),
+                        provider: super::subagent::provider_descriptor(&entry.model()?.provider),
                     },
                 ));
                 payloads.push(super::AgentScopedPayload {
