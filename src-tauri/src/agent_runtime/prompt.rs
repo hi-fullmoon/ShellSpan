@@ -394,6 +394,6 @@ mod tests {
             assert!(!without_target.contains(&name.into()));
         }
         assert!(without_target.contains(&"update_plan".into()));
-        assert!(without_target.contains(&"request_user_input".into()));
+        assert!(without_target.contains(&crate::agent_runtime::user_questions::TOOL_NAME.into()));
     }
 }
