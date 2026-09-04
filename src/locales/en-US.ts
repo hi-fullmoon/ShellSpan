@@ -12,6 +12,7 @@ export default {
   'ai.workspace.images.previous': 'Previous images',
   'ai.workspace.images.next': 'Next images',
   'ai.workspace.images.draft': 'Saved draft · not sent',
+  'ai.workspace.images.processing': 'Processing {count} images',
   'ai.workspace.images.unconfirmed': 'Saved draft · awaiting confirmation',
   'ai.workspace.images.remove': 'Remove image',
   'ai.workspace.images.error.model': 'This model cannot receive images. Choose Qwen qwen3-vl-plus or qwen3-vl-flash. Your draft is kept.',
