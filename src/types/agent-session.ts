@@ -351,8 +351,20 @@ export type AgentSessionEvent =
       reasoningEffort?: string;
       reason: AgentSessionRequestReason;
       series: AgentSessionRequestSeries;
+      /** Why a full snapshot was recorded; absent in older per-request headers. */
+      snapshotReason?: 'initial' | 'change' | 'resume' | 'series';
       systemPrompt: string;
       toolSchemas: readonly AgentSessionRequestToolSchema[];
+      attempt: number;
+    }>
+  | AgentSessionEventWithData<'request/start', {
+      requestId: string;
+      headerRequestId: string;
+      providerId: string;
+      model: string;
+      reasoningEffort?: string;
+      reason: AgentSessionRequestReason;
+      series: AgentSessionRequestSeries;
       attempt: number;
     }>
   | AgentSessionEventWithData<'request/context', {
@@ -787,8 +799,9 @@ export interface AgentActivityRequest {
   readonly reasoningEffort?: string;
   readonly reason: AgentSessionRequestReason;
   readonly series: AgentSessionRequestSeries;
-  readonly systemPrompt: string;
-  readonly toolSchemas: readonly AgentSessionRequestToolSchema[];
+  /** Unknown when the referenced snapshot precedes the loaded event window. */
+  readonly systemPrompt: string | null;
+  readonly toolSchemas: readonly AgentSessionRequestToolSchema[] | null;
   readonly attempt: number;
   readonly startedAt: number;
   readonly firstReasoningAt?: number;

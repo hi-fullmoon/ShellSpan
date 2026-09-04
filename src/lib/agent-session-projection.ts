@@ -332,7 +332,16 @@ function projectActivityNodesUnchecked(
           event.data.message.content, event.data,
         );
         break;
-      case 'request/header': {
+      case 'request/header':
+      case 'request/start': {
+        if (event.type === 'request/header' && event.data.snapshotReason !== undefined) {
+          upsert(
+            `activity:request-header:${event.data.requestId}`,
+            'requestContext', event, 'completed', 'request/header',
+            event.data.snapshotReason, event.data, event.data.requestId,
+          );
+          break;
+        }
         const coordinates = { turnId: event.turnId ?? null, stepId: event.stepId ?? null };
         requestTurn.set(event.data.requestId, coordinates);
         if (event.stepId) currentRequestByStep.set(event.stepId, event.data.requestId);
@@ -594,6 +603,7 @@ function projectActivityUnchecked(
   const stepById = new Map<string, MutableActivityStep>();
   const requestLocation = new Map<string, { step: MutableActivityStep; index: number }>();
   const pendingRetryReason = new Map<string, string>();
+  const headers = new Map<string, Extract<AgentSessionEvent, { type: 'request/header' }>['data']>();
   const toolLocation = new Map<string, { step: MutableActivityStep; index: number }>();
   const latestToolLocation = new Map<string, { step: MutableActivityStep; index: number }>();
   const agents = new Map<string, AgentActivityAgent>();
@@ -738,7 +748,13 @@ function projectActivityUnchecked(
         step.status = terminalStatusFromReason(event.data.reason);
         break;
       }
-      case 'request/header': {
+      case 'request/header':
+      case 'request/start': {
+        if (event.type === 'request/header') headers.set(event.data.requestId, event.data);
+        if (event.type === 'request/header' && event.data.snapshotReason !== undefined) break;
+        const header = event.type === 'request/header'
+          ? event.data
+          : headers.get(event.data.headerRequestId);
         const step = ensureStep(event);
         const request: AgentActivityRequest = {
           requestId: event.data.requestId,
@@ -747,8 +763,8 @@ function projectActivityUnchecked(
           reasoningEffort: event.data.reasoningEffort,
           reason: event.data.reason,
           series: event.data.series,
-          systemPrompt: event.data.systemPrompt,
-          toolSchemas: event.data.toolSchemas,
+          systemPrompt: header?.systemPrompt ?? null,
+          toolSchemas: header?.toolSchemas ?? null,
           attempt: event.data.attempt,
           startedAt: event.timeUnixMs,
           surfaceGeneration,

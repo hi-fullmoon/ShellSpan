@@ -2,3 +2,7 @@ allowBuilds:
   react-intl-universal: true
 patchedDependencies:
   sonner@2.0.8: patches/sonner@2.0.8.patch
+overrides:
+  # MCP SDK imports zod/v3 and zod/v4, which zod 3.24.x does not export.
+  # https://github.com/shadcn-ui/ui/issues/10860
+  'shadcn@4>zod': ^3.25.76

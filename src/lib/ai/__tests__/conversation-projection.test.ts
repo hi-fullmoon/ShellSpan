@@ -36,6 +36,7 @@ const ALL_AGENT_EVENT_TYPES = [
   'assistant/chunk',
   'assistant/message',
   'request/header',
+  'request/start',
   'request/context',
   'request/retry',
   'request/usage',
@@ -210,10 +211,8 @@ describe('AI Phase 3 chat projection', () => {
     expect(projectAgentChatNodes(events.slice(2))[0].key).toBe(initial.key);
   });
 
-  it.each([
-    ['prompt content', { systemPrompt: 'Updated execution policy.' }],
-    ['tool schemas', { toolSchemas: [] }],
-  ] as const)('preserves %s changes and subsequent reversions', (_, changes) => {
+  it('preserves prompt changes and subsequent reversions', () => {
+    const changes = { systemPrompt: 'Updated execution policy.' };
     const events = [requestHeader(0), requestHeader(1, changes), requestHeader(2)];
     const prompts = projectAgentChatNodes(events).filter((node) => node.kind === 'systemPrompt');
 
@@ -229,12 +228,36 @@ describe('AI Phase 3 chat projection', () => {
     ]);
   });
 
-  it('keeps identical prompts in separate Turns', () => {
+  it('reuses identical prompts across Turns', () => {
     const events = [requestHeader(0), { ...requestHeader(1), turnId: 'turn-02' }];
     const prompts = projectAgentChatNodes(events).filter((node) => node.kind === 'systemPrompt');
 
-    expect(prompts.map((node) => node.turnId)).toEqual(['turn-01', 'turn-02']);
-    expect(prompts.map((node) => node.requestIds)).toEqual([['request-0'], ['request-1']]);
+    expect(prompts.map((node) => node.turnId)).toEqual(['turn-01']);
+    expect(prompts.map((node) => node.requestIds)).toEqual([['request-0', 'request-1']]);
+  });
+
+  it('keeps tool and model changes out of the system prompt rows', () => {
+    const nodes = projectAgentChatNodes([
+      requestHeader(0),
+      requestHeader(1, { toolSchemas: [], snapshotReason: 'change' }),
+      requestHeader(2, { model: 'another-model', snapshotReason: 'change' }),
+    ]);
+    expect(nodes.filter((node) => node.kind === 'systemPrompt')).toHaveLength(1);
+  });
+
+  it.each(['resume', 'series'] as const)('shows an unchanged prompt at a %s boundary', (snapshotReason) => {
+    const events = [requestHeader(0), requestHeader(1, { snapshotReason })];
+    const prompts = projectAgentChatNodes(events).filter((node) => node.kind === 'systemPrompt');
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0].content).toBe(prompts[1].content);
+    expect(prompts[0].key).not.toBe(prompts[1].key);
+  });
+
+  it('omits empty prompts and shows a prompt restored after removal', () => {
+    const events = [requestHeader(0), requestHeader(1, { systemPrompt: '' }), requestHeader(2)];
+    const prompts = projectAgentChatNodes(events).filter((node) => node.kind === 'systemPrompt');
+    expect(prompts).toHaveLength(2);
+    expect(prompts.every((node) => node.content !== '')).toBe(true);
   });
 
   it('keeps omitted usage unknown instead of projecting zeroes', () => {

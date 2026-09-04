@@ -502,7 +502,15 @@ export const agentSessionAllEventFamiliesFixture: readonly AgentSessionEvent[] =
   ...agentSessionEventFixture.slice(0, -4),
   ...remainingEventFamilyFixture,
   ...agentSessionEventFixture.slice(-4),
-].map((event, seq) => ({
+].flatMap((event): AgentSessionEvent[] => {
+  if (event.type !== 'request/header') return [event];
+  const { systemPrompt: _prompt, toolSchemas: _tools, ...data } = event.data;
+  return [event, {
+    ...event,
+    type: 'request/start',
+    data: { ...data, headerRequestId: data.requestId },
+  }];
+}).map((event, seq) => ({
   ...event,
   seq,
   timeUnixMs: 1_000 + seq * 10,

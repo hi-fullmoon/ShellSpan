@@ -8,7 +8,7 @@ use super::{
     assemble_model_input, default_model_tools, estimate_model_surface_budget, recorded_tool_call,
     AgentActiveScope, AgentAssistantContentBlock, AgentCompactionManager, AgentEntry, AgentHookBus,
     AgentLifecyclePhase, AgentPreStepContext, AgentPreStepDecision, AgentRequestReason,
-    AgentRequestSeries, AgentScopedPayload, AgentSessionEventPayload, AgentSessionStatus,
+    AgentScopedPayload, AgentSessionEventPayload, AgentSessionStatus,
     AgentSessionStore, AgentStopReason, AgentTokenUsage, AgentToolCallDelta, AgentToolPipeline,
     ModelContentBlock, ModelFinishReason, ModelMessage, ModelRequest, ModelResponse,
     ModelStreamSink, NormalizedModelError, NormalizedModelErrorKind, RetryPlan, RetryPolicy,
@@ -458,7 +458,6 @@ async fn run_step(
     config: AgentDriverConfig,
 ) -> Result<StepSettlement, String> {
     let mut attempt = 1_u32;
-    let series_id = format!("series-{}", Uuid::new_v4().simple());
     let mut request_reason = if step_index == 1 {
         AgentRequestReason::Initial
     } else {
@@ -539,53 +538,39 @@ async fn run_step(
         let request_surface_generation = request.surface_generation;
         let budget = estimate_model_surface_budget(&entry.provider, &request);
         let estimated_input_tokens = Some(budget.estimated_input_tokens);
-        let tool_schemas = request.tools.clone();
         if entry.cancellation().is_cancelled() {
             return Ok(StepSettlement::Cancelled);
         }
-        sessions.append_batch(
-            &entry.session_id,
-            vec![
-                AgentScopedPayload {
-                    turn_id: Some(turn_id.to_string()),
-                    step_id: Some(step_id.to_string()),
-                    payload: AgentSessionEventPayload::RequestHeader {
-                        request_id: request_id.clone(),
-                        provider_id: entry.provider.id.clone(),
-                        model: entry.provider.model.clone(),
-                        reasoning_effort: entry
-                            .provider
-                            .reasoning_effort
-                            .map(|effort| format!("{effort:?}").to_ascii_lowercase()),
-                        reason: request_reason,
-                        series: AgentRequestSeries {
-                            series_id: series_id.clone(),
-                            request_index: attempt - 1,
-                            starts_series: attempt == 1,
-                        },
-                        system_prompt: request.system_prompt.clone(),
-                        tool_schemas,
-                        attempt,
-                    },
-                },
-                AgentScopedPayload {
-                    turn_id: Some(turn_id.to_string()),
-                    step_id: Some(step_id.to_string()),
-                    payload: AgentSessionEventPayload::RequestContext {
-                        request_id: request_id.clone(),
-                        input_tokens: estimated_input_tokens,
-                        context_window: Some(budget.context_window),
-                        system_tokens: Some(budget.system_tokens),
-                        tool_schema_tokens: Some(budget.tool_schema_tokens),
-                        message_tokens: Some(budget.message_tokens),
-                        surface_generation: request.surface_generation,
-                        limited: None,
-                        omitted_messages: None,
-                    },
-                },
-            ],
-        )?;
-
+        let mut request_events = super::request_log::request_events(
+            &sessions.all_events(&entry.session_id)?,
+            entry,
+            &request,
+            request_reason,
+            attempt,
+        )
+        .into_iter()
+        .map(|payload| AgentScopedPayload {
+            turn_id: Some(turn_id.to_string()),
+            step_id: Some(step_id.to_string()),
+            payload,
+        })
+        .collect::<Vec<_>>();
+        request_events.push(AgentScopedPayload {
+            turn_id: Some(turn_id.to_string()),
+            step_id: Some(step_id.to_string()),
+            payload: AgentSessionEventPayload::RequestContext {
+                request_id: request_id.clone(),
+                input_tokens: estimated_input_tokens,
+                context_window: Some(budget.context_window),
+                system_tokens: Some(budget.system_tokens),
+                tool_schema_tokens: Some(budget.tool_schema_tokens),
+                message_tokens: Some(budget.message_tokens),
+                surface_generation: request.surface_generation,
+                limited: None,
+                omitted_messages: None,
+            },
+        });
+        sessions.append_batch(&entry.session_id, request_events)?;
         let collected = Arc::new(Mutex::new(PartialContentAccumulator::default()));
         let cancellation = entry.cancellation();
         let sink: Arc<dyn ModelStreamSink> = Arc::new(DurableModelStreamSink {

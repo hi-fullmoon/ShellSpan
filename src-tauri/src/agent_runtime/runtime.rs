@@ -1586,6 +1586,177 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_snapshots_span_followups_and_restart_at_resume() {
+        use super::super::AgentRequestSnapshotReason;
+        let adapter = FakeAdapter::new(vec![reply("one", &[]), reply("two", &[])]);
+        let (root, runtime) = configured(adapter.clone());
+        create(&runtime, "session-snapshots");
+        runtime
+            .followup("session-snapshots", "message-1".into(), "first".into())
+            .unwrap();
+        runtime
+            .start("session-snapshots", provider(), None)
+            .unwrap();
+        runtime.await_idle("session-snapshots").await.unwrap();
+        runtime
+            .followup("session-snapshots", "message-2".into(), "second".into())
+            .unwrap();
+        runtime.await_idle("session-snapshots").await.unwrap();
+        let events = all_events(&runtime, "session-snapshots");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event.payload,
+                    AgentSessionEventPayload::RequestHeader { .. }
+                ))
+                .count(),
+            1
+        );
+        let starts = events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                AgentSessionEventPayload::RequestStart {
+                    series, attempt, ..
+                } => Some((series, attempt)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(starts.len(), 2);
+        assert_eq!(starts[0].0.series_id, starts[1].0.series_id);
+        assert_eq!(starts[1].0.request_index, 1);
+        assert!(!starts[1].0.starts_series);
+        assert_eq!(*starts[1].1, 1);
+
+        let entry = runtime.agents.get("session-snapshots").unwrap().unwrap();
+        let last_start = events
+            .iter()
+            .rposition(|event| {
+                matches!(event.payload, AgentSessionEventPayload::RequestStart { .. })
+            })
+            .unwrap();
+        let checkpoint = super::super::derive_recovery_checkpoint(&events[..=last_start]);
+        assert_eq!(
+            checkpoint.kind,
+            super::super::AgentRecoveryCheckpointKind::OpenModelRequest
+        );
+        assert_eq!(
+            checkpoint.request_id.as_deref(),
+            Some(adapter.requests.lock().unwrap()[1].request_id.as_str())
+        );
+        let mut changed = adapter.requests.lock().unwrap()[1].clone();
+        changed.system_prompt.push_str("\nNew guidance.");
+        let changed_events = super::super::request_log::request_events(
+            &events,
+            &entry,
+            &changed,
+            AgentRequestReason::Initial,
+            1,
+        );
+        assert!(matches!(
+            changed_events[0],
+            AgentSessionEventPayload::RequestHeader {
+                snapshot_reason: Some(AgentRequestSnapshotReason::Change),
+                ..
+            }
+        ));
+        changed = adapter.requests.lock().unwrap()[1].clone();
+        changed.tools.clear();
+        assert!(matches!(
+            super::super::request_log::request_events(
+                &events,
+                &entry,
+                &changed,
+                AgentRequestReason::Initial,
+                1,
+            )[0],
+            AgentSessionEventPayload::RequestHeader {
+                snapshot_reason: Some(AgentRequestSnapshotReason::Change),
+                ..
+            }
+        ));
+        changed = adapter.requests.lock().unwrap()[1].clone();
+        changed.surface_generation += 1;
+        assert!(matches!(
+            super::super::request_log::request_events(
+                &events,
+                &entry,
+                &changed,
+                AgentRequestReason::Recovery,
+                2,
+            )[0],
+            AgentSessionEventPayload::RequestHeader {
+                snapshot_reason: Some(AgentRequestSnapshotReason::Series),
+                series: super::super::AgentRequestSeries {
+                    request_index: 0,
+                    starts_series: true,
+                    ..
+                },
+                ..
+            }
+        ));
+        drop(entry);
+        drop(runtime);
+
+        let resumed_adapter = FakeAdapter::new(vec![reply("three", &[])]);
+        let resumed = AgentRuntimeBuilder::new()
+            .model_factory(Arc::new(FakeFactory(resumed_adapter.clone())))
+            .native_tool_runtime(Arc::new(FakeNativeRuntime))
+            .build();
+        resumed.configure(root.path().to_path_buf()).unwrap();
+        resumed
+            .followup("session-snapshots", "message-3".into(), "third".into())
+            .unwrap();
+        resumed
+            .start("session-snapshots", provider(), None)
+            .unwrap();
+        resumed.await_idle("session-snapshots").await.unwrap();
+        let events = all_events(&resumed, "session-snapshots");
+        let snapshots = events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                AgentSessionEventPayload::RequestHeader {
+                    snapshot_reason, ..
+                } => *snapshot_reason,
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            snapshots,
+            vec![
+                AgentRequestSnapshotReason::Initial,
+                AgentRequestSnapshotReason::Resume
+            ]
+        );
+        let requests = adapter
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .chain(resumed_adapter.requests.lock().unwrap().iter().cloned())
+            .collect::<Vec<_>>();
+        let starts = events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                AgentSessionEventPayload::RequestStart {
+                    request_id,
+                    header_request_id,
+                    ..
+                } => Some((request_id, header_request_id)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(starts.len(), requests.len());
+        for ((request_id, header_id), request) in starts.iter().zip(&requests) {
+            assert_eq!(**request_id, request.request_id);
+            assert!(events.iter().any(|event| matches!(&event.payload,
+                AgentSessionEventPayload::RequestHeader { request_id, system_prompt, tool_schemas, .. }
+                    if request_id == *header_id && system_prompt == &request.system_prompt && tool_schemas == &request.tools
+            )));
+        }
+    }
+    #[tokio::test]
     async fn continuable_child_reuses_the_same_session_and_driver() {
         let adapter = FakeAdapter::new(vec![
             reply("first child answer", &[]),
@@ -2072,6 +2243,10 @@ mod tests {
 
         let events = all_events(&runtime, "session-plan");
         assert_eq!(adapter.request_count(), 2);
+        assert_eq!(events.iter().filter(|event| matches!(event.payload,
+            AgentSessionEventPayload::RequestHeader { .. })).count(), 1);
+        assert_eq!(events.iter().filter(|event| matches!(event.payload,
+            AgentSessionEventPayload::RequestStart { .. })).count(), 2);
         assert!(events.iter().any(|event| matches!(
             &event.payload,
             AgentSessionEventPayload::TaskPlan { version: 1, steps }
@@ -2995,7 +3170,7 @@ mod tests {
                 .iter()
                 .filter(|kind| *kind == "request/header")
                 .count(),
-            2
+            1
         );
         assert_eq!(
             types.iter().filter(|kind| *kind == "request/retry").count(),
@@ -3004,7 +3179,7 @@ mod tests {
         let headers = all_events(&runtime, "session-retry")
             .into_iter()
             .filter_map(|event| match event.payload {
-                AgentSessionEventPayload::RequestHeader { reason, series, .. } => {
+                AgentSessionEventPayload::RequestStart { reason, series, .. } => {
                     Some((reason, series))
                 }
                 _ => None,

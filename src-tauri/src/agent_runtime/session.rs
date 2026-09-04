@@ -1808,6 +1808,68 @@ fn validate_event_transition(
             }
             Ok(())
         }
+        AgentSessionEventPayload::RequestStart {
+            request_id,
+            header_request_id,
+            provider_id,
+            model,
+            reasoning_effort,
+            series,
+            ..
+        } => {
+            let header = record
+                .events
+                .iter()
+                .rev()
+                .find_map(|previous| match &previous.payload {
+                    payload @ AgentSessionEventPayload::RequestHeader { .. } => Some(payload),
+                    _ => None,
+                });
+            let Some(AgentSessionEventPayload::RequestHeader {
+                request_id: snapshot_id,
+                provider_id: snapshot_provider,
+                model: snapshot_model,
+                reasoning_effort: snapshot_effort,
+                series: snapshot_series,
+                ..
+            }) = header
+            else {
+                return Err("request/start requires a recorded header snapshot".into());
+            };
+            if header_request_id != snapshot_id
+                || provider_id != snapshot_provider
+                || model != snapshot_model
+                || reasoning_effort != snapshot_effort
+                || series.series_id != snapshot_series.series_id
+            {
+                return Err(
+                    "request/start must reference the current matching header snapshot".into(),
+                );
+            }
+            let mut previous_series = None;
+            for previous in record.events.iter().rev() {
+                if let AgentSessionEventPayload::RequestStart {
+                    request_id: previous_id,
+                    series: value,
+                    ..
+                } = &previous.payload
+                {
+                    if previous_id == request_id {
+                        return Err("request/start identity was already committed".into());
+                    }
+                    if previous_series.is_none() {
+                        previous_series = Some(value);
+                    }
+                }
+            }
+            let expected_index = previous_series
+                .filter(|previous| previous.series_id == series.series_id)
+                .map_or(0, |previous| previous.request_index.saturating_add(1));
+            if series.request_index != expected_index {
+                return Err("request/start series index is not contiguous".into());
+            }
+            Ok(())
+        }
         AgentSessionEventPayload::RequestContext {
             surface_generation, ..
         } if *surface_generation != derive_surface(&record.events)?.generation => {
@@ -2272,7 +2334,7 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             validate_text(
                 system_prompt,
                 "system prompt",
-                false,
+                true,
                 MAX_AGENT_MESSAGE_BYTES,
             )?;
             validate_collection_allow_empty(tool_schemas, "request tool schemas")?;
@@ -2288,11 +2350,32 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             if *attempt == 0 {
                 return Err("request attempt must be positive".into());
             }
-            if series.request_index.saturating_add(1) != *attempt {
-                return Err("request series index does not match its attempt".into());
+            if series.starts_series != (series.request_index == 0) {
+                return Err("request series boundary does not match its index".into());
             }
-            if series.starts_series != (*attempt == 1) {
-                return Err("request series boundary does not match its attempt".into());
+        }
+        Payload::RequestStart {
+            request_id,
+            header_request_id,
+            provider_id,
+            model,
+            reasoning_effort,
+            series,
+            attempt,
+            ..
+        } => {
+            require_scope(event, true, true)?;
+            validate_identifier(request_id, "requestId")?;
+            validate_identifier(header_request_id, "headerRequestId")?;
+            validate_text(provider_id, "providerId", false, MAX_LABEL_BYTES)?;
+            validate_text(model, "model", false, MAX_LABEL_BYTES)?;
+            validate_optional_text(reasoning_effort.as_deref(), "reasoning effort")?;
+            validate_identifier(&series.series_id, "seriesId")?;
+            if *attempt == 0 {
+                return Err("request attempt must be positive".into());
+            }
+            if series.starts_series != (series.request_index == 0) {
+                return Err("request series boundary does not match its index".into());
             }
         }
         Payload::RequestContext { request_id, .. } => {
@@ -3407,6 +3490,62 @@ mod tests {
             .join("agent-runtime/sessions-v4/session-1.jsonl")
     }
 
+    #[test]
+    fn request_starts_require_current_snapshots_and_contiguous_series() {
+        let (_root, store) = configured();
+        create(&store);
+        let append = |value| {
+            store.append(
+                "session-1",
+                Some("turn-1".into()),
+                Some("step-1".into()),
+                serde_json::from_value(value).unwrap(),
+            )
+        };
+        let mut start = serde_json::json!({
+            "type": "request/start", "data": {
+                "requestId": "request-1", "headerRequestId": "request-1",
+                "providerId": "fake", "model": "fake", "reason": "initial", "attempt": 1,
+                "series": { "seriesId": "series-1", "requestIndex": 0, "startsSeries": true }
+            }
+        });
+        assert!(append(start.clone())
+            .unwrap_err()
+            .contains("recorded header snapshot"));
+        let mut header = start.clone();
+        header["type"] = "request/header".into();
+        header["data"]
+            .as_object_mut()
+            .unwrap()
+            .remove("headerRequestId");
+        header["data"]["systemPrompt"] = "".into();
+        header["data"]["toolSchemas"] = serde_json::json!([]);
+        header["data"]["snapshotReason"] = "initial".into();
+        append(header).unwrap();
+        append(start.clone()).unwrap();
+        assert!(append(start.clone())
+            .unwrap_err()
+            .contains("already committed"));
+        start["data"]["requestId"] = "request-2".into();
+        start["data"]["series"]["requestIndex"] = 1.into();
+        start["data"]["series"]["startsSeries"] = false.into();
+        start["data"]["headerRequestId"] = "missing".into();
+        assert!(append(start.clone())
+            .unwrap_err()
+            .contains("current matching header"));
+        start["data"]["headerRequestId"] = "request-1".into();
+        start["data"]["model"] = "different-model".into();
+        assert!(append(start.clone())
+            .unwrap_err()
+            .contains("current matching header"));
+        start["data"]["model"] = "fake".into();
+        start["data"]["series"]["requestIndex"] = 3.into();
+        assert!(append(start.clone())
+            .unwrap_err()
+            .contains("not contiguous"));
+        start["data"]["series"]["requestIndex"] = 1.into();
+        append(start).unwrap();
+    }
     fn target() -> AgentSessionTarget {
         AgentSessionTarget {
             kind: "local".into(),
