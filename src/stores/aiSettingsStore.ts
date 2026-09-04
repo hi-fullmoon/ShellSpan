@@ -89,7 +89,6 @@ interface AiPreferences {
   providers: AiProviderProfile[];
   defaultProviderId: string;
   contextLines: number;
-  agentEnabled: boolean;
 }
 
 interface AiSettingsState extends AiPreferences {
@@ -104,7 +103,6 @@ interface AiSettingsState extends AiPreferences {
   removeProvider: (id: string) => void;
   setDefaultProvider: (id: string) => void;
   setContextLines: (lines: number) => void;
-  setAgentEnabled: (enabled: boolean) => void;
   getProviderConfig: (id?: string) => AiProviderConfig;
 }
 
@@ -135,10 +133,9 @@ const defaults: AiPreferences = {
   providers: initialProviders,
   defaultProviderId: 'ollama',
   contextLines: 200,
-  agentEnabled: true,
 };
 
-const PREFERENCE_KEYS = ['providers', 'defaultProviderId', 'contextLines', 'agentEnabled'] as const;
+const PREFERENCE_KEYS = ['providers', 'defaultProviderId', 'contextLines'] as const;
 
 function storageKey(key: keyof AiPreferences): string {
   return `ai.${key}`;
@@ -215,9 +212,6 @@ export function parseAiPreferences(entries: [string, string][]): AiPreferences {
       providers: storedProviders,
       defaultProviderId,
       contextLines: typeof parsed.contextLines === 'number' ? parsed.contextLines : defaults.contextLines,
-      agentEnabled: typeof parsed.agentEnabled === 'boolean'
-        ? parsed.agentEnabled
-        : defaults.agentEnabled,
     };
   }
 
@@ -243,9 +237,6 @@ export function parseAiPreferences(entries: [string, string][]): AiPreferences {
     providers: [ollama, openai],
     defaultProviderId: parsed.providerKind === 'openAi' ? openai.id : ollama.id,
     contextLines: typeof parsed.contextLines === 'number' ? parsed.contextLines : defaults.contextLines,
-    agentEnabled: typeof parsed.agentEnabled === 'boolean'
-      ? parsed.agentEnabled
-      : defaults.agentEnabled,
   };
 }
 
@@ -370,7 +361,6 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         : state
     )),
     setContextLines: (contextLines) => set({ contextLines }),
-    setAgentEnabled: (agentEnabled) => set({ agentEnabled }),
     getProviderConfig: (id) => {
       const state = get();
       const provider = state.providers.find((item) => item.id === (id ?? state.defaultProviderId))
@@ -398,7 +388,6 @@ useAiSettingsStore.subscribe(
     providers: state.providers,
     defaultProviderId: state.defaultProviderId,
     contextLines: state.contextLines,
-    agentEnabled: state.agentEnabled,
   }),
   (preferences) => {
     if (useAiSettingsStore.getState().initialized) schedulePreferencesSave(preferences);

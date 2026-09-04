@@ -113,14 +113,23 @@ describe('aiSettingsStore', () => {
     expect(preferences.defaultProviderId).toBe('deepseek-primary');
   });
 
-  it('defaults installs on and preserves an explicit user opt-out', async () => {
-    expect(parseAiPreferences([]).agentEnabled).toBe(true);
-    expect(parseAiPreferences([preference('agentEnabled', false)]).agentEnabled).toBe(false);
+  it.each([false, true])('ignores the removed Agent enable preference (%s) in legacy and current settings', async (enabled) => {
+    const legacyEntries = [preference('agentEnabled', enabled)];
+    const currentEntries = [preference('providers', initialState.providers), ...legacyEntries];
+    expect(parseAiPreferences([])).not.toHaveProperty('agentEnabled');
+    expect(parseAiPreferences(legacyEntries)).toEqual(parseAiPreferences([]));
+    expect(parseAiPreferences(currentEntries))
+      .toEqual(parseAiPreferences([preference('providers', initialState.providers)]));
 
-    tauri.invokeLoadPreferences.mockResolvedValue([preference('agentEnabled', false)]);
+    tauri.invokeLoadPreferences.mockResolvedValue(currentEntries);
     await useAiSettingsStore.getState().hydrateFromDb();
 
-    expect(useAiSettingsStore.getState().agentEnabled).toBe(false);
+    expect(useAiSettingsStore.getState()).not.toHaveProperty('agentEnabled');
+    useAiSettingsStore.getState().setContextLines(500);
+    await flushAiSettingsPreferences();
+    const entries = tauri.invokeSavePreferences.mock.lastCall![0] as [string, string][];
+    expect(entries.map(([key]) => key))
+      .toEqual(['ai.providers', 'ai.defaultProviderId', 'ai.contextLines']);
   });
 
   it('adds a preset and exposes it as the selected request config', () => {
