@@ -4,6 +4,8 @@ import { useImageDraft } from '../workspace/use-image-draft';
 import type { ImageDraft } from '@/lib/ai/image-drafts';
 import { requireVision } from '@/lib/vision-contract';
 import { providerCapabilities } from '@/lib/provider-contract';
+import { initI18n } from '@/locales';
+import { useToastStore } from '@/stores/toastStore';
 
 const mock = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), prepare: vi.fn(), cancel: vi.fn() }));
 vi.mock('@/lib/ai/image-drafts', () => ({ readImageDraft: mock.read, writeImageDraft: mock.write }));
@@ -12,13 +14,68 @@ const image = { name: 'fixture.png', mediaType: 'image/png', data: 'aGVsbG8=' };
 const draft = (owner: string): ImageDraft => ({ owner, revision: 1, text: 'text', images: [image] });
 const deferred = <T,>() => { let resolve!: (v: T) => void; let reject!: (e: unknown) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 const file = { name: 'fixture.png', size: 5, type: 'image/png', arrayBuffer: async () => new TextEncoder().encode('hello').buffer } as File;
-beforeEach(() => {
+beforeEach(async () => {
+  await initI18n('en-US');
+  useToastStore.setState({ toasts: [] });
   vi.stubGlobal('indexedDB', {});
   mock.read.mockReset().mockImplementation(async owner => draft(owner));
   mock.write.mockReset().mockResolvedValue(undefined);
   mock.prepare.mockReset().mockResolvedValue([image]); mock.cancel.mockReset().mockResolvedValue(false);
 });
 afterEach(() => vi.unstubAllGlobals());
+
+describe('image draft count limit', () => {
+  it.each([0, 19])('accepts exactly 20 images when the draft already has %i', async count => {
+    mock.read.mockResolvedValue({ ...draft('A'), images: Array(count).fill(image) });
+    mock.prepare.mockImplementation(async uploads => uploads);
+    const hook = renderHook(() => useImageDraft('A', 'text', vi.fn()));
+    await waitFor(() => expect(hook.result.current.draft).not.toBeNull());
+
+    await act(async () => hook.result.current.add(Array(20 - count).fill(file)));
+
+    expect(hook.result.current.draft?.images).toHaveLength(20);
+    expect(mock.write).toHaveBeenLastCalledWith(expect.objectContaining({ images: Array(20).fill(image) }), 1);
+    expect(hook.result.current.error).toBeNull();
+    expect(useToastStore.getState().toasts).toEqual([]);
+  });
+
+  it.each([
+    [0, 'en-US', 'You can add up to 20 images'],
+    [19, 'en-US', 'You can add up to 20 images'],
+    [20, 'zh-CN', '最多添加 20 张图片'],
+  ] as const)('rejects a batch exceeding 20 with %i existing images and a %s toast', async (count, locale, message) => {
+    await initI18n(locale);
+    const previous = { ...draft('A'), images: Array(count).fill(image) };
+    mock.read.mockResolvedValue(previous);
+    const hook = renderHook(() => useImageDraft('A', 'text', vi.fn()));
+    await waitFor(() => expect(hook.result.current.draft).toBe(previous));
+
+    await act(async () => hook.result.current.add(Array(21 - count).fill(file)));
+
+    expect(mock.prepare).not.toHaveBeenCalled();
+    expect(mock.write).not.toHaveBeenCalled();
+    expect(hook.result.current.draft).toBe(previous);
+    expect(hook.result.current.busy).toBe(false);
+    expect(hook.result.current.error).toBeNull();
+    expect(useToastStore.getState().toasts).toEqual([expect.objectContaining({ variant: 'error', message })]);
+  });
+
+  it('can add another image after removing one from a full draft', async () => {
+    mock.read.mockResolvedValue({ ...draft('A'), images: Array(20).fill(image) });
+    const hook = renderHook(() => useImageDraft('A', 'text', vi.fn()));
+    await waitFor(() => expect(hook.result.current.draft?.images).toHaveLength(20));
+    await act(async () => hook.result.current.add([file]));
+    expect(mock.prepare).not.toHaveBeenCalled();
+
+    await act(async () => hook.result.current.remove(0));
+    await act(async () => hook.result.current.add([file]));
+
+    expect(hook.result.current.draft?.images).toHaveLength(20);
+    expect(mock.prepare).toHaveBeenCalledOnce();
+    expect(hook.result.current.error).toBeNull();
+    expect(useToastStore.getState().toasts).toHaveLength(1);
+  });
+});
 
 describe('image draft ownership and transaction boundaries', () => {
   it.each(['resolve', 'reject'] as const)('old remove %s cannot unlock or alter B, including A→B→A', async outcome => {

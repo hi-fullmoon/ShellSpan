@@ -40,17 +40,21 @@ describe('Agent Session settings', () => {
     mocks.list.mockResolvedValue({ sessions: [activeSession] });
     mocks.cancel.mockResolvedValue({ ...activeSession, ended: true });
     mocks.archive.mockResolvedValue({ ...activeSession, ended: true, archived: true });
-    useAiSettingsStore.setState({ ...initialSettings, agentEnabled: true }, true);
+    useAiSettingsStore.setState(initialSettings, true);
   });
 
-  it('cancels every live runtime session when Agent is disabled', async () => {
+  it('omits the Agent enable switch and permission notice while retaining session cleanup', () => {
     render(<AiSettingsSection />);
-    fireEvent.click(screen.getByRole('switch', { name: 'settings.ai.agent.enable' }));
 
-    await waitFor(() => expect(mocks.cancel).toHaveBeenCalledWith({
-      sessionId: 'agent-session-1',
-    }));
-    expect(useAiSettingsStore.getState().agentEnabled).toBe(false);
+    expect(screen.queryByRole('switch', { name: 'settings.ai.agent.enable' })).not.toBeInTheDocument();
+    expect(screen.queryByText('settings.ai.agent.enableDescription')).not.toBeInTheDocument();
+    expect(screen.queryByText('settings.ai.agent.permissionTitle')).not.toBeInTheDocument();
+    expect(screen.queryByText('settings.ai.agent.permissionDescription')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'settings.ai.agent.clearSessions' })).toBeEnabled();
+    expect(mocks.list).not.toHaveBeenCalled();
+    expect(mocks.cancel).not.toHaveBeenCalled();
+    expect(mocks.archive).not.toHaveBeenCalled();
   });
 
   it('cancels then archives sessions through the typed runtime commands', async () => {

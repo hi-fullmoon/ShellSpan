@@ -69,11 +69,41 @@ describe('Phase 6 Queue Dock', () => {
     await user.type(input, 'Updated task{Enter}');
     expect(update).toHaveBeenCalledWith(queue[0], 'Updated task');
 
-    await user.click(screen.getAllByRole('button', { name: 'Move down in this lane' })[0]);
+    await user.click(screen.getAllByRole('button', { name: 'Reorder queued input' })[0]);
+    await user.click(await screen.findByRole('menuitem', { name: 'Move down in this lane' }));
     expect(reorder).toHaveBeenCalledWith('nextTurn', ['item-b', 'item-a']);
 
     await user.click(screen.getAllByRole('button', { name: 'Remove queued input' })[1]);
     expect(remove).toHaveBeenCalledWith(queue[1]);
+  });
+
+  it('returns keyboard focus to the edit action on cancel and after a pending save settles', async () => {
+    const user = userEvent.setup();
+    const update = vi.fn();
+    const { rerender } = render(<AiQueueDock items={[queue[0]]} onUpdate={update} />);
+    await user.click(screen.getByRole('button', { name: 'Edit queued input' }));
+    await user.type(screen.getByRole('textbox'), ' discarded{Escape}');
+    expect(update).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Edit queued input' })).toHaveFocus();
+
+    await user.keyboard('{Enter}');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('button', { name: 'Edit queued input' })).toHaveFocus();
+
+    const save = (item: AiInboxItem, content: string): void => {
+      update(item, content);
+      rerender(<AiQueueDock items={[queue[0]]} onUpdate={save} mutation={{
+        intent: { type: 'update', itemId: item.id, content }, status: 'pending', error: null, conflict: false,
+      }} />);
+    };
+    rerender(<AiQueueDock items={[queue[0]]} onUpdate={save} />);
+    await user.keyboard('{Enter}');
+    await user.clear(screen.getByRole('textbox'));
+    await user.type(screen.getByRole('textbox'), 'Saved text{Enter}');
+    expect(screen.getByRole('button', { name: 'Edit queued input' })).toBeDisabled();
+    rerender(<AiQueueDock items={[{ ...queue[0], content: 'Saved text' }]} onUpdate={save} />);
+    expect(screen.getByRole('button', { name: 'Edit queued input' })).toHaveFocus();
+    expect(update).toHaveBeenCalledExactlyOnceWith(queue[0], 'Saved text');
   });
 
   it('shows pending and conflict retry without changing projected rows locally', async () => {
@@ -275,5 +305,55 @@ describe('Phase 6 Session Browser rename', () => {
     );
     expect(screen.getByText(/current revision 9/)).toBeVisible();
     expect(screen.getByRole('textbox', { name: 'Session title' })).toHaveValue('Retry title');
+  });
+});
+
+
+describe('Queue steering controls', () => {
+  it('steers a single row independently of ordering and explains the step boundary', async () => {
+    const user = userEvent.setup();
+    const steer = vi.fn();
+    const reorder = vi.fn();
+    const { rerender } = render(<AiQueueDock items={[queue[0]]} running onSteer={steer} onReorder={reorder} />);
+    const button = screen.getByRole('button', { name: 'Steer now' });
+    await user.hover(button);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Use this input at the next step of the current task. The model or tool call in progress will finish first.');
+    await user.click(button);
+    expect(steer).toHaveBeenCalledWith(queue[0]);
+    expect(reorder).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Reorder queued input' })).toBeNull();
+    rerender(<AiQueueDock items={[queue[0]]} running onSteer={steer} mutation={{ intent: { type: 'steer', itemId: queue[0].id }, status: 'pending', error: null, conflict: false }} />);
+    expect(screen.getByRole('button', { name: 'Steer now' })).toBeDisabled();
+    expect(screen.getByLabelText('Updating queued input')).toBeVisible();
+    expect(screen.getByText(queue[0].content)).toBeVisible();
+  });
+
+  it.each([
+    { item: queue[0], running: false, mutable: true },
+    { item: queue[0], running: true, mutable: false },
+    { item: { ...queue[0], lane: 'nextStep' as const }, running: true, mutable: true },
+    { item: { ...queue[0], state: 'pending' as const }, running: true, mutable: true },
+    { item: { ...queue[0], state: 'claimed' as const }, running: true, mutable: true },
+    { item: { ...queue[0], source: 'runtime' as const }, running: true, mutable: true },
+  ])('does not offer steer for an ineligible row: %j', ({ item, running, mutable }) => {
+    render(<AiQueueDock items={[item]} running={running} mutable={mutable} onSteer={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Steer now' })).toBeNull();
+  });
+
+  it('keeps a failed operation visible and retryable after the queue becomes empty', async () => {
+    const retry = vi.fn();
+    render(<AiQueueDock items={[]} onRetry={retry} mutation={{ intent: { type: 'steer', itemId: 'gone' }, status: 'failed', error: 'receipt unavailable', conflict: false }} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('receipt unavailable');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it('localizes the dedicated action and timing in Chinese', async () => {
+    useAppStore.setState({ locale: 'zh-CN' });
+    await initI18n('zh-CN');
+    const user = userEvent.setup();
+    render(<AiQueueDock items={[queue[0]]} running onSteer={vi.fn()} />);
+    await user.hover(screen.getByRole('button', { name: '立即介入' }));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('在当前任务的下一步骤生效；正在进行的模型或工具调用会先完成。');
   });
 });

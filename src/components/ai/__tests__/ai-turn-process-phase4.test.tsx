@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -120,6 +120,40 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toBeInTheDocument();
   });
 
+  it.each(['running', 'completed', 'failed', 'cancelled'] as const)(
+    'omits process-message actions during a %s turn while preserving the final answer copy',
+    async (status) => {
+      const user = userEvent.setup();
+      const commentary = "I'll check interfaces, routes, DNS, and outbound connectivity.";
+      const events = agentSessionBaselineScenarios['single-tool'].events.map((event) => (
+        event.type === 'assistant/message' && event.data.messageId === 'message-assistant-tools'
+          ? { ...event, data: { ...event.data, content: [
+            { type: 'text' as const, text: commentary }, ...event.data.content,
+          ] } }
+          : event
+      ));
+      const nodes = projectAgentChatNodes(events).map((node) => (
+        node.kind === 'turnProcess'
+          ? { ...node, sessionId: `process-actions-${status}`, status, hasEndBoundary: status !== 'running' }
+          : node
+      ));
+      const { container } = render(<AiConversationNodeList nodes={nodes} />);
+      const processTrigger = container.querySelector<HTMLButtonElement>('.ai-turn-process-trigger')!;
+      if (processTrigger.getAttribute('aria-expanded') === 'false') await user.click(processTrigger);
+
+      const processMessage = screen.getByText(commentary).closest<HTMLElement>('[role="article"]')!;
+      expect(processMessage).toBeVisible();
+      expect(within(processMessage).queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
+      expect(processMessage.querySelector('time')).not.toBeInTheDocument();
+      expect(processMessage.querySelector('.ai-message-actions')).not.toBeInTheDocument();
+      expect(within(screen.getByRole('article', { name: 'Your message' }))
+        .getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+
+      await user.click(within(screen.getByLabelText('Turn statistics')).getByRole('button', { name: 'Copy' }));
+      expect(await navigator.clipboard.readText()).toBe('nginx is active.');
+    },
+  );
+
   it('keeps streaming process state and focus across committed chunk revisions', async () => {
     const user = userEvent.setup();
     const events = agentSessionBaselineScenarios['streaming-reasoning'].events;
@@ -239,31 +273,101 @@ describe('AI Phase 4 Turn Process renderer', () => {
     if (!hasAnswer) expect(await screen.findByText(answer)).toBeVisible();
   });
 
-  it('renders every traceable Turn stat and hides every unavailable token group', () => {
-    const complete = projectAgentChatNodes(agentSessionBaselineScenarios.hello.events);
-    const { rerender } = render(<AiConversationNodeList nodes={complete} />);
-    const stats = screen.getByLabelText('Turn statistics');
+  it.each([
+    ['Usage 144 tok', 'Turn usage'],
+    ['Time 1.1s', 'Turn timing and speed'],
+  ])('opens %s details only on click, not hover', async (label, title) => {
+    const user = userEvent.setup();
+    const tail = projectAgentChatNodes(agentSessionBaselineScenarios.hello.events)
+      .find((node): node is AiConversationNodeOf<'turnTail'> => node.kind === 'turnTail')!;
+    render(<AiConversationNodeList nodes={[tail]} />);
+    const trigger = screen.getByRole('button', { name: label });
 
-    expect(within(stats).getByText('1 turns')).toBeVisible();
-    expect(within(stats).getByText('1 steps')).toBeVisible();
-    expect(stats.querySelector('[data-stat="model"]')).toHaveTextContent('LLM 0.5s');
-    expect(stats.querySelector('[data-stat="ttft"]')).toHaveTextContent('First token avg 0.2s');
-    expect(stats.querySelector('[data-stat="rate"]')).toHaveTextContent('80 tok/s');
-    expect(stats.querySelector('[data-stat="cacheRead"]')).toHaveTextContent('Cache read 64');
-    expect(stats.querySelector('[data-stat="cacheWrite"]')).toHaveTextContent('Cache write 8');
-    expect(stats.querySelector('[data-stat="cacheHit"]')).toHaveTextContent('Cache hit 50%');
-    expect(stats.querySelector('[data-stat="inputTokens"]')).toHaveTextContent('Input 128');
-    expect(stats.querySelector('[data-stat="outputTokens"]')).toHaveTextContent('Output 24');
-    expect(stats.querySelector('[data-stat="reasoningTokens"]')).toHaveTextContent('Reasoning 10');
+    await user.hover(trigger);
+    // Wait beyond the previous hover delay to catch deferred opening.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(trigger);
+    expect(await screen.findByRole('dialog', { name: title })).toBeVisible();
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    await user.click(document.body);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('formats the reference usage and duration and toggles details on click', async () => {
+    const user = userEvent.setup();
+    const tail = projectAgentChatNodes(agentSessionBaselineScenarios.hello.events)
+      .find((node): node is AiConversationNodeOf<'turnTail'> => node.kind === 'turnTail')!;
+    render(<AiConversationNodeList nodes={[{
+      ...tail,
+      durationMs: 139_000,
+      models: [{ providerId: 'minimax-cn', model: 'MiniMax-M3' }],
+      stats: {
+        ...tail.stats,
+        uncachedInputTokens: 7_007,
+        cacheReadTokens: 556_713,
+        cacheWriteTokens: 0,
+        outputTokens: 3_033,
+        reasoningTokens: 0,
+        totalTokens: 566_753,
+        averageTimeToFirstTokenMs: 8_600,
+        tokensPerSecond: 32,
+      },
+    }]} />);
+    expect(screen.getByRole('button', { name: 'Time 2m 19s' })).toBeVisible();
+    const usageTrigger = screen.getByRole('button', { name: 'Usage 567K tok' });
+    await user.click(usageTrigger);
+    const usage = await screen.findByRole('dialog', { name: 'Turn usage' });
+    expect(within(usage).getByText('566,753 tok')).toBeVisible();
+    expect(usage.querySelector('[data-stat="cacheHit"]')).toHaveTextContent('98.8%');
+    expect(usage.querySelector('[data-stat="cacheRead"]')).toHaveTextContent('556,713 tok');
+    expect(usage.querySelector('[data-stat="cacheWrite"]')).not.toBeInTheDocument();
+    await user.click(usageTrigger);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('keeps the footer compact and reveals only recorded metrics in accessible popovers', async () => {
+    const user = userEvent.setup();
+    const complete = projectAgentChatNodes(agentSessionBaselineScenarios.hello.events);
+    const { rerender, container } = render(<AiConversationNodeList nodes={complete} />);
+    const footer = screen.getByLabelText('Turn statistics');
+    expect(within(footer).getAllByRole('button')).toHaveLength(3);
+    expect(container.querySelector('.ai-assistant-actions')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    await user.click(within(footer).getByRole('button', { name: 'Copy' }));
+    expect(await navigator.clipboard.readText()).toBe('Hello! How can I help?');
+    await user.click(within(footer).getByRole('button', { name: 'Usage 144 tok' }));
+    const usage = await screen.findByRole('dialog', { name: 'Turn usage' });
+    expect(usage.querySelector('[data-stat="cacheRead"]')).toHaveTextContent('64 tok');
+    expect(usage.querySelector('[data-stat="cacheWrite"]')).toHaveTextContent('8 tok');
+    expect(usage.querySelector('[data-stat="cacheHit"]')).toHaveTextContent('50.0%');
+    expect(usage.querySelector('[data-stat="uncachedInput"]')).toHaveTextContent('56 tok');
+    expect(usage.querySelector('[data-stat="outputTokens"]')).toHaveTextContent('24 tok');
+    expect(usage.querySelector('[data-stat="reasoningTokens"]')).toHaveTextContent('10 tok');
+    expect(usage.querySelector('[data-stat="models"]')).toHaveTextContent('deepseek/deepseek-reasoner');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    const timeTrigger = within(footer).getByRole('button', { name: 'Time 1.1s' });
+    timeTrigger.focus();
+    await user.keyboard('{Enter}');
+    const timing = await screen.findByRole('dialog', { name: 'Turn timing and speed' });
+    expect(timing.querySelector('[data-stat="duration"]')).toHaveTextContent('1.1s');
+    expect(timing.querySelector('[data-stat="model"]')).toHaveTextContent('0.5s');
+    expect(timing.querySelector('[data-stat="ttft"]')).toHaveTextContent('0.2s');
+    expect(timing.querySelector('[data-stat="rate"]')).toHaveTextContent('80 tok/s');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 
     rerender(<AiConversationNodeList nodes={projectAgentChatNodes(
       agentSessionBaselineScenarios['missing-usage'].events,
     )} />);
-    const missing = screen.getByLabelText('Turn statistics');
-    for (const key of [
-      'rate', 'cacheRead', 'cacheWrite', 'cacheHit', 'inputTokens', 'outputTokens', 'reasoningTokens',
-    ]) {
-      expect(missing.querySelector(`[data-stat="${key}"]`)).not.toBeInTheDocument();
-    }
+    expect(screen.queryByRole('button', { name: /^Usage/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Time / }));
+    const missing = await screen.findByRole('dialog', { name: 'Turn timing and speed' });
+    expect(missing.querySelector('[data-stat="rate"]')).not.toBeInTheDocument();
   });
 });

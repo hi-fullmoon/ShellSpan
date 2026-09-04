@@ -52,7 +52,7 @@ describe('MessageScroller', () => {
     });
   });
 
-  it('follows at the live edge, detaches on user scroll, and jumps back to latest', async () => {
+  it.each(['wheel', 'scrollbar'])('follows at the live edge, detaches on %s input, and jumps back to latest', async (input) => {
     let itemCount = 3;
     const thread = () => (
       <MessageScroller followKey={String(itemCount)} ariaLabel="Conversation">
@@ -126,7 +126,16 @@ describe('MessageScroller', () => {
     installItemRects();
     scrollTo.mockClear();
     scrollTop = 100;
-    fireEvent.wheel(viewport, { deltaY: -100 });
+    if (input === 'scrollbar') {
+      // jsdom has no overflow layout, so Base UI does not mount its scrollbar.
+      const scrollbar = document.createElement('div');
+      scrollbar.dataset.slot = 'scroll-area-scrollbar';
+      container.querySelector('[data-slot="scroll-area"]')!.appendChild(scrollbar);
+      fireEvent.pointerDown(scrollbar);
+      scrollbar.remove();
+    } else {
+      fireEvent.wheel(viewport, { deltaY: -100 });
+    }
     fireEvent.scroll(viewport);
     const jump = container.querySelector<HTMLButtonElement>('[data-slot="message-scroller-button"]');
     await waitFor(() => expect(jump).toHaveAttribute('data-active', 'true'));
@@ -167,7 +176,7 @@ describe('MessageScroller', () => {
     });
     const installRects = (): void => {
       container.querySelectorAll<HTMLElement>('[data-ai-node-key]').forEach((row) => {
-        Object.defineProperty(row, 'getBoundingClientRect', {
+        Object.defineProperty(row.parentElement!, 'getBoundingClientRect', {
           configurable: true,
           value: () => {
             const index = keys.indexOf(row.dataset.aiNodeKey ?? '');
@@ -195,5 +204,55 @@ describe('MessageScroller', () => {
     installRects();
     rerender(thread());
     await waitFor(() => expect(scrollTop).toBe(200));
+  });
+
+  it('saves the visible row without forcing layout inside offscreen messages', () => {
+    const saved = vi.fn();
+    const { container } = render(
+      <MessageScroller followKey="long-thread" onAnchorChange={saved}>
+        {Array.from({ length: 256 }, (_, index) => (
+          <div key={index} data-ai-node-key={`node-${index}`}>Message {index}</div>
+        ))}
+      </MessageScroller>,
+    );
+    const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
+    const rect = (top: number) => ({ top, bottom: top + 100, height: 100, left: 0, right: 320, width: 320, x: 0, y: top, toJSON: () => ({}) });
+    Object.defineProperties(viewport, {
+      scrollTop: { configurable: true, value: 25_050, writable: true },
+      scrollHeight: { configurable: true, value: 25_600 },
+      clientHeight: { configurable: true, value: 100 },
+      getBoundingClientRect: { configurable: true, value: () => rect(0) },
+    });
+    const measureMessage = vi.fn(() => rect(0));
+    container.querySelectorAll<HTMLElement>('[data-ai-node-key]').forEach((node, index) => {
+      node.getBoundingClientRect = measureMessage;
+      node.parentElement!.getBoundingClientRect = () => rect(index * 100 - viewport.scrollTop);
+    });
+
+    fireEvent.scroll(viewport);
+
+    expect(saved).toHaveBeenLastCalledWith({ nodeKey: 'node-250', offset: -50, scrollTop: 25_050 });
+    expect(measureMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not replay saved scroll positions when the parent updates during reading', async () => {
+    const children = <div data-ai-node-key="node-1">A long response</div>;
+    const { container, rerender } = render(<MessageScroller followKey="1">{children}</MessageScroller>);
+    const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
+    const scrollTo = vi.fn();
+    Object.defineProperties(viewport, {
+      scrollTop: { configurable: true, value: 120, writable: true },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+
+    rerender(
+      <MessageScroller followKey="2" initialAnchor={{ nodeKey: 'node-1', offset: -20, scrollTop: 120 }}>
+        {children}
+      </MessageScroller>,
+    );
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    expect(viewport.scrollTop).toBe(120);
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 });

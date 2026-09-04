@@ -67,7 +67,7 @@ describe('AiConversationNodeList', () => {
     expect(screen.getByText('Check nginx now.')).toBeVisible();
     expect(document.querySelector('[data-ai-node-key="turn-process:turn-1"]'))
       .toHaveAttribute('data-ai-node-kind', 'turnProcess');
-    expect(document.querySelector('[data-ai-node-key="tool:call-health"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-ai-node-key="tool:turn-1:step-1:call-health"]')).not.toBeInTheDocument();
     const process = screen.getByRole('button', { name: 'Thought' });
     expect(process).toHaveAttribute('aria-expanded', 'false');
     await waitFor(() => {
@@ -370,14 +370,16 @@ describe('AiConversationNodeList', () => {
     expect(getComputedStyle(card).overflow).toBe('hidden');
     expect(getComputedStyle(payload).overflowWrap).toBe('anywhere');
 
-    const statsRow = screen.getByLabelText('Turn statistics');
-    expect(statsRow.querySelectorAll('[data-stat]')).toHaveLength(3);
-    expect(statsRow.querySelector('[data-stat="turn"]')).toHaveTextContent('1 turns');
-    expect(statsRow.querySelector('[data-stat="steps"]')).toHaveTextContent('2 steps');
-    expect(statsRow.querySelector('[data-stat="tools"]')).toHaveTextContent('Tools 0.2s');
+    const footer = screen.getByLabelText('Turn statistics');
+    expect(within(footer).queryByRole('button', { name: /^Usage/ })).not.toBeInTheDocument();
+    await user.click(within(footer).getByRole('button', { name: /^Time / }));
+    const details = await screen.findByRole('dialog', { name: 'Turn timing and speed' });
+    expect(details.querySelector('[data-stat="steps"]')).toHaveTextContent('2');
+    expect(details.querySelector('[data-stat="tools"]')).toHaveTextContent('0.2s');
     for (const missing of ['model', 'ttft', 'rate', 'tokens']) {
-      expect(statsRow.querySelector(`[data-stat="${missing}"]`)).not.toBeInTheDocument();
+      expect(details.querySelector(`[data-stat="${missing}"]`)).not.toBeInTheDocument();
     }
+    const statsRow = footer.querySelector('.ai-turn-stats') as HTMLElement;
     expect(getComputedStyle(statsRow).display).toBe('flex');
     expect(getComputedStyle(statsRow).flexWrap).toBe('wrap');
     expect(getComputedStyle(statsRow).overflow).toBe('visible');

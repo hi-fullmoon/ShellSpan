@@ -48,11 +48,11 @@ function adapter(changes: Partial<AiSessionControllerAdapter> = {}): AiSessionCo
   };
 }
 
-function connectedTerminal(): void {
+function connectedTerminal(sessionId = 'terminal-1'): void {
   useTerminalStore.setState({
-    activeSessionId: 'terminal-1',
+    activeSessionId: sessionId,
     sessions: [{
-      sessionId: 'terminal-1',
+      sessionId,
       title: 'Remote',
       host: 'example.test',
       port: 22,
@@ -62,20 +62,20 @@ function connectedTerminal(): void {
   });
 }
 
-function runningAgentView(): AiSessionView {
+function runningAgentView(sessionId = 'agent-session-1', terminalId = 'terminal-1'): AiSessionView {
   return {
     summary: {
-      id: 'agent-session-1', kind: 'agent', title: 'Run checks',
+      id: sessionId, kind: 'agent', title: 'Run checks',
       updatedAt: '2026-09-03T00:00:00.000Z', status: 'running',
-      scopeKey: 'terminal-terminal-1', archived: false,
+      scopeKey: `terminal-${terminalId}`, archived: false,
     },
     snapshot: {
       kind: 'agent',
       value: {
         header: {
-          sessionId: 'agent-session-1', taskId: 'task-1', goal: 'Run checks',
+          sessionId, taskId: 'task-1', goal: 'Run checks',
           createdAtUnixMs: 1,
-          target: { kind: 'remote', targetId: 'terminal-terminal-1', sessionId: 'terminal-1' },
+          target: { kind: 'remote', targetId: `terminal-${terminalId}`, sessionId: terminalId },
         },
         status: 'running', ended: false, archived: false, eventCount: 0,
         surface: { generation: 0, messages: [] },
@@ -103,7 +103,6 @@ beforeEach(async () => {
   useAiSettingsStore.setState({
     providers: [provider],
     defaultProviderId: provider.id,
-    agentEnabled: true,
   });
   useTerminalStore.setState({ sessions: [], activeSessionId: null });
 });
@@ -111,6 +110,240 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiWorkspaceController', () => {
+  it.each(['terminal', 'roundTrip', 'newSession', 'otherSession'] as const)(
+    'keeps the current conversation when an old submission returns after %s navigation', async (destination) => {
+      connectedTerminal();
+      const first = runningAgentView();
+      const second = runningAgentView('agent-session-2', 'terminal-2');
+      let release!: (receipt: AiSubmitReceipt) => void;
+      const agent = adapter({
+        list: vi.fn(async (input) => ({
+          sessions: [input.scopeKey === second.summary.scopeKey ? second.summary : first.summary],
+        })),
+        open: vi.fn(async (id) => id === second.summary.id ? second : first),
+        submit: vi.fn(() => new Promise<AiSubmitReceipt>((resolve) => { release = resolve; })),
+      });
+      const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+      await waitFor(() => expect(result.current.view?.summary.id).toBe(first.summary.id));
+      act(() => { result.current.setDraft('inspect server A'); result.current.submit('primary'); });
+      await waitFor(() => expect(agent.submit).toHaveBeenCalledOnce());
+      if (destination === 'newSession') {
+        act(() => result.current.newSession());
+      } else if (destination === 'otherSession') {
+        act(() => result.current.openSession(second.summary));
+        await waitFor(() => expect(result.current.view?.summary.id).toBe(second.summary.id));
+      } else {
+        act(() => connectedTerminal('terminal-2'));
+        await waitFor(() => expect(result.current.view?.summary.id).toBe(second.summary.id));
+        if (destination === 'roundTrip') {
+          act(() => connectedTerminal());
+          await waitFor(() => expect(result.current.view?.summary.id).toBe(first.summary.id));
+        }
+      }
+      const expectedSession = result.current.composer.sessionId;
+      act(() => result.current.setDraft('draft for the current conversation'));
+      const input = vi.mocked(agent.submit).mock.calls[0][1];
+      await act(async () => release({
+        sessionId: first.summary.id, mode: input.mode, clientOperationId: input.clientOperationId,
+      }));
+      expect(result.current.composer.sessionId).toBe(expectedSession);
+      expect(result.current.view?.summary.id ?? null).toBe(expectedSession);
+      expect(result.current.navigation.route).toEqual({ kind: 'conversation', sessionId: expectedSession });
+      expect(result.current.composer.draft).toBe('draft for the current conversation');
+      expect(result.current.composer.pendingSubmissions).toEqual([]);
+      expect(result.current.pendingNodes).toEqual([]);
+      if (expectedSession) {
+        act(() => result.current.submit('primary'));
+        expect(agent.submit).toHaveBeenLastCalledWith(expectedSession, expect.objectContaining({
+          content: 'draft for the current conversation',
+        }));
+      }
+    },
+  );
+
+  it.each(['accepted', 'failed'] as const)(
+    'isolates a cold submission that is %s after opening a new conversation', async (outcome) => {
+      connectedTerminal();
+      let release!: (receipt: AiSubmitReceipt) => void;
+      let reject!: (error: Error) => void;
+      const agent = adapter({
+        submit: vi.fn(() => new Promise<AiSubmitReceipt>((resolve, fail) => { release = resolve; reject = fail; })),
+      });
+      const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+      await waitFor(() => expect(agent.list).toHaveBeenCalledOnce());
+      act(() => { result.current.setDraft('old input'); result.current.submit('primary'); });
+      await waitFor(() => expect(agent.submit).toHaveBeenCalledOnce());
+      act(() => result.current.newSession());
+      expect(result.current.composer.phase).toBe('idle');
+      expect(result.current.composer.detached).toBeNull();
+      expect(result.current.pendingNodes).toEqual([]);
+      act(() => result.current.setDraft('new draft'));
+      const input = vi.mocked(agent.submit).mock.calls[0][1];
+      await act(async () => {
+        if (outcome === 'failed') reject(new Error('old request failed'));
+        else release({ sessionId: 'late-session', mode: input.mode, clientOperationId: input.clientOperationId });
+      });
+      expect(result.current.view).toBeNull();
+      expect(result.current.composer).toMatchObject({
+        sessionId: null, phase: 'idle', draft: 'new draft', lastError: null, pendingSubmissions: [],
+      });
+      expect(agent.open).not.toHaveBeenCalled();
+    },
+  );
+
+  it('saves and restores independent new-conversation drafts for each terminal', async () => {
+    connectedTerminal();
+    const agent = adapter();
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    await waitFor(() => expect(agent.list).toHaveBeenCalledOnce());
+    act(() => result.current.setDraft('server A draft'));
+    act(() => connectedTerminal('terminal-2'));
+    expect(result.current.composer.draft).toBe('');
+    act(() => result.current.setDraft('server B draft'));
+    act(() => connectedTerminal());
+    expect(result.current.composer.draft).toBe('server A draft');
+    act(() => connectedTerminal('terminal-2'));
+    expect(result.current.composer.draft).toBe('server B draft');
+  });
+
+  it('does not reopen an explicitly selected session in a terminal with no history', async () => {
+    connectedTerminal();
+    const first = runningAgentView();
+    const agent = adapter({
+      open: vi.fn(async () => first),
+      subscribe: vi.fn((_id, listener) => { listener(first); return () => undefined; }),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    await waitFor(() => expect(agent.list).toHaveBeenCalledOnce());
+    act(() => result.current.openSession(first.summary));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(first.summary.id));
+    act(() => result.current.setDraft('session A draft'));
+    act(() => connectedTerminal('terminal-2'));
+    await waitFor(() => expect(agent.list).toHaveBeenLastCalledWith(expect.objectContaining({ scopeKey: 'terminal-terminal-2' })));
+    expect(agent.open).toHaveBeenCalledOnce();
+    expect(result.current.view).toBeNull();
+    expect(result.current.composer).toMatchObject({ sessionId: null, draft: '', phase: 'idle' });
+  });
+
+  it('renews the subscription when history selects the current session again', async () => {
+    connectedTerminal();
+    const view = runningAgentView();
+    const listeners: ((value: AiSessionView) => void)[] = [];
+    const agent = adapter({
+      open: vi.fn(async () => view),
+      subscribe: vi.fn((_id, listener) => { listeners.push(listener); return () => undefined; }),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    await waitFor(() => expect(agent.list).toHaveBeenCalledOnce());
+    act(() => result.current.openSession(view.summary));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
+    act(() => result.current.setDraft('keep this draft'));
+    act(() => result.current.openSession(view.summary));
+    await waitFor(() => expect(agent.subscribe).toHaveBeenCalledTimes(2));
+    expect(result.current.composer.draft).toBe('keep this draft');
+    act(() => listeners[0]({ ...view, throughSeq: 999 }));
+    expect(result.current.view?.throughSeq).toBe(10);
+    act(() => listeners[1]({ ...view, throughSeq: 20 }));
+    expect(result.current.view?.throughSeq).toBe(20);
+  });
+
+  it('keeps Workbench and terminal drafts separate', async () => {
+    connectedTerminal();
+    const agent = adapter();
+    const { result, rerender } = renderHook(({ scope }: { scope: 'terminal' | 'workbench' }) => (
+      useAiSessionController({ scope, adapter: agent })
+    ), { initialProps: { scope: 'terminal' } });
+    await waitFor(() => expect(agent.list).toHaveBeenCalledOnce());
+    act(() => result.current.setDraft('terminal draft'));
+    rerender({ scope: 'workbench' });
+    expect(result.current.composer.draft).toBe('');
+    rerender({ scope: 'terminal' });
+    expect(result.current.composer.draft).toBe('terminal draft');
+  });
+
+  it('moves a saved new-conversation draft into its created session without losing newer typing', async () => {
+    connectedTerminal();
+    const view = runningAgentView();
+    let release!: (receipt: AiSubmitReceipt) => void;
+    const agent = adapter({
+      open: vi.fn(async () => view),
+      submit: vi.fn(() => new Promise<AiSubmitReceipt>((resolve) => { release = resolve; })),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    await waitFor(() => expect(agent.list).toHaveBeenCalledOnce());
+    act(() => result.current.setDraft('saved prompt'));
+    act(() => connectedTerminal('terminal-2'));
+    act(() => connectedTerminal());
+    expect(result.current.composer.draft).toBe('saved prompt');
+    act(() => result.current.submit('primary'));
+    await waitFor(() => expect(agent.submit).toHaveBeenCalledOnce());
+    act(() => result.current.setDraft('newer unsent text'));
+    const input = vi.mocked(agent.submit).mock.calls[0][1];
+    await act(async () => release({
+      sessionId: view.summary.id, mode: input.mode, clientOperationId: input.clientOperationId,
+    }));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
+    expect(result.current.composer.draft).toBe('newer unsent text');
+    act(() => result.current.newSession());
+    expect(result.current.composer.draft).toBe('');
+    act(() => result.current.openSession(view.summary));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
+    expect(result.current.composer.draft).toBe('newer unsent text');
+  });
+
+  it('restores saved session drafts when terminal history opens automatically', async () => {
+    connectedTerminal();
+    const first = runningAgentView();
+    const second = runningAgentView('agent-session-2', 'terminal-2');
+    const agent = adapter({
+      list: vi.fn(async (input) => ({ sessions: [input.scopeKey === second.summary.scopeKey ? second.summary : first.summary] })),
+      open: vi.fn(async (id) => id === second.summary.id ? second : first),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(first.summary.id));
+    act(() => result.current.setDraft('session A draft'));
+    act(() => connectedTerminal('terminal-2'));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(second.summary.id));
+    expect(result.current.composer.draft).toBe('');
+    act(() => result.current.setDraft('session B draft'));
+    act(() => connectedTerminal());
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(first.summary.id));
+    expect(result.current.composer.draft).toBe('session A draft');
+    act(() => connectedTerminal('terminal-2'));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(second.summary.id));
+    expect(result.current.composer.draft).toBe('session B draft');
+  });
+
+  it('remembers reading positions for navigation without rerendering on scroll', async () => {
+    connectedTerminal();
+    const view = runningAgentView();
+    const agent = adapter({
+      list: vi.fn(async () => ({ sessions: [view.summary] })),
+      open: vi.fn(async () => view),
+      subscribe: vi.fn((_id, listener) => { listener(view); return () => {}; }),
+    });
+    const renders = vi.fn();
+    const { result } = renderHook(() => {
+      renders();
+      return useAiSessionController({ scope: 'terminal', adapter: agent });
+    });
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
+    const count = renders.mock.calls.length;
+    const anchor = { nodeKey: 'node-250', offset: -50, scrollTop: 25_050 };
+    act(() => {
+      for (let index = 0; index < 60; index += 1) {
+        result.current.saveScrollAnchor({ ...anchor, scrollTop: index * 100 });
+      }
+      result.current.saveScrollAnchor(anchor);
+    });
+    expect(renders).toHaveBeenCalledTimes(count);
+
+    act(() => result.current.openSessions());
+    await waitFor(() => expect(result.current.navigation.route.kind).toBe('sessions'));
+    act(() => result.current.back());
+    expect(result.current.navigation.scrollAnchorBySession[`agent:${view.summary.id}`]).toEqual(anchor);
+  });
+
   it('shows an explicit disabled Agent state in Workbench without submitting a fallback', async () => {
     const agent = adapter();
     render(<AiWorkspaceController scope="workbench" adapter={agent} />);
@@ -410,15 +643,21 @@ describe('Stage 6B cold Session Skills consumer', () => {
     expect(result.current.composer.sessionId).toBeNull();
   });
 
-  it('freezes a cold Session, lists before model start, and submits the selected slash through the same Inbox route', async () => {
+  it('previews builtins without creating a Session and sends the selected slash without a root', async () => {
     connectedTerminal();
     const cold = { ...runningAgentView(), status: 'idle' as const, summary: { ...runningAgentView().summary, status: 'idle' as const } };
-    const agent = adapter({ create: vi.fn(async () => cold), listSkills: vi.fn(async () => ({ sessionId: cold.summary.id, status: 'fresh' as const, revision: 'r', diagnostics: [], entries: [{ name: 'inspect', description: 'Inspect the target', modelInvocable: false, userInvocable: true, relativePath: '.agents/skills/inspect.md', resourceBase: '.agents/skills', fileHash: 'a', instructionHash: 'b', extensions: {} }] })), submit: vi.fn(async (sessionId, input) => ({ sessionId: sessionId!, mode: input.mode, clientOperationId: input.clientOperationId })) });
-    const user=userEvent.setup();render(<AiWorkspaceController scope="terminal" adapter={agent}/>);
-    await user.click(screen.getByRole('button',{name:'Skills'}));expect(agent.create).not.toHaveBeenCalled();await user.type(screen.getByRole('textbox',{name:'Project directory'}),'/project');await user.click(screen.getByRole('button',{name:'Load skills'}));await waitFor(()=>expect(agent.create).toHaveBeenCalled());await waitFor(()=>expect(agent.listSkills).toHaveBeenCalled());await screen.findByText('User only');expect(agent.create).toHaveBeenCalledWith(expect.objectContaining({request:expect.objectContaining({target:expect.objectContaining({kind:'remote',rootPath:'/project'})})}));expect(agent.create).toHaveBeenCalledTimes(1);expect(agent.submit).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('menuitem',{name:/inspect/}));expect(screen.getByRole('textbox')).toHaveValue('/inspect ');
-    await user.click(screen.getByRole('textbox'));await user.keyboard('{Enter}');await waitFor(()=>expect(agent.submit).toHaveBeenCalledWith(cold.summary.id,expect.objectContaining({content:'/inspect ',mode:'start'})));
-    expect(agent.create).toHaveBeenCalledTimes(1);
+    const agent = adapter({ create: vi.fn(async () => cold), listSkills: vi.fn(), submit: vi.fn(async (sessionId, input) => ({ sessionId: sessionId!, mode: input.mode, clientOperationId: input.clientOperationId })) });
+    const user = userEvent.setup(); render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+    await user.type(screen.getByRole('textbox'), '/sys');
+    await user.click(await screen.findByRole('option', { name: /system-status/ }));
+    expect(agent.create).not.toHaveBeenCalled(); expect(agent.listSkills).not.toHaveBeenCalled(); expect(agent.submit).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox')).toHaveValue('/system-status ');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({ content: '/system-status ', mode: 'start' })));
+    expect(agent.create).not.toHaveBeenCalled();
+    const request = vi.mocked(agent.submit).mock.calls[0][1].create;
+    expect(request?.kind === 'agent' && request.request.target?.rootPath).toBeUndefined();
   });
 });
 
@@ -472,4 +711,85 @@ it('drops a delayed file result after navigation A to B to A without clearing th
   await act(async()=>{await result.current.listFileReferences('new',new AbortController().signal,'/new-A');});
   await act(async()=>resolveOld(paths));
   expect(await old).toContain('AbortError');expect(result.current.projectTargetLabel).toContain('/new-A');
+});
+
+
+function steerableView(): AiSessionView {
+  return { ...runningAgentView(), revision: 7, inbox: [{ id: 'queued', clientSubmissionId: 'original-submission', lane: 'nextTurn', content: 'queued text', state: 'queued', source: 'user' }] };
+}
+
+describe('Queue mutation controller', () => {
+  it('guards same-render double clicks, keeps the projected row, and waits for the committed adapter', async () => {
+    connectedTerminal();
+    const view = steerableView();
+    let finish: (() => void) | undefined;
+    const mutateInbox = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const agent = adapter({ list: vi.fn(async () => ({ sessions: [view.summary] })), open: vi.fn(async () => view), mutateInbox });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent, operationId: () => 'steer-operation' }));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
+    act(() => { result.current.steerQueueItem(view.inbox[0]); result.current.steerQueueItem(view.inbox[0]); });
+    expect(mutateInbox).toHaveBeenCalledOnce();
+    expect(mutateInbox).toHaveBeenCalledWith({ sessionId: view.summary.id, type: 'steer', itemId: 'queued', expectedRevision: 7, clientOperationId: 'steer-operation' });
+    expect(result.current.queueMutation?.status).toBe('pending');
+    expect(result.current.view?.inbox).toEqual(view.inbox);
+    await act(async () => finish?.());
+    expect(result.current.queueMutation).toBeNull();
+    expect(agent.submit).not.toHaveBeenCalled();
+  });
+
+  it('refreshes conflicts and retries with the same operation identity and latest revision', async () => {
+    connectedTerminal();
+    const view = steerableView();
+    const refreshed = { ...view, revision: 9 };
+    const mutateInbox = vi.fn().mockRejectedValueOnce(new Error('Agent Runtime revision conflict: expected revision 7, current revision 9')).mockResolvedValueOnce(undefined);
+    const operationId = vi.fn(() => 'steer-retry');
+    const agent = adapter({ list: vi.fn(async () => ({ sessions: [view.summary] })), open: vi.fn(async () => view), refresh: vi.fn(async () => refreshed), mutateInbox });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent, operationId }));
+    await waitFor(() => expect(result.current.view?.revision).toBe(7));
+    act(() => result.current.steerQueueItem(view.inbox[0]));
+    await waitFor(() => expect(result.current.queueMutation?.status).toBe('failed'));
+    expect(result.current.queueMutation?.conflict).toBe(true);
+    expect(agent.refresh).toHaveBeenCalledWith(view.summary.id);
+    act(() => result.current.retryQueueMutation());
+    await waitFor(() => expect(result.current.queueMutation).toBeNull());
+    expect(mutateInbox).toHaveBeenLastCalledWith({ sessionId: view.summary.id, type: 'steer', itemId: 'queued', expectedRevision: 9, clientOperationId: 'steer-retry' });
+    expect(operationId).toHaveBeenCalledOnce();
+  });
+
+  it('retries an ambiguous failure with the same identity after consumption, and ignores navigation-stale failures', async () => {
+    connectedTerminal();
+    const view = steerableView();
+    let publish: ((next: AiSessionView) => void) | undefined;
+    const mutateInbox = vi.fn().mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce(undefined);
+    const agent = adapter({ list: vi.fn(async () => ({ sessions: [view.summary] })), open: vi.fn(async () => view), subscribe: vi.fn((_id, callback) => { publish = callback; return () => undefined; }), mutateInbox });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent, operationId: () => 'same' }));
+    await waitFor(() => expect(result.current.view?.revision).toBe(7));
+    act(() => result.current.steerQueueItem(view.inbox[0]));
+    await waitFor(() => expect(result.current.queueMutation?.status).toBe('failed'));
+    act(() => publish?.({ ...view, revision: 12, inbox: [], status: 'idle' }));
+    act(() => result.current.retryQueueMutation());
+    await waitFor(() => expect(result.current.queueMutation).toBeNull());
+    expect(mutateInbox).toHaveBeenLastCalledWith(expect.objectContaining({ clientOperationId: 'same', expectedRevision: 12 }));
+    let reject: ((error: Error) => void) | undefined;
+    mutateInbox.mockImplementationOnce(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
+    act(() => publish?.(view));
+    act(() => result.current.steerQueueItem(view.inbox[0]));
+    act(() => result.current.newSession());
+    await act(async () => reject?.(new Error('old session failure')));
+    expect(result.current.view).toBeNull();
+    expect(result.current.queueMutation).toBeNull();
+  });
+
+  it('wires the production root/composer queue action to mutateInbox and removes a claimed row', async () => {
+    connectedTerminal();
+    const view = steerableView();
+    let publish: ((next: AiSessionView) => void) | undefined;
+    const agent = adapter({ list: vi.fn(async () => ({ sessions: [view.summary] })), open: vi.fn(async () => view), subscribe: vi.fn((_id, callback) => { publish = callback; return () => undefined; }) });
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Steer now' }));
+    await waitFor(() => expect(agent.mutateInbox).toHaveBeenCalledWith(expect.objectContaining({ type: 'steer', itemId: 'queued' })));
+    act(() => publish?.({ ...view, inbox: [{ ...view.inbox[0], lane: 'nextStep', state: 'claimed' }] }));
+    expect(screen.queryByText('queued text')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Steer now' })).toBeNull();
+  });
 });
