@@ -92,7 +92,7 @@ describe('AI panel production path and immutable shell', () => {
     expect(panel.querySelector('[data-slot="ai-empty-hero"]')).toHaveClass('ai-empty-hero');
     expect(panel.querySelector('[data-slot="empty-state-title"]')).toHaveTextContent('ai.workbench.emptyTitle');
     const header = panel.querySelector('[data-slot="ai-workspace-header"]');
-    expect(getComputedStyle(header as Element).height).toBe('48px');
+    expect(getComputedStyle(header as Element).height).toBe('calc(var(--spacing) * 10)');
     expect(getComputedStyle(header as Element).alignItems).toBe('center');
     expect(getComputedStyle(header as Element).paddingBlockStart).toMatch(/^0(?:px)?$/);
     expect(getComputedStyle(header as Element).paddingBlockEnd).toMatch(/^0(?:px)?$/);
@@ -115,8 +115,7 @@ describe('AI panel production path and immutable shell', () => {
     render(<div><AiPanel /></div>);
     const handle = screen.getByRole('separator', { name: 'ai.resize' });
     expect(handle).toHaveClass('ai-panel-resize-handle');
-    expect(handle.querySelector('[data-slot="ai-panel-resize-indicator"]'))
-      .toHaveClass('ai-panel-resize-indicator');
+    expect(handle).toBeEmptyDOMElement();
     Object.defineProperties(handle, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },

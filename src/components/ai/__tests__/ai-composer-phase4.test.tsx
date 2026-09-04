@@ -51,6 +51,69 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiComposerSeat Phase 4 behavior', () => {
+  it('adds pasted images once without submitting the message', () => {
+    const onPasteImages = vi.fn();
+    const onSubmit = vi.fn();
+    render(<AiComposerSeat phase="active" status="idle" defaultDraft="Describe this" onPasteImages={onPasteImages} onSubmit={onSubmit} />);
+    const image = new File(['image'], 'screenshot.png', { type: 'image/png' });
+    const document = new File(['text'], 'notes.txt', { type: 'text/plain' });
+    const accepted = fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: {
+        files: [image, document],
+        items: [{ kind: 'file', type: image.type, getAsFile: () => image }],
+      },
+    });
+    expect(accepted).toBe(false);
+    expect(onPasteImages.mock.calls).toEqual([[[image]]]);
+    expect(screen.getByRole('textbox')).toHaveValue('Describe this');
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('accepts clipboard image items when the browser has no file list', () => {
+    const onPasteImages = vi.fn();
+    render(<AiComposerSeat phase="hero" status="idle" onPasteImages={onPasteImages} />);
+    const image = new File(['image'], 'screenshot.png', { type: 'image/png' });
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: { files: [], items: [{ kind: 'file', type: image.type, getAsFile: () => image }] },
+    });
+    expect(onPasteImages).toHaveBeenCalledWith([image]);
+  });
+
+  it('preserves normal text paste and does not import non-image files', async () => {
+    const user = userEvent.setup();
+    const onPasteImages = vi.fn();
+    render(<AiComposerSeat phase="active" status="idle" onPasteImages={onPasteImages} />);
+    const textbox = screen.getByRole('textbox');
+    await user.click(textbox);
+    await user.paste('Pasted text');
+    expect(textbox).toHaveValue('Pasted text');
+    expect(fireEvent.paste(textbox, {
+      clipboardData: { files: [new File(['text'], 'notes.txt', { type: 'text/plain' })], items: [] },
+    })).toBe(true);
+    expect(onPasteImages).not.toHaveBeenCalled();
+  });
+
+  it.each([{ imageBusy: true }, { imageLocked: true }, { unavailableReason: 'Unavailable' }])(
+    'does not import images when the composer cannot accept them: %o', (props) => {
+      const onPasteImages = vi.fn();
+      render(<AiComposerSeat phase="active" status="idle" onPasteImages={onPasteImages} {...props} />);
+      fireEvent.paste(screen.getByRole('textbox'), {
+        clipboardData: { files: [new File(['image'], 'screenshot.png', { type: 'image/png' })], items: [] },
+      });
+      expect(onPasteImages).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([['MacIntel', '⌘V'], ['Win32', 'Ctrl+V']])('shows the image paste shortcut for %s', (platform, shortcut) => {
+    const platformSpy = vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+    try {
+      render(<AiComposerSeat phase="active" status="idle" />);
+      expect(screen.getByRole('textbox').getAttribute('placeholder')).toContain(`${shortcut} Paste images`);
+    } finally {
+      platformSpy.mockRestore();
+    }
+  });
+
   it('maps Enter and Ctrl/Cmd+Enter while preserving Shift+Enter and IME composition', () => {
     const submit = vi.fn();
     render(<Harness initial={createAiComposerState({ draft: 'Queue me' })} onSubmitGesture={submit} />);
@@ -211,7 +274,8 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(queue).toBeVisible();
     expect(screen.getByText('Run tests next')).toBeVisible();
     expect(queue).toHaveTextContent('Next turn · Queued');
-    expect(queue).toHaveTextContent('Next step · Claimed');
+    expect(screen.queryByText('Do not restart')).toBeNull();
+    expect(queue).not.toHaveTextContent('Claimed');
     expect(screen.getAllByRole('button', { name: /edit|remove/i })).toHaveLength(2);
   });
 

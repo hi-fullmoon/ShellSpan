@@ -23,35 +23,34 @@ interface BridgeState { requests: { messages: unknown }[]; sessions: { snapshot:
 // Ordinary unit runs deliberately skip this process integration; the stage gate starts
 // the Rust transport and requires both the frontend and Rust sides to pass.
 describe.runIf(Boolean(transport.config))('controller to production Runtime and HTTP provider', () => {
-  it('freezes an explicit root before listing, then preserves menu and manual slash submissions through durable claims and wire messages', async () => {
+  it('loads bundled skills without a root and preserves menu/manual slash submissions through durable claims and wire messages', async () => {
     const bridge = JSON.parse(transport.config!);
     const state = async (): Promise<BridgeState> => (await (await fetch(bridge.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: '__state', args: {} }) })).json()).value;
     useAppStore.setState({ locale: 'en-US' }); await initI18n('en-US');
     useAgentPermissionStore.getState().resetAll();
-    useAiSettingsStore.setState({ agentEnabled: true, defaultProviderId: 'bridge', providers: [{ id: 'bridge', preset: 'custom', name: 'Test HTTP receiver', kind: 'openAiCompatible', baseUrl: bridge.modelUrl, model: 'test-model', requiresApiKey: false }] });
+    useAiSettingsStore.setState({ defaultProviderId: 'bridge', providers: [{ id: 'bridge', preset: 'custom', name: 'Test HTTP receiver', kind: 'openAiCompatible', baseUrl: bridge.modelUrl, model: 'test-model', requiresApiKey: false }] });
     for (const mode of ['menu', 'manual']) {
       useTerminalStore.setState({ activeSessionId: `local-${mode}`, sessions: [{ sessionId: `local-${mode}`, title: 'Local fixture', host: 'local', port: 0, username: 'fixture', status: 'connected' }] });
       const user = userEvent.setup(); render(<AiWorkspaceController scope="terminal" />);
-      await user.click(screen.getByRole('button', { name: 'Skills' }));
-      expect(screen.getByText('Local fixture (local)')).toBeVisible();
-      expect(screen.getByRole('button', { name: 'Load skills' })).toBeDisabled();
       const prior = await state(); expect(prior.requests).toHaveLength(mode === 'menu' ? 0 : 1);
-      await user.type(screen.getByRole('textbox', { name: 'Project directory' }), bridge.root);
-      await user.click(screen.getByRole('button', { name: 'Load skills' }));
-      await screen.findByText('User only');
-      expect((await state()).requests).toHaveLength(prior.requests.length);
-      if (mode === 'menu') await user.click(screen.getByRole('menuitem', { name: /inspect/ }));
-      else { await user.keyboard('{Escape}'); await user.type(screen.getByRole('textbox'), '  please /inspect  '); }
-      const content = mode === 'menu' ? '/inspect ' : '  please /inspect  ';
+      if (mode === 'menu') {
+        await user.type(screen.getByRole('textbox'), '/sys');
+        await user.click(await screen.findByRole('option', { name: /system-status/ }));
+      } else {
+        await user.type(screen.getByRole('textbox'), '  please /system-status  ');
+      }
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect((await state()).sessions).toHaveLength(mode === 'menu' ? 0 : 1);
+      const content = mode === 'menu' ? '/system-status ' : '  please /system-status  ';
       expect(screen.getByRole('textbox')).toHaveValue(content);
       await user.click(screen.getByRole('textbox')); await user.keyboard('{Enter}');
       await waitFor(() => expect(screen.getByText('Controller wire complete')).toBeVisible(), { timeout: 10000 });
       const captured = await state(); const session = captured.sessions[captured.sessions.length - 1]!;
-      expect(session.snapshot.header.target?.cwd).toBe(bridge.root);
+      expect(session.snapshot.header.target?.cwd).toBeUndefined();
       for (const operation of ['enqueued', 'claimed']) expect(session.events.some((event) => event.type === 'agent/inbox/spliced' && event.data.operation === operation && event.data.messages.some((message) => message.content === content && message.clientSubmissionId))).toBe(true);
       const prepared = session.events.find((event) => event.type === 'skill/step_prepared');
-      expect(prepared?.type === 'skill/step_prepared' && prepared.data.prepared.outcomes[0].loaded?.instructions).toBe('ENTIRE CONTROLLER INSTRUCTION\nFinal line from the real file.\n');
-      expect(JSON.stringify(captured.requests[captured.requests.length - 1]?.messages)).toContain('ENTIRE CONTROLLER INSTRUCTION');
+      expect(prepared?.type === 'skill/step_prepared' && prepared.data.prepared.outcomes[0].loaded?.instructions).toContain('# System status');
+      expect(JSON.stringify(captured.requests[captured.requests.length - 1]?.messages)).toContain('# System status');
       expect(JSON.stringify(captured.requests[captured.requests.length - 1]?.messages)).toContain('skill_provenance');
       cleanup();
     }

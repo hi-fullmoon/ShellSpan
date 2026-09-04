@@ -1,9 +1,14 @@
 import { useState } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
+import { AgentSessionCommittedClient } from '@/lib/agent-session-client';
+import { agentSessionView } from '@/lib/ai/agent-session-adapter';
+import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
+import { agentSessionEventFixture, sessionEvent } from '@/test/fixtures/agent-session';
+import type { AgentSessionEvent } from '@/types/agent-session';
 import { createAiComposerState } from '@/lib/ai/composer-machine';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import {
@@ -145,7 +150,7 @@ describe('AI workspace Phase 5 workflows', () => {
     render(<AiWorkspaceRoot view={agentView()} scope="terminal" />);
     const toggle = screen.getByRole('button', { name: 'Toggle 2 tasks' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByText('1 completed')).toBeVisible();
+    expect(screen.getByText('1 completed · 1 in progress')).toBeVisible();
     expect(screen.queryByText('Inspect service')).toBeNull();
     await user.click(toggle);
     expect(screen.getByText('Inspect service')).toBeVisible();
@@ -252,6 +257,63 @@ describe('AI workspace Phase 5 workflows', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Command: Restart nginx' })).toHaveFocus());
   });
 
+  it('opens a failed nested command by its key when another step reused the call ID', async () => {
+    const user = userEvent.setup();
+    const error = 'native policy rejects unscoped command network egress';
+    const command = 'which docker && docker --version';
+    const events = [
+      sessionEvent(0, { type: 'turn/start', turnId: 'turn-inspect' }),
+      sessionEvent(1, {
+        type: 'tool/call', turnId: 'turn-inspect', stepId: 'step-1',
+        data: { call: { callId: 'call-1', name: 'exec_command', arguments: { command: 'echo earlier' } } },
+      }),
+      sessionEvent(2, {
+        type: 'tool/result', turnId: 'turn-inspect', stepId: 'step-1',
+        data: { callId: 'call-1', name: 'exec_command', status: 'completed', summary: 'earlier output' },
+      }),
+      sessionEvent(3, {
+        type: 'tool/call', turnId: 'turn-inspect', stepId: 'step-2',
+        data: { call: {
+          callId: 'call-1', name: 'exec_command', arguments: { command, cwd: '/tmp' },
+          effect: 'externalSideEffect', target: tool.target!,
+        } },
+      }),
+      sessionEvent(4, {
+        type: 'tool/result', turnId: 'turn-inspect', stepId: 'step-2',
+        data: { callId: 'call-1', name: 'exec_command', status: 'failed', summary: error },
+      }),
+    ];
+    const view = {
+      ...agentView(),
+      summary: { ...agentView().summary, id: 'session-fixture' },
+      nodes: projectAgentChatNodes(events),
+    };
+    function Harness(): React.ReactNode {
+      const [navigation, setNavigation] = useState(createAiWorkspaceNavigationState(view.summary.id));
+      return <AiWorkspaceRoot
+        view={view}
+        scope="terminal"
+        navigation={navigation}
+        onOpenTool={(node) => setNavigation((current) => ({
+          ...current,
+          route: { kind: 'toolDetails', sessionId: node.sessionId, nodeKey: node.key },
+        }))}
+      />;
+    }
+    const { container } = render(<Harness />);
+    await user.click(screen.getByRole('button', { name: `Command: ${error}` }));
+    await user.click(screen.getByRole('button', { name: 'Open details for exec_command' }));
+    const details = container.querySelector('[data-slot="ai-tool-details"]');
+    expect(details).toHaveTextContent(command);
+    expect(details).toHaveTextContent('/tmp');
+    expect(details).toHaveTextContent(error);
+    expect(details).toHaveTextContent('externalSideEffect');
+    expect(details).toHaveTextContent('Production');
+    expect(details).not.toHaveTextContent('echo earlier');
+    expect(details).not.toHaveTextContent('earlier output');
+    expect(details).not.toHaveTextContent('This item is not available');
+  });
+
   it('loads Artifact content only after entering its details route', async () => {
     const loadArtifact = vi.fn(async () => ({
       metadata: {
@@ -328,4 +390,39 @@ describe('AI workspace Phase 5 workflows', () => {
     expect(screen.getByRole('button', { name: 'Open details for terminal.exec' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Open artifact Deployment report' })).toBeVisible();
   });
+});
+
+
+it('updates the task strip from live committed plan events with an unchanged initial snapshot, including clearing', async () => {
+  const user = userEvent.setup();
+  const initialSnapshot = { ...agentView().snapshot.value, header: { ...agentView().snapshot.value.header, sessionId: 'session-fixture' }, task: { evidence: [], successCriteria: ['preserved'] } };
+  const events = [...agentSessionEventFixture.slice(0, 3)];
+  let publish: ((event: AgentSessionEvent) => void) | undefined;
+  const client = new AgentSessionCommittedClient('session-fixture', {
+    snapshot: async () => initialSnapshot,
+    committedEvents: async ({ afterSeq }) => ({ events: events.filter((event) => afterSeq === undefined || event.seq > afterSeq) }),
+    subscribe: async (listener) => { publish = listener; return () => undefined; },
+  });
+  const state = await client.connect();
+  const { rerender } = render(<AiWorkspaceRoot view={agentSessionView(state)} scope="terminal" />);
+  const unsubscribe = client.onChange((next) => rerender(<AiWorkspaceRoot view={agentSessionView(next)} scope="terminal" />));
+  expect(screen.queryByRole('button', { name: /Toggle .* tasks/ })).toBeNull();
+  const emitPlan = async (steps: Extract<AgentSessionEvent, { type: 'task/plan' }>['data']['steps']): Promise<void> => {
+    const event = sessionEvent(events.length, { type: 'task/plan', data: { version: 1, steps } });
+    events.push(event);
+    await act(async () => { publish?.(event); await client.settled(); });
+  };
+  await emitPlan([{ id: 'live', title: 'Live task', status: 'inProgress' }]);
+  expect(screen.getByText('1 in progress')).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Toggle 1 tasks' }));
+  expect(screen.getByText('Live task')).toBeVisible();
+  await emitPlan([{ id: 'live', title: 'Updated live task', status: 'completed' }]);
+  expect(screen.getByText('1 completed')).toBeVisible();
+  expect(screen.getByText('Updated live task')).toBeVisible();
+  expect(agentSessionView(client.state()).snapshot.value.task).toMatchObject({ successCriteria: ['preserved'] });
+  expect(client.state().snapshot).toBe(initialSnapshot);
+  await emitPlan([]);
+  expect(screen.queryByRole('button', { name: /Toggle .* tasks/ })).toBeNull();
+  unsubscribe();
+  client.disconnect();
 });
