@@ -1,5 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
+import { getPlatform } from '@/lib/platform';
+import { getShortcutKeys } from '@/lib/shortcuts';
 import { useI18n } from '@/hooks/useI18n';
 import { useTrackpadSafeActivation } from '@/hooks/useTrackpadSafeActivation';
 import { Sidebar } from '@/components/layout/app-shell';
@@ -11,11 +13,12 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { SettingsSection, WorkbenchTab } from '@/types';
 import { useUpdateStore } from '@/stores/updateStore';
+import { useAppStore } from '@/stores/appStore';
 import {
   ActivityIcon,
   ChevronUpIcon,
@@ -27,7 +30,7 @@ import {
   PaletteIcon,
   RefreshCwIcon,
   ServerIcon,
-  Settings2Icon,
+  SettingsIcon,
   ShieldCheckIcon,
   UserRoundIcon,
 } from 'lucide-react';
@@ -87,6 +90,10 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
   onRequestExit,
 }) => {
   const { t } = useI18n();
+  const settingsShortcut = useAppStore((state) => state.shortcuts.openSettings);
+  const platform = getPlatform();
+  const settingsShortcutLabel = getShortcutKeys(settingsShortcut, platform)
+    .join(platform === 'macos' ? '' : '+');
   const updatePhase = useUpdateStore((state) => state.phase);
   const checkingForUpdates = updatePhase === 'checking';
   const downloadingUpdate = updatePhase === 'update_available' || updatePhase === 'downloading';
@@ -159,44 +166,43 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
           side="top"
           align="start"
           sideOffset={6}
-          className="w-52 border border-app-border bg-app-surface p-1 text-app-text shadow-[var(--shadow-dialog)] ring-0"
+          className="workbench-user-menu w-(--anchor-width) max-w-[calc(100vw-1rem)] rounded-2xl border border-border p-1 shadow-[var(--shadow-dialog)] ring-0 backdrop-blur-xl"
         >
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="flex items-center gap-2 px-2 py-2">
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <DropdownMenuLabel className="flex items-center gap-2 px-1.5 pt-1.5 pb-2">
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary [&_svg]:size-3.5">
                 <UserRoundIcon aria-hidden />
               </span>
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-sm font-medium text-foreground">{t('workbench.userMenu.name')}</span>
-                <span className="text-[11px] font-normal text-muted-foreground">{t('workbench.userMenu.localProfile')}</span>
+              <span className="flex min-w-0 flex-col gap-0.5 leading-[18px]">
+                <span className="truncate text-sm font-medium text-foreground">{t('workbench.userMenu.name')}</span>
+                <span className="truncate text-xs font-normal text-muted-foreground">{t('workbench.userMenu.localProfile')}</span>
               </span>
             </DropdownMenuLabel>
           </DropdownMenuGroup>
-          <DropdownMenuSeparator className="mx-0" />
-          <DropdownMenuGroup className="text-app-text-soft [&_[data-slot=dropdown-menu-item]]:text-[13px]">
+          <DropdownMenuGroup>
             <DropdownMenuItem onClick={() => onOpenSettings('general')}>
-              <Settings2Icon className="size-3.5" />
+              <SettingsIcon aria-hidden />
               {t('workbench.settings.title')}
+              <DropdownMenuShortcut aria-hidden>{settingsShortcutLabel}</DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onOpenSettings('appearance')}>
-              <PaletteIcon className="size-3.5" />
+              <PaletteIcon aria-hidden />
               {t('settings.appearance.title')}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onOpenSettings('shortcuts')}>
-              <KeyboardIcon className="size-3.5" />
+              <KeyboardIcon aria-hidden />
               {t('settings.shortcuts.title')}
             </DropdownMenuItem>
           </DropdownMenuGroup>
-          <DropdownMenuSeparator className="mx-0" />
-          <DropdownMenuGroup className="text-app-text-soft [&_[data-slot=dropdown-menu-item]]:text-[13px]">
+          <DropdownMenuGroup>
             <DropdownMenuItem
               closeOnClick={false}
               disabled={updateBusy}
               onClick={onCheckForUpdates}
             >
               {updateBusy
-                ? <Spinner className="size-3.5" />
-                : <RefreshCwIcon className="size-3.5" />}
+                ? <Spinner />
+                : <RefreshCwIcon aria-hidden />}
               {checkingForUpdates
                 ? t('workbench.userMenu.checkingUpdate')
                 : downloadingUpdate
@@ -204,11 +210,11 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
                   : t('settings.general.checkUpdate')}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={onOpenAbout}>
-              <InfoIcon className="size-3.5" />
+              <InfoIcon aria-hidden />
               {t('workbench.userMenu.about')}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={onRequestExit}>
-              <LogOutIcon className="size-3.5" />
+              <LogOutIcon aria-hidden />
               {t('workbench.userMenu.quit')}
             </DropdownMenuItem>
           </DropdownMenuGroup>

@@ -24,7 +24,7 @@ export async function mountFilesPage(root: HTMLElement) {
   const locale = params.get('locale') === 'zh-CN' ? 'zh-CN' : 'en-US';
   const theme = params.get('theme') === 'dark' ? 'dark' : 'light';
   useAppStore.setState({ locale, theme }); await initI18n(locale); applyTheme(theme);
-  useAiSettingsStore.setState({ agentEnabled: true, defaultProviderId: 'image-bridge', providers: [{ id: 'image-bridge', preset: 'qwen', profile: 'qwen', name: 'Vision test', kind: 'openAiCompatible', model: 'qwen3-vl-plus', baseUrl: params.get('modelUrl')!, requiresApiKey: false }] });
+  useAiSettingsStore.setState({ defaultProviderId: 'image-bridge', providers: [{ id: 'image-bridge', preset: 'qwen', profile: 'qwen', name: 'Vision test', kind: 'openAiCompatible', model: 'qwen3-vl-plus', baseUrl: params.get('modelUrl')!, requiresApiKey: false }] });
   const target = params.get('target') ?? 'images-menu';
   useTerminalStore.setState({ activeSessionId: target, sessions: [{ sessionId: target, title: 'Image fixture', host: 'local', port: 0, username: 'fixture', status: 'connected' }] });
   Object.assign(window, { imageTestChangeProvider: (model: string) => useAiSettingsStore.setState(s => ({ providers: s.providers.map(p => ({ ...p, model })) })) });

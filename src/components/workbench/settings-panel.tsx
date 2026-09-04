@@ -23,7 +23,8 @@ import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { CompactDialogHeader } from '@/components/ui/compact-dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -434,31 +435,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => onOpenChange(nextOpen)}>
       <DialogContent
-        showCloseButton={false}
-        className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 [&_[data-slot=select-trigger]]:min-w-36 sm:rounded-xl"
+        className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=dialog-close]]:size-8 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 [&_[data-slot=select-trigger]]:min-w-36 sm:rounded-xl"
       >
         <TooltipProvider>
-          <DialogHeader className="h-12 flex-row items-center gap-2 border-b border-app-border/50 bg-card/80 px-4 py-0">
-            <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-              <Settings2Icon className="size-4" aria-hidden />
-            </div>
-            <div className="min-w-0 flex-1">
-              <DialogTitle>{t('workbench.settings.title')}</DialogTitle>
-              <DialogDescription className="sr-only">{t('settings.description')}</DialogDescription>
-            </div>
-            <DialogClose
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t('common.close')}
-                />
-              }
-            >
-              <XIcon />
-            </DialogClose>
-          </DialogHeader>
+          <CompactDialogHeader
+            title={t('workbench.settings.title')}
+            description={t('settings.description')}
+          />
 
           <Tabs
             value={activeSection}

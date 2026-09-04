@@ -362,9 +362,11 @@ describe('SettingsPanel', () => {
 
     for (const title of sectionTitles) {
       openSection(title);
-      within(settingsDialog).getAllByRole('button').forEach((button) => {
-        expect(button.className).toMatch(/(?:^|\s)(?:h-6|size-6)(?:\s|$)/);
-      });
+      within(settingsDialog).getAllByRole('button')
+        .filter((button) => button.getAttribute('data-slot') !== 'dialog-close')
+        .forEach((button) => {
+          expect(button.className).toMatch(/(?:^|\s)(?:h-6|size-6)(?:\s|$)/);
+        });
     }
   });
 
