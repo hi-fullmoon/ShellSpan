@@ -135,6 +135,42 @@
   --sidebar-ring: var(--app-primary);
 }
 
+/* The account menu uses one soft surface, with inset rounded action rows. */
+.workbench-user-menu {
+  background-color: color-mix(in srgb, var(--popover) 92%, transparent);
+}
+
+.workbench-user-menu [data-slot='dropdown-menu-item'] {
+  min-height: 30px;
+  gap: 8px;
+  border-radius: 10px;
+  padding: 5px 10px;
+  color: var(--popover-foreground);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  transition: background-color 120ms ease;
+}
+
+.workbench-user-menu [data-slot='dropdown-menu-item']:is(:focus, [data-highlighted]) {
+  background-color: color-mix(in srgb, var(--popover-foreground) 5%, var(--popover));
+  color: var(--popover-foreground);
+}
+
+.workbench-user-menu [data-slot='dropdown-menu-item'] > svg {
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+  stroke-width: 1.75;
+}
+
+.workbench-user-menu [data-slot='dropdown-menu-shortcut'] {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
 html,
 body,
 #root {
@@ -358,8 +394,7 @@ body.tab-dragging * {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-slot='ai-workspace-root'] *,
-  [data-slot='ai-panel-resize-indicator'] {
+  [data-slot='ai-workspace-root'] * {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
