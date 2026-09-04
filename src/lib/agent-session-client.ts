@@ -81,14 +81,21 @@ export class AgentSessionCommittedClient {
       }
       this.enqueue(() => this.ingestLive(event));
     });
-    this.snapshotValue = await this.transport.snapshot(this.sessionId);
-    await this.fetchAfter(this.events[this.events.length - 1]?.seq);
-    this.buffering = false;
-    const buffered = this.buffered.sort((left, right) => left.seq - right.seq);
-    this.buffered = [];
-    for (const event of buffered) await this.ingestLive(event);
-    this.emit();
-    return this.state();
+    try {
+      this.snapshotValue = await this.transport.snapshot(this.sessionId);
+      await this.fetchAfter(this.events[this.events.length - 1]?.seq);
+      this.buffering = false;
+      const buffered = this.buffered.sort((left, right) => left.seq - right.seq);
+      this.buffered = [];
+      for (const event of buffered) await this.ingestLive(event);
+      this.emit();
+      return this.state();
+    } catch (error) {
+      // A rootless image draft may probe its durable ID before creating the Session.
+      // A failed probe must not leave connect() believing it is already connected.
+      this.disconnect();
+      throw error;
+    }
   }
 
   async reconnect(): Promise<AgentSessionStreamState> {
@@ -177,6 +184,15 @@ export class AgentSessionCommittedClient {
   private validateEnvelope(event: AgentSessionEvent): void {
     if (!isSupportedAgentSessionEventVersion(event.version) || event.sessionId !== this.sessionId) {
       throw new Error('Committed Agent event has an incompatible identity or version');
+    }
+    if (event.type === 'agent/inbox/item_steered') {
+      const data = event.data;
+      if (!data || typeof data.itemId !== 'string' || !data.itemId.trim()
+        || typeof data.clientOperationId !== 'string' || !data.clientOperationId.trim()
+        || !Number.isSafeInteger(data.previousRevision) || data.previousRevision < 0
+        || data.previousRevision !== event.seq || event.turnId || event.stepId) {
+        throw new Error('Committed Agent inbox steer event has an invalid mutation identity');
+      }
     }
   }
 

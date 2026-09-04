@@ -59,6 +59,8 @@ export interface AiAssistantMessageNode extends AiConversationNodeBase {
   /** Provider-ordered durable blocks. */
   readonly blocks: readonly AgentSessionAssistantContentBlock[];
   readonly state: 'streaming' | 'completed' | 'interrupted' | 'failed' | 'cancelled';
+  /** The settled turn footer owns this answer's copy action and timestamp. */
+  readonly hasTurnTail?: boolean;
 }
 
 export interface AiReasoningNode extends AiConversationNodeBase {
@@ -73,6 +75,8 @@ export interface AiToolDetailRef {
   readonly kind: 'agentTool';
   readonly sessionId: string;
   readonly callId: string;
+  readonly turnId?: string | null;
+  readonly stepId?: string | null;
 }
 
 export interface AiToolNode extends AiConversationNodeBase {
@@ -226,6 +230,9 @@ export interface AiTurnTailNode extends AiConversationNodeBase {
   readonly usage: AgentSessionTokenUsage | null;
   readonly stats: AiDurableTurnStats;
   readonly sessionStats: AiDurableSessionStats;
+  readonly summaryText?: string;
+  readonly durationMs?: number;
+  readonly models?: readonly { readonly providerId: string; readonly model: string }[];
 }
 
 export type AiConversationNode =

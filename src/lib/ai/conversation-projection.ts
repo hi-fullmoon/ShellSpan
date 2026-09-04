@@ -3,6 +3,7 @@ import { projectQuestions } from './question-projection';
 import { questionKey } from '@/types/agent-question';
 import {
   agentEventTimestamp,
+  agentToolEventKey,
   validateCommittedAgentEventWindow,
 } from '@/lib/agent-session-event-window';
 import type {
@@ -44,6 +45,8 @@ type RuntimeEventLike = Readonly<{
 
 interface RequestFacts {
   readonly requestId: string;
+  readonly providerId: string;
+  readonly model: string;
   readonly turnId: string | null;
   readonly stepId: string | null;
   readonly startedAt: number;
@@ -64,6 +67,7 @@ interface TurnState {
   readonly assistants: Map<string, AiAssistantMessageNode>;
   lastSeq: number;
   startSeq?: number;
+  startedAt?: number;
   endSeq?: number;
   endTimestamp?: string;
   endReason?: string;
@@ -277,7 +281,6 @@ export function projectAgentChatNodes(
   const requests = new Map<string, RequestFacts>();
   const activeRequestByStep = new Map<string, string>();
   const tools = new Map<string, AiToolNode>();
-  const toolTurnIds = new Map<string, string>();
   const unscopedNodes = new Map<string, AiConversationNode>();
   let latestTurnId: string | null = null;
 
@@ -450,11 +453,46 @@ export function projectAgentChatNodes(
     callId: string,
     update: (node: AiToolNode) => AiToolNode,
   ): void => {
-    const previous = tools.get(callId);
+    const identity = agentToolEventKey(event, callId);
+    const previous = tools.get(identity);
     if (!previous) return;
     const next = { ...update(previous), lastSeq: event.seq };
-    tools.set(callId, next);
-    putProcessChild(toolTurnIds.get(callId) ?? eventTurnId(event), next);
+    tools.set(identity, next);
+    putProcessChild(previous.turnId, next);
+  };
+
+  const settleStreamingOutput = (
+    event: RuntimeEventLike,
+    status: Exclude<AiTurnProcessStatus, 'running' | 'partial'>,
+    scope: 'step' | 'turn' | 'session',
+  ): void => {
+    const currentTurn = event.turnId ? turns.get(event.turnId) : undefined;
+    const scopedTurns = scope === 'session' ? turns.values() : currentTurn ? [currentTurn] : [];
+    const nodeMaps: Map<string, AiConversationNode>[] = [unscopedNodes];
+    for (const turn of scopedTurns) {
+      nodeMaps.push(turn.children, turn.assistants);
+      if (scope === 'session' && turn.endSeq === undefined) {
+        turn.status = status;
+        turn.lastSeq = event.seq;
+      }
+    }
+    for (const nodes of nodeMaps) {
+      for (const [key, node] of nodes) {
+        if ((node.kind !== 'reasoning' && node.kind !== 'assistantMessage')
+          || node.state !== 'streaming'
+          || (scope !== 'session' && node.turnId !== eventTurnId(event))
+          || (scope === 'step' && node.stepId !== eventStepId(event))) continue;
+        // Runtime failures can end a scope without committing an assistant/message.
+        // Keep the partial content, but never leave it streaming or imply it completed.
+        nodes.set(key, node.kind === 'reasoning'
+          ? { ...node, lastSeq: event.seq, state: 'interrupted' }
+          : {
+            ...node,
+            lastSeq: event.seq,
+            state: status === 'failed' || status === 'cancelled' ? status : 'interrupted',
+          });
+      }
+    }
   };
 
   for (const event of events) {
@@ -463,6 +501,7 @@ export function projectAgentChatNodes(
       case 'session/created':
       case 'agent/created':
       case 'agent/inbox/reordered':
+      case 'agent/inbox/item_steered':
       case 'session/renamed':
       case 'request/context':
       case 'compaction/start':
@@ -478,22 +517,28 @@ export function projectAgentChatNodes(
       case 'task/evidence':
         break;
       case 'agent/status':
+        if (event.data.status === 'completed' || event.data.status === 'failed'
+          || event.data.status === 'cancelled') {
+          settleStreamingOutput(event, event.data.status, 'session');
+        }
         if (event.data.status === 'failed' || event.data.status === 'cancelled') {
           upsertTurnError(event, event.data.status, event.data.reason ?? event.data.status, 'session');
         }
         break;
       case 'session/ended':
+        settleStreamingOutput(event, event.data.status, 'session');
         if (event.data.status !== 'completed') {
           upsertTurnError(event, event.data.status, event.data.reason ?? event.data.status, 'session');
         }
         break;
       case 'agent/inbox/spliced':
         for (const message of event.data.messages) {
-          if (event.data.lane !== 'nextTurn' || message.source.kind !== 'user') continue;
+          if (message.source.kind !== 'user') continue;
           if (event.data.operation === 'discarded') {
             userMessages.delete(message.messageId);
             continue;
           }
+          if (event.data.lane !== 'nextTurn') continue;
           const key = `user:${message.messageId}`;
           const previous = userMessages.get(message.messageId);
           userMessages.set(message.messageId, {
@@ -530,7 +575,10 @@ export function projectAgentChatNodes(
         break;
       case 'turn/start': {
         const turn = ensureTurn(event);
-        if (turn) turn.startSeq = event.seq;
+        if (turn) {
+          turn.startSeq = event.seq;
+          turn.startedAt = event.timeUnixMs;
+        }
         break;
       }
       case 'turn/end': {
@@ -540,6 +588,7 @@ export function projectAgentChatNodes(
         turn.endTimestamp = agentEventTimestamp(event.timeUnixMs);
         turn.endReason = event.data.reason;
         turn.status = terminalStatusFromReason(event.data.reason);
+        settleStreamingOutput(event, turn.status, 'turn');
         if (turn.status === 'failed' || turn.status === 'cancelled') {
           upsertTurnError(event, turn.status, event.data.reason, 'turn');
         }
@@ -552,6 +601,7 @@ export function projectAgentChatNodes(
       }
       case 'step/end': {
         const status = terminalStatusFromReason(event.data.reason);
+        settleStreamingOutput(event, status, 'step');
         if (status === 'failed' || status === 'cancelled') {
           upsertTurnError(event, status, event.data.reason, 'step');
         }
@@ -613,6 +663,8 @@ export function projectAgentChatNodes(
         if (event.type === 'request/start' || event.data.snapshotReason === undefined) {
           const facts: RequestFacts = {
             requestId: event.data.requestId,
+            providerId: event.data.providerId,
+            model: event.data.model,
             turnId: eventTurnId(event),
             stepId: eventStepId(event),
             startedAt: event.timeUnixMs,
@@ -778,9 +830,10 @@ export function projectAgentChatNodes(
         break;
       case 'tool/call': {
         const call = event.data.call;
+        const identity = agentToolEventKey(event, call.callId);
         const node: AiToolNode = {
           kind: 'tool',
-          key: `tool:${call.callId}`,
+          key: `tool:${identity}`,
           sourceKind: 'agent',
           sessionId: event.sessionId,
           turnId: eventTurnId(event),
@@ -794,7 +847,10 @@ export function projectAgentChatNodes(
           state: 'preparing',
           effect: call.effect ?? 'unknown',
           durationMs: null,
-          detailRef: { kind: 'agentTool', sessionId: event.sessionId, callId: call.callId },
+          detailRef: {
+            kind: 'agentTool', sessionId: event.sessionId, callId: call.callId,
+            turnId: eventTurnId(event), stepId: eventStepId(event),
+          },
           evidenceRefs: [],
           input: call.arguments,
           output: null,
@@ -803,14 +859,13 @@ export function projectAgentChatNodes(
           idempotency: null,
           approval: null,
         };
-        tools.set(call.callId, node);
-        if (event.turnId) toolTurnIds.set(call.callId, event.turnId);
+        tools.set(identity, node);
         putProcessChild(eventTurnId(event), node);
         break;
       }
       case 'tool/approval': {
         const approvalId = event.data.approvalId ?? `${event.data.requestId}:${event.data.callId}`;
-        const turnId = toolTurnIds.get(event.data.callId) ?? eventTurnId(event);
+        const turnId = eventTurnId(event);
         const turn = turnId ? turns.get(turnId) : undefined;
         const key = `approval:${approvalId}`;
         const previous = turn?.children.get(key) ?? unscopedNodes.get(key);
@@ -866,10 +921,11 @@ export function projectAgentChatNodes(
           ...(context.loaded ? { loadedSkill: context.loaded } : {}),
         });
 
-        if (!tools.has(event.data.callId)) {
+        const identity = agentToolEventKey(event, event.data.callId);
+        if (!tools.has(identity)) {
           const node: AiToolNode = {
             kind: 'tool',
-            key: `tool:${event.data.callId}`,
+            key: `tool:${identity}`,
             sourceKind: 'agent',
             sessionId: event.sessionId,
             turnId: eventTurnId(event),
@@ -883,7 +939,10 @@ export function projectAgentChatNodes(
             state: toolState(event.data.status),
             effect: 'unknown',
             durationMs: event.data.durationMs ?? null,
-            detailRef: { kind: 'agentTool', sessionId: event.sessionId, callId: event.data.callId },
+            detailRef: {
+              kind: 'agentTool', sessionId: event.sessionId, callId: event.data.callId,
+              turnId: eventTurnId(event), stepId: eventStepId(event),
+            },
             evidenceRefs: event.data.evidenceRefs ?? [],
             input: null,
             output: event.data.data ?? event.data.summary,
@@ -894,8 +953,7 @@ export function projectAgentChatNodes(
             idempotency: null,
             approval: null,
           };
-          tools.set(event.data.callId, node);
-          if (event.turnId) toolTurnIds.set(event.data.callId, event.turnId);
+          tools.set(identity, node);
           putProcessChild(eventTurnId(event), node);
         } else {
           updateTool(event, event.data.callId, (tool) => ({
@@ -1062,7 +1120,7 @@ export function projectAgentChatNodes(
     const children = [...turn.children.values()].sort(processChildSort);
     const status: AiTurnProcessStatus = turn.startSeq === undefined
       ? 'partial'
-      : turn.endSeq === undefined ? 'running' : turn.status ?? 'completed';
+      : turn.status ?? (turn.endSeq === undefined ? 'running' : 'completed');
     const answerGeneration = [...turn.requestIds].reverse()[0] ?? `turn:${turn.id}`;
     const process: AiTurnProcessNode = {
       kind: 'turnProcess',
@@ -1082,7 +1140,9 @@ export function projectAgentChatNodes(
       children,
     };
     nodes.push(process);
-    if (closing) nodes.push(closing);
+    const hasTurnTail = turn.startSeq !== undefined && turn.endSeq !== undefined
+      && Boolean(turn.endReason && turn.endTimestamp);
+    if (closing) nodes.push(hasTurnTail ? { ...closing, hasTurnTail: true } : closing);
     nodes.push(...(scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort));
 
     if (turn.startSeq !== undefined && turn.endSeq !== undefined && turn.endReason && turn.endTimestamp) {
@@ -1108,6 +1168,15 @@ export function projectAgentChatNodes(
         usage: aggregateUsage(stats),
         stats,
         sessionStats: aggregateDurableSessionStats(settledTurnStats, events[0]?.seq === 0),
+        summaryText: closing ? textContent(closing.blocks) : undefined,
+        durationMs: turn.startedAt === undefined ? undefined
+          : Math.max(0, Date.parse(turn.endTimestamp) - turn.startedAt),
+        models: [...new Map(turn.requestIds.flatMap((requestId) => {
+          const request = requests.get(requestId);
+          return request ? [[JSON.stringify([request.providerId, request.model]), {
+            providerId: request.providerId, model: request.model,
+          }] as const] : [];
+        })).values()],
       };
       nodes.push(tail);
     }

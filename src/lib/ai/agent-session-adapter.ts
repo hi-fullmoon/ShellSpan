@@ -24,6 +24,7 @@ import type {
   AgentSessionSnapshot,
 } from '@/types/agent-session';
 import { projectAgentChatNodes } from './conversation-projection';
+import { findConversationTool } from './conversation-tool';
 import type { AiConversationNode } from './conversation-node';
 import type {
   AiApprovalDecisionInput,
@@ -153,8 +154,13 @@ function inboxSource(source: import('@/types/agent-session').AgentSessionMessage
 
 export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonly AiInboxItem[] {
   const items = new Map<string, AiInboxItem>();
+  let activeTurnId: string | undefined;
   for (const event of events) {
-    if (event.type === 'agent/inbox/spliced') {
+    if (event.type === 'turn/start') {
+      activeTurnId = event.turnId;
+    } else if (event.type === 'turn/end' && event.turnId === activeTurnId) {
+      activeTurnId = undefined;
+    } else if (event.type === 'agent/inbox/spliced') {
       for (const message of event.data.messages) {
         if (event.data.operation === 'enqueued') {
           items.set(message.messageId, {
@@ -164,7 +170,12 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
               : {}),
             lane: event.data.lane,
             content: message.content,
+            ...(message.images ? { images: message.images } : {}),
             state: 'queued',
+            // Runtime briefly enqueues even an immediate send before claiming it.
+            // Keep its presentation stable when agent/status becomes running.
+            startsTurn: message.source.kind === 'user'
+              && event.data.lane === 'nextTurn' && activeTurnId === undefined,
             source: inboxSource(message.source),
             provenance: message.source,
           });
@@ -180,6 +191,12 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
       if (previous) items.set(event.data.itemId, { ...previous, content: event.data.content });
     } else if (event.type === 'agent/inbox/item_removed') {
       items.delete(event.data.itemId);
+    } else if (event.type === 'agent/inbox/item_steered') {
+      const previous = items.get(event.data.itemId);
+      if (previous) {
+        items.delete(previous.id);
+        items.set(previous.id, { ...previous, lane: 'nextStep', startsTurn: false });
+      }
     } else if (event.type === 'agent/inbox/reordered') {
       const ordered = event.data.orderedItemIds
         .map((itemId) => items.get(itemId))
@@ -207,7 +224,7 @@ function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApprova
     candidate.kind === 'approvalMarker' && candidate.status === 'requested'
   ));
   if (node?.kind !== 'approvalMarker' || node.turnId === null || node.stepId === null) return null;
-  const tool = readable.find((candidate) => candidate.kind === 'tool' && candidate.callId === node.callId);
+  const tool = findConversationTool(nodes, node);
   return {
     sessionId: node.sessionId,
     turnId: node.turnId,
@@ -219,11 +236,11 @@ function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApprova
     prompt: node.prompt,
     reason: node.reason,
     expiresAtUnixMs: node.expiresAtUnixMs,
-    toolName: tool?.kind === 'tool' ? tool.name : node.callId,
-    target: tool?.kind === 'tool' ? tool.target : null,
-    arguments: tool?.kind === 'tool' ? tool.input : null,
-    effect: tool?.kind === 'tool' ? tool.effect : node.risk,
-    evidenceRefs: tool?.kind === 'tool' ? tool.evidenceRefs : [],
+    toolName: tool?.name ?? node.callId,
+    target: tool?.target ?? null,
+    arguments: tool?.input ?? null,
+    effect: tool?.effect ?? node.risk,
+    evidenceRefs: tool?.evidenceRefs ?? [],
   };
 }
 
@@ -245,7 +262,13 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
   const nodes = projectAgentChatNodes(events);
   return {
     summary: sessionSummary(state.snapshot, events, activity.status),
-    snapshot: { kind: 'agent', value: state.snapshot },
+    snapshot: {
+      kind: 'agent',
+      value: activity.plan === undefined ? state.snapshot : {
+        ...state.snapshot,
+        task: { ...state.snapshot.task, plan: activity.plan },
+      },
+    },
     nodes,
     activityNodes: activity.nodes,
     inbox: projectAgentInbox(events),
@@ -261,6 +284,7 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
           return [event.data.submission.clientOperationId];
         case 'agent/inbox/item_updated':
         case 'agent/inbox/item_removed':
+        case 'agent/inbox/item_steered':
         case 'agent/inbox/reordered':
         case 'session/renamed':
           return [event.data.clientOperationId];
@@ -337,6 +361,8 @@ export function createAgentSessionAdapter(
       resolveCommit = resolve;
       rejectCommit = reject;
     });
+    // A timeout can fire while the IPC command is still pending.
+    void committed.catch(() => undefined);
     const listener: AiSessionListener = (next) => {
       if (!next.committedOperationIds?.includes(clientOperationId) || settled) return;
       settled = true;
@@ -363,7 +389,9 @@ export function createAgentSessionAdapter(
       });
     }, 15_000);
     try {
-      await command();
+      // The durable receipt can arrive before the IPC response, or after the
+      // response is lost entirely. It is sufficient to settle the operation.
+      await Promise.race([command(), committed]);
       if (entry.view?.committedOperationIds?.includes(clientOperationId) && !settled) {
         settled = true;
         entry.listeners.delete(listener);
@@ -371,6 +399,21 @@ export function createAgentSessionAdapter(
       }
       await committed;
     } catch (error) {
+      // IPC may fail after durable append. Reconnect before reporting failure,
+      // so retries can acknowledge the original operation, even after consumption.
+      if (!entry.view?.committedOperationIds?.includes(clientOperationId)) {
+        try {
+          const refreshed = agentSessionView(await entry.client.reconnect());
+          entry.view = refreshed;
+          for (const subscribed of entry.listeners) subscribed(refreshed);
+        } catch {
+          // Preserve the original error; the caller retries the same identity.
+        }
+      }
+      if (entry.view?.committedOperationIds?.includes(clientOperationId)) {
+        entry.listeners.delete(listener);
+        return;
+      }
       if (!settled) {
         settled = true;
         entry.listeners.delete(listener);
@@ -505,7 +548,7 @@ export function createAgentSessionAdapter(
       const { type, sessionId, expectedRevision, clientOperationId } = input;
       const mutation = type === 'update'
         ? { type, itemId: input.itemId, content: input.content }
-        : type === 'remove'
+        : type === 'remove' || type === 'steer'
           ? { type, itemId: input.itemId }
           : { type, lane: input.lane, orderedItemIds: input.orderedItemIds };
       await waitForCommittedOperation(sessionId, clientOperationId, () => dependencies.mutateInbox({

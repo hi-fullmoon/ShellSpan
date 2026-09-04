@@ -35,6 +35,9 @@ export interface AiInboxItem {
   readonly lane: 'nextTurn' | 'nextStep';
   readonly content: string;
   readonly state: 'queued' | 'pending' | 'claimed';
+  /** Input accepted between turns; displayed in the conversation, without a queue row. */
+  readonly startsTurn?: boolean;
+  readonly images?: import('@/types/agent-session').AgentSessionInboxMessage['images'];
   readonly source: import('@/types/agent-session').AgentSessionProvenanceKind;
   readonly provenance?: import('@/types/agent-session').AgentSessionMessageSource;
 }
@@ -81,30 +84,11 @@ export interface AiSessionView {
   readonly contextUsage?: AiContextUsage;
 }
 
-export type AiInboxMutationInput =
-  | Readonly<{
-      type: 'update';
-      sessionId: string;
-      itemId: string;
-      content: string;
-      expectedRevision: number;
-      clientOperationId: string;
-    }>
-  | Readonly<{
-      type: 'remove';
-      sessionId: string;
-      itemId: string;
-      expectedRevision: number;
-      clientOperationId: string;
-    }>
-  | Readonly<{
-      type: 'reorder';
-      sessionId: string;
-      lane: 'nextTurn' | 'nextStep';
-      orderedItemIds: readonly string[];
-      expectedRevision: number;
-      clientOperationId: string;
-    }>;
+export type AiInboxMutationInput = Readonly<{
+  sessionId: string;
+  expectedRevision: number;
+  clientOperationId: string;
+}> & import('@/types/agent-session').AgentInboxMutation;
 
 export interface AiSessionRenameInput {
   readonly sessionId: string;
