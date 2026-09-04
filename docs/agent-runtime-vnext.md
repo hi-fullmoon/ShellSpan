@@ -11,6 +11,18 @@
 
 ## 1. Ownership
 
+Root Session model and permission choices remain editable during conversation. The Runtime
+commits `session/model_selected` (a credential-free provider descriptor) and
+`session/permission_changed`; replay projects them into the Session header. A model Step
+captures one provider/adapter pair and permission prompt for its requests and retries, while
+the next Step reads the latest selection. Native tool preparation reads the latest permission;
+already prepared calls and pending approvals retain their recorded authorization context.
+The composer displays committed Session choices without changing global provider defaults.
+
+Root Session turns have no default Step count limit, matching deepseek-harness: tool
+continuations and approval resumes can run until completion, cancellation, a hook rejection,
+or a runtime failure. Explicit Step budgets, including subagent budgets, remain enforced.
+
 Image input uses typed refs in user input and Model Surface, durable renderer
 drafts, native immutable blobs and verified transient HTTP image blocks. Images
 survive compaction/restart separately from text summaries. Bounded, cancellable
@@ -195,8 +207,10 @@ parallel-tool request flag does not authorize local parallel execution.
 Questions persist their identity, answer and exact resumed queue; unsent question-form drafts
 are page-lifetime memory. Image drafts use IndexedDB, while normalized immutable PNG blobs live
 in `agent-runtime/images-v1`; no automatic blob GC or full ICC color management is claimed.
-Only Qwen profile / Chat Completions / exact `qwen3-vl-plus` and `qwen3-vl-flash` admit image input.
-128000 tokens is a conservative application context cap, not a universal vendor maximum.
+Image input uses Chat Completions with the exact models in the shared vision contract:
+Qwen `qwen3-vl-plus` / `qwen3-vl-flash`, and Kimi Code `k3` / `k3-256k`.
+Qwen uses a conservative 128000-token application context cap; Kimi uses 262144 tokens,
+the 256K context available to all K3-eligible memberships. K3's 1M context depends on membership.
 
 Skills and @file share the explicitly selected, durable local/remote project identity.
 Discovery is shallow and bounded. @file inserts ordinary text, never implicitly reads content
