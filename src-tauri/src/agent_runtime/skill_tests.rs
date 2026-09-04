@@ -1,5 +1,6 @@
 use super::*;
 use crate::agent_runtime::skills::*;
+use crate::agent_runtime::AgentCapabilityScope;
 pub(super) fn create_skill_session(runtime: &AgentRuntime, session: &str, root: &std::path::Path) {
     runtime
         .create_session(CreateAgentSessionRequest {
@@ -61,6 +62,141 @@ fn skill_call(name: &str) -> ModelToolCall {
 }
 
 #[tokio::test]
+async fn skill_builtin_rootless_local_remote_slash_model_permissions_and_replay() {
+    for kind in ["local", "remote"] {
+        let model = FakeAdapter::new(vec![
+            tool_response(vec![skill_call("network-diagnosis")]),
+            reply("done", &[]),
+        ]);
+        let (storage, runtime) = configured(model.clone());
+        let mut target: AgentSessionTarget = serde_json::from_value(json!({
+            "kind": kind, "targetId": "ops-target", "sessionId": "terminal",
+            "host": "example.test", "port": 22, "username": "operator"
+        }))
+        .unwrap();
+        if kind == "local" {
+            target.host = None;
+            target.port = None;
+            target.username = None;
+        }
+        let request = CreateAgentSessionRequest {
+            session_id: "builtin".into(),
+            task_id: "task-builtin".into(),
+            goal: "Inspect target".into(),
+            parent_session_id: None,
+            target: Some(target.clone()),
+            permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
+            success_criteria: vec!["Diagnose without a directory".into()],
+            capability_scope: None,
+            subagent: None,
+        };
+        runtime.create_session(request.clone()).unwrap();
+        let list = runtime.list_skills("builtin").await.unwrap();
+        assert_eq!(list.status, "fresh");
+        assert_eq!(list.entries.len(), 5);
+        assert_eq!(model.request_count(), 0);
+        assert!(
+            all_events(&runtime, "builtin")
+                .iter()
+                .find_map(crate::agent_runtime::file_references::bound_scope)
+                .is_none(),
+            "bundled skills must not bind a filesystem root"
+        );
+        for entry in &list.entries {
+            runtime
+                .tools
+                .skills
+                .load(
+                    "builtin",
+                    &entry.name,
+                    SkillInvocationKind::User,
+                    vec![],
+                    None,
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap()
+                .validate()
+                .unwrap();
+        }
+        runtime
+            .followup("builtin", "user".into(), "/system-status".into())
+            .unwrap();
+        runtime.start("builtin", provider(), None).unwrap();
+        idle_skill(&runtime, "builtin").await;
+        let requests = model.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        let first = serde_json::to_string(&requests[0]).unwrap();
+        let second = serde_json::to_string(&requests[1]).unwrap();
+        assert!(first.contains("# System status"));
+        assert!(
+            !first.contains("# Docker diagnosis"),
+            "only invoked bodies enter the prompt"
+        );
+        assert!(second.contains("# Network diagnosis"));
+        assert!(second.contains(crate::agent_runtime::builtin_skills::PROVIDER));
+        drop(requests);
+        let events = all_events(&runtime, "builtin");
+        assert!(events.iter().any(|e| matches!(&e.payload, AgentSessionEventPayload::ToolResult { name, status: AgentToolResultStatus::Completed, .. } if name == SKILL_TOOL)));
+        assert_eq!(
+            runtime.session("builtin").unwrap().header.permission_mode,
+            Some(AgentSessionPermissionMode::RequestApproval)
+        );
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        assert!(runtime
+            .tools
+            .skills
+            .load(
+                "builtin",
+                "system-status",
+                SkillInvocationKind::User,
+                vec![],
+                None,
+                cancelled
+            )
+            .await
+            .is_err());
+        runtime
+            .create_session(CreateAgentSessionRequest {
+                session_id: "restricted".into(),
+                task_id: "task-restricted".into(),
+                capability_scope: Some(AgentCapabilityScope {
+                    tool_names: vec!["run_terminal_command".into()],
+                    effects: vec![AgentSessionEffect::ReadOnly],
+                    target_ids: vec![target.target_id],
+                }),
+                ..request
+            })
+            .unwrap();
+        assert!(runtime
+            .list_skills("restricted")
+            .await
+            .unwrap()
+            .entries
+            .is_empty());
+        assert!(runtime
+            .tools
+            .skills
+            .load(
+                "restricted",
+                "system-status",
+                SkillInvocationKind::User,
+                vec![],
+                None,
+                CancellationToken::new()
+            )
+            .await
+            .is_err());
+        drop(runtime);
+        let restored = AgentRuntimeBuilder::new().build();
+        restored.configure(storage.path().into()).unwrap();
+        let replay = serde_json::to_string(&restored.session("builtin").unwrap().surface).unwrap();
+        assert!(replay.contains("# System status") && replay.contains("# Network diagnosis"));
+    }
+}
+
+#[tokio::test]
 async fn skill_runtime_slash_model_complete_large_body_and_replay() {
     let body = format!("{}\nFINAL INSTRUCTION", "full instructions ".repeat(1024));
     let model = FakeAdapter::new(vec![
@@ -78,7 +214,10 @@ async fn skill_runtime_slash_model_complete_large_body_and_replay() {
     );
     create_skill_session(&runtime, "skills", root.path());
     let list = runtime.list_skills("skills").await.unwrap();
-    assert_eq!(list.entries.len(), 2);
+    assert_eq!(
+        list.entries.len(),
+        2 + crate::agent_runtime::builtin_skills::definitions().len()
+    );
     assert_eq!(model.request_count(), 0);
     runtime
         .followup(
@@ -792,7 +931,13 @@ async fn skill_current_winner_policy_delete_rename_and_cross_target_isolation() 
     std::fs::write(a.path().join(".agents/skills/0-winner.md"),"---\nname: same\ndescription: d\ndisable-model-invocation: true\nuser-invocable: false\n---\ndisabled winner").unwrap();
     assert!(read("a", SkillInvocationKind::Model).await.is_err());
     assert!(read("a", SkillInvocationKind::User).await.is_err());
-    assert!(runtime.list_skills("a").await.unwrap().entries.is_empty());
+    assert!(runtime
+        .list_skills("a")
+        .await
+        .unwrap()
+        .entries
+        .iter()
+        .all(|entry| entry.name != "same"));
     std::fs::remove_file(a.path().join(".agents/skills/0-winner.md")).unwrap();
     write_skill(a.path(), "same", "user-invocable: false\n", "latest body");
     assert!(read("a", SkillInvocationKind::User).await.is_err());

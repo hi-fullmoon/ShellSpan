@@ -32,7 +32,10 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> serde_json::Value {
     serde_json::from_slice(&bytes[end..end + len]).unwrap()
 }
 async fn respond(socket: &mut tokio::net::TcpStream, mime: &str, body: String) {
-    socket.write_all(format!("HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+    if let Err(error) = socket.write_all(format!("HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await {
+        // Autocomplete cancels obsolete requests before their response arrives.
+        assert!(matches!(error.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset));
+    }
 }
 
 #[tokio::test]
@@ -113,7 +116,7 @@ async fn browser_bridge(files: bool) {
             "agent_runtime_submit_images"=>{if fail_submit {fail_submit=false;return Err("IMAGE_TEST_WRITE_FAILURE".into());}runtime.submit_images(serde_json::from_value(input.clone()).unwrap()).await?;runtime.await_idle(session).await?;serde_json::to_value(runtime.session(session)?).unwrap()},
             "agent_runtime_cancel_image_submission"=>json!(runtime.cancel_image_submission(serde_json::from_value(input.clone()).unwrap())?),
             "agent_runtime_image_preview"=>json!(runtime.image_preview(serde_json::from_value(input.clone()).unwrap())?),
-            "agent_runtime_create_session"=>{let create:CreateAgentSessionRequest=serde_json::from_value(args["request"].clone()).unwrap();assert_eq!(create.target.as_ref().unwrap().cwd.as_deref(),project.to_str());ids.push(create.session_id.clone());serde_json::to_value(runtime.create_session(create)?).unwrap()},
+            "agent_runtime_create_session"=>{let create:CreateAgentSessionRequest=serde_json::from_value(args["request"].clone()).unwrap();assert!(create.target.as_ref().unwrap().cwd.as_deref().is_none_or(|cwd| Some(cwd) == project.to_str()));ids.push(create.session_id.clone());serde_json::to_value(runtime.create_session(create)?).unwrap()},
             "agent_runtime_get_session"=>serde_json::to_value(runtime.session(session)?).unwrap(),
             "agent_runtime_get_committed_events"=>serde_json::to_value(runtime.committed_events(serde_json::from_value(args["request"].clone()).unwrap())?).unwrap(),
             "agent_runtime_list_sessions"=>serde_json::to_value(runtime.sessions(serde_json::from_value(args["request"].clone()).unwrap())?).unwrap(),
@@ -181,6 +184,6 @@ async fn browser_bridge(files: bool) {
     }
     assert!(captured
         .iter()
-        .any(|r| r.to_string().contains("IMAGE AND SKILL FULL INSTRUCTIONS")));
+        .any(|r| r.to_string().contains("# System status")));
     server.abort();
 }

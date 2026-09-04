@@ -252,7 +252,7 @@ fn image_format_base64_mime_name_and_reference_bounds_fail_closed() {
         assert!(store.import(&[u], &CancellationToken::new()).is_err());
     }
     assert!(store
-        .import(&vec![valid.clone(); 5], &CancellationToken::new())
+        .import(&vec![valid.clone(); 21], &CancellationToken::new())
         .is_err());
     let mut refs = store.import(&[valid], &CancellationToken::new()).unwrap();
     let reference = &mut refs[0];
@@ -487,18 +487,18 @@ async fn image_text_or_unknown_model_rejected_before_enqueue_and_vision_budget_i
     let (_storage, runtime, model) = setup();
     runtime.start("images", vision_provider(), None).unwrap();
     runtime.await_idle("images").await.unwrap();
-    let mut four = input("four");
-    four.images = vec![upload(ImageFormat::Png); 4];
-    runtime.submit_images(four).await.unwrap();
+    let mut twenty = input("twenty");
+    twenty.images = vec![upload(ImageFormat::Png); 20];
+    runtime.submit_images(twenty).await.unwrap();
     runtime.await_idle("images").await.unwrap();
     assert!(runtime
-        .submit_images(input("fifth"))
+        .submit_images(input("twenty-first"))
         .await
         .unwrap_err()
         .contains("BUDGET"));
     assert_eq!(model.request_count(), 1);
     let events = all_events(&runtime, "images");
-    assert!(events.iter().any(|e|matches!(e.payload,AgentSessionEventPayload::RequestContext {input_tokens:Some(n),..}if n>65536)));
+    assert!(events.iter().any(|e|matches!(e.payload,AgentSessionEventPayload::RequestContext {input_tokens:Some(n),..}if n>81920)));
     let encoded = serde_json::to_string(&events).unwrap();
     assert!(!encoded.contains("data:image"));
 }
@@ -634,4 +634,45 @@ async fn image_concurrent_duplicate_and_conflicting_operations_commit_once() {
     let mut changed = input("same");
     changed.content = "different secret sk-not-real-password".into();
     assert!(runtime.submit_images(changed).await.is_err());
+}
+
+#[tokio::test]
+async fn inbox_steer_image_submission_keeps_attachment_in_the_next_model_step() {
+    let model = FakeAdapter::new(vec![
+        FakeScript::Wait {
+            response: Some(response("first")),
+        },
+        reply("image received", &[]),
+    ]);
+    let (storage, runtime) = configured(model.clone());
+    skill_tests::create_skill_session(&runtime, "images", storage.path());
+    runtime
+        .followup("images", "initial".into(), "first".into())
+        .unwrap();
+    runtime.start("images", vision_provider(), None).unwrap();
+    model.started.notified().await;
+    runtime.submit_images(input("queued-image")).await.unwrap();
+    let before = runtime.session("images").unwrap();
+    let message = before.inbox.next_turn[0].clone();
+    let mutation = crate::agent_runtime::AgentInboxMutationInput {
+        session_id: "images".into(),
+        expected_revision: before.event_count,
+        client_operation_id: "steer-image".into(),
+        mutation: crate::agent_runtime::AgentInboxMutation::Steer {
+            item_id: message.message_id.clone(),
+        },
+    };
+    let accepted = runtime.mutate_inbox(mutation).unwrap();
+    assert_eq!(accepted.inbox.next_step, vec![message.clone()]);
+    model.release.notify_one();
+    runtime.await_idle("images").await.unwrap();
+    let requests = model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].messages.iter().any(|m| matches!(m, ModelMessage::UserImages { content, images, data_urls } if content == &message.content && images == &message.images && data_urls.len() == 1)));
+    let users = all_events(&runtime, "images");
+    let original = users.iter().find(|e| matches!(&e.payload, AgentSessionEventPayload::UserMessage { message } if message.message_id == "initial")).unwrap();
+    let steered = users.iter().filter(|e| matches!(&e.payload, AgentSessionEventPayload::UserMessage { message: queued } if queued == &message)).collect::<Vec<_>>();
+    assert_eq!(steered.len(), 1);
+    assert_eq!(steered[0].turn_id, original.turn_id);
+    assert_ne!(steered[0].step_id, original.step_id);
 }
