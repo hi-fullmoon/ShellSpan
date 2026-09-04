@@ -6,7 +6,7 @@
 去重使这个重复 marker 消失，第二轮内容相应上移。正文、统计、面板宽度和 composer 均未改变。
 其余 17 场景在首次逐场景比较中像素及语义均一致，没有更新。
 
-- [原截图](pagination-before.png) / [原语义](pagination-before.json)
+- [原语义](pagination-before.json)
 - [当前截图](../ai-panel-phase5/evidence/screenshots/pagination-560-light-completed-1x.png) /
   [当前语义](../ai-panel-phase5/evidence/semantic/pagination-560-light-completed-1x.json)
 - 更新原因保存在 [原基线 manifest](../ai-panel-phase5/evidence/manifest.json)。

@@ -4,21 +4,17 @@
 > loop, compatibility readers, dual-write paths, and lifecycle-as-conversation rendering are not
 > part of the product.
 
-> Current delivery (2026-09-04): Stage 1–6D and final Stage 7 fixes are integrated as
-> uncommitted changes in the main workspace, preserving HEAD `31ce4343` and the user's
-> InputGroup change. Questions, Skills, images and path-only completion are implemented.
-> See [current handoff](ai-runtime-handoff.md) and [cumulative acceptance](ai-runtime-stage7-validation.md).
-> macOS/local HTTP/isolated Linux and configured live results are separate evidence classes.
-> Windows native compilation, junction/reparse races and execution remain NOT RUN;
-> this is not an all-platform or total-goal completion claim. Earlier stage reports are historical.
+> This document describes the current Runtime contract. For end-user workflows, see
+> the [Terminal Agent guide](terminal-agent.md). macOS, local HTTP, isolated Linux,
+> and configured live-provider results are separate evidence classes. Windows native
+> compilation, junction/reparse races and execution still require validation.
 
 ## 1. Ownership
 
-Stage 6C adds typed image refs to user input and Model Surface, durable renderer
+Image input uses typed refs in user input and Model Surface, durable renderer
 drafts, native immutable blobs and verified transient HTTP image blocks. Images
-survive compaction/restart separately from text summaries. See the [implementation](ai-runtime-stage6c.md)
-and [validation](ai-runtime-stage6c-validation.md). Stage 6D adds bounded,
-cancellable path discovery through Runtime/IPC and the existing composer; it
+survive compaction/restart separately from text summaries. Bounded, cancellable
+path discovery runs through Runtime/IPC and the existing composer; it
 shares the Skills project scope and does not attach file contents to Model Surface.
 
 Rust owns Agent business state:
@@ -181,8 +177,7 @@ events.
 
 The executable source is the shared `src/lib/provider-contract.json` loaded by TypeScript and
 Rust. An explicit profile takes precedence over host inference. Context values are operational
-admission budgets, not verified vendor maxima for every model alias. See the [Stage 4 contract
-and semantic checkpoint details](ai-runtime-stage4.md) and [Stage 3B request recovery](ai-runtime-stage3b.md).
+admission budgets, not verified vendor maxima for every model alias.
 
 Request retries retain failed attempts as audit facts without replaying their partial output as
 committed assistant/tool content. Provider policy is configurable and restored for child sessions;
@@ -192,8 +187,8 @@ until `[DONE]` or clean EOF. Clean EOF after a finish reason remains valid witho
 stays unknown. Abnormal EOF and idle timeout fail the uncommitted attempt; cancellation wins.
 No complete tool or answer is committed twice through recovery. This boundary has gated real HTTP
 tests and was verified against MiniMax-M2.7 live, not just single-buffer fixtures.
-The Stage 5 local scheduler uses a bounded rolling pool with ordered commits; a Provider's
-parallel-tool request flag does not authorize local parallel execution. See [scheduler behavior](ai-runtime-stage5.md).
+The local scheduler uses a bounded rolling pool with ordered commits; a Provider's
+parallel-tool request flag does not authorize local parallel execution.
 
 ## 5. Persistence and incompatibility
 
@@ -206,8 +201,8 @@ Only Qwen profile / Chat Completions / exact `qwen3-vl-plus` and `qwen3-vl-flash
 Skills and @file share the explicitly selected, durable local/remote project identity.
 Discovery is shallow and bounded. @file inserts ordinary text, never implicitly reads content
 or grants tool permissions. Native/SSH scopes still authorize later reads. SSH discovery requires
-the fixed Python 3 helper; unavailability never falls back to local files. See the full
-[Skills](ai-runtime-stage6b.md), [images](ai-runtime-stage6c.md), and [path](ai-runtime-stage6d.md) contracts.
+the fixed Python 3 helper; unavailability never falls back to local files. User workflows
+for Skills, images, and file references are covered in the [Terminal Agent guide](terminal-agent.md).
 
 Active v4 logs are stored under the application data directory at
 `agent-runtime/sessions-v4/`; archived logs use `agent-runtime/archives-v4/`. Older namespaces are
@@ -256,7 +251,7 @@ computes every node revision, and exercises 20 repeated streaming
 revisions. The Phase 6 fixture test maps every acceptance scenario to direct Event, Conversation,
 Activity, Stats, and visual evidence.
 The existing benchmark checks semantic invariants and reports timing; it has no numeric latency
-failure threshold. Stage 7 did not change its workload or invent a threshold to obtain PASS.
+failure threshold.
 The entry first runs ordinary workload tests and then rejects missing/non-finite timing or fewer
 than five measured samples. A successful experimental benchmark process alone is not PASS.
 CI runs portable `stage6:frontend`/`stage6:rust` gates, pinned macOS pixel/browser bridges,
