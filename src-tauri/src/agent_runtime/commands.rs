@@ -229,9 +229,41 @@ pub(crate) fn agent_runtime_start(
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
     runtime.configure_credentials(credentials.inner().clone())?;
+    let provider = runtime.session(&input.session_id)?.header.model_selection
+        .as_ref().map(super::subagent::provider_config).transpose()?.unwrap_or(input.provider);
+    validate_provider_config(&provider, true)?;
+    let api_key = api_key_for_provider(credentials.inner(), &provider)?;
+    runtime.start(&input.session_id, provider, api_key)
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_select_model(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    credentials: State<'_, CredentialManager>,
+    input: AgentRuntimeStartInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
     validate_provider_config(&input.provider, true)?;
     let api_key = api_key_for_provider(credentials.inner(), &input.provider)?;
-    runtime.start(&input.session_id, input.provider, api_key)
+    runtime.select_model(&input.session_id, input.provider, api_key)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentPermissionInput {
+    session_id: String,
+    mode: super::AgentSessionPermissionMode,
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_set_permission(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentPermissionInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.set_permission_mode(&input.session_id, input.mode)
 }
 
 #[tauri::command]

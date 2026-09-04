@@ -55,7 +55,7 @@ pub(crate) fn vision_route(provider: &AiProviderConfig) -> Result<&'static Visio
         provider.kind == AiProviderKind::OpenAiCompatible && route.kind == "openAiCompatible"
             && route.profile == super::provider::profile_id(provider)
             && route.models.iter().any(|model| model == &provider.model.trim().to_ascii_lowercase())
-    }).ok_or_else(|| "IMAGE_MODEL_UNSUPPORTED: choose Qwen qwen3-vl-plus or qwen3-vl-flash; unknown/text-only models cannot receive images".into())
+    }).ok_or_else(|| "IMAGE_MODEL_UNSUPPORTED: image input is not enabled for this provider, protocol, and model".into())
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

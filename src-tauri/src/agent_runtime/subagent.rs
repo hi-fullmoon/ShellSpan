@@ -841,7 +841,8 @@ impl SubAgentManager {
         let descriptor_id = format!("descriptor-{}", Uuid::new_v4().simple());
         let child_session_id = format!("session-{}", Uuid::new_v4().simple());
         let child_task_id = format!("task-{}", Uuid::new_v4().simple());
-        let provider = provider_descriptor(&parent_entry.provider);
+        let parent_model = parent_entry.model()?;
+        let provider = provider_descriptor(&parent_model.provider);
         let metadata = AgentSubagentSession {
             descriptor_id: descriptor_id.clone(),
             parent_task_id: parent.header.task_id.clone(),
@@ -885,8 +886,8 @@ impl SubAgentManager {
         let handle = Arc::new(self.agents.attach(
             self.sessions.clone(),
             child_session_id.clone(),
-            parent_entry.provider.clone(),
-            Arc::clone(&parent_entry.adapter),
+            parent_model.provider.clone(),
+            Arc::clone(&parent_model.adapter),
         )?);
         self.agents.set_owner(&handle.entry(), &parent_entry)?;
         self.handles

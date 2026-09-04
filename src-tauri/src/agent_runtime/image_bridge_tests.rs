@@ -39,6 +39,96 @@ async fn respond(socket: &mut tokio::net::TcpStream, mime: &str, body: String) {
 }
 
 #[tokio::test]
+async fn image_kimi_k3_submission_reaches_chat_transport_with_pixels() {
+    for (model, caption) in ["k3", "k3-256k"].into_iter().flat_map(|model| {
+        ["Describe this image", "", " \n\t "]
+            .into_iter()
+            .map(move |caption| (model, caption))
+    }) {
+        let storage = tempfile::tempdir().unwrap();
+        let runtime = AgentRuntime::default();
+        runtime.configure(storage.path().to_path_buf()).unwrap();
+        skill_tests::create_skill_session(&runtime, "images", storage.path());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut provider = image_tests::vision_provider();
+        provider.profile = Some("kimi".into());
+        provider.model = model.into();
+        provider.base_url = format!("http://{}", listener.local_addr().unwrap());
+        provider.reasoning_effort = Some(crate::ai::AiReasoningEffort::High);
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let body = read_request(&mut socket).await;
+            respond(&mut socket, "text/event-stream", concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Image received\"},\"finish_reason\":\"stop\"}]}\n\n",
+                "data: [DONE]\n\n"
+            ).into()).await;
+            body
+        });
+        runtime.start("images", provider, None).unwrap();
+        runtime
+            .submit_images(crate::agent_runtime::images::ImageSubmission {
+                session_id: "images".into(),
+                client_operation_id: "kimi-image".into(),
+                content: caption.into(),
+                lane: AgentInboxLane::NextTurn,
+                images: vec![image_tests::upload(image::ImageFormat::Png)],
+            })
+            .await
+            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            runtime.await_idle("images"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let body = tokio::time::timeout(std::time::Duration::from_secs(10), server)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(body["model"], model);
+        assert_eq!(body["reasoning_effort"], "high");
+        let content = body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|message| message["role"] == "user" && message["content"].is_array())
+            .unwrap()["content"]
+            .as_array()
+            .unwrap();
+        let text_blocks: Vec<_> = content
+            .iter()
+            .filter(|block| block["type"] == "text")
+            .collect();
+        if caption.trim().is_empty() {
+            assert!(
+                text_blocks.is_empty(),
+                "image-only requests must omit blank text blocks"
+            );
+        } else {
+            assert_eq!(text_blocks.len(), 1);
+            assert_eq!(text_blocks[0]["text"], caption);
+        }
+        let images: Vec<_> = content
+            .iter()
+            .filter(|block| block["type"] == "image_url")
+            .collect();
+        assert_eq!(images.len(), 1);
+        let bytes = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            images[0]["image_url"]["url"]
+                .as_str()
+                .unwrap()
+                .strip_prefix("data:image/png;base64,")
+                .unwrap(),
+        )
+        .unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (12, 8));
+    }
+}
+
+#[tokio::test]
 #[ignore = "requires Stage 6C real browser/controller runner"]
 async fn image_browser_controller_http_bridge() {
     browser_bridge(false).await;

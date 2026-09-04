@@ -569,6 +569,10 @@ pub(crate) enum AgentSessionEventPayload {
         previous_revision: u64,
         client_operation_id: String,
     },
+    #[serde(rename = "session/model_selected")]
+    SessionModelSelected { provider: AgentSubagentModel },
+    #[serde(rename = "session/permission_changed")]
+    SessionPermissionChanged { mode: AgentSessionPermissionMode },
     #[serde(rename = "session/renamed")]
     SessionRenamed {
         title: String,

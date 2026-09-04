@@ -747,7 +747,11 @@ fn chat_messages(
             ModelMessage::UserImages {
                 content, data_urls, ..
             } => {
-                let mut blocks = vec![json!({"type":"text", "text":content})];
+                let mut blocks = Vec::new();
+                // Image-only submissions are valid, but providers can reject empty text parts.
+                if !content.trim().is_empty() {
+                    blocks.push(json!({"type":"text", "text":content}));
+                }
                 blocks.extend(
                     data_urls
                         .iter()

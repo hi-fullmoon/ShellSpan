@@ -249,7 +249,7 @@ impl AgentRuntime {
         if entry.cancellation().is_cancelled() || token.is_cancelled() {
             return Err("IMAGE_CANCELLED".into());
         }
-        let route = super::images::vision_route(&entry.provider)?;
+        let route = super::images::vision_route(&entry.model()?.provider)?;
         let store = self.models.images.clone();
         let uploads = input.images;
         let import_token = token.clone();
@@ -329,7 +329,7 @@ impl AgentRuntime {
         if count > route.max_request_images {
             return Err("IMAGE_REQUEST_BUDGET: start a new session for more images".into());
         }
-        let budget = super::estimate_model_surface_budget(&entry.provider, &request);
+        let budget = super::estimate_model_surface_budget(&entry.model()?.provider, &request);
         if budget.estimated_input_tokens > budget.usable_input_tokens {
             return Err("IMAGE_TOKEN_BUDGET".into());
         }
@@ -448,7 +448,8 @@ impl AgentRuntime {
             };
         }
         if self.agents.get(&session_id)?.is_none() {
-            let provider = super::subagent::provider_config(&question.provider)?;
+            let selected = self.sessions.snapshot(&session_id)?.header.model_selection;
+            let provider = super::subagent::provider_config(selected.as_ref().unwrap_or(&question.provider))?;
             crate::ai::validate_provider_config(&provider, true)?;
             let api_key = match credentials {
                 Some(credentials) => crate::ai::api_key_for_provider(credentials, &provider)?,
@@ -524,6 +525,55 @@ impl AgentRuntime {
         self.sessions.create(request)
     }
 
+    pub(crate) fn select_model(
+        &self,
+        session_id: &str,
+        provider: AiProviderConfig,
+        api_key: Option<String>,
+    ) -> Result<AgentSessionSnapshot, String> {
+        let snapshot = self.sessions.snapshot(session_id)?;
+        if snapshot.header.subagent.is_some() || snapshot.ended || snapshot.archived {
+            return Err("Model selection requires an active root session".into());
+        }
+        crate::ai::validate_provider_config(&provider, true)?;
+        // Retained image history must remain consumable by the selected model.
+        if snapshot.surface.messages.iter().any(|message| matches!(message,
+            super::AgentSurfaceMessage::UserImages { images, .. } if !images.is_empty()))
+            || snapshot.inbox.next_turn.iter().chain(&snapshot.inbox.next_step)
+                .any(|message| !message.images.is_empty()) {
+            super::images::vision_route(&provider)?;
+        }
+        let descriptor = super::subagent::provider_descriptor(&provider);
+        let adapter = self.models.resolve(provider.clone(), api_key)?;
+        let entry = self.agents.get(session_id)?;
+        let mut current = entry.as_ref().map(|entry| entry.model.lock()
+            .map_err(|_| "Agent model selection lock is unavailable".to_string())).transpose()?;
+        if self.sessions.snapshot(session_id)?.header.model_selection.as_ref() != Some(&descriptor) {
+            self.sessions.append(session_id, None, None,
+                super::AgentSessionEventPayload::SessionModelSelected { provider: descriptor })?;
+        }
+        if let Some(current) = current.as_mut() {
+            **current = super::AgentModelSelection { provider, adapter };
+        }
+        self.sessions.snapshot(session_id)
+    }
+
+    pub(crate) fn set_permission_mode(
+        &self,
+        session_id: &str,
+        mode: super::AgentSessionPermissionMode,
+    ) -> Result<AgentSessionSnapshot, String> {
+        let snapshot = self.sessions.snapshot(session_id)?;
+        if snapshot.header.subagent.is_some() || snapshot.ended || snapshot.archived {
+            return Err("Permission selection requires an active root session".into());
+        }
+        if snapshot.header.permission_mode != Some(mode) {
+            self.sessions.append(session_id, None, None,
+                super::AgentSessionEventPayload::SessionPermissionChanged { mode })?;
+        }
+        self.sessions.snapshot(session_id)
+    }
+
     pub(crate) fn start(
         &self,
         session_id: &str,
@@ -539,6 +589,12 @@ impl AgentRuntime {
         }
         self.sessions.repair_step_claims(session_id)?;
         let adapter = self.models.resolve(provider.clone(), api_key)?;
+        if self.sessions.snapshot(session_id)?.header.model_selection.is_none() {
+            self.sessions.append(session_id, None, None,
+                super::AgentSessionEventPayload::SessionModelSelected {
+                    provider: super::subagent::provider_descriptor(&provider),
+                })?;
+        }
         let handle = self.agents.attach(
             self.sessions.clone(),
             session_id.to_string(),
@@ -1909,8 +1965,6 @@ mod tests {
         configured_with(
             adapter,
             AgentDriverConfig {
-                max_steps_per_turn: 8,
-                max_turns_per_session: 64,
                 retry_policy: RetryPolicy {
                     max_attempts: 2,
                     initial_delay_ms: 1,
@@ -1918,6 +1972,7 @@ mod tests {
                     max_server_delay_ms: 1,
                     jitter_ratio: 0.0,
                 },
+                ..AgentDriverConfig::default()
             },
         )
     }
@@ -2036,6 +2091,7 @@ mod tests {
         let changed_events = super::super::request_log::request_events(
             &events,
             &entry,
+            &entry.model().unwrap().provider,
             &changed,
             AgentRequestReason::Initial,
             1,
@@ -2053,6 +2109,7 @@ mod tests {
             super::super::request_log::request_events(
                 &events,
                 &entry,
+                &entry.model().unwrap().provider,
                 &changed,
                 AgentRequestReason::Initial,
                 1,
@@ -2068,6 +2125,7 @@ mod tests {
             super::super::request_log::request_events(
                 &events,
                 &entry,
+                &entry.model().unwrap().provider,
                 &changed,
                 AgentRequestReason::Recovery,
                 2,
@@ -2893,6 +2951,51 @@ mod tests {
         assert!(recovered.task.evidence.iter().any(|evidence| {
             evidence.kind == "artifact-integrity" && evidence.summary.contains("missing")
         }));
+    }
+
+    #[tokio::test]
+    async fn default_step_budget_allows_long_tool_turns_with_and_without_approvals() {
+        for requires_approval in [false, true] {
+            let native = RecordingNativeRuntime::new(requires_approval);
+            let mut scripts = (0..9)
+                .map(|index| {
+                    tool_response(vec![native_call(&format!("call-{index}"), "list_directory")])
+                })
+                .collect::<Vec<_>>();
+            scripts.push(reply("All nine tools completed.", &[]));
+            let adapter = FakeAdapter::new(scripts);
+            let (_root, runtime) = configured_with_native(
+                adapter.clone(),
+                AgentDriverConfig::default(),
+                native.clone(),
+            );
+            let session_id = "session-long-tool-turn";
+            create(&runtime, session_id);
+            runtime
+                .followup(session_id, "message-long-turn".into(), "inspect nine times".into())
+                .unwrap();
+            runtime.start(session_id, provider(), None).unwrap();
+            runtime.await_idle(session_id).await.unwrap();
+
+            if requires_approval {
+                for index in 0..9 {
+                    let approval = pending_approval(&runtime, session_id);
+                    assert_eq!(approval.call_id, format!("call-{index}"));
+                    runtime.approve_tool(approval).await.unwrap();
+                    runtime.await_idle(session_id).await.unwrap();
+                }
+            }
+
+            assert_eq!(native.executions.load(Ordering::Acquire), 9);
+            assert_eq!(adapter.request_count(), 10);
+            let types = event_types(&runtime, session_id);
+            assert_eq!(types.iter().filter(|kind| *kind == "turn/start").count(), 1);
+            assert_eq!(types.iter().filter(|kind| *kind == "step/start").count(), 10);
+            assert_eq!(types.iter().filter(|kind| *kind == "turn/end").count(), 1);
+            let snapshot = runtime.session(session_id).unwrap();
+            assert_eq!(snapshot.status, AgentSessionStatus::Idle);
+            assert!(!snapshot.ended);
+        }
     }
 
     #[tokio::test]
@@ -4271,6 +4374,7 @@ mod tests {
                 .get("snapshot")
                 .unwrap()
                 .unwrap()
+                .model().unwrap()
                 .provider
                 .retry_policy
                 .unwrap()
@@ -4570,7 +4674,7 @@ mod tests {
         let (_root, runtime) = configured_with(
             step_limited.clone(),
             AgentDriverConfig {
-                max_steps_per_turn: 1,
+                max_steps_per_turn: Some(1),
                 ..AgentDriverConfig::default()
             },
         );
@@ -4646,6 +4750,60 @@ mod tests {
                 AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
                     if reason.starts_with("turnLimitExceeded")
             )));
+    }
+
+    #[tokio::test]
+    async fn session_settings_switch_at_next_request_and_survive_restart() {
+        let first = FakeAdapter::new(vec![FakeScript::Wait { response: Some(response("first")) }]);
+        let second = FakeAdapter::new(vec![reply("second", &[])]);
+        struct RoutingFactory(Arc<FakeAdapter>, Arc<FakeAdapter>);
+        impl ModelAdapterFactory for RoutingFactory {
+            fn create(&self, provider: AiProviderConfig, _: Option<String>) -> Result<Arc<dyn ModelAdapter>, String> {
+                Ok(if provider.model == "second-model" { self.1.clone() } else { self.0.clone() })
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let runtime = AgentRuntimeBuilder::new()
+            .model_factory(Arc::new(RoutingFactory(first.clone(), second.clone())))
+            .native_tool_runtime(Arc::new(FakeNativeRuntime)).build();
+        runtime.configure(root.path().to_path_buf()).unwrap();
+        create(&runtime, "switch");
+        create(&runtime, "other");
+        runtime.followup("switch", "one".into(), "first".into()).unwrap();
+        runtime.start("switch", provider(), None).unwrap();
+        first.started.notified().await;
+        let mut selected = provider();
+        selected.model = "second-model".into();
+        selected.reasoning_effort = None;
+        runtime.select_model("switch", selected.clone(), None).unwrap();
+        runtime.set_permission_mode("switch", AgentSessionPermissionMode::Operator).unwrap();
+        let revision = runtime.session("switch").unwrap().event_count;
+        runtime.select_model("switch", selected, None).unwrap();
+        runtime.set_permission_mode("switch", AgentSessionPermissionMode::Operator).unwrap();
+        assert_eq!(runtime.session("switch").unwrap().event_count, revision);
+        assert_eq!(second.request_count(), 0);
+        runtime.followup("switch", "two".into(), "next".into()).unwrap();
+        first.release.notify_one();
+        runtime.await_idle("switch").await.unwrap();
+        assert_eq!(first.request_count(), 1);
+        assert_eq!(second.request_count(), 1);
+        assert!(first.requests.lock().unwrap()[0].system_prompt.contains("request-approval mode"));
+        assert!(second.requests.lock().unwrap()[0].system_prompt.contains("operator mode"));
+        assert!(second.requests.lock().unwrap()[0].messages.iter().any(|message| matches!(message,
+            super::super::ModelMessage::User { content } if content.contains("\"operator\""))));
+        let models: Vec<_> = all_events(&runtime, "switch").into_iter().filter_map(|event| match event.payload {
+            AgentSessionEventPayload::RequestStart { model, .. } => Some(model), _ => None,
+        }).collect();
+        assert_eq!(models, ["fake-model", "second-model"]);
+        assert_eq!(runtime.session("other").unwrap().header.permission_mode, Some(AgentSessionPermissionMode::RequestApproval));
+        assert!(runtime.session("other").unwrap().header.model_selection.is_none());
+        let recovered = AgentRuntime::default();
+        recovered.configure(root.path().to_path_buf()).unwrap();
+        let header = recovered.session("switch").unwrap().header;
+        assert_eq!(header.model_selection.unwrap().model, "second-model");
+        assert_eq!(header.permission_mode, Some(AgentSessionPermissionMode::Operator));
+        runtime.set_permission_mode("switch", AgentSessionPermissionMode::ScopedAutopilot).unwrap();
+        assert_eq!(runtime.session("switch").unwrap().header.permission_mode, Some(AgentSessionPermissionMode::ScopedAutopilot));
     }
 
     #[tokio::test]
