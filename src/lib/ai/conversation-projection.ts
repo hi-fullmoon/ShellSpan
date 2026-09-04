@@ -268,7 +268,7 @@ export function projectAgentChatNodes(
   const turns = new Map<string, TurnState>();
   const userMessages = new Map<string, AiUserMessageNode>();
   const systemPrompts = new Map<string, AiSystemPromptNode>();
-  const seriesPromptKeys = new Map<string, string>();
+  const latestPromptKeys = new Map<string | null, string>();
   const artifacts = new Map<string, AiArtifactNode>();
   const requests = new Map<string, RequestFacts>();
   const activeRequestByStep = new Map<string, string>();
@@ -602,16 +602,17 @@ export function projectAgentChatNodes(
         if (event.stepId) activeRequestByStep.set(event.stepId, event.data.requestId);
         if (turn && !turn.requestIds.includes(event.data.requestId)) turn.requestIds.push(event.data.requestId);
 
-        const seriesScope = `${event.turnId ?? 'unscoped'}:${event.data.series.seriesId}`;
-        const seriesKey = `system-prompt:${event.turnId ?? 'unscoped'}:${event.data.series.seriesId}`;
-        const existingKey = seriesPromptKeys.get(seriesScope);
+        // Each tool continuation starts a new request series. Group unchanged
+        // snapshots across those series so one Turn does not repeat the prompt.
+        const turnId = eventTurnId(event);
+        const existingKey = latestPromptKeys.get(turnId);
         const existing = existingKey ? systemPrompts.get(existingKey) : undefined;
         const samePrompt = existing?.content === event.data.systemPrompt
           && JSON.stringify(existing.toolSchemas) === JSON.stringify(event.data.toolSchemas);
         const key = existing === undefined || samePrompt
-          ? existingKey ?? seriesKey
+          ? existingKey ?? `system-prompt:${turnId ?? 'unscoped'}`
           : `system-prompt:${event.data.requestId}`;
-        seriesPromptKeys.set(seriesScope, key);
+        latestPromptKeys.set(turnId, key);
         systemPrompts.set(key, {
           kind: 'systemPrompt',
           key,
