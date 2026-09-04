@@ -41,15 +41,7 @@ async fn reply_http(socket: &mut tokio::net::TcpStream, content_type: &str, body
 async fn skill_controller_bridge() {
     let ready = std::env::var("SHELLSPAN_SKILLS_BRIDGE_READY")
         .expect("use scripts/ai-runtime-stage6b-controller.mjs");
-    let root = tempfile::tempdir().unwrap();
-    let project = std::fs::canonicalize(root.path()).unwrap();
     let storage = tempfile::tempdir().unwrap();
-    super::skill_tests::write_skill(
-        &project,
-        "inspect",
-        "disable-model-invocation: true\n",
-        "ENTIRE CONTROLLER INSTRUCTION\nFinal line from the real file.\n",
-    );
     let runtime = AgentRuntimeBuilder::new().build();
     runtime.configure(storage.path().to_path_buf()).unwrap();
     let receiver = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -65,7 +57,14 @@ async fn skill_controller_bridge() {
         }
     });
     let rpc = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    std::fs::write(ready,serde_json::to_vec(&json!({"url":format!("http://{}",rpc.local_addr().unwrap()),"root":project,"modelUrl":model_url})).unwrap()).unwrap();
+    std::fs::write(
+        ready,
+        serde_json::to_vec(
+            &json!({"url":format!("http://{}",rpc.local_addr().unwrap()),"modelUrl":model_url}),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let mut ids = Vec::<String>::new();
     let mut stopped = false;
     while !stopped {
@@ -82,10 +81,7 @@ async fn skill_controller_bridge() {
             "agent_runtime_create_session" => {
                 let create: CreateAgentSessionRequest =
                     serde_json::from_value(args["request"].clone()).unwrap();
-                assert_eq!(
-                    create.target.as_ref().unwrap().cwd.as_deref(),
-                    project.to_str()
-                );
+                assert!(create.target.as_ref().unwrap().cwd.is_none());
                 ids.push(create.session_id.clone());
                 serde_json::to_value(runtime.create_session(create).unwrap()).unwrap()
             }
