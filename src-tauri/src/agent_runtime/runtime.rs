@@ -671,7 +671,18 @@ impl AgentRuntime {
         &self,
         input: super::AgentInboxMutationInput,
     ) -> Result<AgentSessionSnapshot, String> {
-        self.sessions.mutate_inbox(input)
+        // Steer only accepts a running open turn under the Session lock. Its
+        // driver owns the next-step boundary (including the atomic TurnEnd
+        // check); waking here could restart a stopped/recovered Session or
+        // turn an already committed receipt into a scheduling failure.
+        let active = self.agents.get(&input.session_id).ok().flatten().is_some_and(|entry| {
+            entry.is_driver_active()
+                && !entry.cancellation().is_cancelled()
+                && entry.phase().ok() == Some(super::AgentLifecyclePhase::Running)
+        });
+        // Session checks receipts before this admission flag, so cold/stopped
+        // instances can still acknowledge an earlier successful operation.
+        self.sessions.mutate_inbox_with_driver(input, active)
     }
 
     pub(crate) fn rename_session(
@@ -1091,9 +1102,15 @@ impl AgentRuntime {
             .call_id
             .clone()
             .ok_or_else(|| "recovery checkpoint lost callId".to_string())?;
+        if checkpoint.turn_id.is_none() || checkpoint.step_id.is_none() {
+            return Err("recovery checkpoint lost its tool scope".into());
+        }
         let events = self.sessions.all_events(&input.session_id)?;
         let (turn_id, step_id, name) = events
             .iter()
+            .filter(|event| {
+                event.turn_id == checkpoint.turn_id && event.step_id == checkpoint.step_id
+            })
             .find_map(|event| match &event.payload {
                 super::AgentSessionEventPayload::ToolCall { call } if call.call_id == call_id => {
                     Some((
@@ -1205,7 +1222,14 @@ impl AgentRuntime {
                 },
             },
         ];
-        if checkpoint.step_id.is_some() {
+        if !events.iter().any(|event| {
+            event.turn_id == turn_id
+                && event.step_id == step_id
+                && matches!(
+                    event.payload,
+                    super::AgentSessionEventPayload::StepEnd { .. }
+                )
+        }) {
             payloads.insert(
                 1,
                 super::AgentScopedPayload {
@@ -1360,6 +1384,9 @@ impl AgentRuntime {
 
 #[cfg(test)]
 mod tests {
+    mod inbox_steer_tests {
+        include!("runtime_inbox_steer_tests.rs");
+    }
     mod image_tests {
         include!("image_tests.rs");
     }
@@ -3357,6 +3384,128 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[tokio::test]
+    async fn recovery_reconciliation_uses_the_checkpoint_step_when_call_ids_repeat() {
+        use super::super::AgentRecoveryReconcileOutcome::{ConfirmedApplied, ConfirmedNotApplied};
+
+        for outcome in [ConfirmedApplied, ConfirmedNotApplied] {
+            let session_id = "session-repeated-recovery";
+            let native = RecordingNativeRuntime::new(true);
+            let adapter = FakeAdapter::new(vec![
+                tool_response(vec![native_call("call-1", "list_directory")]),
+                tool_response(vec![native_call("call-1", "apply_patch")]),
+            ]);
+            let (root, first) =
+                configured_with_native(adapter, AgentDriverConfig::default(), native.clone());
+            create(&first, session_id);
+            first
+                .followup(session_id, "input".into(), "inspect then update".into())
+                .unwrap();
+            first.start(session_id, provider(), None).unwrap();
+            first.await_idle(session_id).await.unwrap();
+            let previous = pending_approval(&first, session_id);
+            first.approve_tool(previous.clone()).await.unwrap();
+            first.await_idle(session_id).await.unwrap();
+            assert_eq!(native.executions.load(Ordering::Acquire), 1);
+            let decision = pending_approval(&first, session_id);
+            assert_eq!(previous.call_id, decision.call_id);
+            assert_ne!(previous.step_id, decision.step_id);
+            let previous_result = all_events(&first, session_id)
+                .into_iter()
+                .find(|event| {
+                    event.step_id.as_ref() == Some(&previous.step_id)
+                        && matches!(event.payload, AgentSessionEventPayload::ToolResult { .. })
+                })
+                .unwrap();
+            first
+                .append_for_driver(
+                    session_id,
+                    Some(decision.turn_id.clone()),
+                    Some(decision.step_id.clone()),
+                    AgentSessionEventPayload::ToolApproval {
+                        request_id: decision.request_id,
+                        call_id: decision.call_id.clone(),
+                        approval_id: Some(decision.approval_id),
+                        status: AgentToolApprovalStatus::Approved,
+                        risk: Some(AgentSessionEffect::StateChange),
+                        reason: Some("simulated crash after authorization".into()),
+                        expires_at_unix_ms: None,
+                        prompt: None,
+                    },
+                )
+                .unwrap();
+            first
+                .append_for_driver(
+                    session_id,
+                    Some(decision.turn_id.clone()),
+                    Some(decision.step_id.clone()),
+                    AgentSessionEventPayload::ToolExecution {
+                        call_id: decision.call_id.clone(),
+                        status: crate::agent_runtime::AgentToolExecutionStatus::Dispatched,
+                        idempotency: "no".into(),
+                    },
+                )
+                .unwrap();
+            drop(first);
+
+            let restarted_native = RecordingNativeRuntime::new(true);
+            let restarted = AgentRuntimeBuilder::new()
+                .model_factory(Arc::new(FakeFactory(FakeAdapter::new(vec![reply(
+                    "recovered",
+                    &[],
+                )]))))
+                .native_tool_runtime(restarted_native.clone())
+                .build();
+            restarted.configure(root.path().to_path_buf()).unwrap();
+            let waiting = restarted.start(session_id, provider(), None).unwrap();
+            assert_eq!(
+                waiting.recovery.step_id.as_ref(),
+                Some(&decision.step_id),
+                "unexpected checkpoint: {:?}",
+                waiting.recovery
+            );
+            restarted
+                .reconcile_recovery(crate::agent_runtime::AgentRecoveryReconcileInput {
+                    session_id: session_id.into(),
+                    outcome,
+                    evidence: "Operator checked the frozen target.".into(),
+                })
+                .unwrap();
+            restarted.await_idle(session_id).await.unwrap();
+
+            let results = all_events(&restarted, session_id)
+                .into_iter()
+                .filter(|event| {
+                    matches!(event.payload, AgentSessionEventPayload::ToolResult { .. })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(results.len(), 2);
+            assert_eq!(results[0], previous_result);
+            assert_eq!(results[1].turn_id.as_ref(), Some(&decision.turn_id));
+            assert_eq!(results[1].step_id.as_ref(), Some(&decision.step_id));
+            let expected_status = if outcome == ConfirmedApplied {
+                AgentToolResultStatus::Completed
+            } else {
+                AgentToolResultStatus::Cancelled
+            };
+            assert!(matches!(&results[1].payload,
+                AgentSessionEventPayload::ToolResult { call_id, name, status, .. }
+                    if call_id == &decision.call_id && name == "apply_patch" && *status == expected_status
+            ));
+            assert_eq!(restarted_native.executions.load(Ordering::Acquire), 0);
+            assert_eq!(
+                all_events(&restarted, session_id)
+                    .iter()
+                    .filter(|event| {
+                        event.step_id.as_ref() == Some(&decision.step_id)
+                            && matches!(event.payload, AgentSessionEventPayload::StepEnd { .. })
+                    })
+                    .count(),
+                1
+            );
+        }
     }
 
     #[tokio::test]

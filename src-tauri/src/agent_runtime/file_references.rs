@@ -67,9 +67,11 @@ pub(crate) struct FileReferenceRequest {
 pub(crate) fn bound_scope(event: &super::AgentSessionEvent) -> Option<&SkillScope> {
     match &event.payload {
         AgentSessionEventPayload::FileReferenceScopeBound { scope } => Some(scope),
-        AgentSessionEventPayload::SkillCatalogObserved { observation } => {
-            observation.snapshot.as_ref().map(|s| &s.scope)
-        }
+        AgentSessionEventPayload::SkillCatalogObserved { observation } => observation
+            .snapshot
+            .as_ref()
+            .map(|s| &s.scope)
+            .filter(|scope| !super::builtin_skills::is_builtin_scope(scope)),
         _ => None,
     }
 }

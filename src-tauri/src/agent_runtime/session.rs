@@ -94,6 +94,9 @@ pub(crate) enum AgentInboxMutation {
     Remove {
         item_id: String,
     },
+    Steer {
+        item_id: String,
+    },
     Reorder {
         lane: AgentInboxLane,
         ordered_item_ids: Vec<String>,
@@ -977,7 +980,38 @@ impl AgentSessionStore {
         Ok(Some(AgentClaimedStep { messages }))
     }
 
-    pub(crate) fn begin_step(
+    /// Serialize the last-step boundary with inbox mutations. Once TurnEnd is
+    /// durable, steer rejects this turn even before the driver publishes Idle.
+    pub(crate) fn end_turn_if_no_step_input(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<bool, String> {
+        let mut inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| "Agent session was not found".to_string())?;
+        if !record.inbox.next_step().is_empty() {
+            return Ok(false);
+        }
+        let (events, publisher) = append_payloads_locked(
+            &mut inner,
+            session_id,
+            vec![(
+                Some(turn_id.to_string()),
+                None,
+                AgentSessionEventPayload::TurnEnd {
+                    reason: "completed".into(),
+                },
+            )],
+        )?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(true)
+    }
+
+    pub(crate) fn begin_step_or_end_turn(
         &self,
         session_id: &str,
         turn_id: String,
@@ -991,6 +1025,19 @@ impl AgentSessionStore {
             .inbox
             .step_claim();
         if messages.is_empty() {
+            let (events, publisher) = append_payloads_locked(
+                &mut inner,
+                session_id,
+                vec![(
+                    Some(turn_id),
+                    None,
+                    AgentSessionEventPayload::TurnEnd {
+                        reason: "completed".into(),
+                    },
+                )],
+            )?;
+            drop(inner);
+            publish_events(publisher, &events);
             return Ok(None);
         }
         let mut payloads = vec![
@@ -1130,9 +1177,18 @@ impl AgentSessionStore {
         Ok(snapshot)
     }
 
+    #[cfg(test)]
     pub(crate) fn mutate_inbox(
         &self,
         input: AgentInboxMutationInput,
+    ) -> Result<AgentSessionSnapshot, String> {
+        self.mutate_inbox_with_driver(input, true)
+    }
+
+    pub(crate) fn mutate_inbox_with_driver(
+        &self,
+        input: AgentInboxMutationInput,
+        has_active_driver: bool,
     ) -> Result<AgentSessionSnapshot, String> {
         validate_identifier(&input.session_id, "sessionId")?;
         validate_identifier(&input.client_operation_id, "clientOperationId")?;
@@ -1144,9 +1200,37 @@ impl AgentSessionStore {
             .sessions
             .get(&input.session_id)
             .ok_or_else(|| "Agent inbox mutation target Session was not found".to_string())?;
+        // A durable receipt wins over stale revision, claimed state or termination.
+        // Retrying a committed operation must acknowledge it without consuming twice.
+        if let Some(previous) = record.events.iter().find(|event| {
+            inbox_operation_id(&event.payload) == Some(input.client_operation_id.as_str())
+        }) {
+            if let AgentSessionEventPayload::InboxItemSteered { item_id, .. } = &previous.payload {
+                if input.mutation
+                    == (AgentInboxMutation::Steer {
+                        item_id: item_id.clone(),
+                    })
+                {
+                    return record.snapshot();
+                }
+            }
+            return Err("client operation id was already committed with a different payload".into());
+        }
         validate_mutable_session(record, "inbox mutation")?;
+        if matches!(input.mutation, AgentInboxMutation::Steer { .. }) && !has_active_driver {
+            return Err("Agent inbox steer requires an active running driver; resume the Session first".into());
+        }
         validate_expected_revision(record, input.expected_revision)?;
         let payload = match input.mutation {
+            AgentInboxMutation::Steer { item_id } => {
+                validate_identifier(&item_id, "itemId")?;
+                validate_steer_target(record, &item_id)?;
+                AgentSessionEventPayload::InboxItemSteered {
+                    item_id,
+                    previous_revision: input.expected_revision,
+                    client_operation_id: input.client_operation_id,
+                }
+            }
             AgentInboxMutation::Update { item_id, content } => {
                 validate_identifier(&item_id, "itemId")?;
                 validate_text(&content, "inbox content", false, MAX_AGENT_MESSAGE_BYTES)?;
@@ -1841,12 +1925,50 @@ fn require_queued_item<'a>(
     }
 }
 
+fn inbox_operation_id(payload: &AgentSessionEventPayload) -> Option<&str> {
+    match payload {
+        AgentSessionEventPayload::InboxItemSteered { client_operation_id, .. }
+        | AgentSessionEventPayload::InboxItemUpdated { client_operation_id, .. }
+        | AgentSessionEventPayload::InboxItemRemoved { client_operation_id, .. }
+        | AgentSessionEventPayload::InboxReordered { client_operation_id, .. }
+        | AgentSessionEventPayload::SessionRenamed { client_operation_id, .. } => {
+            Some(client_operation_id)
+        }
+        _ => None,
+    }
+}
+
 fn validate_mutable_session(record: &AgentSessionRecord, operation: &str) -> Result<(), String> {
     if record.archived {
         return Err(format!("archived Agent Session rejects {operation}"));
     }
     if record.ended || record.status.is_terminal() {
         return Err(format!("terminal Agent Session rejects {operation}"));
+    }
+    Ok(())
+}
+
+fn validate_steer_target(record: &AgentSessionRecord, item_id: &str) -> Result<(), String> {
+    validate_mutable_session(record, "inbox steer")?;
+    if record.status != AgentSessionStatus::Running {
+        return Err("Agent inbox steer requires a running Session".into());
+    }
+    let last_turn_boundary = record.events.iter().rev().find(|event| {
+        matches!(event.payload,
+            AgentSessionEventPayload::TurnStart | AgentSessionEventPayload::TurnEnd { .. }
+        )
+    });
+    if !last_turn_boundary
+        .is_some_and(|event| matches!(event.payload, AgentSessionEventPayload::TurnStart))
+    {
+        return Err("Agent inbox steer requires an open running turn".into());
+    }
+    let (lane, message) = require_queued_item(record, item_id)?;
+    if lane != AgentInboxLane::NextTurn {
+        return Err("Agent inbox steer requires a queued nextTurn item".into());
+    }
+    if message.source.kind != super::AgentMessageSourceKind::User {
+        return Err("Agent inbox steer requires a user message".into());
     }
     Ok(())
 }
@@ -1916,6 +2038,14 @@ fn validate_event_transition(
         return Err("terminal Agent status must be followed by session/ended".into());
     }
     match &event.payload {
+        AgentSessionEventPayload::InboxItemSteered { item_id, .. } => {
+            if record.events.iter().any(|previous| {
+                inbox_operation_id(&previous.payload) == inbox_operation_id(&event.payload)
+            }) {
+                return Err("Agent inbox steer operation was already committed".into());
+            }
+            validate_steer_target(record, item_id)
+        }
         AgentSessionEventPayload::SessionCreated { .. } if !record.events.is_empty() => {
             Err("session/created can only be the first event".into())
         }
@@ -2339,6 +2469,9 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
         AgentSessionEventPayload::InboxItemRemoved { item_id, lane, .. } => {
             record.inbox.remove(*lane, item_id)?
         }
+        AgentSessionEventPayload::InboxItemSteered { item_id, .. } => {
+            record.inbox.steer(item_id)?
+        }
         AgentSessionEventPayload::InboxReordered {
             lane,
             ordered_item_ids,
@@ -2431,7 +2564,12 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             validate_identifier(item_id, "itemId")?;
             validate_text(content, "inbox content", false, MAX_AGENT_MESSAGE_BYTES)?;
         }
-        Payload::InboxItemRemoved {
+        Payload::InboxItemSteered {
+            item_id,
+            previous_revision,
+            client_operation_id,
+        }
+        | Payload::InboxItemRemoved {
             item_id,
             previous_revision,
             client_operation_id,
@@ -3717,6 +3855,7 @@ fn sync_parent(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("session_inbox_steer_tests.rs");
 
     #[test]
     fn stream_delta_validation_accepts_provider_whitespace_but_rejects_oversized_chunks() {
