@@ -78,6 +78,47 @@ describe('image draft count limit', () => {
 });
 
 describe('image draft ownership and transaction boundaries', () => {
+  it('shows pending previews before file reading finishes and keeps saved images intact', async () => {
+    const bytes = deferred<ArrayBuffer>();
+    const hook = renderHook(() => useImageDraft('A', 'text', vi.fn()));
+    await waitFor(() => expect(hook.result.current.draft).not.toBeNull());
+    const pendingFile = { ...file, arrayBuffer: () => bytes.promise } as File;
+    let adding!: Promise<void>;
+    act(() => { adding = hook.result.current.add([pendingFile]); });
+    expect(hook.result.current.pendingFiles).toEqual([pendingFile]);
+    expect(hook.result.current.draft?.images).toEqual([image]);
+    expect(mock.prepare).not.toHaveBeenCalled();
+
+    await act(async () => { bytes.resolve(new TextEncoder().encode('hello').buffer); await adding; });
+    expect(hook.result.current.pendingFiles).toEqual([]);
+    expect(hook.result.current.draft?.images).toEqual([image, image]);
+  });
+
+  it('cancels a pending preview without letting the old import clear a newer one', async () => {
+    const first = deferred<typeof image[]>();
+    const second = deferred<typeof image[]>();
+    mock.prepare.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise);
+    const hook = renderHook(() => useImageDraft('A', 'text', vi.fn()));
+    await waitFor(() => expect(hook.result.current.draft).not.toBeNull());
+    let oldImport!: Promise<void>;
+    act(() => { oldImport = hook.result.current.add([file]); });
+    await waitFor(() => expect(mock.prepare).toHaveBeenCalledTimes(1));
+    await act(async () => hook.result.current.cancel());
+    expect(hook.result.current.pendingFiles).toEqual([]);
+
+    const nextFile = { ...file, name: 'next.png' } as File;
+    let nextImport!: Promise<void>;
+    act(() => { nextImport = hook.result.current.add([nextFile]); });
+    await act(async () => { first.resolve([image]); await oldImport; });
+    expect(hook.result.current.pendingFiles).toEqual([nextFile]);
+    expect(hook.result.current.busy).toBe(true);
+    expect(hook.result.current.draft?.images).toEqual([image]);
+
+    await act(async () => { second.resolve([image]); await nextImport; });
+    expect(hook.result.current.pendingFiles).toEqual([]);
+    expect(hook.result.current.draft?.images).toHaveLength(2);
+  });
+
   it.each(['resolve', 'reject'] as const)('old remove %s cannot unlock or alter B, including A→B→A', async outcome => {
     const write = deferred<void>(); mock.write.mockImplementationOnce(() => write.promise);
     const hook = renderHook(({ owner }) => useImageDraft(owner, 'text', vi.fn()), { initialProps: { owner: 'A' } });
@@ -136,7 +177,9 @@ describe('image draft ownership and transaction boundaries', () => {
     const prepare = deferred<typeof image[]>(); mock.prepare.mockImplementationOnce(() => prepare.promise);
     let pending!: Promise<void>; act(() => { pending = hook.result.current.add([file]); }); await waitFor(() => expect(mock.prepare).toHaveBeenCalled());
     hook.rerender({ owner: 'B' }); await waitFor(() => expect(hook.result.current.draft?.owner).toBe('B'));
+    expect(hook.result.current.pendingFiles).toEqual([]);
     await act(async () => { prepare.resolve([image]); await pending; }); expect(hook.result.current.draft?.images).toHaveLength(1);
+    expect(hook.result.current.pendingFiles).toEqual([]);
   });
 });
 it('vision uses exact shared models and profile/protocol, including model-specific context', () => {

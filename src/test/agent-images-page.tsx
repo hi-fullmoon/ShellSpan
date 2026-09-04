@@ -13,9 +13,16 @@ export async function mountImagesPage(root: HTMLElement) {
   const params = new URLSearchParams(location.search);
   const rpc = params.get('rpc')!;
   if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(rpc)) throw new Error('test-only loopback bridge required');
+  let holdPreparation = false;
+  let releasePreparation: (() => void) | undefined;
+  Object.assign(window, {
+    imageTestHoldPreparation: () => { holdPreparation = true; },
+    imageTestReleasePreparation: () => { holdPreparation = false; releasePreparation?.(); releasePreparation = undefined; },
+  });
   mockIPC(async (command, args) => {
     if (command.startsWith('plugin:event|')) return 1;
     if (command.startsWith('plugin:log|')) return;
+    if (command === 'agent_runtime_prepare_images' && holdPreparation) await new Promise<void>(resolve => { releasePreparation = resolve; });
     const result = await (await fetch(rpc, { method: 'POST', body: JSON.stringify({ command, args }) })).json();
     if (result.error) throw new Error(result.error);
     return result.value;

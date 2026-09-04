@@ -9,6 +9,7 @@ import type { AgentImageUpload } from '@/types/agent-image';
 export function useImageDraft(owner: string, text: string, restoreText: (text: string) => void) {
   const toast = useToast();
   const [draft, setDraft] = useState<ImageDraft | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<readonly File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ownerRef = useRef(owner); ownerRef.current = owner;
@@ -21,7 +22,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
   const saving = useRef<{ generation: number; promise: Promise<void> } | null>(null);
   useEffect(() => {
     const generation = ++epoch.current;
-    current.current = null; setDraft(null); setError(null); setBusy(false); running.current = false; ready.current = false;
+    current.current = null; setDraft(null); setPendingFiles([]); setError(null); setBusy(false); running.current = false; ready.current = false;
     if (typeof indexedDB === 'undefined') { ready.current = true; return; }
     void readImageDraft(owner).then(value => {
       if (epoch.current !== generation) return;
@@ -55,9 +56,11 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       }
       if (files.some(file => file.size > IMAGE_LIMITS.maxSourceBytes)
         || files.reduce((sum, file) => sum + file.size, 0) > IMAGE_LIMITS.maxBatchBytes) throw new Error('IMAGE_SOURCE_LIMIT');
+      setPendingFiles(files);
       const uploads: AgentImageUpload[] = [];
       for (const file of files) {
         const bytes = new Uint8Array(await file.arrayBuffer());
+        if (!isCurrent(generation)) return;
         let binary = '';
         for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
         // No extension inference. Empty browser MIME is rejected by native admission too.
@@ -67,7 +70,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       if (!isCurrent(generation)) return;
       await persist({ ...previous, revision: previous.revision + 1, text: textRef.current, images: [...previous.images, ...normalized] }, generation);
     } catch (e) { if (isCurrent(generation)) setError(String(e)); }
-    finally { if (isCurrent(generation)) { running.current = false; setBusy(false); } }
+    finally { if (isCurrent(generation)) { running.current = false; setBusy(false); setPendingFiles([]); } }
   }
   async function remove(index: number): Promise<void> {
     if (running.current || current.current?.operation) return;
@@ -131,7 +134,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
   async function cancel(): Promise<void> {
     const generation = epoch.current;
     const value = current.current;
-    if (!value?.operation) { ++epoch.current; running.current = false; setBusy(false); return; }
+    if (!value?.operation) { ++epoch.current; running.current = false; setBusy(false); setPendingFiles([]); return; }
     try {
       const committed = await invokeCancelAgentImageSubmission({ sessionId: value.operation.sessionId, clientOperationId: value.operation.id });
       if (!isCurrent(generation)) return;
@@ -143,5 +146,5 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       running.current = false; setBusy(false); setError('IMAGE_CANCELLED');
     } catch (e) { if (isCurrent(generation)) setError(String(e)); }
   }
-  return { draft, busy, error, add, remove, send, cancel, locked: Boolean(draft?.operation), reportError: setError };
+  return { owner, draft, pendingFiles, busy, error, add, remove, send, cancel, locked: Boolean(draft?.operation), reportError: setError };
 }
