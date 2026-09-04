@@ -41,7 +41,7 @@ async function verifyQueryRace(page, editor, bridgeUrl) {
     await page.route(routeUrl, routeHandler);
     try {
       for (const query of ['empty/', 'absent/', 'plain']) {
-        await editor.fill(`@${query}`); await editor.press('End');
+        await editor.fill(`@${query}`); await editor.evaluate(el => { el.setSelectionRange(el.value.length, el.value.length); el.dispatchEvent(new Event('select', { bubbles: true })); });
         await bounded(controls.get(query).arrived.promise);
       }
       for (const query of order) {
@@ -91,18 +91,28 @@ try {
     const before=await rpc('__state');let bound=false;
     // No empty autocomplete addon while the editor has no active token.
     assert.equal(await page.locator('[data-file-completion]').count(),0);
-    await editor.fill('mail user@example.com ');await editor.press('End');await delay(150);
+    await editor.fill('mail user@example.com ');await editor.evaluate(el => { el.setSelectionRange(el.value.length, el.value.length); el.dispatchEvent(new Event('select', { bubbles: true })); });await delay(150);
     assert.equal((await rpc('__state')).pathQueries.length,before.pathQueries.length,'email does not trigger a query');
     for(const step of order) {
       if(step==='image') {
-        await page.getByLabel(zh?'添加图片':'Add images',{exact:true}).setInputFiles({name:bridge.image.name,mimeType:bridge.image.mediaType,buffer:Buffer.from(bridge.image.data,'base64')});
+        await page.locator('input[type=file]').setInputFiles({name:bridge.image.name,mimeType:bridge.image.mediaType,buffer:Buffer.from(bridge.image.data,'base64')});
         await page.getByText(zh?'已保存草稿 · 尚未发送':'Saved draft · not sent').waitFor();
         if(!bound)assert.equal((await rpc('__state')).sessions.length,before.sessions.length,'image selection never makes rootless Session');
       } else if(step==='skill') {
-        await page.getByRole('button',{name:zh?'技能':'Skills',exact:true}).click();
-        if(!bound){await page.getByRole('textbox',{name:zh?'项目目录':'Project directory'}).fill(bridge.root);await page.getByRole('button',{name:zh?'读取技能':'Load skills'}).click();bound=true;}
+        await editor.click(); await editor.evaluate(el => { el.setSelectionRange(el.value.length, el.value.length); el.dispatchEvent(new Event('select', { bubbles: true })); }); await editor.pressSequentially(' /sys');
+        await page.getByRole('option',{name:/system-status/}).click();
+      } else {
+        await editor.click();await editor.evaluate(el => { el.setSelectionRange(el.value.length, el.value.length); el.dispatchEvent(new Event('select', { bubbles: true })); });await editor.pressSequentially('@sp');
+        if(!bound){
+          const draft=await editor.inputValue();await editor.press('Enter');await page.getByRole('dialog').waitFor();
+          const dir=page.getByRole('textbox',{name:zh?'项目目录':'Project directory'});
+          // Actual click and sequential key input catch React portal bubbling into the composer.
+          await dir.click();await dir.pressSequentially(bridge.root);
+          assert.equal(await dir.inputValue(),bridge.root);assert.equal(await editor.inputValue(),draft);
+          await dir.press('Enter');await page.getByRole('dialog').waitFor({state:'hidden'});bound=true;
+        }
         if (scene === 0) {
-          await page.getByRole('menuitem',{name:/inspect/}).waitFor();
+          await page.getByRole('option',{name:'space dir/'}).waitFor();
           const draft = await editor.inputValue();
           historyRelease.resolve(); await historyDelivered.promise;
           await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -111,23 +121,12 @@ try {
           assert.equal(state.sessions.length, before.sessions.length + 1);
           assert.equal(await editor.inputValue(), draft);
           await page.getByText('Saved draft · not sent').waitFor();
-          await page.getByRole('menuitem',{name:/inspect/}).waitFor();
+          await page.getByRole('option',{name:'space dir/'}).waitFor();
           await writeFile(join(output, 'controlled-history-race.json'), JSON.stringify({
-            historyReleasedAfter: ['image draft', 'cold project', 'visible Skills menu'],
-            preserved: ['draft text', 'image owner', 'Skills menu'], requests: state.requests.length - before.requests.length,
+            historyReleasedAfter: ['image draft', 'cold project', 'visible file menu'],
+            preserved: ['draft text', 'image owner', 'file menu'], requests: state.requests.length - before.requests.length,
           }, null, 2));
           await page.unroute(new URL(bridge.url).href);
-        }
-        await page.getByRole('menuitem',{name:/inspect/}).click();
-      } else {
-        await editor.click();await editor.press('End');await editor.pressSequentially('@sp');
-        if(!bound){
-          const draft=await editor.inputValue();await editor.press('Enter');await page.getByRole('dialog').waitFor();
-          const dir=page.getByRole('textbox',{name:zh?'项目目录':'Project directory'});
-          // Actual click and sequential key input catch React portal bubbling into the composer.
-          await dir.click();await dir.pressSequentially(bridge.root);
-          assert.equal(await dir.inputValue(),bridge.root);assert.equal(await editor.inputValue(),draft);
-          await dir.press('Enter');await page.getByRole('dialog').waitFor({state:'hidden'});bound=true;
         }
         await page.getByRole('option',{name:'space dir/'}).waitFor();
         await editor.press('ArrowDown');await editor.press('ArrowUp');await editor.press('Enter');
@@ -142,17 +141,17 @@ try {
     // Temporary query edits leave the intended prompt intact. Test real IME and keyboard escape/tab boundaries.
     const raw=await editor.inputValue();
     if(scene===0){
-      await editor.fill('@match');await editor.press('End');await page.getByText(zh?/显示前 40/:/Showing the first 40/).waitFor();await editor.press('Escape');assert.equal(await page.getByRole('listbox').count(),0);
-      await editor.fill('@empty/');await editor.press('End');await page.getByText(zh?'没有匹配的文件或目录':'No matching files or directories').waitFor();await editor.press('Tab');assert.equal(await editor.evaluate(e=>document.activeElement===e),false);
-      await editor.fill('@absent/');await editor.press('End');await page.getByText(zh?/目录不存在/:/Directory no longer exists/).waitFor();await editor.press('Enter');assert.equal((await rpc('__state')).requests.length,before.requests.length);
-      await editor.fill('@plain');await editor.press('End');await page.getByRole('option',{name:'plain.txt'}).waitFor();
+      await editor.fill('@match');await editor.evaluate(el => { el.setSelectionRange(el.value.length, el.value.length); el.dispatchEvent(new Event('select', { bubbles: true })); });await page.getByText(zh?/显示前 40/:/Showing the first 40/).waitFor();await editor.press('Escape');assert.equal(await page.getByRole('listbox').count(),0);
+      await editor.fill('@empty/');await editor.evaluate(el => { el.setSelectionRange(el.value.length, el.value.length); el.dispatchEvent(new Event('select', { bubbles: true })); });await page.getByText(zh?'没有匹配的文件或目录':'No matching files or directories').waitFor();await editor.press('Tab');assert.equal(await editor.evaluate(e=>document.activeElement===e),false);
+      await editor.fill('@absent/');await editor.evaluate(el => { el.setSelectionRange(el.value.length, el.value.length); el.dispatchEvent(new Event('select', { bubbles: true })); });await page.getByText(zh?/目录不存在/:/Directory no longer exists/).waitFor();await editor.press('Enter');assert.equal((await rpc('__state')).requests.length,before.requests.length);
+      await editor.fill('@plain');await editor.evaluate(el => { el.setSelectionRange(el.value.length, el.value.length); el.dispatchEvent(new Event('select', { bubbles: true })); });await page.getByRole('option',{name:'plain.txt'}).waitFor();
       await editor.dispatchEvent('compositionstart');await editor.dispatchEvent('keydown',{key:'Enter',code:'Enter',keyCode:229,isComposing:true});await editor.dispatchEvent('compositionend');
       assert.equal((await rpc('__state')).requests.length,before.requests.length);await editor.fill('');assert.equal(await page.getByRole('listbox').count(),0);
       const races = await verifyQueryRace(page, editor, bridge.url);
       await writeFile(join(output, 'controlled-query-races.json'), JSON.stringify(races, null, 2));
       assert.equal((await rpc('__state')).requests.length,before.requests.length,'query races never call the model');
     }
-    await editor.fill(raw);await editor.press('End');await delay(100);await editor.press('Enter');
+    await editor.fill(raw);await editor.evaluate(el => { el.setSelectionRange(el.value.length, el.value.length); el.dispatchEvent(new Event('select', { bubbles: true })); });await delay(100);await editor.press('Enter');
     try { await page.getByText('Image wire complete',{exact:true}).waitFor({timeout:20000}); } catch(e) { await page.screenshot({path:join(output,'failure.png')});console.error('Scene',scene,await page.locator('body').innerText());throw e; }
     let captured=await rpc('__state');const session=captured.sessions.at(-1);
     assert.equal(session.snapshot.header.target.cwd,bridge.root);
@@ -162,11 +161,11 @@ try {
     assert.equal(enqueued[0].images?.length??0,order.includes('image')?1:0);
     assert.ok(!JSON.stringify(captured.requests).includes('FILE_CONTENT_MUST_NEVER_BE_READ_6D'));
     assert.ok(JSON.stringify(captured.requests.at(-1)).includes('Completion does not read or attach content'));
-    if(order.includes('skill'))assert.ok(JSON.stringify(captured.requests.at(-1)).includes('IMAGE AND SKILL FULL INSTRUCTIONS'));
+    if(order.includes('skill'))assert.ok(JSON.stringify(captured.requests.at(-1)).includes('# System status'));
     await rpc('__restart');await page.reload();await editor.waitFor();
     // Wait for actual restored history, not merely the initial empty composer.
     await page.getByText('Image wire complete',{exact:true}).waitFor();
-    await editor.fill('@pl');await editor.press('End');await page.getByRole('option',{name:'plain.txt'}).waitFor();
+    await editor.fill('@pl');await editor.evaluate(el => { el.setSelectionRange(el.value.length, el.value.length); el.dispatchEvent(new Event('select', { bubbles: true })); });await page.getByRole('option',{name:'plain.txt'}).waitFor();
     assert.equal(await page.getByRole('button',{name:zh?'选择项目目录':'Choose project directory'}).count(),0,'restored Session uses frozen root');
     await editor.press('Tab');assert.equal(await editor.inputValue(),'@plain.txt ');await editor.pressSequentially('follow-up');await editor.press('Enter');
     for(let i=0;i<100;i++){captured=await rpc('__state');if(captured.requests.length===before.requests.length+2)break;await delay(100);}
