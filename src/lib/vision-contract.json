@@ -25,6 +25,18 @@
       "reservedTokensPerImage": 4096,
       "imageTokenBudgetPolicy": "Reserve 4096 tokens per image after local normalization to at most 1048576 pixels and 2048 pixels per side. Qwen3-VL uses 32x32 pixels per token; this reservation includes headroom for resizing and image markers.",
       "sources": ["https://docs.modelstudio.console.alibabacloud.com/zh/model-studio/vision", "https://docs.modelstudio.console.alibabacloud.com/en/model-studio/vision-model", "https://qwen.ai/apiplatform"]
+    },
+    {
+      "profile": "kimi",
+      "kind": "openAiCompatible",
+      "models": ["k3", "k3-256k"],
+      "contextWindow": 262144,
+      "contextPolicy": "Use the 256K context available to all K3-eligible memberships; K3's 1M context depends on the membership tier.",
+      "maxRequestImages": 20,
+      "maxRequestImageBytes": 20971520,
+      "reservedTokensPerImage": 4096,
+      "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after normalization to at most 1048576 pixels and 2048 pixels per side; not provider-reported usage. Image count and byte limits are application limits.",
+      "sources": ["https://www.kimi.com/code/docs/kimi-code/models.html", "https://www.kimi.com/code/docs/en/third-party-tools/hermes.html", "https://platform.kimi.com/docs/guide/use-kimi-vision-model"]
     }
   ]
 }

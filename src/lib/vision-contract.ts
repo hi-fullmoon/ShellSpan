@@ -7,5 +7,5 @@ export function visionCapability(provider: AiProviderConfig) {
     && route.kind === provider.kind && route.models.includes(provider.model.trim().toLowerCase()));
 }
 export function requireVision(provider: AiProviderConfig): void {
-  if (!visionCapability(provider)) throw new Error('IMAGE_MODEL_UNSUPPORTED: Qwen qwen3-vl-plus / qwen3-vl-flash');
+  if (!visionCapability(provider)) throw new Error('IMAGE_MODEL_UNSUPPORTED: image input is not enabled for this provider, protocol, and model');
 }
