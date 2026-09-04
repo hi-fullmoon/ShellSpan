@@ -23,7 +23,10 @@ export function AiWorkspaceController({
 }: AiWorkspaceControllerProps): React.ReactNode {
   const controller = useAiSessionController({ scope, adapter });
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
-  const agentSessionLocked = controller.view?.summary.kind === 'agent';
+  const session = controller.view?.snapshot.value;
+  const settingsLocked = controller.settingsBusy || !controller.canStartAgent
+    || Boolean(session?.ended || session?.archived || session?.header.subagent)
+    || ['completed', 'cancelled', 'failed'].includes(controller.view?.status ?? 'idle');
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
   return (
     <AiWorkspaceRoot
@@ -59,14 +62,20 @@ export function AiWorkspaceController({
       providerLabel={controller.providerLabel}
       modelLabel={controller.modelLabel}
       modelControl={(
-        <AiComposerModelSelector disabled={agentSessionLocked || !controller.canStartAgent} />
+        <AiComposerModelSelector
+          disabled={settingsLocked}
+          selection={controller.selectedProvider}
+          onSelect={controller.view ? controller.selectModel : undefined}
+        />
       )}
       permissionControl={scope === 'terminal' && activeTerminalId
         ? (
             <AgentPermissionSelector
               sessionId={activeTerminalId}
               variant="composer"
-              disabled={agentSessionLocked || !controller.canStartAgent}
+              disabled={settingsLocked}
+              mode={controller.selectedPermission}
+              onModeChange={controller.view ? controller.selectPermission : undefined}
             />
           )
         : undefined}

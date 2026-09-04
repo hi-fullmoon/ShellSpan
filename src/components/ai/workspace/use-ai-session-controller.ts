@@ -4,6 +4,8 @@ import { createAgentSessionAdapter } from '@/lib/ai/agent-session-adapter';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
 import { questionKey } from '@/types/agent-question';
 import { useImageDraft } from './use-image-draft';
+import { sessionProviderConfig } from '@/lib/ai/session-settings';
+import type { AiProviderConfig } from '@/types/ai';
 import { requireVision } from '@/lib/vision-contract';
 import { resolveAiSubmission } from '@/lib/ai/submission-policy';
 import {
@@ -60,6 +62,11 @@ export interface UseAiSessionControllerInput {
 }
 
 export interface AiSessionController {
+  readonly selectedProvider?: AiProviderConfig;
+  readonly selectedPermission?: AgentPermissionMode;
+  readonly settingsBusy: boolean;
+  readonly selectModel: (provider: AiProviderConfig) => Promise<void>;
+  readonly selectPermission: (mode: AgentPermissionMode) => Promise<void>;
   readonly imageDraft: ReturnType<typeof useImageDraft>;
   readonly listFileReferences: import('@/types/agent-file-reference').ListFileReferences;
   readonly listSkills: (root?: string) => Promise<import('@/types/agent-skill').SkillUserList>;
@@ -196,6 +203,28 @@ export function useAiSessionController({
   const [renameError, setRenameError] = useState<string | null>(null);
   const composerRef = useRef(composer);
   const viewRef = useRef(view);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const settingsPending = useRef(false);
+  const currentProviderConfig = useCallback((): AiProviderConfig => {
+    const selection = viewRef.current?.snapshot.value.header.modelSelection;
+    return selection ? sessionProviderConfig(selection) : useAiSettingsStore.getState().getProviderConfig();
+  }, []);
+  const changeSettings = async (change: (sessionId: string) => Promise<void>): Promise<void> => {
+    const sessionId = viewRef.current?.summary.id;
+    if (!sessionId || settingsPending.current) return;
+    settingsPending.current = true;
+    setSettingsBusy(true);
+    const context = viewRef.current?.summary.id;
+    try {
+      await change(sessionId);
+    } catch (error) {
+      if (viewRef.current?.summary.id === context) setAnnouncement(normalizeAiSessionError(error).message);
+    } finally {
+      settingsPending.current = false;
+      if (mountedRef.current) setSettingsBusy(false);
+    }
+  };
+
   const optimisticRef = useRef(optimistic);
   const mountedRef = useRef(true);
   const timeoutRef = useRef(new Map<string, number>());
@@ -222,7 +251,7 @@ export function useAiSessionController({
   const agentUnavailableReason = canStartAgent
     ? null
     : t('agent.availability.needsTerminal');
-  const hasProvider = Boolean(provider?.model.trim());
+  const hasProvider = Boolean(view?.snapshot.value.header.modelSelection?.model.trim() || provider?.model.trim());
 
   const updateOptimistic = useCallback((updater: (
     current: readonly AiOptimisticSubmission[],
@@ -411,7 +440,7 @@ export function useAiSessionController({
 
     void (async () => {
       try {
-        const currentProvider = useAiSettingsStore.getState().getProviderConfig();
+        const currentProvider = currentProviderConfig();
         const base = {
           content: payload.content,
           mode: payload.mode,
@@ -883,8 +912,21 @@ export function useAiSessionController({
     },
     pendingNodes,
     composer,
+    selectedProvider: visibleView?.snapshot.value.header.modelSelection
+      ? sessionProviderConfig(visibleView.snapshot.value.header.modelSelection) : undefined,
+    selectedPermission: visibleView ? (visibleView.snapshot.value.header.permissionMode === 'operator'
+      ? 'fullAccess' : 'autoApproveReadOnly') : undefined,
+    settingsBusy,
+    selectModel: (provider) => changeSettings(async (sessionId) => {
+      if (!adapter.selectModel) throw new Error('Model selection is unavailable');
+      await adapter.selectModel(sessionId, provider);
+    }),
+    selectPermission: (mode) => changeSettings(async (sessionId) => {
+      if (!adapter.setPermission) throw new Error('Permission selection is unavailable');
+      await adapter.setPermission(sessionId, permissionMode(mode));
+    }),
     providerLabel: provider?.name ?? '',
-    modelLabel: provider?.model ?? '',
+    modelLabel: visibleView?.snapshot.value.header.modelSelection?.model ?? provider?.model ?? '',
     canStartAgent,
     agentUnavailableReason,
     announcement,
@@ -915,7 +957,7 @@ export function useAiSessionController({
           accelerated, preferredBusyMode: composer.preferredBusyMode, submitting: imageDraft.busy });
         if (decision.kind !== 'submit') { imageDraft.reportError(decision.kind === 'reject' ? decision.reason : 'sessionUnavailable'); return; }
         // Recheck selected model BEFORE binding a cold Session. Adding images never creates one.
-        try { requireVision(useAiSettingsStore.getState().getProviderConfig()); }
+        try { requireVision(currentProviderConfig()); }
         catch (e) { imageDraft.reportError(String(e)); return; }
         void imageDraft.send(async () => {
           const cold = await coldSkillSession.current;
@@ -934,7 +976,7 @@ export function useAiSessionController({
             }
           }
           await adapter.submit(op.sessionId, { clientOperationId: op.id, mode: op.mode, content: value.text,
-            images: value.images, provider: useAiSettingsStore.getState().getProviderConfig() });
+            images: value.images, provider: currentProviderConfig() });
         }, value => {
           if (!mountedRef.current || submissionContextRef.current !== context) return;
           if (composerRef.current.draft === value.text) dispatch({ type: 'draft.changed', value: '' });

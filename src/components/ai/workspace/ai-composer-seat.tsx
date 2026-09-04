@@ -17,8 +17,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -379,17 +380,24 @@ export function AiComposerSeat({
                         : t('ai.workspace.steer.tooltip')}
                     </TooltipContent>
                   </Tooltip>
-                  <DropdownMenuContent side="top" sideOffset={8} align="start">
+                  <DropdownMenuContent className="ai-busy-preference-menu" side="top" sideOffset={8} align="start">
                     <DropdownMenuGroup>
-                      <DropdownMenuLabel>{t('ai.workspace.busyPreference')}</DropdownMenuLabel>
-                      <DropdownMenuItem onClick={() => onBusyPreferenceChange?.('queue')}>
-                        <ListPlusIcon />
-                        {t('ai.workspace.queue.action')}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => onBusyPreferenceChange?.('steer')}>
-                        <CornerUpLeftIcon />
-                        {t('ai.workspace.steer.action')}
-                      </DropdownMenuItem>
+                      <DropdownMenuLabel className="px-2.5 py-2">{t('ai.workspace.busyPreference')}</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        value={busyPreference}
+                        onValueChange={(value) => {
+                          if (value === 'queue' || value === 'steer') onBusyPreferenceChange?.(value);
+                        }}
+                      >
+                        <DropdownMenuRadioItem className="min-h-10 gap-2 py-2 pl-2.5 whitespace-nowrap" value="queue">
+                          <ListPlusIcon />
+                          {t('ai.workspace.queue.action')}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem className="min-h-10 gap-2 py-2 pl-2.5 whitespace-nowrap" value="steer">
+                          <CornerUpLeftIcon />
+                          {t('ai.workspace.steer.action')}
+                        </DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
                     </DropdownMenuGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>

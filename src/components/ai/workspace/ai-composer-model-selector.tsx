@@ -19,7 +19,7 @@ import {
 } from '@/lib/ai-reasoning';
 import type { LocaleKey } from '@/locales';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
-import type { AiProviderProfile, AiReasoningOption } from '@/types/ai';
+import type { AiProviderConfig, AiProviderProfile, AiReasoningOption } from '@/types/ai';
 
 type ModelMenuPane = 'root' | 'model' | 'reasoning';
 
@@ -59,11 +59,15 @@ function groupProviders(providers: readonly AiProviderProfile[]): readonly Provi
 
 export interface AiComposerModelSelectorProps {
   readonly disabled?: boolean;
+  readonly selection?: AiProviderConfig;
+  readonly onSelect?: (provider: AiProviderConfig) => Promise<void>;
 }
 
 /** Provider-backed model and reasoning selector using the current persisted AI configuration. */
 export function AiComposerModelSelector({
   disabled = false,
+  selection,
+  onSelect,
 }: AiComposerModelSelectorProps): React.ReactNode {
   const { t } = useI18n();
   const providers = useAiSettingsStore((state) => state.providers);
@@ -73,8 +77,11 @@ export function AiComposerModelSelector({
   const [open, setOpen] = useState(false);
   const [pane, setPane] = useState<ModelMenuPane>('root');
   const groups = useMemo(() => groupProviders(providers), [providers]);
-  const current = providers.find((provider) => provider.id === defaultProviderId)
+  const defaultProvider = providers.find((provider) => provider.id === defaultProviderId)
     ?? providers[0];
+  const current: AiProviderProfile | undefined = selection
+    ? { name: selection.id, preset: 'custom', ...providers.find((item) => item.id === selection.id), ...selection }
+    : defaultProvider;
   const reasoningOptions = current ? reasoningEffortOptions(current) : [];
   const reasoning = current ? effectiveReasoningEffort(current) : undefined;
   const modelLabel = current?.model.trim() || t('ai.modelMissing');
@@ -162,9 +169,10 @@ export function AiComposerModelSelector({
           <DropdownMenuGroup key={group.id}>
             <DropdownMenuLabel>{group.label}</DropdownMenuLabel>
             <DropdownMenuRadioGroup
-              value={defaultProviderId}
+              value={current?.id}
               onValueChange={(providerId) => {
-                setDefaultProvider(providerId);
+                if (onSelect) void onSelect(useAiSettingsStore.getState().getProviderConfig(providerId));
+                else setDefaultProvider(providerId);
                 close();
               }}
             >
@@ -187,11 +195,15 @@ export function AiComposerModelSelector({
             <DropdownMenuRadioGroup
               value={reasoning ?? 'provider-default'}
               onValueChange={(value) => {
-                updateProvider(current.id, {
+                const patch = {
                   reasoningEffort: value === 'provider-default'
                     ? undefined
                     : value as AiReasoningOption,
-                });
+                };
+                if (onSelect) {
+                  const { name: _name, preset: _preset, ...config } = current;
+                  void onSelect({ ...config, ...patch });
+                } else updateProvider(current.id, patch);
                 close();
               }}
             >

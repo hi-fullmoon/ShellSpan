@@ -1,29 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { XIcon } from 'lucide-react';
 import { Attachment, AttachmentGroup, AttachmentMedia, AttachmentTitle, AttachmentContent, AttachmentDescription } from '@/components/ui/attachment';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
-import type { LocaleKey } from '@/locales';
+import { imageErrorKey } from '@/lib/ai/image-error';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { visionCapability } from '@/lib/vision-contract';
 import { invokeAgentImagePreview } from '@/lib/tauri';
 import type { AgentImageRef } from '@/types/agent-image';
 import type { useImageDraft } from './use-image-draft';
 import { AiImageDraftRail } from './ai-image-draft-rail';
-
-function imageErrorKey(error: string): LocaleKey {
-  if (error.includes('IMAGE_MODEL_UNSUPPORTED')) return 'ai.workspace.images.error.model';
-  if (/IMAGE_(SOURCE|BATCH|COUNT|PIXEL|BASE64|REFERENCE).*LIMIT|IMAGE_SOURCE_LIMIT/.test(error)) return 'ai.workspace.images.error.limit';
-  if (error.includes('IMAGE_COLOR_PROFILE')) return 'ai.workspace.images.error.color';
-  if (error.includes('IMAGE_ANIMATION')) return 'ai.workspace.images.error.animation';
-  if (/IMAGE_(REQUEST|TOKEN)_BUDGET/.test(error)) return 'ai.workspace.images.error.budget';
-  if (error.includes('IMAGE_ALREADY_COMMITTED')) return 'ai.workspace.images.error.committed';
-  if (error.includes('IMAGE_CANCELLED')) return 'ai.workspace.images.error.cancelled';
-  if (/IMAGE_(BLOB|REFERENCE_NOT_IN_SESSION)/.test(error)) return 'ai.workspace.images.error.blob';
-  if (/IMAGE_(INVALID|MIME|CONTAINER|NAME)/.test(error)) return 'ai.workspace.images.error.invalid';
-  return 'ai.workspace.images.error.retry';
-}
 
 export function AiImageDraftControls({ state }: { state: ReturnType<typeof useImageDraft> }) {
   const { t } = useI18n();
@@ -41,7 +27,6 @@ export function AiImageDraftControls({ state }: { state: ReturnType<typeof useIm
       </div>
       <span className="sr-only" role="status">{state.pendingFiles.length ? t('ai.workspace.images.processing', { count: state.pendingFiles.length }) : t(state.locked ? 'ai.workspace.images.unconfirmed' : 'ai.workspace.images.draft')}</span>
     </>}
-    {state.error && <Alert variant="destructive"><AlertDescription>{t(imageErrorKey(state.error))}</AlertDescription></Alert>}
   </div>;
 }
 
