@@ -461,7 +461,7 @@ export function AiToolRow({
               : node.state === 'approval'
                 ? <ShieldAlertIcon />
                 : <Icon />}
-            <ChevronDownIcon className="ai-tool-row-hover-chevron" />
+            <ChevronDownIcon className="ai-disclosure-chevron" />
           </span>
           <span className="ai-disclosure-title">{t(titleKey(variant))}</span>
           <span className="ai-disclosure-separator" aria-hidden="true" />
@@ -471,7 +471,6 @@ export function AiToolRow({
           {node.durationMs !== null && (
             <span className="ai-tool-duration">{t('ai.workspace.durationMs', { duration: node.durationMs })}</span>
           )}
-          <ChevronDownIcon className="ai-disclosure-chevron" aria-hidden="true" />
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="ai-tool-body">

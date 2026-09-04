@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ImagePlusIcon, XIcon } from 'lucide-react';
-import { Attachment, AttachmentGroup, AttachmentMedia, AttachmentTitle, AttachmentContent, AttachmentActions, AttachmentAction, AttachmentDescription } from '@/components/ui/attachment';
+import { Attachment, AttachmentGroup, AttachmentMedia, AttachmentTitle, AttachmentContent, AttachmentDescription } from '@/components/ui/attachment';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
@@ -10,6 +9,7 @@ import { visionCapability } from '@/lib/vision-contract';
 import { invokeAgentImagePreview } from '@/lib/tauri';
 import type { AgentImageRef } from '@/types/agent-image';
 import type { useImageDraft } from './use-image-draft';
+import { AiImageDraftRail } from './ai-image-draft-rail';
 
 function imageErrorKey(error: string): LocaleKey {
   if (error.includes('IMAGE_MODEL_UNSUPPORTED')) return 'ai.workspace.images.error.model';
@@ -24,30 +24,19 @@ function imageErrorKey(error: string): LocaleKey {
   return 'ai.workspace.images.error.retry';
 }
 
-export function AiImageDraftControls({ state, disabled }: { state: ReturnType<typeof useImageDraft>; disabled?: boolean }) {
+export function AiImageDraftControls({ state }: { state: ReturnType<typeof useImageDraft> }) {
   const { t } = useI18n();
-  const picker = useRef<HTMLInputElement>(null);
   const supported = useAiSettingsStore(s => Boolean(visionCapability(s.getProviderConfig())));
   const previouslySupported = useRef(supported);
   useEffect(() => {
     if (!previouslySupported.current && supported && state.error?.includes('IMAGE_MODEL_UNSUPPORTED')) state.reportError(null);
     previouslySupported.current = supported;
   }, [supported, state.error, state.reportError]);
-  const pickerDisabled = disabled || state.busy || state.locked;
   return <div className="flex min-w-0 flex-col gap-2" data-testid="image-draft" onClick={e => e.stopPropagation()}>
-    <Button type="button" variant="ghost" size="sm" className="self-start" disabled={pickerDisabled} onClick={() => picker.current?.click()}>
-      <ImagePlusIcon data-icon="inline-start" />{t('ai.workspace.images.add')}
-    </Button>
-    <input ref={picker} type="file" hidden multiple accept="image/png,image/jpeg,image/webp,image/gif" aria-label={t('ai.workspace.images.add')}
-      disabled={pickerDisabled}
-      onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; void state.add(files); }} />
-    {!!state.draft?.images.length && <AttachmentGroup>
-      {state.draft.images.map((image, index) => <Attachment key={index} size="sm" state={state.busy ? 'uploading' : state.error ? 'error' : 'idle'}>
-        <AttachmentMedia variant="image"><img src={`data:${image.mediaType};base64,${image.data}`} alt={image.name} /></AttachmentMedia>
-        <AttachmentContent><AttachmentTitle>{image.name}</AttachmentTitle><AttachmentDescription>{t(state.locked ? 'ai.workspace.images.unconfirmed' : 'ai.workspace.images.draft')}</AttachmentDescription></AttachmentContent>
-        <AttachmentActions><AttachmentAction aria-label={`${t('ai.workspace.images.remove')} ${image.name}`} disabled={state.busy || state.locked} onClick={() => void state.remove(index)}><XIcon /></AttachmentAction></AttachmentActions>
-      </Attachment>)}
-    </AttachmentGroup>}
+    {!!state.draft?.images.length && <>
+      <AiImageDraftRail key={state.draft.owner} images={state.draft.images} busy={state.busy} locked={state.locked} error={Boolean(state.error)} onRemove={index => void state.remove(index)} />
+      <span className="sr-only" role="status">{t(state.locked ? 'ai.workspace.images.unconfirmed' : 'ai.workspace.images.draft')}</span>
+    </>}
     {state.error && <Alert variant="destructive"><AlertDescription>{t(imageErrorKey(state.error))}</AlertDescription></Alert>}
     {(state.busy || state.locked) && <Button variant="outline" size="sm" onClick={() => void state.cancel()}>{t('common.cancel')}</Button>}
   </div>;

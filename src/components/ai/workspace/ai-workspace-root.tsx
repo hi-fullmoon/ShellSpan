@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
+import { findConversationTool } from '@/lib/ai/conversation-tool';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiInboxItem, AiSessionView } from '@/lib/ai/session-adapter';
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
@@ -28,6 +29,7 @@ export interface AiWorkspaceSubmitInput {
 
 export interface AiWorkspaceRootProps {
   readonly imageControls?: React.ReactNode;
+  readonly onPasteImages?: (files: File[]) => void | Promise<void>;
   readonly hasImages?: boolean;
   readonly imageBusy?: boolean;
   readonly imageLocked?: boolean;
@@ -78,6 +80,7 @@ export interface AiWorkspaceRootProps {
   readonly onArchiveSession?: (summary: AiSessionSummary) => void;
   readonly onUpdateQueueItem?: (item: AiInboxItem, content: string) => void;
   readonly onRemoveQueueItem?: (item: AiInboxItem) => void;
+  readonly onSteerQueueItem?: (item: AiInboxItem) => void;
   readonly onReorderQueueLane?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
   readonly onRetryQueueMutation?: () => void;
   readonly onRenameSession?: (summary: AiSessionSummary, title: string) => void;
@@ -93,7 +96,7 @@ export interface AiWorkspaceRootProps {
 }
 
 export function AiWorkspaceRoot({
-  imageControls, hasImages, imageBusy, imageLocked,
+  imageControls, onPasteImages, hasImages, imageBusy, imageLocked,
   view,
   scope,
   title,
@@ -141,6 +144,7 @@ export function AiWorkspaceRoot({
   onArchiveSession,
   onUpdateQueueItem,
   onRemoveQueueItem,
+  onSteerQueueItem,
   onReorderQueueLane,
   onRetryQueueMutation,
   onRenameSession,
@@ -175,8 +179,8 @@ export function AiWorkspaceRoot({
   const scrollAnchor = sessionLedgerKey
     ? navigation.scrollAnchorBySession[sessionLedgerKey]
     : undefined;
-  const toolDetailsNode = route.kind === 'toolDetails'
-    ? view?.nodes.find((node) => node.kind === 'tool' && node.key === route.nodeKey)
+  const toolDetailsNode = route.kind === 'toolDetails' && view
+    ? findConversationTool(view.nodes, route)
     : undefined;
   const artifactDetailsNode = route.kind === 'artifactDetails'
     ? view?.nodes.find((node) => node.kind === 'artifact' && node.artifactId === route.artifactId)
@@ -224,7 +228,7 @@ export function AiWorkspaceRoot({
         />
       ) : route.kind === 'toolDetails' ? (
         <AiToolDetails
-          node={toolDetailsNode?.kind === 'tool' ? toolDetailsNode : null}
+          node={toolDetailsNode ?? null}
           onBack={() => onBack?.()}
           onClose={onClose}
         />
@@ -262,6 +266,7 @@ export function AiWorkspaceRoot({
             />
           ) : (
             <AiConversation
+              key={sessionLedgerKey ?? 'pending'}
               nodes={visibleNodes}
               status={status}
               throughSeq={view?.throughSeq ?? null}
@@ -277,7 +282,7 @@ export function AiWorkspaceRoot({
         </div>
 
         <AiComposerSeat
-          imageControls={imageControls} hasImages={hasImages} imageBusy={imageBusy} imageLocked={imageLocked}
+          imageControls={imageControls} onPasteImages={onPasteImages} hasImages={hasImages} imageBusy={imageBusy} imageLocked={imageLocked}
           phase={hero ? 'hero' : 'active'}
           status={status}
           draft={draft}
@@ -291,6 +296,7 @@ export function AiWorkspaceRoot({
           inbox={view?.inbox}
           taskSteps={taskSteps}
           queueMutation={queueMutation}
+          queueMutable={Boolean(view && !view.summary.archived && !view.snapshot.value.ended)}
           announcement={announcement}
           pendingApproval={view?.pendingApproval}
           pendingQuestion={view?.pendingQuestion}
@@ -310,6 +316,7 @@ export function AiWorkspaceRoot({
           onBusyPreferenceChange={onBusyPreferenceChange}
           onUpdateQueueItem={onUpdateQueueItem}
           onRemoveQueueItem={onRemoveQueueItem}
+          onSteerQueueItem={onSteerQueueItem}
           onReorderQueueLane={onReorderQueueLane}
           onRetryQueueMutation={onRetryQueueMutation}
           onRetryFailedDraft={onRetryFailedDraft}
@@ -319,8 +326,9 @@ export function AiWorkspaceRoot({
           onReject={onReject}
           onOpenApprovalDetails={() => {
             const approval = view?.pendingApproval;
-            const tool = view?.nodes.find((node) => node.kind === 'tool' && node.callId === approval?.callId);
-            if (tool?.kind === 'tool') onOpenTool?.(tool);
+            if (!view || !approval) return;
+            const tool = findConversationTool(view.nodes, approval);
+            if (tool) onOpenTool?.(tool);
           }}
         />
       </div>

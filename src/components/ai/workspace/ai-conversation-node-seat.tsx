@@ -28,17 +28,17 @@ import { useI18n } from '@/hooks/useI18n';
 import type {
   AiConversationNode,
   AiConversationNodeOf,
-  AiDurableSessionStats,
-  AiDurableTurnStats,
   AiTurnProcessStatus,
 } from '@/lib/ai/conversation-node';
 import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
 import { AiToolRow } from './ai-tool-presentation';
+import { AiTurnFooter } from './ai-turn-footer';
 import { AiQuestionHistory } from './ai-question-panel';
 
 type AiConversationNodeRendererProps<Kind extends AiConversationNode['kind']> = {
   readonly node: AiConversationNodeOf<Kind>;
+  readonly inTurnProcess?: boolean;
   readonly renderers?: AiConversationNodeRendererMap;
   readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
   readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
@@ -82,7 +82,10 @@ function SemanticNoteDisclosure({
               />
             )}
           >
-            <MarkerIcon>{icon}</MarkerIcon>
+            <MarkerIcon className="ai-disclosure-leading">
+              {icon}
+              <ChevronDownIcon className="ai-disclosure-chevron" />
+            </MarkerIcon>
             <MarkerContent className="ai-semantic-note-heading">
               <span className="ai-disclosure-title">{label}</span>
               {summary && (
@@ -92,7 +95,6 @@ function SemanticNoteDisclosure({
                 </>
               )}
             </MarkerContent>
-            <ChevronDownIcon className="ai-disclosure-chevron" aria-hidden="true" />
           </CollapsibleTrigger>
         </MarkerPrimitive>
         <CollapsibleContent>
@@ -170,7 +172,8 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
 
 function AssistantMessageNodeView({
   node,
-}: { readonly node: AiConversationNodeOf<'assistantMessage'> }) {
+  inTurnProcess = false,
+}: AiConversationNodeRendererProps<'assistantMessage'>) {
   const { t } = useI18n();
   const text = assistantText(node);
   if (!text) return null;
@@ -188,7 +191,7 @@ function AssistantMessageNodeView({
           </span>
         )}
       </Bubble>
-      {text && (
+      {!inTurnProcess && !node.hasTurnTail && (
         <MessageActions
           text={text}
           timestamp={node.timestamp}
@@ -203,20 +206,21 @@ function AssistantMessageNodeView({
 function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reasoning'> }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const isStreaming = node.state === 'streaming';
   const lines = node.content.trim().split('\n');
-  const summary = node.state === 'streaming'
-    ? lines[lines.length - 1] || node.summary || t('ai.thinking.inProgress')
-    : lines[0] || node.summary || t('ai.workspace.reasoning');
-  const title = node.state === 'streaming'
+  const summary = (isStreaming ? lines[lines.length - 1] : lines[0]) || node.summary.trim();
+  const title = isStreaming
     ? t('ai.thinking.inProgress')
-    : t('ai.workspace.reasoning');
+    : node.state === 'interrupted'
+      ? t('ai.thinking.interrupted')
+      : t('ai.workspace.reasoning');
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
-        className={cn('ai-reasoning-row', node.state === 'streaming' && 'shimmer')}
-        data-state={node.state === 'streaming' ? 'running' : 'ok'}
+        className="ai-reasoning-row"
+        data-state={isStreaming ? 'running' : node.state === 'interrupted' ? 'interrupted' : 'ok'}
         data-expanded={open || undefined}
-        role={node.state === 'streaming' ? 'status' : undefined}
+        role={isStreaming ? 'status' : undefined}
       >
         <CollapsibleTrigger
           render={(
@@ -225,18 +229,22 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
               variant="plain"
               size="sm"
               className="ai-disclosure-row"
-              aria-label={`${title} ${summary}`}
+              aria-label={summary ? `${title} ${summary}` : title}
               aria-expanded={open}
             />
           )}
         >
           <span className="ai-disclosure-leading" aria-hidden="true">
             <AtomIcon />
+            <ChevronDownIcon className="ai-disclosure-chevron" />
           </span>
-          <span className="ai-disclosure-title">{title}</span>
-          <span className="ai-disclosure-separator" aria-hidden="true" />
-          <span className="ai-disclosure-summary">{summary}</span>
-          <ChevronDownIcon className="ai-disclosure-chevron" aria-hidden="true" />
+          <span className={cn('ai-disclosure-title', isStreaming && 'shimmer')}>{title}</span>
+          {summary && (
+            <>
+              <span className="ai-disclosure-separator" aria-hidden="true" />
+              <span className="ai-disclosure-summary">{summary}</span>
+            </>
+          )}
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="ai-reasoning-body">{node.content || node.summary}</div>
@@ -440,6 +448,9 @@ function TurnProcessDisclosure({
             />
           )}
         >
+          <span className="ai-disclosure-leading" aria-hidden="true">
+            <ChevronDownIcon className="ai-disclosure-chevron" />
+          </span>
           <span className="ai-disclosure-title">{label}</span>
           {summary && (
             <>
@@ -447,7 +458,6 @@ function TurnProcessDisclosure({
               <span className="ai-disclosure-summary">{summary}</span>
             </>
           )}
-          <ChevronDownIcon className="ai-disclosure-chevron" aria-hidden="true" />
         </CollapsibleTrigger>
         <Separator className="ai-turn-process-separator" />
         <CollapsibleContent>
@@ -459,7 +469,7 @@ function TurnProcessDisclosure({
                 data-ai-process-child={child.kind}
                 data-ai-process-child-key={child.key}
               >
-                {renderNode(child, renderers, onOpenTool, onOpenArtifact)}
+                {renderNode(child, renderers, onOpenTool, onOpenArtifact, true)}
               </div>
             ))}
           </div>
@@ -488,139 +498,6 @@ function TurnProcessRow({
   );
 }
 
-function compactDuration(
-  milliseconds: number,
-  t: ReturnType<typeof useI18n>['t'],
-): string {
-  if (milliseconds < 60_000) {
-    const seconds = milliseconds / 1_000;
-    return t('ai.workspace.duration.seconds', {
-      seconds: seconds < 10 ? seconds.toFixed(1) : Math.round(seconds),
-    });
-  }
-  const minutes = Math.floor(milliseconds / 60_000);
-  const seconds = Math.round((milliseconds % 60_000) / 1_000);
-  return t('ai.workspace.duration.minutes', { minutes, seconds });
-}
-
-function cacheHitPercent(
-  stats: AiDurableTurnStats | AiDurableSessionStats,
-): number | null {
-  if (stats.uncachedInputTokens === null || stats.cacheReadTokens === null
-    || stats.cacheWriteTokens === null) return null;
-  const input = stats.uncachedInputTokens + stats.cacheReadTokens + stats.cacheWriteTokens;
-  if (input <= 0) return null;
-  return (stats.cacheReadTokens / input) * 100;
-}
-
-function formatRate(rate: number): string {
-  return rate < 10 ? rate.toFixed(1) : String(Math.round(rate));
-}
-
-export function StatsLine({
-  stats,
-}: {
-  readonly stats: AiDurableTurnStats | AiDurableSessionStats;
-}) {
-  const { t } = useI18n();
-  if ('historyComplete' in stats && !stats.historyComplete) return null;
-  const count = stats.turnCount;
-  const inputTokens = stats.uncachedInputTokens !== null
-    && stats.cacheReadTokens !== null
-    && stats.cacheWriteTokens !== null
-    ? stats.uncachedInputTokens + stats.cacheReadTokens + stats.cacheWriteTokens
-    : null;
-  const cacheHit = cacheHitPercent(stats);
-  const groups = [
-    [
-      { key: 'turn', text: t('ai.workspace.stats.turn', { count }) },
-      { key: 'steps', text: t('ai.workspace.stats.steps', { count: stats.stepCount }) },
-    ],
-    [
-      stats.modelDurationMs === null ? null : {
-        key: 'model',
-        text: t('ai.workspace.stats.model', { duration: compactDuration(stats.modelDurationMs, t) }),
-      },
-      stats.toolDurationMs === null ? null : {
-        key: 'tools',
-        text: t('ai.workspace.stats.tools', { duration: compactDuration(stats.toolDurationMs, t) }),
-      },
-    ],
-    [
-      stats.averageTimeToFirstTokenMs === null ? null : {
-        key: 'ttft',
-        text: t('ai.workspace.stats.ttft', {
-          duration: compactDuration(stats.averageTimeToFirstTokenMs, t),
-        }),
-      },
-      stats.tokensPerSecond === null ? null : {
-        key: 'rate',
-        text: t('ai.workspace.stats.rate', { rate: formatRate(stats.tokensPerSecond) }),
-      },
-    ],
-    [
-      stats.cacheReadTokens === null ? null : {
-        key: 'cacheRead',
-        text: t('ai.workspace.stats.cacheRead', { count: stats.cacheReadTokens }),
-      },
-      stats.cacheWriteTokens === null ? null : {
-        key: 'cacheWrite',
-        text: t('ai.workspace.stats.cacheWrite', { count: stats.cacheWriteTokens }),
-      },
-      cacheHit === null ? null : {
-        key: 'cacheHit',
-        text: t('ai.workspace.stats.cacheHit', {
-          percent: cacheHit < 99.5 ? Math.round(cacheHit) : Number(cacheHit.toFixed(2)),
-        }),
-      },
-    ],
-    [
-      inputTokens === null ? null : {
-        key: 'inputTokens',
-        text: t('ai.workspace.stats.inputTokens', { count: inputTokens }),
-      },
-      stats.outputTokens === null ? null : {
-        key: 'outputTokens',
-        text: t('ai.workspace.stats.outputTokens', { count: stats.outputTokens }),
-      },
-      stats.reasoningTokens === null ? null : {
-        key: 'reasoningTokens',
-        text: t('ai.workspace.stats.reasoningTokens', { count: stats.reasoningTokens }),
-      },
-      stats.totalTokens === null ? null : {
-        key: 'totalTokens',
-        text: t('ai.workspace.stats.tokens', { count: stats.totalTokens }),
-      },
-    ],
-  ].map((group) => group.filter(
-    (item): item is { key: string; text: string } => item !== null,
-  )).filter((group) => group.length > 0);
-  const line = groups.map((group) => group.map((stat) => stat.text).join(' · ')).join(' | ');
-  if (!line) return null;
-  return (
-    <div className="ai-turn-stats" aria-label={t('ai.workspace.stats.label')} title={line}>
-      {groups.map((group) => (
-        <span key={group.map((stat) => stat.key).join(':')} data-stat-group="">
-          {group.map((stat, index) => (
-            <React.Fragment key={stat.key}>
-              {index > 0 && <span className="ai-turn-stats-inner-separator" aria-hidden="true">·</span>}
-              <span data-stat={stat.key}>{stat.text}</span>
-            </React.Fragment>
-          ))}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function TurnTail({ node }: { readonly node: AiConversationNodeOf<'turnTail'> }) {
-  return (
-    <div className="ai-turn-tail" data-status={node.status} data-stop-reason={node.stopReason ?? undefined}>
-      <StatsLine stats={node.stats} />
-    </div>
-  );
-}
-
 export const aiConversationNodeRenderers = {
   systemPrompt: SystemPromptRow,
   contextInjection: ContextInjectionRow,
@@ -634,7 +511,7 @@ export const aiConversationNodeRenderers = {
   retry: RetryNodeView,
   error: ErrorNodeView,
   turnProcess: TurnProcessRow,
-  turnTail: TurnTail,
+  turnTail: AiTurnFooter,
 } satisfies AiConversationNodeRendererMap;
 
 function assertNever(value: never): never {
@@ -646,12 +523,13 @@ function renderNode(
   renderers: AiConversationNodeRendererMap,
   onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void,
   onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void,
+  inTurnProcess = false,
 ): React.ReactNode {
   switch (node.kind) {
     case 'systemPrompt': return React.createElement(renderers.systemPrompt, { node, renderers });
     case 'contextInjection': return React.createElement(renderers.contextInjection, { node, renderers });
     case 'userMessage': return React.createElement(renderers.userMessage, { node });
-    case 'assistantMessage': return React.createElement(renderers.assistantMessage, { node });
+    case 'assistantMessage': return React.createElement(renderers.assistantMessage, { node, inTurnProcess });
     case 'reasoning': return React.createElement(renderers.reasoning, { node });
     case 'tool': return React.createElement(renderers.tool, { node, onOpenTool });
     case 'question': return React.createElement(renderers.question, { node });
@@ -673,7 +551,7 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
     case 'systemPrompt': return `${base}:${node.requestIds.join(',')}:${node.content}`;
     case 'contextInjection': return `${base}:${node.provenance.kind}:${node.content}`;
     case 'userMessage': return `${base}:${node.delivery}:${node.content}`;
-    case 'assistantMessage': return `${base}:${node.state}:${JSON.stringify(node.blocks)}`;
+    case 'assistantMessage': return `${base}:${node.state}:${node.hasTurnTail ?? false}:${JSON.stringify(node.blocks)}`;
     case 'reasoning': return `${base}:${node.state}:${node.summary}:${node.content}`;
     case 'tool': return `${base}:${node.state}:${node.durationMs ?? ''}:${node.error ?? ''}`;
     case 'question': return `${base}:${node.question.status}:${node.lastSeq}`;
@@ -682,7 +560,7 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
     case 'retry': return `${base}:${node.attempt}:${node.reason}`;
     case 'error': return `${base}:${node.state}:${node.code ?? ''}:${node.message}`;
     case 'turnProcess': return `${base}:${node.status}:${node.answerGeneration}:${node.hasStartBoundary}:${node.hasEndBoundary}:${node.children.map(aiConversationNodeRevision).join('|')}`;
-    case 'turnTail': return `${base}:${node.status}:${node.endReason}:${JSON.stringify(node.stats)}:${JSON.stringify(node.sessionStats)}`;
+    case 'turnTail': return `${base}:${node.status}:${node.endReason}:${JSON.stringify(node.stats)}:${JSON.stringify(node.sessionStats)}:${node.summaryText ?? ''}:${node.durationMs ?? ''}:${JSON.stringify(node.models)}`;
     default: return assertNever(node);
   }
 }

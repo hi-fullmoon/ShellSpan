@@ -4,10 +4,10 @@ import {
   SquarePenIcon,
 } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
+import { AiHeaderIconButton } from './ai-header-icon-button';
 
 export interface AiSessionHeaderProps {
   readonly title: string;
@@ -53,15 +53,13 @@ export function AiSessionHeader({
           <Tooltip>
             <TooltipTrigger
               render={(
-                <Button
-                  variant="ghost"
-                  size="icon"
+                <AiHeaderIconButton
                   onClick={onHistory}
                   aria-label={t('ai.history')}
                 />
               )}
             >
-              <HistoryIcon />
+              <HistoryIcon data-icon="inline-start" />
             </TooltipTrigger>
             <TooltipContent>{t('ai.history')}</TooltipContent>
           </Tooltip>
@@ -71,15 +69,13 @@ export function AiSessionHeader({
           <Tooltip>
             <TooltipTrigger
               render={(
-                <Button
-                  variant="ghost"
-                  size="icon"
+                <AiHeaderIconButton
                   onClick={onNewSession}
                   aria-label={t('ai.newConversation')}
                 />
               )}
             >
-              <SquarePenIcon />
+              <SquarePenIcon data-icon="inline-start" />
             </TooltipTrigger>
             <TooltipContent>{t('ai.newConversation')}</TooltipContent>
           </Tooltip>
@@ -89,15 +85,13 @@ export function AiSessionHeader({
           <Tooltip>
             <TooltipTrigger
               render={(
-                <Button
-                  variant="ghost"
-                  size="icon"
+                <AiHeaderIconButton
                   onClick={onClose}
                   aria-label={t('ai.close')}
                 />
               )}
             >
-              <PanelRightCloseIcon />
+              <PanelRightCloseIcon data-icon="inline-start" />
             </TooltipTrigger>
             <TooltipContent>{t('ai.close')}</TooltipContent>
           </Tooltip>
