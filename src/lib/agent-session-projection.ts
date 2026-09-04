@@ -13,6 +13,7 @@ import {
 } from '@/types/agent-session';
 import {
   agentEventTimestamp,
+  agentToolEventKey,
   validateCommittedAgentEventWindow,
 } from '@/lib/agent-session-event-window';
 
@@ -124,7 +125,6 @@ function projectActivityNodesUnchecked(
   const indexByKey = new Map<string, number>();
   const currentRequestByStep = new Map<string, string>();
   const requestTurn = new Map<string, { readonly turnId: string | null; readonly stepId: string | null }>();
-  const toolKeys = new Map<string, string>();
   const subagentKeys = new Map<string, string>();
   let taskKey = `activity:task:${events[0]?.sessionId ?? 'unknown'}`;
   let activeCompactionKey: string | null = null;
@@ -277,6 +277,12 @@ function projectActivityNodesUnchecked(
         upsert(
           `activity:inbox:${event.data.itemId}`,
           'inbox', event, 'cancelled', `${event.data.lane}/removed`, event.data.itemId, event.data,
+        );
+        break;
+      case 'agent/inbox/item_steered':
+        upsert(
+          `activity:inbox:${event.data.itemId}`,
+          'inbox', event, 'updated', 'nextStep/steered', null, event.data,
         );
         break;
       case 'agent/inbox/reordered':
@@ -452,8 +458,7 @@ function projectActivityNodesUnchecked(
         break;
       }
       case 'tool/call': {
-        const key = `activity:tool:${event.data.call.callId}`;
-        toolKeys.set(event.data.call.callId, key);
+        const key = `activity:tool:${agentToolEventKey(event, event.data.call.callId)}`;
         upsert(
           key, 'tool', event, 'pending', event.data.call.name,
           event.data.call.title ?? null, event.data,
@@ -470,7 +475,7 @@ function projectActivityNodesUnchecked(
         break;
       }
       case 'tool/approval': {
-        const key = toolKeys.get(event.data.callId) ?? `activity:tool:${event.data.callId}`;
+        const key = `activity:tool:${agentToolEventKey(event, event.data.callId)}`;
         upsert(
           key, 'tool', event, approvalToolStatus(event.data.status), event.data.callId,
           event.data.reason ?? null, event.data, event.data.requestId,
@@ -485,13 +490,13 @@ function projectActivityNodesUnchecked(
       }
       case 'tool/execution':
         upsert(
-          toolKeys.get(event.data.callId) ?? `activity:tool:${event.data.callId}`,
+          `activity:tool:${agentToolEventKey(event, event.data.callId)}`,
           'tool', event, 'running', event.data.callId, event.data.idempotency, event.data,
         );
         break;
       case 'tool/result':
         upsert(
-          toolKeys.get(event.data.callId) ?? `activity:tool:${event.data.callId}`,
+          `activity:tool:${agentToolEventKey(event, event.data.callId)}`,
           'tool', event, event.data.status, event.data.name, event.data.summary, event.data,
         );
         break;

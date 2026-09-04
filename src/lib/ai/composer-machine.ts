@@ -24,7 +24,10 @@ export interface AiFailedDraft {
   readonly error: AiSessionError;
 }
 
-export type AiPendingSubmission = AiDetachedSubmission & { readonly state: 'sending' | 'accepted' };
+export type AiPendingSubmission = AiDetachedSubmission & {
+  readonly state: 'sending' | 'accepted';
+  readonly startsTurn?: boolean;
+};
 
 export interface AiComposerState {
   readonly phase: AiComposerPhase;
@@ -131,7 +134,13 @@ function beginSubmission(
       detached: payload,
       pendingSubmissions: [
         ...state.pendingSubmissions.filter((item) => item.clientOperationId !== payload.clientOperationId),
-        { ...payload, state: 'sending' },
+        {
+          ...payload,
+          state: 'sending',
+          // Capture the gesture's intent before acceptance changes the runtime status.
+          startsTurn: payload.mode !== 'nextStep'
+            && state.runtimeStatus !== 'running' && state.runtimeStatus !== 'waiting',
+        },
       ],
       failedDrafts,
       lastError: null,

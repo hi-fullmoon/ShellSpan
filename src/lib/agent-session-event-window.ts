@@ -32,3 +32,11 @@ export function validateCommittedAgentEventWindow(
 export function agentEventTimestamp(timeUnixMs: number): string {
   return new Date(timeUnixMs).toISOString();
 }
+
+/** Provider call IDs may repeat; identify tools within a single-session event window. */
+export function agentToolEventKey(
+  event: Readonly<{ turnId?: string; stepId?: string }>,
+  callId: string,
+): string {
+  return [event.turnId ?? '', event.stepId ?? '', callId].map(encodeURIComponent).join(':');
+}
