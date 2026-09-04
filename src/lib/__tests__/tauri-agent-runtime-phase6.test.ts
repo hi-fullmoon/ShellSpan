@@ -35,3 +35,10 @@ describe('Phase 6 Agent Runtime Tauri wrappers', () => {
     expect(invoke).toHaveBeenCalledWith('agent_runtime_rename_session', { input });
   });
 });
+
+
+it('forwards identity-only queue steer on the existing mutateInbox command', async () => {
+  const input = { sessionId: 'session-1', expectedRevision: 8, clientOperationId: 'steer-1', mutation: { type: 'steer' as const, itemId: 'queued-original' } };
+  await invokeMutateAgentRuntimeInbox(input);
+  expect(invoke).toHaveBeenCalledWith('agent_runtime_mutate_inbox', { input });
+});

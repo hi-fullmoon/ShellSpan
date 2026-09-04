@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
+import { projectAgentActivity } from '@/lib/agent-session-projection';
 import { AgentSessionCommittedClient } from '@/lib/agent-session-client';
 import {
   agentSessionView,
@@ -8,6 +10,8 @@ import {
 } from '@/lib/ai/agent-session-adapter';
 import {
   agentSessionEventFixture,
+  agentSessionSteerFixture,
+  queuedSteerMessageFixture,
   agentSessionWaitingApprovalEventFixture,
 } from '@/test/fixtures/agent-session';
 import type {
@@ -178,7 +182,7 @@ describe('AgentSessionAdapter', () => {
     ];
     expect(projectAgentInbox(events)).toEqual([{
       id: 'b', clientSubmissionId: 'submission-b', lane: 'nextTurn',
-      content: 'B updated', state: 'queued', source: 'user',
+      content: 'B updated', state: 'queued', source: 'user', startsTurn: true,
       provenance: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
     }]);
   });
@@ -415,5 +419,98 @@ describe('AgentSessionAdapter', () => {
     });
     expect(view.status).toBe('running');
     expect(view.error).toBeNull();
+  });
+});
+
+
+describe('Committed queue steering', () => {
+  it('replays a lane migration, original attachment and single conversation identity through consumption', () => {
+    const queued = projectAgentInbox(agentSessionSteerFixture.slice(0, 7));
+    expect(queued.map((item) => [item.id, item.lane])).toEqual([
+      ['existing-step', 'nextStep'], ['queued-steer', 'nextStep'],
+    ]);
+    expect(queued[1]).toMatchObject({
+      id: queuedSteerMessageFixture.messageId, clientSubmissionId: 'original-submission',
+      content: queuedSteerMessageFixture.content, images: queuedSteerMessageFixture.images, state: 'queued',
+    });
+    const cold = agentSessionView({ snapshot: snapshot(), events: agentSessionSteerFixture, lastCommittedSeq: 10, hasTerminalEvent: false });
+    expect(cold.committedOperationIds).toContain('steer-operation');
+    expect(cold.inbox.find((item) => item.id === 'queued-steer')).toMatchObject({ lane: 'nextStep', state: 'claimed', images: queuedSteerMessageFixture.images });
+    const users = projectAgentChatNodes(agentSessionSteerFixture).filter((node) => node.kind === 'userMessage' && node.messageId === 'queued-steer');
+    expect(users).toHaveLength(1);
+    expect(users[0]).toMatchObject({ turnId: 'turn-steer', stepId: 'step-next', images: queuedSteerMessageFixture.images });
+    expect(projectAgentActivity(agentSessionSteerFixture.slice(0, 7)).nodes.find((node) => node.key === 'activity:inbox:queued-steer')).toBeDefined();
+  });
+
+  it('waits for the live receipt, settles despite delayed IPC, and deduplicates its retry', async () => {
+    const events = [...agentSessionSteerFixture.slice(0, 6)];
+    let publish: ((event: AgentSessionEvent) => void) | undefined;
+    const client = new AgentSessionCommittedClient('session-fixture', {
+      snapshot: async () => snapshot(),
+      committedEvents: async ({ afterSeq }) => ({ events: events.filter((event) => afterSeq === undefined || event.seq > afterSeq) }),
+      subscribe: async (listener) => { publish = listener; return () => undefined; },
+    });
+    const dependencies = { ...agentDependencies(events), client: () => client };
+    let rejectIpc: ((error: Error) => void) | undefined;
+    vi.mocked(dependencies.mutateInbox).mockImplementation(() => new Promise((_resolve, reject) => {
+      rejectIpc = reject;
+    }));
+    const adapter = createAgentSessionAdapter(dependencies);
+    const input = { type: 'steer' as const, sessionId: 'session-fixture', itemId: 'queued-steer', expectedRevision: 6, clientOperationId: 'steer-operation' };
+    let resolved = false;
+    const pending = adapter.mutateInbox(input).then(() => { resolved = true; });
+    await vi.waitFor(() => expect(dependencies.mutateInbox).toHaveBeenCalledOnce());
+    expect(dependencies.mutateInbox).toHaveBeenCalledWith({ sessionId: 'session-fixture', expectedRevision: 6, clientOperationId: 'steer-operation', mutation: { type: 'steer', itemId: 'queued-steer' } });
+    expect(resolved).toBe(false);
+    events.push(agentSessionSteerFixture[6]);
+    publish?.(events[6]);
+    await client.settled();
+    await pending;
+    expect(resolved).toBe(true);
+    rejectIpc?.(new Error('late IPC failure after committed receipt'));
+    await adapter.mutateInbox(input);
+    expect(dependencies.mutateInbox).toHaveBeenCalledOnce();
+    expect(dependencies.followup).not.toHaveBeenCalled();
+    expect(dependencies.steer).not.toHaveBeenCalled();
+    adapter.dispose();
+  });
+
+  it('reconnects after an ambiguous IPC error and acknowledges a consumed, durably committed operation', async () => {
+    const events = [...agentSessionSteerFixture.slice(0, 6)];
+    const dependencies = agentDependencies(events);
+    vi.mocked(dependencies.mutateInbox).mockImplementation(async () => {
+      events.push(...agentSessionSteerFixture.slice(6));
+      throw new Error('IPC response lost');
+    });
+    const adapter = createAgentSessionAdapter(dependencies);
+    await adapter.mutateInbox({ type: 'steer', sessionId: 'session-fixture', itemId: 'queued-steer', expectedRevision: 6, clientOperationId: 'steer-operation' });
+    const view = await adapter.open('session-fixture');
+    expect(view.inbox.find((item) => item.id === 'queued-steer')?.state).toBe('claimed');
+    expect(view.committedOperationIds).toContain('steer-operation');
+    adapter.dispose();
+  });
+
+  it('backfills a lost live receipt on timeout and leaves an uncommitted error retryable', async () => {
+    vi.useFakeTimers();
+    const events = [...agentSessionSteerFixture.slice(0, 6)];
+    const dependencies = agentDependencies(events);
+    const adapter = createAgentSessionAdapter(dependencies);
+    const input = { type: 'steer' as const, sessionId: 'session-fixture', itemId: 'queued-steer', expectedRevision: 6, clientOperationId: 'steer-operation' };
+    try {
+      await adapter.open('session-fixture');
+      const pending = adapter.mutateInbox(input);
+      await vi.advanceTimersByTimeAsync(1);
+      events.push(agentSessionSteerFixture[6]);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await pending;
+      expect((await adapter.open('session-fixture')).committedOperationIds).toContain('steer-operation');
+    } finally { adapter.dispose(); vi.useRealTimers(); }
+
+    const failedDependencies = agentDependencies(agentSessionSteerFixture.slice(0, 6));
+    vi.mocked(failedDependencies.mutateInbox).mockRejectedValue(new Error('disk unavailable'));
+    const failedAdapter = createAgentSessionAdapter(failedDependencies);
+    await expect(failedAdapter.mutateInbox(input)).rejects.toThrow('disk unavailable');
+    expect((await failedAdapter.open('session-fixture')).inbox.find((item) => item.id === 'queued-steer')?.lane).toBe('nextTurn');
+    failedAdapter.dispose();
   });
 });

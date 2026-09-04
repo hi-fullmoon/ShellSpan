@@ -4,7 +4,7 @@ import {
   AgentSessionCommittedClient,
   type AgentSessionStreamTransport,
 } from '@/lib/agent-session-client';
-import { sessionEvent } from '@/test/fixtures/agent-session';
+import { agentSessionSteerFixture, sessionEvent } from '@/test/fixtures/agent-session';
 import type {
   AgentSessionEvent,
   AgentSessionSnapshot,
@@ -66,6 +66,30 @@ const created = sessionEvent(0, {
 });
 
 describe('AgentSessionCommittedClient', () => {
+  it('can connect after a missing-session probe and releases the failed subscription', async () => {
+    const source = transport([created]);
+    let exists = false;
+    let subscriptions = 0;
+    let releases = 0;
+    const client = new AgentSessionCommittedClient('session-fixture', {
+      ...source,
+      snapshot: async () => { if (!exists) throw new Error('Agent session was not found'); return snapshot(); },
+      subscribe: async listener => {
+        subscriptions++;
+        const release = await source.subscribe(listener);
+        return () => { releases++; release(); };
+      },
+    });
+    await expect(client.connect()).rejects.toThrow('Agent session was not found');
+    expect(releases).toBe(1);
+    exists = true;
+    const connected = await client.connect();
+    expect(connected.snapshot).toEqual(snapshot());
+    expect(connected.events).toEqual([created]);
+    expect(subscriptions).toBe(2);
+    client.disconnect();
+  });
+
   it('subscribes before backfill and deduplicates an event observed on both paths', async () => {
     const source = transport([created]);
     const client = new AgentSessionCommittedClient('session-fixture', source);
@@ -154,4 +178,32 @@ describe('AgentSessionCommittedClient', () => {
     );
     expect(client.state().events).toEqual([created]);
   });
+});
+
+
+it('parses a live steer mutation after filling a sequence gap, and reproduces it on cold replay', async () => {
+  const source = transport([...agentSessionSteerFixture.slice(0, 5)]);
+  const client = new AgentSessionCommittedClient('session-fixture', source);
+  await client.connect();
+  source.replace([...agentSessionSteerFixture]);
+  source.publish(agentSessionSteerFixture[10]);
+  expect((await client.settled()).events).toEqual(agentSessionSteerFixture);
+  client.disconnect();
+  const cold = new AgentSessionCommittedClient('session-fixture', source);
+  expect((await cold.connect()).events).toEqual(agentSessionSteerFixture);
+  cold.disconnect();
+});
+
+it.each([
+  { itemId: '', previousRevision: 1, clientOperationId: 'operation' },
+  { itemId: 'item', previousRevision: 0, clientOperationId: 'operation' },
+  { itemId: 'item', previousRevision: 1, clientOperationId: '' },
+])('rejects malformed steer event data without appending it: %j', async (data) => {
+  const source = transport([created]);
+  const client = new AgentSessionCommittedClient('session-fixture', source);
+  await client.connect();
+  source.publish(sessionEvent(1, { type: 'agent/inbox/item_steered', data }));
+  await expect(client.settled()).rejects.toThrow('invalid mutation identity');
+  expect(client.state().events).toEqual([created]);
+  client.disconnect();
 });
