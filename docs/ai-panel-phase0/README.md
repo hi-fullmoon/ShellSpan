@@ -1,6 +1,6 @@
 # AI Panel Phase 0 基线
 
-本目录冻结 ShellSpan 当前 AI Panel 与 DeepSeek Harness 目标态的可比较基线。所有事件和目标会话均为固定数据；生成证据时不访问 provider，也不发起真实模型请求。
+本目录保存 Phase 0 的固定测试输入和历史文本记录。现行视觉回归基线位于 `../ai-panel-phase5/evidence/`。所有事件和目标会话均为固定数据；生成证据时不访问 provider，也不发起真实模型请求。
 
 ## 冻结输入
 
@@ -54,10 +54,10 @@ node scripts/ai-panel-phase0-baseline.mjs --write-before
 ## 证据
 
 - `evidence/workspace-before.txt`：开始实施前的分支、提交、工作区和相关文件摘要。
-- `evidence/before/`：ShellSpan 当前实现的事件、语义树、DOM 和截图。
-- `evidence/target/`：DeepSeek Harness 固定会话的折叠/展开语义树、DOM、截图与源结构说明。
-- `evidence/baseline-result.json`：两次连续捕获的环境与稳定 SHA-256。
-- `evidence/manifest.sha256`：证据文件校验和。
+- `evidence/before/`：Phase 0 时 ShellSpan 实现的事件、语义树和 DOM。
+- `evidence/target/`：DeepSeek Harness 固定会话的折叠/展开语义树、DOM 与源结构说明。
+- `evidence/baseline-result.json`：当时两次连续捕获的环境与 SHA-256 记录，其中截图哈希仅作历史记录。
+- `evidence/manifest.sha256`：保留的证据文件校验和。
 - `fixtures/deepseek-target-hello.session.jsonl`：DeepSeek Harness keyless replay 的固定会话。
 
 DeepSeek 目标证据通过其测试 scaffold 注入上述会话并重放，未连接 provider。需要重新观察目标页面时，从 `deepseek-harness` 仓库运行：
