@@ -56,9 +56,26 @@ try {
       }, { image: bridge.image, count });
     };
     const add = async () => {
+      if (index === 1) await page.evaluate(() => window.imageTestHoldPreparation());
       await paste(index === 0 ? 20 : 1);
+      let loadingHeight;
+      if (index === 1) {
+        const pending = page.locator('.ai-image-thumbnail[aria-busy=true]');
+        await pending.waitFor();
+        await page.waitForFunction(() => document.querySelector('.ai-image-thumbnail[aria-busy=true] img')?.naturalWidth > 0);
+        assert.equal(await pending.locator('img').evaluate(image => image.src.startsWith('blob:')), true, 'local image preview appears before native preparation');
+        assert.equal(await pending.locator('[data-slot=spinner]').count(), 1);
+        loadingHeight = (await page.locator('[data-composer-card]').boundingBox()).height;
+        await page.screenshot({ path: join(output, `${width}-${theme}-loading.png`), animations: 'disabled' });
+        await page.evaluate(() => window.imageTestReleasePreparation());
+      }
       await page.locator('[data-testid=image-draft] img').first().waitFor();
       await page.getByText(zh ? '已保存草稿 · 尚未发送' : 'Saved draft · not sent').waitFor();
+      if (index === 1) {
+        assert.equal(await page.locator('.ai-image-thumbnail[aria-busy=true]').count(), 0);
+        assert.equal(await page.locator('.ai-image-thumbnail [data-slot=spinner]').count(), 0);
+        assert.equal((await page.locator('[data-composer-card]').boundingBox()).height, loadingHeight, 'finishing image preparation does not resize the composer');
+      }
     };
     const skill = async () => {
       const editor = page.getByTestId('ai-workspace-composer');
