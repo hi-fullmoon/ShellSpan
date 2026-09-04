@@ -25,11 +25,104 @@ function makeTerminal() {
 
 const disposals: Array<() => void> = [];
 
+// Match xterm: an armed document listener consumes every move, regardless of
+// buttons, until its mouseup listener removes it.
+function armXtermDrag() {
+  const move = vi.fn((event: MouseEvent) => event.stopImmediatePropagation());
+  const up = vi.fn(() => {
+    document.removeEventListener('mousemove', move);
+    document.removeEventListener('mouseup', up);
+  });
+  document.addEventListener('mousemove', move);
+  document.addEventListener('mouseup', up);
+  disposals.push(() => {
+    document.removeEventListener('mousemove', move);
+    document.removeEventListener('mouseup', up);
+  });
+  return { move, up };
+}
+
 afterEach(() => {
   for (const dispose of disposals.splice(0)) dispose();
 });
 
 describe('installTerminalSelectionGuard', () => {
+  it('ends a released tap before an earlier xterm listener can consume its move', () => {
+    const terminal = makeTerminal();
+    const xterm = armXtermDrag();
+    disposals.push(installTerminalSelectionGuard(terminal));
+    terminal.element?.dispatchEvent(new MouseEvent('mousedown', {
+      button: 0, buttons: 1, clientX: 20, clientY: 20,
+    }));
+
+    document.dispatchEvent(new MouseEvent('mousemove', {
+      buttons: 0, clientX: 240, clientY: 90,
+    }));
+
+    expect(xterm.move).not.toHaveBeenCalled();
+    expect(xterm.up).toHaveBeenCalledOnce();
+  });
+
+  it.each(['pointerup', 'pointermove', 'pointercancel', 'click', 'blur', 'dispose'])(
+    'ends a stale drag on %s even when mouseup is missing',
+    (release) => {
+      const terminal = makeTerminal();
+      document.body.append(terminal.element!);
+      disposals.push(() => terminal.element?.remove());
+      const dispose = installTerminalSelectionGuard(terminal);
+      disposals.push(dispose);
+      const xterm = armXtermDrag();
+      terminal.element?.dispatchEvent(new MouseEvent('mousedown', {
+        button: 0, buttons: 1, clientX: 20, clientY: 20, bubbles: true,
+      }));
+
+      if (release === 'blur') {
+        window.dispatchEvent(new Event('blur'));
+      } else if (release === 'dispose') {
+        dispose();
+      } else if (release === 'click') {
+        terminal.element?.dispatchEvent(new MouseEvent('click', {
+          button: 0, buttons: 0, detail: 1, bubbles: true,
+        }));
+      } else {
+        terminal.element?.dispatchEvent(new PointerEvent(release, {
+          pointerType: 'mouse', button: 0, buttons: 0, bubbles: true,
+        }));
+      }
+
+      // The legacy mouse stream may still carry a stale held-button value.
+      document.dispatchEvent(new MouseEvent('mousemove', {
+        buttons: 1, clientX: 240, clientY: 90,
+      }));
+      expect(xterm.up).toHaveBeenCalledOnce();
+      expect(xterm.move).not.toHaveBeenCalled();
+      expect(terminal.clearSelection).not.toHaveBeenCalled();
+    },
+  );
+
+  it('handles a normal pointer/mouse release only once and preserves the final selection', () => {
+    const terminal = makeTerminal();
+    disposals.push(installTerminalSelectionGuard(terminal));
+    const xterm = armXtermDrag();
+    terminal.element?.dispatchEvent(new MouseEvent('mousedown', {
+      button: 0, buttons: 1, clientX: 20, clientY: 20,
+    }));
+    document.dispatchEvent(new MouseEvent('mousemove', {
+      buttons: 1, clientX: 140, clientY: 90,
+    }));
+    document.dispatchEvent(new PointerEvent('pointerup', {
+      pointerType: 'mouse', button: 0, buttons: 0, clientX: 140, clientY: 90,
+    }));
+    document.dispatchEvent(new MouseEvent('mouseup', { button: 0, buttons: 0 }));
+    document.dispatchEvent(new MouseEvent('mousemove', {
+      buttons: 0, clientX: 240, clientY: 120,
+    }));
+
+    expect(xterm.move).toHaveBeenCalledOnce();
+    expect(xterm.up).toHaveBeenCalledOnce();
+    expect(terminal.clearSelection).not.toHaveBeenCalled();
+  });
+
   it('keeps sub-threshold tap drift away from xterm document listeners', () => {
     const terminal = makeTerminal();
     disposals.push(installTerminalSelectionGuard(terminal));

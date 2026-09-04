@@ -392,6 +392,34 @@ describe('TerminalPane', () => {
     document.removeEventListener('mousemove', xtermMouseMove);
   });
 
+  it('installs selection protection when a terminal first opens after being hidden', () => {
+    const terminal = makeMockTerminal();
+    const element = terminal.element!;
+    Object.assign(terminal, { element: undefined });
+    const controller = terminalRegistry.get('s1')!;
+    vi.mocked(controller.attach).mockImplementation(() => {
+      Object.assign(terminal, { element });
+    });
+    const session = makeSession();
+    const view = render(<TerminalPane activeSession={session} isVisible={false} />);
+    view.rerender(<TerminalPane activeSession={session} isVisible />);
+
+    const move = vi.fn();
+    document.addEventListener('mousemove', move);
+    try {
+      element.dispatchEvent(new MouseEvent('mousedown', {
+        button: 0, buttons: 1, clientX: 100, clientY: 100,
+      }));
+      document.dispatchEvent(new MouseEvent('mousemove', {
+        buttons: 1, clientX: 103, clientY: 100,
+      }));
+      expect(move).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      document.removeEventListener('mousemove', move);
+    }
+  });
+
   it('preserves a fast drag once it crosses the distance threshold', () => {
     const terminal = makeMockTerminal('selected');
     render(<TerminalPane activeSession={makeSession()} />);

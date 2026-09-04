@@ -6,9 +6,10 @@ interface SelectionGesture {
   x: number;
   y: number;
   dragging: boolean;
+  lastEvent: MouseEvent;
 }
 
-function releaseXtermDrag(ownerDocument: Document, event: MouseEvent): void {
+function releaseXtermDrag(ownerDocument: Document, event: MouseEvent, cancelled = false): void {
   const MouseEventConstructor = ownerDocument.defaultView?.MouseEvent ?? MouseEvent;
   ownerDocument.dispatchEvent(new MouseEventConstructor('mouseup', {
     button: 0,
@@ -19,7 +20,8 @@ function releaseXtermDrag(ownerDocument: Document, event: MouseEvent): void {
     screenY: event.screenY,
     ctrlKey: event.ctrlKey,
     shiftKey: event.shiftKey,
-    altKey: event.altKey,
+    // Cancellation must not invoke xterm's Alt+click cursor movement.
+    altKey: !cancelled && event.altKey,
     metaKey: event.metaKey,
     bubbles: true,
     cancelable: true,
@@ -31,16 +33,23 @@ function releaseXtermDrag(ownerDocument: Document, event: MouseEvent): void {
  * listener. WKWebView can synthesize a tiny held-button move for macOS
  * tap-to-click; xterm otherwise treats any movement as a selection drag.
  *
- * Once the pointer crosses the threshold, xterm owns the gesture without any
- * further interference. This preserves fast drags, modifier selections, and
- * word/line extension after double or triple click.
+ * Release signals from either event stream end stale drags. Capture-phase
+ * listeners run before xterm even when its document listener was armed first;
+ * xterm consumes mousemove with stopImmediatePropagation.
  */
 export function installTerminalSelectionGuard(terminal: Terminal): () => void {
   const element = terminal.element;
   if (!element) return () => {};
 
   const ownerDocument = element.ownerDocument;
+  const ownerWindow = ownerDocument.defaultView;
   let gesture: SelectionGesture | null = null;
+
+  const finishGesture = (event: MouseEvent, cancelled = false): void => {
+    if (!gesture) return;
+    gesture = null;
+    releaseXtermDrag(ownerDocument, event, cancelled);
+  };
 
   const handleMouseDown = (event: MouseEvent): void => {
     if (event.button !== 0) return;
@@ -48,19 +57,20 @@ export function installTerminalSelectionGuard(terminal: Terminal): () => void {
       x: event.clientX,
       y: event.clientY,
       dragging: false,
+      lastEvent: event,
     };
   };
 
   const handleMouseMove = (event: MouseEvent): void => {
     if (!gesture) return;
+    gesture.lastEvent = event;
 
     // A buttonless move proves that WKWebView dropped mouseup. Recreate the
     // release synchronously so xterm removes its drag listeners before it can
     // consume this move. A synthetic mouseup also preserves xterm's native
     // normal, word, line, and column selection modes.
     if (!(event.buttons & 1)) {
-      gesture = null;
-      releaseXtermDrag(ownerDocument, event);
+      finishGesture(event);
       return;
     }
 
@@ -73,8 +83,7 @@ export function installTerminalSelectionGuard(terminal: Terminal): () => void {
     }
 
     if (!gesture.dragging) {
-      // This listener is installed before xterm adds its document listener on
-      // mousedown, so stopping later listeners here creates the dead zone.
+      // Stop the move before xterm's document listener sees tap drift.
       event.stopImmediatePropagation();
     }
   };
@@ -83,14 +92,44 @@ export function installTerminalSelectionGuard(terminal: Terminal): () => void {
     if (event.button === 0) gesture = null;
   };
 
-  element.addEventListener('mousedown', handleMouseDown);
-  ownerDocument.addEventListener('mousemove', handleMouseMove);
+  const handlePointerMove = (event: PointerEvent): void => {
+    if (event.pointerType === 'mouse' && !(event.buttons & 1)) finishGesture(event);
+  };
+
+  const handlePointerUp = (event: PointerEvent): void => {
+    if (event.pointerType === 'mouse' && event.button === 0) finishGesture(event);
+  };
+
+  const handlePointerCancel = (event: PointerEvent): void => {
+    if (event.pointerType === 'mouse') finishGesture(event, true);
+  };
+
+  const handleClick = (event: MouseEvent): void => {
+    if (event.button === 0 && event.detail > 0) finishGesture(event);
+  };
+
+  const cancelGesture = (): void => {
+    if (gesture) finishGesture(gesture.lastEvent, true);
+  };
+
+  element.addEventListener('mousedown', handleMouseDown, true);
+  ownerDocument.addEventListener('mousemove', handleMouseMove, true);
   ownerDocument.addEventListener('mouseup', handleMouseUp);
+  ownerDocument.addEventListener('pointermove', handlePointerMove, true);
+  ownerDocument.addEventListener('pointerup', handlePointerUp, true);
+  ownerDocument.addEventListener('pointercancel', handlePointerCancel, true);
+  ownerDocument.addEventListener('click', handleClick, true);
+  ownerWindow?.addEventListener('blur', cancelGesture);
 
   return () => {
-    gesture = null;
-    element.removeEventListener('mousedown', handleMouseDown);
-    ownerDocument.removeEventListener('mousemove', handleMouseMove);
+    cancelGesture();
+    element.removeEventListener('mousedown', handleMouseDown, true);
+    ownerDocument.removeEventListener('mousemove', handleMouseMove, true);
     ownerDocument.removeEventListener('mouseup', handleMouseUp);
+    ownerDocument.removeEventListener('pointermove', handlePointerMove, true);
+    ownerDocument.removeEventListener('pointerup', handlePointerUp, true);
+    ownerDocument.removeEventListener('pointercancel', handlePointerCancel, true);
+    ownerDocument.removeEventListener('click', handleClick, true);
+    ownerWindow?.removeEventListener('blur', cancelGesture);
   };
 }

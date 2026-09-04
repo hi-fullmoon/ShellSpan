@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Spinner } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
@@ -305,10 +305,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     };
   }, [activeSession?.status, activeSessionId, terminal, searchOpen, handleOpenSearch, handleCloseSearch, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning, rightClickBehavior, trimTrailingWhitespace]);
 
-  useEffect(() => {
-    if (!terminal) return;
+  // useActiveController opens xterm in a layout effect only when visible.
+  // Install after that effect, including the first hidden -> visible transition.
+  useLayoutEffect(() => {
+    if (!terminal || !isVisible) return;
     return installTerminalSelectionGuard(terminal);
-  }, [terminal]);
+  }, [terminal, isVisible]);
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">
