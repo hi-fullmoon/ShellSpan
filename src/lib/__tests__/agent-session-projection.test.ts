@@ -160,7 +160,7 @@ describe('Agent committed Activity projection', () => {
       ...new Set(nodes.map((node) => node.key)),
     ]);
     expect(nodes.find((node) => node.kind === 'tool')).toMatchObject({
-      key: 'activity:tool:call-health',
+      key: 'activity:tool:turn-1:step-1:call-health',
       status: 'completed',
       eventTypes: ['tool/call', 'tool/approval', 'tool/approval', 'tool/execution', 'tool/result'],
     });

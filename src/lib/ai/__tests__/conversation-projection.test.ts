@@ -26,6 +26,7 @@ const ALL_AGENT_EVENT_TYPES = [
   'agent/inbox/spliced',
   'agent/inbox/item_updated',
   'agent/inbox/item_removed',
+  'agent/inbox/item_steered',
   'agent/inbox/reordered',
   'session/renamed',
   'turn/start',
@@ -342,7 +343,7 @@ describe('AI Phase 3 chat projection', () => {
       'approvalMarker',
     ]);
     expect(processChild(toolNodes, 'tool', 'turn-1')).toMatchObject({
-      key: 'tool:call-health',
+      key: 'tool:turn-1:step-1:call-health',
       state: 'succeeded',
       durationMs: 220,
     });
