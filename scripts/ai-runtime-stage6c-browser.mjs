@@ -97,10 +97,12 @@ try {
         assert.equal(await page.getByTestId('ai-workspace-composer').inputValue(), 'durable image draft ');
         await page.evaluate(() => window.imageTestChangeProvider('qwen-turbo'));
         await page.getByTestId('ai-workspace-composer').press('Enter');
-        await page.getByText(zh ? /当前模型不支持图片/ : /This model cannot receive images/).waitFor();
+        const modelError = page.locator('[data-sonner-toast]').getByText(zh ? '暂时无法向当前模型发送图片，请切换模型重试。' : 'Images cannot be sent to this model yet. Switch models and try again.', { exact: true });
+        await modelError.waitFor();
+        assert.equal(await page.locator('[data-testid=image-draft] [role=alert]').count(), 0, 'unsupported model uses a toast');
         assert.equal((await rpc('__state')).sessions.length, before.sessions.length);
         await page.evaluate(() => window.imageTestChangeProvider('qwen3-vl-plus'));
-        await page.getByText(zh ? /当前模型不支持图片/ : /This model cannot receive images/).waitFor({ state: 'detached' });
+        await modelError.waitFor({ state: 'detached' });
       }
       await skill();
     } else { await skill(); await add(); }
