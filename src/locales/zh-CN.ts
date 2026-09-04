@@ -12,6 +12,7 @@ export default {
   'ai.workspace.images.previous': '前面的图片',
   'ai.workspace.images.next': '后面的图片',
   'ai.workspace.images.draft': '已保存草稿 · 尚未发送',
+  'ai.workspace.images.processing': '正在处理 {count} 张图片',
   'ai.workspace.images.unconfirmed': '已保存草稿 · 等待提交确认',
   'ai.workspace.images.remove': '删除图片',
   'ai.workspace.images.error.model': '当前模型不支持图片，请选择 Qwen qwen3-vl-plus 或 qwen3-vl-flash。草稿已保留。',
