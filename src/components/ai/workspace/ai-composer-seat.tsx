@@ -1,3 +1,5 @@
+import { useFileCompletion } from './use-file-completion';
+import { AiSkillsMenu } from './ai-skills-menu';
 import { useMemo, useRef, useState } from 'react';
 import {
   ArrowUpIcon,
@@ -33,12 +35,18 @@ import type { AiContextUsage, AiInboxItem, AiPendingApproval } from '@/lib/ai/se
 import type { LocaleKey } from '@/locales';
 import type { AgentSessionPlanStep } from '@/types/agent-session';
 import { AiApprovalPanel } from './ai-approval-panel';
+import { AiQuestionPanel } from './ai-question-panel';
+import { questionKey } from '@/types/agent-question';
 import { AiContextMeter } from './ai-context-meter';
 import { AiQueueDock } from './ai-queue-dock';
 import { AiTaskStrip } from './ai-task-strip';
 import type { AiQueueMutationState } from './use-ai-session-controller';
 
 export interface AiComposerSeatProps {
+  readonly imageControls?: React.ReactNode;
+  readonly hasImages?: boolean;
+  readonly imageBusy?: boolean;
+  readonly imageLocked?: boolean;
   readonly phase: 'hero' | 'active';
   readonly status: AiSessionStatus;
   readonly defaultDraft?: string;
@@ -54,6 +62,13 @@ export interface AiComposerSeatProps {
   readonly queueMutation?: AiQueueMutationState | null;
   readonly announcement?: string | null;
   readonly pendingApproval?: AiPendingApproval | null;
+  readonly pendingQuestion?: import('@/types/agent-question').AgentQuestionView | null;
+  readonly onListFileReferences?: import('@/types/agent-file-reference').ListFileReferences;
+  readonly onListSkills?: (root?: string) => Promise<import('@/types/agent-skill').SkillUserList>;
+  readonly skillsScopeKey?: string;
+  readonly skillsNeedsRoot?: boolean;
+  readonly projectTargetLabel?: string;
+  readonly onAnswerQuestion?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
   readonly approvalDecision?: 'approve' | 'reject' | null;
   readonly approvalError?: string | null;
   readonly unavailableReason?: string | null;
@@ -76,6 +91,7 @@ export interface AiComposerSeatProps {
 
 /** Harness-aligned Composer surface backed by the existing ShellSpan state machine. */
 export function AiComposerSeat({
+  imageControls, hasImages = false, imageBusy = false, imageLocked = false,
   phase,
   status,
   defaultDraft = '',
@@ -91,6 +107,13 @@ export function AiComposerSeat({
   queueMutation = null,
   announcement,
   pendingApproval,
+  pendingQuestion,
+  onAnswerQuestion,
+  onListFileReferences,
+  onListSkills,
+  skillsScopeKey,
+  skillsNeedsRoot,
+  projectTargetLabel,
   approvalDecision = null,
   approvalError = null,
   unavailableReason = null,
@@ -117,19 +140,21 @@ export function AiComposerSeat({
   const draft = composerState?.draft ?? controlledDraft ?? localDraft;
   const running = status === 'running' || status === 'waiting';
   const waitingApproval = composerState?.phase === 'waitingApproval';
-  const submitting = composerState?.phase === 'submitting';
+  const waitingQuestion = Boolean(pendingQuestion) || composerState?.phase === 'waitingQuestion';
+  const submitting = composerState?.phase === 'submitting' || imageBusy;
   const terminal = composerState?.terminal ?? false;
   const unavailable = unavailableReason !== null;
-  const empty = draft.trim().length === 0;
+  const empty = draft.trim().length === 0 && !hasImages;
   const stopPrimary = running && empty;
   const submitDisabled = terminal
+    || waitingQuestion
     || waitingApproval
     || submitting
     || (stopPrimary
       ? onStop === undefined
       : unavailable || empty || (onSubmitGesture === undefined && onSubmit === undefined));
   const busyPreference = composerState?.preferredBusyMode ?? 'queue';
-  const primaryLabel = stopPrimary
+  const primaryLabel = imageLocked && !imageBusy ? t('common.retry') : stopPrimary
     ? t('ai.workspace.stop')
     : running
       ? busyPreference === 'queue'
@@ -160,6 +185,7 @@ export function AiComposerSeat({
     if (composerState === undefined && controlledDraft === undefined) setLocalDraft(value);
     onDraftChange?.(value);
   };
+  const completion = useFileCompletion({ text: draft, update: updateDraft, query: onListFileReferences, scopeKey: skillsScopeKey, needsRoot: skillsNeedsRoot, targetLabel: projectTargetLabel, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
   const submit = (gesture: 'keyboard' | 'primary', accelerated = false): void => {
     if (submitDisabled) return;
     if (stopPrimary) {
@@ -227,6 +253,7 @@ export function AiComposerSeat({
           </Alert>
         ))}
       </div>
+      {completion.dialog}
       <AiQueueDock
         items={queueItems}
         mutation={queueMutation}
@@ -235,6 +262,8 @@ export function AiComposerSeat({
         onReorder={onReorderQueueLane}
         onRetry={onRetryQueueMutation}
       />
+      {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
+      {waitingQuestion && <Alert><AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle><AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>{onStop && <Button type="button" variant="outline" onClick={onStop}>{t('ai.workspace.stop')}</Button>}</Alert>}
       {waitingApproval && pendingApproval ? (
         <AiApprovalPanel
           approval={pendingApproval}
@@ -247,34 +276,41 @@ export function AiComposerSeat({
       ) : (
         <InputGroup data-composer-card="">
           <InputGroupTextarea
+            {...completion.textareaProps}
             data-testid="ai-workspace-composer"
             value={draft}
-            disabled={waitingApproval || unavailable}
-            onChange={(event) => updateDraft(event.target.value)}
+            disabled={waitingApproval || waitingQuestion || unavailable || imageLocked}
+            onChange={(event) => { updateDraft(event.target.value); completion.changed(event.target); }}
             onCompositionStart={() => {
               composingRef.current = true;
+              completion.composition(true);
             }}
             onCompositionEnd={() => {
               composingRef.current = false;
+              completion.composition(false);
               composingUntilRef.current = Date.now() + 10;
             }}
             onKeyDown={(event) => {
-              if (event.key !== 'Enter' || event.shiftKey) return;
               if (
                 event.nativeEvent.isComposing
                 || event.keyCode === 229
                 || composingRef.current
                 || Date.now() < composingUntilRef.current
               ) return;
+              if (completion.keyDown(event)) return;
+              if (event.key !== 'Enter' || event.shiftKey) return;
               event.preventDefault();
               if (event.repeat) return;
               submit('keyboard', event.metaKey || event.ctrlKey);
             }}
             placeholder={t('ai.workspace.composerPlaceholder')}
           />
+          {completion.panel && <InputGroupAddon align="block-start" className="block min-w-0">{completion.panel}</InputGroupAddon>}
+          {imageControls && <InputGroupAddon align="block-start" className="block min-w-0">{imageControls}</InputGroupAddon>}
           <InputGroupAddon align="block-end" className="ai-composer-toolbar">
             <div className="ai-composer-tools">
               {permissionControl}
+              {onListSkills && <AiSkillsMenu key={skillsScopeKey} query={onListSkills} needsRoot={skillsNeedsRoot} targetLabel={projectTargetLabel} disabled={terminal || waitingQuestion || submitting} onSelect={(name) => updateDraft(`${draft}${draft && !/\s$/.test(draft) ? ' ' : ''}/${name} `)} />}
               {running && (
                 <DropdownMenu>
                   <Tooltip>

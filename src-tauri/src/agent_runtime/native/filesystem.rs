@@ -732,7 +732,22 @@ fn read_target_file(
         } => {
             let root = canonical_local_root(Path::new(root))?;
             let path = resolve_local_existing(&root, requested_path, false)?;
-            let bytes = read_local_bounded(&path, limit, operation)?;
+            use super::scoped_read::{LocalScopedReader, ScopeReadError};
+            let reader = LocalScopedReader::open(root.to_str().ok_or("invalid local root")?)
+                .map_err(|error| format!("native scoped root: {error}"))?;
+            let relative = path
+                .strip_prefix(&root)
+                .map_err(|_| "file escaped native root")?
+                .to_str()
+                .ok_or("invalid local path")?
+                .replace('\\', "/");
+            let bytes = reader
+                .read_checked(&relative, limit as usize, || {
+                    operation
+                        .ensure_active()
+                        .map_err(|_| ScopeReadError::Cancelled)
+                })
+                .map_err(|error| format!("native scoped read: {error}"))?;
             Ok((
                 path.to_string_lossy().to_string(),
                 bytes,
@@ -1652,22 +1667,12 @@ fn read_stream_bounded<R: Read>(
     limit: u64,
     operation: &FileOperationGuardNative,
 ) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        operation.ensure_active()?;
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|error| format!("failed to read file bytes: {error}"))?;
-        if read == 0 {
-            break;
-        }
-        if bytes.len() as u64 + read as u64 > limit {
-            return Err("file exceeds the native byte limit".into());
-        }
-        bytes.extend_from_slice(&buffer[..read]);
-    }
-    Ok(bytes)
+    super::scoped_read::read_bounded_checked(reader, limit as usize, || {
+        operation
+            .ensure_active()
+            .map_err(|_| super::scoped_read::ScopeReadError::Cancelled)
+    })
+    .map_err(|error| format!("native bounded read failed: {error}"))
 }
 
 fn write_stream<W: Write>(

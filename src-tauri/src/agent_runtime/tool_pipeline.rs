@@ -138,6 +138,20 @@ pub(crate) struct NativeToolResult {
 }
 
 pub(crate) trait NativeToolRuntime: Send + Sync {
+    fn list_file_references(
+        &self,
+        request: super::file_references::FileReferenceRequest,
+    ) -> super::file_references::FileReferenceList {
+        super::file_references::read_local(request)
+    }
+
+    fn read_skills(
+        &self,
+        request: super::skill_runtime::SkillReadRequest,
+    ) -> super::skill_runtime::SkillReadResult {
+        super::skill_runtime::read_local(request)
+    }
+
     fn prepare(&self, request: NativeToolRequest) -> Result<NativeToolPreparation, String>;
 
     fn execute(
@@ -268,6 +282,26 @@ impl NativeToolRuntimeSlot {
 }
 
 impl NativeToolRuntime for NativeToolRuntimeSlot {
+    fn list_file_references(
+        &self,
+        request: super::file_references::FileReferenceRequest,
+    ) -> super::file_references::FileReferenceList {
+        match self.runtime() {
+            Ok(runtime) => runtime.list_file_references(request),
+            Err(_) => super::file_references::read_local(request),
+        }
+    }
+
+    fn read_skills(
+        &self,
+        request: super::skill_runtime::SkillReadRequest,
+    ) -> super::skill_runtime::SkillReadResult {
+        match self.runtime() {
+            Ok(runtime) => runtime.read_skills(request),
+            Err(_) => super::skill_runtime::read_local(request),
+        }
+    }
+
     fn prepare(&self, request: NativeToolRequest) -> Result<NativeToolPreparation, String> {
         self.runtime()?.prepare(request)
     }
@@ -351,9 +385,17 @@ impl Drop for PendingExecutionGuard<'_> {
     }
 }
 
+#[cfg(test)]
+type QuestionLeasePause = Arc<Mutex<Option<(Arc<Notify>, Arc<Notify>)>>>;
+
 #[derive(Clone)]
 pub(crate) struct AgentToolPipeline {
-    sessions: AgentSessionStore,
+    pub(crate) skills: super::skill_runtime::SkillRuntime,
+    #[cfg(test)]
+    pub(super) question_lease_pause: QuestionLeasePause,
+    pub(super) agents: super::AgentRegistry,
+    pub(super) question_gate: Arc<Mutex<()>>,
+    pub(super) sessions: AgentSessionStore,
     hooks: AgentHookBus,
     native: Arc<dyn NativeToolRuntime>,
     artifacts: AgentArtifactStore,
@@ -367,6 +409,7 @@ pub(crate) struct AgentToolPipeline {
 
 impl AgentToolPipeline {
     pub(crate) fn new(
+        agents: super::AgentRegistry,
         sessions: AgentSessionStore,
         hooks: AgentHookBus,
         native: Arc<dyn NativeToolRuntime>,
@@ -374,6 +417,11 @@ impl AgentToolPipeline {
         orchestration: OrchestrationToolRuntimeSlot,
     ) -> Self {
         Self {
+            skills: super::skill_runtime::SkillRuntime::new(sessions.clone(), native.clone()),
+            #[cfg(test)]
+            question_lease_pause: Arc::new(Mutex::new(None)),
+            agents,
+            question_gate: Arc::new(Mutex::new(())),
             sessions,
             hooks,
             native,
@@ -517,11 +565,37 @@ impl AgentToolPipeline {
                     if let Some(subagent) = &entry.subagent {
                         // Every dispatched or pending call already has a durable reservation.
                         // Preparation is synchronous, so there is no unrecorded concurrent admission.
-                        let used =
-                            admitted_tool_calls(&self.sessions.all_events(&entry.session_id)?);
-                        if used >= subagent.budget.max_tool_calls {
+                        let events = self.sessions.all_events(&entry.session_id)?;
+                        let used = admitted_tool_calls(&events);
+                        let reserved = events.iter().any(|event| event.step_id.as_deref() == Some(step_id) && matches!(&event.payload, AgentSessionEventPayload::ToolCall { call: previous } if previous.call_id == call.call_id));
+                        if used >= subagent.budget.max_tool_calls && !reserved {
                             budget_exhausted = true;
                             continue;
+                        }
+                    }
+                    if call.name == super::skills::SKILL_TOOL {
+                        if !running.is_empty() { draining_barrier = true; continue; }
+                        self.process_skill_call(entry, turn_id, step_id, request_id, target.clone(), call.clone()).await?;
+                        next += 1; committed += 1; continue;
+                    }
+                    if call.name == super::user_questions::TOOL_NAME {
+                        if !running.is_empty() {
+                            draining_barrier = true;
+                            continue;
+                        }
+                        match self.request_question(
+                            entry,
+                            turn_id,
+                            step_id,
+                            request_id,
+                            call.clone(),
+                        )? {
+                            ToolPipelineSettlement::Completed => {
+                                next += 1;
+                                committed += 1;
+                                continue;
+                            }
+                            settlement => return Ok(settlement),
                         }
                     }
                     if is_session_tool(&call.name) || is_orchestration_tool(&call.name) {
@@ -744,6 +818,189 @@ impl AgentToolPipeline {
             }))?;
         }
         Ok(settlement)
+    }
+
+    pub(crate) fn restore_skill_phase(&self, entry: &Arc<AgentEntry>) -> Result<(), String> {
+        let events = self.sessions.all_events(&entry.session_id)?;
+        if let Some((turn, step, _)) = super::skill_runtime::resumable_skill_queue(&events) {
+            if super::user_questions::records(&events)
+                .iter()
+                .any(|q| q.identity.step_id == step && q.answer.is_none() && !q.cancelled)
+            {
+                return Ok(());
+            }
+            let ended = events.iter().any(|e| {
+                e.step_id.as_deref() == Some(&step)
+                    && matches!(e.payload, AgentSessionEventPayload::StepEnd { .. })
+            });
+            entry.set_scope(Some(AgentActiveScope {
+                turn_id: turn,
+                step_id: (!ended).then_some(step),
+            }))?;
+            entry.set_phase(AgentLifecyclePhase::Running)?;
+        }
+        Ok(())
+    }
+    pub(crate) async fn continue_skills(
+        &self,
+        entry: &Arc<AgentEntry>,
+    ) -> Result<Option<ToolPipelineSettlement>, String> {
+        let events = self.sessions.all_events(&entry.session_id)?;
+        let Some((turn, step, request)) = super::skill_runtime::resumable_skill_queue(&events)
+        else {
+            return Ok(None);
+        };
+        if entry.scope()?.and_then(|s| s.step_id).as_deref() != Some(&step) {
+            return Ok(None);
+        }
+        let calls = events
+            .iter()
+            .find_map(|e| {
+                if e.step_id.as_deref() == Some(&step) {
+                    match &e.payload {
+                        AgentSessionEventPayload::AssistantMessage { content, .. } => {
+                            Some(super::assistant_tool_calls(content))
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+            .ok_or("missing Skills assistant queue")?;
+        let remaining = calls.into_iter().filter(|c| !events.iter().any(|e| e.step_id.as_deref() == Some(&step) && matches!(&e.payload, AgentSessionEventPayload::ToolResult { call_id, .. } if call_id == &c.call_id))).map(|c| ModelToolCall { call_id:c.call_id,provider_call_id:c.provider_call_id,name:c.name,arguments:c.arguments }).collect();
+        self.process_model_calls(entry, &turn, &step, &request, remaining)
+            .await
+            .map(Some)
+    }
+
+    async fn process_skill_call(
+        &self,
+        entry: &Arc<AgentEntry>,
+        turn_id: &str,
+        step_id: &str,
+        request_id: &str,
+        target: AgentSessionTarget,
+        call: ModelToolCall,
+    ) -> Result<(), String> {
+        use super::skills::*;
+        let recorded = RecordedToolCall {
+            call_id: call.call_id.clone(),
+            provider_call_id: call.provider_call_id.clone(),
+            name: call.name.clone(),
+            native_name: Some(SKILL_TOOL.into()),
+            arguments: call.arguments.clone(),
+            title: Some("Load Skill".into()),
+            effect: Some(AgentSessionEffect::ReadOnly),
+            target: Some(target.clone()),
+        };
+        let events = self.sessions.all_events(&entry.session_id)?;
+        if !events.iter().any(|e| e.step_id.as_deref() == Some(step_id) && matches!(&e.payload, AgentSessionEventPayload::ToolCall { call: c } if c.call_id == call.call_id)) {
+            self.sessions.append(&entry.session_id, Some(turn_id.into()), Some(step_id.into()), AgentSessionEventPayload::ToolCall { call: recorded.clone() })?;
+        }
+        let load = async {
+            self.ensure_capability(
+                entry,
+                SKILL_TOOL,
+                AgentSessionEffect::ReadOnly,
+                &target.target_id,
+            )?;
+            let before = AgentBeforeToolContext {
+                session_id: entry.session_id.clone(),
+                task_id: self.sessions.snapshot(&entry.session_id)?.header.task_id,
+                turn_id: turn_id.into(),
+                step_id: step_id.into(),
+                request_id: request_id.into(),
+                call_id: call.call_id.clone(),
+                name: SKILL_TOOL.into(),
+                arguments: call.arguments.clone(),
+                target: target.clone(),
+            };
+            for decision in self.hooks.before_tool(&before)? {
+                if let AgentBeforeToolDecision::Reject { reason } = decision {
+                    return Err(reason);
+                }
+            }
+            let args: SkillArguments = serde_json::from_value(call.arguments.clone())
+                .map_err(|e| format!("invalid skill arguments: {e}"))?;
+            self.skills
+                .load(
+                    &entry.session_id,
+                    &args.name,
+                    SkillInvocationKind::Model,
+                    Vec::new(),
+                    Some((request_id.into(), call.call_id.clone())),
+                    entry.cancellation(),
+                )
+                .await
+        }
+        .await;
+        if load.is_ok() {
+            let current = self.sessions.all_events(&entry.session_id)?;
+            if !current.iter().any(|e| e.step_id.as_deref() == Some(step_id) && matches!(&e.payload, AgentSessionEventPayload::ToolApproval { call_id, .. } if call_id == &call.call_id)) {
+                self.sessions.append(&entry.session_id, Some(turn_id.into()), Some(step_id.into()), AgentSessionEventPayload::ToolApproval { request_id: request_id.into(), call_id: call.call_id.clone(), approval_id: None, status: AgentToolApprovalStatus::Approved, risk: Some(AgentSessionEffect::ReadOnly), reason: Some("frozenSkillsReadAuthorized".into()), expires_at_unix_ms: None, prompt: None })?;
+            }
+            if !current.iter().any(|e| e.step_id.as_deref() == Some(step_id) && matches!(&e.payload, AgentSessionEventPayload::ToolExecution { call_id, .. } if call_id == &call.call_id)) {
+                self.sessions.append(&entry.session_id, Some(turn_id.into()), Some(step_id.into()), AgentSessionEventPayload::ToolExecution { call_id: call.call_id.clone(), status: AgentToolExecutionStatus::Dispatched, idempotency: "yes".into() })?;
+            }
+        }
+        let (status, summary, data) = match load {
+            Ok(loaded) => (
+                AgentToolResultStatus::Completed,
+                format!("Loaded Skill {}", loaded.name),
+                Some(serde_json::to_value(loaded).map_err(|e| e.to_string())?),
+            ),
+            Err(error) => (
+                if entry.cancellation().is_cancelled() {
+                    AgentToolResultStatus::Cancelled
+                } else {
+                    AgentToolResultStatus::Failed
+                },
+                error,
+                None,
+            ),
+        };
+        let header = self.sessions.snapshot(&entry.session_id)?.header;
+        let request = NativeToolRequest {
+            session_id: entry.session_id.clone(),
+            task_id: self.sessions.snapshot(&entry.session_id)?.header.task_id,
+            goal: header.goal,
+            success_criteria: header.success_criteria,
+            turn_id: turn_id.into(),
+            step_id: step_id.into(),
+            request_id: request_id.into(),
+            model_call: call.clone(),
+            target: target.clone(),
+            permission_mode: header
+                .permission_mode
+                .unwrap_or(super::AgentSessionPermissionMode::RequestApproval),
+        };
+        let preparation = NativeToolPreparation {
+            token: String::new(),
+            call: recorded,
+            requires_approval: false,
+            prompt: String::new(),
+            expires_at_unix_ms: 0,
+            idempotency: NativeToolIdempotency::Yes,
+            parallel: false,
+            exclusive: true,
+        };
+        self.finish_native(
+            &request,
+            &preparation,
+            Ok(Ok(NativeToolResult {
+                call_id: call.call_id,
+                native_name: SKILL_TOOL.into(),
+                target_id: target.target_id,
+                effect: AgentSessionEffect::ReadOnly,
+                status,
+                summary,
+                data,
+                duration_ms: None,
+                evidence_refs: Vec::new(),
+                artifacts: Vec::new(),
+            })),
+        )
     }
 
     fn process_session_call(
@@ -1037,14 +1294,16 @@ impl AgentToolPipeline {
     ) -> Result<ToolPipelineSettlement, String> {
         if preparation.requires_approval {
             let waiting_turn_id = request.turn_id.clone();
-            self.sessions.append(
-                &request.session_id,
-                Some(request.turn_id.clone()),
-                Some(request.step_id.clone()),
-                AgentSessionEventPayload::ToolCall {
-                    call: preparation.call.clone(),
-                },
-            )?;
+            if !self.has_unadmitted_call(&request, &preparation.call)? {
+                self.sessions.append(
+                    &request.session_id,
+                    Some(request.turn_id.clone()),
+                    Some(request.step_id.clone()),
+                    AgentSessionEventPayload::ToolCall {
+                        call: preparation.call.clone(),
+                    },
+                )?;
+            }
             let approval_id = format!("approval-{}", Uuid::new_v4().simple());
             self.sessions.append_batch(
                 &request.session_id,
@@ -1124,33 +1383,66 @@ impl AgentToolPipeline {
         request: &NativeToolRequest,
         preparation: &NativeToolPreparation,
     ) -> Result<(), String> {
-        self.sessions.append_batch(
-            &request.session_id,
-            vec![
-                AgentScopedPayload {
-                    turn_id: Some(request.turn_id.clone()),
-                    step_id: Some(request.step_id.clone()),
-                    payload: AgentSessionEventPayload::ToolCall {
-                        call: preparation.call.clone(),
-                    },
-                },
-                AgentScopedPayload {
-                    turn_id: Some(request.turn_id.clone()),
-                    step_id: Some(request.step_id.clone()),
-                    payload: AgentSessionEventPayload::ToolApproval {
-                        request_id: request.request_id.clone(),
-                        call_id: request.model_call.call_id.clone(),
-                        approval_id: None,
-                        status: AgentToolApprovalStatus::Approved,
-                        risk: preparation.call.effect,
-                        reason: Some("nativePolicyAutoApproved".into()),
-                        expires_at_unix_ms: Some(preparation.expires_at_unix_ms),
-                        prompt: None,
-                    },
-                },
-            ],
-        )?;
+        let existing = self.has_unadmitted_call(request, &preparation.call)?;
+        let mut payloads = vec![AgentScopedPayload {
+            turn_id: Some(request.turn_id.clone()),
+            step_id: Some(request.step_id.clone()),
+            payload: AgentSessionEventPayload::ToolCall {
+                call: preparation.call.clone(),
+            },
+        }];
+        if existing {
+            payloads.clear();
+        }
+        payloads.push(AgentScopedPayload {
+            turn_id: Some(request.turn_id.clone()),
+            step_id: Some(request.step_id.clone()),
+            payload: AgentSessionEventPayload::ToolApproval {
+                request_id: request.request_id.clone(),
+                call_id: request.model_call.call_id.clone(),
+                approval_id: None,
+                status: AgentToolApprovalStatus::Approved,
+                risk: preparation.call.effect,
+                reason: Some("nativePolicyAutoApproved".into()),
+                expires_at_unix_ms: Some(preparation.expires_at_unix_ms),
+                prompt: None,
+            },
+        });
+        self.sessions.append_batch(&request.session_id, payloads)?;
         Ok(())
+    }
+
+    /// A crash can leave the Call line without its following authorization.
+    /// Re-prepare with current policy and reuse only the exact frozen call.
+    fn has_unadmitted_call(
+        &self,
+        request: &NativeToolRequest,
+        prepared: &RecordedToolCall,
+    ) -> Result<bool, String> {
+        let events = self.sessions.all_events(&request.session_id)?;
+        let mut found = false;
+        for event in events
+            .iter()
+            .filter(|e| e.step_id.as_ref() == Some(&request.step_id))
+        {
+            match &event.payload {
+                AgentSessionEventPayload::ToolCall { call } if call.call_id == prepared.call_id => {
+                    if call != prepared {
+                        return Err("recovered native call drifted before authorization".into());
+                    }
+                    found = true;
+                }
+                AgentSessionEventPayload::ToolApproval { call_id, .. }
+                | AgentSessionEventPayload::ToolExecution { call_id, .. }
+                | AgentSessionEventPayload::ToolResult { call_id, .. }
+                    if call_id == &prepared.call_id =>
+                {
+                    return Err("native call already admitted; use its recovery boundary".into());
+                }
+                _ => {}
+            }
+        }
+        Ok(found)
     }
 
     fn append_execution_dispatch(
@@ -1334,7 +1626,14 @@ impl AgentToolPipeline {
             let data_size = serde_json::to_vec(data)
                 .map_err(|error| format!("failed to measure native tool result: {error}"))?
                 .len();
-            if data_size > MAX_INLINE_TOOL_DATA_BYTES {
+            let complete_skill = request.model_call.name == super::skills::SKILL_TOOL;
+            if complete_skill {
+                let loaded: super::skills::LoadedSkill = serde_json::from_value(data.clone())
+                    .map_err(|e| format!("invalid complete Skill result: {e}"))?;
+                loaded.validate()?;
+                super::skills::unchanged_by_redaction(&loaded)?;
+            }
+            if data_size > MAX_INLINE_TOOL_DATA_BYTES && !complete_skill {
                 let artifact = self.artifacts.store_json(
                     &request.session_id,
                     "tool-result",
@@ -1435,6 +1734,7 @@ impl AgentToolPipeline {
                         operation: super::AgentInboxOperation::Enqueued,
                         lane: AgentInboxLane::NextStep,
                         messages: vec![AgentInboxMessage {
+                            images: Vec::new(),
                             message_id,
                             client_submission_id: None,
                             content,
@@ -1653,7 +1953,14 @@ impl AgentToolPipeline {
     }
 
     pub(crate) fn cancel_session(&self, entry: &Arc<AgentEntry>) -> Result<(), String> {
-        entry.cancel();
+        {
+            let _gate = self
+                .question_gate
+                .lock()
+                .map_err(|_| "question gate unavailable")?;
+            entry.cancel();
+            self.cancel_questions(&entry.session_id)?;
+        }
         let session_id = &entry.session_id;
         let keys = self
             .pending
@@ -1839,6 +2146,9 @@ impl AgentToolPipeline {
                 .find(|event| event.step_id.as_deref() == Some(&step_id))
                 .and_then(|event| event.turn_id.clone())
                 .ok_or_else(|| "recovery found an unscoped tool call".to_string())?;
+            if call.name == super::skills::SKILL_TOOL {
+                continue;
+            }
             if status == AgentToolApprovalStatus::Approved
                 && executions.contains_key(&(step_id.clone(), call_id.clone()))
             {

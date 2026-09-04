@@ -34,6 +34,13 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Run frontend review gate
         run: pnpm review:frontend
+      - name: Run cumulative AI projection and input gates
+        run: |
+          pnpm test:ai:phase3
+          pnpm test:ai:phase4
+          pnpm test:ai:phase6
+          pnpm test:ai:stage6:frontend
+          pnpm benchmark:ai-panel
 
   rust:
     name: Rust (${{ matrix.platform }})
@@ -75,15 +82,29 @@ jobs:
           workspaces: src-tauri -> target
           cache-on-failure: true
       - name: Check formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+          pnpm check:rust:includes
       - name: Run Provider contract and semantic compaction stage 4 gate
         run: pnpm test:ai:stage4
-      - name: Run partial stream and Provider retry frontend gate
-        run: pnpm test:ai:stage3b:frontend
+      - name: Run partial stream and Provider retry gate
+        run: pnpm test:ai:stage3b
       - name: Run AI Provider and Agent Runtime stage 3 gate
         run: pnpm test:ai:stage3:rust
       - name: Run bounded tool scheduler stage 5 gate
         run: pnpm test:ai:stage5
+      - name: Run questions, Skills, images and file-reference native gates
+        run: pnpm test:ai:stage6:rust
+      - name: Install pinned Chromium for macOS visual and transport bridges
+        if: matrix.platform == 'macos'
+        run: pnpm exec playwright install chromium
+      - name: Run macOS pixel baselines and real browser transport bridges
+        if: matrix.platform == 'macos'
+        run: |
+          pnpm test:ai:phase5
+          pnpm test:ai:stage6:browser
+      - name: Report configured live smoke results or explicit SKIP
+        run: pnpm test:agent:providers:live
       - name: Run Agent terminal contract tests
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml --locked agent::terminal -- --test-threads=1
@@ -91,9 +112,9 @@ jobs:
       - name: Run Petdex Phase 0 contract probe
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --test petdex_contract_probe -- --test-threads=1
       - name: Run Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings
       - name: Run Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --locked
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-features --no-fail-fast --locked
 
   ssh-e2e:
     name: Isolated SSH/SFTP E2E
@@ -101,6 +122,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install gate dependencies
+        run: pnpm install --frozen-lockfile
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
@@ -132,3 +162,7 @@ jobs:
       - name: Stop isolated SSH service
         if: always()
         run: docker compose --project-name shellspan-e2e --file tests/ssh-e2e/compose.yml down --volumes --remove-orphans
+      - name: Run bounded Skills and path discovery SSH contracts
+        run: |
+          pnpm test:ai:stage6b:sftp
+          pnpm test:ai:stage6d:sftp

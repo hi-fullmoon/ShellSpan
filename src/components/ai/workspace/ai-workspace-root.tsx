@@ -27,6 +27,10 @@ export interface AiWorkspaceSubmitInput {
 }
 
 export interface AiWorkspaceRootProps {
+  readonly imageControls?: React.ReactNode;
+  readonly hasImages?: boolean;
+  readonly imageBusy?: boolean;
+  readonly imageLocked?: boolean;
   readonly view: AiSessionView | null;
   readonly scope: Extract<AppSection, 'terminal' | 'workbench'>;
   readonly title?: string;
@@ -46,6 +50,12 @@ export interface AiWorkspaceRootProps {
   readonly archivingSessionId?: string | null;
   readonly approvalDecision?: 'approve' | 'reject' | null;
   readonly approvalError?: string | null;
+  readonly onListFileReferences?: import('@/types/agent-file-reference').ListFileReferences;
+  readonly onListSkills?: (root?: string) => Promise<import('@/types/agent-skill').SkillUserList>;
+  readonly skillsScopeKey?: string;
+  readonly skillsNeedsRoot?: boolean;
+  readonly projectTargetLabel?: string;
+  readonly onAnswerQuestion?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
   readonly loadingOlder?: boolean;
   readonly queueMutation?: AiQueueMutationState | null;
   readonly renamingSessionId?: string | null;
@@ -83,6 +93,7 @@ export interface AiWorkspaceRootProps {
 }
 
 export function AiWorkspaceRoot({
+  imageControls, hasImages, imageBusy, imageLocked,
   view,
   scope,
   title,
@@ -102,6 +113,12 @@ export function AiWorkspaceRoot({
   archivingSessionId = null,
   approvalDecision = null,
   approvalError = null,
+  onAnswerQuestion,
+  onListFileReferences,
+  onListSkills,
+  skillsScopeKey,
+  skillsNeedsRoot,
+  projectTargetLabel,
   loadingOlder = false,
   queueMutation = null,
   renamingSessionId = null,
@@ -260,6 +277,7 @@ export function AiWorkspaceRoot({
         </div>
 
         <AiComposerSeat
+          imageControls={imageControls} hasImages={hasImages} imageBusy={imageBusy} imageLocked={imageLocked}
           phase={hero ? 'hero' : 'active'}
           status={status}
           draft={draft}
@@ -275,6 +293,13 @@ export function AiWorkspaceRoot({
           queueMutation={queueMutation}
           announcement={announcement}
           pendingApproval={view?.pendingApproval}
+          pendingQuestion={view?.pendingQuestion}
+          onAnswerQuestion={onAnswerQuestion}
+          onListFileReferences={onListFileReferences}
+          onListSkills={onListSkills}
+          skillsScopeKey={skillsScopeKey}
+          skillsNeedsRoot={skillsNeedsRoot}
+          projectTargetLabel={projectTargetLabel}
           approvalDecision={approvalDecision}
           approvalError={approvalError}
           unavailableReason={agentUnavailableReason}

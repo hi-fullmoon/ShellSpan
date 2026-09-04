@@ -1,0 +1,1203 @@
+{
+  "formatVersion": 1,
+  "worktree": "/Users/zhengbiwen/.codex/worktrees/5d5b/ShellSpan",
+  "head": "1ac0c1e4a070bd8024063af5c58e4b2add3b7395",
+  "stageBase": "1ac0c1e4a070bd8024063af5c58e4b2add3b7395",
+  "cumulativeBase": "4f353d9bbfa2c6ccfe75a1023f4df46ab4fb8412",
+  "migration": {
+    "source6aWorktree": "/Users/zhengbiwen/.codex/worktrees/ad7b/ShellSpan",
+    "source6aHead": "25af899f9cde2c5da039e3f76c652b173334e6ea",
+    "source6aTrackedPatchSha256": "6ddb4b860e46b602309a18bf87141127fe6214473f41b86e06f66ff9c601e7f8",
+    "verifiedCumulativeSourceFilesBeforeEdits": 89,
+    "copiedUntrackedProductFilesBeforeEdits": 13,
+    "retainedMainCommit": "1ac0c1e4a070bd8024063af5c58e4b2add3b7395",
+    "note": "The independent conversation-projection change from main is retained. Its merged file intentionally differs from the frozen 6A source."
+  },
+  "note": "Frozen cumulative source bytes, without commit, merge, push or main-checkout mutation. Apply one tracked patch to its exact base, copy all untrackedProductFiles from this worktree, then verify allCumulativeSourceFiles. Preserve predecessorDeliveryMetadata as historical evidence. Generated 6B patches and this inventory are delivery metadata, excluded from source/self-hashes.",
+  "acceptance": {
+    "macOSAndIsolatedLinuxGates": "PASS; see docs/ai-runtime-stage6b-validation.md for exact evidence and ignored cases",
+    "windowsNativeCompilationAndJunctionExecution": "NOT RUN",
+    "externalLiveProviders": "NOT RUN; reserved for Stage 7 using same-project configuration",
+    "mainIntegrationAndStage6c6d7": "PENDING"
+  },
+  "excluded": [
+    "node_modules",
+    "dist",
+    "target",
+    "temporary logs/screenshots",
+    "credentials",
+    "generated handoff metadata"
+  ],
+  "trackedStage6b": [
+    {
+      "path": "docs/agent-runtime-vnext.md",
+      "sha256": "4ce89e08b9f05466bb16d25defd2df10c21bb26f1b10dbe9f9019988f227c08d"
+    },
+    {
+      "path": "docs/ai-panel-deepseek-harness-alignment-plan.md",
+      "sha256": "99224c8a9e914646d7af831b5ed1ae825f8c75bfed2db0f8508317cdf25e10eb"
+    },
+    {
+      "path": "docs/ai-runtime-handoff.md",
+      "sha256": "cdd08c3807e5bc5120e21bb1470eeee69a2b9f5213d59a3056b3315e28946e2d"
+    },
+    {
+      "path": "docs/ai-runtime-harness-remediation-plan.md",
+      "sha256": "bc0adcc2504a0acb558dd841221d7219cebbebd6d385e60798e207e0fd6b5c7d"
+    },
+    {
+      "path": "package.json",
+      "sha256": "8bbff214a642479b27bc16196149cb6d2a06f29dd5d8715816bf2154ed33cd9b"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/commands.rs",
+      "sha256": "02bf124a0d5b53575c5906b9acd891500df73b4637428789eb7b2c30831f7723"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/driver.rs",
+      "sha256": "73601d47c0bb4fe9ad8187a8e4c011767934339c9ac3b44b3130351ba9e77f06"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/event.rs",
+      "sha256": "76ab7a6a5e875f53c96a135260d205b56920e82f9b1c38be9223ef6d7b750e9b"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/mod.rs",
+      "sha256": "0c55fb24536b8b39556adac39c5778b8e31bce8c29dbd0d24ec28c14e66f1823"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/model.rs",
+      "sha256": "31a1e7ad9ccd900b1ccfd390c707f7c01af09ffa3bddca55e79e1ec2a1a598f1"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/filesystem.rs",
+      "sha256": "cad6552a2621f4232c0448915f2bdb54ce9585241b634f5abc8fc7f1738993b3"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/mod.rs",
+      "sha256": "b6f23f96cc8641b2b8b327971fc280527a22585e8f2360ca32bd783ca405010d"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/runtime.rs",
+      "sha256": "fd71d5bef0bfddab8ace6b3cc199615b55cfb03bec96fcd0412b1f57d95a65da"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native_adapter.rs",
+      "sha256": "022bf545eb5c8fecdba63015a5b5fcb51e591acd8140201927b789cf83de70a2"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/recovery.rs",
+      "sha256": "63c21a4a60dd73767d0fbb37840883a5463b7e326a55c0b14c1759106c5d511e"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/registry.rs",
+      "sha256": "0730bccd85ac06a7f8c7a6260f3709861a1d8066f7fa74e4d762552ef9ec5427"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/runtime.rs",
+      "sha256": "9f8c792647cad8cc2a34f44cef10a6f2c389913ed7cd75ec652d88c7b091d15c"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/scheduler_tests.rs",
+      "sha256": "a29746c5e8dae919846686d1b1f42922e3b73794cc8573462a7707f5be9a5da1"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/session.rs",
+      "sha256": "9789c1ee812d620fbda64596bfe870af2c5359633db8606d14c34bbe5cace39f"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/subagent.rs",
+      "sha256": "45979ec25c93c5596a08c49ec3b2de81fc2f7503fb5c78c4b6b1a7cc9472fa7b"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/surface.rs",
+      "sha256": "07128826679c0b95292088ef0a8751aa07e1cd93d01ef7496edd12b3180e4cd4"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/tool_pipeline.rs",
+      "sha256": "f6cd805effc4ccbbd38eca89b85475a83a10231996c3b7b8b29c4c136c15b339"
+    },
+    {
+      "path": "src-tauri/src/connection.rs",
+      "sha256": "c4b359f5b556bca2fb58ee07555a2ae6950343c51272ed4f1825d0001ec96341"
+    },
+    {
+      "path": "src-tauri/src/lib.rs",
+      "sha256": "0a0d032cebc23b5199574532d85e34e0c981d53eabcc138bd3f6afecef336911"
+    },
+    {
+      "path": "src/components/ai/__tests__/ai-workspace-controller.test.tsx",
+      "sha256": "a353820d71918d631556c4027b96ca890c8afacb60135e6b0973280e11989949"
+    },
+    {
+      "path": "src/components/ai/__tests__/ai-workspace-root.test.tsx",
+      "sha256": "6bc5f5c420f742691ce848da5b086b72cfeedb6df126dd1dd8f230d61cae1e87"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-composer-seat.tsx",
+      "sha256": "409bf4b344704717daa1674f581c90bdee77e62162805d9fc8ee8d2a87a69989"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-conversation-node-seat.tsx",
+      "sha256": "4dd9914219a7dd5b9e86e2aa0e11ed5b2bec0334db30e3e614ce3c8c9c0c74fe"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-workspace-controller.tsx",
+      "sha256": "dbb042c1bb2778881366ed4f4335fd7b6a0abc59b7f52bd5b7398d612a296008"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-workspace-root.tsx",
+      "sha256": "89b71ffa4ac56abb0aaa319906375ffb7bdee3e130cd2ff57ac284f58d3fdc8b"
+    },
+    {
+      "path": "src/components/ai/workspace/use-ai-session-controller.ts",
+      "sha256": "db61b8922a57a605d13fb6fc424b40804199f0aa3c81318e50f4d59bf729aa0e"
+    },
+    {
+      "path": "src/components/ui/field.tsx",
+      "sha256": "327cb9df75a3f716fc39d290ad0098ede0293a4f2c475e11f9e8754693f782b5"
+    },
+    {
+      "path": "src/lib/agent-session-projection.ts",
+      "sha256": "ae5ef96d0f6db875c2e1aa202d0c3acebf389ed543228c10d8304d5f19be26fe"
+    },
+    {
+      "path": "src/lib/ai/__tests__/composer-machine.test.ts",
+      "sha256": "4db913299893debc50670ca566d66f9ed839540cc73d459d52625a0172651ceb"
+    },
+    {
+      "path": "src/lib/ai/__tests__/session-adapters.test.ts",
+      "sha256": "e49ceacc77c8b0eb11812d3f34f5fc692cb31a0057d6fcaee0a2c81bfbc12234"
+    },
+    {
+      "path": "src/lib/ai/agent-session-adapter.ts",
+      "sha256": "8d91039c30513adc3d03c775aafbb00031358cb1bac8682f4263a8d3368b5fca"
+    },
+    {
+      "path": "src/lib/ai/composer-machine.ts",
+      "sha256": "5505b2866faa4ef15c0d4602a0001844b67c25775cc1c0cbc537dda7227b71ae"
+    },
+    {
+      "path": "src/lib/ai/conversation-node.ts",
+      "sha256": "f8da621fe40a8318d22ac0469341211e22866014a7a2a88a5a73800a4a2eb419"
+    },
+    {
+      "path": "src/lib/ai/conversation-projection.ts",
+      "sha256": "fb5f2757dd55cd2ce7d729d369af4e3b4a17dbfc680dcb1bb43c3b8898b2a055"
+    },
+    {
+      "path": "src/lib/ai/session-adapter.ts",
+      "sha256": "ecd57d1a3b0403224351692179594971df117430e147e42ce37522821146b7c6"
+    },
+    {
+      "path": "src/lib/ai/submission-policy.ts",
+      "sha256": "d93ab8a96458309d81b1435fc436180e33edc272b5c86a00acb98344719f0335"
+    },
+    {
+      "path": "src/lib/tauri.ts",
+      "sha256": "769914623c9b7bab37633f10ad2e3fd6f65d26247587aa30f2851bacb71497dc"
+    },
+    {
+      "path": "src/locales/en-US.ts",
+      "sha256": "68e0ec9979368c3d4d0c7be05f03c6f5a114bfd9358dbbfffd02867bd1852114"
+    },
+    {
+      "path": "src/locales/zh-CN.ts",
+      "sha256": "75f3896436bb410560b3e4b01dd04386adbaf35d118d43ab448a321cbb86ac93"
+    },
+    {
+      "path": "src/main.tsx",
+      "sha256": "1b399e75ae47e293289d0a0c3b71350af5a37df93a739f802b68636de5450df5"
+    },
+    {
+      "path": "src/types/agent-session.ts",
+      "sha256": "e3a2e55750a9033be53422a3ea7ac25def6ef0166fde69ab4d17cd4a1c13e525"
+    },
+    {
+      "path": "tests/ssh-e2e/Dockerfile",
+      "sha256": "2fd90db5aa100533e8763aaa908eeb3472c92ec4addd1c3624ec1c70137adf62"
+    }
+  ],
+  "trackedCumulative": [
+    {
+      "path": ".gitattributes",
+      "sha256": "3888d30da74858eaaf33e8929a8f05b9b0b4c3b7660a56f7689f3d6d77bb253d"
+    },
+    {
+      "path": ".github/workflows/quality-gate.yml",
+      "sha256": "adb1e60ccb799c970a4c65f5e71965387dfd42d84e1d47b3563bfa9eb6ecb489"
+    },
+    {
+      "path": "docs/agent-runtime-vnext.md",
+      "sha256": "4ce89e08b9f05466bb16d25defd2df10c21bb26f1b10dbe9f9019988f227c08d"
+    },
+    {
+      "path": "docs/ai-panel-deepseek-harness-alignment-plan.md",
+      "sha256": "99224c8a9e914646d7af831b5ed1ae825f8c75bfed2db0f8508317cdf25e10eb"
+    },
+    {
+      "path": "docs/ai-runtime-handoff-inventory.json",
+      "sha256": "ff338141d6742d991b3ed58859d52b0ee723def637e1e4054f136172e9cf3e99"
+    },
+    {
+      "path": "docs/ai-runtime-handoff.md",
+      "sha256": "cdd08c3807e5bc5120e21bb1470eeee69a2b9f5213d59a3056b3315e28946e2d"
+    },
+    {
+      "path": "docs/ai-runtime-harness-remediation-plan.md",
+      "sha256": "bc0adcc2504a0acb558dd841221d7219cebbebd6d385e60798e207e0fd6b5c7d"
+    },
+    {
+      "path": "docs/ai-runtime-stage3b-validation.md",
+      "sha256": "b755fc78169d5541cfe1be706f925f80efce194e9c5d4fbbd33f1c774ac954a5"
+    },
+    {
+      "path": "docs/ai-runtime-stage3b.md",
+      "sha256": "c483f84db99591f9609e43ff643cead62cadaabdf65e449feb9266b912715734"
+    },
+    {
+      "path": "docs/ai-runtime-stage4-validation.md",
+      "sha256": "bef44b4b797b971509ef746ff7943d2b597d2ce4fc16c8c019386f26ad1cff71"
+    },
+    {
+      "path": "docs/ai-runtime-stage4.md",
+      "sha256": "7ff14a49a7809ffec3670dce26a61375ddeded9dc75bc56b9538a274811eabb7"
+    },
+    {
+      "path": "docs/ai-runtime-stage5-validation.md",
+      "sha256": "194e2495d442e281e2d49a2f104dc041a568e9fc70e3c60fb239ed764de44876"
+    },
+    {
+      "path": "docs/ai-runtime-stage5.md",
+      "sha256": "ea32f92fbb28135f457282ba0927546148ed3e874dec36e3792492efeec5261c"
+    },
+    {
+      "path": "docs/ai-runtime-stage6b-design.md",
+      "sha256": "f70db45e3db75fa90efc575b5f7096d1682e40b00ebf96fe1f5ef25b5abf46e1"
+    },
+    {
+      "path": "package.json",
+      "sha256": "8bbff214a642479b27bc16196149cb6d2a06f29dd5d8715816bf2154ed33cd9b"
+    },
+    {
+      "path": "scripts/agent-provider-live-smoke.mjs",
+      "sha256": "042fa49843c9fec04270e2c21ffb2f00bda5f165d9b04b118c92c17a408c5362"
+    },
+    {
+      "path": "scripts/ai-runtime-stage5.mjs",
+      "sha256": "221556c27b3fe82d48b071faf7dac08df4c92b3494d00ade9d49793bdcb0b4a4"
+    },
+    {
+      "path": "src-tauri/Cargo.lock",
+      "sha256": "618cb9ca037537a83d0bb9dcb4906aa6b5ac2af92e671bf2ecb7f8f69a7e1f01"
+    },
+    {
+      "path": "src-tauri/Cargo.toml",
+      "sha256": "64f5a9b20749b75189278b86ab47daf094188e70a9ea7d6e0216a68c005c9710"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/budget.rs",
+      "sha256": "811b19ff1ea97e3a6d337cd18c17c223a280466e8dce7a0b5b075df9bb0e2639"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/commands.rs",
+      "sha256": "02bf124a0d5b53575c5906b9acd891500df73b4637428789eb7b2c30831f7723"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/compaction.rs",
+      "sha256": "c71b56693ea52f1da7050d7d460ffba21b2bb23cf978000ed46853b150b9f2e4"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/driver.rs",
+      "sha256": "73601d47c0bb4fe9ad8187a8e4c011767934339c9ac3b44b3130351ba9e77f06"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/event.rs",
+      "sha256": "76ab7a6a5e875f53c96a135260d205b56920e82f9b1c38be9223ef6d7b750e9b"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/mod.rs",
+      "sha256": "0c55fb24536b8b39556adac39c5778b8e31bce8c29dbd0d24ec28c14e66f1823"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/model.rs",
+      "sha256": "31a1e7ad9ccd900b1ccfd390c707f7c01af09ffa3bddca55e79e1ec2a1a598f1"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/filesystem.rs",
+      "sha256": "cad6552a2621f4232c0448915f2bdb54ce9585241b634f5abc8fc7f1738993b3"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/mod.rs",
+      "sha256": "b6f23f96cc8641b2b8b327971fc280527a22585e8f2360ca32bd783ca405010d"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/runtime.rs",
+      "sha256": "fd71d5bef0bfddab8ace6b3cc199615b55cfb03bec96fcd0412b1f57d95a65da"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native_adapter.rs",
+      "sha256": "022bf545eb5c8fecdba63015a5b5fcb51e591acd8140201927b789cf83de70a2"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/prompt.rs",
+      "sha256": "825198658e95e1c63d3cc914cc2924c93da40e480d9b0cc567af20e7cd66f7dd"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/provider.rs",
+      "sha256": "341e5ac95a2f4a321c80e9ffc54280458d562bdbb695909ec4bb9be8097c8193"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/recovery.rs",
+      "sha256": "63c21a4a60dd73767d0fbb37840883a5463b7e326a55c0b14c1759106c5d511e"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/registry.rs",
+      "sha256": "0730bccd85ac06a7f8c7a6260f3709861a1d8066f7fa74e4d762552ef9ec5427"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/retry.rs",
+      "sha256": "258606235b38c04342d1ff34cb281ecb74b7c1e0601691a3954186c20065f257"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/runtime.rs",
+      "sha256": "9f8c792647cad8cc2a34f44cef10a6f2c389913ed7cd75ec652d88c7b091d15c"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/scheduler_tests.rs",
+      "sha256": "a29746c5e8dae919846686d1b1f42922e3b73794cc8573462a7707f5be9a5da1"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/session.rs",
+      "sha256": "9789c1ee812d620fbda64596bfe870af2c5359633db8606d14c34bbe5cace39f"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/subagent.rs",
+      "sha256": "45979ec25c93c5596a08c49ec3b2de81fc2f7503fb5c78c4b6b1a7cc9472fa7b"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/surface.rs",
+      "sha256": "07128826679c0b95292088ef0a8751aa07e1cd93d01ef7496edd12b3180e4cd4"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/tool_pipeline.rs",
+      "sha256": "f6cd805effc4ccbbd38eca89b85475a83a10231996c3b7b8b29c4c136c15b339"
+    },
+    {
+      "path": "src-tauri/src/ai.rs",
+      "sha256": "13277b2b9d197ad5e103ce9b65336ee4a183c126931cb8f9410e23075bab642e"
+    },
+    {
+      "path": "src-tauri/src/connection.rs",
+      "sha256": "c4b359f5b556bca2fb58ee07555a2ae6950343c51272ed4f1825d0001ec96341"
+    },
+    {
+      "path": "src-tauri/src/lib.rs",
+      "sha256": "0a0d032cebc23b5199574532d85e34e0c981d53eabcc138bd3f6afecef336911"
+    },
+    {
+      "path": "src/components/ai/__tests__/ai-workspace-controller.test.tsx",
+      "sha256": "a353820d71918d631556c4027b96ca890c8afacb60135e6b0973280e11989949"
+    },
+    {
+      "path": "src/components/ai/__tests__/ai-workspace-root.test.tsx",
+      "sha256": "6bc5f5c420f742691ce848da5b086b72cfeedb6df126dd1dd8f230d61cae1e87"
+    },
+    {
+      "path": "src/components/ai/__tests__/provider-setup-dialog.test.tsx",
+      "sha256": "7a84e8068552b237d0d84edfa1db84d2bc527ca801a9fba929ad3946004c394f"
+    },
+    {
+      "path": "src/components/ai/ai-settings-section.tsx",
+      "sha256": "c3aadc832c19afadc2b045843f09a362bece40763713042923c892ee31199419"
+    },
+    {
+      "path": "src/components/ai/provider-setup-dialog.tsx",
+      "sha256": "423692f5d1cdc92fa1da79636fd2d4b06e8abb23d13d89885e393210ada8b15a"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-composer-seat.tsx",
+      "sha256": "409bf4b344704717daa1674f581c90bdee77e62162805d9fc8ee8d2a87a69989"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-conversation-node-seat.tsx",
+      "sha256": "4dd9914219a7dd5b9e86e2aa0e11ed5b2bec0334db30e3e614ce3c8c9c0c74fe"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-workspace-controller.tsx",
+      "sha256": "dbb042c1bb2778881366ed4f4335fd7b6a0abc59b7f52bd5b7398d612a296008"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-workspace-root.tsx",
+      "sha256": "89b71ffa4ac56abb0aaa319906375ffb7bdee3e130cd2ff57ac284f58d3fdc8b"
+    },
+    {
+      "path": "src/components/ai/workspace/use-ai-session-controller.ts",
+      "sha256": "db61b8922a57a605d13fb6fc424b40804199f0aa3c81318e50f4d59bf729aa0e"
+    },
+    {
+      "path": "src/components/ui/field.tsx",
+      "sha256": "327cb9df75a3f716fc39d290ad0098ede0293a4f2c475e11f9e8754693f782b5"
+    },
+    {
+      "path": "src/lib/__tests__/agent-session-projection.test.ts",
+      "sha256": "5971cdc9a324676b42b8cf3151ea6b2b304dea9838c21a14aab0060f28056c2b"
+    },
+    {
+      "path": "src/lib/__tests__/provider-contract-fixtures.json",
+      "sha256": "68e8c9f5a4191f81a2a3d930087e74c0858f56b7d4a6a0facf6ff4b2ac1f3af5"
+    },
+    {
+      "path": "src/lib/__tests__/provider-contract.test.ts",
+      "sha256": "998b9287116c43a09f25d616266a7de0f3c259cfd1241ced71ec92e2a8ecb838"
+    },
+    {
+      "path": "src/lib/__tests__/retry-policy.test.ts",
+      "sha256": "38be1eba22f294ab305649c1f85e4d3ac9661fd5419ef716ea2621075fc3829f"
+    },
+    {
+      "path": "src/lib/agent-session-projection.ts",
+      "sha256": "ae5ef96d0f6db875c2e1aa202d0c3acebf389ed543228c10d8304d5f19be26fe"
+    },
+    {
+      "path": "src/lib/ai-reasoning.ts",
+      "sha256": "72c2f5d1795952c64649cd7449cbc82f4fdf12b76d115c5519428edc7159516c"
+    },
+    {
+      "path": "src/lib/ai/__tests__/composer-machine.test.ts",
+      "sha256": "4db913299893debc50670ca566d66f9ed839540cc73d459d52625a0172651ceb"
+    },
+    {
+      "path": "src/lib/ai/__tests__/conversation-projection.test.ts",
+      "sha256": "f8efd21b68796b0fa0a7ffa08482fe1e35ddaad5a42e38060c639800a4346de1"
+    },
+    {
+      "path": "src/lib/ai/__tests__/retry-projection.test.ts",
+      "sha256": "b9d5471be59b91790311a2f84b746ee6745ab300867ed19d77abcd52b1a2ab49"
+    },
+    {
+      "path": "src/lib/ai/__tests__/session-adapters.test.ts",
+      "sha256": "e49ceacc77c8b0eb11812d3f34f5fc692cb31a0057d6fcaee0a2c81bfbc12234"
+    },
+    {
+      "path": "src/lib/ai/agent-session-adapter.ts",
+      "sha256": "8d91039c30513adc3d03c775aafbb00031358cb1bac8682f4263a8d3368b5fca"
+    },
+    {
+      "path": "src/lib/ai/composer-machine.ts",
+      "sha256": "5505b2866faa4ef15c0d4602a0001844b67c25775cc1c0cbc537dda7227b71ae"
+    },
+    {
+      "path": "src/lib/ai/conversation-node.ts",
+      "sha256": "f8da621fe40a8318d22ac0469341211e22866014a7a2a88a5a73800a4a2eb419"
+    },
+    {
+      "path": "src/lib/ai/conversation-projection.ts",
+      "sha256": "fb5f2757dd55cd2ce7d729d369af4e3b4a17dbfc680dcb1bb43c3b8898b2a055"
+    },
+    {
+      "path": "src/lib/ai/session-adapter.ts",
+      "sha256": "ecd57d1a3b0403224351692179594971df117430e147e42ce37522821146b7c6"
+    },
+    {
+      "path": "src/lib/ai/submission-policy.ts",
+      "sha256": "d93ab8a96458309d81b1435fc436180e33edc272b5c86a00acb98344719f0335"
+    },
+    {
+      "path": "src/lib/provider-contract.json",
+      "sha256": "b82a988580fcfdc9a37850b3edf714103b8070c6fa15b6d780502391f93ab6ee"
+    },
+    {
+      "path": "src/lib/provider-contract.ts",
+      "sha256": "9c037ab4912a6ab655d2a7891f943eb0a63594eb83748f2f433cc5763a2bab90"
+    },
+    {
+      "path": "src/lib/retry-policy.json",
+      "sha256": "16753e8d432d186146767c2e41e34e2965f16aceaa669bad519c78c06f248c76"
+    },
+    {
+      "path": "src/lib/retry-policy.ts",
+      "sha256": "903c359ff559a214e79a65135e8a5c4707b709b04f79ba17b60139adbdd79c27"
+    },
+    {
+      "path": "src/lib/tauri.ts",
+      "sha256": "769914623c9b7bab37633f10ad2e3fd6f65d26247587aa30f2851bacb71497dc"
+    },
+    {
+      "path": "src/locales/en-US.ts",
+      "sha256": "68e0ec9979368c3d4d0c7be05f03c6f5a114bfd9358dbbfffd02867bd1852114"
+    },
+    {
+      "path": "src/locales/zh-CN.ts",
+      "sha256": "75f3896436bb410560b3e4b01dd04386adbaf35d118d43ab448a321cbb86ac93"
+    },
+    {
+      "path": "src/main.tsx",
+      "sha256": "1b399e75ae47e293289d0a0c3b71350af5a37df93a739f802b68636de5450df5"
+    },
+    {
+      "path": "src/stores/__tests__/aiSettingsStore.test.ts",
+      "sha256": "c9294a6fb14bdfa2b2fd0ca25243cdf8ff6a879ba8aeac8352994ab732e1b00a"
+    },
+    {
+      "path": "src/stores/aiSettingsStore.ts",
+      "sha256": "5af727de8cf5a9ffc762c2e88bdc89a212a5833cd5067da7ccc36061f274bbfd"
+    },
+    {
+      "path": "src/types/agent-session.ts",
+      "sha256": "e3a2e55750a9033be53422a3ea7ac25def6ef0166fde69ab4d17cd4a1c13e525"
+    },
+    {
+      "path": "src/types/ai.ts",
+      "sha256": "2efbff16ecbd87de7674314a052edead7264f1ada068f24363cb842e25eaa77e"
+    },
+    {
+      "path": "tests/ssh-e2e/Dockerfile",
+      "sha256": "2fd90db5aa100533e8763aaa908eeb3472c92ec4addd1c3624ec1c70137adf62"
+    }
+  ],
+  "untrackedProductFiles": [
+    {
+      "path": "docs/ai-runtime-stage6a-validation.md",
+      "sha256": "f2617095d97fd609b90f98ea399aeb090d49c20205fd5d844e0320c9c37edcde"
+    },
+    {
+      "path": "docs/ai-runtime-stage6a.md",
+      "sha256": "35af010ef67484eef276b3b1295bc1cab6a9dde43443051bbd26c6662c6cf472"
+    },
+    {
+      "path": "docs/ai-runtime-stage6b-validation.md",
+      "sha256": "50c9150bfc94d034e8ba844993db1e1cc125d8e5e1464bc6c57dcbdced8b967f"
+    },
+    {
+      "path": "docs/ai-runtime-stage6b.md",
+      "sha256": "b2bf87cd3b0ba997b657aa0aed26f32568fe3ffb42c86a099611eec0e1bfcdec"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6a-handoff.mjs",
+      "sha256": "9525fb9b74fb748d171da46381de2ae2ab04664e99d3729ee51f0dbef945b09f"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6a-visual.mjs",
+      "sha256": "9fcd505ad87a2515c3c9c3c5afd87b73e974a87ccdb65cd6d8abb577fc44fdcd"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6b-controller.mjs",
+      "sha256": "17dcad145f05ac80a0a02db52655b36ae3e86eb921483b7a18fe95158129e039"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6b-handoff.mjs",
+      "sha256": "e0ec4bf467d9e2f45b7ff7458e7065a85d2f2efdbf519a643ec93d2102383cd5"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6b-sftp.mjs",
+      "sha256": "6b23927306d3031908db0e2772985c938f05c60c554778a0a892955b74162530"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6b-visual.mjs",
+      "sha256": "fa697919b0704259edb9e42d2dd19f7d82bbe88705974903395f180aabda2052"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6b.mjs",
+      "sha256": "2a6eee2ddcb3a499d4b7333b373974db0933f5d3ad882e0c3fca109654ed4cf7"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/scoped_read.rs",
+      "sha256": "699d78e10514b8b119378b6a4239bfe20eae972c777b899bf2945650836be680"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/skill_reader.py",
+      "sha256": "54dc4221ab10708adbf219645929cc992676160e05ec11c79cf19b6ea97174b9"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/question_tests.rs",
+      "sha256": "b001b2b360567683c7c9b5b0fc6df19cc4bf58e9b1f1c828f75e25e826a8c3ab"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/skill_bridge_tests.rs",
+      "sha256": "7f87737628072b561419a84c7de433f36f69230a829b42b0ff8cf05ad71d8592"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/skill_runtime.rs",
+      "sha256": "87967dd27cc2eb630da7c42dd3cf92240e7d81789c8b0f1b07cb46ef6b8aa962"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/skill_tests.rs",
+      "sha256": "7dbf6443c0b2705d921f5dcbd00c0fe8391abf724e2bc9e0b7b2943e818e29ef"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/skills.rs",
+      "sha256": "e1b387706153b0f2fca2075f30e11900c1e1b9d9ff2648da7edaacfeeba41256"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/user_questions.rs",
+      "sha256": "982692668418b3d335238fb437521ed94875cc2c403d1b4851c3f3cc0cfec1dc"
+    },
+    {
+      "path": "src/components/ai/__tests__/ai-question-panel.test.tsx",
+      "sha256": "6a2e2bbd8bacc68e426a59dad8e713a91abd925a9bb23c57b187462f40387b1b"
+    },
+    {
+      "path": "src/components/ai/__tests__/ai-skills-menu.test.tsx",
+      "sha256": "9b07f40076cb9e8e15dedad5541ea0e801f5c8f0c324e457140a11d562d49c1e"
+    },
+    {
+      "path": "src/components/ai/__tests__/ai-skills-runtime-bridge.test.tsx",
+      "sha256": "30cbcf2022538ef5efaa748f518cbb439a19fa0719367598ba21fdfcae3ff502"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-project-directory-input.tsx",
+      "sha256": "d677dc207702ae0bde59ceaf3e666674de93e1b4383870816ab8c35f47d4c74a"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-question-panel.tsx",
+      "sha256": "b7e440186ef8c5339a41a6b7c04c48543c0f17808f8d4bdf07d24d4a166732ab"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-skills-menu.tsx",
+      "sha256": "880a8886c19c921aaa5d7890129b397fa87ab1d91a51a43c099708b4e84861ac"
+    },
+    {
+      "path": "src/lib/ai/__tests__/question-projection.test.ts",
+      "sha256": "ddad68e5fd58c0be7aa8f4ede5f99eba3858e26596735c09587109a077600d65"
+    },
+    {
+      "path": "src/lib/ai/__tests__/skill-projection.test.ts",
+      "sha256": "3f128869496c6b42542a20d2147c62d82299f973519fd3e68937b3c62814d810"
+    },
+    {
+      "path": "src/lib/ai/question-projection.ts",
+      "sha256": "580ff4332a9796ee60ad883c0e795ad0892db908be9a7d7d2b7633161c75d9f6"
+    },
+    {
+      "path": "src/lib/ai/skill-projection.ts",
+      "sha256": "18567d3d7faaf2c3c26a4dd46f8d0b30b07e83592b0bff14c3c8c872e396cb6d"
+    },
+    {
+      "path": "src/stores/agentQuestionStore.ts",
+      "sha256": "fa37c8dace663623eaaf58001e4857c26fe1ec801a2283343cc605954ba41665"
+    },
+    {
+      "path": "src/test/agent-question-page.tsx",
+      "sha256": "b50c28a0dc242ef68d08effd581d9d6ee7f4582f71901f77ea02bdca77f27e9e"
+    },
+    {
+      "path": "src/test/agent-skills-page.tsx",
+      "sha256": "b1bd9aaf4ae55fea445b5e372221dfbff2cbef7b51fd335003c82e9a8a78f641"
+    },
+    {
+      "path": "src/test/fixtures/agent-skills-runtime.json",
+      "sha256": "cbe04d9fbb0adeff0bec653c3294b3e39a601afff6418413da4803f688162415"
+    },
+    {
+      "path": "src/types/agent-question.ts",
+      "sha256": "6f2f6359393cc6acf357be8cc8efefd231acb5c4772f1d8f8806a2d7d33db2d4"
+    },
+    {
+      "path": "src/types/agent-skill.ts",
+      "sha256": "87c917b01b0be0cffcdcfe428883d61d8a43088a1b609fd52c74cecef108879a"
+    }
+  ],
+  "allCumulativeSourceFiles": [
+    {
+      "path": ".gitattributes",
+      "sha256": "3888d30da74858eaaf33e8929a8f05b9b0b4c3b7660a56f7689f3d6d77bb253d"
+    },
+    {
+      "path": ".github/workflows/quality-gate.yml",
+      "sha256": "adb1e60ccb799c970a4c65f5e71965387dfd42d84e1d47b3563bfa9eb6ecb489"
+    },
+    {
+      "path": "docs/agent-runtime-vnext.md",
+      "sha256": "4ce89e08b9f05466bb16d25defd2df10c21bb26f1b10dbe9f9019988f227c08d"
+    },
+    {
+      "path": "docs/ai-panel-deepseek-harness-alignment-plan.md",
+      "sha256": "99224c8a9e914646d7af831b5ed1ae825f8c75bfed2db0f8508317cdf25e10eb"
+    },
+    {
+      "path": "docs/ai-runtime-handoff-inventory.json",
+      "sha256": "ff338141d6742d991b3ed58859d52b0ee723def637e1e4054f136172e9cf3e99"
+    },
+    {
+      "path": "docs/ai-runtime-handoff.md",
+      "sha256": "cdd08c3807e5bc5120e21bb1470eeee69a2b9f5213d59a3056b3315e28946e2d"
+    },
+    {
+      "path": "docs/ai-runtime-harness-remediation-plan.md",
+      "sha256": "bc0adcc2504a0acb558dd841221d7219cebbebd6d385e60798e207e0fd6b5c7d"
+    },
+    {
+      "path": "docs/ai-runtime-stage3b-validation.md",
+      "sha256": "b755fc78169d5541cfe1be706f925f80efce194e9c5d4fbbd33f1c774ac954a5"
+    },
+    {
+      "path": "docs/ai-runtime-stage3b.md",
+      "sha256": "c483f84db99591f9609e43ff643cead62cadaabdf65e449feb9266b912715734"
+    },
+    {
+      "path": "docs/ai-runtime-stage4-validation.md",
+      "sha256": "bef44b4b797b971509ef746ff7943d2b597d2ce4fc16c8c019386f26ad1cff71"
+    },
+    {
+      "path": "docs/ai-runtime-stage4.md",
+      "sha256": "7ff14a49a7809ffec3670dce26a61375ddeded9dc75bc56b9538a274811eabb7"
+    },
+    {
+      "path": "docs/ai-runtime-stage5-validation.md",
+      "sha256": "194e2495d442e281e2d49a2f104dc041a568e9fc70e3c60fb239ed764de44876"
+    },
+    {
+      "path": "docs/ai-runtime-stage5.md",
+      "sha256": "ea32f92fbb28135f457282ba0927546148ed3e874dec36e3792492efeec5261c"
+    },
+    {
+      "path": "docs/ai-runtime-stage6a-validation.md",
+      "sha256": "f2617095d97fd609b90f98ea399aeb090d49c20205fd5d844e0320c9c37edcde"
+    },
+    {
+      "path": "docs/ai-runtime-stage6a.md",
+      "sha256": "35af010ef67484eef276b3b1295bc1cab6a9dde43443051bbd26c6662c6cf472"
+    },
+    {
+      "path": "docs/ai-runtime-stage6b-design.md",
+      "sha256": "f70db45e3db75fa90efc575b5f7096d1682e40b00ebf96fe1f5ef25b5abf46e1"
+    },
+    {
+      "path": "docs/ai-runtime-stage6b-validation.md",
+      "sha256": "50c9150bfc94d034e8ba844993db1e1cc125d8e5e1464bc6c57dcbdced8b967f"
+    },
+    {
+      "path": "docs/ai-runtime-stage6b.md",
+      "sha256": "b2bf87cd3b0ba997b657aa0aed26f32568fe3ffb42c86a099611eec0e1bfcdec"
+    },
+    {
+      "path": "package.json",
+      "sha256": "8bbff214a642479b27bc16196149cb6d2a06f29dd5d8715816bf2154ed33cd9b"
+    },
+    {
+      "path": "scripts/agent-provider-live-smoke.mjs",
+      "sha256": "042fa49843c9fec04270e2c21ffb2f00bda5f165d9b04b118c92c17a408c5362"
+    },
+    {
+      "path": "scripts/ai-runtime-stage5.mjs",
+      "sha256": "221556c27b3fe82d48b071faf7dac08df4c92b3494d00ade9d49793bdcb0b4a4"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6a-handoff.mjs",
+      "sha256": "9525fb9b74fb748d171da46381de2ae2ab04664e99d3729ee51f0dbef945b09f"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6a-visual.mjs",
+      "sha256": "9fcd505ad87a2515c3c9c3c5afd87b73e974a87ccdb65cd6d8abb577fc44fdcd"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6b-controller.mjs",
+      "sha256": "17dcad145f05ac80a0a02db52655b36ae3e86eb921483b7a18fe95158129e039"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6b-handoff.mjs",
+      "sha256": "e0ec4bf467d9e2f45b7ff7458e7065a85d2f2efdbf519a643ec93d2102383cd5"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6b-sftp.mjs",
+      "sha256": "6b23927306d3031908db0e2772985c938f05c60c554778a0a892955b74162530"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6b-visual.mjs",
+      "sha256": "fa697919b0704259edb9e42d2dd19f7d82bbe88705974903395f180aabda2052"
+    },
+    {
+      "path": "scripts/ai-runtime-stage6b.mjs",
+      "sha256": "2a6eee2ddcb3a499d4b7333b373974db0933f5d3ad882e0c3fca109654ed4cf7"
+    },
+    {
+      "path": "src-tauri/Cargo.lock",
+      "sha256": "618cb9ca037537a83d0bb9dcb4906aa6b5ac2af92e671bf2ecb7f8f69a7e1f01"
+    },
+    {
+      "path": "src-tauri/Cargo.toml",
+      "sha256": "64f5a9b20749b75189278b86ab47daf094188e70a9ea7d6e0216a68c005c9710"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/budget.rs",
+      "sha256": "811b19ff1ea97e3a6d337cd18c17c223a280466e8dce7a0b5b075df9bb0e2639"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/commands.rs",
+      "sha256": "02bf124a0d5b53575c5906b9acd891500df73b4637428789eb7b2c30831f7723"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/compaction.rs",
+      "sha256": "c71b56693ea52f1da7050d7d460ffba21b2bb23cf978000ed46853b150b9f2e4"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/driver.rs",
+      "sha256": "73601d47c0bb4fe9ad8187a8e4c011767934339c9ac3b44b3130351ba9e77f06"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/event.rs",
+      "sha256": "76ab7a6a5e875f53c96a135260d205b56920e82f9b1c38be9223ef6d7b750e9b"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/mod.rs",
+      "sha256": "0c55fb24536b8b39556adac39c5778b8e31bce8c29dbd0d24ec28c14e66f1823"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/model.rs",
+      "sha256": "31a1e7ad9ccd900b1ccfd390c707f7c01af09ffa3bddca55e79e1ec2a1a598f1"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/filesystem.rs",
+      "sha256": "cad6552a2621f4232c0448915f2bdb54ce9585241b634f5abc8fc7f1738993b3"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/mod.rs",
+      "sha256": "b6f23f96cc8641b2b8b327971fc280527a22585e8f2360ca32bd783ca405010d"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/runtime.rs",
+      "sha256": "fd71d5bef0bfddab8ace6b3cc199615b55cfb03bec96fcd0412b1f57d95a65da"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/scoped_read.rs",
+      "sha256": "699d78e10514b8b119378b6a4239bfe20eae972c777b899bf2945650836be680"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native/skill_reader.py",
+      "sha256": "54dc4221ab10708adbf219645929cc992676160e05ec11c79cf19b6ea97174b9"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/native_adapter.rs",
+      "sha256": "022bf545eb5c8fecdba63015a5b5fcb51e591acd8140201927b789cf83de70a2"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/prompt.rs",
+      "sha256": "825198658e95e1c63d3cc914cc2924c93da40e480d9b0cc567af20e7cd66f7dd"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/provider.rs",
+      "sha256": "341e5ac95a2f4a321c80e9ffc54280458d562bdbb695909ec4bb9be8097c8193"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/question_tests.rs",
+      "sha256": "b001b2b360567683c7c9b5b0fc6df19cc4bf58e9b1f1c828f75e25e826a8c3ab"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/recovery.rs",
+      "sha256": "63c21a4a60dd73767d0fbb37840883a5463b7e326a55c0b14c1759106c5d511e"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/registry.rs",
+      "sha256": "0730bccd85ac06a7f8c7a6260f3709861a1d8066f7fa74e4d762552ef9ec5427"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/retry.rs",
+      "sha256": "258606235b38c04342d1ff34cb281ecb74b7c1e0601691a3954186c20065f257"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/runtime.rs",
+      "sha256": "9f8c792647cad8cc2a34f44cef10a6f2c389913ed7cd75ec652d88c7b091d15c"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/scheduler_tests.rs",
+      "sha256": "a29746c5e8dae919846686d1b1f42922e3b73794cc8573462a7707f5be9a5da1"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/session.rs",
+      "sha256": "9789c1ee812d620fbda64596bfe870af2c5359633db8606d14c34bbe5cace39f"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/skill_bridge_tests.rs",
+      "sha256": "7f87737628072b561419a84c7de433f36f69230a829b42b0ff8cf05ad71d8592"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/skill_runtime.rs",
+      "sha256": "87967dd27cc2eb630da7c42dd3cf92240e7d81789c8b0f1b07cb46ef6b8aa962"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/skill_tests.rs",
+      "sha256": "7dbf6443c0b2705d921f5dcbd00c0fe8391abf724e2bc9e0b7b2943e818e29ef"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/skills.rs",
+      "sha256": "e1b387706153b0f2fca2075f30e11900c1e1b9d9ff2648da7edaacfeeba41256"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/subagent.rs",
+      "sha256": "45979ec25c93c5596a08c49ec3b2de81fc2f7503fb5c78c4b6b1a7cc9472fa7b"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/surface.rs",
+      "sha256": "07128826679c0b95292088ef0a8751aa07e1cd93d01ef7496edd12b3180e4cd4"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/tool_pipeline.rs",
+      "sha256": "f6cd805effc4ccbbd38eca89b85475a83a10231996c3b7b8b29c4c136c15b339"
+    },
+    {
+      "path": "src-tauri/src/agent_runtime/user_questions.rs",
+      "sha256": "982692668418b3d335238fb437521ed94875cc2c403d1b4851c3f3cc0cfec1dc"
+    },
+    {
+      "path": "src-tauri/src/ai.rs",
+      "sha256": "13277b2b9d197ad5e103ce9b65336ee4a183c126931cb8f9410e23075bab642e"
+    },
+    {
+      "path": "src-tauri/src/connection.rs",
+      "sha256": "c4b359f5b556bca2fb58ee07555a2ae6950343c51272ed4f1825d0001ec96341"
+    },
+    {
+      "path": "src-tauri/src/lib.rs",
+      "sha256": "0a0d032cebc23b5199574532d85e34e0c981d53eabcc138bd3f6afecef336911"
+    },
+    {
+      "path": "src/components/ai/__tests__/ai-question-panel.test.tsx",
+      "sha256": "6a2e2bbd8bacc68e426a59dad8e713a91abd925a9bb23c57b187462f40387b1b"
+    },
+    {
+      "path": "src/components/ai/__tests__/ai-skills-menu.test.tsx",
+      "sha256": "9b07f40076cb9e8e15dedad5541ea0e801f5c8f0c324e457140a11d562d49c1e"
+    },
+    {
+      "path": "src/components/ai/__tests__/ai-skills-runtime-bridge.test.tsx",
+      "sha256": "30cbcf2022538ef5efaa748f518cbb439a19fa0719367598ba21fdfcae3ff502"
+    },
+    {
+      "path": "src/components/ai/__tests__/ai-workspace-controller.test.tsx",
+      "sha256": "a353820d71918d631556c4027b96ca890c8afacb60135e6b0973280e11989949"
+    },
+    {
+      "path": "src/components/ai/__tests__/ai-workspace-root.test.tsx",
+      "sha256": "6bc5f5c420f742691ce848da5b086b72cfeedb6df126dd1dd8f230d61cae1e87"
+    },
+    {
+      "path": "src/components/ai/__tests__/provider-setup-dialog.test.tsx",
+      "sha256": "7a84e8068552b237d0d84edfa1db84d2bc527ca801a9fba929ad3946004c394f"
+    },
+    {
+      "path": "src/components/ai/ai-settings-section.tsx",
+      "sha256": "c3aadc832c19afadc2b045843f09a362bece40763713042923c892ee31199419"
+    },
+    {
+      "path": "src/components/ai/provider-setup-dialog.tsx",
+      "sha256": "423692f5d1cdc92fa1da79636fd2d4b06e8abb23d13d89885e393210ada8b15a"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-composer-seat.tsx",
+      "sha256": "409bf4b344704717daa1674f581c90bdee77e62162805d9fc8ee8d2a87a69989"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-conversation-node-seat.tsx",
+      "sha256": "4dd9914219a7dd5b9e86e2aa0e11ed5b2bec0334db30e3e614ce3c8c9c0c74fe"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-project-directory-input.tsx",
+      "sha256": "d677dc207702ae0bde59ceaf3e666674de93e1b4383870816ab8c35f47d4c74a"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-question-panel.tsx",
+      "sha256": "b7e440186ef8c5339a41a6b7c04c48543c0f17808f8d4bdf07d24d4a166732ab"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-skills-menu.tsx",
+      "sha256": "880a8886c19c921aaa5d7890129b397fa87ab1d91a51a43c099708b4e84861ac"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-workspace-controller.tsx",
+      "sha256": "dbb042c1bb2778881366ed4f4335fd7b6a0abc59b7f52bd5b7398d612a296008"
+    },
+    {
+      "path": "src/components/ai/workspace/ai-workspace-root.tsx",
+      "sha256": "89b71ffa4ac56abb0aaa319906375ffb7bdee3e130cd2ff57ac284f58d3fdc8b"
+    },
+    {
+      "path": "src/components/ai/workspace/use-ai-session-controller.ts",
+      "sha256": "db61b8922a57a605d13fb6fc424b40804199f0aa3c81318e50f4d59bf729aa0e"
+    },
+    {
+      "path": "src/components/ui/field.tsx",
+      "sha256": "327cb9df75a3f716fc39d290ad0098ede0293a4f2c475e11f9e8754693f782b5"
+    },
+    {
+      "path": "src/lib/__tests__/agent-session-projection.test.ts",
+      "sha256": "5971cdc9a324676b42b8cf3151ea6b2b304dea9838c21a14aab0060f28056c2b"
+    },
+    {
+      "path": "src/lib/__tests__/provider-contract-fixtures.json",
+      "sha256": "68e8c9f5a4191f81a2a3d930087e74c0858f56b7d4a6a0facf6ff4b2ac1f3af5"
+    },
+    {
+      "path": "src/lib/__tests__/provider-contract.test.ts",
+      "sha256": "998b9287116c43a09f25d616266a7de0f3c259cfd1241ced71ec92e2a8ecb838"
+    },
+    {
+      "path": "src/lib/__tests__/retry-policy.test.ts",
+      "sha256": "38be1eba22f294ab305649c1f85e4d3ac9661fd5419ef716ea2621075fc3829f"
+    },
+    {
+      "path": "src/lib/agent-session-projection.ts",
+      "sha256": "ae5ef96d0f6db875c2e1aa202d0c3acebf389ed543228c10d8304d5f19be26fe"
+    },
+    {
+      "path": "src/lib/ai-reasoning.ts",
+      "sha256": "72c2f5d1795952c64649cd7449cbc82f4fdf12b76d115c5519428edc7159516c"
+    },
+    {
+      "path": "src/lib/ai/__tests__/composer-machine.test.ts",
+      "sha256": "4db913299893debc50670ca566d66f9ed839540cc73d459d52625a0172651ceb"
+    },
+    {
+      "path": "src/lib/ai/__tests__/conversation-projection.test.ts",
+      "sha256": "f8efd21b68796b0fa0a7ffa08482fe1e35ddaad5a42e38060c639800a4346de1"
+    },
+    {
+      "path": "src/lib/ai/__tests__/question-projection.test.ts",
+      "sha256": "ddad68e5fd58c0be7aa8f4ede5f99eba3858e26596735c09587109a077600d65"
+    },
+    {
+      "path": "src/lib/ai/__tests__/retry-projection.test.ts",
+      "sha256": "b9d5471be59b91790311a2f84b746ee6745ab300867ed19d77abcd52b1a2ab49"
+    },
+    {
+      "path": "src/lib/ai/__tests__/session-adapters.test.ts",
+      "sha256": "e49ceacc77c8b0eb11812d3f34f5fc692cb31a0057d6fcaee0a2c81bfbc12234"
+    },
+    {
+      "path": "src/lib/ai/__tests__/skill-projection.test.ts",
+      "sha256": "3f128869496c6b42542a20d2147c62d82299f973519fd3e68937b3c62814d810"
+    },
+    {
+      "path": "src/lib/ai/agent-session-adapter.ts",
+      "sha256": "8d91039c30513adc3d03c775aafbb00031358cb1bac8682f4263a8d3368b5fca"
+    },
+    {
+      "path": "src/lib/ai/composer-machine.ts",
+      "sha256": "5505b2866faa4ef15c0d4602a0001844b67c25775cc1c0cbc537dda7227b71ae"
+    },
+    {
+      "path": "src/lib/ai/conversation-node.ts",
+      "sha256": "f8da621fe40a8318d22ac0469341211e22866014a7a2a88a5a73800a4a2eb419"
+    },
+    {
+      "path": "src/lib/ai/conversation-projection.ts",
+      "sha256": "fb5f2757dd55cd2ce7d729d369af4e3b4a17dbfc680dcb1bb43c3b8898b2a055"
+    },
+    {
+      "path": "src/lib/ai/question-projection.ts",
+      "sha256": "580ff4332a9796ee60ad883c0e795ad0892db908be9a7d7d2b7633161c75d9f6"
+    },
+    {
+      "path": "src/lib/ai/session-adapter.ts",
+      "sha256": "ecd57d1a3b0403224351692179594971df117430e147e42ce37522821146b7c6"
+    },
+    {
+      "path": "src/lib/ai/skill-projection.ts",
+      "sha256": "18567d3d7faaf2c3c26a4dd46f8d0b30b07e83592b0bff14c3c8c872e396cb6d"
+    },
+    {
+      "path": "src/lib/ai/submission-policy.ts",
+      "sha256": "d93ab8a96458309d81b1435fc436180e33edc272b5c86a00acb98344719f0335"
+    },
+    {
+      "path": "src/lib/provider-contract.json",
+      "sha256": "b82a988580fcfdc9a37850b3edf714103b8070c6fa15b6d780502391f93ab6ee"
+    },
+    {
+      "path": "src/lib/provider-contract.ts",
+      "sha256": "9c037ab4912a6ab655d2a7891f943eb0a63594eb83748f2f433cc5763a2bab90"
+    },
+    {
+      "path": "src/lib/retry-policy.json",
+      "sha256": "16753e8d432d186146767c2e41e34e2965f16aceaa669bad519c78c06f248c76"
+    },
+    {
+      "path": "src/lib/retry-policy.ts",
+      "sha256": "903c359ff559a214e79a65135e8a5c4707b709b04f79ba17b60139adbdd79c27"
+    },
+    {
+      "path": "src/lib/tauri.ts",
+      "sha256": "769914623c9b7bab37633f10ad2e3fd6f65d26247587aa30f2851bacb71497dc"
+    },
+    {
+      "path": "src/locales/en-US.ts",
+      "sha256": "68e0ec9979368c3d4d0c7be05f03c6f5a114bfd9358dbbfffd02867bd1852114"
+    },
+    {
+      "path": "src/locales/zh-CN.ts",
+      "sha256": "75f3896436bb410560b3e4b01dd04386adbaf35d118d43ab448a321cbb86ac93"
+    },
+    {
+      "path": "src/main.tsx",
+      "sha256": "1b399e75ae47e293289d0a0c3b71350af5a37df93a739f802b68636de5450df5"
+    },
+    {
+      "path": "src/stores/__tests__/aiSettingsStore.test.ts",
+      "sha256": "c9294a6fb14bdfa2b2fd0ca25243cdf8ff6a879ba8aeac8352994ab732e1b00a"
+    },
+    {
+      "path": "src/stores/agentQuestionStore.ts",
+      "sha256": "fa37c8dace663623eaaf58001e4857c26fe1ec801a2283343cc605954ba41665"
+    },
+    {
+      "path": "src/stores/aiSettingsStore.ts",
+      "sha256": "5af727de8cf5a9ffc762c2e88bdc89a212a5833cd5067da7ccc36061f274bbfd"
+    },
+    {
+      "path": "src/test/agent-question-page.tsx",
+      "sha256": "b50c28a0dc242ef68d08effd581d9d6ee7f4582f71901f77ea02bdca77f27e9e"
+    },
+    {
+      "path": "src/test/agent-skills-page.tsx",
+      "sha256": "b1bd9aaf4ae55fea445b5e372221dfbff2cbef7b51fd335003c82e9a8a78f641"
+    },
+    {
+      "path": "src/test/fixtures/agent-skills-runtime.json",
+      "sha256": "cbe04d9fbb0adeff0bec653c3294b3e39a601afff6418413da4803f688162415"
+    },
+    {
+      "path": "src/types/agent-question.ts",
+      "sha256": "6f2f6359393cc6acf357be8cc8efefd231acb5c4772f1d8f8806a2d7d33db2d4"
+    },
+    {
+      "path": "src/types/agent-session.ts",
+      "sha256": "e3a2e55750a9033be53422a3ea7ac25def6ef0166fde69ab4d17cd4a1c13e525"
+    },
+    {
+      "path": "src/types/agent-skill.ts",
+      "sha256": "87c917b01b0be0cffcdcfe428883d61d8a43088a1b609fd52c74cecef108879a"
+    },
+    {
+      "path": "src/types/ai.ts",
+      "sha256": "2efbff16ecbd87de7674314a052edead7264f1ada068f24363cb842e25eaa77e"
+    },
+    {
+      "path": "tests/ssh-e2e/Dockerfile",
+      "sha256": "2fd90db5aa100533e8763aaa908eeb3472c92ec4addd1c3624ec1c70137adf62"
+    }
+  ],
+  "predecessorDeliveryMetadata": [
+    {
+      "path": "docs/ai-runtime-stage6a-handoff/cumulative-tracked.patch",
+      "sha256": "5589bede3d4e77d87b8eb347c320ecfdf3cc32b2e71f98e5416fac2dffef1a14"
+    },
+    {
+      "path": "docs/ai-runtime-stage6a-handoff/inventory.json",
+      "sha256": "a64d5495ff78920a16113f02fdf923849e0dea64ab629989f3200978ebd209e1"
+    },
+    {
+      "path": "docs/ai-runtime-stage6a-handoff/stage6a-tracked.patch",
+      "sha256": "6ddb4b860e46b602309a18bf87141127fe6214473f41b86e06f66ff9c601e7f8"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "docs/ai-runtime-stage6b-handoff/stage6b-tracked.patch",
+      "sha256": "189a79cb7780000e8042291913b8777daa082c58581c13b6df73d83212fbf6d3"
+    },
+    {
+      "path": "docs/ai-runtime-stage6b-handoff/cumulative-tracked.patch",
+      "sha256": "51c08f1faa30c4f3512a942d868c56b47068145a0c7274835bed1e10e5814341"
+    }
+  ]
+}

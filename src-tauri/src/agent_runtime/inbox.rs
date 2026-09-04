@@ -233,6 +233,7 @@ mod tests {
 
     fn message(id: &str) -> AgentInboxMessage {
         AgentInboxMessage {
+            images: Vec::new(),
             message_id: id.into(),
             client_submission_id: Some(id.into()),
             content: id.into(),

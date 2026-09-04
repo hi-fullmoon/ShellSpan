@@ -8,6 +8,7 @@ mod process;
 mod pty;
 mod registry;
 mod runtime;
+pub(crate) mod scoped_read;
 
 pub(crate) use call_policy::*;
 pub(crate) use capability::*;

@@ -1,4 +1,5 @@
 import contract from './provider-contract.json';
+import vision from './vision-contract.json';
 import type { AiProviderConfig, AiProviderPreset, AiProviderKind, AiReasoningOption } from '@/types/ai';
 
 export type ProviderProfileId = keyof typeof contract.profiles;
@@ -37,7 +38,7 @@ export function providerCapabilities(provider: Provider) {
     model === p || ['-', '.', ':'].some(separator => model.startsWith(p + separator)))
     && !r.exclude.some(part => model.includes(part)));
   return { version: contract.version, profile, ...capability, kind: capability.kind as AiProviderKind,
-    contextWindow: contextHint ?? capability.contextRules.find(r => r.prefixes.some(p => model.startsWith(p)))?.tokens ?? capability.contextWindow,
+    contextWindow: contextHint ?? vision.routes.find(r => r.profile === profile && r.kind === provider.kind && r.models.includes(model))?.contextWindow ?? capability.contextRules.find(r => r.prefixes.some(p => model.startsWith(p)))?.tokens ?? capability.contextWindow,
     preservesReasoningAcrossTurns: capability.preservesReasoningAcrossTurns,
     nativeReasoning: profile === 'qwen' && model.includes('instruct') ? false : capability.nativeReasoning,
     reasoningOptions: (rule?.options ?? []) as AiReasoningOption[], reasoningEncoding: rule?.encoding ?? 'none' };

@@ -316,6 +316,20 @@ export async function invokeAgentRuntimeFollowup(
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_followup', { input });
 }
 
+// Upload bytes must never enter diagnostic request logging.
+export async function invokePrepareAgentImages(images: readonly import('@/types/agent-image').AgentImageUpload[]) {
+  return invoke<import('@/types/agent-image').AgentImageUpload[]>('agent_runtime_prepare_images', { images });
+}
+export async function invokeSubmitAgentImages(input: { sessionId: string; clientOperationId: string; content: string; lane: 'nextTurn' | 'nextStep'; images: readonly import('@/types/agent-image').AgentImageUpload[] }) {
+  return invoke<AgentSessionSnapshot>('agent_runtime_submit_images', { input });
+}
+export async function invokeCancelAgentImageSubmission(input: { sessionId: string; clientOperationId: string }) {
+  return invoke<boolean>('agent_runtime_cancel_image_submission', { input });
+}
+export async function invokeAgentImagePreview(input: { sessionId: string; sha256: string }) {
+  return invoke<string>('agent_runtime_image_preview', { input });
+}
+
 export async function invokeAgentRuntimeSteer(
   input: AgentSessionMessageInput,
 ): Promise<AgentSessionSnapshot> {
@@ -859,6 +873,10 @@ export async function invokeRequestAppRestart(): Promise<void> {
   return invokeLogged('request_app_restart');
 }
 
+export function invokeAnswerAgentRuntimeQuestion(input: import('@/types/agent-question').AnswerQuestionInput): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_answer_question', { input });
+}
+
 // --- Database commands ---
 
 export async function invokeListProfiles(): Promise<ProfileRow[]> {
@@ -971,4 +989,21 @@ export async function invokeCollectRemoteHealthSnapshot(
 
 export async function invokeCancelRemoteHealthSnapshot(operationId: string): Promise<void> {
   return invokeLogged('cancel_remote_health_snapshot', { operationId });
+}
+
+export function invokeListAgentRuntimeSkills(sessionId: string): Promise<import('@/types/agent-skill').SkillUserList> {
+  return invokeLogged('agent_runtime_list_skills', { input: { sessionId } });
+}
+
+/** Abort cancels only this query; native work remains bounded if the renderer disappears. */
+export async function invokeListAgentFileReferences(sessionId: string, query: string, signal: AbortSignal): Promise<import('@/types/agent-file-reference').FileReferenceList> {
+  if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+  const requestId = crypto.randomUUID();
+  const cancel = (): void => { void invokeLogged('agent_runtime_cancel_file_references', { input: { sessionId, requestId } }).catch(() => undefined); };
+  signal.addEventListener('abort', cancel, { once: true });
+  try {
+    const result = await invokeLogged<import('@/types/agent-file-reference').FileReferenceList>('agent_runtime_list_file_references', { input: { sessionId, requestId, query } });
+    if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+    return result;
+  } finally { signal.removeEventListener('abort', cancel); }
 }

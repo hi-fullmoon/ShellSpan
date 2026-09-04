@@ -3,6 +3,14 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 import { Label } from "@/components/ui/label"
 
+function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
+  return <fieldset data-slot="field-set" className={cn("flex min-w-0 flex-col gap-3", className)} {...props} />
+}
+
+function FieldLegend({ className, ...props }: React.ComponentProps<"legend">) {
+  return <legend data-slot="field-legend" className={cn("mb-2 text-sm font-medium", className)} {...props} />
+}
+
 function FieldGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -63,4 +71,4 @@ function FieldError({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-export { Field, FieldDescription, FieldError, FieldGroup, FieldLabel }
+export { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldSet, FieldLegend }

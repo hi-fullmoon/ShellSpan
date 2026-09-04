@@ -96,7 +96,9 @@ pub(crate) fn provider_model_context_window(provider: &AiProviderConfig) -> u64 
     {
         return explicit.clamp(MIN_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS);
     }
-    super::provider::context_window(provider)
+    super::images::vision_route(provider)
+        .map(|route| route.context_window)
+        .unwrap_or_else(|_| super::provider::context_window(provider))
 }
 
 fn context_window_hint(value: &str) -> Option<u64> {
@@ -132,10 +134,26 @@ pub(crate) fn measure_model_messages(messages: &[ModelMessage]) -> (u64, u64) {
 }
 
 fn model_message_tokens(message: &ModelMessage) -> u64 {
+    let image_reserve = match message {
+        // Conservative admission reserve, never provider-reported usage. The exact route
+        // contract has the same reserve; geometry and encoded-byte limits are separate.
+        ModelMessage::UserImages { images, .. } => {
+            images.len() as u64
+                * super::images::VISION
+                    .routes
+                    .iter()
+                    .map(|r| r.reserved_tokens_per_image)
+                    .max()
+                    .unwrap_or(16384)
+        }
+        _ => 0,
+    };
     // Four bytes per token is deliberately conservative for mixed prose,
     // paths, JSON arguments and tool output. The per-message framing reserve
     // covers provider role/name/call identifiers that are not literal text.
-    estimate_tokens(model_message_bytes(message)).saturating_add(8)
+    estimate_tokens(model_message_bytes(message))
+        .saturating_add(8)
+        .saturating_add(image_reserve)
 }
 
 fn estimate_tokens(bytes: u64) -> u64 {

@@ -80,6 +80,32 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiWorkspaceRoot Phase 3 skeleton', () => {
+  it('keeps the stage6a question actionable outside collapsed process and preserves ordinary draft', async () => {
+    const base = agentView();
+    const pendingQuestion: NonNullable<AiSessionView['pendingQuestion']> = {
+      identity: { sessionId: 'session-fixture', turnId: 'turn-01', stepId: 'step-01', requestId: 'request-01', callId: 'q', questionRequestId: 'workspace-question' },
+      questions: [{ id: 'text', question: 'What next?', multi_select: false }],
+      answers: [], status: 'pending', firstSeq: 1, lastSeq: 1, timestamp: '2026-09-04T00:00:00Z',
+    };
+    const onAnswerQuestion = vi.fn(async () => undefined);
+    const onSubmit = vi.fn();
+    const props = { scope: 'workbench' as const, canStartAgent: true, defaultDraft: 'ordinary unsent draft', onAnswerQuestion, onSubmit };
+    const view = { ...base, pendingQuestion, status: 'waiting' as const };
+    const { container, rerender } = render(<AiWorkspaceRoot {...props} view={view} />);
+    expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute('aria-expanded', 'false');
+    const panel = container.querySelector('[data-slot="ai-question-panel"]')!;
+    expect(panel.closest('[data-ai-node-kind="turnProcess"]')).toBeNull();
+    expect(container.querySelectorAll('[data-message-scroller-viewport]')).toHaveLength(1);
+    expect(screen.getByTestId('ai-workspace-composer')).toHaveValue('ordinary unsent draft');
+    expect(screen.getByTestId('ai-workspace-composer')).toBeDisabled();
+    fireEvent.change(within(panel as HTMLElement).getByRole('textbox'), { target: { value: 'Continue' } });
+    await userEvent.click(screen.getByRole('button', { name: 'Submit answers' }));
+    expect(onAnswerQuestion).toHaveBeenCalledOnce();
+    expect(onSubmit).not.toHaveBeenCalled();
+    rerender(<AiWorkspaceRoot {...props} view={{ ...base, pendingQuestion: null }} />);
+    expect(screen.getByTestId('ai-workspace-composer')).toHaveValue('ordinary unsent draft');
+    expect(screen.getByTestId('ai-workspace-composer')).not.toBeDisabled();
+  });
   it.each([320, 400, 560, 720])(
     'keeps the complete single-column workspace structure at %d px',
     (width) => {

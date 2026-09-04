@@ -1,3 +1,6 @@
+import { skillContexts } from './skill-projection';
+import { projectQuestions } from './question-projection';
+import { questionKey } from '@/types/agent-question';
 import {
   agentEventTimestamp,
   validateCommittedAgentEventWindow,
@@ -506,6 +509,7 @@ export function projectAgentChatNodes(
             messageId: message.messageId,
             ...(message.clientSubmissionId ? { clientSubmissionId: message.clientSubmissionId } : {}),
             content: message.content,
+            images: message.images,
             delivery: 'committed',
           });
         }
@@ -553,6 +557,17 @@ export function projectAgentChatNodes(
         }
         break;
       }
+      case 'skill/catalog_published':
+      case 'skill/catalog_observed':
+      case 'skill/step_prepared': {
+        for (const context of skillContexts(event)) putProcessChild(eventTurnId(event), {
+          kind: 'contextInjection', key: context.id, sourceKind: 'agent', sessionId: event.sessionId,
+          turnId: eventTurnId(event), stepId: eventStepId(event), firstSeq: event.seq, lastSeq: event.seq,
+          timestamp: agentEventTimestamp(event.timeUnixMs), messageId: context.id, content: context.content, provenance: context.source,
+          ...(context.loaded ? { loadedSkill: context.loaded } : {}),
+        });
+        break;
+      }
       case 'user/message': {
         const message = event.data.message;
         if (message.source.kind === 'user') {
@@ -570,6 +585,7 @@ export function projectAgentChatNodes(
             messageId: message.messageId,
             ...(message.clientSubmissionId ? { clientSubmissionId: message.clientSubmissionId } : {}),
             content: message.content,
+            images: message.images,
             delivery: 'committed',
           });
         } else {
@@ -843,6 +859,13 @@ export function projectAgentChatNodes(
         }));
         break;
       case 'tool/result': {
+        for (const context of skillContexts(event)) putProcessChild(eventTurnId(event), {
+          kind: 'contextInjection', key: context.id, sourceKind: 'agent', sessionId: event.sessionId,
+          turnId: eventTurnId(event), stepId: eventStepId(event), firstSeq: event.seq, lastSeq: event.seq,
+          timestamp: agentEventTimestamp(event.timeUnixMs), messageId: context.id, content: context.content, provenance: context.source,
+          ...(context.loaded ? { loadedSkill: context.loaded } : {}),
+        });
+
         if (!tools.has(event.data.callId)) {
           const node: AiToolNode = {
             kind: 'tool',
@@ -1090,5 +1113,16 @@ export function projectAgentChatNodes(
     }
   }
 
+  const questionNodes = projectQuestions(events).map((question): import('./conversation-node').AiQuestionNode => ({
+    kind: 'question', key: `question:${questionKey(question.identity)}`, sourceKind: 'agent',
+    sessionId: question.identity.sessionId, turnId: question.identity.turnId, stepId: question.identity.stepId,
+    firstSeq: question.firstSeq, lastSeq: question.lastSeq, timestamp: question.timestamp, question,
+  }));
+  for (const question of questionNodes) {
+    const followingAnswer = nodes.findIndex((node) => node.turnId === question.turnId
+      && (node.kind === 'assistantMessage' || node.kind === 'turnTail') && node.firstSeq > question.firstSeq);
+    const afterTurn = nodes.reduce((end, node, index) => node.turnId === question.turnId ? index + 1 : end, 0);
+    nodes.splice(followingAnswer >= 0 ? followingAnswer : afterTurn || nodes.length, 0, question);
+  }
   return nodes;
 }

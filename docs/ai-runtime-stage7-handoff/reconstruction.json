@@ -1,0 +1,29 @@
+{
+  "inventorySha256": "6ff5550ef3ae9577f2123d78a943dd600860715156cf9313255db1b8a0c285b9",
+  "reconstructions": [
+    {
+      "base": "31ce4343b9a834503c43db1b04b81fe0128e4ea0",
+      "patch": "stage7-tracked.patch",
+      "status": "PASS",
+      "verifiedCumulativeFiles": 176,
+      "copiedUntrackedProducts": 78,
+      "historicalMetadata": 14,
+      "userPatchSeparate": "PASS"
+    },
+    {
+      "base": "4f353d9bbfa2c6ccfe75a1023f4df46ab4fb8412",
+      "patch": "cumulative-tracked.patch",
+      "status": "PASS",
+      "verifiedCumulativeFiles": 176,
+      "copiedUntrackedProducts": 78,
+      "historicalMetadata": 14,
+      "userPatchSeparate": "PASS"
+    }
+  ],
+  "source6dReadOnly": "PASS",
+  "harnessReadOnlyStatus": "clean",
+  "rawIndexUnchanged": true,
+  "userFileUnchanged": true,
+  "stagedChanges": [],
+  "temporaryReconstruction": "/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/shellspan-stage7-reconstruct-mfkcXq"
+}

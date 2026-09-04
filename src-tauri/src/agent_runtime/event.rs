@@ -112,6 +112,8 @@ impl AgentMessageSource {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentInboxMessage {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) images: Vec<super::images::ImageRef>,
     pub(crate) message_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) client_submission_id: Option<String>,
@@ -566,6 +568,26 @@ pub(crate) enum AgentSessionEventPayload {
         previous_revision: u64,
         client_operation_id: String,
     },
+    #[serde(rename = "step/input_claim")]
+    StepInputClaim {
+        start_turn: bool,
+        turn_messages: Vec<AgentInboxMessage>,
+        step_messages: Vec<AgentInboxMessage>,
+    },
+    #[serde(rename = "file_reference/scope_bound")]
+    FileReferenceScopeBound { scope: super::skills::SkillScope },
+    #[serde(rename = "skill/catalog_observed")]
+    SkillCatalogObserved {
+        observation: super::skills::SkillObservation,
+    },
+    #[serde(rename = "skill/catalog_published")]
+    SkillCatalogPublished {
+        catalog: super::skills::SkillCatalogPublication,
+    },
+    #[serde(rename = "skill/step_prepared")]
+    SkillStepPrepared {
+        prepared: super::skills::SkillStepPrepared,
+    },
     #[serde(rename = "turn/start")]
     TurnStart,
     #[serde(rename = "turn/end")]
@@ -681,6 +703,21 @@ pub(crate) enum AgentSessionEventPayload {
     },
     #[serde(rename = "tool/call")]
     ToolCall { call: RecordedToolCall },
+    #[serde(rename = "question/requested")]
+    QuestionRequested {
+        identity: super::user_questions::QuestionIdentity,
+        arguments: super::user_questions::QuestionArguments,
+        provider: super::AgentSubagentModel,
+    },
+    #[serde(rename = "question/answered")]
+    QuestionAnswered {
+        submission: super::user_questions::AnswerQuestionInput,
+        fingerprint: String,
+    },
+    #[serde(rename = "question/cancelled")]
+    QuestionCancelled {
+        identity: super::user_questions::QuestionIdentity,
+    },
     #[serde(rename = "tool/approval")]
     ToolApproval {
         request_id: String,

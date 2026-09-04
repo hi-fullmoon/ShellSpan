@@ -13,6 +13,8 @@ pub(crate) enum AgentRecoveryCheckpointKind {
     Idle,
     OpenModelRequest,
     WaitingApproval,
+    WaitingQuestion,
+    QuestionContinuation,
     AuthorizedBeforeExecute,
     ExecutionInFlight,
     ToolResultCommitted,
@@ -230,6 +232,76 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
         );
     }
     let mut ordered_tools = tools.iter().collect::<Vec<_>>();
+    let question = super::user_questions::records(events)
+        .into_iter()
+        .rev()
+        .find(|q| {
+            turn_id.as_deref() == Some(&q.identity.turn_id)
+                && events
+                    .iter()
+                    .rev()
+                    .find(|e| matches!(e.payload, AgentSessionEventPayload::StepStart))
+                    .and_then(|e| e.step_id.as_deref())
+                    == Some(&q.identity.step_id)
+        });
+    // A question never erases a later native dispatch or authorization boundary.
+    let native_unresolved = tools
+        .values()
+        .any(|t| !t.has_result && (t.dispatched.is_some() || t.approval.is_some()));
+    if !native_unresolved && super::user_questions::question_queue(events).is_some() {
+        if let Some(recovery) = task_recovery.as_ref().filter(|r| {
+            matches!(
+                r.status,
+                AgentRecoveryStatus::Required | AgentRecoveryStatus::Reconciling
+            )
+        }) {
+            return make(
+                AgentRecoveryCheckpointKind::OpenModelRequest,
+                recovery.status,
+                recovery
+                    .summary
+                    .as_deref()
+                    .unwrap_or("Question queue requires reconciliation."),
+                open_request,
+                None,
+                None,
+                None,
+            );
+        }
+    }
+    if let Some(question) = question.filter(|_| !native_unresolved) {
+        let pending = question.answer.is_none() && !question.cancelled;
+        return make(
+            if pending {
+                AgentRecoveryCheckpointKind::WaitingQuestion
+            } else {
+                AgentRecoveryCheckpointKind::QuestionContinuation
+            },
+            AgentRecoveryStatus::Available,
+            if pending {
+                "Waiting for a durable user answer; no approval timeout applies."
+            } else {
+                "Continue the original tool queue from its committed question answer."
+            },
+            Some(question.identity.request_id),
+            Some(question.identity.call_id),
+            None,
+            None,
+        );
+    }
+    if let Some((_, _, request)) =
+        super::user_questions::question_queue(events).filter(|_| !native_unresolved)
+    {
+        return make(
+            AgentRecoveryCheckpointKind::QuestionContinuation,
+            AgentRecoveryStatus::Available,
+            "Resume the committed assistant question queue without repeating completed tools.",
+            Some(request),
+            None,
+            None,
+            None,
+        );
+    }
     // A later completed sibling must never hide an earlier unresolved dispatch.
     ordered_tools.sort_by_key(|(_, boundary)| {
         (

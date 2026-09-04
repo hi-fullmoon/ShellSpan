@@ -952,7 +952,7 @@ fn validate_frozen_cwd(
     }
 }
 
-pub(super) fn connection_for_remote_target(
+pub(crate) fn connection_for_remote_target(
     target: &AgentToolTargetNative,
     database: &Database,
     credentials: &CredentialManager,

@@ -1,4 +1,8 @@
 import { AgentSessionCommittedClient, type AgentSessionStreamState } from '@/lib/agent-session-client';
+import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeListAgentFileReferences } from '@/lib/tauri';
+import { projectQuestions } from './question-projection';
+import { invokeSubmitAgentImages } from '@/lib/tauri';
+import { requireVision } from '@/lib/vision-contract';
 import {
   invokeAgentRuntimeFollowup,
   invokeAgentRuntimeSteer,
@@ -76,8 +80,12 @@ interface AgentCommittedClientLike {
 }
 
 export interface AgentSessionAdapterDependencies {
+  readonly submitImages?: typeof invokeSubmitAgentImages;
+  readonly listFileReferences?: typeof invokeListAgentFileReferences;
+  readonly listSkills?: typeof invokeListAgentRuntimeSkills;
   readonly createSession: typeof invokeCreateAgentRuntimeSession;
   readonly start: typeof invokeStartAgentRuntime;
+  readonly answerQuestion: typeof invokeAnswerAgentRuntimeQuestion;
   readonly followup: typeof invokeAgentRuntimeFollowup;
   readonly steer: typeof invokeAgentRuntimeSteer;
   readonly stop: typeof invokeCancelAgentRuntime;
@@ -92,8 +100,12 @@ export interface AgentSessionAdapterDependencies {
 }
 
 const defaultDependencies: AgentSessionAdapterDependencies = {
+  submitImages: invokeSubmitAgentImages,
+  listSkills: invokeListAgentRuntimeSkills,
+  listFileReferences: invokeListAgentFileReferences,
   createSession: invokeCreateAgentRuntimeSession,
   start: invokeStartAgentRuntime,
+  answerQuestion: invokeAnswerAgentRuntimeQuestion,
   followup: invokeAgentRuntimeFollowup,
   steer: invokeAgentRuntimeSteer,
   stop: invokeCancelAgentRuntime,
@@ -238,12 +250,15 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
     activityNodes: activity.nodes,
     inbox: projectAgentInbox(events),
     pendingApproval: pendingApproval(nodes),
+    pendingQuestion: projectQuestions(events).find((q) => q.status === 'pending') ?? null,
     status: activity.status,
     error: terminalError(nodes),
     throughSeq: state.lastCommittedSeq ?? null,
     revision: state.lastCommittedSeq === undefined ? state.snapshot.eventCount : state.lastCommittedSeq + 1,
     committedOperationIds: events.flatMap((event) => {
       switch (event.type) {
+        case 'question/answered':
+          return [event.data.submission.clientOperationId];
         case 'agent/inbox/item_updated':
         case 'agent/inbox/item_removed':
         case 'agent/inbox/reordered':
@@ -392,6 +407,20 @@ export function createAgentSessionAdapter(
       ));
       return { sessions, nextCursor: page.nextCursor };
     },
+    async answerQuestion(input): Promise<void> {
+      await dependencies.answerQuestion(input);
+      // IPC success alone is not the UI acknowledgement: a lost live event must
+      // be repaired before the form discards its retryable draft.
+      const entry = ensureEntry(input.identity.sessionId);
+      const view = agentSessionView(await entry.client.reconnect());
+      entry.view = view;
+      for (const listener of entry.listeners) listener(view);
+      if (!view.committedOperationIds?.includes(input.clientOperationId)) {
+        throw new Error('Committed question answer is not visible yet');
+      }
+    },
+    listFileReferences: (sessionId, query, signal) => (dependencies.listFileReferences ?? invokeListAgentFileReferences)(sessionId, query, signal),
+    listSkills: (sessionId) => (dependencies.listSkills ?? invokeListAgentRuntimeSkills)(sessionId),
     create: createSession,
     open: openEntry,
     subscribe(sessionId: string, listener: AiSessionListener): () => void {
@@ -417,15 +446,22 @@ export function createAgentSessionAdapter(
       sessionId: string | null,
       input: AiSubmitInput<'agent'>,
     ): Promise<AiSubmitReceipt> {
-      const content = input.content.trim();
-      if (!content) throw new Error('Agent submission content is empty');
+      const content = input.content;
+      const hasImages = Boolean(input.images?.length);
+      if (!content.trim() && !hasImages) throw new Error('Agent submission content is empty');
+      if (hasImages) requireVision(input.provider);
       let resolvedSessionId = sessionId;
       if (resolvedSessionId === null) {
         if (!input.create) throw new Error('Agent submission requires create input for a new session');
         resolvedSessionId = (await createSession(input.create)).summary.id;
       }
-      await openEntry(resolvedSessionId);
-      if (input.mode === 'start') {
+      const view = await openEntry(resolvedSessionId);
+      // An idle restored Session needs an owning runtime before its next input. start is idempotent.
+      // A text follow-up still sends retained image bytes. Reattach after process restart
+      // and apply the same vision preflight before accepting more Inbox content.
+      const retainedImages = view.snapshot.value.surface.messages.some(m => m.role === 'userImages');
+      if (retainedImages) requireVision(input.provider);
+      if (input.mode === 'start' || view.status === 'idle' || hasImages || retainedImages) {
         await dependencies.start({ sessionId: resolvedSessionId, provider: input.provider });
       }
       const message = {
@@ -434,7 +470,18 @@ export function createAgentSessionAdapter(
         clientSubmissionId: input.clientOperationId,
         content,
       };
-      if (input.mode === 'nextStep') await dependencies.steer(message);
+      if (hasImages) {
+        if (!dependencies.submitImages) throw new Error('Image transport is unavailable');
+        await dependencies.submitImages({ sessionId: resolvedSessionId, clientOperationId: input.clientOperationId,
+          content, images: input.images!, lane: input.mode === 'nextStep' ? 'nextStep' : 'nextTurn' });
+        // Backfill lost events before the durable draft can be acknowledged and removed.
+        const state = await ensureEntry(resolvedSessionId).client.reconnect();
+        if (!state.events.some(e => e.type === 'agent/inbox/spliced' && e.data.operation === 'enqueued'
+          && e.data.messages.some(m => m.clientSubmissionId === input.clientOperationId))) {
+          throw new Error('Image submission is not confirmed; retry the same draft');
+        }
+      }
+      else if (input.mode === 'nextStep') await dependencies.steer(message);
       else await dependencies.followup(message);
       return {
         sessionId: resolvedSessionId,

@@ -6,7 +6,7 @@ import {
 } from './submission-policy';
 import type { AiSessionError, AiSubmissionMode, AiSubmitReceipt } from './session-adapter';
 
-export type AiComposerPhase = 'idle' | 'running' | 'waitingApproval' | 'submitting' | 'error';
+export type AiComposerPhase = 'idle' | 'running' | 'waitingApproval' | 'waitingQuestion' | 'submitting' | 'error';
 
 export interface AiDetachedSubmission {
   readonly clientOperationId: string;
@@ -38,6 +38,7 @@ export interface AiComposerState {
   readonly preferredBusyMode: AiBusyPreference;
   readonly lastError: AiSessionError | null;
   readonly waitingApproval: boolean;
+  readonly waitingQuestion?: boolean;
 }
 
 export type AiComposerEffect =
@@ -55,6 +56,7 @@ export type AiComposerEvent =
       status: AiSessionStatus;
       terminal: boolean;
       waitingApproval: boolean;
+      waitingQuestion?: boolean;
     }>
   | Readonly<{
       type: 'submit.requested';
@@ -87,7 +89,8 @@ export interface AiComposerTransition {
   readonly effects: readonly AiComposerEffect[];
 }
 
-function runtimePhase(state: Pick<AiComposerState, 'runtimeStatus' | 'waitingApproval'>): AiComposerPhase {
+function runtimePhase(state: Pick<AiComposerState, 'runtimeStatus' | 'waitingApproval' | 'waitingQuestion'>): AiComposerPhase {
+  if (state.waitingQuestion) return 'waitingQuestion';
   if (state.waitingApproval) return 'waitingApproval';
   return state.runtimeStatus === 'running' || state.runtimeStatus === 'waiting' ? 'running' : 'idle';
 }
@@ -188,6 +191,7 @@ export function reduceAiComposer(
         runtimeStatus: event.status,
         terminal: event.terminal,
         waitingApproval: event.waitingApproval,
+        waitingQuestion: event.waitingQuestion ?? false,
         ...(adoptsCreatedSession ? {
           pendingSubmissions: state.pendingSubmissions.map((item) => (
             item.sessionId === null ? { ...item, sessionId: event.sessionId } : item
@@ -219,6 +223,7 @@ export function reduceAiComposer(
         terminal: state.terminal,
         sessionId: state.sessionId,
         waitingApproval: state.waitingApproval,
+        waitingQuestion: state.waitingQuestion,
         hasProvider: event.hasProvider,
         canCreateSession: event.canCreateSession,
         draft: state.draft,
@@ -236,7 +241,7 @@ export function reduceAiComposer(
       const payload: AiDetachedSubmission = {
         clientOperationId: event.clientOperationId,
         sessionId: state.sessionId,
-        content: state.draft.trim(),
+        content: state.draft,
         mode: decision.mode,
         createdAtUnixMs: event.now,
       };
@@ -251,6 +256,7 @@ export function reduceAiComposer(
         terminal: state.terminal,
         sessionId: state.sessionId,
         waitingApproval: state.waitingApproval,
+        waitingQuestion: state.waitingQuestion,
         hasProvider: event.hasProvider,
         canCreateSession: event.canCreateSession,
         draft: failed.content,
@@ -289,6 +295,7 @@ export function reduceAiComposer(
           phase: runtimePhase({
             runtimeStatus: state.runtimeStatus === 'idle' ? 'running' : state.runtimeStatus,
             waitingApproval: state.waitingApproval,
+            waitingQuestion: state.waitingQuestion,
           }),
           runtimeStatus: state.runtimeStatus === 'idle' ? 'running' : state.runtimeStatus,
           sessionId: event.receipt.sessionId,

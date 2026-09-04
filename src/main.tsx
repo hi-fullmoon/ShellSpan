@@ -25,6 +25,26 @@ initGlobalErrorLogging();
 
 async function bootstrap(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
+  if (import.meta.env.DEV && params.has('aiStage6dVisual')) {
+    const { mountFilesPage } = await import('./test/agent-files-page');
+    await mountFilesPage(document.getElementById('root')!);
+    return;
+  }
+  if (import.meta.env.DEV && params.has('aiStage6cVisual')) {
+    const { mountImagesPage } = await import('./test/agent-images-page');
+    await mountImagesPage(document.getElementById('root')!);
+    return;
+  }
+  if (import.meta.env.DEV && params.has('aiStage6aVisual')) {
+    const { mountQuestionPage } = await import('./test/agent-question-page');
+    await mountQuestionPage(document.getElementById('root')!);
+    return;
+  }
+  if (import.meta.env.DEV && params.has('aiStage6bVisual')) {
+    const { mountSkillsPage } = await import('./test/agent-skills-page');
+    await mountSkillsPage(document.getElementById('root')!);
+    return;
+  }
   const phase5Scenario = params.get('aiPhase5Visual');
   if (import.meta.env.DEV && phase5Scenario !== null) {
     const { mountAgentSessionPhase5Page } = await import('./test/agent-session-phase5-page');

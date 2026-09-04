@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { arch, platform } from 'node:os';
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { arch, platform, tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -513,9 +513,19 @@ try {
   await waitForServer(server, output);
   browser = await chromium.launch({ headless: true });
   if (!updateId) await verifyManifest(browser);
+  const mismatches = [];
+  let failureDirectory;
   for (const scene of selectedScenes) {
     const first = await captureScene(browser, scene);
     const second = await captureScene(browser, scene);
+    if (!second.screenshot.equals(first.screenshot) || JSON.stringify(second.semantic) !== JSON.stringify(first.semantic)) {
+      const unstable = await mkdtemp(join(tmpdir(), 'shellspan-phase5-unstable-'));
+      for (const [label, capture] of [['first', first], ['second', second]]) {
+        await writeFile(join(unstable, `${scene.id}-${label}.png`), capture.screenshot);
+        await writeFile(join(unstable, `${scene.id}-${label}.json`), `${JSON.stringify(capture.semantic, null, 2)}\n`);
+      }
+      process.stderr.write(`Unstable capture evidence: ${unstable}\n`);
+    }
     assert.equal(second.screenshot.equals(first.screenshot), true, `${scene.id}: consecutive screenshots differ`);
     assert.deepEqual(second.semantic, first.semantic, `${scene.id}: consecutive semantic snapshots differ`);
     if (updateId) {
@@ -527,9 +537,26 @@ try {
       readFile(join(SCREENSHOTS, `${scene.id}.png`)),
       readFile(join(SEMANTIC, `${scene.id}.json`), 'utf8'),
     ]);
-    assert.equal(first.screenshot.equals(expectedPng), true, `${scene.id}: pixel baseline mismatch`);
-    assert.equal(`${JSON.stringify(first.semantic, null, 2)}\n`, expectedSemantic, `${scene.id}: semantic DOM baseline mismatch`);
+    const actualSemantic = `${JSON.stringify(first.semantic, null, 2)}\n`;
+    const pixelsMatch = first.screenshot.equals(expectedPng);
+    const semanticsMatch = actualSemantic === expectedSemantic;
+    if (!pixelsMatch || !semanticsMatch) {
+      failureDirectory ??= await mkdtemp(join(tmpdir(), 'shellspan-phase5-diff-'));
+      await Promise.all([
+        writeFile(join(failureDirectory, `${scene.id}-before.png`), expectedPng),
+        writeFile(join(failureDirectory, `${scene.id}-after.png`), first.screenshot),
+        writeFile(join(failureDirectory, `${scene.id}-before.json`), expectedSemantic),
+        writeFile(join(failureDirectory, `${scene.id}-after.json`), actualSemantic),
+      ]);
+      mismatches.push({ id: scene.id, pixelsMatch, semanticsMatch });
+      process.stderr.write(`mismatch ${scene.id}; evidence: ${failureDirectory}\n`);
+      continue;
+    }
     process.stdout.write(`verified ${scene.id}\n`);
+  }
+  if (mismatches.length) {
+    await writeFile(join(failureDirectory, 'report.json'), `${JSON.stringify(mismatches, null, 2)}\n`);
+    assert.fail(`${mismatches.length} scene baselines differ; review before/after evidence: ${failureDirectory}`);
   }
 } finally {
   await browser?.close();

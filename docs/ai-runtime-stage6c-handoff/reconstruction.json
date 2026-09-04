@@ -1,0 +1,23 @@
+{
+  "inventorySha256": "2066a1486074e3276ebcf22387ce5f0a6e1267d6261d990ddc0a87deae1ccccf",
+  "directory": "/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/shellspan-6c-reconstruct-RR6len",
+  "results": [
+    {
+      "base": "31ce4343b9a834503c43db1b04b81fe0128e4ea0",
+      "patch": "stage6c-tracked.patch",
+      "verifiedFiles": 143,
+      "copiedUntrackedProducts": 52,
+      "status": "PASS"
+    },
+    {
+      "base": "4f353d9bbfa2c6ccfe75a1023f4df46ab4fb8412",
+      "patch": "cumulative-tracked.patch",
+      "verifiedFiles": 143,
+      "copiedUntrackedProducts": 52,
+      "status": "PASS"
+    }
+  ],
+  "metadataHashes": "PASS",
+  "head": "31ce4343b9a834503c43db1b04b81fe0128e4ea0",
+  "stagedChanges": ""
+}

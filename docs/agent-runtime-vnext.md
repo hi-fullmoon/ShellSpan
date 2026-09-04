@@ -4,13 +4,22 @@
 > loop, compatibility readers, dual-write paths, and lifecycle-as-conversation rendering are not
 > part of the product.
 
-> 2026-09-04 handoff: verified runtime hardening through Stage 5 is integrated into main.
-> Structured questions remain unfinished on `codex/ai-runtime-stage6a-wip`; Skills, images,
-> and file-reference completion are not implemented on main. Development stopped at the user's
-> request. See [handoff and remaining acceptance](ai-runtime-handoff.md); supported source kinds
-> and UI fixtures are not proof that a corresponding runtime producer exists.
+> Current delivery (2026-09-04): Stage 1–6D and final Stage 7 fixes are integrated as
+> uncommitted changes in the main workspace, preserving HEAD `31ce4343` and the user's
+> InputGroup change. Questions, Skills, images and path-only completion are implemented.
+> See [current handoff](ai-runtime-handoff.md) and [cumulative acceptance](ai-runtime-stage7-validation.md).
+> macOS/local HTTP/isolated Linux and configured live results are separate evidence classes.
+> Windows native compilation, junction/reparse races and execution remain NOT RUN;
+> this is not an all-platform or total-goal completion claim. Earlier stage reports are historical.
 
 ## 1. Ownership
+
+Stage 6C adds typed image refs to user input and Model Surface, durable renderer
+drafts, native immutable blobs and verified transient HTTP image blocks. Images
+survive compaction/restart separately from text summaries. See the [implementation](ai-runtime-stage6c.md)
+and [validation](ai-runtime-stage6c-validation.md). Stage 6D adds bounded,
+cancellable path discovery through Runtime/IPC and the existing composer; it
+shares the Skills project scope and does not attach file contents to Model Surface.
 
 Rust owns Agent business state:
 
@@ -60,6 +69,7 @@ Important event families are:
   `assistant/message`, `request/usage`;
 - tools: `tool/call`, `tool/approval`, `tool/execution`, `tool/result`;
 - memory: `context/artifact`, `compaction/*`;
+- input preparation: `step/input_claim`, `skill/*`, `question/*`, `file_reference/scope_bound`;
 - orchestration: `subagent/*`, `task/*`.
 
 The v4 model contract is deliberately structured:
@@ -94,8 +104,11 @@ come from that evidence:
 
 1. The prompt assembler produces one final system prompt and one canonical tool-schema list.
    `driver.rs` uses those values for both the `request/header` event and the provider request.
-2. Runtime context, Agent instructions, skill/plugin context, forms, and session references enter
-   the model surface only through committed `user/message` events with provenance.
+2. Runtime context, Agent instructions, plugin context, and session references enter
+   through committed provenance-bearing messages. Skills use typed catalogue/preparation/result
+   facts; question answers become the original call's durable ToolResult. User images remain
+   typed immutable refs in durable input and are verified into transient wire blocks at dispatch.
+   None of these inputs is reconstructed from UI labels or mutable external files during replay.
 3. Assistant reasoning, text, tool calls, and tool results re-enter later requests from committed
    ordered blocks, not from UI state.
 4. Compaction replaces model history only after its summary is durable.
@@ -174,10 +187,27 @@ and semantic checkpoint details](ai-runtime-stage4.md) and [Stage 3B request rec
 Request retries retain failed attempts as audit facts without replaying their partial output as
 committed assistant/tool content. Provider policy is configurable and restored for child sessions;
 connection, first-byte and idle deadlines do not impose a fixed total lifetime on an active stream.
+Chat `finish_reason` closes a choice, not the transport: separate later usage frames are consumed
+until `[DONE]` or clean EOF. Clean EOF after a finish reason remains valid without usage; usage
+stays unknown. Abnormal EOF and idle timeout fail the uncommitted attempt; cancellation wins.
+No complete tool or answer is committed twice through recovery. This boundary has gated real HTTP
+tests and was verified against MiniMax-M2.7 live, not just single-buffer fixtures.
 The Stage 5 local scheduler uses a bounded rolling pool with ordered commits; a Provider's
 parallel-tool request flag does not authorize local parallel execution. See [scheduler behavior](ai-runtime-stage5.md).
 
 ## 5. Persistence and incompatibility
+
+Questions persist their identity, answer and exact resumed queue; unsent question-form drafts
+are page-lifetime memory. Image drafts use IndexedDB, while normalized immutable PNG blobs live
+in `agent-runtime/images-v1`; no automatic blob GC or full ICC color management is claimed.
+Only Qwen profile / Chat Completions / exact `qwen3-vl-plus` and `qwen3-vl-flash` admit image input.
+128000 tokens is a conservative application context cap, not a universal vendor maximum.
+
+Skills and @file share the explicitly selected, durable local/remote project identity.
+Discovery is shallow and bounded. @file inserts ordinary text, never implicitly reads content
+or grants tool permissions. Native/SSH scopes still authorize later reads. SSH discovery requires
+the fixed Python 3 helper; unavailability never falls back to local files. See the full
+[Skills](ai-runtime-stage6b.md), [images](ai-runtime-stage6c.md), and [path](ai-runtime-stage6d.md) contracts.
 
 Active v4 logs are stored under the application data directory at
 `agent-runtime/sessions-v4/`; archived logs use `agent-runtime/archives-v4/`. Older namespaces are
@@ -203,17 +233,35 @@ pnpm test:ai:phase6
 pnpm test:agent:runtime
 pnpm test:scripts
 pnpm test
+pnpm exec tsc --noEmit
 pnpm build
 pnpm benchmark:ai-panel
+pnpm test:ai:stage3
+pnpm test:ai:stage4
+pnpm test:ai:stage3b
+pnpm test:ai:stage5
+pnpm test:ai:stage6a
+pnpm test:ai:stage6b
+pnpm test:ai:stage6c
+pnpm test:ai:stage6d
+pnpm check:rust:includes
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --all-features --no-fail-fast
 git diff --check
 ```
 
-The AI Panel benchmark projects and revisions 5,000 nodes and exercises repeated streaming
+The AI Panel benchmark retains 5,000 messages (7,500 nodes including Turn process rows),
+computes every node revision, and exercises 20 repeated streaming
 revisions. The Phase 6 fixture test maps every acceptance scenario to direct Event, Conversation,
 Activity, Stats, and visual evidence.
+The existing benchmark checks semantic invariants and reports timing; it has no numeric latency
+failure threshold. Stage 7 did not change its workload or invent a threshold to obtain PASS.
+The entry first runs ordinary workload tests and then rejects missing/non-finite timing or fewer
+than five measured samples. A successful experimental benchmark process alone is not PASS.
+CI runs portable `stage6:frontend`/`stage6:rust` gates, pinned macOS pixel/browser bridges,
+and the Linux-only disposable SSH runners separately. The 6B/6D aggregate commands above need
+Docker's Linux engine. Saved macOS pixels are not Windows pixel evidence.
 
 ### Visual regression
 
@@ -242,8 +290,7 @@ configuration is present. Put local credentials in the gitignored repository-roo
 file; the package script loads that file automatically:
 
 ```bash
-cp .env.example .env.local
-# Edit only .env.local and uncomment the live provider entries you need.
+# Configure this project's .env.local; never overwrite an existing credential file.
 pnpm test:agent:providers:live
 ```
 

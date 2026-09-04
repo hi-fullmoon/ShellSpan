@@ -4,6 +4,7 @@ import { useTerminalStore } from '@/stores/terminalStore';
 import { AgentPermissionSelector } from '../agent-permission-selector';
 import { AiComposerModelSelector } from './ai-composer-model-selector';
 import { AiWorkspaceRoot } from './ai-workspace-root';
+import { AiImageDraftControls } from './ai-image-attachments';
 import {
   useAiSessionController,
   type AiSessionControllerAdapter,
@@ -27,6 +28,16 @@ export function AiWorkspaceController({
   return (
     <AiWorkspaceRoot
       view={controller.view}
+      imageControls={<AiImageDraftControls state={controller.imageDraft} disabled={!controller.canStartAgent || controller.composer.waitingQuestion || controller.composer.waitingApproval} />}
+      hasImages={Boolean(controller.imageDraft.draft?.images.length)}
+      imageBusy={controller.imageDraft.busy}
+      imageLocked={controller.imageDraft.locked}
+      onAnswerQuestion={controller.answerQuestion}
+      onListFileReferences={controller.listFileReferences}
+      onListSkills={controller.listSkills}
+      skillsScopeKey={controller.skillsScopeKey}
+      skillsNeedsRoot={controller.skillsNeedsRoot}
+      projectTargetLabel={controller.projectTargetLabel}
       pendingNodes={controller.pendingNodes}
       scope={scope}
       composerState={controller.composer}

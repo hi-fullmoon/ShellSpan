@@ -65,6 +65,7 @@ export interface AiSessionError {
 }
 
 export interface AiSessionView {
+  readonly pendingQuestion?: import('@/types/agent-question').AgentQuestionView | null;
   readonly summary: AiSessionSummary;
   readonly snapshot: AiSessionSourceSnapshot;
   readonly nodes: readonly AiConversationNode[];
@@ -143,6 +144,7 @@ export type AiCreateSessionInput = Readonly<{
 export type AiSubmissionMode = 'start' | 'nextTurn' | 'nextStep';
 
 export interface AiSubmitInput<Kind extends AiSessionKind = AiSessionKind> {
+  readonly images?: readonly import('@/types/agent-image').AgentImageUpload[];
   readonly content: string;
   readonly mode: AiSubmissionMode;
   readonly clientOperationId: string;
@@ -169,6 +171,9 @@ export type AiSessionListener = (view: AiSessionView) => void;
 
 /** UI-facing operations backed exclusively by the Agent Runtime. */
 export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
+  listFileReferences?(sessionId: string, query: string, signal: AbortSignal): Promise<import('@/types/agent-file-reference').FileReferenceList>;
+  listSkills?(sessionId: string): Promise<import('@/types/agent-skill').SkillUserList>;
+  answerQuestion(input: import('@/types/agent-question').AnswerQuestionInput): Promise<void>;
   readonly kind: Kind;
   list(input: ListSessionsInput): Promise<AiSessionSummaryPage>;
   create(

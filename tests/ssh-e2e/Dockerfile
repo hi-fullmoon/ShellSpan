@@ -1,6 +1,6 @@
 FROM alpine:3.22
 
-RUN apk add --no-cache openssh \
+RUN apk add --no-cache openssh python3 \
     && adduser -D -s /bin/sh shellspan \
     && echo 'shellspan:shellspan-e2e' | chpasswd \
     && mkdir -p /home/shellspan/upload /run/sshd /var/lib/shellspan-m6 \

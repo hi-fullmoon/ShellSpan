@@ -86,6 +86,7 @@ impl AgentRuntimeBuilder {
     pub(crate) fn build(self) -> AgentRuntime {
         let agents = AgentRegistry::default();
         let tool_pipeline = AgentToolPipeline::new(
+            agents.clone(),
             self.sessions.clone(),
             self.hooks.clone(),
             Arc::clone(&self.native_tools),
@@ -108,6 +109,10 @@ impl AgentRuntimeBuilder {
             .install(&orchestration)
             .expect("fresh orchestration slot is available");
         AgentRuntime {
+            file_references: super::file_references::FileReferenceRuntime::new(
+                self.sessions.clone(),
+                self.native_tools.clone(),
+            ),
             sessions: self.sessions,
             agents,
             handles: Arc::new(Mutex::new(HashMap::new())),
@@ -126,6 +131,7 @@ impl AgentRuntimeBuilder {
 
 #[derive(Clone)]
 pub(crate) struct AgentRuntime {
+    pub(crate) file_references: super::file_references::FileReferenceRuntime,
     sessions: AgentSessionStore,
     agents: AgentRegistry,
     handles: Arc<Mutex<HashMap<String, super::AgentHandle>>>,
@@ -173,6 +179,295 @@ impl Default for AgentRuntimeBuilder {
 }
 
 impl AgentRuntime {
+    pub(crate) async fn prepare_images(
+        &self,
+        uploads: Vec<super::images::ImageUpload>,
+    ) -> Result<Vec<super::images::ImageUpload>, String> {
+        let permit = self.models.images.import_permit()?;
+        let store = self.models.images.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let refs = store.import(&uploads, &tokio_util::sync::CancellationToken::new())?;
+            refs.into_iter()
+                .map(|r| {
+                    Ok(super::images::ImageUpload {
+                        data: base64::engine::general_purpose::STANDARD.encode(store.read(&r)?),
+                        name: r.name,
+                        media_type: r.media_type,
+                    })
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+    pub(crate) async fn submit_images(
+        &self,
+        input: super::images::ImageSubmission,
+    ) -> Result<AgentSessionSnapshot, String> {
+        use super::images::{digest, ImageOperation};
+        super::images::validate_upload_envelope(&input.images)?;
+        if input.content.len() > super::MAX_AGENT_MESSAGE_BYTES {
+            return Err("IMAGE_TEXT_LIMIT".into());
+        }
+        let operation = ImageOperation {
+            session_id: input.session_id.clone(),
+            client_operation_id: input.client_operation_id.clone(),
+        };
+        let token = self.models.images.token(&operation)?;
+        // Fingerprint original input, not sanitized text or normalized pixels.
+        let fingerprint = digest(&serde_json::to_vec(&serde_json::json!({"content":input.content, "lane":input.lane, "images":input.images})).map_err(|e| e.to_string())?);
+        for event in self.sessions.all_events(&input.session_id)? {
+            if let super::AgentSessionEventPayload::InboxSpliced {
+                operation: super::AgentInboxOperation::Enqueued,
+                messages,
+                ..
+            } = event.payload
+            {
+                if let Some(message) = messages
+                    .iter()
+                    .find(|m| m.client_submission_id.as_deref() == Some(&input.client_operation_id))
+                {
+                    return if message
+                        .source
+                        .metadata
+                        .get("imageFingerprint")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(&fingerprint)
+                    {
+                        self.sessions.snapshot(&input.session_id)
+                    } else {
+                        Err("IMAGE_SUBMISSION_CONFLICT".into())
+                    };
+                }
+            }
+        }
+        let entry = self
+            .agents
+            .get(&input.session_id)?
+            .ok_or("IMAGE_SESSION_NOT_STARTED")?;
+        if entry.cancellation().is_cancelled() || token.is_cancelled() {
+            return Err("IMAGE_CANCELLED".into());
+        }
+        let route = super::images::vision_route(&entry.provider)?;
+        let store = self.models.images.clone();
+        let uploads = input.images;
+        let import_token = token.clone();
+        let permit = self.models.images.import_permit()?;
+        let images = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            store.import(&uploads, &import_token)
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        self.models.images.boundary("beforeInbox", &token)?;
+        let gate = self
+            .models
+            .images
+            .operations
+            .lock()
+            .map_err(|_| "IMAGE_OPERATION_UNAVAILABLE")?;
+        for event in self.sessions.all_events(&input.session_id)? {
+            if let super::AgentSessionEventPayload::InboxSpliced {
+                operation: super::AgentInboxOperation::Enqueued,
+                messages,
+                ..
+            } = event.payload
+            {
+                if let Some(message) = messages
+                    .iter()
+                    .find(|m| m.client_submission_id.as_deref() == Some(&input.client_operation_id))
+                {
+                    return if message
+                        .source
+                        .metadata
+                        .get("imageFingerprint")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(&fingerprint)
+                    {
+                        self.sessions.snapshot(&input.session_id)
+                    } else {
+                        Err("IMAGE_SUBMISSION_CONFLICT".into())
+                    };
+                }
+            }
+        }
+        let snapshot = self.sessions.snapshot(&input.session_id)?;
+        let mut request = super::ModelRequest::from_surface(
+            "image-admission".into(),
+            &snapshot.surface,
+            String::new(),
+            Vec::new(),
+        );
+        for pending in snapshot
+            .inbox
+            .next_turn
+            .iter()
+            .chain(snapshot.inbox.next_step.iter())
+        {
+            if !pending.images.is_empty() {
+                request.messages.push(super::ModelMessage::UserImages {
+                    content: pending.content.clone(),
+                    images: pending.images.clone(),
+                    data_urls: Vec::new(),
+                });
+            }
+        }
+        request.messages.push(super::ModelMessage::UserImages {
+            content: input.content.clone(),
+            images: images.clone(),
+            data_urls: Vec::new(),
+        });
+        let count: usize = request
+            .messages
+            .iter()
+            .map(|m| match m {
+                super::ModelMessage::UserImages { images, .. } => images.len(),
+                _ => 0,
+            })
+            .sum();
+        if count > route.max_request_images {
+            return Err("IMAGE_REQUEST_BUDGET: start a new session for more images".into());
+        }
+        let budget = super::estimate_model_surface_budget(&entry.provider, &request);
+        if budget.estimated_input_tokens > budget.usable_input_tokens {
+            return Err("IMAGE_TOKEN_BUDGET".into());
+        }
+        if token.is_cancelled() || entry.cancellation().is_cancelled() {
+            return Err("IMAGE_CANCELLED".into());
+        }
+        let mut source = AgentMessageSource::user();
+        source
+            .metadata
+            .insert("imageFingerprint".into(), fingerprint.into());
+        let snapshot = self.sessions.enqueue(
+            &input.session_id,
+            input.lane,
+            AgentInboxMessage {
+                images,
+                message_id: input.client_operation_id.clone(),
+                client_submission_id: Some(input.client_operation_id),
+                content: crate::redaction::redact_sensitive_text(&input.content),
+                source,
+            },
+        )?;
+        drop(gate);
+        let _ = self.models.images.boundary("afterInbox", &token);
+        // Inbox commit is the acknowledgement. A wake failure cannot undo acceptance.
+        let _ = self.wake(&input.session_id);
+        Ok(snapshot)
+    }
+
+    pub(crate) fn cancel_image_submission(
+        &self,
+        input: super::images::ImageOperation,
+    ) -> Result<bool, String> {
+        let token = self.models.images.token(&input)?;
+        let _gate = self
+            .models
+            .images
+            .operations
+            .lock()
+            .map_err(|_| "IMAGE_OPERATION_UNAVAILABLE")?;
+        token.cancel();
+        Ok(self.sessions.all_events(&input.session_id)?.iter().any(|e| matches!(&e.payload,
+            super::AgentSessionEventPayload::InboxSpliced { operation: super::AgentInboxOperation::Enqueued, messages, .. }
+                if messages.iter().any(|m| m.client_submission_id.as_deref() == Some(&input.client_operation_id)))))
+    }
+
+    pub(crate) fn image_preview(
+        &self,
+        input: super::images::ImagePreviewRequest,
+    ) -> Result<String, String> {
+        // The renderer cannot read by a guessed global blob hash. Require a committed input
+        // in the addressed Session, never an arbitrary path or renderer-provided reference.
+        let reference = self
+            .sessions
+            .all_events(&input.session_id)?
+            .into_iter()
+            .find_map(|e| {
+                if let super::AgentSessionEventPayload::InboxSpliced {
+                    operation: super::AgentInboxOperation::Enqueued,
+                    messages,
+                    ..
+                } = e.payload
+                {
+                    messages
+                        .into_iter()
+                        .flat_map(|m| m.images)
+                        .find(|r| r.sha256 == input.sha256)
+                } else {
+                    None
+                }
+            })
+            .ok_or("IMAGE_REFERENCE_NOT_IN_SESSION")?;
+        Ok(format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(self.models.images.read(&reference)?)
+        ))
+    }
+
+    pub(crate) async fn list_skills(
+        &self,
+        session_id: &str,
+    ) -> Result<super::skill_runtime::SkillUserList, String> {
+        self.tools
+            .skills
+            .list(session_id, tokio_util::sync::CancellationToken::new())
+            .await
+    }
+
+    pub(crate) fn answer_question(
+        &self,
+        input: super::user_questions::AnswerQuestionInput,
+        credentials: Option<&crate::keychain::CredentialManager>,
+    ) -> Result<AgentSessionSnapshot, String> {
+        input.validate()?;
+        let session_id = input.identity.session_id.clone();
+        let records = super::user_questions::records(&self.sessions.all_events(&session_id)?);
+        let question = records
+            .iter()
+            .find(|r| r.identity == input.identity)
+            .ok_or("unknown or stale question identity")?;
+        question.arguments.normalize_answers(&input.answers)?;
+        if question.cancelled
+            || self.sessions.snapshot(&session_id)?.status == super::AgentSessionStatus::Cancelled
+        {
+            return Err("question was cancelled".into());
+        }
+        if question.answer.is_some()
+            && !super::user_questions::is_same_submission(question, &input)?
+        {
+            return Err("question answer conflicts with its committed answer".into());
+        }
+        if self.sessions.snapshot(&session_id)?.ended {
+            return if super::user_questions::is_same_submission(question, &input)? {
+                self.sessions.snapshot(&session_id)
+            } else {
+                Err("question Session has ended".into())
+            };
+        }
+        if self.agents.get(&session_id)?.is_none() {
+            let provider = super::subagent::provider_config(&question.provider)?;
+            crate::ai::validate_provider_config(&provider, true)?;
+            let api_key = match credentials {
+                Some(credentials) => crate::ai::api_key_for_provider(credentials, &provider)?,
+                None if provider.requires_api_key => {
+                    return Err("question continuation requires provider credentials".into())
+                }
+                None => None,
+            };
+            self.start(&session_id, provider, api_key)?;
+        }
+        let entry = self
+            .agents
+            .get(&session_id)?
+            .ok_or("question Agent is not live")?;
+        self.tools.submit_question_answer(&entry, input)?;
+        self.wake(&session_id)?;
+        self.sessions.snapshot(&session_id)
+    }
+
     pub(crate) fn configure_credentials(
         &self,
         credentials: crate::keychain::CredentialManager,
@@ -210,6 +505,7 @@ impl AgentRuntime {
             })?;
         self.tools.configure_parallelism(parallelism.as_deref())?;
         self.sessions.configure(app_data_root.clone())?;
+        self.models.images.configure(&app_data_root)?;
         self.artifacts.configure(&app_data_root)?;
         self.reconcile_artifacts()
     }
@@ -241,6 +537,7 @@ impl AgentRuntime {
         if let Some(policy) = provider.retry_policy {
             policy.validate()?;
         }
+        self.sessions.repair_step_claims(session_id)?;
         let adapter = self.models.resolve(provider.clone(), api_key)?;
         let handle = self.agents.attach(
             self.sessions.clone(),
@@ -253,17 +550,20 @@ impl AgentRuntime {
         if matches!(
             recovery.status,
             super::AgentRecoveryStatus::Available | super::AgentRecoveryStatus::Required
-        ) {
+        ) || recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval
+        {
             entry.set_phase(AgentLifecyclePhase::Waiting)?;
         }
         if let Err(error) = recover_open_scope(&self.sessions, &entry) {
             self.agents.detach(session_id)?;
             return Err(error);
         }
+        self.tools.restore_question_phase(&entry)?;
         if let Err(error) = self.tools.recover_waiting(&entry) {
             self.agents.detach(session_id)?;
             return Err(error);
         }
+        self.tools.restore_skill_phase(&entry)?;
         let mut handles = match self.handles.lock() {
             Ok(handles) => handles,
             Err(_) => {
@@ -292,6 +592,7 @@ impl AgentRuntime {
             session_id,
             AgentInboxLane::NextTurn,
             AgentInboxMessage {
+                images: Vec::new(),
                 message_id,
                 client_submission_id: Some(client_submission_id),
                 content,
@@ -324,6 +625,7 @@ impl AgentRuntime {
             session_id,
             AgentInboxLane::NextStep,
             AgentInboxMessage {
+                images: Vec::new(),
                 message_id,
                 client_submission_id: Some(client_submission_id),
                 content,
@@ -356,6 +658,7 @@ impl AgentRuntime {
             session_id,
             AgentInboxLane::NextStep,
             AgentInboxMessage {
+                images: Vec::new(),
                 message_id,
                 client_submission_id: None,
                 content,
@@ -379,6 +682,7 @@ impl AgentRuntime {
     }
 
     pub(crate) async fn cancel(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
+        self.models.images.cancel_session(session_id)?;
         self.subagents.cancel_descendants(session_id).await?;
         let handle = self
             .handles
@@ -404,6 +708,12 @@ impl AgentRuntime {
         if self.agents.get(session_id)?.is_some() {
             return Err("Agent Session is already stopping".into());
         }
+        let _gate = self
+            .tools
+            .question_gate
+            .lock()
+            .map_err(|_| "question gate unavailable")?;
+        self.tools.cancel_questions(session_id)?;
         self.sessions.cancel(session_id)
     }
 
@@ -959,8 +1269,8 @@ impl AgentRuntime {
         let compactions = self.compactions.clone();
         let config = self.driver_config;
         tauri::async_runtime::spawn(async move {
+            let mut lease = Some(ActiveDriverLease(Arc::clone(&entry)));
             loop {
-                let lease = ActiveDriverLease(Arc::clone(&entry));
                 let settlement = drive_agent(
                     sessions.clone(),
                     Arc::clone(&entry),
@@ -970,11 +1280,38 @@ impl AgentRuntime {
                     config,
                 )
                 .await;
-                drop(lease);
+                #[cfg(test)]
                 if settlement == AgentDriverSettlement::Waiting {
+                    let pause = tools.question_lease_pause.lock().unwrap().take();
+                    if let Some((entered, release)) = pause {
+                        entered.notify_one();
+                        release.notified().await;
+                    }
+                }
+                if settlement == AgentDriverSettlement::Waiting {
+                    // Keep the current lease if an answer already committed. Otherwise
+                    // publish idle while holding the same gate used by answer/cancel,
+                    // so no accepted answer can fall into a release/reacquire gap.
+                    let resume = {
+                        let Ok(_gate) = tools.question_gate.lock() else {
+                            break;
+                        };
+                        if entry.phase().ok() == Some(super::AgentLifecyclePhase::Running)
+                            && !entry.cancellation().is_cancelled()
+                        {
+                            true
+                        } else {
+                            drop(lease.take());
+                            false
+                        }
+                    };
+                    if resume {
+                        continue;
+                    }
                     match tools.wait_for_expiry(&entry).await {
                         Ok(true) if !entry.cancellation().is_cancelled() => {
                             if entry.try_acquire_driver().unwrap_or(false) {
+                                lease = Some(ActiveDriverLease(Arc::clone(&entry)));
                                 continue;
                             }
                         }
@@ -989,6 +1326,7 @@ impl AgentRuntime {
                     }
                     break;
                 }
+                drop(lease.take());
                 if settlement != AgentDriverSettlement::Idle || entry.cancellation().is_cancelled()
                 {
                     break;
@@ -1002,6 +1340,7 @@ impl AgentRuntime {
                 if !has_work || !entry.try_acquire_driver().unwrap_or(false) {
                     break;
                 }
+                lease = Some(ActiveDriverLease(Arc::clone(&entry)));
             }
         });
         Ok(())
@@ -1021,6 +1360,24 @@ impl AgentRuntime {
 
 #[cfg(test)]
 mod tests {
+    mod image_tests {
+        include!("image_tests.rs");
+    }
+    mod image_bridge_tests {
+        include!("image_bridge_tests.rs");
+    }
+    mod file_reference_tests {
+        include!("file_reference_tests.rs");
+    }
+    mod skill_tests {
+        include!("skill_tests.rs");
+    }
+    mod skill_bridge_tests {
+        include!("skill_bridge_tests.rs");
+    }
+    mod question_tests {
+        include!("question_tests.rs");
+    }
     include!("scheduler_tests.rs");
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -2243,10 +2600,26 @@ mod tests {
 
         let events = all_events(&runtime, "session-plan");
         assert_eq!(adapter.request_count(), 2);
-        assert_eq!(events.iter().filter(|event| matches!(event.payload,
-            AgentSessionEventPayload::RequestHeader { .. })).count(), 1);
-        assert_eq!(events.iter().filter(|event| matches!(event.payload,
-            AgentSessionEventPayload::RequestStart { .. })).count(), 2);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event.payload,
+                    AgentSessionEventPayload::RequestHeader { .. }
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event.payload,
+                    AgentSessionEventPayload::RequestStart { .. }
+                ))
+                .count(),
+            2
+        );
         assert!(events.iter().any(|event| matches!(
             &event.payload,
             AgentSessionEventPayload::TaskPlan { version: 1, steps }
@@ -2654,7 +3027,9 @@ mod tests {
         runtime.start("session-parallel", provider(), None).unwrap();
         runtime.await_idle("session-parallel").await.unwrap();
 
-        assert_eq!(native.max_active.load(Ordering::Acquire), 2);
+        // Exact overlap is proved by verify_write_barrier's controlled gates.
+        // This short, ungated execution only promises the upper bound.
+        assert!(native.max_active.load(Ordering::Acquire) <= 2);
         let trace = native.trace.lock().unwrap().clone();
         let position = |needle: &str| trace.iter().position(|entry| entry == needle).unwrap();
         assert!(position("end:read-1") < position("start:write-1"));
@@ -3525,10 +3900,27 @@ mod tests {
     #[tokio::test]
     async fn real_http_partial_sse_then_503_then_success_retains_audit_and_clean_history() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        for delta in [
-            json!({"content":"failed wire text"}),
-            json!({"reasoning_content":"failed wire reasoning"}),
-            json!({"tool_calls":[{"index":0,"id":"incomplete","function":{"name":"apply_patch","arguments":"{\"patch\":"}}]}),
+        for (delta, finish_reason) in [
+            (
+                json!({"content":"failed wire text"}),
+                serde_json::Value::Null,
+            ),
+            (
+                json!({"reasoning_content":"failed wire reasoning"}),
+                serde_json::Value::Null,
+            ),
+            (
+                json!({"tool_calls":[{"index":0,"id":"incomplete","function":{"name":"apply_patch","arguments":"{\"patch\":"}}]}),
+                serde_json::Value::Null,
+            ),
+            (
+                json!({"content":"choice finished before broken transport"}),
+                json!("stop"),
+            ),
+            (
+                json!({"tool_calls":[{"index":0,"id":"uncommitted-complete-call","function":{"name":"apply_patch","arguments":"{\"patch\":\"*** Begin Patch\\n*** End Patch\"}"}}]}),
+                json!("tool_calls"),
+            ),
         ] {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let url = format!("http://{}", listener.local_addr().unwrap());
@@ -3569,7 +3961,7 @@ mod tests {
                         .unwrap()
                         .push(serde_json::from_slice(&bytes[end..end + length]).unwrap());
                     let (status, body, truncated) = match attempt {
-                        1 => ("200 OK", format!("data: {}\n\n", json!({"choices":[{"delta":delta}]})), true),
+                        1 => ("200 OK", format!("data: {}\n\n", json!({"choices":[{"delta":delta,"finish_reason":finish_reason}]})), true),
                         2 => ("503 Service Unavailable", "{\"error\":{\"message\":\"temporary\"}}".into(), false),
                         _ => ("200 OK", "data: {\"choices\":[{\"delta\":{\"content\":\"wire recovered\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".into(), false),
                     };

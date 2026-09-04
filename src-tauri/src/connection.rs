@@ -355,7 +355,20 @@ pub(crate) fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, Str
     // on the first one.
     let mut last_error = None;
     for socket_addr in socket_addrs {
-        match TcpStream::connect_timeout(&socket_addr, Duration::from_secs(12)) {
+        let timeout = SCOPED_CONNECTION_IO.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .map_or(Duration::from_secs(12), |context| {
+                    context
+                        .deadline
+                        .saturating_duration_since(std::time::Instant::now())
+                        .min(Duration::from_millis(500))
+                })
+        });
+        if timeout.is_zero() {
+            return Err("scoped connection deadline exceeded".into());
+        }
+        match TcpStream::connect_timeout(&socket_addr, timeout) {
             Ok(tcp) => {
                 configure_tcp_stream(&tcp).map_err(|error| {
                     format!("failed to configure TCP socket for {address}: {error}")
@@ -378,11 +391,22 @@ pub(crate) fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, Str
 pub(crate) fn resolve_socket_addresses(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
     validate_host(host)?;
     let address = format!("{}:{port}", format_host_for_socket_address(host));
-    let socket_addrs: Vec<_> = address
-        .as_str()
-        .to_socket_addrs()
-        .map_err(|error| format!("failed to resolve {address}: {error}"))?
-        .collect();
+    let scoped = SCOPED_CONNECTION_IO.with(|slot| slot.borrow().clone());
+    let socket_addrs: Vec<_> = if let Some(context) = scoped {
+        tokio::runtime::Handle::try_current().map_err(|_| "scoped resolver requires runtime")?.block_on(async {
+            tokio::select! {
+                biased;
+                _ = context.cancellation.cancelled() => Err("scoped DNS cancelled".to_string()),
+                result = tokio::time::timeout_at(tokio::time::Instant::from_std(context.deadline), tokio::net::lookup_host(address.as_str())) => result.map_err(|_| "scoped DNS deadline".to_string())?.map(|addresses| addresses.take(32).collect()).map_err(|e| e.to_string()),
+            }
+        })?
+    } else {
+        address
+            .as_str()
+            .to_socket_addrs()
+            .map_err(|error| format!("failed to resolve {address}: {error}"))?
+            .collect()
+    };
     if socket_addrs.is_empty() {
         return Err(format!("no socket address found for {address}"));
     }
@@ -460,6 +484,7 @@ fn open_handshaken_session(
     host: &str,
     port: u16,
 ) -> Result<Session, ConnectionError> {
+    register_scoped_socket(&tcp).map_err(|message| ConnectionError::Other { message })?;
     let mut session = Session::new().map_err(|error| ConnectionError::Other {
         message: format!("session init failed: {error}"),
     })?;
@@ -636,10 +661,18 @@ fn open_jump_bridge(
     jump_session.set_blocking(false);
 
     // Accept and bridge concurrently with the client connect below.
+    let scoped = SCOPED_CONNECTION_IO.with(|slot| slot.borrow().clone());
+    let worker_scope = scoped.clone();
     let bridge_handle = thread::spawn(move || {
-        match accept_bridge_with_timeout(&listener, Duration::from_secs(15)) {
+        match accept_bridge_with_timeout(
+            &listener,
+            Duration::from_secs(15),
+            worker_scope.as_deref(),
+        ) {
             Ok(server_stream) => {
-                if let Err(error) = bridge_channel_tcp(channel, server_stream) {
+                if let Err(error) =
+                    bridge_channel_tcp(channel, server_stream, worker_scope.as_deref())
+                {
                     warn!("Jump host bridge thread ended with error: {error}");
                 }
             }
@@ -648,6 +681,16 @@ fn open_jump_bridge(
             }
         }
     });
+    if let Some(context) = scoped {
+        context
+            .workers
+            .lock()
+            .expect("scoped worker registry")
+            .push(bridge_handle);
+    } else {
+        // Long-lived ordinary terminal connections retain their existing owner.
+        drop(bridge_handle);
+    }
 
     let client_stream =
         TcpStream::connect(("127.0.0.1", local_port)).map_err(|e| ConnectionError::Other {
@@ -657,17 +700,22 @@ fn open_jump_bridge(
         message: format!("failed to configure bridge client socket: {e}"),
     })?;
 
-    // Detach the bridge; it exits when either SSH session drops.
-    drop(bridge_handle);
     Ok(client_stream)
 }
 
 fn accept_bridge_with_timeout(
     listener: &TcpListener,
     timeout: Duration,
+    scoped: Option<&ScopedConnectionIo>,
 ) -> Result<TcpStream, std::io::Error> {
     let deadline = std::time::Instant::now() + timeout;
     loop {
+        if scoped.is_some_and(ScopedConnectionIo::stopped) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "scoped bridge stopped",
+            ));
+        }
         match listener.accept() {
             Ok((stream, _)) => return Ok(stream),
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -684,7 +732,11 @@ fn accept_bridge_with_timeout(
     }
 }
 
-fn bridge_channel_tcp(mut channel: ssh2::Channel, mut tcp: TcpStream) -> Result<(), String> {
+fn bridge_channel_tcp(
+    mut channel: ssh2::Channel,
+    mut tcp: TcpStream,
+    scoped: Option<&ScopedConnectionIo>,
+) -> Result<(), String> {
     tcp.set_nonblocking(true)
         .map_err(|error| format!("failed to set bridge TCP stream nonblocking: {error}"))?;
 
@@ -701,6 +753,9 @@ fn bridge_channel_tcp(mut channel: ssh2::Channel, mut tcp: TcpStream) -> Result<
     let mut closing = false;
 
     loop {
+        if scoped.is_some_and(ScopedConnectionIo::stopped) {
+            return Ok(());
+        }
         let mut progressed = false;
 
         if !closing && tcp_to_channel_start == tcp_to_channel_end {
@@ -1714,4 +1769,156 @@ mod tests {
         assert_eq!(downloaded, "shellspan-sftp-ok");
         sftp.unlink(remote_path).expect("clean up remote fixture");
     }
+}
+
+// Scoped native readers own every socket until the operation has joined. Closing
+// those sockets interrupts libssh2 handshake/authentication/SFTP, rather than
+// merely abandoning a blocked worker when a Tokio timeout fires.
+struct ScopedConnectionIo {
+    cancellation: tokio_util::sync::CancellationToken,
+    deadline: std::time::Instant,
+    sockets: Mutex<Vec<TcpStream>>,
+    workers: Mutex<Vec<thread::JoinHandle<()>>>,
+    finished: AtomicBool,
+}
+impl ScopedConnectionIo {
+    fn stopped(&self) -> bool {
+        self.finished.load(AtomicOrdering::SeqCst)
+            || self.cancellation.is_cancelled()
+            || std::time::Instant::now() >= self.deadline
+    }
+}
+thread_local! { static SCOPED_CONNECTION_IO: std::cell::RefCell<Option<Arc<ScopedConnectionIo>>> = const { std::cell::RefCell::new(None) }; }
+struct ScopedConnectionReset(Arc<ScopedConnectionIo>);
+impl Drop for ScopedConnectionReset {
+    fn drop(&mut self) {
+        self.0.finished.store(true, AtomicOrdering::SeqCst);
+        if let Ok(sockets) = self.0.sockets.lock() {
+            for socket in sockets.iter() {
+                let _ = socket.shutdown(std::net::Shutdown::Both);
+            }
+        }
+        if let Ok(mut workers) = self.0.workers.lock() {
+            for worker in workers.drain(..) {
+                let _ = worker.join();
+            }
+        }
+        SCOPED_CONNECTION_IO.with(|slot| *slot.borrow_mut() = None);
+    }
+}
+pub(crate) fn with_scoped_connection_io<T>(
+    cancellation: tokio_util::sync::CancellationToken,
+    deadline: std::time::Instant,
+    operation: impl FnOnce() -> T,
+) -> T {
+    let context = Arc::new(ScopedConnectionIo {
+        cancellation,
+        deadline,
+        sockets: Mutex::new(Vec::new()),
+        workers: Mutex::new(Vec::new()),
+        finished: AtomicBool::new(false),
+    });
+    SCOPED_CONNECTION_IO.with(|slot| {
+        assert!(slot.borrow().is_none(), "nested scoped connection");
+        *slot.borrow_mut() = Some(context.clone());
+    });
+    std::thread::scope(|scope| {
+        let context = context.clone();
+        scope.spawn(move || {
+            while !context.finished.load(AtomicOrdering::SeqCst) {
+                if context.cancellation.is_cancelled()
+                    || std::time::Instant::now() >= context.deadline
+                {
+                    if let Ok(sockets) = context.sockets.lock() {
+                        for socket in sockets.iter() {
+                            let _ = socket.shutdown(std::net::Shutdown::Both);
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let _reset = ScopedConnectionReset(context_clone());
+        operation()
+    })
+}
+fn context_clone() -> Arc<ScopedConnectionIo> {
+    SCOPED_CONNECTION_IO.with(|s| {
+        s.borrow()
+            .as_ref()
+            .expect("scoped connection context")
+            .clone()
+    })
+}
+#[test]
+fn skill_scoped_connection_cancellation_and_deadline_join_stalled_handshake() {
+    for cancel in [true, false] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let token = tokio_util::sync::CancellationToken::new();
+        let server_token = token.clone();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut bytes = [0; 1024];
+            let _ = socket.read(&mut bytes).unwrap();
+            if cancel {
+                server_token.cancel();
+            }
+            // The owner must close its socket and join; no server response releases it.
+            assert_eq!(socket.read(&mut bytes).unwrap_or(0), 0);
+        });
+        let started = std::time::Instant::now();
+        let result = with_scoped_connection_io(token, started + Duration::from_millis(200), || {
+            open_handshaken_session(
+                TcpStream::connect(address).unwrap(),
+                "127.0.0.1",
+                address.port(),
+            )
+        });
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_secs(2));
+        server.join().unwrap();
+        assert!(SCOPED_CONNECTION_IO.with(|slot| slot.borrow().is_none()));
+    }
+}
+fn register_scoped_socket(tcp: &TcpStream) -> Result<(), String> {
+    SCOPED_CONNECTION_IO.with(|slot| {
+        if let Some(context) = slot.borrow().as_ref() {
+            if context.cancellation.is_cancelled() || std::time::Instant::now() >= context.deadline
+            {
+                return Err("scoped connection cancelled or timed out".into());
+            }
+            context
+                .sockets
+                .lock()
+                .map_err(|_| "scoped socket registry unavailable")?
+                .push(tcp.try_clone().map_err(|e| e.to_string())?);
+        }
+        Ok(())
+    })
+}
+
+#[test]
+fn skill_scoped_connection_joins_bridge_workers_before_return() {
+    let finished = Arc::new(AtomicBool::new(false));
+    let observed = finished.clone();
+    with_scoped_connection_io(
+        tokio_util::sync::CancellationToken::new(),
+        std::time::Instant::now() + Duration::from_secs(1),
+        || {
+            let context = context_clone();
+            let worker_context = context.clone();
+            let worker = thread::spawn(move || {
+                while !worker_context.stopped() {
+                    thread::yield_now();
+                }
+                observed.store(true, AtomicOrdering::SeqCst);
+            });
+            context.workers.lock().unwrap().push(worker);
+        },
+    );
+    assert!(finished.load(AtomicOrdering::SeqCst));
 }

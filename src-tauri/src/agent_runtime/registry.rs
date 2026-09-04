@@ -37,6 +37,7 @@ pub(crate) struct AgentEntry {
     pub(crate) adapter: Arc<dyn ModelAdapter>,
     pub(crate) capability_scope: Option<AgentCapabilityScope>,
     pub(crate) subagent: Option<AgentSubagentSession>,
+    owner: Mutex<Option<std::sync::Weak<AgentEntry>>>,
     cancellation: CancellationToken,
     admitting: AtomicBool,
     driver_active: AtomicBool,
@@ -63,6 +64,7 @@ impl AgentEntry {
             adapter,
             capability_scope,
             subagent,
+            owner: Mutex::new(None),
             cancellation: CancellationToken::new(),
             admitting: AtomicBool::new(true),
             driver_active: AtomicBool::new(false),
@@ -173,6 +175,43 @@ pub(crate) struct AgentRegistry {
 }
 
 impl AgentRegistry {
+    pub(crate) fn set_owner(
+        &self,
+        child: &Arc<AgentEntry>,
+        parent: &Arc<AgentEntry>,
+    ) -> Result<(), String> {
+        *child
+            .owner
+            .lock()
+            .map_err(|_| "Agent ownership lock unavailable")? = Some(Arc::downgrade(parent));
+        Ok(())
+    }
+
+    pub(crate) fn require_live_root(&self, entry: &Arc<AgentEntry>) -> Result<(), String> {
+        if !self
+            .get(&entry.session_id)?
+            .is_some_and(|live| Arc::ptr_eq(&live, entry))
+        {
+            return Err("CALLER_NOT_LIVE: human input requires the exact live agent".into());
+        }
+        let owner = entry
+            .owner
+            .lock()
+            .map_err(|_| "Agent ownership lock unavailable")?
+            .as_ref()
+            .and_then(std::sync::Weak::upgrade);
+        if let Some(owner) = owner {
+            if self
+                .get(&owner.session_id)?
+                .is_some_and(|live| Arc::ptr_eq(&live, &owner))
+            {
+                return Err(
+                    "DELEGATED_CALLER: report unresolved questions in the child result".into(),
+                );
+            }
+        }
+        Ok(())
+    }
     pub(crate) fn attach(
         &self,
         sessions: AgentSessionStore,

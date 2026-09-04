@@ -591,6 +591,57 @@ mod scheduler_tests {
     }
 
     #[tokio::test]
+    async fn skill_success_is_exclusive_and_following_sensitive_write_still_waits_for_approval() {
+        let (native, mut rx) = GatedNative::new();
+        let root = tempfile::tempdir().unwrap();
+        super::skill_tests::write_skill(
+            root.path(),
+            "barrier",
+            "allowed-tools: '*'\n",
+            "Proceed with the task",
+        );
+        let mut skill = native_call("skill", "skill");
+        skill.arguments = json!({"name":"barrier"});
+        let (_storage, runtime) = setup(
+            vec![
+                native_call("r0", "list_directory"),
+                native_call("r1", "list_directory"),
+                skill,
+                native_call("approval", "apply_patch"),
+                native_call("last", "list_directory"),
+            ],
+            native.clone(),
+            Some("2"),
+        );
+        super::skill_tests::create_skill_session(&runtime, "skill-barrier", root.path());
+        runtime
+            .followup("skill-barrier", "u".into(), "go".into())
+            .unwrap();
+        runtime.start("skill-barrier", provider(), None).unwrap();
+        let _ = started(&mut rx).await;
+        let _ = started(&mut rx).await;
+        native.release("r1");
+        assert!(!all_events(&runtime, "skill-barrier").iter().any(
+            |e| matches!(&e.payload,AgentSessionEventPayload::ToolCall{call}if call.name=="skill")
+        ));
+        native.release("r0");
+        idle(&runtime, "skill-barrier").await;
+        assert_eq!(results(&runtime, "skill-barrier"), ["r0", "r1", "skill"]);
+        let approval = pending_approval(&runtime, "skill-barrier");
+        assert_eq!(approval.call_id, "approval");
+        assert!(rx.try_recv().is_err());
+        native.release("approval");
+        native.release("last");
+        runtime.approve_tool(approval).await.unwrap();
+        idle(&runtime, "skill-barrier").await;
+        assert_eq!(
+            results(&runtime, "skill-barrier"),
+            ["r0", "r1", "skill", "approval", "last"]
+        );
+        native.assert_clean();
+    }
+
+    #[tokio::test]
     async fn child_budget_covers_inflight_prepare_failure_and_mixed_calls() {
         for (names, budget, preparation_failure, expected_executed) in [
             (
