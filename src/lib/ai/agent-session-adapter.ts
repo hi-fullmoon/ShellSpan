@@ -16,6 +16,8 @@ import {
   invokeRejectAgentRuntimeTool,
   invokeRenameAgentRuntimeSession,
   invokeStartAgentRuntime,
+  invokeSelectAgentRuntimeModel,
+  invokeSetAgentRuntimePermission,
 } from '@/lib/tauri';
 import { projectAgentActivity } from '@/lib/agent-session-projection';
 import type {
@@ -81,6 +83,8 @@ interface AgentCommittedClientLike {
 }
 
 export interface AgentSessionAdapterDependencies {
+  readonly selectModel?: typeof invokeSelectAgentRuntimeModel;
+  readonly setPermission?: typeof invokeSetAgentRuntimePermission;
   readonly submitImages?: typeof invokeSubmitAgentImages;
   readonly listFileReferences?: typeof invokeListAgentFileReferences;
   readonly listSkills?: typeof invokeListAgentRuntimeSkills;
@@ -101,6 +105,8 @@ export interface AgentSessionAdapterDependencies {
 }
 
 const defaultDependencies: AgentSessionAdapterDependencies = {
+  selectModel: invokeSelectAgentRuntimeModel,
+  setPermission: invokeSetAgentRuntimePermission,
   submitImages: invokeSubmitAgentImages,
   listSkills: invokeListAgentRuntimeSkills,
   listFileReferences: invokeListAgentFileReferences,
@@ -260,13 +266,19 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
   const events = state.events;
   const activity = projectAgentActivity(events);
   const nodes = projectAgentChatNodes(events);
+  const header = { ...state.snapshot.header };
+  for (const event of events) {
+    if (event.type === 'session/model_selected') header.modelSelection = event.data.provider;
+    if (event.type === 'session/permission_changed') header.permissionMode = event.data.mode;
+  }
   return {
     summary: sessionSummary(state.snapshot, events, activity.status),
     snapshot: {
       kind: 'agent',
-      value: activity.plan === undefined ? state.snapshot : {
+      value: {
         ...state.snapshot,
-        task: { ...state.snapshot.task, plan: activity.plan },
+        header,
+        task: activity.plan === undefined ? state.snapshot.task : { ...state.snapshot.task, plan: activity.plan },
       },
     },
     nodes,
@@ -466,6 +478,18 @@ export function createAgentSessionAdapter(
     listSkills: (sessionId) => (dependencies.listSkills ?? invokeListAgentRuntimeSkills)(sessionId),
     create: createSession,
     open: openEntry,
+    async selectModel(sessionId, provider) {
+      await (dependencies.selectModel ?? invokeSelectAgentRuntimeModel)({ sessionId, provider });
+      const entry = ensureEntry(sessionId);
+      entry.view = agentSessionView(await entry.client.reconnect());
+      for (const listener of entry.listeners) listener(entry.view);
+    },
+    async setPermission(sessionId, mode) {
+      await (dependencies.setPermission ?? invokeSetAgentRuntimePermission)({ sessionId, mode });
+      const entry = ensureEntry(sessionId);
+      entry.view = agentSessionView(await entry.client.reconnect());
+      for (const listener of entry.listeners) listener(entry.view);
+    },
     subscribe(sessionId: string, listener: AiSessionListener): () => void {
       const entry = ensureEntry(sessionId);
       entry.listeners.add(listener);
