@@ -1998,6 +1998,7 @@
 
 .ai-image-rail {
   position: relative;
+  flex: 1;
   min-width: 0;
 }
 
@@ -2029,6 +2030,25 @@
 
 .ai-image-thumbnail-media img {
   height: 100%;
+}
+
+.ai-image-thumbnail-loading {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--popover);
+  color: var(--muted-foreground);
+  box-shadow: var(--dsw-elevation-panel);
+}
+
+.ai-image-thumbnail-loading [data-slot='spinner'] {
+  width: 12px;
+  height: 12px;
 }
 
 .ai-image-thumbnail-open {
