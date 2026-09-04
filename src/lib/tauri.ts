@@ -250,6 +250,17 @@ export async function invokeStartAgentRuntime(
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_start', { input });
 }
 
+export async function invokeSelectAgentRuntimeModel(input: AgentRuntimeStartInput): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_select_model', { input });
+}
+
+export async function invokeSetAgentRuntimePermission(input: {
+  sessionId: string;
+  mode: import('@/types/agent-session').AgentSessionPermissionMode;
+}): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_set_permission', { input });
+}
+
 export async function invokeSpawnAgentRuntimeSubagent(
   request: AgentSubagentSpawnRequest,
 ): Promise<AgentSessionSnapshot> {

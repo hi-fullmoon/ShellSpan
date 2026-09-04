@@ -326,6 +326,8 @@ export type AgentSessionEvent =
       previousRevision: number;
       clientOperationId: string;
     }>
+  | AgentSessionEventWithData<'session/model_selected', { provider: AgentSubagentModel }>
+  | AgentSessionEventWithData<'session/permission_changed', { mode: AgentSessionPermissionMode }>
   | AgentSessionEventWithData<'session/renamed', {
       title: string;
       previousRevision: number;
@@ -579,6 +581,7 @@ export interface AgentTaskProjection {
 }
 
 export interface AgentSessionHeader {
+  readonly modelSelection?: AgentSubagentModel;
   readonly sessionId: string;
   readonly taskId: string;
   readonly goal: string;

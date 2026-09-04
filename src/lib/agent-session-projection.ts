@@ -222,6 +222,9 @@ function projectActivityNodesUnchecked(
   for (const event of events) {
     if (event.turnId) latestTurnId = event.turnId;
     switch (event.type) {
+      case 'session/model_selected':
+      case 'session/permission_changed':
+        break;
       case 'session/created':
         taskKey = `activity:task:${event.data.taskId}`;
         upsert(
