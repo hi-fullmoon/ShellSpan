@@ -8,11 +8,11 @@ use super::{
     assemble_model_input, default_model_tools, estimate_model_surface_budget, recorded_tool_call,
     AgentActiveScope, AgentAssistantContentBlock, AgentCompactionManager, AgentEntry, AgentHookBus,
     AgentLifecyclePhase, AgentPreStepContext, AgentPreStepDecision, AgentRequestReason,
-    AgentScopedPayload, AgentSessionEventPayload, AgentSessionStatus,
-    AgentSessionStore, AgentStopReason, AgentTokenUsage, AgentToolCallDelta, AgentToolPipeline,
-    ModelContentBlock, ModelFinishReason, ModelMessage, ModelRequest, ModelResponse,
-    ModelStreamSink, NormalizedModelError, NormalizedModelErrorKind, RetryPlan, RetryPolicy,
-    StreamDelta, ToolPipelineSettlement, MAX_AGENT_STREAM_DELTA_BYTES,
+    AgentScopedPayload, AgentSessionEventPayload, AgentSessionStatus, AgentSessionStore,
+    AgentStopReason, AgentTokenUsage, AgentToolCallDelta, AgentToolPipeline, ModelContentBlock,
+    ModelFinishReason, ModelMessage, ModelRequest, ModelResponse, ModelStreamSink,
+    NormalizedModelError, NormalizedModelErrorKind, RetryPlan, RetryPolicy, StreamDelta,
+    ToolPipelineSettlement, MAX_AGENT_STREAM_DELTA_BYTES,
 };
 
 #[cfg(test)]
@@ -107,6 +107,23 @@ async fn drive_agent_inner(
             close_open_scope(sessions, entry, "cancelled")?;
             return Ok(AgentDriverSettlement::Cancelled);
         }
+        if let Some(settlement) = tools.continue_questions(entry).await? {
+            match settlement {
+                ToolPipelineSettlement::Completed => continue,
+                ToolPipelineSettlement::Waiting => return Ok(AgentDriverSettlement::Waiting),
+                ToolPipelineSettlement::Cancelled => {
+                    close_open_scope(sessions, entry, "cancelled")?;
+                    return Ok(AgentDriverSettlement::Cancelled);
+                }
+            }
+        }
+        if let Some(settlement) = tools.continue_skills(entry).await? {
+            match settlement {
+                ToolPipelineSettlement::Completed => continue,
+                ToolPipelineSettlement::Waiting => return Ok(AgentDriverSettlement::Waiting),
+                ToolPipelineSettlement::Cancelled => return Ok(AgentDriverSettlement::Cancelled),
+            }
+        }
         let all_events = sessions.all_events(&entry.session_id)?;
         if let Some(reason) = subagent_budget_failure(entry, &all_events)? {
             close_open_scope(sessions, entry, &reason)?;
@@ -133,6 +150,19 @@ async fn drive_agent_inner(
 
         let existing_scope = entry.scope()?;
         let (turn_id, step_id, mut step_index) = if let Some(AgentActiveScope {
+            turn_id,
+            step_id: Some(step_id),
+        }) = existing_scope.clone()
+        {
+            let index = all_events
+                .iter()
+                .filter(|e| {
+                    e.turn_id.as_deref() == Some(&turn_id)
+                        && matches!(e.payload, AgentSessionEventPayload::StepStart)
+                })
+                .count();
+            (turn_id, step_id, index)
+        } else if let Some(AgentActiveScope {
             turn_id,
             step_id: None,
         }) = existing_scope
@@ -381,6 +411,7 @@ async fn apply_pre_step_hooks(
                     &entry.session_id,
                     AgentInboxLane::NextStep,
                     AgentInboxMessage {
+                        images: Vec::new(),
                         message_id,
                         client_submission_id: None,
                         content,
@@ -510,6 +541,10 @@ async fn run_step(
             &snapshot.surface,
             &assembly,
         )?;
+        tools.skills.prepare_step(entry, turn_id, step_id).await?;
+        tools
+            .skills
+            .republish_if_missing(&entry.session_id, turn_id, step_id)?;
         let surface = sessions.snapshot(&entry.session_id)?.surface;
         let mut request = ModelRequest::from_surface(
             request_id.clone(),
@@ -522,9 +557,15 @@ async fn run_step(
                 !matches!(
                     message,
                     super::AgentSurfaceMessage::User { source, .. }
-                        if is_assembled_context_source(source)
+                        if is_assembled_context_source(source) || source.producer_id == "shellspan.skills.v1"
                 )
             });
+            inherited.messages.retain(|m| !matches!(m, super::AgentSurfaceMessage::Tool { name, .. } if name == super::skills::SKILL_TOOL));
+            for message in &mut inherited.messages {
+                if let super::AgentSurfaceMessage::Assistant { content, .. } = message {
+                    content.retain(|b| !matches!(b, AgentAssistantContentBlock::ToolCall { call } if call.name == super::skills::SKILL_TOOL));
+                }
+            }
             let mut inherited_messages = ModelRequest::from_surface(
                 format!("{request_id}-inherited"),
                 &inherited,
@@ -537,6 +578,31 @@ async fn run_step(
         }
         let request_surface_generation = request.surface_generation;
         let budget = estimate_model_surface_budget(&entry.provider, &request);
+        if budget.requires_compaction() {
+            let before = surface.generation;
+            compactions
+                .compact(
+                    &entry.session_id,
+                    turn_id,
+                    step_id,
+                    Some(turn_id),
+                    "skillsInputBudget",
+                    &budget,
+                    false,
+                    &entry.cancellation(),
+                )
+                .await?;
+            if sessions.snapshot(&entry.session_id)?.surface.generation != before {
+                continue;
+            }
+            if budget.estimated_input_tokens > budget.usable_input_tokens
+                || budget.estimated_input_bytes > budget.maximum_input_bytes
+            {
+                return Ok(StepSettlement::Failed(
+                    "complete Skill input exceeds model budget".into(),
+                ));
+            }
+        }
         let estimated_input_tokens = Some(budget.estimated_input_tokens);
         if entry.cancellation().is_cancelled() {
             return Ok(StepSettlement::Cancelled);
@@ -823,7 +889,12 @@ fn model_tools_for(entry: &AgentEntry) -> Vec<super::ModelToolDefinition> {
     };
     tools
         .into_iter()
-        .filter(|tool| scope.tool_names.iter().any(|name| name == &tool.name))
+        // Human input has its own live-root admission boundary, independent of
+        // historical native capability scopes retained by a resumed root.
+        .filter(|tool| {
+            tool.name == super::user_questions::TOOL_NAME
+                || scope.tool_names.iter().any(|name| name == &tool.name)
+        })
         .collect()
 }
 
@@ -1401,7 +1472,30 @@ pub(crate) fn recover_open_scope(
         turn_id,
         step_id: step_id.clone(),
     }))?;
-    if entry.phase()? == AgentLifecyclePhase::Waiting {
+    let events = sessions.all_events(&entry.session_id)?;
+    if let Some(step_id) = step_id.as_deref() {
+        let step_events: Vec<_> = events
+            .iter()
+            .filter(|e| e.step_id.as_deref() == Some(step_id))
+            .collect();
+        if step_events
+            .iter()
+            .any(|e| matches!(e.payload, AgentSessionEventPayload::StepInputClaim { .. }))
+            && !step_events.iter().any(|e| {
+                matches!(
+                    e.payload,
+                    AgentSessionEventPayload::AssistantMessage { .. }
+                        | AgentSessionEventPayload::ToolCall { .. }
+                )
+            })
+        {
+            entry.set_phase(AgentLifecyclePhase::Running)?;
+            return Ok(());
+        }
+    }
+    if entry.phase()? == AgentLifecyclePhase::Waiting
+        || super::skill_runtime::resumable_skill_queue(&events).is_some()
+    {
         return Ok(());
     }
     let reason = "runtimeRestarted: an in-flight Model Step was not replayed";

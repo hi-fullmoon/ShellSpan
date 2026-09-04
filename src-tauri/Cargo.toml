@@ -33,6 +33,7 @@ sha2_compat = { package = "sha2", version = "0.10" }
 hmac = "0.12"
 sha1 = "0.10"
 base64 = "0.23"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 diffy = "0.4"
 crossbeam-channel = "0.5"
 portable-pty = "0.9"

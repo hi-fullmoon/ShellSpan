@@ -1,0 +1,131 @@
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { chromium } from 'playwright';
+const output = await mkdtemp(join(tmpdir(), 'shellspan-images-e2e-'));
+const ready = join(output, 'ready.json');
+const rust = spawn('cargo', ['test', '--manifest-path', 'src-tauri/Cargo.toml', '--lib', '--locked', 'image_browser_controller_http_bridge', '--', '--ignored', '--nocapture'], { detached: process.platform !== 'win32', stdio: 'inherit', env: { ...process.env, SHELLSPAN_IMAGES_BRIDGE_READY: ready } });
+const completion = new Promise((resolve, reject) => { rust.once('error', reject); rust.once('exit', resolve); });
+const origin = 'http://127.0.0.1:1448';
+const vite = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '1448', '--strictPort'], { stdio: 'ignore' });
+let browser;
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+try {
+  let bridge;
+  for (let i = 0; i < 1800; i++) {
+    if (rust.exitCode !== null) throw new Error(`Rust exited ${rust.exitCode}`);
+    try { bridge = JSON.parse(await readFile(ready, 'utf8')); if ((await fetch(origin)).ok) break; } catch { /* startup */ }
+    await delay(100);
+  }
+  assert.ok(bridge);
+  const rpc = async command => {
+    const result = await (await fetch(bridge.url, { method: 'POST', body: JSON.stringify({ command, args: {} }) })).json();
+    if (result.error) throw new Error(result.error); return result.value;
+  };
+  browser = await chromium.launch({ headless: true });
+  const report = [];
+  for (const [index, width] of [320, 400, 560, 720].entries()) for (const theme of ['light', 'dark']) {
+    const zh = theme === 'dark';
+    const context = await browser.newContext({ viewport: { width, height: 800 }, reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    page.on('pageerror', e => console.error(e));
+    const url = `${origin}/?${new URLSearchParams({ aiStage6cVisual: '', rpc: bridge.url, modelUrl: bridge.modelUrl, target: `image-${width}-${theme}`, theme, locale: zh ? 'zh-CN' : 'en-US' })}`;
+    await page.goto(url); await page.locator('[data-stage6c-ready]').waitFor();
+    if (index === 0) {
+      // Real IndexedDB transactions: one winner for concurrent CAS, rollback leaves the
+      // original complete batch, and a bound cold draft is discoverable from its Session.
+      const result = await page.evaluate(async () => {
+        const { writeImageDraft, readImageDraft } = await import('/src/lib/ai/image-drafts.ts');
+        const value = { owner: 'transaction-test', revision: 1, text: 'whole batch', images: [{ name: 'x', mediaType: 'image/png', data: 'fixture' }], operation: { id: 'op', sessionId: 'bound', mode: 'start' } };
+        const writes = await Promise.allSettled([writeImageDraft(value, 0), writeImageDraft({ ...value, text: 'loser' }, 0)]);
+        return { fulfilled: writes.filter(w => w.status === 'fulfilled').length, value: await readImageDraft('agent:bound') };
+      });
+      assert.equal(result.fulfilled, 1); assert.equal(result.value.images.length, 1); assert.equal(result.value.operation.sessionId, 'bound');
+    }
+    const picker = () => page.getByLabel(zh ? '添加图片' : 'Add images', { exact: true });
+    const add = async () => {
+      await picker().setInputFiles({ name: bridge.image.name, mimeType: bridge.image.mediaType, buffer: Buffer.from(bridge.image.data, 'base64') });
+      await page.locator('[data-testid=image-draft] img').waitFor();
+      await page.getByText(zh ? '已保存草稿 · 尚未发送' : 'Saved draft · not sent').waitFor();
+    };
+    const skill = async () => {
+      await page.getByRole('button', { name: zh ? '技能' : 'Skills', exact: true }).click();
+      await page.getByRole('textbox', { name: zh ? '项目目录' : 'Project directory' }).fill(bridge.root);
+      await page.getByRole('button', { name: zh ? '读取技能' : 'Load skills' }).click();
+      await page.getByRole('menuitem', { name: /inspect/ }).click();
+    };
+    const before = await rpc('__state');
+    if (index % 2 === 0) {
+      await add(); assert.equal((await rpc('__state')).sessions.length, before.sessions.length, 'image selection must not create a rootless Session');
+      if (index === 0) {
+        await page.getByTestId('ai-workspace-composer').fill('durable image draft ');
+        await page.reload(); await page.locator('[data-testid=image-draft] img').waitFor();
+        assert.equal(await page.getByTestId('ai-workspace-composer').inputValue(), 'durable image draft ');
+        await page.evaluate(() => window.imageTestChangeProvider('qwen-turbo'));
+        await page.getByTestId('ai-workspace-composer').press('Enter');
+        await page.getByText(zh ? /当前模型不支持图片/ : /This model cannot receive images/).waitFor();
+        assert.equal((await rpc('__state')).sessions.length, before.sessions.length);
+        await page.evaluate(() => window.imageTestChangeProvider('qwen3-vl-plus'));
+        await page.getByText(zh ? /当前模型不支持图片/ : /This model cannot receive images/).waitFor({ state: 'detached' });
+      }
+      await skill();
+    } else { await skill(); await add(); }
+    if (index === 1) {
+      await page.getByRole('button', { name: new RegExp(zh ? '删除图片' : 'Remove image') }).click();
+      await page.locator('[data-testid=image-draft] img').waitFor({ state: 'detached' }); await add();
+    }
+    assert.ok(await page.locator('[data-message-scroller-viewport]').count() <= 1, 'empty hero must not add another scroller');
+    await page.screenshot({ path: join(output, `${width}-${theme}-draft.png`), animations: 'disabled' });
+    if (index === 2) await rpc('__fail_submit');
+    await page.getByTestId('ai-workspace-composer').press('Enter');
+    if (index === 2) {
+      await page.getByText(zh ? /操作未确认，草稿已保留/ : /The operation is unconfirmed and your draft is kept/).waitFor();
+      assert.equal((await rpc('__state')).requests.length, before.requests.length);
+      await page.reload(); await page.locator('[data-testid=image-draft] img').waitFor();
+      await page.getByRole('button', { name: zh ? '重试' : 'Retry', exact: true }).click();
+    }
+    await page.getByText('Image wire complete', { exact: true }).waitFor({ timeout: 20000 });
+    await page.locator('[data-testid=image-draft] img').waitFor({ state: 'detached' });
+    assert.equal(await page.getByTestId('ai-workspace-composer').inputValue(), '');
+    const after = await rpc('__state'); const session = after.sessions.at(-1);
+    assert.equal(session.snapshot.header.target.cwd, bridge.root);
+    assert.equal(after.requests.length, before.requests.length + 1);
+    const wire = after.requests.at(-1);
+    assert.ok(JSON.stringify(wire).includes('IMAGE AND SKILL FULL INSTRUCTIONS'));
+    const image = wire.messages.flatMap(m => Array.isArray(m.content) ? m.content : []).find(b => b.type === 'image_url');
+    assert.ok(image?.image_url.url.startsWith('data:image/png;base64,'));
+    assert.equal(session.events.filter(e => e.type === 'agent/inbox/spliced' && e.data.operation === 'enqueued' && e.data.messages.some(m => m.images?.length)).length, 1);
+    assert.ok(!JSON.stringify(session.events).includes('data:image/png;base64,'));
+    await rpc('__restart'); await page.reload();
+    await page.locator('[data-slot=bubble] img').waitFor();
+    if (index === 0) {
+      await page.getByTestId('ai-workspace-composer').fill('Look at the same image again');
+      await page.getByTestId('ai-workspace-composer').press('Enter');
+      let resumed;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        resumed = await rpc('__state');
+        if (resumed.requests.length > after.requests.length) break;
+        await delay(100);
+      }
+      assert.equal(resumed.requests.length, after.requests.length + 1, 'text follow-up reattaches the recovered vision session');
+      assert.ok(JSON.stringify(resumed.requests.at(-1)).includes(image.image_url.url), 'recovered HTTP input contains identical pixels');
+      await page.reload(); await page.locator('[data-slot=bubble] img').waitFor();
+    }
+    assert.equal(await page.locator('[data-message-scroller-viewport]').count(), 1);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
+    await page.screenshot({ path: join(output, `${width}-${theme}-recovered.png`), animations: 'disabled' });
+    report.push({ width, theme, combo: index % 2 === 0 ? 'image-then-skill' : 'skill-then-image', wire: true, restart: true });
+    await context.close();
+  }
+  await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2));
+  await rpc('__stop'); assert.equal(await completion, 0);
+  console.log(`PASS ${report.length} real browser → controller → Runtime → image HTTP/restart scenes; evidence: ${output}`);
+} finally {
+  await browser?.close(); vite.kill('SIGTERM');
+  if (rust.exitCode === null) {
+    if (process.platform !== 'win32') process.kill(-rust.pid, 'SIGTERM'); else rust.kill('SIGTERM');
+    await completion;
+  }
+}

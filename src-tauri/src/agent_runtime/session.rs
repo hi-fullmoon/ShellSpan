@@ -209,7 +209,9 @@ pub(crate) struct AgentSubagentToolSettlement {
     pub(crate) data: Option<serde_json::Value>,
 }
 
-pub(crate) struct AgentClaimedStep;
+pub(crate) struct AgentClaimedStep {
+    pub(crate) messages: Vec<AgentInboxMessage>,
+}
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -661,6 +663,7 @@ impl AgentSessionStore {
                     operation: AgentInboxOperation::Enqueued,
                     lane,
                     messages: vec![AgentInboxMessage {
+                        images: Vec::new(),
                         message_id: format!("subagent-{settlement_id}"),
                         client_submission_id: None,
                         content: summary,
@@ -798,6 +801,105 @@ impl AgentSessionStore {
         Ok(events)
     }
 
+    pub(crate) fn claimed_step(
+        &self,
+        session_id: &str,
+        step_id: &str,
+    ) -> Result<AgentClaimedStep, String> {
+        let messages = self
+            .all_events(session_id)?
+            .into_iter()
+            .find_map(|e| {
+                if e.step_id.as_deref() != Some(step_id) {
+                    return None;
+                }
+                match e.payload {
+                    AgentSessionEventPayload::StepInputClaim {
+                        turn_messages,
+                        step_messages,
+                        ..
+                    } => Some(turn_messages.into_iter().chain(step_messages).collect()),
+                    _ => None,
+                }
+            })
+            .unwrap_or_default();
+        Ok(AgentClaimedStep { messages })
+    }
+
+    pub(crate) fn repair_step_claims(&self, session_id: &str) -> Result<(), String> {
+        let mut inner = self.lock_configured()?;
+        let record = inner.sessions.get(session_id).ok_or("Session not found")?;
+        if record.ended {
+            return Ok(());
+        }
+        let mut payloads = Vec::new();
+        for intent in &record.events {
+            let AgentSessionEventPayload::StepInputClaim {
+                start_turn,
+                turn_messages,
+                step_messages,
+            } = &intent.payload
+            else {
+                continue;
+            };
+            for (lane, messages) in [
+                (AgentInboxLane::NextTurn, turn_messages),
+                (AgentInboxLane::NextStep, step_messages),
+            ] {
+                let missing: Vec<_> = messages
+                    .iter()
+                    .filter(|m| record.inbox.locate(&m.message_id).is_some())
+                    .cloned()
+                    .collect();
+                if !missing.is_empty() {
+                    payloads.push((
+                        None,
+                        None,
+                        AgentSessionEventPayload::InboxSpliced {
+                            operation: AgentInboxOperation::Claimed,
+                            lane,
+                            messages: missing,
+                        },
+                    ));
+                }
+            }
+            if *start_turn
+                && !record.events.iter().any(|e| {
+                    e.turn_id == intent.turn_id
+                        && matches!(e.payload, AgentSessionEventPayload::TurnStart)
+                })
+            {
+                payloads.push((
+                    intent.turn_id.clone(),
+                    None,
+                    AgentSessionEventPayload::TurnStart,
+                ));
+            }
+            if !record.events.iter().any(|e| {
+                e.step_id == intent.step_id
+                    && matches!(e.payload, AgentSessionEventPayload::StepStart)
+            }) {
+                payloads.push((
+                    intent.turn_id.clone(),
+                    intent.step_id.clone(),
+                    AgentSessionEventPayload::StepStart,
+                ));
+            }
+            for message in turn_messages.iter().chain(step_messages) {
+                if !record.events.iter().any(|e| matches!(&e.payload, AgentSessionEventPayload::UserMessage { message: m } if m.message_id == message.message_id)) {
+                    payloads.push((intent.turn_id.clone(), intent.step_id.clone(), AgentSessionEventPayload::UserMessage { message: message.clone() }));
+                }
+            }
+        }
+        if payloads.is_empty() {
+            return Ok(());
+        }
+        let (events, publisher) = append_payloads_locked(&mut inner, session_id, payloads)?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(())
+    }
+
     pub(crate) fn begin_turn_step(
         &self,
         session_id: &str,
@@ -817,7 +919,15 @@ impl AgentSessionStore {
         if turn_messages.is_empty() && step_messages.is_empty() {
             return Ok(None);
         }
-        let mut payloads = Vec::new();
+        let mut payloads = vec![(
+            Some(turn_id.clone()),
+            Some(step_id.clone()),
+            AgentSessionEventPayload::StepInputClaim {
+                start_turn: true,
+                turn_messages: turn_messages.clone(),
+                step_messages: step_messages.clone(),
+            },
+        )];
         if !turn_messages.is_empty() {
             payloads.push((
                 None,
@@ -864,7 +974,7 @@ impl AgentSessionStore {
         let (events, publisher) = append_payloads_locked(&mut inner, session_id, payloads)?;
         drop(inner);
         publish_events(publisher, &events);
-        Ok(Some(AgentClaimedStep))
+        Ok(Some(AgentClaimedStep { messages }))
     }
 
     pub(crate) fn begin_step(
@@ -884,6 +994,15 @@ impl AgentSessionStore {
             return Ok(None);
         }
         let mut payloads = vec![
+            (
+                Some(turn_id.clone()),
+                Some(step_id.clone()),
+                AgentSessionEventPayload::StepInputClaim {
+                    start_turn: false,
+                    turn_messages: Vec::new(),
+                    step_messages: messages.clone(),
+                },
+            ),
             (
                 None,
                 None,
@@ -909,7 +1028,7 @@ impl AgentSessionStore {
         let (events, publisher) = append_payloads_locked(&mut inner, session_id, payloads)?;
         drop(inner);
         publish_events(publisher, &events);
-        Ok(Some(AgentClaimedStep))
+        Ok(Some(AgentClaimedStep { messages }))
     }
 
     pub(crate) fn begin_continuation_step(
@@ -927,7 +1046,15 @@ impl AgentSessionStore {
             return Err("ended Agent session cannot continue a Turn".into());
         }
         let messages = record.inbox.step_claim();
-        let mut payloads = Vec::new();
+        let mut payloads = vec![(
+            Some(turn_id.clone()),
+            Some(step_id.clone()),
+            AgentSessionEventPayload::StepInputClaim {
+                start_turn: false,
+                turn_messages: Vec::new(),
+                step_messages: messages.clone(),
+            },
+        )];
         if !messages.is_empty() {
             payloads.push((
                 None,
@@ -944,7 +1071,7 @@ impl AgentSessionStore {
             Some(step_id.clone()),
             AgentSessionEventPayload::StepStart,
         ));
-        payloads.extend(messages.into_iter().map(|message| {
+        payloads.extend(messages.iter().cloned().map(|message| {
             (
                 Some(turn_id.clone()),
                 Some(step_id.clone()),
@@ -954,7 +1081,7 @@ impl AgentSessionStore {
         let (events, publisher) = append_payloads_locked(&mut inner, session_id, payloads)?;
         drop(inner);
         publish_events(publisher, &events);
-        Ok(AgentClaimedStep)
+        Ok(AgentClaimedStep { messages })
     }
 
     pub(crate) fn enqueue(
@@ -1870,6 +1997,77 @@ fn validate_event_transition(
             }
             Ok(())
         }
+        AgentSessionEventPayload::FileReferenceScopeBound { scope } => {
+            if record.header.target.as_ref() != Some(&scope.target)
+                || record
+                    .events
+                    .iter()
+                    .filter_map(super::file_references::bound_scope)
+                    .any(|previous| previous != scope)
+            {
+                return Err("File reference root identity changed".into());
+            }
+            Ok(())
+        }
+        AgentSessionEventPayload::SkillCatalogObserved { observation } => {
+            if let Some(snapshot) = &observation.snapshot {
+                if record.header.target.as_ref() != Some(&snapshot.scope.target) {
+                    return Err("Skills observation changed the frozen target".into());
+                }
+                if record
+                    .events
+                    .iter()
+                    .filter_map(super::file_references::bound_scope)
+                    .any(|previous| *previous != snapshot.scope)
+                {
+                    return Err("Skills root identity changed during observation".into());
+                }
+            }
+            Ok(())
+        }
+        AgentSessionEventPayload::SkillStepPrepared { prepared } => {
+            if record.events.iter().any(|e| {
+                e.step_id == event.step_id
+                    && matches!(
+                        e.payload,
+                        AgentSessionEventPayload::SkillStepPrepared { .. }
+                    )
+            }) {
+                return Err("Skill Step already prepared".into());
+            }
+            let claimed: Vec<_> = record
+                .events
+                .iter()
+                .filter(|e| e.step_id == event.step_id)
+                .flat_map(|e| match &e.payload {
+                    AgentSessionEventPayload::StepInputClaim {
+                        turn_messages,
+                        step_messages,
+                        ..
+                    } => turn_messages
+                        .iter()
+                        .chain(step_messages)
+                        .filter(|m| super::skills::direct_skill_input(m))
+                        .map(|m| m.message_id.clone())
+                        .collect(),
+                    _ => Vec::new(),
+                })
+                .collect();
+            if claimed != prepared.message_ids {
+                return Err("Skill preparation does not match durable claim".into());
+            }
+            for outcome in &prepared.outcomes {
+                if outcome.message_ids.iter().any(|id| !claimed.contains(id)) {
+                    return Err("Skill invocation has an unclaimed input".into());
+                }
+                if outcome.loaded.as_ref().is_some_and(|loaded| {
+                    record.header.target.as_ref() != Some(&loaded.provenance.scope.target)
+                }) {
+                    return Err("Skill invocation changed the frozen target".into());
+                }
+            }
+            Ok(())
+        }
         AgentSessionEventPayload::RequestContext {
             surface_generation, ..
         } if *surface_generation != derive_surface(&record.events)?.generation => {
@@ -1908,6 +2106,11 @@ fn validate_event_transition(
         AgentSessionEventPayload::ToolResult {
             call_id, status, ..
         } => validate_tool_result_transition(record, event, call_id, *status),
+        AgentSessionEventPayload::QuestionRequested { .. }
+        | AgentSessionEventPayload::QuestionAnswered { .. }
+        | AgentSessionEventPayload::QuestionCancelled { .. } => {
+            super::user_questions::validate_transition(&record.events, event)
+        }
         _ => Ok(()),
     }
 }
@@ -2038,6 +2241,7 @@ fn validate_tool_result_transition(
     status: super::AgentToolResultStatus,
 ) -> Result<(), String> {
     let mut has_call = false;
+    let mut is_skill = false;
     let mut approval = None;
     let mut dispatched = false;
     let mut has_result = false;
@@ -2049,6 +2253,7 @@ fn validate_tool_result_transition(
         match &previous.payload {
             AgentSessionEventPayload::ToolCall { call } if call.call_id == call_id => {
                 has_call = true;
+                is_skill = call.name == super::skills::SKILL_TOOL;
             }
             AgentSessionEventPayload::ToolApproval {
                 call_id: previous_call,
@@ -2069,6 +2274,17 @@ fn validate_tool_result_transition(
     if !has_call || has_result {
         return Err("tool result has no unique durable call".into());
     }
+    if let Some(question) = super::user_questions::records(&record.events)
+        .into_iter()
+        .find(|q| {
+            q.identity.call_id == call_id && event.step_id.as_deref() == Some(&q.identity.step_id)
+        })
+    {
+        if super::user_questions::matches_result(&question, &event.payload) {
+            return Ok(());
+        }
+        return Err("question result does not match its durable answer or cancellation".into());
+    }
     let allowed = match approval {
         Some(super::AgentToolApprovalStatus::Approved) => dispatched,
         Some(super::AgentToolApprovalStatus::Rejected) => {
@@ -2081,10 +2297,13 @@ fn validate_tool_result_transition(
             status == super::AgentToolResultStatus::Cancelled
         }
         Some(super::AgentToolApprovalStatus::Requested) => false,
-        None => matches!(
-            status,
-            super::AgentToolResultStatus::Rejected | super::AgentToolResultStatus::Failed
-        ),
+        None => {
+            (is_skill && status == super::AgentToolResultStatus::Cancelled)
+                || matches!(
+                    status,
+                    super::AgentToolResultStatus::Rejected | super::AgentToolResultStatus::Failed
+                )
+        }
     };
     if !allowed {
         return Err("tool result does not match the durable approval state".into());
@@ -2137,6 +2356,11 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
     use AgentSessionEventPayload as Payload;
 
     match &event.payload {
+        Payload::QuestionRequested { .. }
+        | Payload::QuestionAnswered { .. }
+        | Payload::QuestionCancelled { .. } => {
+            super::user_questions::validate_payload(event)?;
+        }
         Payload::SessionCreated {
             task_id,
             goal,
@@ -2242,6 +2466,50 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             require_scope(event, false, false)?;
             validate_mutation_event_identity(event, *previous_revision, client_operation_id)?;
             validate_session_title(title)?;
+        }
+        Payload::StepInputClaim {
+            turn_messages,
+            step_messages,
+            ..
+        } => {
+            require_scope(event, true, true)?;
+            for message in turn_messages.iter().chain(step_messages) {
+                validate_inbox_message(message)?;
+            }
+        }
+        Payload::FileReferenceScopeBound { scope } => {
+            require_scope(event, false, false)?;
+            validate_text(&scope.root, "File reference root", false, 4096)?;
+            validate_text(
+                &scope.root_identity,
+                "File reference root identity",
+                false,
+                256,
+            )?;
+            super::skills::unchanged_by_redaction(scope)?;
+        }
+        Payload::SkillCatalogObserved { observation } => {
+            require_scope(event, false, false)?;
+            if observation.protocol_version != super::skills::SKILL_PROTOCOL {
+                return Err("unsupported Skill observation version".into());
+            }
+            if let Some(snapshot) = &observation.snapshot {
+                snapshot.validate()?;
+            }
+        }
+        Payload::SkillCatalogPublished { catalog } => {
+            require_scope(event, true, true)?;
+            validate_text(
+                &catalog.content,
+                "Skill catalog",
+                false,
+                MAX_AGENT_MESSAGE_BYTES,
+            )?;
+            super::skills::unchanged_by_redaction(catalog)?;
+        }
+        Payload::SkillStepPrepared { prepared } => {
+            require_scope(event, true, true)?;
+            prepared.validate()?;
         }
         Payload::TurnStart => require_scope(event, true, false)?,
         Payload::TurnEnd { reason } => {
@@ -2464,6 +2732,8 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             name,
             summary,
             evidence_refs,
+            status,
+            data,
             ..
         } => {
             require_scope(event, true, true)?;
@@ -2478,6 +2748,21 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             validate_collection_allow_empty(evidence_refs, "evidence refs")?;
             for evidence in evidence_refs {
                 validate_identifier(evidence, "evidenceId")?;
+            }
+            if name == super::skills::SKILL_TOOL
+                && *status == super::AgentToolResultStatus::Completed
+            {
+                let loaded: super::skills::LoadedSkill = serde_json::from_value(
+                    data.clone().ok_or("complete Skill result has no body")?,
+                )
+                .map_err(|e| format!("invalid Skill result protocol: {e}"))?;
+                loaded.validate()?;
+                if loaded.provenance.call_id.as_deref() != Some(call_id)
+                    || loaded.provenance.invocation != super::skills::SkillInvocationKind::Model
+                {
+                    return Err("Skill result invocation identity mismatch".into());
+                }
+                super::skills::unchanged_by_redaction(&loaded)?;
             }
         }
         Payload::ContextArtifact {
@@ -2708,6 +2993,15 @@ fn validate_session_title(title: &str) -> Result<(), String> {
 }
 
 fn validate_inbox_message(message: &AgentInboxMessage) -> Result<(), String> {
+    if message.images.len() > super::images::VISION.max_images {
+        return Err("IMAGE_COUNT_LIMIT".into());
+    }
+    for image in &message.images {
+        image.validate()?;
+    }
+    if !message.images.is_empty() && message.source.kind != super::AgentMessageSourceKind::User {
+        return Err("IMAGE_SOURCE_NOT_USER".into());
+    }
     validate_identifier(&message.message_id, "messageId")?;
     if let Some(client_submission_id) = message.client_submission_id.as_deref() {
         validate_identifier(client_submission_id, "clientSubmissionId")?;
@@ -2715,7 +3009,7 @@ fn validate_inbox_message(message: &AgentInboxMessage) -> Result<(), String> {
     validate_text(
         &message.content,
         "message content",
-        false,
+        !message.images.is_empty(),
         MAX_AGENT_MESSAGE_BYTES,
     )?;
     validate_text(
@@ -3268,7 +3562,7 @@ fn session_path(root: &Path, session_id: &str) -> PathBuf {
     root.join(format!("{session_id}.jsonl"))
 }
 
-fn validate_identifier(value: &str, label: &str) -> Result<(), String> {
+pub(super) fn validate_identifier(value: &str, label: &str) -> Result<(), String> {
     if value.is_empty()
         || value.len() > MAX_IDENTIFIER_BYTES
         || !value
@@ -3478,6 +3772,7 @@ mod tests {
 
     fn message(id: &str, content: &str) -> AgentInboxMessage {
         AgentInboxMessage {
+            images: Vec::new(),
             message_id: id.into(),
             client_submission_id: Some(id.into()),
             content: content.into(),

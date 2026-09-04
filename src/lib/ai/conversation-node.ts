@@ -24,6 +24,7 @@ export interface AiConversationNodeBase {
 }
 
 export interface AiUserMessageNode extends AiConversationNodeBase {
+  readonly images?: readonly import('@/types/agent-image').AgentImageRef[];
   readonly kind: 'userMessage';
   readonly messageId: string;
   readonly clientSubmissionId?: string;
@@ -44,6 +45,7 @@ export interface AiSystemPromptNode extends AiConversationNodeBase {
 }
 
 export interface AiContextInjectionNode extends AiConversationNodeBase {
+  readonly loadedSkill?: import('@/types/agent-skill').LoadedSkill;
   readonly kind: 'contextInjection';
   readonly messageId: string;
   readonly content: string;
@@ -227,6 +229,7 @@ export interface AiTurnTailNode extends AiConversationNodeBase {
 }
 
 export type AiConversationNode =
+  | AiQuestionNode
   | AiSystemPromptNode
   | AiContextInjectionNode
   | AiUserMessageNode
@@ -239,6 +242,11 @@ export type AiConversationNode =
   | AiErrorNode
   | AiTurnProcessNode
   | AiTurnTailNode;
+
+export interface AiQuestionNode extends AiConversationNodeBase {
+  readonly kind: 'question';
+  readonly question: import('@/types/agent-question').AgentQuestionView;
+}
 
 export type AiConversationNodeOf<Kind extends AiConversationNode['kind']> = Extract<
   AiConversationNode,

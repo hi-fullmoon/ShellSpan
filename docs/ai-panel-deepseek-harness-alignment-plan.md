@@ -1,11 +1,13 @@
 # ShellSpan AI Panel 向 DeepSeek Harness 对齐计划清单
 
+> 当前状态（Stage 7）：6A–6D 累计实现已安全接入 main 工作目录，保留 `1ac0c1e4` Turn 聚合与 `31ce4343` system-prompt snapshots。最终门禁、逐场景视觉更改、有效性能样本、Provider 3 PASS / 5 SKIP 和 Windows NOT RUN 见 [Stage 7 验收](ai-runtime-stage7-validation.md)。唯一现行交接入口为 [交接说明](ai-runtime-handoff.md)。未提交、暂存或推送；本页其余 Phase 0–6 计数和当时暂停状态均为历史，不作为当前总目标完成声明。
+
 > 历史状态：本页记录此前 AI Panel Phase 0–6 与当时的离线/live 验收，不代表 2026-09-04 Runtime 补齐目标全部完成。
 > 决策：一次性切换事件协议，不兼容、不迁移、不读取旧 Agent 会话  
 > 范围：Agent Runtime、会话事件、Conversation/Activity 投影、AI Panel 对话渲染与统计  
 > 参考实现：`/Users/zhengbiwen/Developer/deepseek-harness`
 
-> 当前交接：阶段 1–5 Runtime 修复已合入 main；6A 未验收 WIP 独立保存，Skills/图片/@file 与最终累计验收仍待完成。用户已要求停止本机开发。请以 [跨设备交接](ai-runtime-handoff.md) 和 [Runtime 完整范围清单](ai-runtime-harness-remediation-plan.md) 为本轮状态依据；本页历史勾选项及 live 记录不能替代新累计代码验收。
+> 历史交接：阶段 1–5 Runtime 修复已合入 main；当时暂停的 6A WIP 已由后续独立任务继续。请以 [跨设备交接](ai-runtime-handoff.md) 和 [Runtime 完整范围清单](ai-runtime-harness-remediation-plan.md) 为当前状态依据；本页历史勾选项及 live 记录不能替代新累计代码验收。
 
 ## 1. 目标结果
 

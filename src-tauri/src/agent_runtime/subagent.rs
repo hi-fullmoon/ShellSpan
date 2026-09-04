@@ -888,6 +888,7 @@ impl SubAgentManager {
             parent_entry.provider.clone(),
             Arc::clone(&parent_entry.adapter),
         )?);
+        self.agents.set_owner(&handle.entry(), &parent_entry)?;
         self.handles
             .lock()
             .map_err(|_| "subagent handle registry is unavailable".to_string())?
@@ -896,6 +897,7 @@ impl SubAgentManager {
             &child_session_id,
             AgentInboxLane::NextTurn,
             AgentInboxMessage {
+                images: Vec::new(),
                 message_id: format!("delegation-{}", Uuid::new_v4().simple()),
                 client_submission_id: None,
                 content: role_prompt(role, &goal),
@@ -929,6 +931,7 @@ impl SubAgentManager {
             child_session_id,
             AgentInboxLane::NextTurn,
             AgentInboxMessage {
+                images: Vec::new(),
                 message_id: format!("child-input-{}", Uuid::new_v4().simple()),
                 client_submission_id: None,
                 content,
@@ -968,6 +971,16 @@ impl SubAgentManager {
             adapter,
         )?);
         let entry = handle.entry();
+        let parent_id = snapshot
+            .header
+            .parent_session_id
+            .as_deref()
+            .ok_or("child owner missing")?;
+        let parent = self
+            .agents
+            .get(parent_id)?
+            .ok_or("child owner is not live")?;
+        self.agents.set_owner(&entry, &parent)?;
         self.handles
             .lock()
             .map_err(|_| "subagent handle registry is unavailable".to_string())?
@@ -1572,7 +1585,7 @@ fn default_subagent_budget() -> AgentSubagentBudget {
     }
 }
 
-fn provider_descriptor(provider: &AiProviderConfig) -> AgentSubagentModel {
+pub(super) fn provider_descriptor(provider: &AiProviderConfig) -> AgentSubagentModel {
     AgentSubagentModel {
         profile: provider.profile.clone(),
         retry_policy: provider
@@ -1592,7 +1605,7 @@ fn provider_descriptor(provider: &AiProviderConfig) -> AgentSubagentModel {
     }
 }
 
-fn provider_config(provider: &AgentSubagentModel) -> Result<AiProviderConfig, String> {
+pub(super) fn provider_config(provider: &AgentSubagentModel) -> Result<AiProviderConfig, String> {
     Ok(AiProviderConfig {
         profile: provider.profile.clone(),
         retry_policy: provider

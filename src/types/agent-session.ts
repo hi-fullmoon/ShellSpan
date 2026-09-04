@@ -57,6 +57,7 @@ export interface AgentSessionMessageSource {
 }
 
 export interface AgentSessionInboxMessage {
+  readonly images?: readonly import('./agent-image').AgentImageRef[];
   readonly messageId: string;
   readonly clientSubmissionId?: string;
   readonly content: string;
@@ -329,6 +330,11 @@ export type AgentSessionEvent =
   | AgentSessionEventWithData<'turn/end', { reason: string }>
   | AgentSessionEventWithoutData<'step/start'>
   | AgentSessionEventWithData<'step/end', { reason: string }>
+  | AgentSessionEventWithData<'step/input_claim', { startTurn: boolean; turnMessages: readonly AgentSessionInboxMessage[]; stepMessages: readonly AgentSessionInboxMessage[] }>
+  | AgentSessionEventWithData<'file_reference/scope_bound', { scope: import('./agent-skill').SkillScope }>
+  | AgentSessionEventWithData<'skill/catalog_observed', { observation: import('./agent-skill').SkillObservation }>
+  | AgentSessionEventWithData<'skill/catalog_published', { catalog: import('./agent-skill').SkillCatalogPublication }>
+  | AgentSessionEventWithData<'skill/step_prepared', { prepared: import('./agent-skill').SkillStepPrepared }>
   | AgentSessionEventWithData<'user/message', { message: AgentSessionInboxMessage }>
   | AgentSessionEventWithData<'assistant/chunk', {
       requestId: string;
@@ -412,6 +418,13 @@ export type AgentSessionEvent =
       };
     }>
   | AgentSessionEventWithData<'tool/call', { call: AgentSessionRecordedToolCall }>
+  | AgentSessionEventWithData<'question/requested', {
+    identity: import('./agent-question').QuestionIdentity;
+    arguments: { questions: readonly import('./agent-question').AgentQuestion[] };
+    provider: AgentSubagentModel;
+  }>
+  | AgentSessionEventWithData<'question/answered', { submission: import('./agent-question').AnswerQuestionInput; fingerprint: string }>
+  | AgentSessionEventWithData<'question/cancelled', { identity: import('./agent-question').QuestionIdentity }>
   | AgentSessionEventWithData<'tool/approval', {
       requestId: string;
       callId: string;
@@ -508,6 +521,7 @@ export type AgentSessionEvent =
     }>;
 
 export type AgentModelSurfaceMessage =
+  | Readonly<{ role: 'userImages'; messageId: string; content: string; source: AgentSessionMessageSource; images: readonly import('./agent-image').AgentImageRef[] }>
   | Readonly<{
       role: 'user';
       messageId: string;
@@ -888,6 +902,7 @@ export interface AgentActivityAgent {
 }
 
 export type AgentActivityNodeKind =
+  | 'question'
   | 'session'
   | 'agent'
   | 'inbox'

@@ -1,3 +1,4 @@
+import { skillContexts } from './ai/skill-projection';
 import {
   type AgentActivityAgent,
   type AgentActivityNode,
@@ -94,6 +95,7 @@ const ACTIVITY_KIND_ORDER = {
   error: 18,
   cancellation: 19,
   unknown: 20,
+  question: 21,
 } satisfies Record<AgentActivityNode['kind'], number>;
 
 type ActivityEventLike = Readonly<{
@@ -325,6 +327,11 @@ function projectActivityNodesUnchecked(
         }
         break;
       }
+      case 'skill/catalog_published':
+      case 'skill/catalog_observed':
+      case 'skill/step_prepared':
+        for (const context of skillContexts(event)) upsert(context.id, 'inbox', event, 'completed', context.source.label, context.content, { ...event.data, loadedSkill: context.loaded });
+        break;
       case 'user/message':
         upsert(
           `activity:message:${event.data.message.messageId}`,
@@ -451,6 +458,15 @@ function projectActivityNodesUnchecked(
           key, 'tool', event, 'pending', event.data.call.name,
           event.data.call.title ?? null, event.data,
         );
+        break;
+      }
+      case 'question/requested':
+      case 'question/answered':
+      case 'question/cancelled': {
+        const identity = event.type === 'question/answered' ? event.data.submission.identity : event.data.identity;
+        upsert(`activity:question:${identity.questionRequestId}`, 'question', event,
+          event.type === 'question/requested' ? 'pending' : event.type === 'question/answered' ? 'completed' : 'cancelled',
+          event.type, null, event.data, identity.requestId);
         break;
       }
       case 'tool/approval': {

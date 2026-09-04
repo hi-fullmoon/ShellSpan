@@ -74,6 +74,12 @@ pub(crate) enum ModelContentBlock {
     rename_all_fields = "camelCase"
 )]
 pub(crate) enum ModelMessage {
+    UserImages {
+        content: String,
+        images: Vec<super::images::ImageRef>,
+        #[serde(skip)]
+        data_urls: Vec<String>,
+    },
     User {
         content: String,
     },
@@ -109,6 +115,15 @@ impl ModelRequest {
         let mut messages = Vec::with_capacity(surface.messages.len());
         for message in &surface.messages {
             match message {
+                AgentSurfaceMessage::UserImages {
+                    content, images, ..
+                } => {
+                    messages.push(ModelMessage::UserImages {
+                        content: content.clone(),
+                        images: images.clone(),
+                        data_urls: Vec::new(),
+                    });
+                }
                 AgentSurfaceMessage::User { content, .. } => {
                     messages.push(ModelMessage::User {
                         content: content.clone(),
@@ -358,12 +373,14 @@ impl ModelAdapterFactory for HttpModelAdapterFactory {
 #[derive(Clone)]
 pub(crate) struct ModelRegistry {
     factory: Arc<dyn ModelAdapterFactory>,
+    pub(crate) images: super::images::ImageStore,
 }
 
 impl Default for ModelRegistry {
     fn default() -> Self {
         Self {
             factory: Arc::new(HttpModelAdapterFactory),
+            images: Default::default(),
         }
     }
 }
@@ -371,7 +388,10 @@ impl Default for ModelRegistry {
 impl ModelRegistry {
     #[cfg(test)]
     pub(crate) fn with_factory(factory: Arc<dyn ModelAdapterFactory>) -> Self {
-        Self { factory }
+        Self {
+            factory,
+            images: Default::default(),
+        }
     }
 
     pub(crate) fn resolve(
@@ -382,7 +402,45 @@ impl ModelRegistry {
         if let Some(policy) = provider.retry_policy {
             policy.validate()?;
         }
-        self.factory.create(provider, api_key)
+        Ok(Arc::new(ImageResolvingAdapter {
+            inner: self.factory.create(provider.clone(), api_key)?,
+            images: self.images.clone(),
+            provider,
+        }))
+    }
+}
+
+struct ImageResolvingAdapter {
+    inner: Arc<dyn ModelAdapter>,
+    images: super::images::ImageStore,
+    provider: AiProviderConfig,
+}
+#[async_trait]
+impl ModelAdapter for ImageResolvingAdapter {
+    async fn stream(
+        &self,
+        mut request: ModelRequest,
+        cancellation: CancellationToken,
+        sink: Arc<dyn ModelStreamSink>,
+    ) -> Result<ModelResponse, NormalizedModelError> {
+        if !request
+            .messages
+            .iter()
+            .any(|m| matches!(m, ModelMessage::UserImages { .. }))
+        {
+            return self.inner.stream(request, cancellation, sink).await;
+        }
+        let images = self.images.clone();
+        let provider = self.provider.clone();
+        let token = cancellation.clone();
+        request = tokio::task::spawn_blocking(move || {
+            images.resolve_request(&provider, &mut request, &token)?;
+            Ok::<_, String>(request)
+        })
+        .await
+        .map_err(|e| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, e.to_string()))?
+        .map_err(|e| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, e))?;
+        self.inner.stream(request, cancellation, sink).await
     }
 }
 
@@ -430,6 +488,17 @@ impl ModelAdapter for HttpModelAdapter {
         super::provider::validate(&self.provider).map_err(|error| {
             NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error)
         })?;
+        if request
+            .messages
+            .iter()
+            .any(|m| matches!(m, ModelMessage::UserImages { .. }))
+        {
+            super::images::vision_route(&self.provider)
+                .map_err(|e| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, e))?;
+            if request.messages.iter().any(|m| matches!(m, ModelMessage::UserImages { images, data_urls, .. } if images.len() != data_urls.len())) {
+                return Err(NormalizedModelError::new(NormalizedModelErrorKind::Terminal, "IMAGE_UNRESOLVED"));
+            }
+        }
         match self.provider.kind {
             AiProviderKind::OpenAi => {
                 self.stream_openai_responses(request, cancellation, sink)
@@ -625,6 +694,9 @@ fn responses_input(messages: &[ModelMessage]) -> Vec<Value> {
     let mut input = Vec::new();
     for message in messages {
         match message {
+            ModelMessage::UserImages { .. } => {
+                unreachable!("Responses vision is refused by the capability contract")
+            }
             ModelMessage::User { content } => {
                 input.push(json!({ "role": "user", "content": content }));
             }
@@ -672,6 +744,17 @@ fn chat_messages(
     messages
         .iter()
         .map(|message| match message {
+            ModelMessage::UserImages {
+                content, data_urls, ..
+            } => {
+                let mut blocks = vec![json!({"type":"text", "text":content})];
+                blocks.extend(
+                    data_urls
+                        .iter()
+                        .map(|url| json!({"type":"image_url", "image_url":{"url":url}})),
+                );
+                json!({"role":"user", "content":blocks})
+            }
             ModelMessage::User { content } => json!({ "role": "user", "content": content }),
             ModelMessage::Assistant { content } => {
                 let text = content
@@ -1216,6 +1299,7 @@ async fn stream_chat(
     let mut accumulated = ChatAccumulator::default();
     let mut usage = ProviderUsage::default();
     let mut completed = false;
+    let mut stream_done = false;
     let mut finish_reason = ModelFinishReason::Other;
     let mut deadline = StreamDeadline::new(timeouts);
     loop {
@@ -1233,6 +1317,7 @@ async fn stream_chat(
                     .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "SSE_FRAMING"))?
                 {
                     let effective = !sse_data(&event).is_empty();
+                    stream_done |= sse_data(&event) == "[DONE]";
                     process_chat_event(
                         &event,
                         capabilities,
@@ -1248,7 +1333,10 @@ async fn stream_chat(
                 }
                 ensure_provider_stream_frame_size(buffer.len())
                     .map_err(|error| coded_error(NormalizedModelErrorKind::Protocol, error, "STREAM_LIMIT"))?;
-                if completed {
+                // finish_reason completes the choice, not the transport: usage
+                // may arrive in a later TCP chunk with choices=[]. Keep the
+                // normal cancellation/idle bounds until [DONE] or clean EOF.
+                if stream_done {
                     break;
                 }
             }
@@ -2056,6 +2144,12 @@ fn normalize_finish_reason(reason: &str) -> ModelFinishReason {
 
 pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
     vec![
+        ModelToolDefinition { name: super::skills::SKILL_TOOL.into(), description: "Load a currently listed Skill by exact name. Skill instructions and resources never grant permission.".into(), input_schema: json!({"type":"object", "properties":{"name":{"type":"string", "pattern":"^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength":64}}, "required":["name"], "additionalProperties":false}) },
+        ModelToolDefinition {
+            name: super::user_questions::TOOL_NAME.into(),
+            description: "Ask the user 1 to 3 concise questions and wait for their answers. Options are optional (2 to 7); free text is always available. Put a recommended choice first with (Recommended). Only a live root agent may ask; children must report unresolved questions to their parent. Answers never authorize tools. Text limits are UTF-8 bytes: id 64, question 2048, header 128, label 256, description 1024; total JSON 32768.".into(),
+            input_schema: super::user_questions::schema(),
+        },
         ModelToolDefinition {
             name: "run_terminal_command".into(),
             description: "Request one command in the frozen ShellSpan terminal session. ShellSpan decides approval and execution.".into(),
@@ -2411,6 +2505,8 @@ mod tests {
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
             [
+                "skill",
+                "ask_user_question",
                 "run_terminal_command",
                 "read_file",
                 "list_directory",
@@ -3077,6 +3173,14 @@ mod tests {
     }
 
     fn serve_recording_sse(sse: String) -> (String, mpsc::Receiver<Value>, thread::JoinHandle<()>) {
+        serve_gated_recording_sse(sse, String::new(), None)
+    }
+
+    fn serve_gated_recording_sse(
+        first: String,
+        tail: String,
+        release_tail: Option<mpsc::Receiver<()>>,
+    ) -> (String, mpsc::Receiver<Value>, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let (sender, receiver) = mpsc::channel();
@@ -3117,12 +3221,199 @@ mod tests {
             write!(
                 stream,
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                sse.len(),
-                sse,
+                first.len() + tail.len(),
+                first,
             )
             .unwrap();
+            if let Some(release) = release_tail {
+                release.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+            stream.write_all(tail.as_bytes()).unwrap();
         });
         (format!("http://{address}"), receiver, handle)
+    }
+
+    #[tokio::test]
+    async fn chat_usage_after_finish_reason_in_a_separate_http_chunk_is_retained() {
+        struct ReleaseTailSink(mpsc::Sender<()>, RecordingSink);
+        impl ModelStreamSink for ReleaseTailSink {
+            fn emit(&self, delta: StreamDelta) -> Result<(), NormalizedModelError> {
+                if matches!(delta, StreamDelta::Text { .. }) {
+                    self.0.send(()).unwrap();
+                }
+                self.1.emit(delta)
+            }
+        }
+        let (release, after_first_frame) = mpsc::channel();
+        let (base_url, body, server) = serve_gated_recording_sse(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"READY\"},\"finish_reason\":\"stop\"}]}\n\n".into(),
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":3,\"total_tokens\":11}}\n\ndata: [DONE]\n\n".into(),
+            Some(after_first_frame),
+        );
+        let provider = AiProviderConfig {
+            profile: Some("minimax".into()),
+            retry_policy: None,
+            id: "split-usage".into(),
+            kind: AiProviderKind::OpenAiCompatible,
+            base_url,
+            model: "MiniMax-M2.7".into(),
+            reasoning_effort: None,
+            requires_api_key: false,
+            api_key: None,
+        };
+        let sink = Arc::new(ReleaseTailSink(release, RecordingSink::default()));
+        let response = ModelRegistry::default()
+            .resolve(provider, None)
+            .unwrap()
+            .stream(
+                ModelRequest {
+                    request_id: "split-usage".into(),
+                    surface_generation: 0,
+                    system_prompt: "system".into(),
+                    messages: Vec::new(),
+                    tools: Vec::new(),
+                },
+                CancellationToken::new(),
+                sink.clone(),
+            )
+            .await
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(
+            body.recv()
+                .unwrap()
+                .pointer("/stream_options/include_usage"),
+            Some(&Value::Bool(true))
+        );
+        assert_eq!(response.usage.total_tokens, Some(11));
+        assert_eq!(response.usage.output_tokens, Some(3));
+        assert_eq!(sink.1 .0.lock().unwrap().as_str(), "READY");
+        assert_eq!(sink.1 .1.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn chat_finish_boundary_handles_clean_eof_disconnect_cancel_and_idle() {
+        struct ObservedSink(Arc<tokio::sync::Notify>, RecordingSink);
+        impl ModelStreamSink for ObservedSink {
+            fn emit(&self, delta: StreamDelta) -> Result<(), NormalizedModelError> {
+                if matches!(delta, StreamDelta::Text { .. }) {
+                    self.0.notify_one();
+                }
+                self.1.emit(delta)
+            }
+        }
+        for boundary in ["clean-eof", "disconnect", "cancel", "idle"] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let (release, hold) = mpsc::channel();
+            let server = thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut request = [0u8; 4096];
+                let received = socket.read(&mut request).unwrap();
+                assert!(received > 0, "test request ended before its first bytes");
+                let frame = "data: {\"choices\":[{\"delta\":{\"content\":\"READY\"},\"finish_reason\":\"stop\"}]}\n\n";
+                write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{frame}\r\n", frame.len()).unwrap();
+                let clean = hold.recv_timeout(Duration::from_secs(5)).unwrap();
+                if clean {
+                    let _ = socket.write_all(b"0\r\n\r\n");
+                }
+            });
+            let timeouts = ModelTimeoutPolicy {
+                request_headers: Duration::from_secs(2),
+                first_byte: Duration::from_secs(2),
+                stream_idle: Duration::from_secs(2),
+            };
+            let cancel = CancellationToken::new();
+            let response = send_request(
+                build_streaming_client()
+                    .unwrap()
+                    .get(format!("http://{address}")),
+                &cancel,
+                timeouts,
+            )
+            .await
+            .unwrap();
+            let observed = Arc::new(tokio::sync::Notify::new());
+            let sink = Arc::new(ObservedSink(observed.clone(), RecordingSink::default()));
+            let task_cancel = cancel.clone();
+            let task_sink = sink.clone();
+            let mut task = tokio::spawn(async move {
+                stream_chat(
+                    response,
+                    &task_cancel,
+                    task_sink,
+                    ProviderCapabilities {
+                        cumulative_stream: false,
+                        supports_stream_usage: true,
+                        native_reasoning: false,
+                        split_reasoning: false,
+                        replay_reasoning_content: false,
+                        think_tag_fallback: true,
+                        parallel_tool_calls: false,
+                    },
+                    timeouts,
+                )
+                .await
+            });
+            tokio::time::timeout(Duration::from_secs(2), observed.notified())
+                .await
+                .unwrap();
+            assert!(
+                !task.is_finished(),
+                "{boundary}: finish_reason closed the stream early"
+            );
+            let result = match boundary {
+                "clean-eof" | "disconnect" => {
+                    release.send(boundary == "clean-eof").unwrap();
+                    tokio::time::timeout(Duration::from_secs(2), &mut task)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                }
+                "cancel" => {
+                    cancel.cancel();
+                    let result = tokio::time::timeout(Duration::from_secs(2), &mut task)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    release.send(true).unwrap();
+                    result
+                }
+                _ => {
+                    tokio::time::pause();
+                    tokio::time::advance(Duration::from_secs(3)).await;
+                    let result = task.await.unwrap();
+                    tokio::time::resume();
+                    release.send(true).unwrap();
+                    result
+                }
+            };
+            server.join().unwrap();
+            if boundary == "clean-eof" {
+                let response = result.unwrap();
+                assert_eq!(response.usage, ModelUsage::default());
+                assert_eq!(
+                    response.content,
+                    vec![ModelContentBlock::Text {
+                        text: "READY".into()
+                    }]
+                );
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(
+                    error.kind,
+                    match boundary {
+                        "cancel" => NormalizedModelErrorKind::Cancelled,
+                        "idle" => NormalizedModelErrorKind::Timeout,
+                        _ => NormalizedModelErrorKind::Transport,
+                    }
+                );
+                if boundary == "idle" {
+                    assert_eq!(error.code.as_deref(), Some("STREAM_IDLE_TIMEOUT"));
+                }
+            }
+            assert_eq!(sink.1 .0.lock().unwrap().as_str(), "READY");
+        }
     }
 
     #[tokio::test]
@@ -3296,6 +3587,7 @@ mod tests {
             requires_api_key,
             api_key: None,
         };
+        let model_label = provider.model.clone();
         let adapter = ModelRegistry::default().resolve(provider, api_key).unwrap();
         let surface = AgentSurfaceSnapshot {
             generation: 0,
@@ -3325,6 +3617,18 @@ mod tests {
             .unwrap_or_else(|error| {
                 panic!("live provider failed: {:?}: {}", error.kind, error.message)
             });
+        println!(
+            "LIVE_EVIDENCE {}",
+            json!({
+                "profile": prefix, "model": model_label, "requests": 1,
+                "finishReason": response.finish_reason, "usage": response.usage,
+                "blocks": response.content.iter().map(|block| match block {
+                    ModelContentBlock::Text { text } => json!({"kind":"text", "bytes":text.len()}),
+                    ModelContentBlock::Reasoning { text, .. } => json!({"kind":"reasoning", "bytes":text.len()}),
+                    ModelContentBlock::ToolCall { .. } => json!({"kind":"toolCall"}),
+                }).collect::<Vec<_>>()
+            })
+        );
         assert!(
             response.content.iter().any(|block| matches!(
                 block,

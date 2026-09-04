@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -36,6 +36,7 @@ function adapter(changes: Partial<AiSessionControllerAdapter> = {}): AiSessionCo
     stop: vi.fn(async () => undefined),
     approve: vi.fn(async () => undefined),
     reject: vi.fn(async () => undefined),
+    answerQuestion: vi.fn(async () => undefined),
     archive: vi.fn(async () => undefined),
     mutateInbox: vi.fn(async () => undefined),
     rename: vi.fn(async () => undefined),
@@ -343,4 +344,132 @@ describe('AiWorkspaceController', () => {
     await waitFor(() => expect(agent.stop).toHaveBeenCalledWith(view.summary.id));
     expect(await screen.findByText('Network disconnected while stopping')).toBeVisible();
   });
+});
+
+describe('Stage 6B cold Session Skills consumer', () => {
+  it.each(['draft', 'root', 'newSession'] as const)('ignores late initial history after user intent: %s', async intent => {
+    connectedTerminal();
+    let release!: (value: { sessions: AiSessionView['summary'][] }) => void;
+    const cold = { ...runningAgentView(), status: 'idle' as const };
+    const agent = adapter({
+      list: vi.fn(() => new Promise<{ sessions: AiSessionView['summary'][] }>(resolve => { release = resolve; })),
+      open: vi.fn(async () => cold),
+      create: vi.fn(async () => cold),
+      listSkills: vi.fn(async () => ({ sessionId: cold.summary.id, status: 'fresh' as const, revision: null, entries: [], diagnostics: [] })),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    await waitFor(() => expect(agent.list).toHaveBeenCalledOnce());
+    await act(async () => {
+      if (intent === 'root') await result.current.listSkills('/chosen');
+      else if (intent === 'newSession') result.current.newSession();
+      else result.current.setDraft('keep my draft');
+    });
+    await act(async () => { release({ sessions: [cold.summary] }); });
+    expect(result.current.view).toBeNull();
+    expect(agent.open).not.toHaveBeenCalled();
+    expect(agent.subscribe).not.toHaveBeenCalled();
+    if (intent === 'draft') expect(result.current.composer.draft).toBe('keep my draft');
+    if (intent === 'root') expect(result.current.projectTargetLabel).toContain('/chosen');
+  });
+
+  it('ignores a late automatic open but retains explicitly opened session subscriptions', async () => {
+    connectedTerminal();
+    let release!: (value: AiSessionView) => void;
+    let publish!: (value: AiSessionView) => void;
+    const view = runningAgentView();
+    const agent = adapter({
+      list: vi.fn(async () => ({ sessions: [view.summary] })),
+      open: vi.fn().mockImplementationOnce(() => new Promise(resolve => { release = resolve; })).mockResolvedValue(view),
+      subscribe: vi.fn((_id, callback) => { publish = callback; return () => undefined; }),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    await waitFor(() => expect(agent.open).toHaveBeenCalledOnce());
+    act(() => result.current.newSession());
+    await act(async () => { release(view); publish(view); });
+    expect(result.current.view).toBeNull();
+    act(() => result.current.openSession(view.summary));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
+    act(() => { result.current.setDraft('next input'); publish({ ...view, throughSeq: 99 }); });
+    expect(result.current.view?.throughSeq).toBe(99);
+    expect(result.current.composer.draft).toBe('next input');
+  });
+
+  it('new conversation revokes even an already-established automatic subscription', async () => {
+    connectedTerminal();
+    const view = runningAgentView();
+    const unsubscribe = vi.fn();
+    let publish!: (value: AiSessionView) => void;
+    const agent = adapter({ list: vi.fn(async () => ({ sessions: [view.summary] })), open: vi.fn(async () => view),
+      subscribe: vi.fn((_id, callback) => { publish = callback; callback(view); return unsubscribe; }) });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    await waitFor(() => expect(result.current.view).not.toBeNull());
+    act(() => result.current.newSession());
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    act(() => publish({ ...view, throughSeq: 99 }));
+    expect(result.current.view).toBeNull();
+    expect(result.current.composer.sessionId).toBeNull();
+  });
+
+  it('freezes a cold Session, lists before model start, and submits the selected slash through the same Inbox route', async () => {
+    connectedTerminal();
+    const cold = { ...runningAgentView(), status: 'idle' as const, summary: { ...runningAgentView().summary, status: 'idle' as const } };
+    const agent = adapter({ create: vi.fn(async () => cold), listSkills: vi.fn(async () => ({ sessionId: cold.summary.id, status: 'fresh' as const, revision: 'r', diagnostics: [], entries: [{ name: 'inspect', description: 'Inspect the target', modelInvocable: false, userInvocable: true, relativePath: '.agents/skills/inspect.md', resourceBase: '.agents/skills', fileHash: 'a', instructionHash: 'b', extensions: {} }] })), submit: vi.fn(async (sessionId, input) => ({ sessionId: sessionId!, mode: input.mode, clientOperationId: input.clientOperationId })) });
+    const user=userEvent.setup();render(<AiWorkspaceController scope="terminal" adapter={agent}/>);
+    await user.click(screen.getByRole('button',{name:'Skills'}));expect(agent.create).not.toHaveBeenCalled();await user.type(screen.getByRole('textbox',{name:'Project directory'}),'/project');await user.click(screen.getByRole('button',{name:'Load skills'}));await waitFor(()=>expect(agent.create).toHaveBeenCalled());await waitFor(()=>expect(agent.listSkills).toHaveBeenCalled());await screen.findByText('User only');expect(agent.create).toHaveBeenCalledWith(expect.objectContaining({request:expect.objectContaining({target:expect.objectContaining({kind:'remote',rootPath:'/project'})})}));expect(agent.create).toHaveBeenCalledTimes(1);expect(agent.submit).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('menuitem',{name:/inspect/}));expect(screen.getByRole('textbox')).toHaveValue('/inspect ');
+    await user.click(screen.getByRole('textbox'));await user.keyboard('{Enter}');await waitFor(()=>expect(agent.submit).toHaveBeenCalledWith(cold.summary.id,expect.objectContaining({content:'/inspect ',mode:'start'})));
+    expect(agent.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+it('keeps a new target directory when an old cold Session creation fails late', async () => {
+  connectedTerminal();
+  let rejectOld!: (error: Error) => void;
+  let resolveNew!: (view: AiSessionView) => void;
+  const create = vi.fn().mockImplementationOnce(() => new Promise<AiSessionView>((_resolve, reject) => { rejectOld = reject; }))
+    .mockImplementationOnce(() => new Promise<AiSessionView>((resolve) => { resolveNew = resolve; }));
+  const agent = adapter({ create, listSkills: vi.fn(async () => ({ sessionId: 'new', revision: null, status: 'fresh' as const, entries: [], diagnostics: [] })) });
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+  let old!: Promise<unknown>;
+  act(() => { old = result.current.listSkills('/old').catch(() => undefined); });
+  act(() => { useTerminalStore.setState({ activeSessionId: 'terminal-new', sessions: [{ sessionId: 'terminal-new', title: 'New target', host: 'new.example', port: 22, username: 'tester', status: 'connected' }] }); });
+  let next!: Promise<unknown>;
+  act(() => { next = result.current.listSkills('/new'); });
+  await act(async () => { rejectOld(new Error('old target failed')); await old; });
+  expect(result.current.skillsNeedsRoot).toBe(false);
+  const cold = { ...runningAgentView(), summary: { ...runningAgentView().summary, id: 'new' } };
+  await act(async () => { resolveNew(cold); await next; });
+  expect(agent.listSkills).toHaveBeenCalledWith('new');
+});
+
+it('shares an explicitly frozen cold Session between paths and Skills and never guesses a root', async () => {
+  connectedTerminal();
+  const cold = runningAgentView();
+  const paths = { entries: [], scope: null, status: 'ready' as const, code: null, excluded: 0 };
+  const agent = adapter({ create: vi.fn(async()=>cold), listFileReferences: vi.fn(async()=>paths), listSkills: vi.fn(async()=>({sessionId:cold.summary.id,status:'fresh' as const,revision:null,entries:[],diagnostics:[]})) });
+  const {result}=renderHook(()=>useAiSessionController({scope:'terminal',adapter:agent}));
+  await expect(result.current.listFileReferences('',new AbortController().signal)).rejects.toThrow();
+  expect(agent.create).not.toHaveBeenCalled();
+  await act(async()=>{await result.current.listFileReferences('',new AbortController().signal,'/chosen');});
+  await act(async()=>{await result.current.listSkills();});
+  expect(agent.create).toHaveBeenCalledTimes(1);
+  expect(agent.create).toHaveBeenCalledWith(expect.objectContaining({request:expect.objectContaining({target:expect.objectContaining({rootPath:'/chosen',kind:'remote'})})}));
+  expect(agent.listSkills).toHaveBeenCalledWith(cold.summary.id);
+  expect(agent.listFileReferences).toHaveBeenCalledWith(cold.summary.id,'',expect.any(AbortSignal));
+});
+
+it('drops a delayed file result after navigation A to B to A without clearing the new target', async () => {
+  connectedTerminal();let resolveOld!: (value:import('@/types/agent-file-reference').FileReferenceList)=>void;
+  const paths={entries:[],scope:null,status:'ready' as const,code:null,excluded:0};
+  const agent=adapter({create:vi.fn(async()=>runningAgentView()),listFileReferences:vi.fn().mockImplementationOnce(()=>new Promise(r=>{resolveOld=r;})).mockResolvedValue(paths)});
+  const {result}=renderHook(()=>useAiSessionController({scope:'terminal',adapter:agent}));
+  let old!:Promise<unknown>;
+  await act(async()=>{old=result.current.listFileReferences('old',new AbortController().signal,'/A').catch(e=>String(e));await Promise.resolve();});
+  await waitFor(()=>expect(agent.listFileReferences).toHaveBeenCalledTimes(1));
+  act(()=>useTerminalStore.setState({activeSessionId:'B',sessions:[{sessionId:'B',title:'B',host:'b.test',port:22,username:'tester',status:'connected'}]}));
+  act(()=>connectedTerminal());
+  await act(async()=>{await result.current.listFileReferences('new',new AbortController().signal,'/new-A');});
+  await act(async()=>resolveOld(paths));
+  expect(await old).toContain('AbortError');expect(result.current.projectTargetLabel).toContain('/new-A');
 });

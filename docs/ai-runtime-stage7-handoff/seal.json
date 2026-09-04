@@ -1,0 +1,28 @@
+{
+  "generatedAt": "2026-09-04T05:41:51.713Z",
+  "inventory": {
+    "path": "docs/ai-runtime-stage7-handoff/inventory.json",
+    "sha256": "6ff5550ef3ae9577f2123d78a943dd600860715156cf9313255db1b8a0c285b9"
+  },
+  "reconstruction": {
+    "path": "docs/ai-runtime-stage7-handoff/reconstruction.json",
+    "sha256": "062b379fabaa1c07d8b6a42c97d942c018005648b645ac437ec7be342fa64bc6"
+  },
+  "artifacts": [
+    {
+      "path": "docs/ai-runtime-stage7-handoff/stage7-tracked.patch",
+      "sha256": "e8ee9fd9c60330180a6d6485b5e80efce2d02505a5413f8fcce3be6d5c0df9a9"
+    },
+    {
+      "path": "docs/ai-runtime-stage7-handoff/cumulative-tracked.patch",
+      "sha256": "b321b865b1ed40d6118185e445632104da722912da4b04fd6b72961a2d686481"
+    },
+    {
+      "path": "docs/ai-runtime-stage7-handoff/user-preserved.patch",
+      "sha256": "8810cfccfe2900435df7c42cc8501145a3ed6a1443d029ba49f34d798766354e"
+    }
+  ],
+  "sourceFiles": 176,
+  "untrackedProductFiles": 78,
+  "historicalMetadataFiles": 14
+}

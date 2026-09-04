@@ -236,9 +236,9 @@
       "coverageReason": "Protect the full prepended history layout and stable two-turn ordering.",
       "screenshot": "docs/ai-panel-phase5/evidence/screenshots/pagination-560-light-completed-1x.png",
       "semantic": "docs/ai-panel-phase5/evidence/semantic/pagination-560-light-completed-1x.json",
-      "screenshotSha256": "ea5d57d2d5532d1c17302881fbd530e573f49a8da2bc7fbab76b9b06a1dd91a2",
-      "semanticSha256": "412c4fa5e70ed977845474884ba9e1d166d47d79817adbb19d200b9b5392e88e",
-      "lastUpdatedReason": "Add Phase 6 acceptance coverage for prepended paginated history."
+      "screenshotSha256": "c7cc2d9a74730fd15b900f81089b17f03ad413937f537fda37d305f2da7e66d1",
+      "semanticSha256": "8ff9baf0973b26adba36d585c794623f3f16a066fa0a2e4292b43c94c97aebd8",
+      "lastUpdatedReason": "Stage 7: preserve main 31ce4343 system-prompt snapshot deduplication. Pagination now shows one unchanged prompt instead of a duplicate second prompt; the second turn moves up by the removed marker. All other 17 scenes match unchanged. Before/after retained in Stage 7 visual evidence."
     },
     {
       "id": "compaction-400-light-completed-1x",

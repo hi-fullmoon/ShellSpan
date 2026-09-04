@@ -35,6 +35,7 @@ import type {
 import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
 import { AiToolRow } from './ai-tool-presentation';
+import { AiQuestionHistory } from './ai-question-panel';
 
 type AiConversationNodeRendererProps<Kind extends AiConversationNode['kind']> = {
   readonly node: AiConversationNodeOf<Kind>;
@@ -135,7 +136,9 @@ function ContextInjectionRow({
   const { t } = useI18n();
   return (
     <SemanticNoteDisclosure
-      body={node.content}
+      body={node.loadedSkill
+        ? `${t('ai.workspace.skills.instructions')}\n${node.loadedSkill.instructions}\n\n${t('ai.workspace.skills.source')}\n${JSON.stringify(node.loadedSkill.provenance, null, 2)}\nrenderedHash: ${node.loadedSkill.renderedHash}`
+        : node.content}
       icon={<FileInputIcon />}
       label={t(contextLabelKey(node.provenance.kind))}
       summary={node.provenance.label}
@@ -143,12 +146,15 @@ function ContextInjectionRow({
   );
 }
 
+import { AiCommittedImages } from './ai-image-attachments';
+
 function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'userMessage'> }) {
   const { t } = useI18n();
   return (
     <Message role="user">
       <Bubble role="user">
         <span className="ai-user-message-text">{node.content}</span>
+        <AiCommittedImages sessionId={node.sessionId} images={node.images} />
         {node.delivery !== 'committed' && (
           <span className="ai-user-delivery" data-state={node.delivery}>
             {node.delivery === 'failed'
@@ -622,6 +628,7 @@ export const aiConversationNodeRenderers = {
   assistantMessage: AssistantMessageNodeView,
   reasoning: ReasoningNodeView,
   tool: ToolNodeView,
+  question: ({ node }) => <AiQuestionHistory question={node.question} />,
   artifact: ArtifactNodeView,
   approvalMarker: ApprovalMarkerNodeView,
   retry: RetryNodeView,
@@ -647,6 +654,7 @@ function renderNode(
     case 'assistantMessage': return React.createElement(renderers.assistantMessage, { node });
     case 'reasoning': return React.createElement(renderers.reasoning, { node });
     case 'tool': return React.createElement(renderers.tool, { node, onOpenTool });
+    case 'question': return React.createElement(renderers.question, { node });
     case 'artifact': return React.createElement(renderers.artifact, { node, onOpenArtifact });
     case 'approvalMarker': return React.createElement(renderers.approvalMarker, { node });
     case 'retry': return React.createElement(renderers.retry, { node });
@@ -668,6 +676,7 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
     case 'assistantMessage': return `${base}:${node.state}:${JSON.stringify(node.blocks)}`;
     case 'reasoning': return `${base}:${node.state}:${node.summary}:${node.content}`;
     case 'tool': return `${base}:${node.state}:${node.durationMs ?? ''}:${node.error ?? ''}`;
+    case 'question': return `${base}:${node.question.status}:${node.lastSeq}`;
     case 'artifact': return `${base}:${node.sha256}:${node.sizeBytes ?? ''}`;
     case 'approvalMarker': return `${base}:${node.status}:${node.prompt ?? ''}`;
     case 'retry': return `${base}:${node.attempt}:${node.reason}`;

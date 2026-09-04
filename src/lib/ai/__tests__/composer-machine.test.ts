@@ -54,10 +54,10 @@ describe('reduceAiComposer', () => {
     expect(result.state).toEqual(expect.objectContaining({
       phase: 'submitting',
       draft: '',
-      detached: expect.objectContaining({ content: 'Queue this', mode: 'nextTurn' }),
+      detached: expect.objectContaining({ content: '  Queue this  ', mode: 'nextTurn' }),
     }));
     expect(result.effects).toEqual([
-      { type: 'submit', payload: expect.objectContaining({ clientOperationId: 'operation-1', content: 'Queue this', mode: 'nextTurn' }) },
+      { type: 'submit', payload: expect.objectContaining({ clientOperationId: 'operation-1', content: '  Queue this  ', mode: 'nextTurn' }) },
       { type: 'focusEditor' },
     ]);
   });

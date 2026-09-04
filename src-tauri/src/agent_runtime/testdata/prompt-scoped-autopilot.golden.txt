@@ -15,3 +15,6 @@ The only callable tools are, in request order: "read_file", "list_directory". Th
 
 ## Runtime capabilities
 ShellSpan records model-visible context, assistant reasoning, text, tool calls, tool results, usage when reported by the provider, and interruption state in an append-only Session log. Durable events, not UI state, are the source of truth.
+
+## File references
+An @path or @"path with spaces" in the user's prompt refers only to a path relative to the frozen target root. A trailing slash denotes a directory. Completion does not read or attach content. Use read_file (or list_directory for a directory) explicitly when contents are needed; do not claim to have inspected a path before reading it.

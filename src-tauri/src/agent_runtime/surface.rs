@@ -12,6 +12,12 @@ use super::{
     rename_all_fields = "camelCase"
 )]
 pub(crate) enum AgentSurfaceMessage {
+    UserImages {
+        message_id: String,
+        content: String,
+        source: AgentMessageSource,
+        images: Vec<super::images::ImageRef>,
+    },
     User {
         message_id: String,
         content: String,
@@ -124,6 +130,26 @@ pub(crate) fn derive_surface(events: &[AgentSessionEvent]) -> Result<AgentSurfac
     let mut messages = Vec::new();
     if let (Some(through), Some(summary)) = (replaced_through_seq, replacement) {
         messages.push(summary);
+        // Summaries cannot stand in for pixels. Retain the immutable image inputs across
+        // compaction; request budgets may explicitly refuse a history with too many images.
+        messages.extend(
+            events
+                .iter()
+                .filter(|event| event.seq <= through)
+                .filter_map(|event| {
+                    if let AgentSessionEventPayload::UserMessage { message } = &event.payload {
+                        if !message.images.is_empty() {
+                            return Some(AgentSurfaceMessage::UserImages {
+                                message_id: message.message_id.clone(),
+                                content: "Image retained from compacted history".into(),
+                                source: message.source.clone(),
+                                images: message.images.clone(),
+                            });
+                        }
+                    }
+                    None
+                }),
+        );
         append_surface_events(
             events.iter().filter(|event| event.seq > through),
             &mut messages,
@@ -159,11 +185,72 @@ fn append_surface_events<'a>(
 ) {
     for event in events {
         match &event.payload {
-            AgentSessionEventPayload::UserMessage { message } => {
+            AgentSessionEventPayload::SkillCatalogPublished { catalog } => {
+                let mut source = AgentMessageSource::runtime("Skills catalog".into());
+                source.kind = super::AgentMessageSourceKind::SkillCatalog;
+                source.producer_id = "shellspan.skills.v1".into();
+                source
+                    .metadata
+                    .insert("digest".into(), catalog.model_catalog_digest.clone().into());
                 messages.push(AgentSurfaceMessage::User {
-                    message_id: message.message_id.clone(),
-                    content: message.content.clone(),
-                    source: message.source.clone(),
+                    message_id: format!("skills-catalog-{}", event.seq),
+                    content: catalog.content.clone(),
+                    source,
+                });
+            }
+            AgentSessionEventPayload::SkillStepPrepared { prepared } => {
+                if let Some(catalog) = &prepared.catalog {
+                    let mut source = AgentMessageSource::runtime("Skills catalog".into());
+                    source.kind = super::AgentMessageSourceKind::SkillCatalog;
+                    source.producer_id = "shellspan.skills.v1".into();
+                    source
+                        .metadata
+                        .insert("digest".into(), catalog.model_catalog_digest.clone().into());
+                    source.metadata.insert(
+                        "scope".into(),
+                        serde_json::to_value(&catalog.scope).unwrap_or_default(),
+                    );
+                    messages.push(AgentSurfaceMessage::User {
+                        message_id: format!("skills-catalog-{}", event.seq),
+                        content: catalog.content.clone(),
+                        source,
+                    });
+                }
+                for outcome in &prepared.outcomes {
+                    if let Some(loaded) = &outcome.loaded {
+                        let mut source =
+                            AgentMessageSource::runtime(format!("Skill /{}", loaded.name));
+                        source.kind = super::AgentMessageSourceKind::SkillInvocation;
+                        source.producer_id = "shellspan.skills.v1".into();
+                        source.metadata.insert(
+                            "provenance".into(),
+                            serde_json::to_value(&loaded.provenance).unwrap_or_default(),
+                        );
+                        source
+                            .metadata
+                            .insert("renderedHash".into(), loaded.rendered_hash.clone().into());
+                        messages.push(AgentSurfaceMessage::User {
+                            message_id: format!("skills-invocation-{}-{}", event.seq, loaded.name),
+                            content: loaded.rendered.clone(),
+                            source,
+                        });
+                    }
+                }
+            }
+            AgentSessionEventPayload::UserMessage { message } => {
+                messages.push(if message.images.is_empty() {
+                    AgentSurfaceMessage::User {
+                        message_id: message.message_id.clone(),
+                        content: message.content.clone(),
+                        source: message.source.clone(),
+                    }
+                } else {
+                    AgentSurfaceMessage::UserImages {
+                        message_id: message.message_id.clone(),
+                        content: message.content.clone(),
+                        source: message.source.clone(),
+                        images: message.images.clone(),
+                    }
                 });
             }
             AgentSessionEventPayload::AssistantMessage {
@@ -187,7 +274,21 @@ fn append_surface_events<'a>(
                 call_id: call_id.clone(),
                 name: name.clone(),
                 status: *status,
-                content: tool_result_content(*status, summary, data.as_ref()),
+                content: if name == super::skills::SKILL_TOOL
+                    && *status == AgentToolResultStatus::Completed
+                {
+                    data.clone()
+                        .and_then(|d| serde_json::from_value::<super::skills::LoadedSkill>(d).ok())
+                        .filter(|l| l.validate().is_ok())
+                        .map(|l| l.rendered)
+                        .unwrap_or_else(|| "invalid complete Skill result".into())
+                } else if name == super::user_questions::TOOL_NAME
+                    && *status == AgentToolResultStatus::Completed
+                {
+                    serde_json::to_string(data).unwrap_or_default()
+                } else {
+                    tool_result_content(*status, summary, data.as_ref())
+                },
             }),
             _ => {}
         }
@@ -222,6 +323,7 @@ mod tests {
     fn user(id: &str, content: &str) -> AgentSessionEventPayload {
         AgentSessionEventPayload::UserMessage {
             message: AgentInboxMessage {
+                images: Vec::new(),
                 message_id: id.into(),
                 client_submission_id: None,
                 content: content.into(),

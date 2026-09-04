@@ -18,6 +18,7 @@ pub(crate) struct ModelContextInjection {
 impl ModelContextInjection {
     pub(crate) fn into_message(self, message_id: String) -> AgentInboxMessage {
         AgentInboxMessage {
+            images: Vec::new(),
             message_id,
             client_submission_id: None,
             content: self.content,
@@ -48,6 +49,9 @@ pub(crate) fn assemble_model_input(
         ("Structured tools", tools_prompt(&tools)),
         ("Runtime capabilities", runtime_capabilities_prompt(header)),
     ];
+    if tools.iter().any(|t| t.name == "read_file") {
+        sections.push(("File references", "An @path or @\"path with spaces\" in the user's prompt refers only to a path relative to the frozen target root. A trailing slash denotes a directory. Completion does not read or attach content. Use read_file (or list_directory for a directory) explicitly when contents are needed; do not claim to have inspected a path before reading it.".into()));
+    }
     let system_prompt = sections
         .drain(..)
         .map(|(title, content)| format!("## {title}\n{content}"))
@@ -244,6 +248,18 @@ mod tests {
             normalize_line_endings(include_str!("testdata/prompt-scoped-autopilot.golden.txt"));
         assert_eq!(first, second);
         assert_eq!(first.system_prompt, golden.trim_end_matches('\n'));
+    }
+
+    #[test]
+    fn prompt_golden_crlf_checkout_matches_the_current_full_prompt() {
+        let golden =
+            normalize_line_endings(include_str!("testdata/prompt-scoped-autopilot.golden.txt"));
+        let crlf_checkout = golden.replace('\n', "\r\n");
+        assert!(crlf_checkout.contains("\r\n"));
+        assert_eq!(
+            assemble_model_input(&header(), tools()).system_prompt,
+            normalize_line_endings(&crlf_checkout).trim_end_matches('\n')
+        );
     }
 
     #[test]

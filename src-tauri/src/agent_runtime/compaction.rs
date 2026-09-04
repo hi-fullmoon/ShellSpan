@@ -1949,6 +1949,7 @@ mod tests {
                 Some("step-old"),
                 AgentSessionEventPayload::UserMessage {
                     message: AgentInboxMessage {
+                        images: Vec::new(),
                         message_id: "message-old".into(),
                         client_submission_id: None,
                         content: "old context ".repeat(2_000),
@@ -1992,6 +1993,7 @@ mod tests {
                 Some(step_id.as_str()),
                 AgentSessionEventPayload::UserMessage {
                     message: AgentInboxMessage {
+                        images: Vec::new(),
                         message_id: format!("message-{turn_id}"),
                         client_submission_id: None,
                         content: content.into(),
@@ -2057,6 +2059,7 @@ mod tests {
                 Some("step-a"),
                 AgentSessionEventPayload::UserMessage {
                     message: AgentInboxMessage {
+                        images: Vec::new(),
                         message_id: "message-a".into(),
                         client_submission_id: None,
                         content: "x".repeat(20_000),
@@ -2230,6 +2233,7 @@ mod tests {
                 Some("step"),
                 AgentSessionEventPayload::UserMessage {
                     message: AgentInboxMessage {
+                        images: Vec::new(),
                         message_id: "constraint-old".into(),
                         client_submission_id: None,
                         content: "Implement quickly".into(),
@@ -2350,6 +2354,7 @@ mod tests {
                 Some("step"),
                 AgentSessionEventPayload::UserMessage {
                     message: AgentInboxMessage {
+                        images: Vec::new(),
                         message_id: "constraint-latest".into(),
                         client_submission_id: None,
                         content: "Latest constraint: do not edit the reference repository.".into(),

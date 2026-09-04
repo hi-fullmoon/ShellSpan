@@ -7,6 +7,7 @@ export type AiSubmissionRejection =
   | 'empty'
   | 'submitting'
   | 'waitingApproval'
+  | 'waitingQuestion'
   | 'terminal'
   | 'providerUnavailable'
   | 'sessionUnavailable';
@@ -21,6 +22,7 @@ export interface AiSubmissionPolicyInput {
   readonly terminal: boolean;
   readonly sessionId: string | null;
   readonly waitingApproval: boolean;
+  readonly waitingQuestion?: boolean;
   readonly hasProvider: boolean;
   readonly canCreateSession: boolean;
   readonly draft: string;
@@ -40,6 +42,7 @@ export function resolveAiSubmission(input: AiSubmissionPolicyInput): AiSubmissio
   const running = input.sessionStatus === 'running' || input.sessionStatus === 'waiting';
 
   if (input.submitting) return { kind: 'reject', reason: 'submitting' };
+  if (input.waitingQuestion) return { kind: 'reject', reason: 'waitingQuestion' };
   if (input.waitingApproval) return { kind: 'reject', reason: 'waitingApproval' };
   if (running && empty && input.gesture === 'primary') return { kind: 'stop' };
   if (empty) return { kind: 'reject', reason: 'empty' };

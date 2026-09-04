@@ -18,6 +18,47 @@ use super::{
 
 pub(crate) const AGENT_RUNTIME_SESSION_EVENT: &str = "agent-runtime-session-event";
 
+#[tauri::command]
+pub(crate) async fn agent_runtime_prepare_images(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    images: Vec<super::images::ImageUpload>,
+) -> Result<Vec<super::images::ImageUpload>, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.prepare_images(images).await
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_submit_images(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: super::images::ImageSubmission,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.submit_images(input).await
+}
+#[tauri::command]
+pub(crate) fn agent_runtime_cancel_image_submission(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: super::images::ImageOperation,
+) -> Result<bool, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.cancel_image_submission(input)
+}
+#[tauri::command]
+pub(crate) async fn agent_runtime_image_preview(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: super::images::ImagePreviewRequest,
+) -> Result<String, String> {
+    configure_runtime(&app, &runtime)?;
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || runtime.image_preview(input))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 pub(crate) fn configure_runtime(app: &AppHandle, runtime: &AgentRuntime) -> Result<(), String> {
     let root = app
         .path()
@@ -191,6 +232,18 @@ pub(crate) fn agent_runtime_start(
     validate_provider_config(&input.provider, true)?;
     let api_key = api_key_for_provider(credentials.inner(), &input.provider)?;
     runtime.start(&input.session_id, input.provider, api_key)
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_answer_question(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    credentials: State<'_, CredentialManager>,
+    input: super::user_questions::AnswerQuestionInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.configure_credentials(credentials.inner().clone())?;
+    runtime.answer_question(input, Some(credentials.inner()))
 }
 
 #[tauri::command]
@@ -392,4 +445,33 @@ pub(crate) async fn agent_runtime_abort_recovery(
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
     runtime.abort_recovery(&input.session_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_list_skills(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentSessionIdInput,
+) -> Result<super::skill_runtime::SkillUserList, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.list_skills(&input.session_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_list_file_references(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: super::file_references::FileReferenceInput,
+) -> Result<super::file_references::FileReferenceList, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.file_references.list(input).await
+}
+#[tauri::command]
+pub(crate) fn agent_runtime_cancel_file_references(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: super::file_references::FileReferenceCancel,
+) -> Result<(), String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.file_references.cancel(input)
 }

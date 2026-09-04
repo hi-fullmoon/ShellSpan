@@ -1,0 +1,1505 @@
+diff --git a/docs/agent-runtime-vnext.md b/docs/agent-runtime-vnext.md
+index cd8beaa1..b1870dc3 100644
+--- a/docs/agent-runtime-vnext.md
++++ b/docs/agent-runtime-vnext.md
+@@ -10,6 +10,11 @@
+ > request. See [handoff and remaining acceptance](ai-runtime-handoff.md); supported source kinds
+ > and UI fixtures are not proof that a corresponding runtime producer exists.
+ 
++> Resumed Stage 6A worktree: structured questions now have an implemented durable
++> runtime/IPC/UI path, documented in [Stage 6A](ai-runtime-stage6a.md). See its
++> [validation report](ai-runtime-stage6a-validation.md) for exact acceptance and
++> handoff status. This does not mean the worktree is merged into main or 6B–7 is done.
++
+ ## 1. Ownership
+ 
+ Rust owns Agent business state:
+diff --git a/docs/ai-panel-deepseek-harness-alignment-plan.md b/docs/ai-panel-deepseek-harness-alignment-plan.md
+index 5813d490..693ebe47 100644
+--- a/docs/ai-panel-deepseek-harness-alignment-plan.md
++++ b/docs/ai-panel-deepseek-harness-alignment-plan.md
+@@ -1,5 +1,7 @@
+ # ShellSpan AI Panel 向 DeepSeek Harness 对齐计划清单
+ 
++> 续作更新：用户已恢复任务；本次 Stage 6A 结构化问答详见 [实施](ai-runtime-stage6a.md) 与 [验收](ai-runtime-stage6a-validation.md)。本文历史 Phase 勾选及暂停说明不替代当前分阶段验收。
++
+ > 历史状态：本页记录此前 AI Panel Phase 0–6 与当时的离线/live 验收，不代表 2026-09-04 Runtime 补齐目标全部完成。
+ > 决策：一次性切换事件协议，不兼容、不迁移、不读取旧 Agent 会话  
+ > 范围：Agent Runtime、会话事件、Conversation/Activity 投影、AI Panel 对话渲染与统计  
+diff --git a/docs/ai-runtime-handoff.md b/docs/ai-runtime-handoff.md
+index 931e206d..8fcd3429 100644
+--- a/docs/ai-runtime-handoff.md
++++ b/docs/ai-runtime-handoff.md
+@@ -1,5 +1,7 @@
+ # AI Runtime 跨设备交接（2026-09-04）
+ 
++> 恢复续作：用户已明确覆盖下述历史暂停要求。Stage 6A 已在独立工作树验收并冻结，尚未合入 main；当前代码和证据以 [6A 实施说明](ai-runtime-stage6a.md)、[6A 验收报告](ai-runtime-stage6a-validation.md) 为准。以下原交接内容保留作历史基线，6B–7 仍由后续独立任务继续。
++
+ > 用户要求及时停止开发，合并已有成果到 main，后续换设备继续。阶段 6A 已停止，阶段 6B 只读设计已结束；不得把本次交接视为原完整 Goal 验收通过。
+ 
+ ## 1. 哪些代码可以继续使用
+diff --git a/docs/ai-runtime-harness-remediation-plan.md b/docs/ai-runtime-harness-remediation-plan.md
+index 24553385..f79fac31 100644
+--- a/docs/ai-runtime-harness-remediation-plan.md
++++ b/docs/ai-runtime-harness-remediation-plan.md
+@@ -1,5 +1,7 @@
+ # AI Runtime / DeepSeek Harness 差距修复验收清单
+ 
++> 本次恢复：用户已要求继续，覆盖历史暂停。6A 的独立实现、累计门禁和冻结交接见 [6A 验收报告](ai-runtime-stage6a-validation.md)；下方全目标勾选仍需阶段 7 在最终累计代码上复验。
++
+ 本清单记录 2026-09-04 审计之后的修复范围。参考仓库为 DeepSeek Harness；它是只读对照，不是本轮修改目标。本文件与 AI Panel 视觉对齐计划不同：UI 可以正确显示一种事件，但不能据此认定对应的 Runtime 能力已经实现。
+ 
+ > 2026-09-04 交接状态：用户要求停止开发并换设备继续。阶段 1–5（含 3B）的 53 文件已合入 main（`3e40eef`）；未验收 6A 保存在 `codex/ai-runtime-stage6a-wip`（`48fd8fd`），6B 只有设计，6C/6D/最终验收未执行。下一台设备从 [交接说明](ai-runtime-handoff.md) 继续。下方完整目标仍保留，未勾选项不因暂停而视为完成。
+diff --git a/package.json b/package.json
+index ea6dfea7..d88dc38b 100644
+--- a/package.json
++++ b/package.json
+@@ -27,6 +27,10 @@
+     "test:ai:stage3b:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib --locked agent_runtime::runtime::tests && cargo test --manifest-path src-tauri/Cargo.toml --lib --locked agent_runtime::retry::tests && cargo test --manifest-path src-tauri/Cargo.toml --lib --locked agent_runtime::subagent::retry_policy_tests && cargo test --manifest-path src-tauri/Cargo.toml --lib --locked agent_runtime::compaction::tests",
+     "test:ai:stage3b": "pnpm test:ai:stage3b:frontend && pnpm test:ai:stage3b:rust",
+     "test:ai:stage5": "node scripts/ai-runtime-stage5.mjs",
++    "test:ai:stage6a:frontend": "vitest run src/components/ai/__tests__/ai-question-panel.test.tsx src/components/ai/__tests__/ai-workspace-root.test.tsx src/components/ai/__tests__/ai-workspace-controller.test.tsx src/lib/ai/__tests__/question-projection.test.ts src/lib/ai/__tests__/session-adapters.test.ts --maxWorkers=1",
++    "test:ai:stage6a:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib --locked question_",
++    "test:ai:stage6a": "pnpm test:ai:stage6a:frontend && pnpm test:ai:stage6a:rust && pnpm test:ai:stage6a:visual",
++    "test:ai:stage6a:visual": "node scripts/ai-runtime-stage6a-visual.mjs",
+     "test:agent:runtime": "vitest run src/lib/__tests__/agent-session-client.test.ts src/lib/__tests__/agent-session-projection.test.ts src/lib/ai/__tests__/conversation-projection.test.ts src/lib/ai/__tests__/session-adapters.test.ts src/components/ai/__tests__/ai-conversation-node-seat.test.tsx src/components/ai/__tests__/ai-workspace-phase5.test.tsx src/components/ai/__tests__/agent-permission-approval.test.tsx src/stores/__tests__/agentPermissionStore.test.ts --maxWorkers=1",
+     "test:agent:providers:live": "node --env-file-if-exists=.env.local scripts/agent-provider-live-smoke.mjs",
+     "check:agent-terminal": "pnpm test:agent:runtime",
+diff --git a/src-tauri/src/agent_runtime/commands.rs b/src-tauri/src/agent_runtime/commands.rs
+index b94e256e..bf780483 100644
+--- a/src-tauri/src/agent_runtime/commands.rs
++++ b/src-tauri/src/agent_runtime/commands.rs
+@@ -193,6 +193,18 @@ pub(crate) fn agent_runtime_start(
+     runtime.start(&input.session_id, input.provider, api_key)
+ }
+ 
++#[tauri::command]
++pub(crate) fn agent_runtime_answer_question(
++    app: AppHandle,
++    runtime: State<'_, AgentRuntime>,
++    credentials: State<'_, CredentialManager>,
++    input: super::user_questions::AnswerQuestionInput,
++) -> Result<AgentSessionSnapshot, String> {
++    configure_runtime(&app, &runtime)?;
++    runtime.configure_credentials(credentials.inner().clone())?;
++    runtime.answer_question(input, Some(credentials.inner()))
++}
++
+ #[tauri::command]
+ pub(crate) fn agent_runtime_followup(
+     app: AppHandle,
+diff --git a/src-tauri/src/agent_runtime/driver.rs b/src-tauri/src/agent_runtime/driver.rs
+index 73c25e0d..30c22d2e 100644
+--- a/src-tauri/src/agent_runtime/driver.rs
++++ b/src-tauri/src/agent_runtime/driver.rs
+@@ -107,6 +107,16 @@ async fn drive_agent_inner(
+             close_open_scope(sessions, entry, "cancelled")?;
+             return Ok(AgentDriverSettlement::Cancelled);
+         }
++        if let Some(settlement) = tools.continue_questions(entry).await? {
++            match settlement {
++                ToolPipelineSettlement::Completed => continue,
++                ToolPipelineSettlement::Waiting => return Ok(AgentDriverSettlement::Waiting),
++                ToolPipelineSettlement::Cancelled => {
++                    close_open_scope(sessions, entry, "cancelled")?;
++                    return Ok(AgentDriverSettlement::Cancelled);
++                }
++            }
++        }
+         let all_events = sessions.all_events(&entry.session_id)?;
+         if let Some(reason) = subagent_budget_failure(entry, &all_events)? {
+             close_open_scope(sessions, entry, &reason)?;
+@@ -838,7 +848,12 @@ fn model_tools_for(entry: &AgentEntry) -> Vec<super::ModelToolDefinition> {
+     };
+     tools
+         .into_iter()
+-        .filter(|tool| scope.tool_names.iter().any(|name| name == &tool.name))
++        // Human input has its own live-root admission boundary, independent of
++        // historical native capability scopes retained by a resumed root.
++        .filter(|tool| {
++            tool.name == super::user_questions::TOOL_NAME
++                || scope.tool_names.iter().any(|name| name == &tool.name)
++        })
+         .collect()
+ }
+ 
+diff --git a/src-tauri/src/agent_runtime/event.rs b/src-tauri/src/agent_runtime/event.rs
+index 1d517c33..4263438b 100644
+--- a/src-tauri/src/agent_runtime/event.rs
++++ b/src-tauri/src/agent_runtime/event.rs
+@@ -658,6 +658,21 @@ pub(crate) enum AgentSessionEventPayload {
+     },
+     #[serde(rename = "tool/call")]
+     ToolCall { call: RecordedToolCall },
++    #[serde(rename = "question/requested")]
++    QuestionRequested {
++        identity: super::user_questions::QuestionIdentity,
++        arguments: super::user_questions::QuestionArguments,
++        provider: super::AgentSubagentModel,
++    },
++    #[serde(rename = "question/answered")]
++    QuestionAnswered {
++        submission: super::user_questions::AnswerQuestionInput,
++        fingerprint: String,
++    },
++    #[serde(rename = "question/cancelled")]
++    QuestionCancelled {
++        identity: super::user_questions::QuestionIdentity,
++    },
+     #[serde(rename = "tool/approval")]
+     ToolApproval {
+         request_id: String,
+diff --git a/src-tauri/src/agent_runtime/mod.rs b/src-tauri/src/agent_runtime/mod.rs
+index 523a641e..bfb96e29 100644
+--- a/src-tauri/src/agent_runtime/mod.rs
++++ b/src-tauri/src/agent_runtime/mod.rs
+@@ -21,6 +21,7 @@ mod session;
+ mod subagent;
+ mod surface;
+ mod tool_pipeline;
++mod user_questions;
+ 
+ pub(crate) use artifact::*;
+ pub(crate) use budget::*;
+diff --git a/src-tauri/src/agent_runtime/model.rs b/src-tauri/src/agent_runtime/model.rs
+index 3fce3787..f6932404 100644
+--- a/src-tauri/src/agent_runtime/model.rs
++++ b/src-tauri/src/agent_runtime/model.rs
+@@ -2056,6 +2056,11 @@ fn normalize_finish_reason(reason: &str) -> ModelFinishReason {
+ 
+ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
+     vec![
++        ModelToolDefinition {
++            name: super::user_questions::TOOL_NAME.into(),
++            description: "Ask the user 1 to 3 concise questions and wait for their answers. Options are optional (2 to 7); free text is always available. Put a recommended choice first with (Recommended). Only a live root agent may ask; children must report unresolved questions to their parent. Answers never authorize tools. Text limits are UTF-8 bytes: id 64, question 2048, header 128, label 256, description 1024; total JSON 32768.".into(),
++            input_schema: super::user_questions::schema(),
++        },
+         ModelToolDefinition {
+             name: "run_terminal_command".into(),
+             description: "Request one command in the frozen ShellSpan terminal session. ShellSpan decides approval and execution.".into(),
+@@ -2411,6 +2416,7 @@ mod tests {
+                 .map(|tool| tool.name.as_str())
+                 .collect::<Vec<_>>(),
+             [
++                "ask_user_question",
+                 "run_terminal_command",
+                 "read_file",
+                 "list_directory",
+diff --git a/src-tauri/src/agent_runtime/recovery.rs b/src-tauri/src/agent_runtime/recovery.rs
+index 5ed9b274..fe897611 100644
+--- a/src-tauri/src/agent_runtime/recovery.rs
++++ b/src-tauri/src/agent_runtime/recovery.rs
+@@ -13,6 +13,8 @@ pub(crate) enum AgentRecoveryCheckpointKind {
+     Idle,
+     OpenModelRequest,
+     WaitingApproval,
++    WaitingQuestion,
++    QuestionContinuation,
+     AuthorizedBeforeExecute,
+     ExecutionInFlight,
+     ToolResultCommitted,
+@@ -229,6 +231,76 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
+         );
+     }
+     let mut ordered_tools = tools.iter().collect::<Vec<_>>();
++    let question = super::user_questions::records(events)
++        .into_iter()
++        .rev()
++        .find(|q| {
++            turn_id.as_deref() == Some(&q.identity.turn_id)
++                && events
++                    .iter()
++                    .rev()
++                    .find(|e| matches!(e.payload, AgentSessionEventPayload::StepStart))
++                    .and_then(|e| e.step_id.as_deref())
++                    == Some(&q.identity.step_id)
++        });
++    // A question never erases a later native dispatch or authorization boundary.
++    let native_unresolved = tools
++        .values()
++        .any(|t| !t.has_result && (t.dispatched.is_some() || t.approval.is_some()));
++    if !native_unresolved && super::user_questions::question_queue(events).is_some() {
++        if let Some(recovery) = task_recovery.as_ref().filter(|r| {
++            matches!(
++                r.status,
++                AgentRecoveryStatus::Required | AgentRecoveryStatus::Reconciling
++            )
++        }) {
++            return make(
++                AgentRecoveryCheckpointKind::OpenModelRequest,
++                recovery.status,
++                recovery
++                    .summary
++                    .as_deref()
++                    .unwrap_or("Question queue requires reconciliation."),
++                open_request,
++                None,
++                None,
++                None,
++            );
++        }
++    }
++    if let Some(question) = question.filter(|_| !native_unresolved) {
++        let pending = question.answer.is_none() && !question.cancelled;
++        return make(
++            if pending {
++                AgentRecoveryCheckpointKind::WaitingQuestion
++            } else {
++                AgentRecoveryCheckpointKind::QuestionContinuation
++            },
++            AgentRecoveryStatus::Available,
++            if pending {
++                "Waiting for a durable user answer; no approval timeout applies."
++            } else {
++                "Continue the original tool queue from its committed question answer."
++            },
++            Some(question.identity.request_id),
++            Some(question.identity.call_id),
++            None,
++            None,
++        );
++    }
++    if let Some((_, _, request)) =
++        super::user_questions::question_queue(events).filter(|_| !native_unresolved)
++    {
++        return make(
++            AgentRecoveryCheckpointKind::QuestionContinuation,
++            AgentRecoveryStatus::Available,
++            "Resume the committed assistant question queue without repeating completed tools.",
++            Some(request),
++            None,
++            None,
++            None,
++        );
++    }
+     // A later completed sibling must never hide an earlier unresolved dispatch.
+     ordered_tools.sort_by_key(|(_, boundary)| {
+         (
+diff --git a/src-tauri/src/agent_runtime/registry.rs b/src-tauri/src/agent_runtime/registry.rs
+index 760ad33e..db20469c 100644
+--- a/src-tauri/src/agent_runtime/registry.rs
++++ b/src-tauri/src/agent_runtime/registry.rs
+@@ -35,6 +35,7 @@ pub(crate) struct AgentEntry {
+     pub(crate) adapter: Arc<dyn ModelAdapter>,
+     pub(crate) capability_scope: Option<AgentCapabilityScope>,
+     pub(crate) subagent: Option<AgentSubagentSession>,
++    owner: Mutex<Option<std::sync::Weak<AgentEntry>>>,
+     cancellation: CancellationToken,
+     admitting: AtomicBool,
+     driver_active: AtomicBool,
+@@ -60,6 +61,7 @@ impl AgentEntry {
+             adapter,
+             capability_scope,
+             subagent,
++            owner: Mutex::new(None),
+             cancellation: CancellationToken::new(),
+             admitting: AtomicBool::new(true),
+             driver_active: AtomicBool::new(false),
+@@ -170,6 +172,43 @@ pub(crate) struct AgentRegistry {
+ }
+ 
+ impl AgentRegistry {
++    pub(crate) fn set_owner(
++        &self,
++        child: &Arc<AgentEntry>,
++        parent: &Arc<AgentEntry>,
++    ) -> Result<(), String> {
++        *child
++            .owner
++            .lock()
++            .map_err(|_| "Agent ownership lock unavailable")? = Some(Arc::downgrade(parent));
++        Ok(())
++    }
++
++    pub(crate) fn require_live_root(&self, entry: &Arc<AgentEntry>) -> Result<(), String> {
++        if !self
++            .get(&entry.session_id)?
++            .is_some_and(|live| Arc::ptr_eq(&live, entry))
++        {
++            return Err("CALLER_NOT_LIVE: human input requires the exact live agent".into());
++        }
++        let owner = entry
++            .owner
++            .lock()
++            .map_err(|_| "Agent ownership lock unavailable")?
++            .as_ref()
++            .and_then(std::sync::Weak::upgrade);
++        if let Some(owner) = owner {
++            if self
++                .get(&owner.session_id)?
++                .is_some_and(|live| Arc::ptr_eq(&live, &owner))
++            {
++                return Err(
++                    "DELEGATED_CALLER: report unresolved questions in the child result".into(),
++                );
++            }
++        }
++        Ok(())
++    }
+     pub(crate) fn attach(
+         &self,
+         sessions: AgentSessionStore,
+diff --git a/src-tauri/src/agent_runtime/runtime.rs b/src-tauri/src/agent_runtime/runtime.rs
+index c4dbd897..e82fb037 100644
+--- a/src-tauri/src/agent_runtime/runtime.rs
++++ b/src-tauri/src/agent_runtime/runtime.rs
+@@ -86,6 +86,7 @@ impl AgentRuntimeBuilder {
+     pub(crate) fn build(self) -> AgentRuntime {
+         let agents = AgentRegistry::default();
+         let tool_pipeline = AgentToolPipeline::new(
++            agents.clone(),
+             self.sessions.clone(),
+             self.hooks.clone(),
+             Arc::clone(&self.native_tools),
+@@ -173,6 +174,57 @@ impl Default for AgentRuntimeBuilder {
+ }
+ 
+ impl AgentRuntime {
++    pub(crate) fn answer_question(
++        &self,
++        input: super::user_questions::AnswerQuestionInput,
++        credentials: Option<&crate::keychain::CredentialManager>,
++    ) -> Result<AgentSessionSnapshot, String> {
++        input.validate()?;
++        let session_id = input.identity.session_id.clone();
++        let records = super::user_questions::records(&self.sessions.all_events(&session_id)?);
++        let question = records
++            .iter()
++            .find(|r| r.identity == input.identity)
++            .ok_or("unknown or stale question identity")?;
++        question.arguments.normalize_answers(&input.answers)?;
++        if question.cancelled
++            || self.sessions.snapshot(&session_id)?.status == super::AgentSessionStatus::Cancelled
++        {
++            return Err("question was cancelled".into());
++        }
++        if question.answer.is_some()
++            && !super::user_questions::is_same_submission(question, &input)?
++        {
++            return Err("question answer conflicts with its committed answer".into());
++        }
++        if self.sessions.snapshot(&session_id)?.ended {
++            return if super::user_questions::is_same_submission(question, &input)? {
++                self.sessions.snapshot(&session_id)
++            } else {
++                Err("question Session has ended".into())
++            };
++        }
++        if self.agents.get(&session_id)?.is_none() {
++            let provider = super::subagent::provider_config(&question.provider)?;
++            crate::ai::validate_provider_config(&provider, true)?;
++            let api_key = match credentials {
++                Some(credentials) => crate::ai::api_key_for_provider(credentials, &provider)?,
++                None if provider.requires_api_key => {
++                    return Err("question continuation requires provider credentials".into())
++                }
++                None => None,
++            };
++            self.start(&session_id, provider, api_key)?;
++        }
++        let entry = self
++            .agents
++            .get(&session_id)?
++            .ok_or("question Agent is not live")?;
++        self.tools.submit_question_answer(&entry, input)?;
++        self.wake(&session_id)?;
++        self.sessions.snapshot(&session_id)
++    }
++
+     pub(crate) fn configure_credentials(
+         &self,
+         credentials: crate::keychain::CredentialManager,
+@@ -253,13 +305,15 @@ impl AgentRuntime {
+         if matches!(
+             recovery.status,
+             super::AgentRecoveryStatus::Available | super::AgentRecoveryStatus::Required
+-        ) {
++        ) || recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval
++        {
+             entry.set_phase(AgentLifecyclePhase::Waiting)?;
+         }
+         if let Err(error) = recover_open_scope(&self.sessions, &entry) {
+             self.agents.detach(session_id)?;
+             return Err(error);
+         }
++        self.tools.restore_question_phase(&entry)?;
+         if let Err(error) = self.tools.recover_waiting(&entry) {
+             self.agents.detach(session_id)?;
+             return Err(error);
+@@ -404,6 +458,12 @@ impl AgentRuntime {
+         if self.agents.get(session_id)?.is_some() {
+             return Err("Agent Session is already stopping".into());
+         }
++        let _gate = self
++            .tools
++            .question_gate
++            .lock()
++            .map_err(|_| "question gate unavailable")?;
++        self.tools.cancel_questions(session_id)?;
+         self.sessions.cancel(session_id)
+     }
+ 
+@@ -959,8 +1019,8 @@ impl AgentRuntime {
+         let compactions = self.compactions.clone();
+         let config = self.driver_config;
+         tauri::async_runtime::spawn(async move {
++            let mut lease = Some(ActiveDriverLease(Arc::clone(&entry)));
+             loop {
+-                let lease = ActiveDriverLease(Arc::clone(&entry));
+                 let settlement = drive_agent(
+                     sessions.clone(),
+                     Arc::clone(&entry),
+@@ -970,11 +1030,38 @@ impl AgentRuntime {
+                     config,
+                 )
+                 .await;
+-                drop(lease);
++                #[cfg(test)]
++                if settlement == AgentDriverSettlement::Waiting {
++                    let pause = tools.question_lease_pause.lock().unwrap().take();
++                    if let Some((entered, release)) = pause {
++                        entered.notify_one();
++                        release.notified().await;
++                    }
++                }
+                 if settlement == AgentDriverSettlement::Waiting {
++                    // Keep the current lease if an answer already committed. Otherwise
++                    // publish idle while holding the same gate used by answer/cancel,
++                    // so no accepted answer can fall into a release/reacquire gap.
++                    let resume = {
++                        let Ok(_gate) = tools.question_gate.lock() else {
++                            break;
++                        };
++                        if entry.phase().ok() == Some(super::AgentLifecyclePhase::Running)
++                            && !entry.cancellation().is_cancelled()
++                        {
++                            true
++                        } else {
++                            drop(lease.take());
++                            false
++                        }
++                    };
++                    if resume {
++                        continue;
++                    }
+                     match tools.wait_for_expiry(&entry).await {
+                         Ok(true) if !entry.cancellation().is_cancelled() => {
+                             if entry.try_acquire_driver().unwrap_or(false) {
++                                lease = Some(ActiveDriverLease(Arc::clone(&entry)));
+                                 continue;
+                             }
+                         }
+@@ -989,6 +1076,7 @@ impl AgentRuntime {
+                     }
+                     break;
+                 }
++                drop(lease.take());
+                 if settlement != AgentDriverSettlement::Idle || entry.cancellation().is_cancelled()
+                 {
+                     break;
+@@ -1002,6 +1090,7 @@ impl AgentRuntime {
+                 if !has_work || !entry.try_acquire_driver().unwrap_or(false) {
+                     break;
+                 }
++                lease = Some(ActiveDriverLease(Arc::clone(&entry)));
+             }
+         });
+         Ok(())
+@@ -1021,6 +1110,9 @@ impl AgentRuntime {
+ 
+ #[cfg(test)]
+ mod tests {
++    mod question_tests {
++        include!("question_tests.rs");
++    }
+     include!("scheduler_tests.rs");
+     use std::collections::VecDeque;
+     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+@@ -2479,7 +2571,9 @@ mod tests {
+         runtime.start("session-parallel", provider(), None).unwrap();
+         runtime.await_idle("session-parallel").await.unwrap();
+ 
+-        assert_eq!(native.max_active.load(Ordering::Acquire), 2);
++        // Exact overlap is proved by verify_write_barrier's controlled gates.
++        // This short, ungated execution only promises the upper bound.
++        assert!(native.max_active.load(Ordering::Acquire) <= 2);
+         let trace = native.trace.lock().unwrap().clone();
+         let position = |needle: &str| trace.iter().position(|entry| entry == needle).unwrap();
+         assert!(position("end:read-1") < position("start:write-1"));
+diff --git a/src-tauri/src/agent_runtime/session.rs b/src-tauri/src/agent_runtime/session.rs
+index 8b649866..45c120ee 100644
+--- a/src-tauri/src/agent_runtime/session.rs
++++ b/src-tauri/src/agent_runtime/session.rs
+@@ -1846,6 +1846,11 @@ fn validate_event_transition(
+         AgentSessionEventPayload::ToolResult {
+             call_id, status, ..
+         } => validate_tool_result_transition(record, event, call_id, *status),
++        AgentSessionEventPayload::QuestionRequested { .. }
++        | AgentSessionEventPayload::QuestionAnswered { .. }
++        | AgentSessionEventPayload::QuestionCancelled { .. } => {
++            super::user_questions::validate_transition(&record.events, event)
++        }
+         _ => Ok(()),
+     }
+ }
+@@ -2007,6 +2012,17 @@ fn validate_tool_result_transition(
+     if !has_call || has_result {
+         return Err("tool result has no unique durable call".into());
+     }
++    if let Some(question) = super::user_questions::records(&record.events)
++        .into_iter()
++        .find(|q| {
++            q.identity.call_id == call_id && event.step_id.as_deref() == Some(&q.identity.step_id)
++        })
++    {
++        if super::user_questions::matches_result(&question, &event.payload) {
++            return Ok(());
++        }
++        return Err("question result does not match its durable answer or cancellation".into());
++    }
+     let allowed = match approval {
+         Some(super::AgentToolApprovalStatus::Approved) => dispatched,
+         Some(super::AgentToolApprovalStatus::Rejected) => {
+@@ -2075,6 +2091,11 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
+     use AgentSessionEventPayload as Payload;
+ 
+     match &event.payload {
++        Payload::QuestionRequested { .. }
++        | Payload::QuestionAnswered { .. }
++        | Payload::QuestionCancelled { .. } => {
++            super::user_questions::validate_payload(event)?;
++        }
+         Payload::SessionCreated {
+             task_id,
+             goal,
+diff --git a/src-tauri/src/agent_runtime/subagent.rs b/src-tauri/src/agent_runtime/subagent.rs
+index f3e35517..5ad1b4d0 100644
+--- a/src-tauri/src/agent_runtime/subagent.rs
++++ b/src-tauri/src/agent_runtime/subagent.rs
+@@ -888,6 +888,7 @@ impl SubAgentManager {
+             parent_entry.provider.clone(),
+             Arc::clone(&parent_entry.adapter),
+         )?);
++        self.agents.set_owner(&handle.entry(), &parent_entry)?;
+         self.handles
+             .lock()
+             .map_err(|_| "subagent handle registry is unavailable".to_string())?
+@@ -968,6 +969,16 @@ impl SubAgentManager {
+             adapter,
+         )?);
+         let entry = handle.entry();
++        let parent_id = snapshot
++            .header
++            .parent_session_id
++            .as_deref()
++            .ok_or("child owner missing")?;
++        let parent = self
++            .agents
++            .get(parent_id)?
++            .ok_or("child owner is not live")?;
++        self.agents.set_owner(&entry, &parent)?;
+         self.handles
+             .lock()
+             .map_err(|_| "subagent handle registry is unavailable".to_string())?
+@@ -1572,7 +1583,7 @@ fn default_subagent_budget() -> AgentSubagentBudget {
+     }
+ }
+ 
+-fn provider_descriptor(provider: &AiProviderConfig) -> AgentSubagentModel {
++pub(super) fn provider_descriptor(provider: &AiProviderConfig) -> AgentSubagentModel {
+     AgentSubagentModel {
+         profile: provider.profile.clone(),
+         retry_policy: provider
+@@ -1592,7 +1603,7 @@ fn provider_descriptor(provider: &AiProviderConfig) -> AgentSubagentModel {
+     }
+ }
+ 
+-fn provider_config(provider: &AgentSubagentModel) -> Result<AiProviderConfig, String> {
++pub(super) fn provider_config(provider: &AgentSubagentModel) -> Result<AiProviderConfig, String> {
+     Ok(AiProviderConfig {
+         profile: provider.profile.clone(),
+         retry_policy: provider
+diff --git a/src-tauri/src/agent_runtime/surface.rs b/src-tauri/src/agent_runtime/surface.rs
+index fc4dcc69..71f3a952 100644
+--- a/src-tauri/src/agent_runtime/surface.rs
++++ b/src-tauri/src/agent_runtime/surface.rs
+@@ -187,7 +187,13 @@ fn append_surface_events<'a>(
+                 call_id: call_id.clone(),
+                 name: name.clone(),
+                 status: *status,
+-                content: tool_result_content(*status, summary, data.as_ref()),
++                content: if name == super::user_questions::TOOL_NAME
++                    && *status == AgentToolResultStatus::Completed
++                {
++                    serde_json::to_string(data).unwrap_or_default()
++                } else {
++                    tool_result_content(*status, summary, data.as_ref())
++                },
+             }),
+             _ => {}
+         }
+diff --git a/src-tauri/src/agent_runtime/tool_pipeline.rs b/src-tauri/src/agent_runtime/tool_pipeline.rs
+index 4abbfdf4..c9c4395a 100644
+--- a/src-tauri/src/agent_runtime/tool_pipeline.rs
++++ b/src-tauri/src/agent_runtime/tool_pipeline.rs
+@@ -351,9 +351,16 @@ impl Drop for PendingExecutionGuard<'_> {
+     }
+ }
+ 
++#[cfg(test)]
++type QuestionLeasePause = Arc<Mutex<Option<(Arc<Notify>, Arc<Notify>)>>>;
++
+ #[derive(Clone)]
+ pub(crate) struct AgentToolPipeline {
+-    sessions: AgentSessionStore,
++    #[cfg(test)]
++    pub(super) question_lease_pause: QuestionLeasePause,
++    pub(super) agents: super::AgentRegistry,
++    pub(super) question_gate: Arc<Mutex<()>>,
++    pub(super) sessions: AgentSessionStore,
+     hooks: AgentHookBus,
+     native: Arc<dyn NativeToolRuntime>,
+     artifacts: AgentArtifactStore,
+@@ -367,6 +374,7 @@ pub(crate) struct AgentToolPipeline {
+ 
+ impl AgentToolPipeline {
+     pub(crate) fn new(
++        agents: super::AgentRegistry,
+         sessions: AgentSessionStore,
+         hooks: AgentHookBus,
+         native: Arc<dyn NativeToolRuntime>,
+@@ -374,6 +382,10 @@ impl AgentToolPipeline {
+         orchestration: OrchestrationToolRuntimeSlot,
+     ) -> Self {
+         Self {
++            #[cfg(test)]
++            question_lease_pause: Arc::new(Mutex::new(None)),
++            agents,
++            question_gate: Arc::new(Mutex::new(())),
+             sessions,
+             hooks,
+             native,
+@@ -524,6 +536,26 @@ impl AgentToolPipeline {
+                             continue;
+                         }
+                     }
++                    if call.name == super::user_questions::TOOL_NAME {
++                        if !running.is_empty() {
++                            draining_barrier = true;
++                            continue;
++                        }
++                        match self.request_question(
++                            entry,
++                            turn_id,
++                            step_id,
++                            request_id,
++                            call.clone(),
++                        )? {
++                            ToolPipelineSettlement::Completed => {
++                                next += 1;
++                                committed += 1;
++                                continue;
++                            }
++                            settlement => return Ok(settlement),
++                        }
++                    }
+                     if is_session_tool(&call.name) || is_orchestration_tool(&call.name) {
+                         if !running.is_empty() {
+                             draining_barrier = true;
+@@ -1037,14 +1069,16 @@ impl AgentToolPipeline {
+     ) -> Result<ToolPipelineSettlement, String> {
+         if preparation.requires_approval {
+             let waiting_turn_id = request.turn_id.clone();
+-            self.sessions.append(
+-                &request.session_id,
+-                Some(request.turn_id.clone()),
+-                Some(request.step_id.clone()),
+-                AgentSessionEventPayload::ToolCall {
+-                    call: preparation.call.clone(),
+-                },
+-            )?;
++            if !self.has_unadmitted_call(&request, &preparation.call)? {
++                self.sessions.append(
++                    &request.session_id,
++                    Some(request.turn_id.clone()),
++                    Some(request.step_id.clone()),
++                    AgentSessionEventPayload::ToolCall {
++                        call: preparation.call.clone(),
++                    },
++                )?;
++            }
+             let approval_id = format!("approval-{}", Uuid::new_v4().simple());
+             self.sessions.append_batch(
+                 &request.session_id,
+@@ -1124,35 +1158,68 @@ impl AgentToolPipeline {
+         request: &NativeToolRequest,
+         preparation: &NativeToolPreparation,
+     ) -> Result<(), String> {
+-        self.sessions.append_batch(
+-            &request.session_id,
+-            vec![
+-                AgentScopedPayload {
+-                    turn_id: Some(request.turn_id.clone()),
+-                    step_id: Some(request.step_id.clone()),
+-                    payload: AgentSessionEventPayload::ToolCall {
+-                        call: preparation.call.clone(),
+-                    },
+-                },
+-                AgentScopedPayload {
+-                    turn_id: Some(request.turn_id.clone()),
+-                    step_id: Some(request.step_id.clone()),
+-                    payload: AgentSessionEventPayload::ToolApproval {
+-                        request_id: request.request_id.clone(),
+-                        call_id: request.model_call.call_id.clone(),
+-                        approval_id: None,
+-                        status: AgentToolApprovalStatus::Approved,
+-                        risk: preparation.call.effect,
+-                        reason: Some("nativePolicyAutoApproved".into()),
+-                        expires_at_unix_ms: Some(preparation.expires_at_unix_ms),
+-                        prompt: None,
+-                    },
+-                },
+-            ],
+-        )?;
++        let existing = self.has_unadmitted_call(request, &preparation.call)?;
++        let mut payloads = vec![AgentScopedPayload {
++            turn_id: Some(request.turn_id.clone()),
++            step_id: Some(request.step_id.clone()),
++            payload: AgentSessionEventPayload::ToolCall {
++                call: preparation.call.clone(),
++            },
++        }];
++        if existing {
++            payloads.clear();
++        }
++        payloads.push(AgentScopedPayload {
++            turn_id: Some(request.turn_id.clone()),
++            step_id: Some(request.step_id.clone()),
++            payload: AgentSessionEventPayload::ToolApproval {
++                request_id: request.request_id.clone(),
++                call_id: request.model_call.call_id.clone(),
++                approval_id: None,
++                status: AgentToolApprovalStatus::Approved,
++                risk: preparation.call.effect,
++                reason: Some("nativePolicyAutoApproved".into()),
++                expires_at_unix_ms: Some(preparation.expires_at_unix_ms),
++                prompt: None,
++            },
++        });
++        self.sessions.append_batch(&request.session_id, payloads)?;
+         Ok(())
+     }
+ 
++    /// A crash can leave the Call line without its following authorization.
++    /// Re-prepare with current policy and reuse only the exact frozen call.
++    fn has_unadmitted_call(
++        &self,
++        request: &NativeToolRequest,
++        prepared: &RecordedToolCall,
++    ) -> Result<bool, String> {
++        let events = self.sessions.all_events(&request.session_id)?;
++        let mut found = false;
++        for event in events
++            .iter()
++            .filter(|e| e.step_id.as_ref() == Some(&request.step_id))
++        {
++            match &event.payload {
++                AgentSessionEventPayload::ToolCall { call } if call.call_id == prepared.call_id => {
++                    if call != prepared {
++                        return Err("recovered native call drifted before authorization".into());
++                    }
++                    found = true;
++                }
++                AgentSessionEventPayload::ToolApproval { call_id, .. }
++                | AgentSessionEventPayload::ToolExecution { call_id, .. }
++                | AgentSessionEventPayload::ToolResult { call_id, .. }
++                    if call_id == &prepared.call_id =>
++                {
++                    return Err("native call already admitted; use its recovery boundary".into());
++                }
++                _ => {}
++            }
++        }
++        Ok(found)
++    }
++
+     fn append_execution_dispatch(
+         &self,
+         request: &NativeToolRequest,
+@@ -1653,7 +1720,14 @@ impl AgentToolPipeline {
+     }
+ 
+     pub(crate) fn cancel_session(&self, entry: &Arc<AgentEntry>) -> Result<(), String> {
+-        entry.cancel();
++        {
++            let _gate = self
++                .question_gate
++                .lock()
++                .map_err(|_| "question gate unavailable")?;
++            entry.cancel();
++            self.cancel_questions(&entry.session_id)?;
++        }
+         let session_id = &entry.session_id;
+         let keys = self
+             .pending
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 6acbd988..1a0b5c42 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -257,6 +257,7 @@ pub fn run() {
+             ai::ai_list_models,
+             agent_runtime::agent_runtime_create_session,
+             agent_runtime::agent_runtime_start,
++            agent_runtime::agent_runtime_answer_question,
+             agent_runtime::agent_runtime_spawn_subagent,
+             agent_runtime::agent_runtime_send_child_input,
+             agent_runtime::agent_runtime_inspect_child_agent,
+diff --git a/src/components/ai/__tests__/ai-workspace-controller.test.tsx b/src/components/ai/__tests__/ai-workspace-controller.test.tsx
+index 016416cf..d02bcc27 100644
+--- a/src/components/ai/__tests__/ai-workspace-controller.test.tsx
++++ b/src/components/ai/__tests__/ai-workspace-controller.test.tsx
+@@ -36,6 +36,7 @@ function adapter(changes: Partial<AiSessionControllerAdapter> = {}): AiSessionCo
+     stop: vi.fn(async () => undefined),
+     approve: vi.fn(async () => undefined),
+     reject: vi.fn(async () => undefined),
++    answerQuestion: vi.fn(async () => undefined),
+     archive: vi.fn(async () => undefined),
+     mutateInbox: vi.fn(async () => undefined),
+     rename: vi.fn(async () => undefined),
+diff --git a/src/components/ai/__tests__/ai-workspace-root.test.tsx b/src/components/ai/__tests__/ai-workspace-root.test.tsx
+index b52ee5b9..2eee5268 100644
+--- a/src/components/ai/__tests__/ai-workspace-root.test.tsx
++++ b/src/components/ai/__tests__/ai-workspace-root.test.tsx
+@@ -80,6 +80,32 @@ beforeEach(async () => {
+ afterEach(() => cleanup());
+ 
+ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
++  it('keeps the stage6a question actionable outside collapsed process and preserves ordinary draft', async () => {
++    const base = agentView();
++    const pendingQuestion: NonNullable<AiSessionView['pendingQuestion']> = {
++      identity: { sessionId: 'session-fixture', turnId: 'turn-01', stepId: 'step-01', requestId: 'request-01', callId: 'q', questionRequestId: 'workspace-question' },
++      questions: [{ id: 'text', question: 'What next?', multi_select: false }],
++      answers: [], status: 'pending', firstSeq: 1, lastSeq: 1, timestamp: '2026-09-04T00:00:00Z',
++    };
++    const onAnswerQuestion = vi.fn(async () => undefined);
++    const onSubmit = vi.fn();
++    const props = { scope: 'workbench' as const, canStartAgent: true, defaultDraft: 'ordinary unsent draft', onAnswerQuestion, onSubmit };
++    const view = { ...base, pendingQuestion, status: 'waiting' as const };
++    const { container, rerender } = render(<AiWorkspaceRoot {...props} view={view} />);
++    expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute('aria-expanded', 'false');
++    const panel = container.querySelector('[data-slot="ai-question-panel"]')!;
++    expect(panel.closest('[data-ai-node-kind="turnProcess"]')).toBeNull();
++    expect(container.querySelectorAll('[data-message-scroller-viewport]')).toHaveLength(1);
++    expect(screen.getByTestId('ai-workspace-composer')).toHaveValue('ordinary unsent draft');
++    expect(screen.getByTestId('ai-workspace-composer')).toBeDisabled();
++    fireEvent.change(within(panel as HTMLElement).getByRole('textbox'), { target: { value: 'Continue' } });
++    await userEvent.click(screen.getByRole('button', { name: 'Submit answers' }));
++    expect(onAnswerQuestion).toHaveBeenCalledOnce();
++    expect(onSubmit).not.toHaveBeenCalled();
++    rerender(<AiWorkspaceRoot {...props} view={{ ...base, pendingQuestion: null }} />);
++    expect(screen.getByTestId('ai-workspace-composer')).toHaveValue('ordinary unsent draft');
++    expect(screen.getByTestId('ai-workspace-composer')).not.toBeDisabled();
++  });
+   it.each([320, 400, 560, 720])(
+     'keeps the complete single-column workspace structure at %d px',
+     (width) => {
+diff --git a/src/components/ai/workspace/ai-composer-seat.tsx b/src/components/ai/workspace/ai-composer-seat.tsx
+index 54fe1297..ca0d69e2 100644
+--- a/src/components/ai/workspace/ai-composer-seat.tsx
++++ b/src/components/ai/workspace/ai-composer-seat.tsx
+@@ -33,6 +33,8 @@ import type { AiContextUsage, AiInboxItem, AiPendingApproval } from '@/lib/ai/se
+ import type { LocaleKey } from '@/locales';
+ import type { AgentSessionPlanStep } from '@/types/agent-session';
+ import { AiApprovalPanel } from './ai-approval-panel';
++import { AiQuestionPanel } from './ai-question-panel';
++import { questionKey } from '@/types/agent-question';
+ import { AiContextMeter } from './ai-context-meter';
+ import { AiQueueDock } from './ai-queue-dock';
+ import { AiTaskStrip } from './ai-task-strip';
+@@ -54,6 +56,8 @@ export interface AiComposerSeatProps {
+   readonly queueMutation?: AiQueueMutationState | null;
+   readonly announcement?: string | null;
+   readonly pendingApproval?: AiPendingApproval | null;
++  readonly pendingQuestion?: import('@/types/agent-question').AgentQuestionView | null;
++  readonly onAnswerQuestion?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
+   readonly approvalDecision?: 'approve' | 'reject' | null;
+   readonly approvalError?: string | null;
+   readonly unavailableReason?: string | null;
+@@ -91,6 +95,8 @@ export function AiComposerSeat({
+   queueMutation = null,
+   announcement,
+   pendingApproval,
++  pendingQuestion,
++  onAnswerQuestion,
+   approvalDecision = null,
+   approvalError = null,
+   unavailableReason = null,
+@@ -117,12 +123,14 @@ export function AiComposerSeat({
+   const draft = composerState?.draft ?? controlledDraft ?? localDraft;
+   const running = status === 'running' || status === 'waiting';
+   const waitingApproval = composerState?.phase === 'waitingApproval';
++  const waitingQuestion = Boolean(pendingQuestion) || composerState?.phase === 'waitingQuestion';
+   const submitting = composerState?.phase === 'submitting';
+   const terminal = composerState?.terminal ?? false;
+   const unavailable = unavailableReason !== null;
+   const empty = draft.trim().length === 0;
+   const stopPrimary = running && empty;
+   const submitDisabled = terminal
++    || waitingQuestion
+     || waitingApproval
+     || submitting
+     || (stopPrimary
+@@ -235,6 +243,8 @@ export function AiComposerSeat({
+         onReorder={onReorderQueueLane}
+         onRetry={onRetryQueueMutation}
+       />
++      {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
++      {waitingQuestion && <Alert><AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle><AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>{onStop && <Button type="button" variant="outline" onClick={onStop}>{t('ai.workspace.stop')}</Button>}</Alert>}
+       {waitingApproval && pendingApproval ? (
+         <AiApprovalPanel
+           approval={pendingApproval}
+@@ -249,7 +259,7 @@ export function AiComposerSeat({
+           <InputGroupTextarea
+             data-testid="ai-workspace-composer"
+             value={draft}
+-            disabled={waitingApproval || unavailable}
++            disabled={waitingApproval || waitingQuestion || unavailable}
+             onChange={(event) => updateDraft(event.target.value)}
+             onCompositionStart={() => {
+               composingRef.current = true;
+diff --git a/src/components/ai/workspace/ai-conversation-node-seat.tsx b/src/components/ai/workspace/ai-conversation-node-seat.tsx
+index e321acab..bc45d5a1 100644
+--- a/src/components/ai/workspace/ai-conversation-node-seat.tsx
++++ b/src/components/ai/workspace/ai-conversation-node-seat.tsx
+@@ -35,6 +35,7 @@ import type {
+ import type { LocaleKey } from '@/locales';
+ import { cn } from '@/lib/utils';
+ import { AiToolRow } from './ai-tool-presentation';
++import { AiQuestionHistory } from './ai-question-panel';
+ 
+ type AiConversationNodeRendererProps<Kind extends AiConversationNode['kind']> = {
+   readonly node: AiConversationNodeOf<Kind>;
+@@ -622,6 +623,7 @@ export const aiConversationNodeRenderers = {
+   assistantMessage: AssistantMessageNodeView,
+   reasoning: ReasoningNodeView,
+   tool: ToolNodeView,
++  question: ({ node }) => <AiQuestionHistory question={node.question} />,
+   artifact: ArtifactNodeView,
+   approvalMarker: ApprovalMarkerNodeView,
+   retry: RetryNodeView,
+@@ -647,6 +649,7 @@ function renderNode(
+     case 'assistantMessage': return React.createElement(renderers.assistantMessage, { node });
+     case 'reasoning': return React.createElement(renderers.reasoning, { node });
+     case 'tool': return React.createElement(renderers.tool, { node, onOpenTool });
++    case 'question': return React.createElement(renderers.question, { node });
+     case 'artifact': return React.createElement(renderers.artifact, { node, onOpenArtifact });
+     case 'approvalMarker': return React.createElement(renderers.approvalMarker, { node });
+     case 'retry': return React.createElement(renderers.retry, { node });
+@@ -668,6 +671,7 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
+     case 'assistantMessage': return `${base}:${node.state}:${JSON.stringify(node.blocks)}`;
+     case 'reasoning': return `${base}:${node.state}:${node.summary}:${node.content}`;
+     case 'tool': return `${base}:${node.state}:${node.durationMs ?? ''}:${node.error ?? ''}`;
++    case 'question': return `${base}:${node.question.status}:${node.lastSeq}`;
+     case 'artifact': return `${base}:${node.sha256}:${node.sizeBytes ?? ''}`;
+     case 'approvalMarker': return `${base}:${node.status}:${node.prompt ?? ''}`;
+     case 'retry': return `${base}:${node.attempt}:${node.reason}`;
+diff --git a/src/components/ai/workspace/ai-workspace-controller.tsx b/src/components/ai/workspace/ai-workspace-controller.tsx
+index 5fd7f6f4..18191cee 100644
+--- a/src/components/ai/workspace/ai-workspace-controller.tsx
++++ b/src/components/ai/workspace/ai-workspace-controller.tsx
+@@ -27,6 +27,7 @@ export function AiWorkspaceController({
+   return (
+     <AiWorkspaceRoot
+       view={controller.view}
++      onAnswerQuestion={controller.answerQuestion}
+       pendingNodes={controller.pendingNodes}
+       scope={scope}
+       composerState={controller.composer}
+diff --git a/src/components/ai/workspace/ai-workspace-root.tsx b/src/components/ai/workspace/ai-workspace-root.tsx
+index ae40b69c..1d16c73f 100644
+--- a/src/components/ai/workspace/ai-workspace-root.tsx
++++ b/src/components/ai/workspace/ai-workspace-root.tsx
+@@ -46,6 +46,7 @@ export interface AiWorkspaceRootProps {
+   readonly archivingSessionId?: string | null;
+   readonly approvalDecision?: 'approve' | 'reject' | null;
+   readonly approvalError?: string | null;
++  readonly onAnswerQuestion?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
+   readonly loadingOlder?: boolean;
+   readonly queueMutation?: AiQueueMutationState | null;
+   readonly renamingSessionId?: string | null;
+@@ -102,6 +103,7 @@ export function AiWorkspaceRoot({
+   archivingSessionId = null,
+   approvalDecision = null,
+   approvalError = null,
++  onAnswerQuestion,
+   loadingOlder = false,
+   queueMutation = null,
+   renamingSessionId = null,
+@@ -275,6 +277,8 @@ export function AiWorkspaceRoot({
+           queueMutation={queueMutation}
+           announcement={announcement}
+           pendingApproval={view?.pendingApproval}
++          pendingQuestion={view?.pendingQuestion}
++          onAnswerQuestion={onAnswerQuestion}
+           approvalDecision={approvalDecision}
+           approvalError={approvalError}
+           unavailableReason={agentUnavailableReason}
+diff --git a/src/components/ai/workspace/use-ai-session-controller.ts b/src/components/ai/workspace/use-ai-session-controller.ts
+index 9eb6ab66..a7cea0e8 100644
+--- a/src/components/ai/workspace/use-ai-session-controller.ts
++++ b/src/components/ai/workspace/use-ai-session-controller.ts
+@@ -1,6 +1,7 @@
+ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+ 
+ import { createAgentSessionAdapter } from '@/lib/ai/agent-session-adapter';
++import { questionKey } from '@/types/agent-question';
+ import {
+   createAiComposerState,
+   reduceAiComposer,
+@@ -55,6 +56,7 @@ export interface UseAiSessionControllerInput {
+ }
+ 
+ export interface AiSessionController {
++  readonly answerQuestion: AiSessionAdapter['answerQuestion'];
+   readonly view: AiSessionView | null;
+   readonly pendingNodes: readonly AiConversationNode[];
+   readonly composer: AiComposerState;
+@@ -413,6 +415,7 @@ export function useAiSessionController({
+       terminal: view !== null
+         && (view.status === 'completed' || view.status === 'cancelled' || view.status === 'failed'),
+       waitingApproval: view?.pendingApproval !== null && view?.pendingApproval !== undefined,
++      waitingQuestion: Boolean(view?.pendingQuestion),
+     });
+   }, [dispatch, view, view?.pendingApproval, view?.status, view?.summary.id]);
+ 
+@@ -705,6 +708,11 @@ export function useAiSessionController({
+ 
+   return {
+     view: visibleView,
++    answerQuestion: async (input) => {
++      const current = viewRef.current?.pendingQuestion;
++      if (!current || questionKey(current.identity) !== questionKey(input.identity)) throw new Error('Question is no longer active');
++      await adapter.answerQuestion(input);
++    },
+     pendingNodes,
+     composer,
+     providerLabel: provider?.name ?? '',
+diff --git a/src/components/ui/field.tsx b/src/components/ui/field.tsx
+index a9d12397..bed09e84 100644
+--- a/src/components/ui/field.tsx
++++ b/src/components/ui/field.tsx
+@@ -3,6 +3,14 @@ import * as React from "react"
+ import { cn } from "@/lib/utils"
+ import { Label } from "@/components/ui/label"
+ 
++function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
++  return <fieldset data-slot="field-set" className={cn("flex min-w-0 flex-col gap-3", className)} {...props} />
++}
++
++function FieldLegend({ className, ...props }: React.ComponentProps<"legend">) {
++  return <legend data-slot="field-legend" className={cn("mb-2 text-sm font-medium", className)} {...props} />
++}
++
+ function FieldGroup({ className, ...props }: React.ComponentProps<"div">) {
+   return (
+     <div
+@@ -63,4 +71,4 @@ function FieldError({ className, ...props }: React.ComponentProps<"div">) {
+   )
+ }
+ 
+-export { Field, FieldDescription, FieldError, FieldGroup, FieldLabel }
++export { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldSet, FieldLegend }
+diff --git a/src/lib/agent-session-projection.ts b/src/lib/agent-session-projection.ts
+index d33cbdc5..453304fb 100644
+--- a/src/lib/agent-session-projection.ts
++++ b/src/lib/agent-session-projection.ts
+@@ -94,6 +94,7 @@ const ACTIVITY_KIND_ORDER = {
+   error: 18,
+   cancellation: 19,
+   unknown: 20,
++  question: 21,
+ } satisfies Record<AgentActivityNode['kind'], number>;
+ 
+ type ActivityEventLike = Readonly<{
+@@ -444,6 +445,15 @@ function projectActivityNodesUnchecked(
+         );
+         break;
+       }
++      case 'question/requested':
++      case 'question/answered':
++      case 'question/cancelled': {
++        const identity = event.type === 'question/answered' ? event.data.submission.identity : event.data.identity;
++        upsert(`activity:question:${identity.questionRequestId}`, 'question', event,
++          event.type === 'question/requested' ? 'pending' : event.type === 'question/answered' ? 'completed' : 'cancelled',
++          event.type, null, event.data, identity.requestId);
++        break;
++      }
+       case 'tool/approval': {
+         const key = toolKeys.get(event.data.callId) ?? `activity:tool:${event.data.callId}`;
+         upsert(
+diff --git a/src/lib/ai/__tests__/session-adapters.test.ts b/src/lib/ai/__tests__/session-adapters.test.ts
+index 51108f2c..fb7f49e6 100644
+--- a/src/lib/ai/__tests__/session-adapters.test.ts
++++ b/src/lib/ai/__tests__/session-adapters.test.ts
+@@ -60,6 +60,7 @@ function agentDependencies(
+     stop: vi.fn(async () => snapshot()),
+     approve: vi.fn(async () => snapshot()),
+     reject: vi.fn(async () => snapshot()),
++    answerQuestion: vi.fn(async () => snapshot()),
+     archive: vi.fn(async () => snapshot()),
+     list: vi.fn(async () => ({ sessions: [], recoveryNotices: [] })),
+     mutateInbox: vi.fn(async () => snapshot()),
+@@ -230,6 +231,24 @@ describe('AgentSessionAdapter', () => {
+     expect(resolved).toBe(true);
+     adapter.dispose();
+   });
++
++  it('repairs a lost live question answer via reconnect before acknowledging the form', async () => {
++    const identity = { sessionId: 'session-fixture', turnId: 'turn', stepId: 'step', requestId: 'request', callId: 'call', questionRequestId: 'question' };
++    const input = { identity, clientOperationId: 'question-operation', answers: [{ id: 'choice', selected: [], custom: 'Answer' }] };
++    const answered: AgentSessionEvent = { version: AGENT_SESSION_EVENT_VERSION, sessionId: 'session-fixture', seq: agentSessionEventFixture.length, timeUnixMs: 99_999, turnId: 'turn', stepId: 'step', type: 'question/answered', data: { submission: input, fingerprint: '0'.repeat(64) } };
++    const stale = { snapshot: snapshot(), events: [...agentSessionEventFixture], hasTerminalEvent: false };
++    const fresh = { ...stale, events: [...agentSessionEventFixture, answered] };
++    const reconnect = vi.fn(async () => fresh);
++    const dependencies = { ...agentDependencies(agentSessionEventFixture), client: () => ({ state: () => stale, onChange: vi.fn(() => () => undefined), connect: vi.fn(async () => stale), reconnect, disconnect: vi.fn() }) };
++    const adapter = createAgentSessionAdapter(dependencies);
++    await adapter.open('session-fixture');
++    await adapter.answerQuestion(input);
++    expect(dependencies.answerQuestion).toHaveBeenCalledWith(input);
++    expect(reconnect).toHaveBeenCalledOnce();
++    reconnect.mockResolvedValueOnce(stale);
++    await expect(adapter.answerQuestion(input)).rejects.toThrow('not visible');
++    adapter.dispose();
++  });
+   it('releases the current event subscription when UI switches sessions without stopping Runtime', async () => {
+     const base = agentDependencies(agentSessionEventFixture);
+     const disconnect = vi.fn();
+diff --git a/src/lib/ai/agent-session-adapter.ts b/src/lib/ai/agent-session-adapter.ts
+index 34818a51..39151c30 100644
+--- a/src/lib/ai/agent-session-adapter.ts
++++ b/src/lib/ai/agent-session-adapter.ts
+@@ -1,4 +1,6 @@
+ import { AgentSessionCommittedClient, type AgentSessionStreamState } from '@/lib/agent-session-client';
++import { invokeAnswerAgentRuntimeQuestion } from '@/lib/tauri';
++import { projectQuestions } from './question-projection';
+ import {
+   invokeAgentRuntimeFollowup,
+   invokeAgentRuntimeSteer,
+@@ -78,6 +80,7 @@ interface AgentCommittedClientLike {
+ export interface AgentSessionAdapterDependencies {
+   readonly createSession: typeof invokeCreateAgentRuntimeSession;
+   readonly start: typeof invokeStartAgentRuntime;
++  readonly answerQuestion: typeof invokeAnswerAgentRuntimeQuestion;
+   readonly followup: typeof invokeAgentRuntimeFollowup;
+   readonly steer: typeof invokeAgentRuntimeSteer;
+   readonly stop: typeof invokeCancelAgentRuntime;
+@@ -94,6 +97,7 @@ export interface AgentSessionAdapterDependencies {
+ const defaultDependencies: AgentSessionAdapterDependencies = {
+   createSession: invokeCreateAgentRuntimeSession,
+   start: invokeStartAgentRuntime,
++  answerQuestion: invokeAnswerAgentRuntimeQuestion,
+   followup: invokeAgentRuntimeFollowup,
+   steer: invokeAgentRuntimeSteer,
+   stop: invokeCancelAgentRuntime,
+@@ -238,12 +242,15 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView
+     activityNodes: activity.nodes,
+     inbox: projectAgentInbox(events),
+     pendingApproval: pendingApproval(nodes),
++    pendingQuestion: projectQuestions(events).find((q) => q.status === 'pending') ?? null,
+     status: activity.status,
+     error: terminalError(nodes),
+     throughSeq: state.lastCommittedSeq ?? null,
+     revision: state.lastCommittedSeq === undefined ? state.snapshot.eventCount : state.lastCommittedSeq + 1,
+     committedOperationIds: events.flatMap((event) => {
+       switch (event.type) {
++        case 'question/answered':
++          return [event.data.submission.clientOperationId];
+         case 'agent/inbox/item_updated':
+         case 'agent/inbox/item_removed':
+         case 'agent/inbox/reordered':
+@@ -392,6 +399,18 @@ export function createAgentSessionAdapter(
+       ));
+       return { sessions, nextCursor: page.nextCursor };
+     },
++    async answerQuestion(input): Promise<void> {
++      await dependencies.answerQuestion(input);
++      // IPC success alone is not the UI acknowledgement: a lost live event must
++      // be repaired before the form discards its retryable draft.
++      const entry = ensureEntry(input.identity.sessionId);
++      const view = agentSessionView(await entry.client.reconnect());
++      entry.view = view;
++      for (const listener of entry.listeners) listener(view);
++      if (!view.committedOperationIds?.includes(input.clientOperationId)) {
++        throw new Error('Committed question answer is not visible yet');
++      }
++    },
+     create: createSession,
+     open: openEntry,
+     subscribe(sessionId: string, listener: AiSessionListener): () => void {
+diff --git a/src/lib/ai/composer-machine.ts b/src/lib/ai/composer-machine.ts
+index e4980df7..e1ce2917 100644
+--- a/src/lib/ai/composer-machine.ts
++++ b/src/lib/ai/composer-machine.ts
+@@ -6,7 +6,7 @@ import {
+ } from './submission-policy';
+ import type { AiSessionError, AiSubmissionMode, AiSubmitReceipt } from './session-adapter';
+ 
+-export type AiComposerPhase = 'idle' | 'running' | 'waitingApproval' | 'submitting' | 'error';
++export type AiComposerPhase = 'idle' | 'running' | 'waitingApproval' | 'waitingQuestion' | 'submitting' | 'error';
+ 
+ export interface AiDetachedSubmission {
+   readonly clientOperationId: string;
+@@ -38,6 +38,7 @@ export interface AiComposerState {
+   readonly preferredBusyMode: AiBusyPreference;
+   readonly lastError: AiSessionError | null;
+   readonly waitingApproval: boolean;
++  readonly waitingQuestion?: boolean;
+ }
+ 
+ export type AiComposerEffect =
+@@ -55,6 +56,7 @@ export type AiComposerEvent =
+       status: AiSessionStatus;
+       terminal: boolean;
+       waitingApproval: boolean;
++      waitingQuestion?: boolean;
+     }>
+   | Readonly<{
+       type: 'submit.requested';
+@@ -87,7 +89,8 @@ export interface AiComposerTransition {
+   readonly effects: readonly AiComposerEffect[];
+ }
+ 
+-function runtimePhase(state: Pick<AiComposerState, 'runtimeStatus' | 'waitingApproval'>): AiComposerPhase {
++function runtimePhase(state: Pick<AiComposerState, 'runtimeStatus' | 'waitingApproval' | 'waitingQuestion'>): AiComposerPhase {
++  if (state.waitingQuestion) return 'waitingQuestion';
+   if (state.waitingApproval) return 'waitingApproval';
+   return state.runtimeStatus === 'running' || state.runtimeStatus === 'waiting' ? 'running' : 'idle';
+ }
+@@ -188,6 +191,7 @@ export function reduceAiComposer(
+         runtimeStatus: event.status,
+         terminal: event.terminal,
+         waitingApproval: event.waitingApproval,
++        waitingQuestion: event.waitingQuestion ?? false,
+         ...(adoptsCreatedSession ? {
+           pendingSubmissions: state.pendingSubmissions.map((item) => (
+             item.sessionId === null ? { ...item, sessionId: event.sessionId } : item
+@@ -219,6 +223,7 @@ export function reduceAiComposer(
+         terminal: state.terminal,
+         sessionId: state.sessionId,
+         waitingApproval: state.waitingApproval,
++        waitingQuestion: state.waitingQuestion,
+         hasProvider: event.hasProvider,
+         canCreateSession: event.canCreateSession,
+         draft: state.draft,
+@@ -251,6 +256,7 @@ export function reduceAiComposer(
+         terminal: state.terminal,
+         sessionId: state.sessionId,
+         waitingApproval: state.waitingApproval,
++        waitingQuestion: state.waitingQuestion,
+         hasProvider: event.hasProvider,
+         canCreateSession: event.canCreateSession,
+         draft: failed.content,
+@@ -289,6 +295,7 @@ export function reduceAiComposer(
+           phase: runtimePhase({
+             runtimeStatus: state.runtimeStatus === 'idle' ? 'running' : state.runtimeStatus,
+             waitingApproval: state.waitingApproval,
++            waitingQuestion: state.waitingQuestion,
+           }),
+           runtimeStatus: state.runtimeStatus === 'idle' ? 'running' : state.runtimeStatus,
+           sessionId: event.receipt.sessionId,
+diff --git a/src/lib/ai/conversation-node.ts b/src/lib/ai/conversation-node.ts
+index 11b46423..1d755b9a 100644
+--- a/src/lib/ai/conversation-node.ts
++++ b/src/lib/ai/conversation-node.ts
+@@ -227,6 +227,7 @@ export interface AiTurnTailNode extends AiConversationNodeBase {
+ }
+ 
+ export type AiConversationNode =
++  | AiQuestionNode
+   | AiSystemPromptNode
+   | AiContextInjectionNode
+   | AiUserMessageNode
+@@ -240,6 +241,11 @@ export type AiConversationNode =
+   | AiTurnProcessNode
+   | AiTurnTailNode;
+ 
++export interface AiQuestionNode extends AiConversationNodeBase {
++  readonly kind: 'question';
++  readonly question: import('@/types/agent-question').AgentQuestionView;
++}
++
+ export type AiConversationNodeOf<Kind extends AiConversationNode['kind']> = Extract<
+   AiConversationNode,
+   { readonly kind: Kind }
+diff --git a/src/lib/ai/conversation-projection.ts b/src/lib/ai/conversation-projection.ts
+index 9232ce49..1fb5c64b 100644
+--- a/src/lib/ai/conversation-projection.ts
++++ b/src/lib/ai/conversation-projection.ts
+@@ -1,3 +1,5 @@
++import { projectQuestions } from './question-projection';
++import { questionKey } from '@/types/agent-question';
+ import {
+   agentEventTimestamp,
+   validateCommittedAgentEventWindow,
+@@ -1059,5 +1061,16 @@ export function projectAgentChatNodes(
+     }
+   }
+ 
++  const questionNodes = projectQuestions(events).map((question): import('./conversation-node').AiQuestionNode => ({
++    kind: 'question', key: `question:${questionKey(question.identity)}`, sourceKind: 'agent',
++    sessionId: question.identity.sessionId, turnId: question.identity.turnId, stepId: question.identity.stepId,
++    firstSeq: question.firstSeq, lastSeq: question.lastSeq, timestamp: question.timestamp, question,
++  }));
++  for (const question of questionNodes) {
++    const followingAnswer = nodes.findIndex((node) => node.turnId === question.turnId
++      && (node.kind === 'assistantMessage' || node.kind === 'turnTail') && node.firstSeq > question.firstSeq);
++    const afterTurn = nodes.reduce((end, node, index) => node.turnId === question.turnId ? index + 1 : end, 0);
++    nodes.splice(followingAnswer >= 0 ? followingAnswer : afterTurn || nodes.length, 0, question);
++  }
+   return nodes;
+ }
+diff --git a/src/lib/ai/session-adapter.ts b/src/lib/ai/session-adapter.ts
+index 08fb7c00..edaf6ed5 100644
+--- a/src/lib/ai/session-adapter.ts
++++ b/src/lib/ai/session-adapter.ts
+@@ -65,6 +65,7 @@ export interface AiSessionError {
+ }
+ 
+ export interface AiSessionView {
++  readonly pendingQuestion?: import('@/types/agent-question').AgentQuestionView | null;
+   readonly summary: AiSessionSummary;
+   readonly snapshot: AiSessionSourceSnapshot;
+   readonly nodes: readonly AiConversationNode[];
+@@ -169,6 +170,7 @@ export type AiSessionListener = (view: AiSessionView) => void;
+ 
+ /** UI-facing operations backed exclusively by the Agent Runtime. */
+ export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
++  answerQuestion(input: import('@/types/agent-question').AnswerQuestionInput): Promise<void>;
+   readonly kind: Kind;
+   list(input: ListSessionsInput): Promise<AiSessionSummaryPage>;
+   create(
+diff --git a/src/lib/ai/submission-policy.ts b/src/lib/ai/submission-policy.ts
+index 1535ac9e..8adaf73f 100644
+--- a/src/lib/ai/submission-policy.ts
++++ b/src/lib/ai/submission-policy.ts
+@@ -7,6 +7,7 @@ export type AiSubmissionRejection =
+   | 'empty'
+   | 'submitting'
+   | 'waitingApproval'
++  | 'waitingQuestion'
+   | 'terminal'
+   | 'providerUnavailable'
+   | 'sessionUnavailable';
+@@ -21,6 +22,7 @@ export interface AiSubmissionPolicyInput {
+   readonly terminal: boolean;
+   readonly sessionId: string | null;
+   readonly waitingApproval: boolean;
++  readonly waitingQuestion?: boolean;
+   readonly hasProvider: boolean;
+   readonly canCreateSession: boolean;
+   readonly draft: string;
+@@ -40,6 +42,7 @@ export function resolveAiSubmission(input: AiSubmissionPolicyInput): AiSubmissio
+   const running = input.sessionStatus === 'running' || input.sessionStatus === 'waiting';
+ 
+   if (input.submitting) return { kind: 'reject', reason: 'submitting' };
++  if (input.waitingQuestion) return { kind: 'reject', reason: 'waitingQuestion' };
+   if (input.waitingApproval) return { kind: 'reject', reason: 'waitingApproval' };
+   if (running && empty && input.gesture === 'primary') return { kind: 'stop' };
+   if (empty) return { kind: 'reject', reason: 'empty' };
+diff --git a/src/lib/tauri.ts b/src/lib/tauri.ts
+index 04003f8f..c9199c3c 100644
+--- a/src/lib/tauri.ts
++++ b/src/lib/tauri.ts
+@@ -859,6 +859,10 @@ export async function invokeRequestAppRestart(): Promise<void> {
+   return invokeLogged('request_app_restart');
+ }
+ 
++export function invokeAnswerAgentRuntimeQuestion(input: import('@/types/agent-question').AnswerQuestionInput): Promise<AgentSessionSnapshot> {
++  return invokeLogged<AgentSessionSnapshot>('agent_runtime_answer_question', { input });
++}
++
+ // --- Database commands ---
+ 
+ export async function invokeListProfiles(): Promise<ProfileRow[]> {
+diff --git a/src/locales/en-US.ts b/src/locales/en-US.ts
+index 389476b0..e83259ae 100644
+--- a/src/locales/en-US.ts
++++ b/src/locales/en-US.ts
+@@ -1,4 +1,15 @@
+ export default {
++  'ai.workspace.announce.waitingQuestion': 'Answer in the question form before sending a new message. Your draft is saved.',
++  'ai.workspace.question.title': 'Your input is needed',
++  'ai.workspace.question.description': 'Choose an option or enter your own answer. Answers do not grant tool permissions.',
++  'ai.workspace.question.custom': 'Your own answer (optional when an option is selected)',
++  'ai.workspace.question.tooLong': 'Use no more than 8 KiB of text.',
++  'ai.workspace.question.submit': 'Submit answers',
++  'ai.workspace.question.submitting': 'Saving answers…',
++  'ai.workspace.question.submitFailed': 'Could not confirm the answer. Retry with the same answers or reopen the task to refresh its status.',
++  'ai.workspace.question.pending': 'Waiting for your answer',
++  'ai.workspace.question.answered': 'Answered',
++  'ai.workspace.question.cancelled': 'Question cancelled',
+   'app.name': 'ShellSpan',
+   'app.tagline': 'A clean and elegant SSH workbench',
+   'app.primaryNavigation': 'Primary sections',
+diff --git a/src/locales/zh-CN.ts b/src/locales/zh-CN.ts
+index 8a4c2cd5..65639cb6 100644
+--- a/src/locales/zh-CN.ts
++++ b/src/locales/zh-CN.ts
+@@ -1,4 +1,15 @@
+ export default {
++  'ai.workspace.announce.waitingQuestion': '请先在问答区回答，再发送新消息。普通聊天草稿已保留。',
++  'ai.workspace.question.title': '需要你的回答',
++  'ai.workspace.question.description': '请选择选项或填写自己的答案。回答不会授予任何工具权限。',
++  'ai.workspace.question.custom': '自己的答案（已选择选项时可留空）',
++  'ai.workspace.question.tooLong': '文字不得超过 8 KiB。',
++  'ai.workspace.question.submit': '提交答案',
++  'ai.workspace.question.submitting': '正在保存答案…',
++  'ai.workspace.question.submitFailed': '尚未确认答案提交。请用相同答案重试，或重新打开任务刷新状态。',
++  'ai.workspace.question.pending': '等待你的回答',
++  'ai.workspace.question.answered': '已回答',
++  'ai.workspace.question.cancelled': '问题已取消',
+   'app.name': 'ShellSpan',
+   'app.tagline': '简洁优雅的 SSH 工作台',
+   'app.primaryNavigation': '主要板块',
+diff --git a/src/main.tsx b/src/main.tsx
+index fc825d44..3f57b800 100644
+--- a/src/main.tsx
++++ b/src/main.tsx
+@@ -25,6 +25,11 @@ initGlobalErrorLogging();
+ 
+ async function bootstrap(): Promise<void> {
+   const params = new URLSearchParams(window.location.search);
++  if (import.meta.env.DEV && params.has('aiStage6aVisual')) {
++    const { mountQuestionPage } = await import('./test/agent-question-page');
++    await mountQuestionPage(document.getElementById('root')!);
++    return;
++  }
+   const phase5Scenario = params.get('aiPhase5Visual');
+   if (import.meta.env.DEV && phase5Scenario !== null) {
+     const { mountAgentSessionPhase5Page } = await import('./test/agent-session-phase5-page');
+diff --git a/src/types/agent-session.ts b/src/types/agent-session.ts
+index df877b30..45f1509c 100644
+--- a/src/types/agent-session.ts
++++ b/src/types/agent-session.ts
+@@ -400,6 +400,13 @@ export type AgentSessionEvent =
+       };
+     }>
+   | AgentSessionEventWithData<'tool/call', { call: AgentSessionRecordedToolCall }>
++  | AgentSessionEventWithData<'question/requested', {
++    identity: import('./agent-question').QuestionIdentity;
++    arguments: { questions: readonly import('./agent-question').AgentQuestion[] };
++    provider: AgentSubagentModel;
++  }>
++  | AgentSessionEventWithData<'question/answered', { submission: import('./agent-question').AnswerQuestionInput; fingerprint: string }>
++  | AgentSessionEventWithData<'question/cancelled', { identity: import('./agent-question').QuestionIdentity }>
+   | AgentSessionEventWithData<'tool/approval', {
+       requestId: string;
+       callId: string;
+@@ -875,6 +882,7 @@ export interface AgentActivityAgent {
+ }
+ 
+ export type AgentActivityNodeKind =
++  | 'question'
+   | 'session'
+   | 'agent'
+   | 'inbox'

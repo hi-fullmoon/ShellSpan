@@ -60,6 +60,7 @@ function agentDependencies(
     stop: vi.fn(async () => snapshot()),
     approve: vi.fn(async () => snapshot()),
     reject: vi.fn(async () => snapshot()),
+    answerQuestion: vi.fn(async () => snapshot()),
     archive: vi.fn(async () => snapshot()),
     list: vi.fn(async () => ({ sessions: [], recoveryNotices: [] })),
     mutateInbox: vi.fn(async () => snapshot()),
@@ -228,6 +229,24 @@ describe('AgentSessionAdapter', () => {
     publish?.(state());
     await operation;
     expect(resolved).toBe(true);
+    adapter.dispose();
+  });
+
+  it('repairs a lost live question answer via reconnect before acknowledging the form', async () => {
+    const identity = { sessionId: 'session-fixture', turnId: 'turn', stepId: 'step', requestId: 'request', callId: 'call', questionRequestId: 'question' };
+    const input = { identity, clientOperationId: 'question-operation', answers: [{ id: 'choice', selected: [], custom: 'Answer' }] };
+    const answered: AgentSessionEvent = { version: AGENT_SESSION_EVENT_VERSION, sessionId: 'session-fixture', seq: agentSessionEventFixture.length, timeUnixMs: 99_999, turnId: 'turn', stepId: 'step', type: 'question/answered', data: { submission: input, fingerprint: '0'.repeat(64) } };
+    const stale = { snapshot: snapshot(), events: [...agentSessionEventFixture], hasTerminalEvent: false };
+    const fresh = { ...stale, events: [...agentSessionEventFixture, answered] };
+    const reconnect = vi.fn(async () => fresh);
+    const dependencies = { ...agentDependencies(agentSessionEventFixture), client: () => ({ state: () => stale, onChange: vi.fn(() => () => undefined), connect: vi.fn(async () => stale), reconnect, disconnect: vi.fn() }) };
+    const adapter = createAgentSessionAdapter(dependencies);
+    await adapter.open('session-fixture');
+    await adapter.answerQuestion(input);
+    expect(dependencies.answerQuestion).toHaveBeenCalledWith(input);
+    expect(reconnect).toHaveBeenCalledOnce();
+    reconnect.mockResolvedValueOnce(stale);
+    await expect(adapter.answerQuestion(input)).rejects.toThrow('not visible');
     adapter.dispose();
   });
   it('releases the current event subscription when UI switches sessions without stopping Runtime', async () => {

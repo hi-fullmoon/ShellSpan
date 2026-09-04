@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { createAgentSessionAdapter } from '@/lib/ai/agent-session-adapter';
+import { questionKey } from '@/types/agent-question';
+import { useImageDraft } from './use-image-draft';
+import { requireVision } from '@/lib/vision-contract';
+import { resolveAiSubmission } from '@/lib/ai/submission-policy';
 import {
   createAiComposerState,
   reduceAiComposer,
@@ -55,6 +59,13 @@ export interface UseAiSessionControllerInput {
 }
 
 export interface AiSessionController {
+  readonly imageDraft: ReturnType<typeof useImageDraft>;
+  readonly listFileReferences: import('@/types/agent-file-reference').ListFileReferences;
+  readonly listSkills: (root?: string) => Promise<import('@/types/agent-skill').SkillUserList>;
+  readonly skillsScopeKey: string;
+  readonly skillsNeedsRoot: boolean;
+  readonly projectTargetLabel: string;
+  readonly answerQuestion: AiSessionAdapter['answerQuestion'];
   readonly view: AiSessionView | null;
   readonly pendingNodes: readonly AiConversationNode[];
   readonly composer: AiComposerState;
@@ -182,6 +193,13 @@ export function useAiSessionController({
   const sessionListRequestRef = useRef(0);
 
   const workspaceScopeKey = `agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`;
+  // Initial history is only a convenience. It must never claim a workspace after
+  // the user has begun a draft, chosen a project, or explicitly navigated.
+  const automaticRestore = useRef({ key: workspaceScopeKey, eligible: true });
+  if (automaticRestore.current.key !== workspaceScopeKey) {
+    automaticRestore.current = { key: workspaceScopeKey, eligible: true };
+  }
+  const claimWorkspace = useCallback(() => { automaticRestore.current.eligible = false; }, []);
   const canStartAgent = scope === 'terminal'
     && activeTerminal?.status === 'connected'
     && agentEnabled;
@@ -228,6 +246,13 @@ export function useAiSessionController({
     });
   }, [dispatch, navigationDraftKey]);
 
+  const coldSkillSession = useRef<Promise<AiSessionView> | null>(null);
+  const imageDraft = useImageDraft(navigationDraftKey(openedSessionId ?? view?.summary.id ?? null), composer.draft,
+    value => { claimWorkspace(); dispatch({ type: 'draft.changed', value }); });
+  const [skillNavigation, setSkillNavigation] = useState(0);
+  const [skillRoot, setSkillRoot] = useState<string | null>(null);
+  useEffect(() => { coldSkillSession.current = null; setSkillRoot(null); }, [workspaceScopeKey, openedSessionId]);
+
   const createInput = useCallback((
     content: string,
   ): Extract<AiCreateSessionInput, { kind: 'agent' }> => {
@@ -249,6 +274,49 @@ export function useAiSessionController({
       },
     };
   }, [activeTerminal, agentEnabled, operationId, scope]);
+
+  const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}`;
+  const projectEpoch = useRef({ key: projectKey });
+  if (projectEpoch.current.key !== projectKey) projectEpoch.current = { key: projectKey };
+  const ensureProjectSession = useCallback(async (root?: string): Promise<string> => {
+    const epoch = projectEpoch.current;
+    let sessionId = viewRef.current?.summary.id ?? openedSessionId;
+    if (!sessionId) {
+      if (!coldSkillSession.current) {
+        const selectedRoot = root?.trim();
+        if (!selectedRoot || !(/^(?:\/|[A-Za-z]:[\\/])/.test(selectedRoot)) || /[\x00-\x1f]/.test(selectedRoot)) throw new Error(t('ai.workspace.skills.absoluteRoot'));
+        claimWorkspace();
+        const input = createInput(composerRef.current.draft.trim() || t('ai.workspace.skills.title'));
+        const target = input.request.target!;
+        coldSkillSession.current = adapter.create({ ...input, request: { ...input.request, target: { ...target, ...(target.kind === 'local' ? { cwd: selectedRoot } : { rootPath: selectedRoot }) } } });
+        setSkillRoot(selectedRoot);
+      }
+      const pending = coldSkillSession.current;
+      try { sessionId = (await pending).summary.id; } catch (error) {
+        if (coldSkillSession.current === pending) { coldSkillSession.current = null; setSkillRoot(null); }
+        throw error;
+      }
+      if (coldSkillSession.current !== pending) throw new Error(t('ai.workspace.skills.unavailable'));
+    }
+    if (projectEpoch.current !== epoch) throw new Error('Cancelled');
+    return sessionId;
+  }, [adapter, claimWorkspace, createInput, openedSessionId, skillNavigation, t]);
+
+  const listSkills = useCallback(async (root?: string): Promise<import('@/types/agent-skill').SkillUserList> => {
+    if (!adapter.listSkills) throw new Error(t('ai.workspace.skills.unavailable'));
+    const sessionId = await ensureProjectSession(root);
+    return adapter.listSkills(sessionId);
+  }, [adapter, ensureProjectSession, t]);
+  const listFileReferences = useCallback<import('@/types/agent-file-reference').ListFileReferences>(async (query, signal, root) => {
+    const epoch = projectEpoch.current;
+    if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+    if (!adapter.listFileReferences) throw new Error('Unavailable');
+    const sessionId = await ensureProjectSession(root);
+    if (signal.aborted || epoch !== projectEpoch.current) throw new DOMException('Cancelled', 'AbortError');
+    const result = await adapter.listFileReferences(sessionId, query, signal);
+    if (signal.aborted || epoch !== projectEpoch.current) throw new DOMException('Cancelled', 'AbortError');
+    return result;
+  }, [adapter, ensureProjectSession]);
 
   effectExecutorRef.current = (effect): void => {
     if (effect.type === 'focusEditor') return;
@@ -296,9 +364,10 @@ export function useAiSessionController({
           clientOperationId: payload.clientOperationId,
           provider: currentProvider,
         };
-        const receipt = await adapter.submit(payload.sessionId, {
+        const cold = payload.sessionId === null ? await coldSkillSession.current : null;
+        const receipt = await adapter.submit(payload.sessionId ?? cold?.summary.id ?? null, {
           ...base,
-          ...(payload.sessionId === null
+          ...(payload.sessionId === null && !cold
             ? { create: createInput(payload.content) }
             : {}),
         } satisfies AiSubmitInput<'agent'>);
@@ -371,9 +440,14 @@ export function useAiSessionController({
   useEffect(() => {
     let alive = true;
     let unsubscribe = (): void => undefined;
+    const restore = automaticRestore.current;
+    let established = false;
+    const canPublish = (): boolean => alive && (Boolean(openedSessionId)
+      || (automaticRestore.current === restore && (established || restore.eligible)));
     const open = async (): Promise<void> => {
       let sessionId = openedSessionId;
       if (!sessionId && scope === 'terminal' && activeTerminal) {
+        if (!canPublish()) return;
         const page = await adapter.list({
           scopeKey: `terminal-${activeTerminal.sessionId}`,
           archived: false,
@@ -381,9 +455,10 @@ export function useAiSessionController({
         });
         sessionId = page.sessions[0]?.id ?? null;
       }
-      if (!alive || !sessionId) return;
+      if (!canPublish() || !sessionId) return;
       const publish = (next: AiSessionView): void => {
-        if (!alive) return;
+        if (!canPublish()) return;
+        established = true;
         viewRef.current = next;
         setView(next);
       };
@@ -391,7 +466,7 @@ export function useAiSessionController({
       publish(await adapter.open(sessionId));
     };
     void open().catch((error: unknown) => {
-      if (alive) dispatch({ type: 'stop.failed', error: normalizeAiSessionError(error) });
+      if (canPublish()) dispatch({ type: 'stop.failed', error: normalizeAiSessionError(error) });
     });
     return () => {
       alive = false;
@@ -403,6 +478,7 @@ export function useAiSessionController({
     dispatch,
     openedSessionId,
     scope,
+    skillNavigation,
   ]);
 
   useEffect(() => {
@@ -413,6 +489,7 @@ export function useAiSessionController({
       terminal: view !== null
         && (view.status === 'completed' || view.status === 'cancelled' || view.status === 'failed'),
       waitingApproval: view?.pendingApproval !== null && view?.pendingApproval !== undefined,
+      waitingQuestion: Boolean(view?.pendingQuestion),
     });
   }, [dispatch, view, view?.pendingApproval, view?.status, view?.summary.id]);
 
@@ -480,11 +557,13 @@ export function useAiSessionController({
   }, [adapter]);
 
   const openSessions = useCallback((): void => {
+    claimWorkspace();
     setNavigation((current) => ({ ...current, route: { kind: 'sessions' } }));
     void refreshSessions();
-  }, [refreshSessions]);
+  }, [claimWorkspace, refreshSessions]);
 
   const openSession = useCallback((summary: AiSessionSummary): void => {
+    claimWorkspace();
     saveCurrentDraft();
     setOpenedSessionId(summary.id);
     setView(null);
@@ -503,9 +582,14 @@ export function useAiSessionController({
       waitingApproval: summary.status === 'waiting',
     });
     restoreDraft(summary.id);
-  }, [dispatch, restoreDraft, saveCurrentDraft]);
+  }, [claimWorkspace, dispatch, restoreDraft, saveCurrentDraft]);
 
   const newSession = useCallback((): void => {
+    claimWorkspace();
+    automaticRestore.current = { ...automaticRestore.current, eligible: false };
+    coldSkillSession.current = null;
+    setSkillNavigation((generation) => generation + 1);
+    setSkillRoot(null);
     saveCurrentDraft();
     setOpenedSessionId(null);
     setView(null);
@@ -524,7 +608,7 @@ export function useAiSessionController({
       waitingApproval: false,
     });
     restoreDraft(null);
-  }, [dispatch, restoreDraft, saveCurrentDraft]);
+  }, [claimWorkspace, dispatch, restoreDraft, saveCurrentDraft]);
 
   const archiveSession = useCallback((summary: AiSessionSummary): void => {
     setArchivingSessionId(summary.id);
@@ -704,7 +788,27 @@ export function useAiSessionController({
   ), [adapter]);
 
   return {
+    imageDraft: {
+      ...imageDraft,
+      add: files => { claimWorkspace(); return imageDraft.add(files); },
+      remove: index => { claimWorkspace(); return imageDraft.remove(index); },
+      cancel: () => { claimWorkspace(); return imageDraft.cancel(); },
+    },
+    listFileReferences,
+    listSkills,
+    projectTargetLabel: (() => {
+      const target = visibleView?.snapshot.kind === 'agent' ? visibleView.snapshot.value.header.target : null;
+      if (target) return `${target.label ?? target.targetId} (${target.kind === 'local' ? 'local' : `${target.username}@${target.host}:${target.port}`}) · ${target.kind === 'local' ? target.cwd ?? '' : target.rootPath ?? ''}`;
+      return activeTerminal ? `${activeTerminal.title} (${activeTerminal.host === 'local' ? 'local' : `${activeTerminal.username}@${activeTerminal.host}:${activeTerminal.port}`})${skillRoot ? ` · ${skillRoot}` : ''}` : '';
+    })(),
+    skillsNeedsRoot: !visibleView && !openedSessionId && !skillRoot,
+    skillsScopeKey: `${workspaceScopeKey}:${openedSessionId ?? "new"}:${skillNavigation}`,
     view: visibleView,
+    answerQuestion: async (input) => {
+      const current = viewRef.current?.pendingQuestion;
+      if (!current || questionKey(current.identity) !== questionKey(input.identity)) throw new Error('Question is no longer active');
+      await adapter.answerQuestion(input);
+    },
     pendingNodes,
     composer,
     providerLabel: provider?.name ?? '',
@@ -723,11 +827,46 @@ export function useAiSessionController({
     queueMutation,
     renamingSessionId,
     renameError,
-    setDraft: (value) => dispatch({ type: 'draft.changed', value }),
+    setDraft: (value) => { claimWorkspace(); dispatch({ type: 'draft.changed', value }); },
     setBusyPreference: (value) => dispatch({ type: 'preference.changed', value }),
     submit: (gesture, accelerated = false) => {
+      claimWorkspace();
       if (!canStartAgent) {
         setAnnouncement('sessionUnavailable');
+        return;
+      }
+      if (imageDraft.draft?.images.length) {
+        const decision = resolveAiSubmission({ sessionId: composer.sessionId, sessionStatus: composer.runtimeStatus,
+          terminal: composer.terminal, waitingApproval: composer.waitingApproval, waitingQuestion: composer.waitingQuestion,
+          hasProvider, canCreateSession: canStartAgent, draft: composer.draft || '[image]', gesture,
+          accelerated, preferredBusyMode: composer.preferredBusyMode, submitting: imageDraft.busy });
+        if (decision.kind !== 'submit') { imageDraft.reportError(decision.kind === 'reject' ? decision.reason : 'sessionUnavailable'); return; }
+        // Recheck selected model BEFORE binding a cold Session. Adding images never creates one.
+        try { requireVision(useAiSettingsStore.getState().getProviderConfig()); }
+        catch (e) { imageDraft.reportError(String(e)); return; }
+        void imageDraft.send(async () => {
+          const cold = await coldSkillSession.current;
+          const sessionId = composer.sessionId ?? cold?.summary.id;
+          const create = sessionId ? undefined : createInput(composerRef.current.draft.trim() || t('ai.workspace.images.add'));
+          return { id: operationId(), sessionId: sessionId ?? create!.request.sessionId, mode: decision.mode, create };
+        }, async value => {
+          const op = value.operation!;
+          if (op.create) {
+            let existing: AiSessionView | null = null;
+            try { existing = await adapter.open(op.sessionId); } catch { /* Not yet created. */ }
+            if (!existing) await adapter.create(op.create);
+            else if (existing.snapshot.kind !== 'agent'
+              || JSON.stringify(existing.snapshot.value.header.target) !== JSON.stringify(op.create.request.target)) {
+              throw new Error('IMAGE_SESSION_TARGET_MISMATCH');
+            }
+          }
+          await adapter.submit(op.sessionId, { clientOperationId: op.id, mode: op.mode, content: value.text,
+            images: value.images, provider: useAiSettingsStore.getState().getProviderConfig() });
+        }, value => {
+          if (composerRef.current.draft === value.text) dispatch({ type: 'draft.changed', value: '' });
+          setOpenedSessionId(value.operation!.sessionId);
+          setNavigation(current => ({ ...current, route: { kind: 'conversation', sessionId: value.operation!.sessionId } }));
+        });
         return;
       }
       const clientOperationId = operationId();
