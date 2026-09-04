@@ -255,10 +255,47 @@ impl SkillRuntime {
             cancellation: cancellation.clone(),
         };
         let native = self.native.clone();
+        let root = if request.target.kind == "local" {
+            request.target.cwd.as_deref()
+        } else {
+            request.target.root_path.as_deref()
+        };
         // Always join native work, also on cancellation. No detached I/O thread may outlive a load.
-        let result = tokio::task::spawn_blocking(move || native.read_skills(request))
-            .await
-            .map_err(|e| format!("Skills provider failed: {e}"))?;
+        let mut result = if root.is_none_or(|root| root.trim().is_empty()) {
+            let definitions = super::builtin_skills::definitions();
+            let snapshot =
+                SkillSnapshot::new(super::builtin_skills::scope(request.target), &definitions);
+            SkillReadResult {
+                observation: SkillObservation {
+                    protocol_version: SKILL_PROTOCOL,
+                    status: SkillObservationStatus::Complete,
+                    snapshot: Some(snapshot),
+                    diagnostics: vec![],
+                },
+                definitions,
+            }
+        } else {
+            tokio::task::spawn_blocking(move || native.read_skills(request))
+                .await
+                .map_err(|e| format!("Skills provider failed: {e}"))?
+        };
+        if let Some(snapshot) = &result.observation.snapshot {
+            // Existing directory definitions keep precedence for previously bound sessions.
+            let names: BTreeSet<_> = result
+                .definitions
+                .iter()
+                .map(|d| d.entry.name.clone())
+                .collect();
+            result.definitions.extend(
+                super::builtin_skills::definitions()
+                    .into_iter()
+                    .filter(|d| !names.contains(&d.entry.name)),
+            );
+            result.observation.snapshot = Some(SkillSnapshot::new(
+                snapshot.scope.clone(),
+                &result.definitions,
+            ));
+        }
         if cancellation.is_cancelled() {
             return Err("Skills cancelled".into());
         }
@@ -352,8 +389,16 @@ impl SkillRuntime {
             SkillProvenance {
                 protocol_version: SKILL_PROTOCOL,
                 renderer_version: 1,
-                provider_identity: format!("shellspan.frozen-{}.v1", snapshot.scope.target.kind),
-                scope: snapshot.scope,
+                provider_identity: if definition.entry.resource_base == "builtin" {
+                    super::builtin_skills::PROVIDER.into()
+                } else {
+                    format!("shellspan.frozen-{}.v1", snapshot.scope.target.kind)
+                },
+                scope: if definition.entry.resource_base == "builtin" {
+                    super::builtin_skills::scope(snapshot.scope.target)
+                } else {
+                    snapshot.scope
+                },
                 relative_path: definition.entry.relative_path,
                 resource_base: definition.entry.resource_base,
                 invocation,

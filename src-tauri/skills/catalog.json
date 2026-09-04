@@ -1,0 +1,7 @@
+[
+  { "name": "system-status", "description": "Inspect system, CPU, memory, disks and processes", "descriptionZh": "系统巡检：CPU、内存、磁盘和进程" },
+  { "name": "service-diagnosis", "description": "Diagnose service status, startup failures and logs", "descriptionZh": "服务排查：运行状态、启动失败和日志" },
+  { "name": "network-diagnosis", "description": "Diagnose DNS, ports, routing and connectivity", "descriptionZh": "网络排查：DNS、端口、路由和连通性" },
+  { "name": "disk-cleanup", "description": "Analyze disk usage and propose a cleanup plan", "descriptionZh": "磁盘清理分析：定位占用并提出清理方案" },
+  { "name": "docker-diagnosis", "description": "Inspect containers, logs and resource usage", "descriptionZh": "Docker 排查：容器状态、日志和资源占用" }
+]
