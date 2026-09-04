@@ -1,4 +1,6 @@
 import { Button } from '@/components/ui/button';
+import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker';
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNode, AiConversationNodeOf, AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiScrollAnchor } from '@/lib/ai/panel-route';
@@ -68,14 +70,19 @@ export function AiConversation({
         />
       ))}
       {running && (
-        <div
-          className="ai-turn-status shimmer"
+        <Marker
+          className="ai-turn-status w-fit"
           role="status"
           aria-live="polite"
           data-ai-running-indicator=""
         >
-          <span>{status === 'waiting' ? t('agent.session.status.waiting') : t('agent.outcome.running')}</span>
-        </div>
+          <MarkerIcon>
+            <Spinner className="motion-reduce:animate-none" aria-hidden="true" />
+          </MarkerIcon>
+          <MarkerContent>
+            {status === 'waiting' ? t('agent.session.status.waiting') : t('ai.workspace.processing')}
+          </MarkerContent>
+        </Marker>
       )}
     </MessageScroller>
   );

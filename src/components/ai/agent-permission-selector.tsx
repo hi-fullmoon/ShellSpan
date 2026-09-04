@@ -49,12 +49,16 @@ const COMPOSER_PERMISSION_OPTIONS = PERMISSION_OPTIONS;
 export interface AgentPermissionSelectorProps {
   readonly sessionId: string;
   readonly disabled?: boolean;
+  readonly mode?: AgentPermissionMode;
+  readonly onModeChange?: (mode: AgentPermissionMode) => Promise<void>;
   readonly variant?: 'default' | 'composer';
 }
 
 export function AgentPermissionSelector({
   sessionId,
   disabled = false,
+  mode: selectedMode,
+  onModeChange,
   variant = 'default',
 }: AgentPermissionSelectorProps): React.ReactNode {
   const { t } = useI18n();
@@ -65,7 +69,11 @@ export function AgentPermissionSelector({
   ));
   const [fullAccessDialogOpen, setFullAccessDialogOpen] = useState(false);
   const composer = variant === 'composer';
-  const mode = binding?.mode ?? DEFAULT_AGENT_PERMISSION_MODE;
+  const mode = selectedMode ?? binding?.mode ?? DEFAULT_AGENT_PERMISSION_MODE;
+  const changeMode = (nextMode: AgentPermissionMode): void => {
+    if (onModeChange) void onModeChange(nextMode);
+    else setMode(sessionId, nextMode);
+  };
   const visibleMode = mode === 'fullAccess' ? mode : DEFAULT_AGENT_PERMISSION_MODE;
   const current = PERMISSION_OPTIONS.find((option) => option.mode === visibleMode)
     ?? PERMISSION_OPTIONS[0];
@@ -81,7 +89,7 @@ export function AgentPermissionSelector({
       setFullAccessDialogOpen(true);
       return;
     }
-    setMode(sessionId, nextMode);
+    changeMode(nextMode);
   };
 
   return (
@@ -200,7 +208,7 @@ export function AgentPermissionSelector({
         confirmVariant="warning"
         media={<TriangleAlertIcon className="text-app-warning" />}
         onConfirm={() => {
-          setMode(sessionId, 'fullAccess');
+          changeMode('fullAccess');
           setFullAccessDialogOpen(false);
         }}
       />

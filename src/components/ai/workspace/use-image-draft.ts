@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useToast } from '@/hooks/useToast';
 import { t } from '@/locales';
 import { readImageDraft, writeImageDraft, type ImageDraft } from '@/lib/ai/image-drafts';
+import { imageErrorKey } from '@/lib/ai/image-error';
 import { IMAGE_LIMITS } from '@/lib/vision-contract';
 import { invokeCancelAgentImageSubmission, invokePrepareAgentImages } from '@/lib/tauri';
 import type { AgentImageUpload } from '@/types/agent-image';
@@ -12,6 +13,10 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
   const [pendingFiles, setPendingFiles] = useState<readonly File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const reportError = useCallback((value: string | null) => {
+    setError(value);
+    if (value) toast.error(t(imageErrorKey(value)));
+  }, [toast]);
   const ownerRef = useRef(owner); ownerRef.current = owner;
   const textRef = useRef(text); textRef.current = text;
   const restoreRef = useRef(restoreText); restoreRef.current = restoreText;
@@ -28,9 +33,9 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       if (epoch.current !== generation) return;
       ready.current = true; current.current = value; setDraft(value);
       if (value?.images.length) restoreRef.current(value.text);
-    }).catch(e => { if (epoch.current === generation) { ready.current = true; setError(String(e)); } });
+    }).catch(e => { if (epoch.current === generation) { ready.current = true; reportError(String(e)); } });
     return () => { epoch.current++; };
-  }, [owner]);
+  }, [owner, reportError]);
 
   const isCurrent = (generation: number) => epoch.current === generation && ownerRef.current === owner;
   async function persist(value: ImageDraft, generation: number): Promise<void> {
@@ -69,7 +74,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       const normalized = await invokePrepareAgentImages(uploads);
       if (!isCurrent(generation)) return;
       await persist({ ...previous, revision: previous.revision + 1, text: textRef.current, images: [...previous.images, ...normalized] }, generation);
-    } catch (e) { if (isCurrent(generation)) setError(String(e)); }
+    } catch (e) { if (isCurrent(generation)) reportError(String(e)); }
     finally { if (isCurrent(generation)) { running.current = false; setBusy(false); setPendingFiles([]); } }
   }
   async function remove(index: number): Promise<void> {
@@ -82,7 +87,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       const previous = base();
       await persist({ ...previous, revision: previous.revision + 1, text: textRef.current, images: previous.images.filter((_, i) => i !== index) }, generation);
     }
-    catch (e) { if (isCurrent(generation)) setError(String(e)); }
+    catch (e) { if (isCurrent(generation)) reportError(String(e)); }
     finally { if (isCurrent(generation)) { running.current = false; setBusy(false); } }
   }
   // Text shares the image draft transaction. Send awaits this save, so disk failures never
@@ -98,7 +103,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
         previous = current.current;
         await persist({ ...previous, revision: previous.revision + 1, text: textRef.current }, generation);
       }
-    } catch (e) { if (isCurrent(generation)) setError(String(e)); }
+    } catch (e) { if (isCurrent(generation)) reportError(String(e)); }
     finally { if (saving.current?.generation === generation) saving.current = null; } })();
     saving.current = { generation, promise };
     return promise;
@@ -128,7 +133,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
         current.current = { owner: value.owner, revision: value.revision + 1, text: '', images: [] }; setDraft(current.current);
         accepted(value);
       }
-    } catch (e) { if (isCurrent(generation)) setError(String(e)); }
+    } catch (e) { if (isCurrent(generation)) reportError(String(e)); }
     finally { if (isCurrent(generation)) { running.current = false; setBusy(false); } }
   }
   async function cancel(): Promise<void> {
@@ -139,12 +144,12 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       const committed = await invokeCancelAgentImageSubmission({ sessionId: value.operation.sessionId, clientOperationId: value.operation.id });
       if (!isCurrent(generation)) return;
       // If commit won, keep the same operation for a confirming retry. Never label it cancelled.
-      if (committed) { setError('IMAGE_ALREADY_COMMITTED: retry to confirm'); return; }
+      if (committed) { reportError('IMAGE_ALREADY_COMMITTED: retry to confirm'); return; }
       await persist({ ...value, revision: value.revision + 1, operation: undefined }, generation);
       if (!isCurrent(generation)) return;
       ++epoch.current;
-      running.current = false; setBusy(false); setError('IMAGE_CANCELLED');
-    } catch (e) { if (isCurrent(generation)) setError(String(e)); }
+      running.current = false; setBusy(false); reportError('IMAGE_CANCELLED');
+    } catch (e) { if (isCurrent(generation)) reportError(String(e)); }
   }
-  return { owner, draft, pendingFiles, busy, error, add, remove, send, cancel, locked: Boolean(draft?.operation), reportError: setError };
+  return { owner, draft, pendingFiles, busy, error, add, remove, send, cancel, locked: Boolean(draft?.operation), reportError };
 }

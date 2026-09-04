@@ -172,24 +172,32 @@ function CappedText({ text, maxLines = 8 }: { text: string; maxLines?: number })
   );
 }
 
-function CopyTextButton({ text }: { text: string }) {
+export function AiToolCopyButton({ text, label }: { readonly text: string; readonly label?: string }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   return (
-    <button
-      type="button"
-      className="ai-block-copy"
-      aria-label={copied ? t('common.copied') : t('common.copy')}
-      onClick={() => {
-        if (!navigator.clipboard || copied) return;
-        void navigator.clipboard.writeText(text).then(() => {
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1_000);
-        }).catch(() => undefined);
-      }}
-    >
-      {copied ? t('common.copied') : t('common.copy')}
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={(
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={copied ? t('common.copied') : (label ?? t('common.copy'))}
+            onClick={() => {
+              if (!navigator.clipboard || copied) return;
+              void navigator.clipboard.writeText(text).then(() => {
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1_000);
+              }).catch(() => undefined);
+            }}
+          />
+        )}
+      >
+        {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
+      </TooltipTrigger>
+      <TooltipContent>{copied ? t('common.copied') : (label ?? t('common.copy'))}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -211,7 +219,7 @@ function TerminalSurface({ node, compact }: { node: ToolNode; compact: boolean }
         <span className="ai-terminal-cwd">{cwd}</span>
         <span className="ai-terminal-command">{command || node.name}</span>
         {exitCode !== null && exitCode !== 0 && <span className="ai-terminal-exit">exit {exitCode}</span>}
-        {output && <CopyTextButton text={output} />}
+        {output && <AiToolCopyButton text={output} />}
       </div>
       {node.state !== 'running' && (
         <div className="ai-terminal-output">
@@ -366,7 +374,7 @@ function CodeSurface({ node }: { node: ToolNode }) {
     <div className="ai-code-block ai-tool-code-block" data-ai-tool-view="code">
       <div className="ai-code-block-banner">
         <span className="ai-code-block-language">{language}</span>
-        <CopyTextButton text={code} />
+        <AiToolCopyButton text={code} />
       </div>
       <pre className="ai-code-block-pre"><code>{bounded(code)}</code></pre>
       {node.output !== null && (
