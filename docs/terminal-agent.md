@@ -64,6 +64,11 @@ Conversation 展示稳定 keyed 的系统提示词、上下文、用户/助手�
 Context/Artifact、Recovery、Agent 树和 Fleet target matrix。两个页签由同一 committed event window
 投影，因此刷新或回放时 through-seq 保持一致。
 
+系统提示词默认折叠，连续步骤、重试和后续追问复用同一条；正文变化、恢复 Agent 或上下文替换后
+开始新序列时才新增条目。仅工具或模型配置变化保留在 Activity 中，空提示词不显示。
+运行时用 `request/header` 保存必要的完整快照，`request/start` 逐次记录请求并引用快照，
+因此减少重复提示词记录不会改变请求计数、耗时或 token 统计；旧 v4 日志仍可回放。
+
 会话历史、Tool Details 和 Artifact Details 使用 320–720px 面板内单栈 route，不会在宽面板中再开
 永久详情栏。返回详情会恢复来源行焦点和会话滚动 anchor。切换或关闭某个 UI 订阅不会停止后台 Agent；
 只有显式 Stop 才会取消 Runtime 工作并等待 committed terminal event。

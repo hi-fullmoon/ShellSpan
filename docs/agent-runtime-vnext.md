@@ -56,7 +56,7 @@ v2/v3 branch, partial recovery, or compatibility parser.
 Important event families are:
 
 - lifecycle/control: `session/*`, `agent/*`, `turn/*`, `step/*`, `user/message`;
-- model: `request/header`, `request/context`, `request/retry`, `request/failure`, `assistant/chunk`,
+- model: `request/header`, `request/start`, `request/context`, `request/retry`, `request/failure`, `assistant/chunk`,
   `assistant/message`, `request/usage`;
 - tools: `tool/call`, `tool/approval`, `tool/execution`, `tool/result`;
 - memory: `context/artifact`, `compaction/*`;
@@ -65,7 +65,15 @@ Important event families are:
 The v4 model contract is deliberately structured:
 
 - `request/header` records provider, model, reasoning effort, request reason, series boundary,
-  attempt, the exact system prompt, and the canonical tool schemas.
+  attempt, the exact system prompt, and the canonical tool schemas. Full snapshots are written
+  for the first request, changed configuration, Agent resume, or a new series after surface
+  replacement. `snapshotReason` distinguishes these boundaries.
+- `request/start` records every model dispatch, including retries, and references the current
+  snapshot by `headerRequestId`. Unchanged steps and later Turns inherit that snapshot. Series
+  indices span steps and Turns; retry attempts remain scoped to one step. Both events commit in
+  the same batch when a new snapshot is needed. Older v4 headers without `snapshotReason` still
+  serve as request starts during replay. If pagination excludes a referenced header, Activity
+  retains request timing and reports the prompt/tools as unknown until that history is loaded.
 - injected messages carry a provenance object with `kind`, display `label`, `producerId`, and
   optional metadata. Supported kinds are `user`, `runtime`, `plugin`, `skill-catalog`,
   `agent-instructions`, `skill-invocation`, `session-reference`, and `form`.

@@ -268,7 +268,8 @@ export function projectAgentChatNodes(
   const turns = new Map<string, TurnState>();
   const userMessages = new Map<string, AiUserMessageNode>();
   const systemPrompts = new Map<string, AiSystemPromptNode>();
-  const latestPromptKeys = new Map<string | null, string>();
+  let latestPromptKey: string | undefined;
+  let previousPromptContent: string | undefined;
   const artifacts = new Map<string, AiArtifactNode>();
   const requests = new Map<string, RequestFacts>();
   const activeRequestByStep = new Map<string, string>();
@@ -590,29 +591,60 @@ export function projectAgentChatNodes(
         }
         break;
       }
-      case 'request/header': {
+      case 'request/header':
+      case 'request/start': {
         const turn = ensureTurn(event);
-        const facts: RequestFacts = {
-          requestId: event.data.requestId,
-          turnId: eventTurnId(event),
-          stepId: eventStepId(event),
-          startedAt: event.timeUnixMs,
-        };
-        requests.set(event.data.requestId, facts);
-        if (event.stepId) activeRequestByStep.set(event.stepId, event.data.requestId);
-        if (turn && !turn.requestIds.includes(event.data.requestId)) turn.requestIds.push(event.data.requestId);
+        if (event.type === 'request/start' || event.data.snapshotReason === undefined) {
+          const facts: RequestFacts = {
+            requestId: event.data.requestId,
+            turnId: eventTurnId(event),
+            stepId: eventStepId(event),
+            startedAt: event.timeUnixMs,
+          };
+          requests.set(event.data.requestId, facts);
+          if (event.stepId) activeRequestByStep.set(event.stepId, event.data.requestId);
+          if (turn && !turn.requestIds.includes(event.data.requestId)) turn.requestIds.push(event.data.requestId);
+        }
 
-        // Each tool continuation starts a new request series. Group unchanged
-        // snapshots across those series so one Turn does not repeat the prompt.
-        const turnId = eventTurnId(event);
-        const existingKey = latestPromptKeys.get(turnId);
-        const existing = existingKey ? systemPrompts.get(existingKey) : undefined;
-        const samePrompt = existing?.content === event.data.systemPrompt
-          && JSON.stringify(existing.toolSchemas) === JSON.stringify(event.data.toolSchemas);
-        const key = existing === undefined || samePrompt
-          ? existingKey ?? `system-prompt:${turnId ?? 'unscoped'}`
+        const existing = latestPromptKey ? systemPrompts.get(latestPromptKey) : undefined;
+        const requestIds = existing?.requestIds.includes(event.data.requestId)
+          ? existing.requestIds
+          : [...(existing?.requestIds ?? []), event.data.requestId];
+        if (event.type === 'request/start') {
+          if (existing) systemPrompts.set(existing.key, {
+            ...existing, lastSeq: event.seq, requestId: event.data.requestId, requestIds,
+          });
+          break;
+        }
+
+        // Snapshot state spans Turns. Config/tool-only changes belong in Activity;
+        // legacy per-step headers do not declare real message-series boundaries.
+        const boundary = event.data.snapshotReason !== undefined
+          ? event.data.snapshotReason !== 'change'
+          : event.data.reason === 'recovery';
+        const showsPrompt = previousPromptContent === undefined || boundary
+          || previousPromptContent !== event.data.systemPrompt;
+        previousPromptContent = event.data.systemPrompt;
+        if (!event.data.systemPrompt) {
+          latestPromptKey = undefined;
+          break;
+        }
+        if (!showsPrompt && existing) {
+          systemPrompts.set(existing.key, {
+            ...existing, lastSeq: event.seq, requestId: event.data.requestId, requestIds,
+            providerId: event.data.providerId,
+            model: event.data.model,
+            reasoningEffort: event.data.reasoningEffort ?? null,
+            seriesId: event.data.series.seriesId,
+            toolSchemas: event.data.toolSchemas,
+          });
+          break;
+        }
+        const key = systemPrompts.size === 0
+          && event.data.snapshotReason === undefined
+          ? `system-prompt:${event.sessionId}`
           : `system-prompt:${event.data.requestId}`;
-        latestPromptKeys.set(turnId, key);
+        latestPromptKey = key;
         systemPrompts.set(key, {
           kind: 'systemPrompt',
           key,
@@ -620,13 +652,11 @@ export function projectAgentChatNodes(
           sessionId: event.sessionId,
           turnId: eventTurnId(event),
           stepId: eventStepId(event),
-          firstSeq: samePrompt && existing ? existing.firstSeq : event.seq,
+          firstSeq: event.seq,
           lastSeq: event.seq,
-          timestamp: samePrompt && existing ? existing.timestamp : agentEventTimestamp(event.timeUnixMs),
+          timestamp: agentEventTimestamp(event.timeUnixMs),
           requestId: event.data.requestId,
-          requestIds: samePrompt && existing
-            ? [...existing.requestIds, event.data.requestId]
-            : [event.data.requestId],
+          requestIds: [event.data.requestId],
           providerId: event.data.providerId,
           model: event.data.model,
           reasoningEffort: event.data.reasoningEffort ?? null,

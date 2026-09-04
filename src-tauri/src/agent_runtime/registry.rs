@@ -31,6 +31,8 @@ pub(crate) struct AgentActiveScope {
 
 pub(crate) struct AgentEntry {
     pub(crate) session_id: String,
+    // A new in-memory Agent starts a new series when a persisted session resumes.
+    pub(crate) request_series_id: String,
     pub(crate) provider: AiProviderConfig,
     pub(crate) adapter: Arc<dyn ModelAdapter>,
     pub(crate) capability_scope: Option<AgentCapabilityScope>,
@@ -56,6 +58,7 @@ impl AgentEntry {
     ) -> Self {
         Self {
             session_id,
+            request_series_id: format!("series-{}", uuid::Uuid::new_v4().simple()),
             provider,
             adapter,
             capability_scope,

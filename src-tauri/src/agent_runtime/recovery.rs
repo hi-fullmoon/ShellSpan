@@ -110,7 +110,8 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
                 tools.clear();
             }
             AgentSessionEventPayload::StepEnd { .. } => step_id = None,
-            AgentSessionEventPayload::RequestHeader { request_id, .. } => {
+            AgentSessionEventPayload::RequestHeader { request_id, .. }
+            | AgentSessionEventPayload::RequestStart { request_id, .. } => {
                 open_request = Some(request_id.clone());
                 request_finished = false;
             }

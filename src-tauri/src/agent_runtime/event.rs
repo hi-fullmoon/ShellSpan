@@ -310,6 +310,15 @@ pub(crate) enum AgentRequestReason {
     Recovery,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AgentRequestSnapshotReason {
+    Initial,
+    Change,
+    Resume,
+    Series,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentRequestSeries {
@@ -596,8 +605,22 @@ pub(crate) enum AgentSessionEventPayload {
         reasoning_effort: Option<String>,
         reason: AgentRequestReason,
         series: AgentRequestSeries,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_reason: Option<AgentRequestSnapshotReason>,
         system_prompt: String,
         tool_schemas: Vec<AgentRequestToolSchema>,
+        attempt: u32,
+    },
+    #[serde(rename = "request/start")]
+    RequestStart {
+        request_id: String,
+        header_request_id: String,
+        provider_id: String,
+        model: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_effort: Option<String>,
+        reason: AgentRequestReason,
+        series: AgentRequestSeries,
         attempt: u32,
     },
     #[serde(rename = "request/context")]
