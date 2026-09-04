@@ -28,7 +28,8 @@ export function AiWorkspaceController({
   return (
     <AiWorkspaceRoot
       view={controller.view}
-      imageControls={<AiImageDraftControls state={controller.imageDraft} disabled={!controller.canStartAgent || controller.composer.waitingQuestion || controller.composer.waitingApproval} />}
+      imageControls={controller.imageDraft.draft?.images.length || controller.imageDraft.busy || controller.imageDraft.locked || controller.imageDraft.error ? <AiImageDraftControls state={controller.imageDraft} /> : null}
+      onPasteImages={controller.canStartAgent ? controller.imageDraft.add : undefined}
       hasImages={Boolean(controller.imageDraft.draft?.images.length)}
       imageBusy={controller.imageDraft.busy}
       imageLocked={controller.imageDraft.locked}
@@ -83,6 +84,7 @@ export function AiWorkspaceController({
       onArchiveSession={controller.archiveSession}
       onUpdateQueueItem={controller.updateQueueItem}
       onRemoveQueueItem={controller.removeQueueItem}
+      onSteerQueueItem={controller.steerQueueItem}
       onReorderQueueLane={controller.reorderQueueLane}
       onRetryQueueMutation={controller.retryQueueMutation}
       onRenameSession={controller.renameSession}

@@ -25,13 +25,14 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScroller,
 } from '@/components/ui/message-scroller';
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-export const MessageScroller: React.FC<{
+interface MessageScrollerProps {
   children: React.ReactNode;
   followKey: string;
   className?: string;
@@ -39,7 +40,18 @@ export const MessageScroller: React.FC<{
   ariaLabel?: string;
   initialAnchor?: { readonly nodeKey: string; readonly offset: number; readonly scrollTop: number };
   onAnchorChange?: (anchor: { readonly nodeKey: string; readonly offset: number; readonly scrollTop: number }) => void;
-}> = ({
+}
+
+export const MessageScroller: React.FC<MessageScrollerProps> = (props) => {
+  const openingAnchor = useRef(props.initialAnchor);
+  return (
+    <MessageScrollerProvider autoScroll defaultScrollPosition={openingAnchor.current ? 'start' : 'end'}>
+      <ConversationScroller {...props} initialAnchor={openingAnchor.current} />
+    </MessageScrollerProvider>
+  );
+};
+
+const ConversationScroller: React.FC<MessageScrollerProps> = ({
   children,
   followKey,
   className,
@@ -49,98 +61,127 @@ export const MessageScroller: React.FC<{
   onAnchorChange,
 }) => {
   const { t } = useI18n();
-  const rootRef = useRef<HTMLDivElement>(null);
-  const anchorRef = useRef(initialAnchor);
-  const restoredAnchorRef = useRef<string | null>(null);
-  const firstKey = React.Children.toArray(children).find((child) => React.isValidElement(child))?.key ?? null;
-  const previousFirstKeyRef = useRef(firstKey);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const restoredAnchorRef = useRef(false);
+  const restoreFrameRef = useRef<number | null>(null);
+  const { scrollToMessage, scrollToStart } = useMessageScroller();
 
-  const viewport = useCallback(() => (
-    rootRef.current?.querySelector<HTMLElement>('[data-message-scroller-viewport]') ?? null
-  ), []);
+  const cancelRestore = useCallback(() => {
+    if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
+    restoreFrameRef.current = null;
+  }, []);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    cancelRestore();
+    if (!(event.target instanceof Element)
+      || !event.target.closest('[data-slot="scroll-area-scrollbar"]')) return;
+    // The custom scrollbar sits outside the viewport. Notify the primitive's
+    // existing wheel-intent handler with zero movement so dragging releases
+    // auto-follow even during its programmatic-scroll grace period.
+    viewportRef.current?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 0 }));
+  }, [cancelRestore]);
+
+  useEffect(() => cancelRestore, [cancelRestore]);
 
   const readAnchor = useCallback(() => {
-    const scrollport = viewport();
-    if (!scrollport) return;
+    const scrollport = viewportRef.current;
+    const content = contentRef.current;
+    if (!scrollport || !content || !onAnchorChange) return;
     const viewportTop = scrollport.getBoundingClientRect().top;
-    const rows = rootRef.current?.querySelectorAll<HTMLElement>('[data-ai-node-key]') ?? [];
-    let selected: HTMLElement | null = null;
-    for (const row of rows) {
-      const rect = row.getBoundingClientRect();
-      if (rect.bottom > viewportTop) {
-        selected = row;
-        break;
-      }
+    const rows = content.children;
+    const count = rows.length - (content.lastElementChild?.hasAttribute('data-message-scroller-spacer') ? 1 : 0);
+    // Measure only the containment boundaries. Reading an offscreen message's
+    // descendants forces the browser to lay out content-visibility:auto rows.
+    let low = 0;
+    let high = count;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (rows[middle].getBoundingClientRect().bottom <= viewportTop) low = middle + 1;
+      else high = middle;
     }
-    if (!selected?.dataset.aiNodeKey) return;
-    const next = {
-      nodeKey: selected.dataset.aiNodeKey,
-      offset: selected.getBoundingClientRect().top - viewportTop,
-      scrollTop: scrollport.scrollTop,
-    };
-    anchorRef.current = next;
-    onAnchorChange?.(next);
-  }, [onAnchorChange, viewport]);
+    for (let index = low; index < count; index += 1) {
+      const row = rows[index];
+      const nodeKey = row.querySelector<HTMLElement>('[data-ai-node-key]')?.dataset.aiNodeKey;
+      if (!nodeKey) continue;
+      const rect = row.getBoundingClientRect();
+      onAnchorChange({ nodeKey, offset: rect.top - viewportTop, scrollTop: scrollport.scrollTop });
+      break;
+    }
+  }, [onAnchorChange]);
 
   useLayoutEffect(() => {
-    const scrollport = viewport();
-    if (!scrollport) return;
-    const prepend = previousFirstKeyRef.current !== firstKey;
-    previousFirstKeyRef.current = firstKey;
-    const anchor = initialAnchor ?? (prepend ? anchorRef.current : undefined);
-    if (!anchor) return;
-    const restoreKey = `${anchor.nodeKey}:${anchor.offset}:${anchor.scrollTop}`;
-    if (!prepend && restoredAnchorRef.current === restoreKey) return;
-    const row = [...(rootRef.current?.querySelectorAll<HTMLElement>('[data-ai-node-key]') ?? [])]
-      .find((candidate) => candidate.dataset.aiNodeKey === anchor.nodeKey);
-    if (row) {
-      scrollport.scrollTop += row.getBoundingClientRect().top
-        - scrollport.getBoundingClientRect().top
-        - anchor.offset;
+    const scrollport = viewportRef.current;
+    const content = contentRef.current;
+    if (!initialAnchor || restoredAnchorRef.current || !scrollport || !content) return;
+    const nodes = content.querySelectorAll<HTMLElement>('[data-ai-node-key]');
+    if (!nodes.length) return;
+    const node = [...nodes].find((candidate) => candidate.dataset.aiNodeKey === initialAnchor.nodeKey);
+    const item = node?.closest<HTMLElement>('[data-slot="message-scroller-item"]');
+    if (item?.dataset.messageId) {
+      const messageId = item.dataset.messageId;
+      const paddingTop = Number.parseFloat(getComputedStyle(content).paddingBlockStart) || 0;
+      const options = { align: 'start' as const, scrollMargin: initialAnchor.offset - paddingTop };
+      scrollToMessage(messageId, options);
+      // Reopening reveals rows whose heights were estimated by content-visibility.
+      // Let them lay out before aligning the saved offset a final time.
+      restoreFrameRef.current = requestAnimationFrame(() => {
+        restoreFrameRef.current = requestAnimationFrame(() => {
+          restoreFrameRef.current = null;
+          scrollToMessage(messageId, options);
+        });
+      });
     } else {
-      scrollport.scrollTop = anchor.scrollTop;
+      scrollToStart();
+      scrollport.scrollTop = initialAnchor.scrollTop;
     }
-    restoredAnchorRef.current = restoreKey;
-  }, [firstKey, initialAnchor, viewport]);
+    // Saved positions are restored once on mount. Prepending and streaming
+    // remain owned by MessageScroller, without replaying saved scroll events.
+    restoredAnchorRef.current = true;
+  }, [children, initialAnchor, scrollToMessage, scrollToStart]);
 
   return (
-    <MessageScrollerProvider autoScroll>
-      <MessageScrollerPrimitive
-        ref={rootRef}
-        className={className}
-        data-follow-key={followKey}
-        role="log"
-        aria-label={ariaLabel}
+    <MessageScrollerPrimitive
+      className={className}
+      data-follow-key={followKey}
+      role="log"
+      aria-label={ariaLabel}
+      onPointerDownCapture={handlePointerDown}
+    >
+      <MessageScrollerViewport
+        ref={viewportRef}
+        onScroll={readAnchor}
+        onWheel={cancelRestore}
+        onTouchMove={cancelRestore}
+        onKeyDown={cancelRestore}
       >
-        <MessageScrollerViewport onScroll={readAnchor}>
-          <MessageScrollerContent className={cn('gap-4 px-3 py-4', contentClassName)}>
-            {React.Children.toArray(children).map((child, index) => {
-              const itemKey = React.isValidElement(child) && child.key !== null
-                ? child.key
-                : index;
-              return (
-                <MessageScrollerItem
-                  key={itemKey}
-                  messageId={String(itemKey)}
-                  scrollAnchor={
-                    React.isValidElement<{ role?: string; scrollAnchor?: boolean }>(child)
-                    && (child.props.scrollAnchor ?? child.props.role === 'user')
-                  }
-                >
-                  {child}
-                </MessageScrollerItem>
-              );
-            })}
-          </MessageScrollerContent>
-        </MessageScrollerViewport>
-        <Tooltip>
-          <TooltipTrigger render={<MessageScrollerButton aria-label={t('ai.scrollToLatest')} />}>
-            <ArrowDownIcon />
-          </TooltipTrigger>
-          <TooltipContent>{t('ai.scrollToLatest')}</TooltipContent>
-        </Tooltip>
-      </MessageScrollerPrimitive>
-    </MessageScrollerProvider>
+        <MessageScrollerContent ref={contentRef} className={cn('gap-4 px-3 py-4', contentClassName)}>
+          {React.Children.toArray(children).map((child, index) => {
+            const itemKey = React.isValidElement(child) && child.key !== null
+              ? child.key
+              : index;
+            return (
+              <MessageScrollerItem
+                key={itemKey}
+                messageId={String(itemKey)}
+                scrollAnchor={
+                  React.isValidElement<{ role?: string; scrollAnchor?: boolean }>(child)
+                  && (child.props.scrollAnchor ?? child.props.role === 'user')
+                }
+              >
+                {child}
+              </MessageScrollerItem>
+            );
+          })}
+        </MessageScrollerContent>
+      </MessageScrollerViewport>
+      <Tooltip>
+        <TooltipTrigger render={<MessageScrollerButton aria-label={t('ai.scrollToLatest')} />}>
+          <ArrowDownIcon />
+        </TooltipTrigger>
+        <TooltipContent>{t('ai.scrollToLatest')}</TooltipContent>
+      </Tooltip>
+    </MessageScrollerPrimitive>
   );
 };
 
@@ -207,7 +248,9 @@ export const MessageActions: React.FC<{
   align: 'start' | 'end';
   timestamp?: string;
   className?: string;
-}> = ({ text, align, timestamp, className }) => {
+  children?: React.ReactNode;
+  reveal?: 'hover' | 'always';
+}> = ({ text, align, timestamp, className, children, reveal = 'hover' }) => {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const resetTimerRef = useRef<number | null>(null);
@@ -234,10 +277,10 @@ export const MessageActions: React.FC<{
     <div
       className={cn('ai-message-actions', className)}
       data-align={align}
-      data-actions-reveal="hover"
+      data-actions-reveal={reveal}
     >
       {align === 'end' && time && <time dateTime={timestamp}>{time}</time>}
-      <Tooltip>
+      {text && <Tooltip>
         <TooltipTrigger
           render={(
             <Button
@@ -253,7 +296,8 @@ export const MessageActions: React.FC<{
           {copied ? <CheckIcon /> : <CopyIcon />}
         </TooltipTrigger>
         <TooltipContent>{copied ? t('common.copied') : t('common.copy')}</TooltipContent>
-      </Tooltip>
+      </Tooltip>}
+      {children}
       {align === 'start' && time && <time dateTime={timestamp}>{time}</time>}
       <span className="sr-only" aria-live="polite">
         {copied ? t('common.copied') : ''}

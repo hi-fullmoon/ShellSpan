@@ -98,12 +98,7 @@ export const AiPanelResizeHandle: React.FC<AiPanelResizeHandleProps> = ({
       onPointerCancel={onPointerCancel}
       onLostPointerCapture={onLostPointerCapture}
       onKeyDown={onKeyDown}
-    >
-      <div
-        data-slot="ai-panel-resize-indicator"
-        className="ai-panel-resize-indicator"
-      />
-    </div>
+    />
   );
 };
 

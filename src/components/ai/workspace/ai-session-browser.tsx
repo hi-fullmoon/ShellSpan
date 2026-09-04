@@ -47,6 +47,7 @@ import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
 import { AiRouteHeader } from './ai-route-header';
+import { AiHeaderIconButton } from './ai-header-icon-button';
 
 type SessionFilter = 'all' | 'running' | 'archived';
 
@@ -107,16 +108,14 @@ function NewSessionButton({
     <Tooltip>
       <TooltipTrigger
         render={(
-          <Button
-            variant="ghost"
-            size="icon"
+          <AiHeaderIconButton
             disabled={!canStartAgent}
             onClick={onNew}
             aria-label={t('ai.newConversation')}
           />
         )}
       >
-        <SquarePenIcon />
+        <SquarePenIcon data-icon="inline-start" />
       </TooltipTrigger>
       <TooltipContent>
         {canStartAgent ? t('ai.newConversation') : unavailableReason ?? t('agent.availability.needsTerminal')}
@@ -319,16 +318,14 @@ export function AiSessionBrowser({
               render={(
                 <DropdownMenuTrigger
                   render={(
-                    <Button
-                      variant="ghost"
-                      size="icon"
+                    <AiHeaderIconButton
                       aria-label={t('ai.workspace.sessions.filter')}
                     />
                   )}
                 />
               )}
             >
-              <FilterIcon />
+              <FilterIcon data-icon="inline-start" />
             </TooltipTrigger>
             <TooltipContent>{t(`ai.workspace.sessions.filter.${filter}`)}</TooltipContent>
           </Tooltip>
@@ -351,16 +348,14 @@ export function AiSessionBrowser({
         <Tooltip>
           <TooltipTrigger
             render={(
-              <Button
-                variant="ghost"
-                size="icon"
+              <AiHeaderIconButton
                 disabled={loading}
                 onClick={onRefresh}
                 aria-label={t('common.refresh')}
               />
             )}
           >
-            {loading ? <Spinner /> : <RefreshCwIcon />}
+            {loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
           </TooltipTrigger>
           <TooltipContent>{t('common.refresh')}</TooltipContent>
         </Tooltip>

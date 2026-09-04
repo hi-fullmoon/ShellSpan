@@ -1,5 +1,5 @@
 import { useFileCompletion } from './use-file-completion';
-import { AiSkillsMenu } from './ai-skills-menu';
+import { useSkillCompletion } from './use-skill-completion';
 import { useMemo, useRef, useState } from 'react';
 import {
   ArrowUpIcon,
@@ -30,6 +30,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
+import { getPlatform } from '@/lib/platform';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiContextUsage, AiInboxItem, AiPendingApproval } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
@@ -44,6 +45,7 @@ import type { AiQueueMutationState } from './use-ai-session-controller';
 
 export interface AiComposerSeatProps {
   readonly imageControls?: React.ReactNode;
+  readonly onPasteImages?: (files: File[]) => void | Promise<void>;
   readonly hasImages?: boolean;
   readonly imageBusy?: boolean;
   readonly imageLocked?: boolean;
@@ -59,6 +61,7 @@ export interface AiComposerSeatProps {
   readonly composerState?: AiComposerState;
   readonly inbox?: readonly AiInboxItem[];
   readonly taskSteps?: readonly AgentSessionPlanStep[];
+  readonly queueMutable?: boolean;
   readonly queueMutation?: AiQueueMutationState | null;
   readonly announcement?: string | null;
   readonly pendingApproval?: AiPendingApproval | null;
@@ -79,6 +82,7 @@ export interface AiComposerSeatProps {
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onUpdateQueueItem?: (item: AiInboxItem, content: string) => void;
   readonly onRemoveQueueItem?: (item: AiInboxItem) => void;
+  readonly onSteerQueueItem?: (item: AiInboxItem) => void;
   readonly onReorderQueueLane?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
   readonly onRetryQueueMutation?: () => void;
   readonly onRetryFailedDraft?: (failedDraftId: string) => void;
@@ -91,7 +95,7 @@ export interface AiComposerSeatProps {
 
 /** Harness-aligned Composer surface backed by the existing ShellSpan state machine. */
 export function AiComposerSeat({
-  imageControls, hasImages = false, imageBusy = false, imageLocked = false,
+  imageControls, onPasteImages, hasImages = false, imageBusy = false, imageLocked = false,
   phase,
   status,
   defaultDraft = '',
@@ -105,6 +109,7 @@ export function AiComposerSeat({
   inbox = [],
   taskSteps = [],
   queueMutation = null,
+  queueMutable = true,
   announcement,
   pendingApproval,
   pendingQuestion,
@@ -124,6 +129,7 @@ export function AiComposerSeat({
   onBusyPreferenceChange,
   onUpdateQueueItem,
   onRemoveQueueItem,
+  onSteerQueueItem,
   onReorderQueueLane,
   onRetryQueueMutation,
   onRetryFailedDraft,
@@ -162,10 +168,10 @@ export function AiComposerSeat({
         : t('ai.workspace.steer.action')
       : t('ai.send');
   const queueItems = useMemo<readonly AiInboxItem[]>(() => {
-    const items = [...inbox];
+    const items = inbox.filter((item) => item.state !== 'claimed' && !item.startsTurn);
     for (const pending of composerState?.pendingSubmissions ?? []) {
-      if (pending.mode === 'start') continue;
-      if (items.some((item) => (
+      if (pending.mode === 'start' || pending.startsTurn) continue;
+      if (inbox.some((item) => (
         item.id === pending.clientOperationId
         || item.clientSubmissionId === pending.clientOperationId
       ))) continue;
@@ -186,6 +192,7 @@ export function AiComposerSeat({
     onDraftChange?.(value);
   };
   const completion = useFileCompletion({ text: draft, update: updateDraft, query: onListFileReferences, scopeKey: skillsScopeKey, needsRoot: skillsNeedsRoot, targetLabel: projectTargetLabel, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
+  const skillCompletion = useSkillCompletion({ text: draft, update: updateDraft, query: onListSkills, scopeKey: skillsScopeKey, editor: completion.editor, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
   const submit = (gesture: 'keyboard' | 'primary', accelerated = false): void => {
     if (submitDisabled) return;
     if (stopPrimary) {
@@ -257,13 +264,17 @@ export function AiComposerSeat({
       <AiQueueDock
         items={queueItems}
         mutation={queueMutation}
+        running={status === 'running'}
+        mutable={queueMutable && !['completed', 'cancelled', 'failed'].includes(status)}
         onUpdate={onUpdateQueueItem}
         onRemove={onRemoveQueueItem}
+        onSteer={onSteerQueueItem}
         onReorder={onReorderQueueLane}
         onRetry={onRetryQueueMutation}
       />
       {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
       {waitingQuestion && <Alert><AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle><AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>{onStop && <Button type="button" variant="outline" onClick={onStop}>{t('ai.workspace.stop')}</Button>}</Alert>}
+      {skillCompletion.panel}
       {waitingApproval && pendingApproval ? (
         <AiApprovalPanel
           approval={pendingApproval}
@@ -277,17 +288,42 @@ export function AiComposerSeat({
         <InputGroup data-composer-card="">
           <InputGroupTextarea
             {...completion.textareaProps}
+            {...(skillCompletion.open ? {
+              'aria-controls': skillCompletion.textareaProps['aria-controls'],
+              'aria-expanded': true,
+              'aria-activedescendant': skillCompletion.textareaProps['aria-activedescendant'],
+            } : {})}
+            onSelect={event => { completion.textareaProps.onSelect(event); skillCompletion.textareaProps.onSelect(event); }}
+            onFocus={event => { completion.textareaProps.onFocus(event); skillCompletion.textareaProps.onFocus(event); }}
+            onBlur={() => { completion.textareaProps.onBlur(); skillCompletion.textareaProps.onBlur(); }}
             data-testid="ai-workspace-composer"
             value={draft}
             disabled={waitingApproval || waitingQuestion || unavailable || imageLocked}
-            onChange={(event) => { updateDraft(event.target.value); completion.changed(event.target); }}
+            onChange={(event) => { updateDraft(event.target.value); completion.changed(event.target); skillCompletion.changed(event.target); }}
+            onPaste={(event) => {
+              if (!onPasteImages) return;
+              const files = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/'));
+              if (!files.length) {
+                for (const item of Array.from(event.clipboardData.items)) {
+                  if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+                  const file = item.getAsFile();
+                  if (file) files.push(file);
+                }
+              }
+              if (!files.length) return;
+              event.preventDefault();
+              if (terminal || waitingApproval || waitingQuestion || unavailable || submitting || imageLocked) return;
+              void onPasteImages(files);
+            }}
             onCompositionStart={() => {
               composingRef.current = true;
               completion.composition(true);
+              skillCompletion.composition(true);
             }}
             onCompositionEnd={() => {
               composingRef.current = false;
               completion.composition(false);
+              skillCompletion.composition(false);
               composingUntilRef.current = Date.now() + 10;
             }}
             onKeyDown={(event) => {
@@ -297,20 +333,19 @@ export function AiComposerSeat({
                 || composingRef.current
                 || Date.now() < composingUntilRef.current
               ) return;
-              if (completion.keyDown(event)) return;
+              if (skillCompletion.keyDown(event) || completion.keyDown(event)) return;
               if (event.key !== 'Enter' || event.shiftKey) return;
               event.preventDefault();
               if (event.repeat) return;
               submit('keyboard', event.metaKey || event.ctrlKey);
             }}
-            placeholder={t('ai.workspace.composerPlaceholder')}
+            placeholder={t('ai.workspace.composerPlaceholder', { pasteShortcut: getPlatform() === 'macos' ? '⌘V' : 'Ctrl+V' })}
           />
           {completion.panel && <InputGroupAddon align="block-start" className="block min-w-0">{completion.panel}</InputGroupAddon>}
-          {imageControls && <InputGroupAddon align="block-start" className="block min-w-0">{imageControls}</InputGroupAddon>}
+          {imageControls && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0">{imageControls}</InputGroupAddon>}
           <InputGroupAddon align="block-end" className="ai-composer-toolbar">
             <div className="ai-composer-tools">
               {permissionControl}
-              {onListSkills && <AiSkillsMenu key={skillsScopeKey} query={onListSkills} needsRoot={skillsNeedsRoot} targetLabel={projectTargetLabel} disabled={terminal || waitingQuestion || submitting} onSelect={(name) => updateDraft(`${draft}${draft && !/\s$/.test(draft) ? ' ' : ''}/${name} `)} />}
               {running && (
                 <DropdownMenu>
                   <Tooltip>

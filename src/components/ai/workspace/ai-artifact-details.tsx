@@ -128,7 +128,8 @@ export function AiArtifactDetails({
         onClose={onClose}
       />
       <ScrollArea className="min-h-0 min-w-0 flex-1" aria-label={t('ai.workspace.details.artifactTitle')}>
-        <ScrollAreaContent className="ai-details-body">
+        {/* Override Base UI's inline fit-content minimum so long payloads stay inside the viewport. */}
+        <ScrollAreaContent className="ai-details-body" style={{ minWidth: 0 }}>
           {state.kind === 'loading' && (
             <div className="ai-artifact-loading" role="status" aria-label={t('common.loading')}>
               <Skeleton className="h-5 w-2/3" />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import {
   CheckCircle2Icon,
   ChevronDownIcon,
@@ -21,6 +21,8 @@ export interface AiTaskStripProps {
   readonly steps: readonly AgentSessionPlanStep[];
 }
 
+const TASK_STATUS_ORDER = ['completed', 'inProgress', 'pending', 'blocked', 'failed'] as const;
+
 function TaskStatusIcon({ status }: { readonly status: AgentSessionPlanStep['status'] }): React.ReactNode {
   switch (status) {
     case 'completed':
@@ -39,8 +41,12 @@ function TaskStatusIcon({ status }: { readonly status: AgentSessionPlanStep['sta
 export function AiTaskStrip({ steps }: AiTaskStripProps): React.ReactNode {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const progressId = useId();
   if (steps.length === 0) return null;
-  const completed = steps.filter((step) => step.status === 'completed').length;
+  const progress = TASK_STATUS_ORDER.flatMap((status) => {
+    const count = steps.filter((step) => step.status === status).length;
+    return count > 0 ? [t(`ai.workspace.tasks.${status}`, { count })] : [];
+  }).join(' · ');
 
   return (
     <Collapsible
@@ -52,13 +58,16 @@ export function AiTaskStrip({ steps }: AiTaskStripProps): React.ReactNode {
       <CollapsibleTrigger
         className="ai-task-strip-trigger"
         aria-label={t('ai.workspace.tasks.toggle', { count: steps.length })}
+        aria-describedby={progressId}
       >
-        <ListTodoIcon aria-hidden="true" />
-        <span>{t('ai.workspace.tasks.title')}</span>
-        <span className="ai-task-strip-progress">
-          {t('ai.workspace.tasks.completed', { count: completed })}
+        <ListTodoIcon aria-hidden="true" data-icon="inline-start" />
+        <span className="ai-task-strip-title">{t('ai.workspace.tasks.title')}</span>
+        <span id={progressId} className="ai-task-strip-progress truncate" title={progress}>
+          {progress}
         </span>
-        {open ? <ChevronDownIcon aria-hidden="true" /> : <ChevronUpIcon aria-hidden="true" />}
+        {open
+          ? <ChevronDownIcon aria-hidden="true" data-icon="inline-end" />
+          : <ChevronUpIcon aria-hidden="true" data-icon="inline-end" />}
       </CollapsibleTrigger>
       <CollapsibleContent>
         <ul className="ai-task-strip-list">
@@ -67,7 +76,10 @@ export function AiTaskStrip({ steps }: AiTaskStripProps): React.ReactNode {
               <span className="ai-task-strip-status" aria-hidden="true">
                 <TaskStatusIcon status={step.status} />
               </span>
-              <span className="truncate" title={step.detail ?? step.title}>{step.title}</span>
+              <span className="sr-only">{t(`ai.workspace.tasks.status.${step.status}`)}: </span>
+              <span className="min-w-0 truncate" title={step.detail ? `${step.title}\n${step.detail}` : step.title}>
+                {step.title}
+              </span>
             </li>
           ))}
         </ul>

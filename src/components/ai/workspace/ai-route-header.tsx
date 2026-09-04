@@ -1,8 +1,8 @@
 import { ArrowLeftIcon, PanelRightCloseIcon } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
+import { AiHeaderIconButton } from './ai-header-icon-button';
 
 export function AiRouteHeader({
   title,
@@ -23,10 +23,10 @@ export function AiRouteHeader({
       <Tooltip>
         <TooltipTrigger
           render={(
-            <Button variant="ghost" size="icon" onClick={onBack} aria-label={t('common.back')} />
+            <AiHeaderIconButton onClick={onBack} aria-label={t('common.back')} />
           )}
         >
-          <ArrowLeftIcon />
+          <ArrowLeftIcon data-icon="inline-start" />
         </TooltipTrigger>
         <TooltipContent>{t('common.back')}</TooltipContent>
       </Tooltip>
@@ -41,10 +41,10 @@ export function AiRouteHeader({
             <Tooltip>
               <TooltipTrigger
                 render={(
-                  <Button variant="ghost" size="icon" onClick={onClose} aria-label={t('ai.close')} />
+                  <AiHeaderIconButton onClick={onClose} aria-label={t('ai.close')} />
                 )}
               >
-                <PanelRightCloseIcon />
+                <PanelRightCloseIcon data-icon="inline-start" />
               </TooltipTrigger>
               <TooltipContent>{t('ai.close')}</TooltipContent>
             </Tooltip>

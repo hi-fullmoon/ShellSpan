@@ -2,10 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   PlusIcon,
   ServerIcon,
-  ShieldCheckIcon,
   Trash2Icon,
 } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
@@ -13,7 +11,6 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Field } from '@/components/ui/field';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
-import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
@@ -73,8 +70,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
   const contextLines = useAiSettingsStore((state) => state.contextLines);
   const setContextLines = useAiSettingsStore((state) => state.setContextLines);
-  const agentEnabled = useAiSettingsStore((state) => state.agentEnabled);
-  const setAgentEnabled = useAiSettingsStore((state) => state.setAgentEnabled);
   const [selectedProviderId, setSelectedProviderId] = useState(defaultProviderId);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -105,29 +100,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       setDeleteOpen(false);
     } catch {
       showError(t('settings.ai.keyDeleteFailed'));
-    }
-  };
-
-  const handleAgentEnabledChange = async (enabled: boolean): Promise<void> => {
-    setAgentActionBusy(true);
-    try {
-      if (!enabled && isTauriRuntime()) {
-        const page = await invokeListAgentRuntimeSessions({ limit: 512 });
-        await Promise.all(page.sessions
-          .filter((session) => !session.ended && !session.archived)
-          .map((session) => invokeCancelAgentRuntime({ sessionId: session.header.sessionId })));
-      }
-      useAgentPermissionStore.getState().resetAll();
-      setAgentEnabled(enabled);
-      if (enabled) {
-        showSuccess(t('settings.ai.agent.enabled'));
-        return;
-      }
-      showSuccess(t('settings.ai.agent.disabled'));
-    } catch {
-      showError(t(enabled ? 'settings.ai.agent.enableFailed' : 'settings.ai.agent.closeFailed'));
-    } finally {
-      setAgentActionBusy(false);
     }
   };
 
@@ -247,25 +219,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         title={t('settings.ai.agent.title')}
         titleId="terminal-agent-heading"
       >
-        <SettingRow
-          label={t('settings.ai.agent.enable')}
-          description={t('settings.ai.agent.enableDescription')}
-        >
-          <Switch
-            id="ai-agent-enabled"
-            aria-label={t('settings.ai.agent.enable')}
-            checked={agentEnabled}
-            disabled={agentActionBusy}
-            onCheckedChange={(enabled) => void handleAgentEnabledChange(enabled)}
-          />
-        </SettingRow>
-        <div className="px-4 py-3">
-          <Alert size="sm">
-            <ShieldCheckIcon aria-hidden />
-            <AlertTitle>{t('settings.ai.agent.permissionTitle')}</AlertTitle>
-            <AlertDescription>{t('settings.ai.agent.permissionDescription')}</AlertDescription>
-          </Alert>
-        </div>
         <SettingRow
           label={t('settings.ai.agent.localData')}
           description={t('settings.ai.agent.localDataDescription')}

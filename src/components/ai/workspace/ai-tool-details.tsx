@@ -97,7 +97,8 @@ export function AiToolDetails({
         onClose={onClose}
       />
       <ScrollArea className="min-h-0 min-w-0 flex-1" aria-label={t('ai.workspace.details.toolTitle')}>
-        <ScrollAreaContent className="ai-details-body">
+        {/* Override Base UI's inline fit-content minimum so long payloads stay inside the viewport. */}
+        <ScrollAreaContent className="ai-details-body" style={{ minWidth: 0 }}>
           {!node ? (
             <p className="ai-details-empty">{t('ai.workspace.details.notInWindow')}</p>
           ) : (

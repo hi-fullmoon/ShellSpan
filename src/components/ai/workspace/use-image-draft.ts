@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
+import { useToast } from '@/hooks/useToast';
+import { t } from '@/locales';
 import { readImageDraft, writeImageDraft, type ImageDraft } from '@/lib/ai/image-drafts';
 import { IMAGE_LIMITS } from '@/lib/vision-contract';
 import { invokeCancelAgentImageSubmission, invokePrepareAgentImages } from '@/lib/tauri';
 import type { AgentImageUpload } from '@/types/agent-image';
 
 export function useImageDraft(owner: string, text: string, restoreText: (text: string) => void) {
+  const toast = useToast();
   const [draft, setDraft] = useState<ImageDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,8 +49,11 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       if (!isCurrent(generation)) return;
       const previous = base();
       if (!files.length) return;
-      if (previous.images.length + files.length > IMAGE_LIMITS.maxImages
-        || files.some(file => file.size > IMAGE_LIMITS.maxSourceBytes)
+      if (previous.images.length + files.length > IMAGE_LIMITS.maxImages) {
+        toast.error(t('ai.workspace.images.error.count', { max: IMAGE_LIMITS.maxImages }));
+        return;
+      }
+      if (files.some(file => file.size > IMAGE_LIMITS.maxSourceBytes)
         || files.reduce((sum, file) => sum + file.size, 0) > IMAGE_LIMITS.maxBatchBytes) throw new Error('IMAGE_SOURCE_LIMIT');
       const uploads: AgentImageUpload[] = [];
       for (const file of files) {

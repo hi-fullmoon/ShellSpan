@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { createAgentSessionAdapter } from '@/lib/ai/agent-session-adapter';
+import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
 import { questionKey } from '@/types/agent-question';
 import { useImageDraft } from './use-image-draft';
 import { requireVision } from '@/lib/vision-contract';
@@ -98,6 +99,7 @@ export interface AiSessionController {
   readonly archiveSession: (summary: AiSessionSummary) => void;
   readonly updateQueueItem: (item: AiInboxItem, content: string) => void;
   readonly removeQueueItem: (item: AiInboxItem) => void;
+  readonly steerQueueItem: (item: AiInboxItem) => void;
   readonly reorderQueueLane: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
   readonly retryQueueMutation: () => void;
   readonly renameSession: (summary: AiSessionSummary, title: string) => void;
@@ -115,6 +117,7 @@ export interface AiSessionController {
 type AiQueueMutationIntent =
   | Readonly<{ type: 'update'; itemId: string; content: string }>
   | Readonly<{ type: 'remove'; itemId: string }>
+  | Readonly<{ type: 'steer'; itemId: string }>
   | Readonly<{ type: 'reorder'; lane: AiInboxItem['lane']; orderedItemIds: readonly string[] }>;
 
 export interface AiQueueMutationState {
@@ -142,6 +145,13 @@ function permissionMode(mode: AgentPermissionMode): AgentSessionPermissionMode {
   return 'requestApproval';
 }
 
+function sameTarget(left: AgentSessionTarget | undefined, right: AgentSessionTarget | undefined): boolean {
+  if (!left || !right) return left === right;
+  // IPC serialization can reorder fields in a restored target. Compare every value.
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)] as (keyof AgentSessionTarget)[]);
+  return [...keys].every(key => left[key] === right[key]);
+}
+
 function sameOptimistic(
   left: readonly AiOptimisticSubmission[],
   right: readonly AiOptimisticSubmission[],
@@ -164,7 +174,6 @@ export function useAiSessionController({
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
   const providers = useAiSettingsStore((state) => state.providers);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
-  const agentEnabled = useAiSettingsStore((state) => state.agentEnabled);
   const provider = providers.find((item) => item.id === defaultProviderId) ?? providers[0];
   const activeTerminal = terminalSessions.find((item) => item.sessionId === activeTerminalId);
   const [view, setView] = useState<AiSessionView | null>(null);
@@ -173,6 +182,7 @@ export function useAiSessionController({
   const [announcement, setAnnouncement] = useState<string | null>(null);
   const [composer, setComposer] = useState(() => createAiComposerState());
   const [navigation, setNavigation] = useState(() => createAiWorkspaceNavigationState());
+  const scrollAnchorsRef = useRef<Record<string, AiScrollAnchor | undefined>>({});
   const [sessions, setSessions] = useState<readonly AiSessionSummary[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
@@ -181,6 +191,7 @@ export function useAiSessionController({
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [queueMutation, setQueueMutation] = useState<AiQueueMutationState | null>(null);
+  const queueOperationRef = useRef<{ input: AiInboxMutationInput; pending: boolean } | null>(null);
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
   const composerRef = useRef(composer);
@@ -193,6 +204,12 @@ export function useAiSessionController({
   const sessionListRequestRef = useRef(0);
 
   const workspaceScopeKey = `agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`;
+  const appliedWorkspaceRef = useRef(workspaceScopeKey);
+  const workspaceChanging = appliedWorkspaceRef.current !== workspaceScopeKey;
+  const submissionContextRef = useRef({ key: workspaceScopeKey });
+  if (submissionContextRef.current.key !== workspaceScopeKey) {
+    submissionContextRef.current = { key: workspaceScopeKey };
+  }
   // Initial history is only a convenience. It must never claim a workspace after
   // the user has begun a draft, chosen a project, or explicitly navigated.
   const automaticRestore = useRef({ key: workspaceScopeKey, eligible: true });
@@ -201,13 +218,10 @@ export function useAiSessionController({
   }
   const claimWorkspace = useCallback(() => { automaticRestore.current.eligible = false; }, []);
   const canStartAgent = scope === 'terminal'
-    && activeTerminal?.status === 'connected'
-    && agentEnabled;
+    && activeTerminal?.status === 'connected';
   const agentUnavailableReason = canStartAgent
     ? null
-    : agentEnabled
-      ? t('agent.availability.needsTerminal')
-      : t('agent.availability.userDisabled');
+    : t('agent.availability.needsTerminal');
   const hasProvider = Boolean(provider?.model.trim());
 
   const updateOptimistic = useCallback((updater: (
@@ -232,19 +246,52 @@ export function useAiSessionController({
       ? sessionRouteKey('agent', sessionId)
       : `new:agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`
   ), [activeTerminal?.sessionId, scope]);
+  // Keep the editor's owner until its draft is saved, even after the active
+  // terminal has changed in the store.
+  const draftOwnerRef = useRef(navigationDraftKey(null));
 
   const saveCurrentDraft = useCallback((): void => {
-    const key = navigationDraftKey(composerRef.current.sessionId);
-    draftBySessionRef.current.set(key, composerRef.current.draft);
-  }, [navigationDraftKey]);
+    draftBySessionRef.current.set(draftOwnerRef.current, composerRef.current.draft);
+  }, []);
 
   const restoreDraft = useCallback((sessionId: string | null): void => {
     const key = navigationDraftKey(sessionId);
+    draftOwnerRef.current = key;
     dispatch({
       type: 'draft.changed',
       value: draftBySessionRef.current.get(key) ?? '',
     });
   }, [dispatch, navigationDraftKey]);
+
+  const adoptDraft = useCallback((sessionId: string): void => {
+    const key = navigationDraftKey(sessionId);
+    if (draftOwnerRef.current === key) return;
+    // The new-conversation draft now belongs to the created session. Do not
+    // resurrect its submitted text the next time a blank conversation opens.
+    draftBySessionRef.current.delete(draftOwnerRef.current);
+    draftOwnerRef.current = key;
+  }, [navigationDraftKey]);
+
+  const resetComposer = useCallback((summary?: AiSessionSummary): void => {
+    saveCurrentDraft();
+    submissionContextRef.current = { key: workspaceScopeKey };
+    for (const timeout of timeoutRef.current.values()) window.clearTimeout(timeout);
+    timeoutRef.current.clear();
+    updateOptimistic(() => []);
+    const key = navigationDraftKey(summary?.id ?? null);
+    draftOwnerRef.current = key;
+    const next = createAiComposerState({
+      sessionId: summary?.id ?? null,
+      runtimeStatus: summary?.status ?? 'idle',
+      terminal: summary !== undefined && ['completed', 'cancelled', 'failed'].includes(summary.status),
+      waitingApproval: summary?.status === 'waiting',
+      draft: draftBySessionRef.current.get(key) ?? '',
+      preferredBusyMode: composerRef.current.preferredBusyMode,
+    });
+    composerRef.current = next;
+    setComposer(next);
+    setAnnouncement(null);
+  }, [navigationDraftKey, saveCurrentDraft, updateOptimistic, workspaceScopeKey]);
 
   const coldSkillSession = useRef<Promise<AiSessionView> | null>(null);
   const imageDraft = useImageDraft(navigationDraftKey(openedSessionId ?? view?.summary.id ?? null), composer.draft,
@@ -256,7 +303,7 @@ export function useAiSessionController({
   const createInput = useCallback((
     content: string,
   ): Extract<AiCreateSessionInput, { kind: 'agent' }> => {
-    if (scope !== 'terminal' || !activeTerminal || activeTerminal.status !== 'connected' || !agentEnabled) {
+    if (scope !== 'terminal' || !activeTerminal || activeTerminal.status !== 'connected') {
       throw new Error(t('ai.workspace.error.connectedTerminalRequired'));
     }
     const sessionId = `agent-${activeTerminal.sessionId}-${operationId()}`;
@@ -273,7 +320,7 @@ export function useAiSessionController({
         successCriteria: [content],
       },
     };
-  }, [activeTerminal, agentEnabled, operationId, scope]);
+  }, [activeTerminal, operationId, scope]);
 
   const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}`;
   const projectEpoch = useRef({ key: projectKey });
@@ -303,10 +350,15 @@ export function useAiSessionController({
   }, [adapter, claimWorkspace, createInput, openedSessionId, skillNavigation, t]);
 
   const listSkills = useCallback(async (root?: string): Promise<import('@/types/agent-skill').SkillUserList> => {
+    // Browsing bundled instructions must not create a cold Session or freeze a directory.
+    if (root === undefined && !viewRef.current && !openedSessionId && !coldSkillSession.current) {
+      if (scope !== 'terminal' || !activeTerminal || activeTerminal.status !== 'connected') throw new Error(t('ai.workspace.error.connectedTerminalRequired'));
+      return builtinSkillPreview;
+    }
     if (!adapter.listSkills) throw new Error(t('ai.workspace.skills.unavailable'));
     const sessionId = await ensureProjectSession(root);
     return adapter.listSkills(sessionId);
-  }, [adapter, ensureProjectSession, t]);
+  }, [activeTerminal, adapter, ensureProjectSession, openedSessionId, scope, t]);
   const listFileReferences = useCallback<import('@/types/agent-file-reference').ListFileReferences>(async (query, signal, root) => {
     const epoch = projectEpoch.current;
     if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
@@ -319,6 +371,8 @@ export function useAiSessionController({
   }, [adapter, ensureProjectSession]);
 
   effectExecutorRef.current = (effect): void => {
+    const context = submissionContextRef.current;
+    const isCurrent = (): boolean => mountedRef.current && submissionContextRef.current === context;
     if (effect.type === 'focusEditor') return;
     if (effect.type === 'announce') {
       setAnnouncement(effect.reason);
@@ -326,8 +380,8 @@ export function useAiSessionController({
     }
     if (effect.type === 'stop') {
       void adapter.stop(effect.sessionId).then(
-        () => dispatch({ type: 'stop.succeeded' }),
-        (error: unknown) => dispatch({ type: 'stop.failed', error: normalizeAiSessionError(error) }),
+        () => { if (isCurrent()) dispatch({ type: 'stop.succeeded' }); },
+        (error: unknown) => { if (isCurrent()) dispatch({ type: 'stop.failed', error: normalizeAiSessionError(error) }); },
       );
       return;
     }
@@ -371,20 +425,22 @@ export function useAiSessionController({
             ? { create: createInput(payload.content) }
             : {}),
         } satisfies AiSubmitInput<'agent'>);
-        if (!mountedRef.current) return;
+        if (!isCurrent()) return;
         updateOptimistic((current) => current.map((item) => (
           item.clientOperationId === payload.clientOperationId
             ? { ...item, sessionId: receipt.sessionId, delivery: 'accepted' }
             : item
         )));
         setOpenedSessionId(receipt.sessionId);
-        setNavigation((current) => ({
+        adoptDraft(receipt.sessionId);
+        setNavigation((current) => current.route.kind === 'conversation' ? ({
           ...current,
           route: { kind: 'conversation', sessionId: receipt.sessionId },
-        }));
+        }) : current);
         dispatch({ type: 'submit.accepted', receipt });
         const timeout = window.setTimeout(() => {
           timeoutRef.current.delete(payload.clientOperationId);
+          if (!isCurrent()) return;
           const pending = optimisticRef.current.find((item) => (
             item.clientOperationId === payload.clientOperationId
           ));
@@ -399,7 +455,7 @@ export function useAiSessionController({
         }, OPTIMISTIC_COMMIT_TIMEOUT_MS);
         timeoutRef.current.set(payload.clientOperationId, timeout);
       } catch (error) {
-        if (!mountedRef.current) return;
+        if (!isCurrent()) return;
         const normalized = normalizeAiSessionError(error);
         updateOptimistic((current) => current.map((item) => (
           item.clientOperationId === payload.clientOperationId
@@ -422,27 +478,26 @@ export function useAiSessionController({
   }, [ownedAdapter]);
 
   useEffect(() => {
-    saveCurrentDraft();
+    resetComposer();
+    appliedWorkspaceRef.current = workspaceScopeKey;
+    if (composerRef.current.draft) claimWorkspace();
     setOpenedSessionId(null);
     setView(null);
     setQueueMutation(null);
+    queueOperationRef.current = null;
     viewRef.current = null;
-    dispatch({
-      type: 'runtime.synchronized',
-      sessionId: null,
-      status: 'idle',
-      terminal: false,
-      waitingApproval: false,
-    });
     setNavigation(createAiWorkspaceNavigationState());
-  }, [activeTerminal?.sessionId, dispatch, saveCurrentDraft, scope]);
+  }, [claimWorkspace, resetComposer, workspaceScopeKey]);
 
   useEffect(() => {
+    // Wait for the old workspace's state to clear before choosing its successor.
+    if (workspaceChanging) return;
     let alive = true;
     let unsubscribe = (): void => undefined;
     const restore = automaticRestore.current;
+    const context = submissionContextRef.current;
     let established = false;
-    const canPublish = (): boolean => alive && (Boolean(openedSessionId)
+    const canPublish = (): boolean => alive && submissionContextRef.current === context && (Boolean(openedSessionId)
       || (automaticRestore.current === restore && (established || restore.eligible)));
     const open = async (): Promise<void> => {
       let sessionId = openedSessionId;
@@ -479,9 +534,19 @@ export function useAiSessionController({
     openedSessionId,
     scope,
     skillNavigation,
+    workspaceChanging,
   ]);
 
   useEffect(() => {
+    if (view && viewRef.current !== view) return;
+    if (view && draftOwnerRef.current !== navigationDraftKey(view.summary.id)) {
+      saveCurrentDraft();
+      if (composerRef.current.pendingSubmissions.some((item) => item.sessionId === null)) {
+        adoptDraft(view.summary.id);
+      } else {
+        restoreDraft(view.summary.id);
+      }
+    }
     dispatch({
       type: 'runtime.synchronized',
       sessionId: view?.summary.id ?? null,
@@ -491,7 +556,7 @@ export function useAiSessionController({
       waitingApproval: view?.pendingApproval !== null && view?.pendingApproval !== undefined,
       waitingQuestion: Boolean(view?.pendingQuestion),
     });
-  }, [dispatch, view, view?.pendingApproval, view?.status, view?.summary.id]);
+  }, [adoptDraft, dispatch, navigationDraftKey, restoreDraft, saveCurrentDraft, view]);
 
   useEffect(() => {
     if (!view) return;
@@ -564,25 +629,21 @@ export function useAiSessionController({
 
   const openSession = useCallback((summary: AiSessionSummary): void => {
     claimWorkspace();
-    saveCurrentDraft();
+    resetComposer(summary);
+    // Selecting the current history entry is a new visit too; renew its
+    // subscription even when the session ID itself has not changed.
+    setSkillNavigation((generation) => generation + 1);
     setOpenedSessionId(summary.id);
     setView(null);
     setQueueMutation(null);
+    queueOperationRef.current = null;
     viewRef.current = null;
     setNavigation((current) => ({
       ...current,
       route: { kind: 'conversation', sessionId: summary.id },
       returnFocus: null,
     }));
-    dispatch({
-      type: 'runtime.synchronized',
-      sessionId: summary.id,
-      status: summary.status,
-      terminal: summary.status === 'completed' || summary.status === 'cancelled' || summary.status === 'failed',
-      waitingApproval: summary.status === 'waiting',
-    });
-    restoreDraft(summary.id);
-  }, [claimWorkspace, dispatch, restoreDraft, saveCurrentDraft]);
+  }, [claimWorkspace, resetComposer]);
 
   const newSession = useCallback((): void => {
     claimWorkspace();
@@ -590,25 +651,18 @@ export function useAiSessionController({
     coldSkillSession.current = null;
     setSkillNavigation((generation) => generation + 1);
     setSkillRoot(null);
-    saveCurrentDraft();
+    resetComposer();
     setOpenedSessionId(null);
     setView(null);
     setQueueMutation(null);
+    queueOperationRef.current = null;
     viewRef.current = null;
     setNavigation((current) => ({
       ...current,
       route: { kind: 'conversation', sessionId: null },
       returnFocus: null,
     }));
-    dispatch({
-      type: 'runtime.synchronized',
-      sessionId: null,
-      status: 'idle',
-      terminal: false,
-      waitingApproval: false,
-    });
-    restoreDraft(null);
-  }, [claimWorkspace, dispatch, restoreDraft, saveCurrentDraft]);
+  }, [claimWorkspace, resetComposer]);
 
   const archiveSession = useCallback((summary: AiSessionSummary): void => {
     setArchivingSessionId(summary.id);
@@ -621,37 +675,55 @@ export function useAiSessionController({
     ).finally(() => setArchivingSessionId(null));
   }, [adapter, newSession, refreshSessions]);
 
-  const executeQueueMutation = useCallback((intent: AiQueueMutationIntent): void => {
+  const executeQueueMutation = useCallback((intent: AiQueueMutationIntent, retry = false): void => {
+    // React state alone cannot guard two clicks within the same render.
+    if (queueOperationRef.current?.pending) return;
+    if (!retry) queueOperationRef.current = null;
     const current = viewRef.current;
-    if (current?.summary.kind !== 'agent' || current.revision === null || current.revision === undefined) {
-      setQueueMutation({
-        intent,
-        status: 'failed',
-        error: t('ai.workspace.queue.errorUnavailable'),
-        conflict: false,
-      });
+    const previous = retry ? queueOperationRef.current?.input : undefined;
+    if (current?.summary.kind !== 'agent' || current.revision == null) {
+      setQueueMutation({ intent, status: 'failed', error: t('ai.workspace.queue.errorUnavailable'), conflict: false });
       return;
     }
-    const clientOperationId = operationId();
-    const base = {
+    if (previous && previous.sessionId !== current.summary.id) return;
+    if (previous && current.committedOperationIds?.includes(previous.clientOperationId)) {
+      queueOperationRef.current = null;
+      setQueueMutation(null);
+      return;
+    }
+    // A retry must reach the durable receipt lookup even if the item has since
+    // been consumed. New requests can be rejected immediately from the view.
+    const terminal = ['completed', 'failed', 'cancelled'].includes(current.status);
+    const steerable = intent.type !== 'steer' || (current.status === 'running'
+      && current.inbox.some((item) => item.id === intent.itemId && item.state === 'queued'
+        && item.source === 'user' && item.lane === 'nextTurn'));
+    if (!previous && (current.summary.archived || current.snapshot.value.ended || terminal || !steerable)) {
+      setQueueMutation({ intent, status: 'failed', error: t('ai.workspace.queue.errorNotActionable'), conflict: false });
+      return;
+    }
+    const input: AiInboxMutationInput = {
+      ...intent,
       sessionId: current.summary.id,
       expectedRevision: current.revision,
-      clientOperationId,
+      clientOperationId: previous?.clientOperationId ?? operationId(),
     };
-    const input: AiInboxMutationInput = intent.type === 'update'
-      ? { ...base, ...intent }
-      : intent.type === 'remove'
-        ? { ...base, ...intent }
-        : { ...base, ...intent };
+    const operation = { input, pending: true };
+    queueOperationRef.current = operation;
+    const isCurrent = (): boolean => mountedRef.current && queueOperationRef.current === operation
+      && viewRef.current?.summary.id === input.sessionId;
     setQueueMutation({ intent, status: 'pending', error: null, conflict: false });
     void adapter.mutateInbox(input).then(
-      () => setQueueMutation(null),
+      () => {
+        if (!isCurrent()) return;
+        queueOperationRef.current = null;
+        setQueueMutation(null);
+      },
       async (error: unknown) => {
         const normalized = normalizeAiSessionError(error);
-        if (normalized.kind === 'conflict') {
+        if (normalized.kind === 'conflict' && isCurrent()) {
           try {
-            const refreshed = await adapter.refresh(current.summary.id);
-            if (viewRef.current?.summary.id === refreshed.summary.id) {
+            const refreshed = await adapter.refresh(input.sessionId);
+            if (isCurrent()) {
               viewRef.current = refreshed;
               setView(refreshed);
             }
@@ -659,15 +731,17 @@ export function useAiSessionController({
             // Keep the recognizable conflict; retry remains available.
           }
         }
-        setQueueMutation({
-          intent,
-          status: 'failed',
-          error: normalized.message,
-          conflict: normalized.kind === 'conflict',
-        });
+        if (!isCurrent()) return;
+        if (viewRef.current?.committedOperationIds?.includes(input.clientOperationId)) {
+          queueOperationRef.current = null;
+          setQueueMutation(null);
+          return;
+        }
+        operation.pending = false;
+        setQueueMutation({ intent, status: 'failed', error: normalized.message, conflict: normalized.kind === 'conflict' });
       },
     );
-  }, [adapter, operationId]);
+  }, [adapter, operationId, t]);
 
   const renameSession = useCallback((summary: AiSessionSummary, rawTitle: string): void => {
     const title = rawTitle.trim();
@@ -748,10 +822,8 @@ export function useAiSessionController({
     const session = viewRef.current?.summary;
     if (!session) return;
     const key = sessionRouteKey(session.kind, session.id);
-    setNavigation((current) => ({
-      ...current,
-      scrollAnchorBySession: { ...current.scrollAnchorBySession, [key]: anchor },
-    }));
+    // Reading position is navigation bookkeeping, not rendered UI state.
+    scrollAnchorsRef.current[key] = anchor;
   }, []);
 
   const decideApproval = useCallback((decision: 'approve' | 'reject'): void => {
@@ -816,7 +888,7 @@ export function useAiSessionController({
     canStartAgent,
     agentUnavailableReason,
     announcement,
-    navigation,
+    navigation: { ...navigation, scrollAnchorBySession: scrollAnchorsRef.current },
     sessions,
     sessionsLoading,
     sessionsError,
@@ -831,6 +903,7 @@ export function useAiSessionController({
     setBusyPreference: (value) => dispatch({ type: 'preference.changed', value }),
     submit: (gesture, accelerated = false) => {
       claimWorkspace();
+      const context = submissionContextRef.current;
       if (!canStartAgent) {
         setAnnouncement('sessionUnavailable');
         return;
@@ -856,16 +929,19 @@ export function useAiSessionController({
             try { existing = await adapter.open(op.sessionId); } catch { /* Not yet created. */ }
             if (!existing) await adapter.create(op.create);
             else if (existing.snapshot.kind !== 'agent'
-              || JSON.stringify(existing.snapshot.value.header.target) !== JSON.stringify(op.create.request.target)) {
+              || !sameTarget(existing.snapshot.value.header.target, op.create.request.target)) {
               throw new Error('IMAGE_SESSION_TARGET_MISMATCH');
             }
           }
           await adapter.submit(op.sessionId, { clientOperationId: op.id, mode: op.mode, content: value.text,
             images: value.images, provider: useAiSettingsStore.getState().getProviderConfig() });
         }, value => {
+          if (!mountedRef.current || submissionContextRef.current !== context) return;
           if (composerRef.current.draft === value.text) dispatch({ type: 'draft.changed', value: '' });
           setOpenedSessionId(value.operation!.sessionId);
-          setNavigation(current => ({ ...current, route: { kind: 'conversation', sessionId: value.operation!.sessionId } }));
+          adoptDraft(value.operation!.sessionId);
+          setNavigation(current => current.route.kind === 'conversation'
+            ? { ...current, route: { kind: 'conversation', sessionId: value.operation!.sessionId } } : current);
         });
         return;
       }
@@ -906,11 +982,12 @@ export function useAiSessionController({
       type: 'update', itemId: item.id, content,
     }),
     removeQueueItem: (item) => executeQueueMutation({ type: 'remove', itemId: item.id }),
+    steerQueueItem: (item) => executeQueueMutation({ type: 'steer', itemId: item.id }),
     reorderQueueLane: (lane, orderedItemIds) => executeQueueMutation({
       type: 'reorder', lane, orderedItemIds,
     }),
     retryQueueMutation: () => {
-      if (queueMutation) executeQueueMutation(queueMutation.intent);
+      if (queueMutation) executeQueueMutation(queueMutation.intent, true);
     },
     renameSession,
     back,
