@@ -275,16 +275,9 @@ async fn drive_agent_inner(
                 close_open_scope(sessions, entry, "cancelled")?;
                 return Ok(AgentDriverSettlement::Cancelled);
             }
-            let snapshot = sessions.snapshot(&entry.session_id)?;
-            if snapshot.inbox.next_step.is_empty() && !continue_after_tools {
-                sessions.append(
-                    &entry.session_id,
-                    Some(turn_id.clone()),
-                    None,
-                    AgentSessionEventPayload::TurnEnd {
-                        reason: "completed".into(),
-                    },
-                )?;
+            if !continue_after_tools
+                && sessions.end_turn_if_no_step_input(&entry.session_id, &turn_id)?
+            {
                 entry.set_scope(None)?;
                 break;
             }
@@ -322,15 +315,14 @@ async fn drive_agent_inner(
                     turn_id.clone(),
                     current_step_id.clone(),
                 )?;
-            } else {
-                let claimed = sessions.begin_step(
-                    &entry.session_id,
-                    turn_id.clone(),
-                    current_step_id.clone(),
-                )?;
-                if claimed.is_none() {
-                    continue;
-                }
+            } else if sessions
+                .begin_step_or_end_turn(&entry.session_id, turn_id.clone(), current_step_id.clone())?
+                .is_none()
+            {
+                // An operator may remove the final queued input while hooks
+                // run. End atomically instead of running a nonexistent step.
+                entry.set_scope(None)?;
+                break;
             }
             entry.set_scope(Some(AgentActiveScope {
                 turn_id: turn_id.clone(),

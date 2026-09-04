@@ -1,5 +1,6 @@
 mod artifact;
 mod budget;
+mod builtin_skills;
 mod commands;
 mod compaction;
 mod driver;

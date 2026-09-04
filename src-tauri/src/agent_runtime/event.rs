@@ -555,6 +555,13 @@ pub(crate) enum AgentSessionEventPayload {
         previous_revision: u64,
         client_operation_id: String,
     },
+    /// Moves the existing user message from nextTurn to the tail of nextStep.
+    #[serde(rename = "agent/inbox/item_steered")]
+    InboxItemSteered {
+        item_id: String,
+        previous_revision: u64,
+        client_operation_id: String,
+    },
     #[serde(rename = "agent/inbox/reordered")]
     InboxReordered {
         lane: AgentInboxLane,

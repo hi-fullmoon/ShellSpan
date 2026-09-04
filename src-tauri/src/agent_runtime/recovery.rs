@@ -70,6 +70,8 @@ pub(crate) struct AgentRecoveryReconcileInput {
 
 #[derive(Default)]
 struct ToolBoundary {
+    turn_id: Option<String>,
+    step_id: Option<String>,
     last_seq: u64,
     request_id: Option<String>,
     effect: Option<AgentSessionEffect>,
@@ -124,6 +126,8 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
             }
             AgentSessionEventPayload::ToolCall { call } => {
                 let boundary = tools.entry(call.call_id.clone()).or_default();
+                boundary.turn_id.clone_from(&event.turn_id);
+                boundary.step_id.clone_from(&event.step_id);
                 boundary.effect = call.effect;
                 boundary.last_seq = event.seq;
             }
@@ -340,15 +344,21 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
             );
         }
         if boundary.dispatched.is_some() {
-            return make(
-                AgentRecoveryCheckpointKind::ExecutionInFlight,
-                AgentRecoveryStatus::Required,
-                "A native call was dispatched without a durable result; its outcome is uncertain.",
-                boundary.request_id.clone(),
-                Some(call_id.clone()),
-                boundary.effect,
-                boundary.dispatched.clone(),
-            );
+            // Waiting for approval may have ended the model Step already.
+            // Reconciliation still needs the original tool's complete scope.
+            return AgentRecoveryCheckpoint {
+                turn_id: boundary.turn_id.clone(),
+                step_id: boundary.step_id.clone(),
+                ..make(
+                    AgentRecoveryCheckpointKind::ExecutionInFlight,
+                    AgentRecoveryStatus::Required,
+                    "A native call was dispatched without a durable result; its outcome is uncertain.",
+                    boundary.request_id.clone(),
+                    Some(call_id.clone()),
+                    boundary.effect,
+                    boundary.dispatched.clone(),
+                )
+            };
         }
         if boundary.approval == Some(AgentToolApprovalStatus::Approved) {
             return make(

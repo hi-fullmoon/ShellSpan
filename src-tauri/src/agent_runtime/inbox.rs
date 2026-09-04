@@ -31,6 +31,9 @@ impl AgentInbox {
                 AgentSessionEventPayload::InboxItemRemoved { item_id, lane, .. } => {
                     inbox.remove(*lane, item_id)?
                 }
+                AgentSessionEventPayload::InboxItemSteered { item_id, .. } => {
+                    inbox.steer(item_id)?
+                }
                 AgentSessionEventPayload::InboxReordered {
                     lane,
                     ordered_item_ids,
@@ -198,6 +201,22 @@ impl AgentInbox {
             .iter()
             .map(|item_id| by_id[item_id].clone())
             .collect();
+        Ok(())
+    }
+
+    pub(crate) fn steer(&mut self, item_id: &str) -> Result<(), String> {
+        let index = self
+            .next_turn
+            .iter()
+            .position(|message| message.message_id == item_id)
+            .ok_or_else(|| "Agent inbox steer requires a queued nextTurn item".to_string())?;
+        if self.next_turn[index].source.kind != super::AgentMessageSourceKind::User {
+            return Err("Agent inbox steer requires a user message".into());
+        }
+        // Move the object, preserving identity, provenance, content and attachments.
+        // seen_message_ids remains unchanged, so it cannot be enqueued again.
+        let message = self.next_turn.remove(index).expect("validated queued index");
+        self.next_step.push_back(message);
         Ok(())
     }
 
