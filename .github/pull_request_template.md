@@ -1,6 +1,6 @@
 ## 变更目标
 
-- 路线图审计 ID：
+- 关联 Issue：
 - 用户价值：
 
 ## 安全与恢复
@@ -16,7 +16,7 @@
 - [ ] `pnpm review:frontend` 通过
 - [ ] Rust 改动已通过 fmt、Clippy 与测试
 - [ ] Windows/macOS 差异已评估
-- [ ] 已更新 `docs/roadmap-audit.json`（如状态或证据变化）
+- [ ] 已更新相关使用指南或运行时文档（如适用）
 - [ ] 没有把未验证条目标记为 `verified`
 
 ## 审核者检查
