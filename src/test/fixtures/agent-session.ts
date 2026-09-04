@@ -496,6 +496,10 @@ const remainingEventFamilyFixture: readonly AgentSessionEvent[] = [
       clientOperationId: 'fixture-rename',
     },
   }),
+  sessionEvent(11, {
+    type: 'agent/inbox/item_steered',
+    data: { itemId: 'queued-steer', previousRevision: 0, clientOperationId: 'fixture-steer' },
+  }),
 ];
 
 export const agentSessionAllEventFamiliesFixture: readonly AgentSessionEvent[] = [
@@ -510,11 +514,12 @@ export const agentSessionAllEventFamiliesFixture: readonly AgentSessionEvent[] =
     type: 'request/start',
     data: { ...data, headerRequestId: data.requestId },
   }];
-}).map((event, seq) => ({
-  ...event,
-  seq,
-  timeUnixMs: 1_000 + seq * 10,
-}));
+}).map((event, seq): AgentSessionEvent => {
+  const envelope = { seq, timeUnixMs: 1_000 + seq * 10 };
+  return event.type === 'agent/inbox/item_steered'
+    ? { ...event, ...envelope, data: { ...event.data, previousRevision: seq } }
+    : { ...event, ...envelope };
+});
 
 export const agentSessionFailedEventFixture: readonly AgentSessionEvent[] = [
   sessionEvent(0, {
@@ -573,4 +578,23 @@ export const agentSessionFailedEventFixture: readonly AgentSessionEvent[] = [
     type: 'session/ended',
     data: { status: 'failed', reason: 'Provider connection failed.' },
   }),
+];
+
+/** A queued user message moves intact to the tail of nextStep, then is claimed once. */
+export const queuedSteerMessageFixture = {
+  messageId: 'queued-steer', clientSubmissionId: 'original-submission',
+  content: '完整消息\nline two', source: USER_SOURCE,
+  images: [{ version: 1, sha256: 'a'.repeat(64), mediaType: 'image/png', bytes: 100, width: 10, height: 10, name: 'reference.png' }],
+} as const;
+const existingStepMessage = { messageId: 'existing-step', content: 'existing step', source: USER_SOURCE };
+export const agentSessionSteerFixture: readonly AgentSessionEvent[] = [
+  ...agentSessionEventFixture.slice(0, 3),
+  sessionEvent(3, { type: 'turn/start', turnId: 'turn-steer' }),
+  sessionEvent(4, { type: 'agent/inbox/spliced', data: { operation: 'enqueued', lane: 'nextTurn', messages: [queuedSteerMessageFixture] } }),
+  sessionEvent(5, { type: 'agent/inbox/spliced', data: { operation: 'enqueued', lane: 'nextStep', messages: [existingStepMessage] } }),
+  sessionEvent(6, { type: 'agent/inbox/item_steered', data: { itemId: 'queued-steer', previousRevision: 6, clientOperationId: 'steer-operation' } }),
+  sessionEvent(7, { type: 'step/input_claim', turnId: 'turn-steer', stepId: 'step-next', data: { startTurn: false, turnMessages: [], stepMessages: [existingStepMessage, queuedSteerMessageFixture] } }),
+  sessionEvent(8, { type: 'agent/inbox/spliced', data: { operation: 'claimed', lane: 'nextStep', messages: [existingStepMessage, queuedSteerMessageFixture] } }),
+  sessionEvent(9, { type: 'step/start', turnId: 'turn-steer', stepId: 'step-next' }),
+  sessionEvent(10, { type: 'user/message', turnId: 'turn-steer', stepId: 'step-next', data: { message: queuedSteerMessageFixture } }),
 ];
