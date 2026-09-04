@@ -62,6 +62,50 @@ function connectedTerminal(sessionId = 'terminal-1'): void {
   });
 }
 
+it('allows changing model and permissions in a running conversation without changing defaults', async () => {
+  connectedTerminal();
+  const user = userEvent.setup();
+  const view = runningAgentView();
+  const second = { ...provider, id: 'second', model: 'second-model' };
+  useAiSettingsStore.setState({ providers: [provider, second], defaultProviderId: provider.id });
+  const agent = adapter({
+    list: vi.fn(async () => ({ sessions: [view.summary] })),
+    open: vi.fn(async () => view),
+    selectModel: vi.fn(async () => undefined),
+    setPermission: vi.fn(async () => undefined),
+  });
+  render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+  await waitFor(() => expect(agent.open).toHaveBeenCalledWith(view.summary.id));
+  const model = await screen.findByRole('button', { name: /Model selection: model-test/ });
+  expect(model).toBeEnabled();
+  await user.click(model);
+  await user.click(await screen.findByRole('menuitem', { name: /Model.*model-test/ }));
+  await user.click(screen.getByRole('menuitemradio', { name: 'second-model' }));
+  await waitFor(() => expect(agent.selectModel).toHaveBeenCalledWith(view.summary.id, expect.objectContaining({ id: second.id })));
+  expect(useAiSettingsStore.getState().defaultProviderId).toBe(provider.id);
+  await user.click(screen.getByRole('button', { name: /Permission mode:/ }));
+  await user.click(await screen.findByRole('menuitemradio', { name: 'Full access' }));
+  await user.click(await screen.findByRole('button', { name: 'Enable full access' }));
+  await waitFor(() => expect(agent.setPermission).toHaveBeenCalledWith(view.summary.id, 'operator'));
+  expect(useAgentPermissionStore.getState().getMode('terminal-1')).toBe('autoApproveReadOnly');
+});
+
+it('keeps the current session selection when a model change fails', async () => {
+  connectedTerminal();
+  const view = runningAgentView();
+  const agent = adapter({
+    list: vi.fn(async () => ({ sessions: [view.summary] })),
+    open: vi.fn(async () => view),
+    selectModel: vi.fn(async () => { throw new Error('Provider unavailable'); }),
+  });
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+  await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
+  await act(async () => result.current.selectModel({ ...provider, model: 'second-model' }));
+  expect(result.current.announcement).toBe('Provider unavailable');
+  expect(result.current.settingsBusy).toBe(false);
+  expect(result.current.modelLabel).toBe(provider.model);
+});
+
 function runningAgentView(sessionId = 'agent-session-1', terminalId = 'terminal-1'): AiSessionView {
   return {
     summary: {

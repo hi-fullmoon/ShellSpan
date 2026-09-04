@@ -154,7 +154,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       />,
     );
 
-    expect(screen.getByText('What should the Agent complete?')).toBeVisible();
+    expect(screen.getByText('How can I help?')).toBeVisible();
     expect(container.querySelector('.ai-session-context')).toHaveTextContent('Terminal');
     expect(container.querySelector('[data-slot="badge"]')).toBeNull();
 
@@ -210,7 +210,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(container.querySelectorAll('[data-ai-node-kind="turnProcess"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-ai-node-kind="reasoning"]')).toHaveLength(0);
     expect(container.querySelectorAll('[data-tool-state="running"]')).toHaveLength(0);
-    expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('In progress');
+    expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('Working…');
   });
 
   it('renders Agent sessions through the conversation-only surface', () => {
@@ -241,7 +241,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.getByRole('log', { name: 'AI conversation' })).toBeVisible();
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('In progress'));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Working…'));
   });
 
   it('gives every icon-only workspace action an accessible name and tooltip', () => {

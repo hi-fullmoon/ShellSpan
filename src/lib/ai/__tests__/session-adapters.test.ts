@@ -52,6 +52,23 @@ function snapshot(ended = false): AgentSessionSnapshot {
   };
 }
 
+it('projects model and permission changes from live events over an older snapshot', () => {
+  const selected = {
+    providerId: 'other', providerKind: 'openAi' as const,
+    baseUrl: 'https://api.openai.com', model: 'gpt-5.6', requiresApiKey: true,
+    reasoningEffort: 'high',
+  };
+  const base = agentSessionEventFixture[0]!;
+  const events: AgentSessionEvent[] = [base, {
+    ...base, seq: 1, type: 'session/model_selected', data: { provider: selected },
+  }, {
+    ...base, seq: 2, type: 'session/permission_changed', data: { mode: 'operator' },
+  }];
+  const view = agentSessionView({ snapshot: snapshot(), events, lastCommittedSeq: 2, hasTerminalEvent: false });
+  expect(view.snapshot.value.header).toMatchObject({ modelSelection: selected, permissionMode: 'operator' });
+  expect(view.activityNodes.some(node => node.kind === 'unknown')).toBe(false);
+});
+
 function agentDependencies(
   events: readonly AgentSessionEvent[],
   order: string[] = [],

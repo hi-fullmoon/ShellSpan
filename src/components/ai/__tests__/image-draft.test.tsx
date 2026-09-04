@@ -189,3 +189,14 @@ it('vision uses exact shared models and profile/protocol, including model-specif
   expect(() => requireVision({ ...provider, profile: 'generic' })).toThrow('UNSUPPORTED');
   expect(() => requireVision({ ...provider, kind: 'ollama' })).toThrow('UNSUPPORTED');
 });
+
+it.each(['k3', 'k3-256k'])('accepts %s images for Kimi Code and explicitly configured proxies', model => {
+  const provider = { id: 'kimi', kind: 'openAiCompatible' as const, baseUrl: 'https://api.kimi.com/coding', model, requiresApiKey: true };
+  expect(() => requireVision(provider)).not.toThrow();
+  expect(providerCapabilities(provider).contextWindow).toBe(262144);
+  expect(() => requireVision({ ...provider, model: ` ${model.toUpperCase()} ` })).not.toThrow();
+  expect(() => requireVision({ ...provider, profile: 'kimi', baseUrl: 'https://proxy.example/v1' })).not.toThrow();
+  expect(() => requireVision({ ...provider, model: `${model}-unknown` })).toThrow('UNSUPPORTED');
+  expect(() => requireVision({ ...provider, profile: 'generic' })).toThrow('UNSUPPORTED');
+  expect(() => requireVision({ ...provider, kind: 'openAi' })).toThrow('UNSUPPORTED');
+});
