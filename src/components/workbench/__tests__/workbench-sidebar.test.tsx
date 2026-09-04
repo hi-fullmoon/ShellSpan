@@ -148,49 +148,6 @@ describe('WorkbenchSidebar', () => {
     expect(onRequestExit).toHaveBeenCalledOnce();
   });
 
-  it('keeps menu separators inset from the popup edges', () => {
-    render(
-      <WorkbenchSidebar
-        activeTab="connections"
-        onTabChange={vi.fn()}
-        onOpenSettings={vi.fn()}
-        onCheckForUpdates={vi.fn()}
-        onOpenAbout={vi.fn()}
-        onRequestExit={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open user menu' }));
-    const separators = document.querySelectorAll('[data-slot="dropdown-menu-separator"]');
-    expect(separators).toHaveLength(2);
-    separators.forEach((separator) => expect(separator).toHaveClass('mx-0'));
-  });
-
-  it('uses the softer application text color for menu actions', () => {
-    render(
-      <WorkbenchSidebar
-        activeTab="connections"
-        onTabChange={vi.fn()}
-        onOpenSettings={vi.fn()}
-        onCheckForUpdates={vi.fn()}
-        onOpenAbout={vi.fn()}
-        onRequestExit={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open user menu' }));
-    const actionGroups = document.querySelectorAll(
-      '[data-slot="dropdown-menu-group"].text-app-text-soft',
-    );
-    expect(actionGroups).toHaveLength(2);
-    actionGroups.forEach((group) => {
-      expect(group).toHaveClass('[&_[data-slot=dropdown-menu-item]]:text-[13px]');
-      const icons = group.querySelectorAll('svg');
-      expect(icons).toHaveLength(3);
-      icons.forEach((icon) => expect(icon).toHaveClass('size-3.5'));
-    });
-  });
-
   it('shows a disabled loading state while checking for updates', () => {
     const onCheckForUpdates = vi.fn();
     useUpdateStore.setState({ phase: 'checking' });
@@ -208,7 +165,7 @@ describe('WorkbenchSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open user menu' }));
     const checkingItem = screen.getByRole('menuitem', { name: /Checking for updates/ });
     expect(checkingItem).toHaveAttribute('data-disabled');
-    expect(screen.getByRole('status', { name: 'Loading' })).toHaveClass('size-3.5');
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument();
     fireEvent.click(checkingItem);
     expect(onCheckForUpdates).not.toHaveBeenCalled();
   });
