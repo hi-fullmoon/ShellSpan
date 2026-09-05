@@ -79,7 +79,7 @@ try {
     };
     const skill = async () => {
       const editor = page.getByTestId('ai-workspace-composer');
-      await editor.click(); await editor.evaluate(el => { el.setSelectionRange(el.value.length, el.value.length); el.dispatchEvent(new Event('select', { bubbles: true })); }); await editor.pressSequentially(' /sys');
+      await editor.click(); await editor.evaluate(el => { const range = document.createRange(); range.selectNodeContents(el); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.dispatchEvent(new Event('selectionchange')); }); await editor.pressSequentially(' /sys');
       await page.getByRole('option', { name: /system-status/ }).click();
     };
     const before = await rpc('__state');
@@ -94,7 +94,7 @@ try {
         await page.screenshot({ path: join(output, `${width}-${theme}-limit-toast.png`), animations: 'disabled' });
         await page.getByTestId('ai-workspace-composer').fill('durable image draft ');
         await page.reload(); await page.locator('[data-testid=image-draft] img').first().waitFor();
-        assert.equal(await page.getByTestId('ai-workspace-composer').inputValue(), 'durable image draft ');
+        assert.equal(await page.getByTestId('ai-workspace-composer').evaluate(el => el.textContent ? el.innerText : ''), 'durable image draft ');
         await page.evaluate(() => window.imageTestChangeProvider('qwen-turbo'));
         await page.getByTestId('ai-workspace-composer').press('Enter');
         const modelError = page.locator('[data-sonner-toast]').getByText(zh ? '暂时无法向当前模型发送图片，请切换模型重试。' : 'Images cannot be sent to this model yet. Switch models and try again.', { exact: true });
@@ -147,7 +147,7 @@ try {
     }
     await page.getByText('Image wire complete', { exact: true }).waitFor({ timeout: 20000 });
     await page.locator('[data-testid=image-draft] img').first().waitFor({ state: 'detached' });
-    assert.equal(await page.getByTestId('ai-workspace-composer').inputValue(), '');
+    assert.equal(await page.getByTestId('ai-workspace-composer').evaluate(el => el.textContent ? el.innerText : ''), '');
     const after = await rpc('__state'); const session = after.sessions.at(-1);
     assert.equal(session.snapshot.header.target.cwd, undefined);
     assert.equal(after.requests.length, before.requests.length + 1);

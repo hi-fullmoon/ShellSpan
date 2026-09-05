@@ -60,7 +60,7 @@ try {
       await submit.click();
       await card.waitFor({ state: 'detached' });
       assert.equal(
-        await page.getByTestId('ai-workspace-composer').inputValue(),
+        await page.getByTestId('ai-workspace-composer').evaluate(el => el.textContent ? el.innerText : ''),
         'ordinary unsent draft',
       );
       assert.equal(
