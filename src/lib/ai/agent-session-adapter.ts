@@ -8,7 +8,8 @@ import {
   invokeAgentRuntimeSteer,
   invokeApproveAgentRuntimeTool,
   invokeArchiveAgentRuntimeSession,
-  invokeCancelAgentRuntime,
+  invokeInterruptAgentRuntime,
+  invokeResumeAgentRuntime,
   invokeCreateAgentRuntimeSession,
   invokeGetAgentRuntimeArtifact,
   invokeListAgentRuntimeSessions,
@@ -93,7 +94,8 @@ export interface AgentSessionAdapterDependencies {
   readonly answerQuestion: typeof invokeAnswerAgentRuntimeQuestion;
   readonly followup: typeof invokeAgentRuntimeFollowup;
   readonly steer: typeof invokeAgentRuntimeSteer;
-  readonly stop: typeof invokeCancelAgentRuntime;
+  readonly stop: typeof invokeInterruptAgentRuntime;
+  readonly resume?: typeof invokeResumeAgentRuntime;
   readonly approve: typeof invokeApproveAgentRuntimeTool;
   readonly reject: typeof invokeRejectAgentRuntimeTool;
   readonly archive: typeof invokeArchiveAgentRuntimeSession;
@@ -115,7 +117,8 @@ const defaultDependencies: AgentSessionAdapterDependencies = {
   answerQuestion: invokeAnswerAgentRuntimeQuestion,
   followup: invokeAgentRuntimeFollowup,
   steer: invokeAgentRuntimeSteer,
-  stop: invokeCancelAgentRuntime,
+  stop: invokeInterruptAgentRuntime,
+  resume: invokeResumeAgentRuntime,
   approve: invokeApproveAgentRuntimeTool,
   reject: invokeRejectAgentRuntimeTool,
   archive: invokeArchiveAgentRuntimeSession,
@@ -162,7 +165,9 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
   const items = new Map<string, AiInboxItem>();
   let activeTurnId: string | undefined;
   for (const event of events) {
-    if (event.type === 'turn/start') {
+    if (event.type === 'session/resumed') {
+      activeTurnId = undefined;
+    } else if (event.type === 'turn/start') {
       activeTurnId = event.turnId;
     } else if (event.type === 'turn/end' && event.turnId === activeTurnId) {
       activeTurnId = undefined;
@@ -192,6 +197,14 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
           items.delete(message.messageId);
         }
       }
+    } else if (event.type === 'agent/inbox/paused') {
+      for (const id of event.data.itemIds) {
+        const previous = items.get(id);
+        if (previous) items.set(id, { ...previous, paused: true, startsTurn: false });
+      }
+    } else if (event.type === 'agent/inbox/item_resumed') {
+      const previous = items.get(event.data.itemId);
+      if (previous) items.set(previous.id, { ...previous, paused: false });
     } else if (event.type === 'agent/inbox/item_updated') {
       const previous = items.get(event.data.itemId);
       if (previous) items.set(event.data.itemId, { ...previous, content: event.data.content });
@@ -277,6 +290,8 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
       kind: 'agent',
       value: {
         ...state.snapshot,
+        status: activity.status,
+        ended: [...events].reverse().find(event => event.type === 'session/ended' || event.type === 'session/resumed')?.type === 'session/ended',
         header,
         task: activity.plan === undefined ? state.snapshot.task : { ...state.snapshot.task, plan: activity.plan },
       },
@@ -287,13 +302,14 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
     pendingApproval: pendingApproval(nodes),
     pendingQuestion: projectQuestions(events).find((q) => q.status === 'pending') ?? null,
     status: activity.status,
-    error: terminalError(nodes),
+    error: activity.status === 'failed' || activity.status === 'cancelled' ? terminalError(nodes) : null,
     throughSeq: state.lastCommittedSeq ?? null,
     revision: state.lastCommittedSeq === undefined ? state.snapshot.eventCount : state.lastCommittedSeq + 1,
     committedOperationIds: events.flatMap((event) => {
       switch (event.type) {
         case 'question/answered':
           return [event.data.submission.clientOperationId];
+        case 'agent/inbox/item_resumed':
         case 'agent/inbox/item_updated':
         case 'agent/inbox/item_removed':
         case 'agent/inbox/item_steered':
@@ -522,7 +538,17 @@ export function createAgentSessionAdapter(
         if (!input.create) throw new Error('Agent submission requires create input for a new session');
         resolvedSessionId = (await createSession(input.create)).summary.id;
       }
-      const view = await openEntry(resolvedSessionId);
+      let view = await openEntry(resolvedSessionId);
+      if (view.summary.archived || view.snapshot.value.header.subagent) {
+        throw new Error('This conversation cannot accept human follow-up messages');
+      }
+      if (['cancelled', 'failed', 'completed'].includes(view.status) || view.snapshot.value.ended) {
+        await (dependencies.resume ?? invokeResumeAgentRuntime)({ sessionId: resolvedSessionId });
+        const entry = ensureEntry(resolvedSessionId);
+        view = agentSessionView(await entry.client.reconnect());
+        entry.view = view;
+        for (const listener of entry.listeners) listener(view);
+      }
       // An idle restored Session needs an owning runtime before its next input. start is idempotent.
       // A text follow-up still sends retained image bytes. Reattach after process restart
       // and apply the same vision preflight before accepting more Inbox content.
@@ -558,6 +584,9 @@ export function createAgentSessionAdapter(
     },
     async stop(sessionId: string): Promise<void> {
       await dependencies.stop({ sessionId });
+      const entry = ensureEntry(sessionId);
+      entry.view = agentSessionView(await entry.client.reconnect());
+      for (const listener of entry.listeners) listener(entry.view);
     },
     async approve(input: AiApprovalDecisionInput): Promise<void> {
       await dependencies.approve(decision(input));
@@ -572,9 +601,15 @@ export function createAgentSessionAdapter(
       const { type, sessionId, expectedRevision, clientOperationId } = input;
       const mutation = type === 'update'
         ? { type, itemId: input.itemId, content: input.content }
-        : type === 'remove' || type === 'steer'
+        : type === 'remove' || type === 'steer' || type === 'resume'
           ? { type, itemId: input.itemId }
           : { type, lane: input.lane, orderedItemIds: input.orderedItemIds };
+      if (type === 'resume') {
+        const view = await openEntry(sessionId);
+        const selection = view.snapshot.value.header.modelSelection;
+        if (!selection) throw new Error('Select a model before resuming queued input');
+        await dependencies.start({ sessionId, selection });
+      }
       await waitForCommittedOperation(sessionId, clientOperationId, () => dependencies.mutateInbox({
         sessionId,
         expectedRevision,

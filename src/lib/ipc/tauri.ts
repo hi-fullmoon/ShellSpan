@@ -376,6 +376,14 @@ export async function invokeCancelAgentRuntime(
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_cancel', { input });
 }
 
+export async function invokeInterruptAgentRuntime(input: AgentSessionIdInput): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_interrupt', { input });
+}
+
+export async function invokeResumeAgentRuntime(input: AgentSessionIdInput): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_resume', { input });
+}
+
 export async function invokeApproveAgentRuntimeTool(
   input: AgentRuntimeToolDecisionInput,
 ): Promise<AgentSessionSnapshot> {

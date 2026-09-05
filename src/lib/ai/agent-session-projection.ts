@@ -232,6 +232,9 @@ function projectActivityNodesUnchecked(
           'session', event, 'started', 'session', event.data.goal, event.data,
         );
         break;
+      case 'session/resumed':
+        upsert(`activity:session:${event.sessionId}`, 'session', event, 'idle', 'session', null, event.data);
+        break;
       case 'session/ended':
         upsert(
           `activity:session:${event.sessionId}`,
@@ -255,6 +258,14 @@ function projectActivityNodesUnchecked(
         if (event.data.status === 'failed' || event.data.status === 'cancelled') {
           diagnostic('agent', event.sessionId, event, event.data.status, event.data.reason ?? event.data.status);
         }
+        break;
+      case 'agent/inbox/paused':
+        for (const itemId of event.data.itemIds) {
+          upsert(`activity:inbox:${itemId}`, 'inbox', event, 'waiting', 'inbox/paused', null, event.data);
+        }
+        break;
+      case 'agent/inbox/item_resumed':
+        upsert(`activity:inbox:${event.data.itemId}`, 'inbox', event, 'started', 'inbox/resumed', null, event.data);
         break;
       case 'agent/inbox/spliced':
         for (const message of event.data.messages) {
@@ -742,6 +753,10 @@ function projectActivityUnchecked(
         });
         break;
       }
+      case 'session/resumed':
+        status = 'idle';
+        statusReason = undefined;
+        break;
       case 'session/ended':
         status = event.data.status;
         statusReason = event.data.reason;

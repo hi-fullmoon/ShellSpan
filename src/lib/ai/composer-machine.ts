@@ -6,7 +6,7 @@ import {
 } from './submission-policy';
 import type { AiSessionError, AiSubmissionMode, AiSubmitReceipt } from './session-adapter';
 
-export type AiComposerPhase = 'idle' | 'running' | 'waitingApproval' | 'waitingQuestion' | 'submitting' | 'error';
+export type AiComposerPhase = 'idle' | 'running' | 'waitingApproval' | 'waitingQuestion' | 'submitting' | 'stopping' | 'error';
 
 export interface AiDetachedSubmission {
   readonly clientOperationId: string;
@@ -32,6 +32,8 @@ export type AiPendingSubmission = AiDetachedSubmission & {
 export interface AiComposerState {
   readonly phase: AiComposerPhase;
   readonly runtimeStatus: AiSessionStatus;
+  /** Submission is permanently unavailable (for example, archived or delegated).
+   * A stopped/failed root conversation can be continued by the adapter. */
   readonly terminal: boolean;
   readonly sessionId: string | null;
   readonly draft: string;
@@ -63,6 +65,7 @@ export type AiComposerEvent =
     }>
   | Readonly<{
       type: 'submit.requested';
+      content?: string;
       gesture: 'keyboard' | 'primary';
       accelerated: boolean;
       clientOperationId: string;
@@ -167,7 +170,7 @@ function settleFailure(
   return {
     state: {
       ...state,
-      phase: state.detached !== null && state.detached.clientOperationId !== clientOperationId
+      phase: state.phase === 'stopping' ? 'stopping' : state.detached !== null && state.detached.clientOperationId !== clientOperationId
         ? 'submitting'
         : 'error',
       draft: restoresEditor ? pending.content : state.draft,
@@ -218,8 +221,8 @@ export function reduceAiComposer(
       return {
         state: {
           ...next,
-          phase: state.phase === 'submitting' && !sessionChanged
-            ? 'submitting'
+          phase: (state.phase === 'submitting' || state.phase === 'stopping') && !sessionChanged
+            ? state.phase
             : state.phase === 'error' && !sessionChanged
               ? 'error'
               : runtimePhase(next),
@@ -228,6 +231,8 @@ export function reduceAiComposer(
       };
     }
     case 'submit.requested': {
+      if (state.phase === 'stopping') return rejected(state, 'stopping');
+      const content = event.content ?? state.draft;
       const decision = resolveAiSubmission({
         sessionStatus: state.runtimeStatus,
         terminal: state.terminal,
@@ -236,7 +241,7 @@ export function reduceAiComposer(
         waitingQuestion: state.waitingQuestion,
         hasProvider: event.hasProvider,
         canCreateSession: event.canCreateSession,
-        draft: state.draft,
+        draft: content,
         gesture: event.gesture,
         accelerated: event.accelerated,
         preferredBusyMode: state.preferredBusyMode,
@@ -246,18 +251,19 @@ export function reduceAiComposer(
       if (decision.kind === 'stop') {
         return state.sessionId === null
           ? rejected(state, 'sessionUnavailable')
-          : { state, effects: [{ type: 'stop', sessionId: state.sessionId }] };
+          : { state: { ...state, phase: 'stopping' }, effects: [{ type: 'stop', sessionId: state.sessionId }] };
       }
       const payload: AiDetachedSubmission = {
         clientOperationId: event.clientOperationId,
         sessionId: state.sessionId,
-        content: state.draft,
+        content,
         mode: decision.mode,
         createdAtUnixMs: event.now,
       };
-      return beginSubmission(state, payload, '');
+      return beginSubmission(state, payload, event.content === undefined ? '' : state.draft);
     }
     case 'retry.requested': {
+      if (state.phase === 'stopping') return rejected(state, 'stopping');
       if (state.detached !== null) return rejected(state, 'submitting');
       const failed = state.failedDrafts.find((entry) => entry.id === event.failedDraftId);
       if (!failed) return { state, effects: [] };
@@ -302,7 +308,7 @@ export function reduceAiComposer(
       return {
         state: {
           ...state,
-          phase: runtimePhase({
+          phase: state.phase === 'stopping' ? 'stopping' : runtimePhase({
             runtimeStatus: state.runtimeStatus === 'idle' ? 'running' : state.runtimeStatus,
             waitingApproval: state.waitingApproval,
             waitingQuestion: state.waitingQuestion,
@@ -333,7 +339,7 @@ export function reduceAiComposer(
           )),
           detached: state.detached?.clientOperationId === event.clientOperationId ? null : state.detached,
           failedDrafts: remainingFailedDrafts,
-          phase: state.detached !== null && state.detached.clientOperationId !== event.clientOperationId
+          phase: state.phase === 'stopping' ? 'stopping' : state.detached !== null && state.detached.clientOperationId !== event.clientOperationId
             ? 'submitting'
             : runtimePhase(state),
           lastError: remainingFailedDrafts.length === 0 ? null : state.lastError,
@@ -344,11 +350,12 @@ export function reduceAiComposer(
     case 'submit.timedOut':
       return settleFailure(state, event.clientOperationId, event.error);
     case 'stop.requested':
+      if (state.phase === 'stopping') return { state, effects: [] };
       return state.sessionId === null
         ? rejected(state, 'sessionUnavailable')
-        : { state, effects: [{ type: 'stop', sessionId: state.sessionId }] };
+        : { state: { ...state, phase: 'stopping' }, effects: [{ type: 'stop', sessionId: state.sessionId }] };
     case 'stop.succeeded':
-      return { state, effects: [{ type: 'announce', reason: 'stopped' }] };
+      return { state: { ...state, phase: 'idle', runtimeStatus: 'idle', waitingApproval: false, waitingQuestion: false }, effects: [{ type: 'announce', reason: 'stopped' }, { type: 'focusEditor' }] };
     case 'stop.failed':
       return {
         state: { ...state, phase: 'error', lastError: event.error },
