@@ -82,6 +82,7 @@ export function AiWorkspaceController({
       onDraftChange={controller.setDraft}
       onSubmitGesture={controller.submit}
       onStop={controller.stop}
+      onRetryTurn={controller.retryTurn}
       onBusyPreferenceChange={controller.setBusyPreference}
       onRetryFailedDraft={controller.retryFailedDraft}
       onDismissError={controller.dismissError}
@@ -94,6 +95,7 @@ export function AiWorkspaceController({
       onUpdateQueueItem={controller.updateQueueItem}
       onRemoveQueueItem={controller.removeQueueItem}
       onSteerQueueItem={controller.steerQueueItem}
+      onResumeQueueItem={controller.resumeQueueItem}
       onReorderQueueLane={controller.reorderQueueLane}
       onRetryQueueMutation={controller.retryQueueMutation}
       onRenameSession={controller.renameSession}

@@ -68,6 +68,7 @@ export interface AiWorkspaceRootProps {
   readonly onSubmit?: (input: AiWorkspaceSubmitInput) => void | Promise<void>;
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
+  readonly onRetryTurn?: () => void;
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onRetryFailedDraft?: (failedDraftId: string) => void;
   readonly onDismissError?: () => void;
@@ -81,6 +82,7 @@ export interface AiWorkspaceRootProps {
   readonly onUpdateQueueItem?: (item: AiInboxItem, content: string) => void;
   readonly onRemoveQueueItem?: (item: AiInboxItem) => void;
   readonly onSteerQueueItem?: (item: AiInboxItem) => void;
+  readonly onResumeQueueItem?: (item: AiInboxItem) => void;
   readonly onReorderQueueLane?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
   readonly onRetryQueueMutation?: () => void;
   readonly onRenameSession?: (summary: AiSessionSummary, title: string) => void;
@@ -132,6 +134,7 @@ export function AiWorkspaceRoot({
   onSubmit,
   onSubmitGesture,
   onStop,
+  onRetryTurn,
   onBusyPreferenceChange,
   onRetryFailedDraft,
   onDismissError,
@@ -145,6 +148,7 @@ export function AiWorkspaceRoot({
   onUpdateQueueItem,
   onRemoveQueueItem,
   onSteerQueueItem,
+  onResumeQueueItem,
   onReorderQueueLane,
   onRetryQueueMutation,
   onRenameSession,
@@ -322,10 +326,12 @@ export function AiWorkspaceRoot({
           onSubmit={onSubmit ? (content) => onSubmit({ content }) : undefined}
           onSubmitGesture={onSubmitGesture}
           onStop={onStop}
+          onRetryTurn={onRetryTurn}
           onBusyPreferenceChange={onBusyPreferenceChange}
           onUpdateQueueItem={onUpdateQueueItem}
           onRemoveQueueItem={onRemoveQueueItem}
           onSteerQueueItem={onSteerQueueItem}
+          onResumeQueueItem={onResumeQueueItem}
           onReorderQueueLane={onReorderQueueLane}
           onRetryQueueMutation={onRetryQueueMutation}
           onRetryFailedDraft={onRetryFailedDraft}

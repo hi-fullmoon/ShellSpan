@@ -2,7 +2,7 @@ import { AiComposerEditor } from './ai-composer-editor';
 import { AiCompletionPopover } from './ai-completion-popover';
 import { useFileCompletion } from './use-file-completion';
 import { useSkillCompletion } from './use-skill-completion';
-import { useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   ArrowUpIcon,
   ChevronDownIcon,
@@ -82,10 +82,12 @@ export interface AiComposerSeatProps {
   readonly onSubmit?: (value: string) => void | Promise<void>;
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
+  readonly onRetryTurn?: () => void;
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onUpdateQueueItem?: (item: AiInboxItem, content: string) => void;
   readonly onRemoveQueueItem?: (item: AiInboxItem) => void;
   readonly onSteerQueueItem?: (item: AiInboxItem) => void;
+  readonly onResumeQueueItem?: (item: AiInboxItem) => void;
   readonly onReorderQueueLane?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
   readonly onRetryQueueMutation?: () => void;
   readonly onRetryFailedDraft?: (failedDraftId: string) => void;
@@ -128,10 +130,12 @@ export function AiComposerSeat({
   onSubmit,
   onSubmitGesture,
   onStop,
+  onRetryTurn,
   onBusyPreferenceChange,
   onUpdateQueueItem,
   onRemoveQueueItem,
   onSteerQueueItem,
+  onResumeQueueItem,
   onReorderQueueLane,
   onRetryQueueMutation,
   onRetryFailedDraft,
@@ -153,10 +157,12 @@ export function AiComposerSeat({
   const waitingQuestion = Boolean(pendingQuestion) || composerState?.phase === 'waitingQuestion';
   const submitting = composerState?.phase === 'submitting' || imageBusy;
   const terminal = composerState?.terminal ?? false;
+  const stopping = composerState?.phase === 'stopping';
   const unavailable = unavailableReason !== null;
   const empty = draft.trim().length === 0 && !hasImages;
   const stopPrimary = running && empty;
   const submitDisabled = terminal
+    || stopping
     || waitingQuestion
     || waitingApproval
     || submitting
@@ -197,6 +203,14 @@ export function AiComposerSeat({
   };
   const completion = useFileCompletion({ text: draft, update: updateDraft, query: onListFileReferences, scopeKey: skillsScopeKey, needsRoot: skillsNeedsRoot, targetLabel: projectTargetLabel, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
   const skillCompletion = useSkillCompletion({ text: draft, update: updateDraft, query: onListSkills, scopeKey: skillsScopeKey, editor: completion.editor, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
+  const wasStopping = useRef(false);
+  useEffect(() => {
+    if (wasStopping.current && !stopping) {
+      completion.editor.current?.element?.focus({ preventScroll: true });
+      completion.editor.current?.focus();
+    }
+    wasStopping.current = stopping;
+  }, [stopping, completion.editor]);
   const submit = (gesture: 'keyboard' | 'primary', accelerated = false): void => {
     if (submitDisabled) return;
     if (stopPrimary) {
@@ -216,6 +230,7 @@ export function AiComposerSeat({
     >
       <AiTaskStrip steps={taskSteps} />
       <div className="ai-composer-notices">
+        {status === 'failed' && onRetryTurn && !terminal && <Button variant="outline" size="sm" disabled={stopping || submitting || unavailable} onClick={onRetryTurn}><RotateCcwIcon data-icon="inline-start" />{t('ai.workspace.retryTurn')}</Button>}
         {waitingApproval && !pendingApproval && (
           <Alert size="sm">
             <AlertTitle>{t('ai.workspace.approvalWaiting')}</AlertTitle>
@@ -258,21 +273,23 @@ export function AiComposerSeat({
           </Alert>
         ))}
       </div>
+      {stopping && <Alert size="sm" variant="subtle" role="status"><AlertDescription>{t('ai.workspace.stopping')}</AlertDescription></Alert>}
       {completion.dialog}
       <AiQueueDock
         items={queueItems}
         mutation={queueMutation}
         running={status === 'running'}
-        mutable={queueMutable && !['completed', 'cancelled', 'failed'].includes(status)}
+        mutable={!stopping && queueMutable && !['completed', 'cancelled', 'failed'].includes(status)}
         onUpdate={onUpdateQueueItem}
         onRemove={onRemoveQueueItem}
         onSteer={onSteerQueueItem}
+        onResume={onResumeQueueItem}
         onReorder={onReorderQueueLane}
         onRetry={onRetryQueueMutation}
       />
       {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
       {waitingQuestion && <Alert><AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle><AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>{onStop && <Button type="button" variant="outline" onClick={onStop}>{t('ai.workspace.stop')}</Button>}</Alert>}
-      {waitingApproval && pendingApproval ? (
+      {waitingApproval && pendingApproval && (
         <AiApprovalPanel
           approval={pendingApproval}
           decision={approvalDecision}
@@ -281,7 +298,8 @@ export function AiComposerSeat({
           onReject={() => onReject?.()}
           onOpenDetails={() => onOpenApprovalDetails?.()}
         />
-      ) : (
+      )}
+      {
         <div ref={completionAnchor} className="ai-composer-input-anchor">
           <InputGroup data-composer-card="" onClick={event => {
             if (event.target === event.currentTarget) completion.editor.current?.focus();
@@ -301,7 +319,6 @@ export function AiComposerSeat({
               aria-describedby={unavailableReason ? availabilityHintId : undefined}
               value={draft}
               historyKey={JSON.stringify([composerState?.sessionId, skillsScopeKey])}
-              disabled={terminal || waitingApproval || waitingQuestion || unavailable || imageLocked}
               onChange={updateDraft}
               onPaste={(event) => {
                 if (!onPasteImages) return;
@@ -422,7 +439,7 @@ export function AiComposerSeat({
                   </Button>
                 ))}
                 <AiContextMeter usage={contextUsage} />
-                {running && !stopPrimary && onStop && (
+                {running && !stopping && !stopPrimary && onStop && (
                   <Tooltip>
                     <TooltipTrigger
                       render={(
@@ -478,7 +495,7 @@ export function AiComposerSeat({
             {skillCompletion.panel ?? completion.panel}
           </AiCompletionPopover>
         </div>
-      )}
+      }
       {unavailableReason && (
         <Alert
           id={availabilityHintId}

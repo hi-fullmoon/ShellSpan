@@ -102,6 +102,7 @@ export interface AiSessionController {
   readonly setBusyPreference: (value: 'queue' | 'steer') => void;
   readonly submit: (gesture: 'keyboard' | 'primary', accelerated?: boolean) => void;
   readonly stop: () => void;
+  readonly retryTurn: () => void;
   readonly retryFailedDraft: (failedDraftId: string) => void;
   readonly dismissError: () => void;
   readonly openSessions: () => void;
@@ -112,6 +113,7 @@ export interface AiSessionController {
   readonly updateQueueItem: (item: AiInboxItem, content: string) => void;
   readonly removeQueueItem: (item: AiInboxItem) => void;
   readonly steerQueueItem: (item: AiInboxItem) => void;
+  readonly resumeQueueItem: (item: AiInboxItem) => void;
   readonly reorderQueueLane: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
   readonly retryQueueMutation: () => void;
   readonly renameSession: (summary: AiSessionSummary, title: string) => void;
@@ -127,6 +129,7 @@ export interface AiSessionController {
 }
 
 type AiQueueMutationIntent =
+  | Readonly<{ type: 'resume'; itemId: string }>
   | Readonly<{ type: 'update'; itemId: string; content: string }>
   | Readonly<{ type: 'remove'; itemId: string }>
   | Readonly<{ type: 'steer'; itemId: string }>
@@ -614,7 +617,7 @@ export function useAiSessionController({
       sessionId: view?.summary.id ?? null,
       status: view?.status ?? 'idle',
       terminal: view !== null
-        && (view.status === 'completed' || view.status === 'cancelled' || view.status === 'failed'),
+        && (view.summary.archived || Boolean(view.snapshot.value.header.subagent)),
       waitingApproval: view?.pendingApproval !== null && view?.pendingApproval !== undefined,
       waitingQuestion: Boolean(view?.pendingQuestion),
     });
@@ -1026,7 +1029,7 @@ export function useAiSessionController({
         const decision = resolveAiSubmission({ sessionId: composer.sessionId, sessionStatus: composer.runtimeStatus,
           terminal: composer.terminal, waitingApproval: composer.waitingApproval, waitingQuestion: composer.waitingQuestion,
           hasProvider, canCreateSession: canStartAgent, draft: composer.draft, hasImages: true, gesture,
-          accelerated, preferredBusyMode: composer.preferredBusyMode, submitting: imageDraft.busy });
+          accelerated, preferredBusyMode: composer.preferredBusyMode, submitting: imageDraft.busy, stopping: composer.phase === 'stopping' });
         if (decision.kind !== 'submit') { imageDraft.reportError(decision.kind === 'reject' ? decision.reason : 'sessionUnavailable'); return; }
         // Use the same model for vision preflight and submission, even if navigation
         // changes the current Session while native creation is pending.
@@ -1076,6 +1079,12 @@ export function useAiSessionController({
       });
     },
     stop: () => dispatch({ type: 'stop.requested' }),
+    retryTurn: () => {
+      if (viewRef.current?.status !== 'failed' || !canStartAgent) return;
+      dispatch({ type: 'submit.requested', gesture: 'primary', accelerated: false,
+        content: t('ai.workspace.retryTurnPrompt'), clientOperationId: operationId(),
+        now: Date.now(), hasProvider, canCreateSession: canStartAgent });
+    },
     retryFailedDraft: (failedDraftId) => {
       if (!canStartAgent) {
         setAnnouncement('sessionUnavailable');
@@ -1102,6 +1111,7 @@ export function useAiSessionController({
     }),
     removeQueueItem: (item) => executeQueueMutation({ type: 'remove', itemId: item.id }),
     steerQueueItem: (item) => executeQueueMutation({ type: 'steer', itemId: item.id }),
+    resumeQueueItem: (item) => executeQueueMutation({ type: 'resume', itemId: item.id }),
     reorderQueueLane: (lane, orderedItemIds) => executeQueueMutation({
       type: 'reorder', lane, orderedItemIds,
     }),
