@@ -242,7 +242,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       />,
     );
 
-    expect(screen.getByText('How can I help?')).toBeVisible();
+    expect(screen.getByText('What would you like to accomplish?')).toBeVisible();
     expect(container.querySelector('.ai-session-context')).toHaveTextContent('Terminal');
     expect(container.querySelector('[data-slot="badge"]')).toBeNull();
 

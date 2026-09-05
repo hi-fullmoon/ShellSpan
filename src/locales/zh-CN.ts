@@ -1403,7 +1403,7 @@ export default {
   'ai.thinking.inProgress': '思考中…',
   'ai.thinking.interrupted': '思考已中断',
   'ai.thinking.completed': '已思考（用时 {seconds} 秒）',
-  'agent.emptyTitle': '有什么可以帮你？',
+  'agent.emptyTitle': '你想完成什么任务？',
   'agent.emptyDescription': '描述你的任务，我来帮你排查问题、处理文件或运行命令。',
   'agent.conversation': 'Agent 任务对话',
   'agent.session.status.idle': '空闲',

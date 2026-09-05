@@ -1,5 +1,3 @@
-import { SparklesIcon } from 'lucide-react';
-
 import { EmptyState } from '@/components/ui/empty-state';
 
 export interface AiEmptyHeroProps {
@@ -14,7 +12,6 @@ export function AiEmptyHero({
   return (
     <div className="ai-empty-hero" data-slot="ai-empty-hero">
       <EmptyState
-        icon={<SparklesIcon aria-hidden="true" />}
         title={title}
         description={description}
       />
