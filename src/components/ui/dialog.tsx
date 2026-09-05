@@ -29,13 +29,17 @@ function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
 
 function DialogOverlay({
   className,
+  variant = "default",
   ...props
-}: DialogPrimitive.Backdrop.Props) {
+}: DialogPrimitive.Backdrop.Props & { variant?: "default" | "image-preview" }) {
   return (
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        'fixed inset-0 z-50 bg-black/30 backdrop-blur-sm duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0',
+        'fixed inset-0 z-50',
+        variant === "image-preview"
+          ? "image-preview-overlay"
+          : 'bg-black/30 backdrop-blur-sm duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0',
         className
       )}
       {...props}
@@ -47,18 +51,22 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  variant = "default",
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
+  variant?: "default" | "image-preview"
 }) {
   const { t } = useI18n()
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay variant={variant} />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-4 shadow-[var(--shadow-dialog)] duration-150 outline-none data-open:animate-[dialog-fade-in_150ms_ease-out] data-closed:animate-[dialog-fade-out_150ms_ease-in] data-[nested-dialog-open]:after:pointer-events-none data-[nested-dialog-open]:after:absolute data-[nested-dialog-open]:after:inset-0 data-[nested-dialog-open]:after:rounded-[inherit] data-[nested-dialog-open]:after:bg-black/20 data-[nested-dialog-open]:after:backdrop-blur-[1px] data-[nested-dialog-open]:after:content-[''] sm:rounded-lg",
+          variant === "image-preview"
+            ? "image-preview fixed inset-0 z-50 outline-none"
+            : "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-4 shadow-[var(--shadow-dialog)] duration-150 outline-none data-open:animate-[dialog-fade-in_150ms_ease-out] data-closed:animate-[dialog-fade-out_150ms_ease-in] data-[nested-dialog-open]:after:pointer-events-none data-[nested-dialog-open]:after:absolute data-[nested-dialog-open]:after:inset-0 data-[nested-dialog-open]:after:rounded-[inherit] data-[nested-dialog-open]:after:bg-black/20 data-[nested-dialog-open]:after:backdrop-blur-[1px] data-[nested-dialog-open]:after:content-[''] sm:rounded-lg",
           className
         )}
         {...props}
