@@ -1,4 +1,12 @@
 import type { AiSessionError } from './session-adapter';
+import type { LocaleKey } from '@/locales';
+
+export function sessionArchiveErrorMessage(error: unknown, t: (key: LocaleKey) => string): string {
+  const { message } = normalizeAiSessionError(error);
+  return t(/AGENT_SESSION_ARCHIVE_BUSY|a running Agent Session cannot be archived|only an ended Agent Session can be archived/.test(message)
+    ? 'ai.workspace.sessions.archiveBusy'
+    : 'ai.workspace.sessions.archiveFailed');
+}
 
 /** Convert Agent Runtime, Tauri, and transport failures into one recoverable UI error. */
 export function normalizeAiSessionError(error: unknown): AiSessionError {

@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import { normalizeAiSessionError } from '@/lib/ai/session-error';
+import { normalizeAiSessionError, sessionArchiveErrorMessage } from '@/lib/ai/session-error';
+import { initI18n, t } from '@/locales';
 
 describe('normalizeAiSessionError', () => {
+  it.each(['AGENT_SESSION_ARCHIVE_BUSY', 'a running Agent Session cannot be archived', 'only an ended Agent Session can be archived'])('localizes archive rejection %s', async message => {
+    await initI18n('zh-CN');
+    expect(sessionArchiveErrorMessage(new Error(message), t)).toContain('请先停止会话或等待处理完成后再归档');
+  });
+
+  it('gives archive failures an actionable message in the selected language', async () => {
+    await initI18n('en-US');
+    expect(sessionArchiveErrorMessage('disk failure', t)).toBe('Could not archive the session. Refresh the list and try again.');
+  });
   it.each([
     ['API key is unauthorized', 'auth', true],
     ['HTTP 429 too many requests', 'rateLimit', true],
