@@ -191,7 +191,7 @@ function AssistantMessageNodeView({
           </span>
         )}
       </Bubble>
-      {!inTurnProcess && !node.hasTurnTail && (
+      {!inTurnProcess && !node.hasTurnTail && node.state !== 'streaming' && (
         <MessageActions
           text={text}
           timestamp={node.timestamp}

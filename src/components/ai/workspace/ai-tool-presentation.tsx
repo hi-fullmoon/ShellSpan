@@ -24,7 +24,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
-import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 
 export type AiToolVariant =
@@ -447,7 +446,7 @@ export function AiToolRow({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
-        className={cn('ai-tool-row-root', node.state === 'running' && 'shimmer')}
+        className="ai-tool-row-root"
         data-tool-state={node.state}
         data-tool-variant={variant}
         data-tool-fallback={variant === 'generic' || undefined}

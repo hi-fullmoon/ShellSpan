@@ -117,13 +117,13 @@ export function AgentPermissionSelector({
             className={cn(
               'flex items-center leading-none',
               composer ? 'min-w-0 gap-1' : 'gap-2',
-              visibleMode === 'fullAccess' && !composer && 'text-app-warning',
+              visibleMode === 'fullAccess' && 'text-app-warning',
             )}
           >
             <CurrentIcon
               data-icon="inline-start"
               strokeWidth={1.75}
-              className={cn(visibleMode === 'fullAccess' && !composer && 'text-app-warning')}
+              className={cn(visibleMode === 'fullAccess' && 'text-app-warning')}
             />
             <span className={cn('leading-none', composer && 'ai-permission-trigger-label truncate')}>
               {t(triggerLabel)}
