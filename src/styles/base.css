@@ -5,6 +5,18 @@
 
 @custom-variant dark (&:is([data-theme="dark"] *));
 
+/* File completion uses the popover surface directly, without a nested card. */
+.ai-completion-popup:has(> [data-file-completion]) {
+  width: min(440px, var(--anchor-width));
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-radius: 14px;
+}
+
+.ai-file-completion {
+  max-height: inherit;
+}
+
 .image-preview-overlay {
   background: var(--image-preview-backdrop);
   backdrop-filter: none;

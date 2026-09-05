@@ -39,6 +39,7 @@ export interface AiQueueDockProps {
   readonly onUpdate?: (item: AiInboxItem, content: string) => void;
   readonly onRemove?: (item: AiInboxItem) => void;
   readonly onSteer?: (item: AiInboxItem) => void;
+  readonly onResume?: (item: AiInboxItem) => void;
   readonly onReorder?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
   readonly onRetry?: () => void;
 }
@@ -94,6 +95,7 @@ export function AiQueueDock({
   onUpdate,
   onRemove,
   onSteer,
+  onResume,
   onReorder,
   onRetry,
 }: AiQueueDockProps): React.ReactNode {
@@ -227,6 +229,7 @@ export function AiQueueDock({
               ) : (
                 <div className="ai-queue-row-content">
                   <span className="min-w-0 flex-1 truncate">{item.content}</span>
+                  {item.paused && <Badge variant="secondary">{t('ai.workspace.queue.paused')}</Badge>}
                   {item.lane === 'nextStep' && <Badge variant="secondary">{t('ai.workspace.queue.lane.nextStep')}</Badge>}
                   {item.state === 'pending' && (
                     <Spinner aria-label={t('ai.workspace.queue.state.pending')} />
@@ -235,6 +238,7 @@ export function AiQueueDock({
                     {t(`ai.workspace.queue.lane.${item.lane}` as LocaleKey)} ·{' '}
                     {t(`ai.workspace.queue.state.${item.state}` as LocaleKey)}
                   </span>
+                  {!editable && mutable && item.paused && onResume && <IconAction label={t('ai.workspace.queue.resume')} disabled={pending} onClick={() => onResume(item)}><ArrowUpIcon data-icon="inline-start" /></IconAction>}
                   {editable && (
                     <div className="ai-queue-actions">
                       {laneItems.length > 1 && onReorder && <DropdownMenu>
@@ -276,7 +280,8 @@ export function AiQueueDock({
                       >
                         <Trash2Icon data-icon="inline-start" />
                       </IconAction>
-                      {running && item.lane === 'nextTurn' && onSteer && (
+                      {item.paused && onResume && <IconAction label={t('ai.workspace.queue.resume')} disabled={pending} onClick={() => onResume(item)}><ArrowUpIcon data-icon="inline-start" /></IconAction>}
+                      {running && !item.paused && item.lane === 'nextTurn' && onSteer && (
                         <IconAction
                           label={t('ai.workspace.queue.steer')}
                           tooltip={t('ai.workspace.queue.steerTooltip')}

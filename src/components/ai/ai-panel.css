@@ -320,7 +320,10 @@
   background: var(--dsw-alias-label-caption);
 }
 
-.ai-session-status-dot[data-state='idle'],
+.ai-session-status-dot[data-state='idle'] {
+  display: none;
+}
+
 .ai-session-row-status[data-state='idle'] {
   opacity: 0;
 }
@@ -960,12 +963,6 @@
   margin: 16px 0;
   overflow-x: auto;
   overscroll-behavior-x: contain;
-}
-
-.ai-panel-shell .ai-markdown-table-scroll::-webkit-scrollbar,
-.ai-panel-shell .ai-semantic-note-body::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
 }
 
 .ai-markdown-table-scroll table {
@@ -1989,7 +1986,6 @@
 [data-slot='ai-tool-details'] :is(.ai-terminal-output, .ai-read-lines, .ai-search-results, .ai-diff-body) {
   max-height: 400px;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
 }
 
 [data-slot='ai-tool-details'] .ai-detail-section > :is(.ai-details-empty, .ai-detail-error) {
@@ -2874,8 +2870,8 @@
 
 .ai-panel-shell::-webkit-scrollbar,
 .ai-panel-shell *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 .ai-panel-shell::-webkit-scrollbar-track,
