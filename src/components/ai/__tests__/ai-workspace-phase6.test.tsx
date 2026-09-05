@@ -236,10 +236,7 @@ describe('Phase 6 Session Browser rename', () => {
     expect(rows.find((row) => row.textContent?.includes('Running task'))).toHaveAttribute('aria-selected', 'true');
     expect(rows.find((row) => row.textContent?.includes('Idle task'))).toHaveAttribute('aria-selected', 'false');
     expect(screen.queryByText('Archived task')).toBeNull();
-    expect(screen.getByText('Idle task').closest('button')).toHaveAttribute(
-      'title',
-      'Idle task · Idle',
-    );
+    expect(screen.getByText('Idle task').closest('button')).not.toHaveAttribute('title');
 
     await user.click(screen.getByRole('button', { name: 'New conversation' }));
     expect(onNew).toHaveBeenCalledOnce();

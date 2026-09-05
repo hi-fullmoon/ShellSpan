@@ -88,7 +88,8 @@ describe('AI task strip', () => {
     expect(screen.getByRole('button')).toHaveAccessibleDescription('1 已完成 · 1 进行中');
     expect(screen.getAllByRole('listitem')).toHaveLength(2);
     expect(screen.queryByText('更新配置')).toBeNull();
-    expect(screen.getByText(longTitle)).toHaveAttribute('title', `${longTitle}\n保留真实计划详情`);
+    expect(screen.getByText(longTitle)).toBeVisible();
+    expect(container.querySelector('[title]')).toBeNull();
 
     rerender(<AiTaskStrip steps={referenceSteps.map((step) => ({ ...step, status: 'completed' }))} />);
     expect(screen.getByRole('button')).toHaveAccessibleDescription('5 已完成');

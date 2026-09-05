@@ -286,7 +286,6 @@ function ArtifactNodeView({
         type="button"
         className="ai-produced-file"
         data-ai-node-action=""
-        title={node.title}
         aria-label={t('ai.workspace.details.openArtifact', { artifact: node.title })}
         onClick={() => onOpenArtifact?.(node)}
       >

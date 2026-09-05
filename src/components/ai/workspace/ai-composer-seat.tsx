@@ -103,7 +103,6 @@ export function AiComposerSeat({
   status,
   defaultDraft = '',
   draft: controlledDraft,
-  providerLabel,
   modelLabel,
   modelControl,
   contextUsage,
@@ -417,7 +416,6 @@ export function AiComposerSeat({
                     disabled={!onOpenModel}
                     onClick={onOpenModel}
                     aria-label={t('ai.workspace.model.trigger', { selection: modelLabel })}
-                    title={`${providerLabel ? `${providerLabel} · ` : ''}${modelLabel}`}
                   >
                     <span className="truncate">{modelLabel}</span>
                     <ChevronDownIcon data-icon="inline-end" />
