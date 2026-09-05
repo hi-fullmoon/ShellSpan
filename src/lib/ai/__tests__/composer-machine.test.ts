@@ -23,6 +23,31 @@ function runningState(draft = 'Queue this'): AiComposerState {
 }
 
 describe('reduceAiComposer', () => {
+  it('keeps the editor draft and the stopping gate until cancellation is acknowledged', () => {
+    let state = dispatch(runningState('next instruction'), { type: 'stop.requested' }).state;
+    expect(state.phase).toBe('stopping');
+    expect(dispatch(state, { type: 'stop.requested' }).effects).toEqual([]);
+    state = dispatch(state, { type: 'draft.changed', value: 'edited while stopping' }).state;
+    state = dispatch(state, { type: 'runtime.synchronized', sessionId: 'session-1', status: 'idle', terminal: false, waitingApproval: false }).state;
+    expect(state.phase).toBe('stopping');
+    expect(dispatch(state, { type: 'submit.requested', gesture: 'keyboard', accelerated: false,
+      clientOperationId: 'next', now: 100, hasProvider: true, canCreateSession: true }).effects)
+      .toEqual([{ type: 'announce', reason: 'stopping' }]);
+    state = dispatch(state, { type: 'stop.succeeded' }).state;
+    expect(state).toMatchObject({ phase: 'idle', draft: 'edited while stopping' });
+    expect(dispatch(state, { type: 'submit.requested', gesture: 'keyboard', accelerated: false,
+      clientOperationId: 'next', now: 101, hasProvider: true, canCreateSession: true }).effects[0])
+      .toMatchObject({ type: 'submit', payload: { content: 'edited while stopping', mode: 'nextTurn' } });
+  });
+
+  it('retries a failed turn without overwriting a newer draft', () => {
+    const state = createAiComposerState({ runtimeStatus: 'failed', sessionId: 'session-1', draft: 'new draft' });
+    const next = dispatch(state, { type: 'submit.requested', content: 'continue from completed work',
+      gesture: 'primary', accelerated: false, clientOperationId: 'retry-turn', now: 101,
+      hasProvider: true, canCreateSession: true });
+    expect(next.state.draft).toBe('new draft');
+    expect(next.effects[0]).toMatchObject({ type: 'submit', payload: { content: 'continue from completed work' } });
+  });
   it.each(['running', 'submitting', 'waitingApproval', 'waitingQuestion'] as const)(
     'reports and dismisses action errors without changing the %s phase', phase => {
       const state = createAiComposerState({ ...runningState(), phase });

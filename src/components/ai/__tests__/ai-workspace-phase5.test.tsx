@@ -157,7 +157,7 @@ describe('AI workspace Phase 5 workflows', () => {
     expect(screen.getByText('Restart safely')).toBeVisible();
   });
 
-  it('replaces the Composer with approval, keeps the draft, and exposes recoverable decisions', async () => {
+  it('shows approval above the editable Composer and exposes recoverable decisions', async () => {
     const user = userEvent.setup();
     const approve = vi.fn();
     const reject = vi.fn();
@@ -180,7 +180,7 @@ describe('AI workspace Phase 5 workflows', () => {
       />,
     );
 
-    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
     expect(screen.getByRole('group', { name: /Approval required/ })).toBeVisible();
     expect(screen.getByText('Production')).toBeVisible();
     expect(screen.getAllByText('stateChange')).not.toHaveLength(0);

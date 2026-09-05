@@ -205,6 +205,24 @@ afterEach(() => {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 });
 
+it.each(['cancelled', 'failed', 'completed'] as const)('allows follow-up input in an unarchived %s root conversation', async status => {
+  connectedTerminal();
+  const base = runningAgentView();
+  const view: AiSessionView = { ...base, status, summary: { ...base.summary, status },
+    snapshot: { kind: 'agent', value: { ...base.snapshot.value, status, ended: true } } };
+  const agent = adapter({
+    open: vi.fn(async () => view),
+    submit: vi.fn(async (sessionId, input) => ({ sessionId: sessionId!, clientOperationId: input.clientOperationId, mode: input.mode })),
+  });
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+  act(() => result.current.openSession(view.summary));
+  await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
+  expect(result.current.composer.terminal).toBe(false);
+  act(() => result.current.setDraft('continue with these changes'));
+  act(() => result.current.submit('keyboard'));
+  await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(view.summary.id, expect.objectContaining({ content: 'continue with these changes', mode: 'nextTurn' })));
+});
+
 describe('session archive', () => {
   it('localizes a runtime rejection, refreshes stale rows, and suppresses duplicate requests', async () => {
     useAppStore.setState({ locale: 'zh-CN' });
@@ -578,7 +596,7 @@ describe('AiWorkspaceController', () => {
 
     expect(screen.getByRole('status', { name: 'Agent is unavailable' })).toHaveTextContent('Open a connected terminal');
     expect(screen.getByRole('textbox')).toHaveAccessibleDescription('Open a connected terminal to start an Agent task.');
-    expect(screen.getByRole('textbox')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
     expect(screen.queryByRole('button', { name: 'New conversation' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
@@ -597,7 +615,7 @@ describe('AiWorkspaceController', () => {
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
     expect(await screen.findByRole('status', { name: 'Agent is unavailable' })).toHaveTextContent('Open a connected terminal');
-    expect(screen.getByRole('textbox')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
     expect(agent.submit).not.toHaveBeenCalled();
   });
@@ -654,7 +672,7 @@ describe('AiWorkspaceController', () => {
     await user.type(screen.getByRole('textbox'), 'draft survives approval');
 
     act(() => publish?.(pending));
-    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
     await user.click(screen.getByRole('button', { name: 'Approve once' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Approval conflict');
 
@@ -803,7 +821,7 @@ describe('AiWorkspaceController', () => {
       expect.objectContaining({ mode: 'nextStep', content: 'steer input' }),
     ));
 
-    await user.click(screen.getByRole('button', { name: 'Stop task' }));
+    await user.click(screen.getByRole('button', { name: 'Stop this turn' }));
     await waitFor(() => expect(agent.stop).toHaveBeenCalledWith(view.summary.id));
     expect(await screen.findByText('Network disconnected while stopping')).toBeVisible();
   });

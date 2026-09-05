@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import '@/components/ai/ai-panel.css';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
-import { createAiComposerState } from '@/lib/ai/composer-machine';
+import { createAiComposerState, type AiComposerPhase } from '@/lib/ai/composer-machine';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import { applyTheme } from '@/lib/theme';
 import { initI18n } from '@/locales';
@@ -12,12 +12,15 @@ import { agentSessionBaselineView } from './agent-session-baseline-page';
 import { agentSessionBaselineScenario } from './fixtures/agent-session-baseline';
 
 interface ComposerScene {
+  phase?: AiComposerPhase;
   draft: string;
   owner: string;
   status: AiSessionStatus;
   hero: boolean;
   terminal: boolean;
   unavailableReason?: string | null;
+  needsRoot?: boolean;
+  targetLabel?: string;
 }
 
 const base = agentSessionBaselineView(agentSessionBaselineScenario('hello'));
@@ -40,8 +43,10 @@ function ComposerPage() {
       scope="workbench" canStartAgent={!scene.unavailableReason}
       agentUnavailableReason={scene.unavailableReason}
       composerState={createAiComposerState({ sessionId: scene.hero ? null : scene.owner, draft: scene.draft,
-        runtimeStatus: scene.status, terminal: scene.terminal })}
+        runtimeStatus: scene.status, phase: scene.phase, terminal: scene.terminal })}
       skillsScopeKey={scene.owner}
+      skillsNeedsRoot={scene.needsRoot}
+      projectTargetLabel={scene.targetLabel}
       onDraftChange={draft => setScene(current => ({ ...current, draft }))}
       onNewSession={() => setScene(current => ({ ...current, owner: `${current.owner}-new`, draft: '', hero: true, status: 'idle', terminal: false }))}
       onSubmitGesture={() => setScene(current => ({ ...current, draft: '', status: 'running', hero: false }))}

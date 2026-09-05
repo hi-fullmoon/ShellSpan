@@ -185,7 +185,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(panel.closest('[data-ai-node-kind="turnProcess"]')).toBeNull();
     expect(container.querySelectorAll('[data-message-scroller-viewport]')).toHaveLength(1);
     expect(screen.getByTestId('ai-workspace-composer').textContent).toBe('ordinary unsent draft');
-    expect(screen.getByTestId('ai-workspace-composer')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByTestId('ai-workspace-composer')).toHaveAttribute('contenteditable', 'true');
     fireEvent.change(within(panel as HTMLElement).getByRole('textbox'), { target: { value: 'Continue' } });
     await userEvent.click(screen.getByRole('button', { name: 'Submit answers' }));
     expect(onAnswerQuestion).toHaveBeenCalledOnce();

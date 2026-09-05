@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -56,6 +56,20 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiComposerSeat Phase 4 behavior', () => {
+  it('allows typing during stop cleanup and enables sending after it settles', async () => {
+    const user = userEvent.setup();
+    const onSubmitGesture = vi.fn();
+    const initial = createAiComposerState({ phase: 'stopping', sessionId: 'session-1', runtimeStatus: 'running', draft: 'next draft' });
+    const { rerender } = render(<AiComposerSeat phase="active" status="running" composerState={initial} onSubmitGesture={onSubmitGesture} />);
+    expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
+    const editor = screen.getByRole('textbox');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(onSubmitGesture).not.toHaveBeenCalled();
+    rerender(<AiComposerSeat phase="active" status="idle" composerState={{ ...initial, phase: 'idle', runtimeStatus: 'idle' }} onSubmitGesture={onSubmitGesture} />);
+    await waitFor(() => expect(editor).toHaveFocus());
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onSubmitGesture).toHaveBeenCalledWith('primary', false);
+  });
   it.each(['running', 'waiting'] as const)('stops %s only on an explicit primary action when empty', async status => {
     const user = userEvent.setup();
     const stop = vi.fn(), submit = vi.fn();
@@ -67,14 +81,14 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true });
     expect(stop).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: 'Stop task' }));
+    await user.click(screen.getByRole('button', { name: 'Stop this turn' }));
     expect(stop).toHaveBeenCalledOnce();
   });
 
-  it.each(['completed', 'cancelled', 'failed'] as const)('disables editing and sending in a terminal %s session', status => {
+  it.each(['completed', 'cancelled', 'failed'] as const)('keeps drafts editable while sending is blocked in a read-only %s session', status => {
     render(<Harness initial={createAiComposerState({ runtimeStatus: status, terminal: true, draft: 'saved draft' })} />);
-    expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'false');
-    expect(screen.getByRole('textbox')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
+    expect(screen.getByRole('textbox')).not.toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
   });
 
@@ -280,17 +294,17 @@ describe('AiComposerSeat Phase 4 behavior', () => {
       sessionId: 'session-1', draft: '',
     })} onStop={stop} />);
 
-    await user.click(screen.getByRole('button', { name: 'Stop task' }));
+    await user.click(screen.getByRole('button', { name: 'Stop this turn' }));
     expect(stop).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: 'Queue for next turn' })).toBeNull();
   });
 
-  it('keeps approval drafts visible but disabled without implementing takeover actions', () => {
+  it('keeps approval drafts editable while awaiting a decision', () => {
     render(<Harness initial={createAiComposerState({
       phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true,
       sessionId: 'session-1', draft: 'keep this draft',
     })} />);
-    expect(screen.getByRole('textbox')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('textbox')).not.toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('textbox').textContent).toBe('keep this draft');
     expect(screen.getByText('Waiting for approval')).toBeVisible();
     expect(screen.queryByRole('button', { name: /approve/i })).toBeNull();
