@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiComposerSeat } from '@/components/ai/workspace/ai-composer-seat';
@@ -70,7 +70,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     });
     expect(accepted).toBe(false);
     expect(onPasteImages.mock.calls).toEqual([[[image]]]);
-    expect(screen.getByRole('textbox')).toHaveValue('Describe this');
+    expect(screen.getByRole('textbox').textContent).toBe('Describe this');
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -91,10 +91,11 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     const textbox = screen.getByRole('textbox');
     await user.click(textbox);
     await user.paste('Pasted text');
-    expect(textbox).toHaveValue('Pasted text');
+    expect(textbox.textContent).toBe('Pasted text');
     expect(fireEvent.paste(textbox, {
-      clipboardData: { files: [new File(['text'], 'notes.txt', { type: 'text/plain' })], items: [] },
-    })).toBe(true);
+      clipboardData: { files: [new File(['text'], 'notes.txt', { type: 'text/plain' })], items: [], getData: () => '' },
+    })).toBe(false);
+    expect(textbox.textContent).toBe('Pasted text');
     expect(onPasteImages).not.toHaveBeenCalled();
   });
 
@@ -113,7 +114,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     const platformSpy = vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
     try {
       render(<AiComposerSeat phase="active" status="idle" />);
-      expect(screen.getByRole('textbox').getAttribute('placeholder')).toContain(`${shortcut} Paste images`);
+      expect(screen.getByRole('textbox').getAttribute('aria-label')).toContain(`${shortcut} Paste images`);
     } finally {
       platformSpy.mockRestore();
     }
@@ -267,8 +268,8 @@ describe('AiComposerSeat Phase 4 behavior', () => {
       phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true,
       sessionId: 'session-1', draft: 'keep this draft',
     })} />);
-    expect(screen.getByRole('textbox')).toBeDisabled();
-    expect(screen.getByRole('textbox')).toHaveValue('keep this draft');
+    expect(screen.getByRole('textbox')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('textbox').textContent).toBe('keep this draft');
     expect(screen.getByText('Waiting for approval')).toBeVisible();
     expect(screen.queryByRole('button', { name: /approve/i })).toBeNull();
   });
@@ -292,10 +293,10 @@ describe('AiComposerSeat Phase 4 behavior', () => {
       phase: 'error', draft: 'new input', lastError: error,
       failedDrafts: [{ id: 'failed-1', content: 'failed input', mode: 'nextTurn', error }],
     })} onRetry={retry} />);
-    expect(screen.getByRole('textbox')).toHaveValue('new input');
+    expect(screen.getByRole('textbox').textContent).toBe('new input');
     expect(screen.getByText('failed input')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(retry).toHaveBeenCalledWith('failed-1');
-    expect(screen.getByRole('textbox')).toHaveValue('new input');
+    expect(screen.getByRole('textbox').textContent).toBe('new input');
   });
 });

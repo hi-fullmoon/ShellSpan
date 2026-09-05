@@ -189,7 +189,15 @@ describe('AiConversationNodeList', () => {
       blocks: [{ type: 'text', text: '## Safe result\n\nThe service is **ready**.' }],
       state: 'completed',
     };
-    render(<AiConversationNodeList nodes={[userNode, assistantNode]} />);
+    const { rerender } = render(<AiConversationNodeList nodes={[
+      userNode, { ...assistantNode, state: 'streaming' },
+    ]} />);
+    expect(within(screen.getByRole('article', { name: 'AI assistant message' }))
+      .queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('article', { name: 'Your message' }))
+      .getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+
+    rerender(<AiConversationNodeList nodes={[userNode, assistantNode]} />);
 
     const userArticle = screen.getByRole('article', { name: 'Your message' });
     const assistantArticle = screen.getByRole('article', { name: 'AI assistant message' });

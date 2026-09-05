@@ -1,6 +1,6 @@
 vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/test/llm-resolver-fixture')).fixtureResolve }));
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiWorkspaceController } from '@/components/ai/workspace/ai-workspace-controller';
@@ -486,7 +486,7 @@ describe('AiWorkspaceController', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Agent is unavailable');
     expect(screen.getByRole('alert')).toHaveTextContent('Open a connected terminal');
-    expect(screen.getByRole('textbox')).toBeDisabled();
+    expect(screen.getByRole('textbox')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.queryByRole('button', { name: 'New conversation' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
@@ -505,7 +505,7 @@ describe('AiWorkspaceController', () => {
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
     expect(screen.getByRole('alert')).toHaveTextContent('Open a connected terminal');
-    expect(screen.getByRole('textbox')).toBeDisabled();
+    expect(screen.getByRole('textbox')).toHaveAttribute('aria-disabled', 'true');
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
     expect(agent.submit).not.toHaveBeenCalled();
   });
@@ -568,7 +568,7 @@ describe('AiWorkspaceController', () => {
     await user.click(screen.getByRole('button', { name: 'Approve once' }));
     expect(screen.getByRole('button', { name: 'Approve once' })).toBeDisabled();
     act(() => publish?.({ ...running, pendingApproval: null }));
-    await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue('draft survives approval'));
+    await waitFor(() => expect(screen.getByRole('textbox').textContent).toBe('draft survives approval'));
     expect(approve).toHaveBeenCalledTimes(2);
   });
 
@@ -610,7 +610,7 @@ describe('AiWorkspaceController', () => {
     await user.type(textbox, 'first input');
     fireEvent.keyDown(textbox, { key: 'Enter' });
 
-    expect(textbox).toHaveValue('');
+    expect(textbox.textContent).toBe('');
     expect(screen.getByText('first input')).toBeVisible();
     expect(screen.getByText('Sending')).toBeVisible();
     await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({
@@ -625,7 +625,7 @@ describe('AiWorkspaceController', () => {
     await user.type(textbox, 'newer draft');
     rejectSubmit?.(new Error('Network disconnected'));
     await waitFor(() => expect(screen.getByText('Input was not delivered')).toBeVisible());
-    expect(textbox).toHaveValue('newer draft');
+    expect(textbox.textContent).toBe('newer draft');
     expect(screen.getAllByText('first input')).toHaveLength(2);
   });
 
@@ -641,7 +641,7 @@ describe('AiWorkspaceController', () => {
     });
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Run with operator access' } });
+    await userEvent.setup().type(screen.getByRole('textbox'), 'Run with operator access');
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
     await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({
       create: expect.objectContaining({
@@ -787,7 +787,7 @@ describe('Stage 6B cold Session Skills consumer', () => {
     await user.type(screen.getByRole('textbox'), '/sys');
     await user.click(await screen.findByRole('option', { name: /system-status/ }));
     expect(agent.create).not.toHaveBeenCalled(); expect(agent.listSkills).not.toHaveBeenCalled(); expect(agent.submit).not.toHaveBeenCalled();
-    expect(screen.getByRole('textbox')).toHaveValue('/system-status ');
+    expect(screen.getByRole('textbox').textContent).toBe('/system-status ');
     expect(screen.queryByRole('dialog')).toBeNull();
     await user.keyboard('{Enter}');
     await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({ content: '/system-status ', mode: 'start' })));

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
@@ -96,15 +96,15 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const panel = container.querySelector('[data-slot="ai-question-panel"]')!;
     expect(panel.closest('[data-ai-node-kind="turnProcess"]')).toBeNull();
     expect(container.querySelectorAll('[data-message-scroller-viewport]')).toHaveLength(1);
-    expect(screen.getByTestId('ai-workspace-composer')).toHaveValue('ordinary unsent draft');
-    expect(screen.getByTestId('ai-workspace-composer')).toBeDisabled();
+    expect(screen.getByTestId('ai-workspace-composer').textContent).toBe('ordinary unsent draft');
+    expect(screen.getByTestId('ai-workspace-composer')).toHaveAttribute('aria-disabled', 'true');
     fireEvent.change(within(panel as HTMLElement).getByRole('textbox'), { target: { value: 'Continue' } });
     await userEvent.click(screen.getByRole('button', { name: 'Submit answers' }));
     expect(onAnswerQuestion).toHaveBeenCalledOnce();
     expect(onSubmit).not.toHaveBeenCalled();
     rerender(<AiWorkspaceRoot {...props} view={{ ...base, pendingQuestion: null }} />);
-    expect(screen.getByTestId('ai-workspace-composer')).toHaveValue('ordinary unsent draft');
-    expect(screen.getByTestId('ai-workspace-composer')).not.toBeDisabled();
+    expect(screen.getByTestId('ai-workspace-composer').textContent).toBe('ordinary unsent draft');
+    expect(screen.getByTestId('ai-workspace-composer')).toHaveAttribute('contenteditable', 'true');
   });
   it.each([320, 400, 560, 720])(
     'keeps the complete single-column workspace structure at %d px',
@@ -196,7 +196,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       .toHaveAttribute('data-phase', 'active');
     expect(screen.getByRole('textbox')).toBe(textarea);
     expect(screen.getByRole('textbox')).toHaveFocus();
-    expect(screen.getByRole('textbox')).toHaveValue('keep local draft');
+    expect(screen.getByRole('textbox').textContent).toBe('keep local draft');
     expect(container.querySelector('[data-slot="ai-composer-seat"]'))
       .toHaveAttribute('data-phase', 'active');
   });
