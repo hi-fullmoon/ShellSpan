@@ -964,8 +964,8 @@
 
 .ai-panel-shell .ai-markdown-table-scroll::-webkit-scrollbar,
 .ai-panel-shell .ai-semantic-note-body::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 6px;
+  height: 6px;
 }
 
 .ai-markdown-table-scroll table {
