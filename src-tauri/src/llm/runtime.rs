@@ -173,6 +173,7 @@ impl PreparedCall {
         }
         response.content = normalized_content;
         capture.blocks = normalized_metadata;
+        canonicalize_tool_call_ids(&mut response.content, &self.request.messages, &request_id);
         for block in &mut response.content {
             if let ModelContentBlock::Reasoning { provider_item, .. } = block {
                 *provider_item = None;
@@ -189,6 +190,45 @@ impl PreparedCall {
             capture,
         )?);
         Ok(response)
+    }
+}
+
+fn canonicalize_tool_call_ids(
+    content: &mut [ModelContentBlock],
+    history: &[ModelMessage],
+    request_id: &str,
+) {
+    let mut assigned = history
+        .iter()
+        .filter_map(|message| match message {
+            ModelMessage::Assistant { content, .. } => Some(content),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|block| match block {
+            ModelContentBlock::ToolCall { call } => Some(call.call_id.clone()),
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
+    let request_digest = digest(request_id.as_bytes());
+    let mut ordinal = 0_usize;
+    for block in content {
+        if let ModelContentBlock::ToolCall { call } = block {
+            ordinal += 1;
+            if assigned.insert(call.call_id.clone()) {
+                continue;
+            }
+            // Some adapters use response-local ordinals. Preserve an adapter ID when
+            // it is already unique, and bind only collisions to this request.
+            loop {
+                let candidate = format!("call-{request_digest}-{ordinal}");
+                if assigned.insert(candidate.clone()) {
+                    call.call_id = candidate;
+                    break;
+                }
+                ordinal += 1;
+            }
+        }
     }
 }
 
@@ -317,5 +357,52 @@ mod tests {
         let serialized = serde_json::to_string(&call.snapshot).unwrap();
         assert!(!serialized.contains("secret"));
         assert!(!serialized.contains("data:image"));
+    }
+
+    #[test]
+    fn durable_tool_call_ids_are_unique_across_requests() {
+        let content = || {
+            vec![
+                ModelContentBlock::ToolCall {
+                    call: ModelToolCall {
+                        call_id: "call-1".into(),
+                        provider_call_id: Some("provider-1".into()),
+                        name: "read_file".into(),
+                        arguments: serde_json::json!({}),
+                    },
+                },
+                ModelContentBlock::ToolCall {
+                    call: ModelToolCall {
+                        call_id: "call-2".into(),
+                        provider_call_id: Some("provider-2".into()),
+                        name: "read_file".into(),
+                        arguments: serde_json::json!({}),
+                    },
+                },
+            ]
+        };
+        let mut first = content();
+        let mut second = content();
+        canonicalize_tool_call_ids(&mut first, &[], "request-a");
+        let history = vec![ModelMessage::Assistant {
+            content: first.clone(),
+            replay: None,
+            native_replay: None,
+        }];
+        canonicalize_tool_call_ids(&mut second, &history, "request-b");
+
+        let ids = |blocks: &[ModelContentBlock]| {
+            blocks
+                .iter()
+                .filter_map(|block| match block {
+                    ModelContentBlock::ToolCall { call } => Some(call.call_id.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&first), vec!["call-1", "call-2"]);
+        assert_ne!(ids(&first), ids(&second));
+        assert_ne!(ids(&first)[0], ids(&first)[1]);
+        assert!(ids(&second).iter().all(|id| id.len() <= 128));
     }
 }
