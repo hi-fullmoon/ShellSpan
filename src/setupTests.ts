@@ -1,11 +1,13 @@
 import '@testing-library/jest-dom';
 import { beforeEach, vi } from 'vitest';
 import { clearDirectoryListingCache } from '@/lib/sftp/directory-listing-cache';
+import { useAiDraftStore } from '@/stores/aiDraftStore';
 
 // The directory listing cache is module-level state; reset it between tests
 // so cached entries never leak across test cases.
 beforeEach(() => {
   clearDirectoryListingCache();
+  useAiDraftStore.setState({ drafts: {} });
 });
 
 // Node >= 22 ships an experimental `localStorage` global that shadows jsdom's
