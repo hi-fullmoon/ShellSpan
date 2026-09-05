@@ -56,6 +56,11 @@ pub(crate) fn derive_task(events: &[AgentSessionEvent]) -> AgentTaskProjection {
     };
     for event in events {
         match &event.payload {
+            AgentSessionEventPayload::SessionResumed {} => {
+                projection.status = Some("idle".into());
+                projection.phase = None;
+                projection.recovery = None;
+            }
             AgentSessionEventPayload::SessionCreated { task_id, goal, .. } => {
                 projection.task_id = Some(task_id.clone());
                 projection.goal = Some(goal.clone());

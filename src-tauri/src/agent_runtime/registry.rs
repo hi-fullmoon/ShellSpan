@@ -182,6 +182,10 @@ impl AgentEntry {
         Ok(())
     }
 
+    pub(crate) fn is_admitting(&self) -> bool {
+        self.admitting.load(Ordering::Acquire)
+    }
+
     pub(crate) fn cancel(&self) {
         self.cancellation.cancel();
         self.record_lifecycle("cancel");
@@ -323,6 +327,14 @@ impl AgentHandle {
     }
 
     pub(crate) async fn dispose(&self) -> Result<AgentSessionSnapshot, String> {
+        self.finish(true).await
+    }
+
+    pub(crate) async fn interrupt(&self) -> Result<AgentSessionSnapshot, String> {
+        self.finish(false).await
+    }
+
+    async fn finish(&self, terminate: bool) -> Result<AgentSessionSnapshot, String> {
         self.entry.stop_admission()?;
         self.entry.cancel();
         self.entry.await_idle().await;
@@ -352,8 +364,10 @@ impl AgentHandle {
         let current = self.sessions.snapshot(&self.entry.session_id)?;
         let snapshot = if current.ended {
             current
-        } else {
+        } else if terminate {
             self.sessions.cancel(&self.entry.session_id)?
+        } else {
+            self.sessions.interrupt(&self.entry.session_id)?
         };
         self.entry.record_lifecycle("dispose-resources");
         self.entry.set_phase(AgentLifecyclePhase::Disposed)?;
