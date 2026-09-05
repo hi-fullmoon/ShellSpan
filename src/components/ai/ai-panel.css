@@ -2346,6 +2346,11 @@
   padding-inline: 7px;
 }
 
+.ai-permission-trigger [data-icon='inline-start'] {
+  width: 16px;
+  height: 16px;
+}
+
 .ai-model-trigger {
   max-width: min(360px, 48cqi);
   gap: 4px;
@@ -2621,6 +2626,11 @@
 
 .ai-permission-menu-option {
   min-height: 40px;
+}
+
+.ai-permission-menu-option > svg {
+  width: 18px;
+  height: 18px;
 }
 
 .ai-busy-preference-menu {
