@@ -6,13 +6,14 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { EmptyState } from '@/components/ui/empty-state';
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
+import type { ComposerEditorHandle } from './ai-composer-editor';
 import { builtinSkills } from '@/lib/ai/builtin-skills';
 import { activeSkillToken, insertSkill } from '@/lib/ai/skill-completion';
 import type { SkillEntry, SkillUserList } from '@/types/agent-skill';
 
 export function useSkillCompletion({ text, update, query, scopeKey, disabled, editor }: {
   text: string; update: (value: string) => void; query?: () => Promise<SkillUserList>;
-  scopeKey?: string; disabled: boolean; editor: React.RefObject<HTMLTextAreaElement | null>;
+  scopeKey?: string; disabled: boolean; editor: React.RefObject<ComposerEditorHandle | null>;
 }) {
   const { t, locale } = useI18n();
   const [selection, setSelection] = useState<[number, number]>([0, 0]);
@@ -25,6 +26,10 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
   const [index, setIndex] = useState(0);
   const id = useId();
   const version = useRef(0);
+  const knownCommands = useRef({ scopeKey, names: new Set(builtinSkills.map(skill => skill.name)) });
+  if (knownCommands.current.scopeKey !== scopeKey) {
+    knownCommands.current = { scopeKey, names: new Set(builtinSkills.map(skill => skill.name)) };
+  }
   const token = activeSkillToken(text, ...selection);
   const key = JSON.stringify([scopeKey, text, ...selection]);
   useEffect(() => { setDismissed(previous => previous === key ? previous : null); }, [key]);
@@ -35,7 +40,10 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
     if (!open || !query) return;
     setLoading(true);
     void query().then(value => {
-      if (generation === version.current) { setResult(value); setLoading(false); }
+      if (generation === version.current) {
+        value.entries.filter(skill => skill.userInvocable).forEach(skill => knownCommands.current.names.add(skill.name));
+        setResult(value); setLoading(false);
+      }
     }, () => {
       if (generation === version.current) { setError(true); setLoading(false); }
     });
@@ -47,7 +55,7 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
   const entries = result?.entries.filter(skill => skill.userInvocable &&
     `${skill.name} ${skill.description} ${description(skill)}`.toLowerCase().includes(token?.query ?? '')) ?? [];
   useEffect(() => { setIndex(0); }, [key, result]);
-  const readSelection = (element: HTMLTextAreaElement) => setSelection([element.selectionStart, element.selectionEnd]);
+  const readSelection = (element: ComposerEditorHandle) => setSelection([element.selectionStart, element.selectionEnd]);
   const choose = (skill: SkillEntry) => {
     if (!token || !open || loading) return;
     const next = insertSkill(text, token, skill.name);
@@ -60,23 +68,23 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
       }
     });
   };
-  const panel = open ? <Card size="sm" className="w-full min-w-0" data-skill-completion="">
-    <CardHeader>
+  const panel = open ? <Card size="sm" className="w-full min-w-0 gap-1 pt-2 pb-0" data-skill-completion="">
+    <CardHeader className="shrink-0 gap-0.5 px-2">
       <CardTitle>{t('ai.workspace.skills.title')}</CardTitle>
       <CardDescription>{t('ai.workspace.skills.hint')}</CardDescription>
     </CardHeader>
-    <CardContent className="flex min-w-0 flex-col gap-2">
-      <div role="status" aria-live="polite">
+    <CardContent className="flex min-h-0 min-w-0 flex-col gap-1 overflow-hidden px-0">
+      <div role="status" aria-live="polite" className="shrink-0 px-2 empty:hidden">
         {loading && <span className="flex items-center gap-2"><Spinner />{t('ai.workspace.skills.loading')}</span>}
         {(error || result?.status === 'unavailable') && <Alert><AlertDescription>{t('ai.workspace.skills.unavailable')}</AlertDescription></Alert>}
         {result?.status === 'stale' && <Alert><AlertDescription>{t('ai.workspace.skills.stale')}</AlertDescription></Alert>}
         {result && !loading && result.status !== 'unavailable' && entries.length === 0 && <EmptyState title={t('ai.workspace.skills.noMatch')} />}
       </div>
-      <div id={id} role="listbox" aria-label={t('ai.workspace.skills.title')} className="flex max-h-60 min-w-0 flex-col gap-1 overflow-y-auto">
+      <div id={id} role="listbox" aria-label={t('ai.workspace.skills.title')} className="flex max-h-60 min-h-0 min-w-0 flex-col overflow-y-auto p-1">
         {entries.map((skill, i) => <Button key={skill.name} id={`${id}-${i}`} type="button" role="option" aria-selected={i === index} tabIndex={-1}
-          variant={i === index ? 'secondary' : 'ghost'} className="h-auto w-full min-w-0 justify-start py-2" onMouseDown={event => event.preventDefault()} onClick={() => choose(skill)}>
+          variant={i === index ? 'secondary' : 'ghost'} className="h-auto w-full min-w-0 shrink-0 justify-start px-2 py-1.5" onMouseDown={event => event.preventDefault()} onClick={() => choose(skill)}>
           <BookOpenIcon data-icon="inline-start" />
-          <span className="flex min-w-0 flex-col items-start gap-1 text-left">
+          <span className="flex min-w-0 flex-col items-start gap-0.5 text-left">
             <span className="truncate">/{skill.name}</span>
             <span className="whitespace-normal break-words text-xs text-muted-foreground">{description(skill)}</span>
           </span>
@@ -86,17 +94,17 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
   </Card> : null;
   return {
     panel, open,
-    textareaProps: {
+    commandNames: [...knownCommands.current.names],
+    editorProps: {
       'aria-controls': open ? id : undefined,
       'aria-expanded': open,
       'aria-activedescendant': open && entries[index] ? `${id}-${index}` : undefined,
-      onSelect: (event: React.SyntheticEvent<HTMLTextAreaElement>) => readSelection(event.currentTarget),
-      onFocus: (event: React.FocusEvent<HTMLTextAreaElement>) => { setFocused(true); readSelection(event.currentTarget); },
+      onSelectionChange: () => { if (editor.current) readSelection(editor.current); },
+      onFocus: () => { setFocused(true); if (editor.current) readSelection(editor.current); },
       onBlur: () => setFocused(false),
     },
-    changed: readSelection,
     composition: setComposing,
-    keyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    keyDown: (event: KeyboardEvent): boolean => {
       if (!open || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return false;
       if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) return false;
       if (event.key === 'Tab' && (loading || !entries.length)) { setDismissed(key); return false; }

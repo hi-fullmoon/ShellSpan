@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { XIcon } from 'lucide-react';
-import { Attachment, AttachmentGroup, AttachmentMedia, AttachmentTitle, AttachmentContent, AttachmentDescription } from '@/components/ui/attachment';
+import { Attachment, AttachmentGroup, AttachmentMedia } from '@/components/ui/attachment';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import { imageErrorKey } from '@/lib/ai/image-error';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
@@ -43,11 +44,14 @@ function CommittedImage({ sessionId, image }: { sessionId: string; image: AgentI
     );
     return () => { alive = false; };
   }, [sessionId, image.sha256]);
-  return <Attachment size="sm" state={result.error ? 'error' : result.url ? 'done' : 'processing'}>
-    <AttachmentMedia variant="image">{result.url && <img src={result.url} alt={image.name} />}</AttachmentMedia>
-    <AttachmentContent><AttachmentTitle>{image.name}</AttachmentTitle><AttachmentDescription>{result.error ? t(imageErrorKey(result.error)) : `${image.width} × ${image.height}`}</AttachmentDescription></AttachmentContent>
+  return <Attachment orientation="vertical" className="ai-image-thumbnail" state={result.error ? 'error' : result.url ? 'done' : 'processing'}>
+    <AttachmentMedia variant="image" className="ai-image-thumbnail-media">
+      {result.error ? <span role="status" className="p-1 text-center text-xs">{t(imageErrorKey(result.error))}</span>
+        : result.url ? <img src={result.url} alt={image.name} />
+        : <Spinner className="motion-reduce:animate-none" />}
+    </AttachmentMedia>
   </Attachment>;
 }
 export function AiCommittedImages({ sessionId, images }: { sessionId: string; images?: readonly AgentImageRef[] }) {
-  return images?.length ? <AttachmentGroup>{images.map((image, i) => <CommittedImage key={`${image.sha256}:${i}`} sessionId={sessionId} image={image} />)}</AttachmentGroup> : null;
+  return images?.length ? <AttachmentGroup className="gap-1.5">{images.map((image, i) => <CommittedImage key={`${image.sha256}:${i}`} sessionId={sessionId} image={image} />)}</AttachmentGroup> : null;
 }

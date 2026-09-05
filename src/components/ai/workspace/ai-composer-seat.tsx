@@ -1,3 +1,4 @@
+import { AiComposerEditor } from './ai-composer-editor';
 import { useFileCompletion } from './use-file-completion';
 import { useSkillCompletion } from './use-skill-completion';
 import { useMemo, useRef, useState } from 'react';
@@ -26,7 +27,6 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
-  InputGroupTextarea,
 } from '@/components/ui/input-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
@@ -275,7 +275,6 @@ export function AiComposerSeat({
       />
       {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
       {waitingQuestion && <Alert><AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle><AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>{onStop && <Button type="button" variant="outline" onClick={onStop}>{t('ai.workspace.stop')}</Button>}</Alert>}
-      {skillCompletion.panel}
       {waitingApproval && pendingApproval ? (
         <AiApprovalPanel
           approval={pendingApproval}
@@ -286,188 +285,196 @@ export function AiComposerSeat({
           onOpenDetails={() => onOpenApprovalDetails?.()}
         />
       ) : (
-        <InputGroup data-composer-card="">
-          <InputGroupTextarea
-            {...completion.textareaProps}
-            {...(skillCompletion.open ? {
-              'aria-controls': skillCompletion.textareaProps['aria-controls'],
-              'aria-expanded': true,
-              'aria-activedescendant': skillCompletion.textareaProps['aria-activedescendant'],
-            } : {})}
-            onSelect={event => { completion.textareaProps.onSelect(event); skillCompletion.textareaProps.onSelect(event); }}
-            onFocus={event => { completion.textareaProps.onFocus(event); skillCompletion.textareaProps.onFocus(event); }}
-            onBlur={() => { completion.textareaProps.onBlur(); skillCompletion.textareaProps.onBlur(); }}
-            data-testid="ai-workspace-composer"
-            value={draft}
-            disabled={waitingApproval || waitingQuestion || unavailable || imageLocked}
-            onChange={(event) => { updateDraft(event.target.value); completion.changed(event.target); skillCompletion.changed(event.target); }}
-            onPaste={(event) => {
-              if (!onPasteImages) return;
-              const files = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/'));
-              if (!files.length) {
-                for (const item of Array.from(event.clipboardData.items)) {
-                  if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
-                  const file = item.getAsFile();
-                  if (file) files.push(file);
+        <div className="ai-composer-input-anchor">
+          <InputGroup data-composer-card="" onClick={event => {
+            if (event.target === event.currentTarget) completion.editor.current?.focus();
+          }}>
+            <AiComposerEditor
+              {...completion.editorProps}
+              {...(skillCompletion.open ? {
+                'aria-controls': skillCompletion.editorProps['aria-controls'],
+                'aria-expanded': true,
+                'aria-activedescendant': skillCompletion.editorProps['aria-activedescendant'],
+              } : {})}
+              commandNames={skillCompletion.commandNames}
+              onSelectionChange={() => { completion.editorProps.onSelectionChange(); skillCompletion.editorProps.onSelectionChange(); }}
+              onFocus={() => { completion.editorProps.onFocus(); skillCompletion.editorProps.onFocus(); }}
+              onBlur={() => { completion.editorProps.onBlur(); skillCompletion.editorProps.onBlur(); }}
+              data-testid="ai-workspace-composer"
+              value={draft}
+              disabled={waitingApproval || waitingQuestion || unavailable || imageLocked}
+              onChange={updateDraft}
+              onPaste={(event) => {
+                if (!onPasteImages) return;
+                const files = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/'));
+                if (!files.length) {
+                  for (const item of Array.from(event.clipboardData.items)) {
+                    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+                    const file = item.getAsFile();
+                    if (file) files.push(file);
+                  }
                 }
-              }
-              if (!files.length) return;
-              event.preventDefault();
-              if (terminal || waitingApproval || waitingQuestion || unavailable || submitting || imageLocked) return;
-              void onPasteImages(files);
-            }}
-            onCompositionStart={() => {
-              composingRef.current = true;
-              completion.composition(true);
-              skillCompletion.composition(true);
-            }}
-            onCompositionEnd={() => {
-              composingRef.current = false;
-              completion.composition(false);
-              skillCompletion.composition(false);
-              composingUntilRef.current = Date.now() + 10;
-            }}
-            onKeyDown={(event) => {
-              if (
-                event.nativeEvent.isComposing
-                || event.keyCode === 229
-                || composingRef.current
-                || Date.now() < composingUntilRef.current
-              ) return;
-              if (skillCompletion.keyDown(event) || completion.keyDown(event)) return;
-              if (event.key !== 'Enter' || event.shiftKey) return;
-              event.preventDefault();
-              if (event.repeat) return;
-              submit('keyboard', event.metaKey || event.ctrlKey);
-            }}
-            placeholder={t('ai.workspace.composerPlaceholder', { pasteShortcut: getPlatform() === 'macos' ? '⌘V' : 'Ctrl+V' })}
-          />
-          {completion.panel && <InputGroupAddon align="block-start" className="block min-w-0">{completion.panel}</InputGroupAddon>}
-          {imageControls && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0">{imageControls}</InputGroupAddon>}
-          <InputGroupAddon align="block-end" className="ai-composer-toolbar">
-            <div className="ai-composer-tools">
-              {permissionControl}
-              {running && (
-                <DropdownMenu>
+                if (!files.length) return;
+                event.preventDefault();
+                if (terminal || waitingApproval || waitingQuestion || unavailable || submitting || imageLocked) return;
+                void onPasteImages(files);
+              }}
+              onCompositionStart={() => {
+                composingRef.current = true;
+                completion.composition(true);
+                skillCompletion.composition(true);
+              }}
+              onCompositionEnd={() => {
+                composingRef.current = false;
+                completion.composition(false);
+                skillCompletion.composition(false);
+                composingUntilRef.current = Date.now() + 10;
+              }}
+              onKeyDown={(event) => {
+                if (
+                  event.isComposing
+                  || event.keyCode === 229
+                  || composingRef.current
+                  || Date.now() < composingUntilRef.current
+                ) return;
+                if (skillCompletion.keyDown(event) || completion.keyDown(event)) return;
+                if (event.key !== 'Enter' || event.shiftKey) return;
+                event.preventDefault();
+                if (event.repeat) return;
+                submit('keyboard', event.metaKey || event.ctrlKey);
+              }}
+              placeholder={t('ai.workspace.composerPlaceholder', { pasteShortcut: getPlatform() === 'macos' ? '⌘V' : 'Ctrl+V' })}
+            />
+            {completion.panel && <InputGroupAddon align="block-start" className="block min-w-0">{completion.panel}</InputGroupAddon>}
+            {imageControls && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0">{imageControls}</InputGroupAddon>}
+            <InputGroupAddon align="block-end" className="ai-composer-toolbar" onClick={event => {
+              if (!(event.target as HTMLElement).closest('button, [role="button"]')) completion.editor.current?.focus();
+            }}>
+              <div className="ai-composer-tools">
+                {permissionControl}
+                {running && (
+                  <DropdownMenu>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={(
+                          <DropdownMenuTrigger
+                            render={(
+                              <Button
+                                variant="ghost"
+                                size="xs"
+                                className="ai-busy-preference-trigger"
+                                aria-label={t('ai.workspace.busyPreference')}
+                              />
+                            )}
+                          />
+                        )}
+                      >
+                        {busyPreference === 'queue'
+                          ? <ListPlusIcon data-icon="inline-start" />
+                          : <CornerUpLeftIcon data-icon="inline-start" />}
+                        <span className="ai-busy-preference-label">
+                          {busyPreference === 'queue'
+                            ? t('ai.workspace.queue.action')
+                            : t('ai.workspace.steer.action')}
+                        </span>
+                        <ChevronDownIcon data-icon="inline-end" />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {busyPreference === 'queue'
+                          ? t('ai.workspace.queue.tooltip')
+                          : t('ai.workspace.steer.tooltip')}
+                      </TooltipContent>
+                    </Tooltip>
+                    <DropdownMenuContent className="ai-busy-preference-menu" side="top" sideOffset={8} align="start">
+                      <DropdownMenuGroup>
+                        <DropdownMenuLabel className="px-2.5 py-2">{t('ai.workspace.busyPreference')}</DropdownMenuLabel>
+                        <DropdownMenuRadioGroup
+                          value={busyPreference}
+                          onValueChange={(value) => {
+                            if (value === 'queue' || value === 'steer') onBusyPreferenceChange?.(value);
+                          }}
+                        >
+                          <DropdownMenuRadioItem className="min-h-10 gap-2 py-2 pl-2.5 whitespace-nowrap" value="queue">
+                            <ListPlusIcon />
+                            {t('ai.workspace.queue.action')}
+                          </DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem className="min-h-10 gap-2 py-2 pl-2.5 whitespace-nowrap" value="steer">
+                            <CornerUpLeftIcon />
+                            {t('ai.workspace.steer.action')}
+                          </DropdownMenuRadioItem>
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </div>
+
+              <div className="ai-composer-trailing">
+                {modelControl ?? (modelLabel && (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="ai-model-trigger"
+                    disabled={!onOpenModel}
+                    onClick={onOpenModel}
+                    aria-label={t('ai.workspace.model.trigger', { selection: modelLabel })}
+                    title={`${providerLabel ? `${providerLabel} · ` : ''}${modelLabel}`}
+                  >
+                    <span className="truncate">{modelLabel}</span>
+                    <ChevronDownIcon data-icon="inline-end" />
+                  </Button>
+                ))}
+                <AiContextMeter usage={contextUsage} />
+                {running && !stopPrimary && onStop && (
                   <Tooltip>
                     <TooltipTrigger
                       render={(
-                        <DropdownMenuTrigger
-                          render={(
-                            <Button
-                              variant="ghost"
-                              size="xs"
-                              className="ai-busy-preference-trigger"
-                              aria-label={t('ai.workspace.busyPreference')}
-                            />
-                          )}
+                        <InputGroupButton
+                          variant="ghost"
+                          size="icon-sm"
+                          className="ai-composer-primary ai-composer-stop"
+                          onClick={onStop}
+                          aria-label={t('ai.workspace.stop')}
                         />
                       )}
                     >
-                      {busyPreference === 'queue'
-                        ? <ListPlusIcon data-icon="inline-start" />
-                        : <CornerUpLeftIcon data-icon="inline-start" />}
-                      <span className="ai-busy-preference-label">
-                        {busyPreference === 'queue'
-                          ? t('ai.workspace.queue.action')
-                          : t('ai.workspace.steer.action')}
-                      </span>
-                      <ChevronDownIcon data-icon="inline-end" />
+                      <SquareIcon fill="currentColor" />
                     </TooltipTrigger>
-                    <TooltipContent>
-                      {busyPreference === 'queue'
-                        ? t('ai.workspace.queue.tooltip')
-                        : t('ai.workspace.steer.tooltip')}
-                    </TooltipContent>
+                    <TooltipContent>{t('ai.workspace.stopTooltip')}</TooltipContent>
                   </Tooltip>
-                  <DropdownMenuContent className="ai-busy-preference-menu" side="top" sideOffset={8} align="start">
-                    <DropdownMenuGroup>
-                      <DropdownMenuLabel className="px-2.5 py-2">{t('ai.workspace.busyPreference')}</DropdownMenuLabel>
-                      <DropdownMenuRadioGroup
-                        value={busyPreference}
-                        onValueChange={(value) => {
-                          if (value === 'queue' || value === 'steer') onBusyPreferenceChange?.(value);
-                        }}
-                      >
-                        <DropdownMenuRadioItem className="min-h-10 gap-2 py-2 pl-2.5 whitespace-nowrap" value="queue">
-                          <ListPlusIcon />
-                          {t('ai.workspace.queue.action')}
-                        </DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem className="min-h-10 gap-2 py-2 pl-2.5 whitespace-nowrap" value="steer">
-                          <CornerUpLeftIcon />
-                          {t('ai.workspace.steer.action')}
-                        </DropdownMenuRadioItem>
-                      </DropdownMenuRadioGroup>
-                    </DropdownMenuGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
-
-            <div className="ai-composer-trailing">
-              {modelControl ?? (modelLabel && (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="ai-model-trigger"
-                  disabled={!onOpenModel}
-                  onClick={onOpenModel}
-                  aria-label={t('ai.workspace.model.trigger', { selection: modelLabel })}
-                  title={`${providerLabel ? `${providerLabel} · ` : ''}${modelLabel}`}
-                >
-                  <span className="truncate">{modelLabel}</span>
-                  <ChevronDownIcon data-icon="inline-end" />
-                </Button>
-              ))}
-              <AiContextMeter usage={contextUsage} />
-              {running && !stopPrimary && onStop && (
+                )}
                 <Tooltip>
                   <TooltipTrigger
                     render={(
                       <InputGroupButton
-                        variant="ghost"
+                        variant="default"
                         size="icon-sm"
-                        className="ai-composer-primary ai-composer-stop"
-                        onClick={onStop}
-                        aria-label={t('ai.workspace.stop')}
+                        className="ai-composer-primary"
+                        onClick={() => submit('primary')}
+                        disabled={submitDisabled}
+                        aria-label={primaryLabel}
                       />
                     )}
                   >
-                    <SquareIcon fill="currentColor" />
+                    {stopPrimary
+                      ? <SquareIcon fill="currentColor" />
+                      : <ArrowUpIcon />}
                   </TooltipTrigger>
-                  <TooltipContent>{t('ai.workspace.stopTooltip')}</TooltipContent>
+                  <TooltipContent>
+                    {waitingApproval
+                      ? t('ai.workspace.approvalWaiting')
+                      : unavailableReason
+                        ? unavailableReason
+                      : terminal
+                        ? t('ai.workspace.sessionEnded')
+                        : primaryLabel}
+                  </TooltipContent>
                 </Tooltip>
-              )}
-              <Tooltip>
-                <TooltipTrigger
-                  render={(
-                    <InputGroupButton
-                      variant="default"
-                      size="icon-sm"
-                      className="ai-composer-primary"
-                      onClick={() => submit('primary')}
-                      disabled={submitDisabled}
-                      aria-label={primaryLabel}
-                    />
-                  )}
-                >
-                  {stopPrimary
-                    ? <SquareIcon fill="currentColor" />
-                    : <ArrowUpIcon />}
-                </TooltipTrigger>
-                <TooltipContent>
-                  {waitingApproval
-                    ? t('ai.workspace.approvalWaiting')
-                    : unavailableReason
-                      ? unavailableReason
-                    : terminal
-                      ? t('ai.workspace.sessionEnded')
-                      : primaryLabel}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </InputGroupAddon>
-        </InputGroup>
+              </div>
+            </InputGroupAddon>
+          </InputGroup>
+          {skillCompletion.panel}
+        </div>
       )}
       <span className="sr-only" aria-live="polite">
         {announcement ? t(`ai.workspace.announce.${announcement}` as LocaleKey) : null}

@@ -9,6 +9,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import { activeFileToken, insertFileMention } from '@/lib/ai/file-reference-grammar';
 import type { FileCandidate, FileReferenceList, ListFileReferences } from '@/types/agent-file-reference';
+import type { ComposerEditorHandle } from './ai-composer-editor';
 import { AiProjectDirectoryInput } from './ai-project-directory-input';
 
 export function useFileCompletion({ text, update, query, scopeKey, needsRoot, targetLabel, disabled }: {
@@ -16,7 +17,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
   needsRoot?: boolean; targetLabel?: string; disabled: boolean;
 }) {
   const { t } = useI18n();
-  const editor = useRef<HTMLTextAreaElement>(null);
+  const editor = useRef<ComposerEditorHandle>(null);
   const [selection, setSelection] = useState<[number, number]>([0, 0]);
   const [focused, setFocused] = useState(false);
   const [composing, setComposing] = useState(false);
@@ -68,7 +69,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
     if (/Cancelled|AbortError/.test(code)) return t('ai.workspace.files.cancelled');
     return t('ai.workspace.files.unavailable');
   };
-  const readSelection = (element: HTMLTextAreaElement) => setSelection([element.selectionStart, element.selectionEnd]);
+  const readSelection = (element: ComposerEditorHandle) => setSelection([element.selectionStart, element.selectionEnd]);
   const choose = (candidate: FileCandidate) => {
     if (!token || !open || loading) return;
     const next = insertFileMention(text, token, candidate);
@@ -119,7 +120,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
       </CardContent>
     </Card> : null;
   const dialog = <Dialog open={rootOpen} onOpenChange={value => { setRootOpen(value); if (!value) { rootAbort.current?.abort(); setBinding(false); } }}>
-      <DialogContent finalFocus={editor} onClick={event => event.stopPropagation()}>
+      <DialogContent finalFocus={() => editor.current?.element ?? null} onClick={event => event.stopPropagation()}>
         <DialogTitle>{t('ai.workspace.files.chooseRoot')}</DialogTitle>
         <DialogDescription className="break-all">{targetLabel}</DialogDescription>
         <AiProjectDirectoryInput value={root} onChange={setRoot} onConfirm={() => void confirmRoot()} loading={binding} actionLabel={t('ai.workspace.files.bind')} />
@@ -127,19 +128,18 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
       </DialogContent>
     </Dialog>;
   return { panel, dialog, open, editor,
-    textareaProps: {
+    editorProps: {
       ref: editor,
       'aria-autocomplete': 'list' as const,
       'aria-controls': open ? id : undefined,
       'aria-expanded': open,
       'aria-activedescendant': open && result?.entries[index] ? `${id}-${index}` : undefined,
-      onSelect: (event: React.SyntheticEvent<HTMLTextAreaElement>) => readSelection(event.currentTarget),
-      onFocus: (event: React.FocusEvent<HTMLTextAreaElement>) => { setFocused(true); readSelection(event.currentTarget); },
+      onSelectionChange: () => { if (editor.current) readSelection(editor.current); },
+      onFocus: () => { setFocused(true); if (editor.current) readSelection(editor.current); },
       onBlur: () => setFocused(false),
     },
-    changed: readSelection,
     composition: setComposing,
-    keyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    keyDown: (event: KeyboardEvent): boolean => {
       if (!open || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return false;
       if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) return false;
       if (event.key === 'Tab' && !needsRoot && (loading || !result?.entries.length)) { setDismissed(key); return false; }
