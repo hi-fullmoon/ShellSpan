@@ -48,6 +48,64 @@ try {
     assert.deepEqual(errors, []);
     await page.close();
   }
+  for (const [width, height, theme] of [[400, 600, 'light'], [320, 480, 'dark'], [560, 800, 'light']]) {
+    const page = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`${origin}/?aiComposerVisual=1&locale=en-US&theme=${theme}`);
+    const editor = page.locator('[data-composer-editor]');
+    await editor.waitFor();
+    const update = patch => page.evaluate(patch => window.composerTest.update(patch), patch);
+    const undo = process.platform === 'darwin' ? 'Meta+z' : 'Control+z';
+    await editor.fill('previous conversation draft');
+    await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+    await editor.click();
+    await editor.press(undo);
+    assert.equal(await editor.textContent(), '', 'New conversation cannot undo into the old draft');
+    await editor.fill('own draft');
+    await editor.press(undo);
+    assert.equal(await editor.textContent(), '', 'New conversation retains its own undo support');
+    await update({ hero: false, status: 'running', draft: '' });
+    await page.getByRole('button', { name: 'Stop task', exact: true }).waitFor();
+    await editor.press('Enter');
+    assert.equal(await page.locator('[data-stop-count]').getAttribute('data-stop-count'), '0');
+    await page.getByRole('button', { name: 'Stop task', exact: true }).click();
+    assert.equal(await page.locator('[data-stop-count]').getAttribute('data-stop-count'), '1');
+    await update({ terminal: true, status: 'completed' });
+    await page.waitForFunction(() => document.querySelector('[data-composer-editor]').contentEditable === 'false');
+    await update({ terminal: false, status: 'idle' });
+    await page.waitForFunction(() => document.querySelector('[data-composer-editor]').contentEditable === 'true');
+    for (const hero of [false, true]) {
+      await update({ hero });
+      for (const token of ['/', '@']) {
+        const text = `${Array.from({ length: 20 }, (_, i) => `Draft line ${i}`).join('\n')}\n${token}`;
+        await editor.fill(text);
+        const menu = page.locator(token === '/' ? '[data-skill-completion]' : '[data-file-completion]');
+        await menu.getByRole('option').first().waitFor();
+        const popup = page.locator('.ai-completion-popup');
+        await page.waitForFunction(() => {
+          const rect = document.querySelector('.ai-completion-popup')?.getBoundingClientRect();
+          return rect && rect.y >= 0 && rect.bottom <= window.innerHeight && rect.height > 50;
+        });
+        const box = await popup.boundingBox();
+        const send = await page.locator('.ai-composer-primary').last().boundingBox();
+        assert.ok(box.x >= 0 && box.x + box.width <= width + 1, 'Popup stays inside panel width');
+        assert.ok(send.y >= 0 && send.y + send.height <= height, 'Send button stays visible');
+        assert.ok(await editor.evaluate(el => document.activeElement === el), 'Completion keeps editor focus');
+        await page.screenshot({ path: join(screenshots, `${width}x${height}-${theme}-${hero ? 'hero' : 'active'}-${token === '/' ? 'skills' : 'files'}.png`) });
+        // Scroll to the final option via keyboard, then insert without submitting.
+        for (let i = 1; i < await menu.getByRole('option').count(); i++) await editor.press('ArrowDown');
+        const selected = menu.locator('[aria-selected=true]');
+        const optionBox = await selected.boundingBox();
+        assert.ok(optionBox.y >= box.y && optionBox.y + optionBox.height <= box.y + box.height + 1, 'Active option scrolls into view');
+        await editor.press('Tab');
+        await popup.waitFor({ state: 'detached' });
+        assert.ok((await editor.innerText()).startsWith('Draft line 0\n'), 'Completion preserves multiline draft');
+      }
+    }
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
   console.log(`Rich composer browser checks passed. Screenshots: ${screenshots}`);
 } finally {
   await browser?.close();
