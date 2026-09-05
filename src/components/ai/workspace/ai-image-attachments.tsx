@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { XIcon } from 'lucide-react';
-import { Attachment, AttachmentGroup, AttachmentMedia } from '@/components/ui/attachment';
+import { Attachment, AttachmentGroup, AttachmentMedia, AttachmentTrigger } from '@/components/ui/attachment';
 import { Button } from '@/components/ui/button';
+import { DialogTrigger } from '@/components/ui/dialog';
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import { imageErrorKey } from '@/lib/ai/image-error';
@@ -12,6 +13,7 @@ import type { AiProviderConfig } from '@/types/ai';
 import type { AgentImageRef } from '@/types/agent-image';
 import type { useImageDraft } from './use-image-draft';
 import { AiImageDraftRail } from './ai-image-draft-rail';
+import { AiImagePreview } from './ai-image-preview';
 
 export function AiImageDraftControls({ state, selection }: { state: ReturnType<typeof useImageDraft>; selection?: AiProviderConfig }) {
   const { t } = useI18n();
@@ -44,14 +46,15 @@ function CommittedImage({ sessionId, image }: { sessionId: string; image: AgentI
     );
     return () => { alive = false; };
   }, [sessionId, image.sha256]);
-  return <Attachment orientation="vertical" className="ai-image-thumbnail" state={result.error ? 'error' : result.url ? 'done' : 'processing'}>
+  return <AiImagePreview source={result.url} name={image.name}><Attachment orientation="vertical" className="ai-image-thumbnail" state={result.error ? 'error' : result.url ? 'done' : 'processing'}>
     <AttachmentMedia variant="image" className="ai-image-thumbnail-media">
       {result.error ? <span role="status" className="p-1 text-center text-xs">{t(imageErrorKey(result.error))}</span>
         : result.url ? <img src={result.url} alt={image.name} />
         : <Spinner className="motion-reduce:animate-none" />}
     </AttachmentMedia>
-  </Attachment>;
+    {result.url && <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open" aria-label={`${t('ai.workspace.images.preview')} ${image.name}`} title={image.name} />} />}
+  </Attachment></AiImagePreview>;
 }
 export function AiCommittedImages({ sessionId, images }: { sessionId: string; images?: readonly AgentImageRef[] }) {
-  return images?.length ? <AttachmentGroup className="gap-1.5">{images.map((image, i) => <CommittedImage key={`${image.sha256}:${i}`} sessionId={sessionId} image={image} />)}</AttachmentGroup> : null;
+  return images?.length ? <AttachmentGroup className="max-w-[82%] gap-1.5">{images.map((image, i) => <CommittedImage key={`${sessionId}:${image.sha256}:${i}`} sessionId={sessionId} image={image} />)}</AttachmentGroup> : null;
 }

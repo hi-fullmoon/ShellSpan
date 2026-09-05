@@ -2,26 +2,29 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from 'lucide-react';
 import { Attachment, AttachmentGroup, AttachmentMedia, AttachmentActions, AttachmentAction, AttachmentTrigger } from '@/components/ui/attachment';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
+import { DialogTrigger } from '@/components/ui/dialog';
 import { Spinner } from '@/components/ui/spinner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useI18n } from '@/hooks/useI18n';
 import type { AgentImageUpload } from '@/types/agent-image';
+import { AiImagePreview } from './ai-image-preview';
 
 function PendingImage({ file }: { file: File }) {
+  const { t } = useI18n();
   const [source, setSource] = useState<string>();
   useEffect(() => {
     const url = URL.createObjectURL(file);
     setSource(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
-  return <Attachment orientation="vertical" className="ai-image-thumbnail" state="processing" aria-busy="true">
+  return <AiImagePreview source={source} name={file.name}><Attachment orientation="vertical" className="ai-image-thumbnail" state="processing" aria-busy="true">
     <AttachmentMedia variant="image" className="ai-image-thumbnail-media">
       <Skeleton className="absolute inset-0 size-full motion-reduce:animate-none" />
       {source && <img className="relative" src={source} alt={file.name} />}
     </AttachmentMedia>
+    {source && <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open" aria-label={`${t('ai.workspace.images.preview')} ${file.name}`} title={file.name} />} />}
     <span className="ai-image-thumbnail-loading" aria-hidden="true"><Spinner className="motion-reduce:animate-none" /></span>
-  </Attachment>;
+  </Attachment></AiImagePreview>;
 }
 
 export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, error, onRemove }: {
@@ -69,7 +72,7 @@ export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, erro
       onFocusCapture={event => event.target.closest('.ai-image-thumbnail')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })}>
       {images.map((image, index) => {
         const source = `data:${image.mediaType};base64,${image.data}`;
-        return <Dialog key={`${index}:${image.name}`}>
+        return <AiImagePreview key={`${index}:${image.name}`} source={source} name={image.name}>
           <Attachment orientation="vertical" className="ai-image-thumbnail" state={error ? 'error' : 'done'}>
             <AttachmentMedia variant="image" className="ai-image-thumbnail-media">
               <img src={source} alt={image.name} />
@@ -79,12 +82,7 @@ export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, erro
               <AttachmentAction variant="secondary" className="ai-image-thumbnail-remove" aria-label={`${t('ai.workspace.images.remove')} ${image.name}`} disabled={busy || locked} onClick={() => onRemove(index)}><XIcon /></AttachmentAction>
             </AttachmentActions>
           </Attachment>
-          <DialogContent className="w-[calc(100vw-32px)] max-w-4xl" onClick={event => event.stopPropagation()}>
-            <DialogTitle className="truncate pr-8">{image.name}</DialogTitle>
-            <DialogDescription className="sr-only">{t('ai.workspace.images.preview')}</DialogDescription>
-            <img className="max-h-[75vh] w-full object-contain" src={source} alt={image.name} />
-          </DialogContent>
-        </Dialog>;
+        </AiImagePreview>;
       })}
       {pendingFiles.map((file, index) => <PendingImage key={`pending:${index}:${file.name}`} file={file} />)}
     </AttachmentGroup>
