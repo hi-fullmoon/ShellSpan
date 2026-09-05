@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
@@ -197,7 +197,7 @@ describe('AI workspace Phase 5 workflows', () => {
         composerState={createAiComposerState({ ...composer, phase: 'running', runtimeStatus: 'running', waitingApproval: false })}
       />,
     );
-    expect(screen.getByRole('textbox')).toHaveValue('preserved draft');
+    expect(screen.getByRole('textbox').textContent).toBe('preserved draft');
   });
 
   it('shows approval pending and failure without reporting an approved result', () => {

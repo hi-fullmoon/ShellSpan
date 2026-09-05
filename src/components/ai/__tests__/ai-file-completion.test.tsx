@@ -1,5 +1,6 @@
+import { selectEditorText } from '@/test/composer-editor-user';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { initI18n } from '@/locales';
@@ -25,9 +26,9 @@ describe('composer path completion', () => {
     render(<AiComposerSeat phase="hero" status="idle" onListFileReferences={query} onSubmit={submit}/>);
     const editor=screen.getByRole('textbox'); await user.type(editor,'hello @');
     await screen.findByRole('option',{name:'space dir/'}); await user.keyboard('{Enter}');
-    expect(editor).toHaveValue('hello @"space dir/'); expect(submit).not.toHaveBeenCalled();
+    expect(editor.textContent).toBe('hello @"space dir/'); expect(submit).not.toHaveBeenCalled();
     await screen.findByRole('option',{name:'space dir/file name.txt'}); await user.keyboard('{Tab}');
-    expect(editor).toHaveValue('hello @"space dir/file name.txt" '); await user.keyboard('{Enter}');
+    expect(editor.textContent).toBe('hello @"space dir/file name.txt" '); await user.keyboard('{Enter}');
     expect(submit).toHaveBeenCalledExactlyOnceWith('hello @"space dir/file name.txt" ');
   });
   it('does not send during loading, empty/error results, or IME, and Escape dismisses', async () => {
@@ -56,9 +57,9 @@ describe('composer path completion', () => {
   it('uses active caret rather than the end, preserves email and suffix, and selects by mouse', async () => {
     const user=userEvent.setup();const query=vi.fn(async()=>result);
     render(<AiComposerSeat phase="hero" status="idle" defaultDraft="email a@b.com and @plxxx suffix" onListFileReferences={query}/>);
-    const editor=screen.getByRole('textbox') as HTMLTextAreaElement; await user.click(editor); editor.setSelectionRange(20,20); fireEvent.select(editor);
+    const editor=screen.getByRole('textbox') as HTMLDivElement; await user.click(editor); await act(async () => selectEditorText(editor, 20,20));
     await user.click(await screen.findByRole('option',{name:'plain.txt'}));
-    expect(editor.value).toBe('email a@b.com and @plain.txt suffix');
+    expect(editor.textContent!).toBe('email a@b.com and @plain.txt suffix');
   });
   it('asks explicitly for a root without calling discovery, and displays localized failures', async () => {
     const user=userEvent.setup();const query=vi.fn(async(_q:string,_signal:AbortSignal,_root?:string)=>({...result,status:'error' as const,code:'Denied',entries:[]}));
@@ -68,6 +69,6 @@ describe('composer path completion', () => {
     await user.type(screen.getByRole('textbox',{name:'Project directory'}),'/project');
     await user.click(screen.getByRole('button',{name:'Bind directory'})); expect(await screen.findByRole('alert')).toHaveTextContent('access was denied');
     expect(query.mock.calls[0]?.[0]).toBe('');
-    expect(screen.getByTestId('ai-workspace-composer')).toHaveValue('@');
+    expect(screen.getByTestId('ai-workspace-composer').textContent).toBe('@');
   });
 });

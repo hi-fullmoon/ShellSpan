@@ -57,7 +57,7 @@ describe('Composer queue visibility during submission', () => {
     expectQueue(false);
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
     rerender(seat());
-    expect(screen.getByRole('textbox')).toHaveValue('');
+    expect(screen.getByRole('textbox').textContent).toBe('');
     expectQueue(running);
 
     const mode = composer.pendingSubmissions[0].mode;

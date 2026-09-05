@@ -110,3 +110,20 @@ if (!('ariaDisabled' in Element.prototype)) {
     },
   });
 }
+
+// jsdom has selection ranges but no layout measurements; Lexical scrolls caret ranges.
+Range.prototype.getBoundingClientRect ??= () => new DOMRect();
+Range.prototype.getClientRects ??= () => Object.assign([], { item: () => null });
+
+// ClipboardEvent is absent in jsdom; Lexical uses its identity for plain-text paste.
+if (typeof ClipboardEvent === 'undefined') {
+  class TestClipboardEvent extends Event {
+    readonly clipboardData: DataTransfer | null;
+    constructor(type: string, init: ClipboardEventInit = {}) {
+      super(type, init);
+      this.clipboardData = init.clipboardData ?? null;
+    }
+  }
+  Object.defineProperty(globalThis, 'ClipboardEvent', { configurable: true, value: TestClipboardEvent });
+  Object.defineProperty(window, 'ClipboardEvent', { configurable: true, value: TestClipboardEvent });
+}

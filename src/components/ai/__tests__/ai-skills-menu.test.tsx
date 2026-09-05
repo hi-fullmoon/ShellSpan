@@ -1,5 +1,6 @@
+import { selectEditorText } from '@/test/composer-editor-user';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent from '@/test/composer-editor-user';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
@@ -22,24 +23,24 @@ describe('slash skill menu', () => {
     await user.type(editor, 'net');
     expect(screen.getAllByRole('option')).toHaveLength(1); expect(query).toHaveBeenCalledTimes(1);
     await user.keyboard('{Enter}');
-    expect(editor).toHaveValue('/network-diagnosis '); expect(submit).not.toHaveBeenCalled();
+    expect(editor.textContent).toBe('/network-diagnosis '); expect(submit).not.toHaveBeenCalled();
     await user.keyboard('{Enter}'); expect(submit).toHaveBeenCalledExactlyOnceWith('/network-diagnosis ');
   });
   it('replaces the token at the caret and keeps surrounding text and paths', async () => {
     const user = userEvent.setup(); const query = vi.fn(async () => builtinSkillPreview);
     render(<AiComposerSeat phase="hero" status="idle" defaultDraft="check /syszzz then /var/log" onListSkills={query} />);
-    const editor = screen.getByRole('textbox') as HTMLTextAreaElement;
-    await user.click(editor); editor.setSelectionRange(10, 10); fireEvent.select(editor);
+    const editor = screen.getByRole('textbox') as HTMLDivElement;
+    await user.click(editor); await act(async () => selectEditorText(editor, 10, 10));
     await user.click(await screen.findByRole('option', { name: /system-status/ }));
-    expect(editor).toHaveValue('check /system-status then /var/log');
+    expect(editor.textContent).toBe('check /system-status then /var/log');
     expect(screen.queryByRole('listbox')).toBeNull();
-    editor.setSelectionRange(editor.value.length, editor.value.length); fireEvent.select(editor);
+    await act(async () => selectEditorText(editor, editor.textContent!.length, editor.textContent!.length));
     expect(screen.queryByRole('listbox')).toBeNull();
   });
   it('supports arrow keys, Tab, Escape and reopening after editing', async () => {
     const user = userEvent.setup(); render(<AiComposerSeat phase="hero" status="idle" onListSkills={async () => builtinSkillPreview} />);
     const editor = screen.getByRole('textbox'); await user.type(editor, '/'); await screen.findByRole('option', { name: /system-status/ });
-    await user.keyboard('{ArrowDown}{Tab}'); expect(editor).toHaveValue('/service-diagnosis ');
+    await user.keyboard('{ArrowDown}{Tab}'); expect(editor.textContent).toBe('/service-diagnosis ');
     await user.clear(editor); await user.type(editor, '/'); await screen.findByRole('listbox');
     await user.keyboard('{Escape}'); expect(screen.queryByRole('listbox')).toBeNull();
     await user.clear(editor); await user.type(editor, '/'); expect(await screen.findByRole('listbox')).toBeVisible();
@@ -74,8 +75,8 @@ describe('slash skill menu', () => {
     render(<AiComposerSeat phase="hero" status="idle" onListSkills={async () => builtinSkillPreview} onListFileReferences={files} />);
     const editor = screen.getByRole('textbox'); await user.type(editor, '/磁盘');
     await user.click(await screen.findByRole('option', { name: /disk-cleanup/ }));
-    expect(editor).toHaveValue('/disk-cleanup ');
+    expect(editor.textContent).toBe('/disk-cleanup ');
     await user.type(editor, '@log'); await user.click(await screen.findByRole('option', { name: 'log.txt' }));
-    expect(editor).toHaveValue('/disk-cleanup @log.txt ');
+    expect(editor.textContent).toBe('/disk-cleanup @log.txt ');
   });
 });
