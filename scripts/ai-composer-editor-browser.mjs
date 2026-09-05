@@ -66,15 +66,25 @@ try {
     await editor.press(undo);
     assert.equal(await editor.textContent(), '', 'New conversation retains its own undo support');
     await update({ hero: false, status: 'running', draft: '' });
-    await page.getByRole('button', { name: 'Stop task', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Stop this turn', exact: true }).waitFor();
     await editor.press('Enter');
     assert.equal(await page.locator('[data-stop-count]').getAttribute('data-stop-count'), '0');
-    await page.getByRole('button', { name: 'Stop task', exact: true }).click();
+    await page.getByRole('button', { name: 'Stop this turn', exact: true }).click();
     assert.equal(await page.locator('[data-stop-count]').getAttribute('data-stop-count'), '1');
     await update({ terminal: true, status: 'completed' });
-    await page.waitForFunction(() => document.querySelector('[data-composer-editor]').contentEditable === 'false');
+    await page.waitForFunction(() => document.querySelector('[data-composer-editor]').contentEditable === 'true');
+    await editor.fill('draft in a closed conversation');
+    assert.ok(await page.getByRole('button', { name: 'Send', exact: true }).isDisabled());
     await update({ terminal: false, status: 'idle' });
     await page.waitForFunction(() => document.querySelector('[data-composer-editor]').contentEditable === 'true');
+    await update({ phase: 'stopping', status: 'running', draft: 'next message' });
+    await editor.fill('edited while stopping');
+    assert.ok(await page.locator('.ai-composer-primary').last().isDisabled());
+    await update({ phase: 'idle', status: 'idle' });
+    await page.waitForFunction(() => document.activeElement === document.querySelector('[data-composer-editor]'));
+    assert.equal(await editor.textContent(), 'edited while stopping');
+    assert.ok(await page.getByRole('button', { name: 'Send', exact: true }).isEnabled());
+    await update({ phase: undefined });
     for (const hero of [false, true]) {
       await update({ hero });
       for (const token of ['/', '@']) {
