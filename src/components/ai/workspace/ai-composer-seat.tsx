@@ -2,11 +2,12 @@ import { AiComposerEditor } from './ai-composer-editor';
 import { AiCompletionPopover } from './ai-completion-popover';
 import { useFileCompletion } from './use-file-completion';
 import { useSkillCompletion } from './use-skill-completion';
-import { useMemo, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import {
   ArrowUpIcon,
   ChevronDownIcon,
   CornerUpLeftIcon,
+  InfoIcon,
   ListPlusIcon,
   RotateCcwIcon,
   SquareIcon,
@@ -142,6 +143,7 @@ export function AiComposerSeat({
   onOpenApprovalDetails,
 }: AiComposerSeatProps): React.ReactNode {
   const { t } = useI18n();
+  const availabilityHintId = useId();
   const [localDraft, setLocalDraft] = useState(defaultDraft);
   const composingRef = useRef(false);
   const composingUntilRef = useRef(0);
@@ -215,12 +217,6 @@ export function AiComposerSeat({
     >
       <AiTaskStrip steps={taskSteps} />
       <div className="ai-composer-notices">
-        {unavailableReason && (
-          <Alert size="sm">
-            <AlertTitle>{t('agent.availability.title')}</AlertTitle>
-            <AlertDescription>{unavailableReason}</AlertDescription>
-          </Alert>
-        )}
         {waitingApproval && !pendingApproval && (
           <Alert size="sm">
             <AlertTitle>{t('ai.workspace.approvalWaiting')}</AlertTitle>
@@ -303,6 +299,7 @@ export function AiComposerSeat({
               onFocus={() => { completion.editorProps.onFocus(); skillCompletion.editorProps.onFocus(); }}
               onBlur={() => { completion.editorProps.onBlur(); skillCompletion.editorProps.onBlur(); }}
               data-testid="ai-workspace-composer"
+              aria-describedby={unavailableReason ? availabilityHintId : undefined}
               value={draft}
               historyKey={JSON.stringify([composerState?.sessionId, skillsScopeKey])}
               disabled={terminal || waitingApproval || waitingQuestion || unavailable || imageLocked}
@@ -455,6 +452,7 @@ export function AiComposerSeat({
                         onClick={() => submit('primary')}
                         disabled={submitDisabled}
                         aria-label={primaryLabel}
+                        aria-describedby={unavailableReason ? availabilityHintId : undefined}
                       />
                     )}
                   >
@@ -482,6 +480,19 @@ export function AiComposerSeat({
             {skillCompletion.panel ?? completion.panel}
           </AiCompletionPopover>
         </div>
+      )}
+      {unavailableReason && (
+        <Alert
+          id={availabilityHintId}
+          variant="subtle"
+          size="sm"
+          role="status"
+          aria-label={t('agent.availability.title')}
+          className="mx-2 w-auto"
+        >
+          <InfoIcon aria-hidden="true" />
+          <AlertDescription className="min-w-0 break-words">{unavailableReason}</AlertDescription>
+        </Alert>
       )}
       <span className="sr-only" aria-live="polite">
         {announcement ? t(`ai.workspace.announce.${announcement}` as LocaleKey) : null}

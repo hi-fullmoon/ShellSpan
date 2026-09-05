@@ -5,6 +5,84 @@
 
 @custom-variant dark (&:is([data-theme="dark"] *));
 
+.image-preview-overlay {
+  background: var(--image-preview-backdrop);
+  backdrop-filter: none;
+}
+
+.image-preview {
+  /* Preview controls retain their light appearance against the dark canvas. */
+  --secondary: var(--image-preview-controls);
+  --secondary-foreground: var(--image-preview-foreground);
+  --accent: var(--image-preview-control-hover);
+  --accent-foreground: var(--image-preview-foreground);
+  --ring: var(--image-preview-controls);
+  overflow: hidden;
+  color: var(--image-preview-controls);
+  -webkit-app-region: no-drag;
+}
+
+.image-preview-stage {
+  position: absolute;
+  inset: 80px 24px 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.image-preview-picture {
+  flex: none;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 10px;
+  object-fit: contain;
+  user-select: none;
+  touch-action: none;
+  cursor: zoom-in;
+}
+
+.image-preview-picture[data-status='loading'] {
+  visibility: hidden;
+}
+
+.image-preview-picture[data-status='error'] {
+  display: none;
+}
+
+.image-preview-picture[data-zoomed='true'] {
+  cursor: grab;
+}
+
+.image-preview-picture[data-dragging='true'] {
+  cursor: grabbing;
+}
+
+.image-preview-actions {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  gap: 8px;
+}
+
+.image-preview-zoom {
+  --secondary: var(--image-preview-control-hover);
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--image-preview-controls);
+  color: var(--image-preview-foreground);
+  transform: translateX(-50%);
+}
+
 @theme {
   /* Move the gap around a fixed circle to avoid rotating and resampling its outline. */
   --animate-spinner: spinner 1s linear infinite;
@@ -32,6 +110,10 @@
 }
 
 :root {
+  --image-preview-backdrop: rgb(0 0 0 / 88%);
+  --image-preview-controls: #f4f4f4;
+  --image-preview-control-hover: #dedede;
+  --image-preview-foreground: #202124;
   --app-bg: #f6f8fb;
   --app-surface: #ffffff;
   --app-surface-muted: #e9eff5;

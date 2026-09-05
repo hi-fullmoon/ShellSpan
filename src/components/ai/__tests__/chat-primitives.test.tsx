@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { Message, MessageScroller } from '../chat-primitives';
@@ -9,6 +10,78 @@ vi.mock('@/hooks/useI18n', () => ({
 }));
 
 describe('MessageScroller', () => {
+  it('reveals the positioned transcript after StrictMode remounts its effects', async () => {
+    const { container } = render(
+      <StrictMode>
+        <MessageScroller followKey="initial">
+          <div data-ai-node-key="response">Historical response</div>
+        </MessageScroller>
+      </StrictMode>,
+    );
+    const scroller = container.querySelector('[data-slot="message-scroller"]');
+    expect(scroller).toHaveClass('invisible');
+    await waitFor(() => expect(scroller).not.toHaveClass('invisible'));
+  });
+
+  it.each([
+    { offset: -100, scrollTop: 300 },
+    { offset: 100, scrollTop: 100 },
+  ])('restores an end position at offset $offset without blank space and resumes following', async (anchor) => {
+    let scrollTop = 0;
+    let itemCount = 2;
+    const thread = () => (
+      <MessageScroller
+        followKey={String(itemCount)}
+        initialAnchor={{ nodeKey: 'last-response', ...anchor }}
+      >
+        <div data-ai-node-key="earlier">Earlier content</div>
+        <div
+          data-ai-node-key="last-response"
+          ref={(node) => {
+            if (!node) return;
+            const viewport = node.closest<HTMLElement>('[data-message-scroller-viewport]')!;
+            const content = node.closest<HTMLElement>('[data-slot="message-scroller-content"]')!;
+            const rect = (top: number, height: number) => ({
+              top, bottom: top + height, height, left: 0, right: 320, width: 320,
+              x: 0, y: top, toJSON: () => ({}),
+            });
+            Object.defineProperties(viewport, {
+              clientHeight: { configurable: true, value: 200 },
+              scrollHeight: {
+                configurable: true,
+                get: () => 100 + itemCount * 100 + (Number.parseFloat((content.lastElementChild as HTMLElement).style.height) || 0),
+              },
+              scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+              scrollTo: { configurable: true, value: ({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); } },
+              getBoundingClientRect: { configurable: true, value: () => rect(0, 200) },
+            });
+            // A reopened/collapsed transcript is shorter than when this offset was saved.
+            content.querySelectorAll<HTMLElement>('[data-slot="message-scroller-item"]').forEach((item, index) => {
+              item.getBoundingClientRect = () => rect((index === 0 ? 0 : 100 + index * 100) - scrollTop, index === 0 ? 200 : 100);
+            });
+          }}
+        >
+          A now shorter response
+        </div>
+        {itemCount > 2 && <div data-ai-node-key="new-response">More output</div>}
+      </MessageScroller>
+    );
+    const { container, rerender } = render(thread());
+
+    await waitFor(() => {
+      expect(scrollTop).toBe(100);
+      expect(container.querySelector('[data-message-scroller-spacer]')).toHaveAttribute('hidden');
+    });
+    // The deferred correction for content-visibility must also remain clamped.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(scrollTop).toBe(100);
+    expect(container.querySelector('[data-message-scroller-spacer]')).toHaveAttribute('hidden');
+
+    itemCount = 3;
+    rerender(thread());
+    await waitFor(() => expect(scrollTop).toBe(200));
+  });
+
   it('composes ScrollArea with the message scroller viewport as the sole scroll owner', async () => {
     const { container } = render(
       <MessageScroller followKey="1" contentClassName="gap-2 px-3 py-3" ariaLabel="Conversation">
@@ -52,10 +125,19 @@ describe('MessageScroller', () => {
     });
   });
 
-  it.each(['wheel', 'scrollbar'])('follows at the live edge, detaches on %s input, and jumps back to latest', async (input) => {
+  it.each([
+    { input: 'wheel', restored: false },
+    { input: 'scrollbar', restored: false },
+    { input: 'wheel', restored: true },
+    { input: 'scrollbar', restored: true },
+  ])('follows at the live edge, detaches on $input input, and jumps back to latest (restored: $restored)', async ({ input, restored }) => {
     let itemCount = 3;
     const thread = () => (
-      <MessageScroller followKey={String(itemCount)} ariaLabel="Conversation">
+      <MessageScroller
+        followKey={String(itemCount)}
+        ariaLabel="Conversation"
+        initialAnchor={restored ? { nodeKey: 'message-2', offset: 0, scrollTop: 200, atBottom: true } : undefined}
+      >
         {Array.from({ length: itemCount }, (_, index) => (
           <Message key={`message-${index}`} role="assistant">
             Message {index}
@@ -147,6 +229,11 @@ describe('MessageScroller', () => {
 
     fireEvent.click(jump!);
     expect(scrollTo).toHaveBeenCalledWith({ behavior: 'smooth', top: 400 });
+
+    // Jump-to-latest resumes following subsequent output, too.
+    itemCount = 6;
+    rerender(thread());
+    await waitFor(() => expect(scrollTop).toBe(500));
   });
 
   it('keeps the first visible node anchored when older rows are prepended', async () => {
@@ -197,7 +284,7 @@ describe('MessageScroller', () => {
     };
     installRects();
     fireEvent.scroll(viewport);
-    expect(saved).toHaveBeenLastCalledWith({ nodeKey: 'node-1', offset: 0, scrollTop: 100 });
+    expect(saved).toHaveBeenLastCalledWith({ nodeKey: 'node-1', offset: 0, scrollTop: 100, atBottom: false });
 
     keys = ['older', ...keys];
     rerender(thread());
@@ -231,8 +318,12 @@ describe('MessageScroller', () => {
 
     fireEvent.scroll(viewport);
 
-    expect(saved).toHaveBeenLastCalledWith({ nodeKey: 'node-250', offset: -50, scrollTop: 25_050 });
+    expect(saved).toHaveBeenLastCalledWith({ nodeKey: 'node-250', offset: -50, scrollTop: 25_050, atBottom: false });
     expect(measureMessage).not.toHaveBeenCalled();
+
+    viewport.scrollTop = 25_500;
+    fireEvent.scroll(viewport);
+    expect(saved).toHaveBeenLastCalledWith({ nodeKey: 'node-255', offset: 0, scrollTop: 25_500, atBottom: true });
   });
 
   it('does not replay saved scroll positions when the parent updates during reading', async () => {
