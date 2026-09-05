@@ -81,6 +81,7 @@ function selectOffsets(start: number, end: number) {
 interface Props extends Omit<HTMLAttributes<HTMLDivElement>, 'onChange' | 'onSelect' | 'onKeyDown'> {
   ref?: Ref<ComposerEditorHandle>;
   value: string;
+  historyKey?: string;
   disabled?: boolean;
   placeholder: string;
   commandNames: readonly string[];
@@ -90,7 +91,7 @@ interface Props extends Omit<HTMLAttributes<HTMLDivElement>, 'onChange' | 'onSel
 }
 
 /** Lexical owns editing, history and token selection; persisted drafts remain plain text. */
-export function AiComposerEditor({ ref, value, disabled, placeholder, commandNames, onChange, onSelectionChange, onKeyDown, onPaste, ...props }: Props) {
+export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder, commandNames, onChange, onSelectionChange, onKeyDown, onPaste, ...props }: Props) {
   const element = useRef<HTMLDivElement>(null);
   const latest = useRef({ onChange, onSelectionChange, onKeyDown, commandNames });
   latest.current = { onChange, onSelectionChange, onKeyDown, commandNames };
@@ -103,7 +104,6 @@ export function AiComposerEditor({ ref, value, disabled, placeholder, commandNam
   useLayoutEffect(() => {
     editor.setRootElement(element.current);
     const removePlain = registerPlainText(editor);
-    const removeHistory = registerHistory(editor, createEmptyHistoryState(), 300);
     // Run the composer's submit/completion policy before Lexical's Enter handling.
     const removeKeys = editor.registerCommand(KEY_DOWN_COMMAND, event => {
       latest.current.onKeyDown?.(event);
@@ -141,7 +141,7 @@ export function AiComposerEditor({ ref, value, disabled, placeholder, commandNam
     };
     if (typeof ref === 'function') ref(handle); else if (ref) ref.current = handle;
     return () => {
-      removeUpdate(); removeTransform(); removeKeys(); removeHistory(); removePlain(); editor.setRootElement(null);
+      removeUpdate(); removeTransform(); removeKeys(); removePlain(); editor.setRootElement(null);
       if (typeof ref === 'function') ref(null); else if (ref) ref.current = null;
     };
   }, [editor, ref]);
@@ -158,6 +158,13 @@ export function AiComposerEditor({ ref, value, disabled, placeholder, commandNam
       if (focused) selectOffsets(value.length, value.length);
     }, { discrete: true, tag: HISTORY_PUSH_TAG });
   }, [editor, value]);
+  useLayoutEffect(() => {
+    // External draft restoration runs first. A new owner starts from that draft,
+    // so undo/redo can never restore text belonging to the previous conversation.
+    const history = createEmptyHistoryState();
+    history.current = { editor, editorState: editor.getEditorState() };
+    return registerHistory(editor, history, 300);
+  }, [editor, historyKey]);
   return <div className="ai-composer-editor-wrap" onClick={event => { if (event.target === event.currentTarget && !disabled) editor.focus(); }}>
     <div {...props} onPasteCapture={event => { onPaste?.(event); if (event.defaultPrevented) event.stopPropagation(); }} ref={element} contentEditable={!disabled} suppressContentEditableWarning
       role="textbox" aria-multiline="true" aria-label={placeholder} aria-disabled={disabled || undefined}
