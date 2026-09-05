@@ -1596,7 +1596,7 @@ async fn live_provider_basic_round_glm() {
 #[tokio::test]
 async fn every_profile_proxy_request_stream_usage_and_history_fixture() {
     let fixtures: Vec<Value> = serde_json::from_str(include_str!(
-        "../../../src/lib/__tests__/provider-contract-fixtures.json"
+        "../../../src/lib/ai/__tests__/provider-contract-fixtures.json"
     ))
     .unwrap();
     for fixture in fixtures {

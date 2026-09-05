@@ -19,7 +19,7 @@ mod tests {
     #[test]
     fn shared_frontend_fixtures_validate_and_encode_official_wire_shapes() {
         let fixtures: Vec<Value> = serde_json::from_str(include_str!(
-            "../../../src/lib/__tests__/provider-contract-fixtures.json"
+            "../../../src/lib/ai/__tests__/provider-contract-fixtures.json"
         ))
         .unwrap();
         for fixture in fixtures {
