@@ -16,7 +16,7 @@ import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAppStore } from '@/stores/appStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import type { ResolvedModel } from '@/lib/provider-contract';
+import type { ResolvedModel } from '@/lib/ai/provider-contract';
 
 const provider = {
   id: 'provider-test',

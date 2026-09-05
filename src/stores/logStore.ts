@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { LogFileInfo, LogSource } from '@/types';
-import { invokeListLogFiles, invokeReadLogFile } from '@/lib/tauri';
+import { invokeListLogFiles, invokeReadLogFile } from '@/lib/ipc/tauri';
 
 function getLatestFileForSource(
   files: LogFileInfo[],

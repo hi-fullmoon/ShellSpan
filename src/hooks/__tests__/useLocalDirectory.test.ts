@@ -21,7 +21,7 @@ const tauri = vi.hoisted(() => ({
   invokeSupersedeRemoteDirectoryRequest: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('@/lib/tauri', () => tauri);
+vi.mock('@/lib/ipc/tauri', () => tauri);
 
 vi.mock('@/lib/error', () => ({
   getLocalizedErrorMessage: vi.fn().mockImplementation((error: unknown) => {

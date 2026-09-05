@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { invokeResolveAiSelection, isTauriRuntime } from '@/lib/tauri';
-import { useResolvedModel } from '@/lib/provider-contract';
+import { invokeResolveAiSelection, isTauriRuntime } from '@/lib/ipc/tauri';
+import { useResolvedModel } from '@/lib/ai/provider-contract';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,7 +18,7 @@ import { useI18n } from '@/hooks/useI18n';
 import {
   effectiveReasoningEffort,
   reasoningEffortOptions,
-} from '@/lib/ai-reasoning';
+} from '@/lib/ai/ai-reasoning';
 import type { LocaleKey } from '@/locales';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
@@ -105,7 +105,7 @@ export function AiComposerModelSelector({
     ? { name: selection.id, preset: 'custom' as const, ...availableProviders.find((item) => item.id === selection.id && item.model === selection.model), ...selection }
     : defaultProvider;
   const legacyResolution=useResolvedModel(!routeSnapshot ? current : undefined);
-  const [validatedModel,setValidatedModel]=useState<import('@/lib/provider-contract').ResolvedModel>();
+  const [validatedModel,setValidatedModel]=useState<import('@/lib/ai/provider-contract').ResolvedModel>();
   const [selectionError,setSelectionError]=useState<string>();
   useEffect(()=>{
     if(!routeSnapshot||!current){setValidatedModel(undefined);setSelectionError(undefined);return;}

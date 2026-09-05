@@ -17,7 +17,7 @@ import {
   formatPermissionOctal,
   formatOwner,
   formatGroup,
-} from '@/lib/sftp-utils';
+} from '@/lib/sftp/sftp-utils';
 
 export interface SftpPropertiesDialogProps {
   entry?: FileEntry;

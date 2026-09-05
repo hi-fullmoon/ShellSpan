@@ -3,9 +3,9 @@ import { mockIPC, clearMocks } from '@tauri-apps/api/mocks';
 import fixture from '@/test/fixtures/agent-skills-runtime.json';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import { projectAgentChatNodes } from '../conversation-projection';
-import { projectAgentActivity } from '@/lib/agent-session-projection';
+import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { skillContexts } from '../skill-projection';
-import { invokeListAgentRuntimeSkills } from '@/lib/tauri';
+import { invokeListAgentRuntimeSkills } from '@/lib/ipc/tauri';
 const events=fixture as unknown as readonly AgentSessionEvent[];
 afterEach(clearMocks);
 describe('Skills real Runtime log projections and IPC',()=>{

@@ -12,11 +12,11 @@ import {
   invokeStartPortForward,
   invokeStopAllPortForwards,
   invokeStopPortForward,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { createOperationId } from '@/lib/operation-id';
 import { getErrorMessage } from '@/lib/error';
-import { promptForMissingPassword } from '@/lib/password-prompt';
-import { ensureKeychainKeyForProfile } from '@/lib/keychain-key-prompt';
+import { promptForMissingPassword } from '@/lib/connections/password-prompt';
+import { ensureKeychainKeyForProfile } from '@/lib/connections/keychain-key-prompt';
 import { useProfileStore } from '@/stores/profileStore';
 import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';

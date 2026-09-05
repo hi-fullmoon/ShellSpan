@@ -6,7 +6,7 @@ import { useProfileStore } from '@/stores/profileStore';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeGetSessionStatus: vi.fn().mockResolvedValue({
     sessionId: 's1',
     status: 'connected',
@@ -41,24 +41,24 @@ vi.mock('@/lib/tauri', () => ({
   })),
 }));
 
-vi.mock('@/lib/password-prompt', () => ({
+vi.mock('@/lib/connections/password-prompt', () => ({
   promptForMissingPassword: vi.fn(
     (profile) => Promise.resolve({ ...profile, password: 'mock-pass' }),
   ),
 }));
 
-vi.mock('@/lib/keychain-key-prompt', () => ({
+vi.mock('@/lib/connections/keychain-key-prompt', () => ({
   ensureKeychainKeyForProfile: vi.fn((profile) => Promise.resolve(profile)),
   getMissingKeychainKeyTarget: vi.fn().mockReturnValue(null),
   promptForMissingKeychainKey: vi.fn().mockResolvedValue(null),
 }));
 
-import { promptForMissingPassword } from '@/lib/password-prompt';
+import { promptForMissingPassword } from '@/lib/connections/password-prompt';
 import {
   ensureKeychainKeyForProfile,
   getMissingKeychainKeyTarget,
   promptForMissingKeychainKey,
-} from '@/lib/keychain-key-prompt';
+} from '@/lib/connections/keychain-key-prompt';
 
 const initialTerminal = useTerminalStore.getState();
 const initialProfile = useProfileStore.getState();
@@ -108,7 +108,7 @@ describe('useReconnectSession', () => {
     const terminal = controller.terminal;
 
     const { invokeCreateLocalSession, invokeCreateSession, invokeCloseSession } =
-      await import('@/lib/tauri');
+      await import('@/lib/ipc/tauri');
     const { result } = renderHook(() => useReconnectSession());
     await result.current('s1');
 
@@ -128,7 +128,7 @@ describe('useReconnectSession', () => {
       username: 'u',
     });
 
-    const { invokeCreateLocalSession } = await import('@/lib/tauri');
+    const { invokeCreateLocalSession } = await import('@/lib/ipc/tauri');
     vi.mocked(invokeCreateLocalSession).mockRejectedValueOnce(new Error('boom'));
 
     const { result } = renderHook(() => useReconnectSession());
@@ -179,7 +179,7 @@ describe('useReconnectSession', () => {
     controller.write('existing history\r\n');
     const terminal = controller.terminal;
 
-    const { invokeCreateSession, invokeCloseSession } = await import('@/lib/tauri');
+    const { invokeCreateSession, invokeCloseSession } = await import('@/lib/ipc/tauri');
     const { result } = renderHook(() => useReconnectSession());
     await result.current('s1');
 
@@ -215,7 +215,7 @@ describe('useReconnectSession', () => {
       'p1',
     );
 
-    const { invokeCreateSession, invokeCloseSession } = await import('@/lib/tauri');
+    const { invokeCreateSession, invokeCloseSession } = await import('@/lib/ipc/tauri');
     let resolveCreate!: (summary: {
       sessionId: string;
       title: string;
@@ -259,7 +259,7 @@ describe('useReconnectSession', () => {
       'p1',
     );
 
-    const { invokeCreateSession } = await import('@/lib/tauri');
+    const { invokeCreateSession } = await import('@/lib/ipc/tauri');
     vi.mocked(invokeCreateSession).mockRejectedValueOnce(new Error('boom'));
 
     const { result } = renderHook(() => useReconnectSession());
@@ -292,7 +292,7 @@ describe('useReconnectSession', () => {
       'p1',
     );
 
-    const { invokeCreateSession } = await import('@/lib/tauri');
+    const { invokeCreateSession } = await import('@/lib/ipc/tauri');
     vi.mocked(invokeCreateSession).mockClear();
     vi.mocked(invokeCreateSession)
       .mockRejectedValueOnce({

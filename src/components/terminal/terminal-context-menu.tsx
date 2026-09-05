@@ -4,7 +4,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useConnectSession } from '@/hooks/useConnectSession';
-import { invokeCloseSession } from '@/lib/tauri';
+import { invokeCloseSession } from '@/lib/ipc/tauri';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { CompactPromptDialog } from '@/components/ui/compact-dialog';
 import { Separator } from '@/components/ui/separator';

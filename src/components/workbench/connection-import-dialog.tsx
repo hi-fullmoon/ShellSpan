@@ -11,7 +11,7 @@ import {
 import { Dialog } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { useI18n } from '@/hooks/useI18n';
-import type { ConnectionImportPreview } from '@/lib/connection-import';
+import type { ConnectionImportPreview } from '@/lib/connections/connection-import';
 
 interface ConnectionImportDialogProps {
   open: boolean;

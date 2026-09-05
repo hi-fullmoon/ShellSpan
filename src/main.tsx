@@ -5,21 +5,21 @@ import { App } from './App';
 import { AppErrorBoundary } from './components/app-error-boundary';
 import { initGlobalErrorLogging } from './lib/logger';
 import { applyTheme } from './lib/theme';
-import { parseTerminalWorkspace } from './lib/terminal-workspace';
-import { parseSftpWorkspace } from './lib/sftp-workspace';
+import { parseTerminalWorkspace } from './lib/terminal/terminal-workspace';
+import { parseSftpWorkspace } from './lib/sftp/sftp-workspace';
 import {
   invokeClearSftpWorkspace,
   invokeClearTerminalWorkspace,
   invokeLoadSftpWorkspace,
   invokeLoadTerminalWorkspace,
-} from './lib/tauri';
+} from './lib/ipc/tauri';
 import { useAppStore } from './stores/appStore';
 import { useProfileStore } from './stores/profileStore';
 import { useRecentProfilesStore } from './stores/recentProfilesStore';
 import { useTerminalStore } from './stores/terminalStore';
 import { useAiSettingsStore } from './stores/aiSettingsStore';
 import { useSftpStore } from './stores/sftpStore';
-import { hydrateTransferResumeCandidates } from './lib/transfer-resume';
+import { hydrateTransferResumeCandidates } from './lib/sftp/transfer-resume';
 
 initGlobalErrorLogging();
 

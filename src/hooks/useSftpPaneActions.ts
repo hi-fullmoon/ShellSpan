@@ -9,7 +9,7 @@ import {
   invokeRenameLocalPath,
   invokeTrashLocalPaths,
   invokePasteLocalPaths,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { parentPortablePath, parentPosixPath } from '@/lib/path-utils';
 import { useSftpConnection } from '@/hooks/useSftpConnection';

@@ -21,7 +21,7 @@ import {
   clearTerminalOutput,
   getRecentTerminalOutput,
   subscribeTerminalOutput,
-} from '@/lib/terminal-output-buffer';
+} from '@/lib/terminal/terminal-output-buffer';
 
 const instrumentation = vi.hoisted(() => ({
   ipcCalls: 0,
@@ -48,7 +48,7 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
-import { invokeWriteSession } from '@/lib/tauri';
+import { invokeWriteSession } from '@/lib/ipc/tauri';
 
 const STANDARD_BENCH = {
   time: 1_000,

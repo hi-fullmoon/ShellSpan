@@ -1,7 +1,7 @@
 // Test-only IPC responses, checked byte-for-byte against Rust resolution.
 import fixtures from '../../protocol/llm/fixtures/resolved-models.json';
 import type { AiProviderConfig } from '@/types/ai';
-import type { ResolvedModel } from '@/lib/provider-contract';
+import type { ResolvedModel } from '@/lib/ai/provider-contract';
 
 export async function fixtureResolve(command: string, args?: Record<string, unknown>): Promise<unknown> {
   if (command !== 'ai_resolve_model') return undefined;

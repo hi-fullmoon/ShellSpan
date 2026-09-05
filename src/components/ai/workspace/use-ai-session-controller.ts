@@ -6,7 +6,7 @@ import { questionKey } from '@/types/agent-question';
 import { useImageDraft } from './use-image-draft';
 import { sessionProviderConfig } from '@/lib/ai/session-settings';
 import type { AiProviderConfig } from '@/types/ai';
-import { requireVision } from '@/lib/vision-contract';
+import { requireVision } from '@/lib/ai/vision-contract';
 import { resolveAiSubmission } from '@/lib/ai/submission-policy';
 import {
   createAiComposerState,
@@ -43,7 +43,7 @@ import { t } from '@/locales';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore';
-import { isTauriRuntime } from '@/lib/tauri';
+import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import type { AppSection } from '@/types';
 import type { AgentPermissionMode } from '@/types/agent-approval';

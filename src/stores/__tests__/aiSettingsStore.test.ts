@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_RETRY_POLICY } from '@/lib/retry-policy';
+import { DEFAULT_RETRY_POLICY } from '@/lib/ai/retry-policy';
 import {
   flushAiSettingsPreferences,
   parseAiPreferences,
@@ -11,7 +11,7 @@ const tauri = vi.hoisted(() => ({
   invokeSavePreferences: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('@/lib/tauri', () => tauri);
+vi.mock('@/lib/ipc/tauri', () => tauri);
 
 const initialState = useAiSettingsStore.getState();
 

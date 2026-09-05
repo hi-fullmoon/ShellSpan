@@ -8,7 +8,7 @@ import {
 } from '../provider-setup-dialog';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
-import { DEFAULT_RETRY_POLICY } from '@/lib/retry-policy';
+import { DEFAULT_RETRY_POLICY } from '@/lib/ai/retry-policy';
 
 const mocks = vi.hoisted(() => ({
   native: false,
@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   invokeSavePreferences: vi.fn(),
 }));
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   isTauriRuntime: () => mocks.native,
   invokeDeleteAiApiKey: mocks.invokeDeleteAiApiKey,
   invokeHasAiApiKey: mocks.invokeHasAiApiKey,
@@ -530,7 +530,7 @@ describe('ProviderSetupDialog', () => {
     const provider = useAiSettingsStore.getState().providers[0];
     const resolved = await (await import('@/test/llm-resolver-fixture')).fixtureResolve(
       'ai_resolve_model', { provider },
-    ) as import('@/lib/provider-contract').ResolvedModel;
+    ) as import('@/lib/ai/provider-contract').ResolvedModel;
     const routeSave = vi.fn().mockResolvedValue(undefined);
     const route = {
       id: provider.id,
@@ -590,7 +590,7 @@ describe('ProviderSetupDialog', () => {
   it('keeps RouteStore as the sole persisted state when a native save fails', async () => {
     mocks.native=true;
     const provider=useAiSettingsStore.getState().providers[0];
-    const resolved=await (await import('@/test/llm-resolver-fixture')).fixtureResolve('ai_resolve_model',{provider}) as import('@/lib/provider-contract').ResolvedModel;
+    const resolved=await (await import('@/test/llm-resolver-fixture')).fixtureResolve('ai_resolve_model',{provider}) as import('@/lib/ai/provider-contract').ResolvedModel;
     const routeSave=vi.fn().mockRejectedValue(new Error('REVISION_CONFLICT'));
     useLlmRoutesStore.setState({
       ...initialRoutesState,

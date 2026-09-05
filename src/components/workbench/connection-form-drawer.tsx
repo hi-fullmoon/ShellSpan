@@ -33,7 +33,7 @@ import {
   invokePreflightConnection,
   invokeReadTextFile,
   invokeTrustHost,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
 import { createOperationId } from '@/lib/operation-id';
 import type {

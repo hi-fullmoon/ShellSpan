@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { useRecentProfilesStore } from '../recentProfilesStore';
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeListRecentProfiles: vi.fn().mockResolvedValue([]),
   invokeTouchRecentProfile: vi.fn().mockResolvedValue(undefined),
   invokeRemoveRecentProfile: vi.fn().mockResolvedValue(undefined),

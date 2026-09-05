@@ -8,7 +8,7 @@ import { useSftpStore } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
 import type { ConnectionProfile } from '@/types';
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   buildRemoteConnectionRequest: vi.fn((profile: ConnectionProfile) => profile),
   invokeCheckHostKey: vi.fn(),
   invokeTrustHost: vi.fn(),
@@ -31,15 +31,15 @@ vi.mock('@/lib/tauri', () => ({
   invokeListSftpBookmarks: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock('@/lib/password-prompt', async (importActual) => {
-  const actual = await importActual<typeof import('@/lib/password-prompt')>();
+vi.mock('@/lib/connections/password-prompt', async (importActual) => {
+  const actual = await importActual<typeof import('@/lib/connections/password-prompt')>();
   return {
     ...actual,
     promptForMissingPassword: vi.fn((p: ConnectionProfile) => Promise.resolve(p)),
   };
 });
 
-vi.mock('@/lib/keychain-key-prompt', () => ({
+vi.mock('@/lib/connections/keychain-key-prompt', () => ({
   ensureKeychainKeyForProfile: vi.fn().mockImplementation((p) => Promise.resolve(p)),
 }));
 
@@ -51,11 +51,11 @@ import {
   invokeStoreProfilePassword,
   invokeTrustHost,
   invokeWarmRemoteConnection,
-} from '@/lib/tauri';
-import { promptForMissingPassword } from '@/lib/password-prompt';
+} from '@/lib/ipc/tauri';
+import { promptForMissingPassword } from '@/lib/connections/password-prompt';
 import {
   ensureKeychainKeyForProfile,
-} from '@/lib/keychain-key-prompt';
+} from '@/lib/connections/keychain-key-prompt';
 
 const profile: ConnectionProfile = {
   id: 'p1',

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { parseRetryPolicy, type AiRetryPolicy } from '@/lib/retry-policy';
+import { parseRetryPolicy, type AiRetryPolicy } from '@/lib/ai/retry-policy';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type {
   AiProviderConfig,
@@ -10,14 +10,14 @@ import type {
 import {
   invokeLoadPreferences,
   invokeSavePreferences,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
 import { generateId } from '@/lib/utils';
 import {
   isAiReasoningOption,
-} from '@/lib/ai-reasoning';
+} from '@/lib/ai/ai-reasoning';
 
-import { isProviderProfile, resolveProviderProfile } from '@/lib/provider-contract';
+import { isProviderProfile, resolveProviderProfile } from '@/lib/ai/provider-contract';
 
 const logger = createLogger('aiSettingsStore');
 

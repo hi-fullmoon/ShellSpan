@@ -1,4 +1,4 @@
-import { redactTerminalSecrets } from '@/lib/terminal-output-buffer';
+import { redactTerminalSecrets } from '@/lib/terminal/terminal-output-buffer';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -9,8 +9,8 @@ export interface Logger {
   error(message: string, ...details: unknown[]): void;
 }
 
-// Kept in sync with isTauriRuntime() in '@/lib/tauri'. Duplicated on purpose:
-// the logger must stay dependency-free because '@/lib/tauri' is frequently
+// Kept in sync with isTauriRuntime() in '@/lib/ipc/tauri'. Duplicated on purpose:
+// the logger must stay dependency-free because '@/lib/ipc/tauri' is frequently
 // vi.mock'ed in tests, and tauri.ts itself imports this module.
 function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;

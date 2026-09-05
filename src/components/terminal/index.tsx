@@ -7,12 +7,12 @@ import { Button } from '@/components/ui/button';
 import { SquareTerminalIcon } from 'lucide-react';
 import { SplitPane } from '@/components/ui/split-pane';
 import { useConnectSession } from '@/hooks/useConnectSession';
-import { serializeTerminalWorkspace } from '@/lib/terminal-workspace';
+import { serializeTerminalWorkspace } from '@/lib/terminal/terminal-workspace';
 import {
   clearTerminalWorkspace,
   flushTerminalWorkspace,
   stageTerminalWorkspace,
-} from '@/lib/terminal-workspace-persistence';
+} from '@/lib/terminal/terminal-workspace-persistence';
 import { createLogger } from '@/lib/logger';
 import { cn } from '@/lib/utils';
 import { terminalRegistry } from './registry/terminal-registry';

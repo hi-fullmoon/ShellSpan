@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { DisconnectEvent, HealthStatus, SystemHealth } from '@/types';
-import { invokeGetSystemHealth } from '@/lib/tauri';
-import { deriveHealthStatus } from '@/lib/monitor';
+import { invokeGetSystemHealth } from '@/lib/ipc/tauri';
+import { deriveHealthStatus } from '@/lib/host/monitor';
 
 export const MONITOR_POLL_INTERVAL_MS = 2000;
 export const MONITOR_HISTORY_LIMIT = 60;

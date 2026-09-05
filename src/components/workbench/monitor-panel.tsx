@@ -19,7 +19,7 @@ import { MONITOR_POLL_INTERVAL_MS, useMonitorStore } from '@/stores/monitorStore
 import type { ClosedReasonKind, DisconnectEvent, HealthStatus } from '@/types';
 import type { LocaleKey } from '@/locales';
 import { cn, formatBytes } from '@/lib/utils';
-import { formatClockTime, formatDiskHint, formatUptime } from '@/lib/monitor';
+import { formatClockTime, formatDiskHint, formatUptime } from '@/lib/host/monitor';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

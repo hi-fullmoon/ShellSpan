@@ -1,13 +1,13 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ResolvedModel } from '@/lib/provider-contract';
+import type { ResolvedModel } from '@/lib/ai/provider-contract';
 import type { ProviderRoute, RouteSnapshot } from '@/types/ai';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 
 const mocks=vi.hoisted(()=>({resolve:vi.fn()}));
-vi.mock('@/lib/tauri',()=>({isTauriRuntime:()=>true,invokeResolveAiSelection:mocks.resolve}));
+vi.mock('@/lib/ipc/tauri',()=>({isTauriRuntime:()=>true,invokeResolveAiSelection:mocks.resolve}));
 
 import { AiComposerModelSelector } from '../workspace/ai-composer-model-selector';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';

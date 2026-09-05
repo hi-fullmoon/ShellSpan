@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import { beforeEach, vi } from 'vitest';
-import { clearDirectoryListingCache } from '@/lib/directory-listing-cache';
+import { clearDirectoryListingCache } from '@/lib/sftp/directory-listing-cache';
 
 // The directory listing cache is module-level state; reset it between tests
 // so cached entries never leak across test cases.

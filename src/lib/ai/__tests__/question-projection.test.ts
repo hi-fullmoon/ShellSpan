@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { projectQuestions } from '../question-projection';
 import { projectAgentChatNodes } from '../conversation-projection';
-import { projectAgentActivity } from '@/lib/agent-session-projection';
+import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import {
   agentSessionEventFixture,
   sessionEvent,
 } from '@/test/fixtures/agent-session';
-import { invokeAnswerAgentRuntimeQuestion } from '@/lib/tauri';
+import { invokeAnswerAgentRuntimeQuestion } from '@/lib/ipc/tauri';
 import { mockIPC, clearMocks } from '@tauri-apps/api/mocks';
 import type { AnswerQuestionInput } from '@/types/agent-question';
 

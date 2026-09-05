@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
-import { projectAgentActivity } from '@/lib/agent-session-projection';
-import { AgentSessionCommittedClient } from '@/lib/agent-session-client';
+import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
+import { AgentSessionCommittedClient } from '@/lib/ai/agent-session-client';
 import {
   agentSessionView,
   createAgentSessionAdapter,

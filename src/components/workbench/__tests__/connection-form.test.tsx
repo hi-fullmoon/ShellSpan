@@ -28,7 +28,7 @@ const tauriMocks = vi.hoisted(() => ({
   trustHost: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeCancelConnectionPreflight: tauriMocks.cancelPreflight,
   invokePickPrivateKeyFile: tauriMocks.pickPrivateKey,
   invokePreflightConnection: tauriMocks.preflight,

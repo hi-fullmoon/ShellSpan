@@ -25,7 +25,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
-import { formatSize } from '@/lib/sftp-utils';
+import { formatSize } from '@/lib/sftp/sftp-utils';
 import {
   parseArchiveEntries,
   parseDelimitedTable,
@@ -33,7 +33,7 @@ import {
   parseOfficePreview,
   type SpreadsheetPreviewSheet,
   type TabularPreview,
-} from '@/lib/sftp-rich-preview';
+} from '@/lib/sftp/sftp-rich-preview';
 import { cn } from '@/lib/utils';
 
 export const PlainTextPreview: React.FC<{ content: string }> = ({ content }) => {

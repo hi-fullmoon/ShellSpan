@@ -47,13 +47,13 @@ import type {
   TerminalRightClickBehavior,
   ThemeMode,
 } from '@/types';
-import { invokePickLocalFolder } from '@/lib/tauri';
+import { invokePickLocalFolder } from '@/lib/ipc/tauri';
 import type { LocaleKey } from '@/locales';
 import { AiSettingsSection } from '@/components/ai/ai-settings-section';
-import { clearTerminalWorkspace } from '@/lib/terminal-workspace-persistence';
-import { clearSftpWorkspace } from '@/lib/sftp-workspace-persistence';
-import { getPetdexStatus, listenToPetdexStatus, testPetdexConnection } from '@/lib/petdex';
-import { openPetdexPhase3Feedback } from '@/lib/petdex-feedback';
+import { clearTerminalWorkspace } from '@/lib/terminal/terminal-workspace-persistence';
+import { clearSftpWorkspace } from '@/lib/sftp/sftp-workspace-persistence';
+import { getPetdexStatus, listenToPetdexStatus, testPetdexConnection } from '@/lib/petdex/petdex';
+import { openPetdexPhase3Feedback } from '@/lib/petdex/petdex-feedback';
 import type { PetdexConnectionStatus } from '@/types';
 import { SettingRow, SettingsGroup } from './settings-layout';
 

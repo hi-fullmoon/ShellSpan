@@ -3,14 +3,14 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { useImageDraft } from '../workspace/use-image-draft';
 import type { ImageDraft } from '@/lib/ai/image-drafts';
-import { requireVision } from '@/lib/vision-contract';
-import { providerCapabilities, loadResolvedModel } from '@/lib/provider-contract';
+import { requireVision } from '@/lib/ai/vision-contract';
+import { providerCapabilities, loadResolvedModel } from '@/lib/ai/provider-contract';
 import { initI18n } from '@/locales';
 import { useToastStore } from '@/stores/toastStore';
 
 const mock = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), prepare: vi.fn(), cancel: vi.fn() }));
 vi.mock('@/lib/ai/image-drafts', () => ({ readImageDraft: mock.read, writeImageDraft: mock.write }));
-vi.mock('@/lib/tauri', () => ({ invokePrepareAgentImages: mock.prepare, invokeCancelAgentImageSubmission: mock.cancel }));
+vi.mock('@/lib/ipc/tauri', () => ({ invokePrepareAgentImages: mock.prepare, invokeCancelAgentImageSubmission: mock.cancel }));
 const image = { name: 'fixture.png', mediaType: 'image/png', data: 'aGVsbG8=' };
 const draft = (owner: string): ImageDraft => ({ owner, revision: 1, text: 'text', images: [image] });
 const deferred = <T,>() => { let resolve!: (v: T) => void; let reject!: (e: unknown) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };

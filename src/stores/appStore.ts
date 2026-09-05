@@ -6,9 +6,9 @@ import type { AppSection, Locale, PetdexConnectionStatus, SettingsSection, SftpC
 import {
   invokeLoadPreferences,
   invokeSavePreferences,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
-import { configurePetdex } from '@/lib/petdex';
+import { configurePetdex } from '@/lib/petdex/petdex';
 
 const logger = createLogger('appStore');
 

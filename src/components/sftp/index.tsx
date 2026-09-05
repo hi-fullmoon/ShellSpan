@@ -30,7 +30,7 @@ import { useSftpConnection } from '@/hooks/useSftpConnection';
 import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
 import { useSystemFileDrop } from '@/hooks/useSystemFileDrop';
 import { useToast } from '@/hooks/useToast';
-import { invokeCancelRemoteCopy, invokeCopyRemoteToRemote } from '@/lib/tauri';
+import { invokeCancelRemoteCopy, invokeCopyRemoteToRemote } from '@/lib/ipc/tauri';
 import { getLocalizedErrorMessage } from '@/lib/error';
 import { normalizePortablePath, parentPortablePath } from '@/lib/path-utils';
 import {
@@ -39,18 +39,18 @@ import {
   useTransferStore,
 } from '@/stores/transferStore';
 import type { ConnectionProfile, UploadConflictPolicy } from '@/types';
-import { serializeSftpWorkspace } from '@/lib/sftp-workspace';
+import { serializeSftpWorkspace } from '@/lib/sftp/sftp-workspace';
 import {
   clearSftpWorkspace,
   flushSftpWorkspace,
   stageSftpWorkspace,
-} from '@/lib/sftp-workspace-persistence';
+} from '@/lib/sftp/sftp-workspace-persistence';
 import { createLogger } from '@/lib/logger';
 import {
   removeTransferResumeCandidate,
   upsertTransferResumeCandidate,
   type TransferResumeCandidate,
-} from '@/lib/transfer-resume';
+} from '@/lib/sftp/transfer-resume';
 
 const logger = createLogger('sftp-workspace');
 
