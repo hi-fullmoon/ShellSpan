@@ -32,7 +32,7 @@ try {
     assert.ok(Math.abs(openComposer.height - closedComposer.height) <= 1, 'opening skills preserves input height');
     await page.screenshot({ path: join(output, `${width}-${theme}-menu.png`), animations: 'disabled' });
     await page.getByRole('option', { name: /system-status/ }).click();
-    assert.equal(await page.getByTestId('ai-workspace-composer').inputValue(), 'ordinary draft /system-status ');
+    assert.equal(await page.getByTestId('ai-workspace-composer').evaluate(el => el.textContent ? el.innerText : ''), 'ordinary draft /system-status ');
     report.push({ width, theme, oneMessageScroller: true, noDirectoryRequired: true, menuInViewport: true, menuAboveComposer: true, inputHeightPreserved: true, fullRuntimeFixtureRendered: true, slashInserted: true }); await page.close();
   }
   await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2)); console.log(`PASS ${report.length} Skills browser scenes; evidence: ${output}`);
