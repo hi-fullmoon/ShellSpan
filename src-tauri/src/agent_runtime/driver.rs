@@ -128,6 +128,10 @@ async fn drive_agent_inner(
         }
         let completed_turns = all_events
             .iter()
+            .rev()
+            .take_while(|event| {
+                !matches!(event.payload, AgentSessionEventPayload::SessionResumed {})
+            })
             .filter(|event| matches!(event.payload, AgentSessionEventPayload::TurnStart))
             .count();
         let snapshot = sessions.snapshot(&entry.session_id)?;
@@ -144,10 +148,12 @@ async fn drive_agent_inner(
         }
 
         let existing_scope = entry.scope()?;
-        if existing_scope.is_none()
-            && snapshot.inbox.next_turn.is_empty()
-            && snapshot.inbox.next_step.is_empty()
-        {
+        // Descendant cancellation may still be joining. Never claim another
+        // queued turn after the user has requested a stop.
+        if existing_scope.is_none() && !entry.is_admitting() {
+            return Ok(AgentDriverSettlement::Cancelled);
+        }
+        if existing_scope.is_none() && !sessions.has_ready_input(&entry.session_id)? {
             entry.set_phase(AgentLifecyclePhase::Idle)?;
             append_status(sessions, entry, AgentSessionStatus::Idle, None)?;
             return Ok(AgentDriverSettlement::Idle);
@@ -1507,7 +1513,8 @@ pub(crate) fn recover_open_scope(
     for event in events {
         match event.payload {
             AgentSessionEventPayload::TurnStart => turn_id = event.turn_id,
-            AgentSessionEventPayload::TurnEnd { .. } => {
+            AgentSessionEventPayload::TurnEnd { .. }
+            | AgentSessionEventPayload::SessionResumed {} => {
                 turn_id = None;
                 step_id = None;
             }

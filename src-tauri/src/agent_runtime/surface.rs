@@ -185,8 +185,37 @@ fn append_surface_events<'a>(
     events: impl Iterator<Item = &'a AgentSessionEvent>,
     messages: &mut Vec<AgentSurfaceMessage>,
 ) {
+    let mut synthetic_results = std::collections::HashMap::<String, usize>::new();
     for event in events {
         match &event.payload {
+            AgentSessionEventPayload::SessionResumed {}
+            | AgentSessionEventPayload::TurnEnd { .. } => {
+                // A stopped legacy session may contain tool calls without outcomes.
+                // Close their model protocol pairs without executing or asserting an outcome.
+                let mut pending = Vec::new();
+                for message in messages.iter() {
+                    match message {
+                        AgentSurfaceMessage::Assistant { content, .. } => {
+                            for block in content {
+                                if let AgentAssistantContentBlock::ToolCall { call } = block {
+                                    pending.push((call.call_id.clone(), call.name.clone()));
+                                }
+                            }
+                        }
+                        AgentSurfaceMessage::Tool { call_id, .. } => {
+                            pending.retain(|(id, _)| id != call_id)
+                        }
+                        _ => {}
+                    }
+                }
+                for (call_id, name) in pending {
+                    synthetic_results.insert(call_id.clone(), messages.len());
+                    messages.push(AgentSurfaceMessage::Tool {
+                        call_id, name, status: AgentToolResultStatus::Cancelled,
+                        content: "The previous turn ended without a recorded outcome for this call. Do not automatically repeat it; inspect the current state before deciding whether further work is needed.".into(),
+                    });
+                }
+            }
             AgentSessionEventPayload::SkillCatalogPublished { catalog } => {
                 let mut source = AgentMessageSource::runtime("Skills catalog".into());
                 source.kind = super::AgentMessageSourceKind::SkillCatalog;
@@ -288,26 +317,37 @@ fn append_surface_events<'a>(
                 summary,
                 data,
                 ..
-            } => messages.push(AgentSurfaceMessage::Tool {
-                call_id: call_id.clone(),
-                name: name.clone(),
-                status: *status,
-                content: if name == super::skills::SKILL_TOOL
-                    && *status == AgentToolResultStatus::Completed
-                {
-                    data.clone()
-                        .and_then(|d| serde_json::from_value::<super::skills::LoadedSkill>(d).ok())
-                        .filter(|l| l.validate().is_ok())
-                        .map(|l| l.rendered)
-                        .unwrap_or_else(|| "invalid complete Skill result".into())
-                } else if name == super::user_questions::TOOL_NAME
-                    && *status == AgentToolResultStatus::Completed
-                {
-                    serde_json::to_string(data).unwrap_or_default()
+            } => {
+                let result = AgentSurfaceMessage::Tool {
+                    call_id: call_id.clone(),
+                    name: name.clone(),
+                    status: *status,
+                    content: if name == super::skills::SKILL_TOOL
+                        && *status == AgentToolResultStatus::Completed
+                    {
+                        data.clone()
+                            .and_then(|d| {
+                                serde_json::from_value::<super::skills::LoadedSkill>(d).ok()
+                            })
+                            .filter(|l| l.validate().is_ok())
+                            .map(|l| l.rendered)
+                            .unwrap_or_else(|| "invalid complete Skill result".into())
+                    } else if name == super::user_questions::TOOL_NAME
+                        && *status == AgentToolResultStatus::Completed
+                    {
+                        serde_json::to_string(data).unwrap_or_default()
+                    } else {
+                        tool_result_content(*status, summary, data.as_ref())
+                    },
+                };
+                if let Some(index) = synthetic_results.remove(call_id) {
+                    // A later committed outcome supersedes the placeholder without
+                    // creating a second result for the same model tool call.
+                    messages[index] = result;
                 } else {
-                    tool_result_content(*status, summary, data.as_ref())
-                },
-            }),
+                    messages.push(result);
+                }
+            }
             _ => {}
         }
     }
@@ -428,6 +468,67 @@ mod tests {
         assert_eq!(
             content["data"]["stdout"],
             "Mem: 3.6Gi total\n/dev/vda1 72% /\n"
+        );
+    }
+
+    #[test]
+    fn interrupted_tool_calls_keep_one_protocol_result_and_prefer_committed_evidence() {
+        let mut events = vec![
+            event(
+                0,
+                AgentSessionEventPayload::AssistantMessage {
+                    message_id: "partial-tool-call".into(),
+                    content: vec![AgentAssistantContentBlock::ToolCall {
+                        call: Box::new(super::super::RecordedToolCall {
+                            call_id: "interrupted-call".into(),
+                            provider_call_id: None,
+                            name: "apply_patch".into(),
+                            native_name: None,
+                            arguments: serde_json::json!({}),
+                            title: None,
+                            effect: None,
+                            target: None,
+                        }),
+                    }],
+                    usage: AgentTokenUsage::default(),
+                    stop_reason: AgentStopReason::Cancelled,
+                    interrupted: true,
+                    replay: None,
+                },
+            ),
+            event(
+                1,
+                AgentSessionEventPayload::TurnEnd {
+                    reason: "cancelled".into(),
+                },
+            ),
+            event(2, AgentSessionEventPayload::SessionResumed {}),
+        ];
+        let surface = derive_surface(&events).unwrap();
+        assert_eq!(surface.messages.len(), 2);
+        assert!(
+            matches!(&surface.messages[1], AgentSurfaceMessage::Tool { status: AgentToolResultStatus::Cancelled, content, .. } if content.contains("without a recorded outcome"))
+        );
+        events.push(event(
+            3,
+            AgentSessionEventPayload::ToolResult {
+                call_id: "interrupted-call".into(),
+                name: "apply_patch".into(),
+                status: AgentToolResultStatus::Completed,
+                summary: "write confirmed".into(),
+                data: None,
+                duration_ms: None,
+                evidence_refs: Vec::new(),
+            },
+        ));
+        let surface = derive_surface(&events).unwrap();
+        assert_eq!(
+            surface.messages.len(),
+            2,
+            "there must be exactly one result for a tool call"
+        );
+        assert!(
+            matches!(&surface.messages[1], AgentSurfaceMessage::Tool { status: AgentToolResultStatus::Completed, content, .. } if content.contains("write confirmed"))
         );
     }
 

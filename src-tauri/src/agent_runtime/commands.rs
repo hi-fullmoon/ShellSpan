@@ -373,6 +373,26 @@ pub(crate) fn agent_runtime_inject(
 }
 
 #[tauri::command]
+pub(crate) async fn agent_runtime_interrupt(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentSessionIdInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.interrupt(&input.session_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_resume(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentSessionIdInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.resume(&input.session_id).await
+}
+
+#[tauri::command]
 pub(crate) async fn agent_runtime_cancel(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,

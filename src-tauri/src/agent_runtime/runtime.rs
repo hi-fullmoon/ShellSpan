@@ -828,7 +828,13 @@ impl AgentRuntime {
             });
         // Session checks receipts before this admission flag, so cold/stopped
         // instances can still acknowledge an earlier successful operation.
-        self.sessions.mutate_inbox_with_driver(input, active)
+        let resume = matches!(input.mutation, super::AgentInboxMutation::Resume { .. });
+        let session_id = input.session_id.clone();
+        let snapshot = self.sessions.mutate_inbox_with_driver(input, active)?;
+        if resume {
+            self.wake(&session_id)?;
+        }
+        Ok(snapshot)
     }
 
     pub(crate) fn rename_session(
@@ -839,6 +845,69 @@ impl AgentRuntime {
     }
 
     pub(crate) async fn cancel(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
+        self.stop_session(session_id, true).await
+    }
+
+    pub(crate) async fn interrupt(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
+        if self
+            .sessions
+            .snapshot(session_id)?
+            .header
+            .subagent
+            .is_some()
+        {
+            return Err("human interruption requires a root Session".into());
+        }
+        self.stop_session(session_id, false).await
+    }
+
+    pub(crate) async fn resume(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
+        let snapshot = self.sessions.snapshot(session_id)?;
+        if snapshot.archived || snapshot.header.subagent.is_some() {
+            return Err("only an unarchived root Session can be resumed".into());
+        }
+        if !snapshot.ended {
+            return Ok(snapshot);
+        }
+        // Join and detach the previous entry before creating a fresh cancellation token.
+        // Do not call cancel(session_id): a concurrent retry may have already resumed it.
+        let handle = self
+            .handles
+            .lock()
+            .map_err(|_| "Agent handle registry is unavailable")?
+            .remove(session_id);
+        if let Some(handle) = handle {
+            let result = async {
+                handle.entry().stop_admission()?;
+                self.subagents.cancel_descendants(session_id).await?;
+                self.tools.cancel_session(&handle.entry())?;
+                self.tools.await_pending_executions(&handle.entry()).await?;
+                handle.dispose().await
+            }
+            .await;
+            if let Err(error) = result {
+                if self.agents.get(session_id)?.is_some() {
+                    self.handles
+                        .lock()
+                        .map_err(|_| "Agent handle registry is unavailable")?
+                        .insert(session_id.to_string(), handle);
+                }
+                return Err(error);
+            }
+        } else if self.agents.get(session_id)?.is_some() {
+            return Err("Agent Session is already stopping".into());
+        }
+        self.sessions.resume(session_id)
+    }
+
+    async fn stop_session(
+        &self,
+        session_id: &str,
+        terminate: bool,
+    ) -> Result<AgentSessionSnapshot, String> {
+        if let Some(entry) = self.agents.get(session_id)? {
+            entry.stop_admission()?;
+        }
         self.models.images.cancel_session(session_id)?;
         self.subagents.cancel_descendants(session_id).await?;
         let handle = self
@@ -847,9 +916,18 @@ impl AgentRuntime {
             .map_err(|_| "Agent handle registry is unavailable".to_string())?
             .remove(session_id);
         if let Some(handle) = handle {
-            self.tools.cancel_session(&handle.entry())?;
-            self.tools.await_pending_executions(&handle.entry()).await?;
-            match handle.dispose().await {
+            let result = async {
+                handle.entry().stop_admission()?;
+                self.tools.cancel_session(&handle.entry())?;
+                self.tools.await_pending_executions(&handle.entry()).await?;
+                if terminate {
+                    handle.dispose().await
+                } else {
+                    handle.interrupt().await
+                }
+            }
+            .await;
+            match result {
                 Ok(snapshot) => return Ok(snapshot),
                 Err(error) => {
                     if self.agents.get(session_id)?.is_some() {
@@ -871,7 +949,13 @@ impl AgentRuntime {
             .lock()
             .map_err(|_| "question gate unavailable")?;
         self.tools.cancel_questions(session_id)?;
-        self.sessions.cancel(session_id)
+        if self.sessions.snapshot(session_id)?.ended {
+            self.sessions.snapshot(session_id)
+        } else if terminate {
+            self.sessions.cancel(session_id)
+        } else {
+            self.sessions.interrupt(session_id)
+        }
     }
 
     pub(crate) async fn spawn_subagent(
@@ -971,7 +1055,7 @@ impl AgentRuntime {
             loop {
                 entry.await_idle().await;
                 let snapshot = self.sessions.snapshot(session_id)?;
-                if snapshot.inbox.next_turn.is_empty() && snapshot.inbox.next_step.is_empty()
+                if !self.sessions.has_ready_input(session_id)?
                     || snapshot.ended
                     || entry.phase()? == AgentLifecyclePhase::Waiting
                 {
@@ -1469,6 +1553,9 @@ impl AgentRuntime {
         let Some(entry) = self.agents.get(session_id)? else {
             return Ok(());
         };
+        if entry.scope()?.is_none() && !self.sessions.has_ready_input(session_id)? {
+            return Ok(());
+        }
         if !entry.try_acquire_driver()? {
             return Ok(());
         }
@@ -1540,12 +1627,7 @@ impl AgentRuntime {
                 {
                     break;
                 }
-                let has_work = sessions
-                    .snapshot(&entry.session_id)
-                    .map(|snapshot| {
-                        !snapshot.inbox.next_turn.is_empty() || !snapshot.inbox.next_step.is_empty()
-                    })
-                    .unwrap_or(false);
+                let has_work = sessions.has_ready_input(&entry.session_id).unwrap_or(false);
                 if !has_work || !entry.try_acquire_driver().unwrap_or(false) {
                     break;
                 }
@@ -1569,6 +1651,9 @@ impl AgentRuntime {
 
 #[cfg(test)]
 mod tests {
+    mod continuation_tests {
+        include!("runtime_continuation_tests.rs");
+    }
     mod archive_tests {
         include!("runtime_archive_tests.rs");
     }

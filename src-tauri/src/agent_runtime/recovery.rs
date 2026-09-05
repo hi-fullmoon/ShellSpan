@@ -94,6 +94,17 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
 
     for event in events {
         match &event.payload {
+            AgentSessionEventPayload::SessionResumed {} => {
+                status = AgentSessionStatus::Idle;
+                ended = false;
+                turn_id = None;
+                step_id = None;
+                open_request = None;
+                request_finished = false;
+                compaction_open = false;
+                tools.clear();
+                task_recovery = None;
+            }
             AgentSessionEventPayload::AgentStatus { status: value, .. } => status = *value,
             AgentSessionEventPayload::SessionEnded { status: value, .. } => {
                 status = *value;

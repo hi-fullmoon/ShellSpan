@@ -292,6 +292,8 @@ pub fn run() {
             agent_runtime::agent_runtime_rename_session,
             agent_runtime::agent_runtime_inject,
             agent_runtime::agent_runtime_cancel,
+            agent_runtime::agent_runtime_interrupt,
+            agent_runtime::agent_runtime_resume,
             agent_runtime::agent_runtime_approve_tool,
             agent_runtime::agent_runtime_reject_tool,
             agent_runtime::agent_runtime_get_session,

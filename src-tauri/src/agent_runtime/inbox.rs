@@ -10,6 +10,7 @@ pub(crate) struct AgentInbox {
     next_turn: VecDeque<AgentInboxMessage>,
     next_step: VecDeque<AgentInboxMessage>,
     seen_message_ids: HashSet<String>,
+    paused_ids: HashSet<String>,
 }
 
 impl AgentInbox {
@@ -17,6 +18,10 @@ impl AgentInbox {
         let mut inbox = Self::default();
         for event in events {
             match &event.payload {
+                AgentSessionEventPayload::InboxPaused { item_ids } => inbox.pause(item_ids)?,
+                AgentSessionEventPayload::InboxItemResumed { item_id, .. } => {
+                    inbox.resume(item_id)?
+                }
                 AgentSessionEventPayload::InboxSpliced {
                     operation,
                     lane,
@@ -91,7 +96,9 @@ impl AgentInbox {
         if messages != expected {
             return Err("Agent inbox claim did not match the next claimable messages".into());
         }
-        self.remove_front(lane, messages.len());
+        for message in messages {
+            self.remove(lane, &message.message_id)?;
+        }
         Ok(())
     }
 
@@ -105,13 +112,6 @@ impl AgentInbox {
         }
         self.queue_mut(lane).clear();
         Ok(())
-    }
-
-    fn remove_front(&mut self, lane: AgentInboxLane, count: usize) {
-        let queue = self.queue_mut(lane);
-        for _ in 0..count {
-            queue.pop_front();
-        }
     }
 
     fn lane(&self, lane: AgentInboxLane) -> &VecDeque<AgentInboxMessage> {
@@ -166,6 +166,7 @@ impl AgentInbox {
             .position(|message| message.message_id == item_id)
             .ok_or_else(|| "Agent inbox item is not queued in the requested lane".to_string())?;
         queue.remove(index);
+        self.paused_ids.remove(item_id);
         Ok(())
     }
 
@@ -232,11 +233,44 @@ impl AgentInbox {
     }
 
     pub(crate) fn turn_claim(&self) -> Vec<AgentInboxMessage> {
-        self.next_turn.front().cloned().into_iter().collect()
+        self.next_turn
+            .iter()
+            .find(|message| !self.paused_ids.contains(&message.message_id))
+            .cloned()
+            .into_iter()
+            .collect()
     }
 
     pub(crate) fn step_claim(&self) -> Vec<AgentInboxMessage> {
-        self.next_step.iter().cloned().collect()
+        self.next_step
+            .iter()
+            .filter(|message| !self.paused_ids.contains(&message.message_id))
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn pause(&mut self, item_ids: &[String]) -> Result<(), String> {
+        if item_ids.iter().any(|id| self.locate(id).is_none()) {
+            return Err("only queued Inbox items can be paused".into());
+        }
+        self.paused_ids.extend(item_ids.iter().cloned());
+        Ok(())
+    }
+
+    pub(crate) fn resume(&mut self, item_id: &str) -> Result<(), String> {
+        if self.locate(item_id).is_none() || !self.paused_ids.remove(item_id) {
+            return Err("only paused Inbox items can be resumed".into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn paused_ids(&self) -> Vec<String> {
+        self.next_turn
+            .iter()
+            .chain(&self.next_step)
+            .filter(|message| self.paused_ids.contains(&message.message_id))
+            .map(|message| message.message_id.clone())
+            .collect()
     }
 
     pub(crate) fn discard(&self, lane: AgentInboxLane) -> Vec<AgentInboxMessage> {

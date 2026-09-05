@@ -525,6 +525,17 @@ pub(crate) enum AgentSessionEventPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+    /// Explicit human continuation. The previous terminal events remain in history.
+    #[serde(rename = "session/resumed")]
+    SessionResumed {},
+    #[serde(rename = "agent/inbox/paused")]
+    InboxPaused { item_ids: Vec<String> },
+    #[serde(rename = "agent/inbox/item_resumed")]
+    InboxItemResumed {
+        item_id: String,
+        previous_revision: u64,
+        client_operation_id: String,
+    },
     #[serde(rename = "agent/inbox/spliced")]
     InboxSpliced {
         operation: AgentInboxOperation,

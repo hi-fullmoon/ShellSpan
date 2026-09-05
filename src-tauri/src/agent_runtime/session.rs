@@ -89,6 +89,9 @@ pub(crate) struct CreateAgentSessionRequest {
     deny_unknown_fields
 )]
 pub(crate) enum AgentInboxMutation {
+    Resume {
+        item_id: String,
+    },
     Update {
         item_id: String,
         content: String,
@@ -140,6 +143,7 @@ pub(crate) struct AgentSessionSnapshot {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentInboxProjection {
+    pub(crate) paused_ids: Vec<String>,
     pub(crate) next_turn: Vec<AgentInboxMessage>,
     pub(crate) next_step: Vec<AgentInboxMessage>,
 }
@@ -312,6 +316,7 @@ impl AgentSessionRecord {
             event_count: self.events.len() as u64,
             surface: derive_surface(&self.events)?,
             inbox: AgentInboxProjection {
+                paused_ids: self.inbox.paused_ids(),
                 next_turn: self.inbox.next_turn(),
                 next_step: self.inbox.next_step(),
             },
@@ -1015,7 +1020,7 @@ impl AgentSessionStore {
             .sessions
             .get(session_id)
             .ok_or_else(|| "Agent session was not found".to_string())?;
-        if !record.inbox.next_step().is_empty() {
+        if !record.inbox.step_claim().is_empty() {
             return Ok(false);
         }
         let (events, publisher) = append_payloads_locked(
@@ -1228,6 +1233,15 @@ impl AgentSessionStore {
         if let Some(previous) = record.events.iter().find(|event| {
             inbox_operation_id(&event.payload) == Some(input.client_operation_id.as_str())
         }) {
+            if let AgentSessionEventPayload::InboxItemResumed { item_id, .. } = &previous.payload {
+                if input.mutation
+                    == (AgentInboxMutation::Resume {
+                        item_id: item_id.clone(),
+                    })
+                {
+                    return record.snapshot();
+                }
+            }
             if let AgentSessionEventPayload::InboxItemSteered { item_id, .. } = &previous.payload {
                 if input.mutation
                     == (AgentInboxMutation::Steer {
@@ -1250,6 +1264,18 @@ impl AgentSessionStore {
         }
         validate_expected_revision(record, input.expected_revision)?;
         let payload = match input.mutation {
+            AgentInboxMutation::Resume { item_id } => {
+                validate_identifier(&item_id, "itemId")?;
+                require_queued_item(record, &item_id)?;
+                if !record.inbox.paused_ids().contains(&item_id) {
+                    return Err("only paused Inbox items can be resumed".into());
+                }
+                AgentSessionEventPayload::InboxItemResumed {
+                    item_id,
+                    previous_revision: input.expected_revision,
+                    client_operation_id: input.client_operation_id,
+                }
+            }
             AgentInboxMutation::Steer { item_id } => {
                 validate_identifier(&item_id, "itemId")?;
                 validate_steer_target(record, &item_id)?;
@@ -1395,6 +1421,111 @@ impl AgentSessionStore {
         drop(inner);
         publish_events(publisher, &events);
         Ok(messages)
+    }
+
+    /// Stop a turn after its worker and tools have settled. Queue entries stay
+    /// durable but cannot be claimed until explicitly resumed by the user.
+    pub(crate) fn interrupt(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
+        let mut inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?;
+        validate_mutable_session(record, "interrupt")?;
+        let mut payloads = Vec::new();
+        let mut turn_id = None;
+        let mut step_id = None;
+        for event in &record.events {
+            match &event.payload {
+                AgentSessionEventPayload::TurnStart => turn_id.clone_from(&event.turn_id),
+                AgentSessionEventPayload::StepStart => step_id.clone_from(&event.step_id),
+                AgentSessionEventPayload::StepEnd { .. } => step_id = None,
+                AgentSessionEventPayload::TurnEnd { .. } => {
+                    turn_id = None;
+                    step_id = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(turn_id) = turn_id {
+            if let Some(step_id) = step_id {
+                payloads.push((
+                    Some(turn_id.clone()),
+                    Some(step_id),
+                    AgentSessionEventPayload::StepEnd {
+                        reason: "cancelled".into(),
+                    },
+                ));
+            }
+            payloads.push((
+                Some(turn_id),
+                None,
+                AgentSessionEventPayload::TurnEnd {
+                    reason: "cancelled".into(),
+                },
+            ));
+        }
+        let item_ids = record
+            .inbox
+            .next_turn()
+            .iter()
+            .chain(&record.inbox.next_step())
+            .map(|message| message.message_id.clone())
+            .collect::<Vec<_>>();
+        if !item_ids.is_empty() {
+            payloads.push((
+                None,
+                None,
+                AgentSessionEventPayload::InboxPaused { item_ids },
+            ));
+        }
+        payloads.push((
+            None,
+            None,
+            AgentSessionEventPayload::AgentStatus {
+                status: AgentSessionStatus::Idle,
+                reason: Some("stoppedByUser".into()),
+            },
+        ));
+        let (events, publisher) = append_payloads_locked(&mut inner, session_id, payloads)?;
+        let snapshot = inner.sessions[session_id].snapshot()?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(snapshot)
+    }
+
+    pub(crate) fn has_ready_input(&self, session_id: &str) -> Result<bool, String> {
+        let inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?;
+        Ok(!record.inbox.turn_claim().is_empty() || !record.inbox.step_claim().is_empty())
+    }
+
+    /// A new explicit human input may continue a closed root conversation.
+    /// Never rewrite the old terminal event or reopen delegated/archived work.
+    pub(crate) fn resume(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
+        let mut inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?;
+        if record.archived || record.header.subagent.is_some() {
+            return Err("only an unarchived root Session can be resumed".into());
+        }
+        if !record.ended {
+            return record.snapshot();
+        }
+        let (events, publisher) = append_payloads_locked(
+            &mut inner,
+            session_id,
+            vec![(None, None, AgentSessionEventPayload::SessionResumed {})],
+        )?;
+        let snapshot = inner.sessions[session_id].snapshot()?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(snapshot)
     }
 
     pub(crate) fn cancel(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
@@ -1652,7 +1783,8 @@ impl AgentSessionStore {
         }
         // An idle conversation remains continuable after its last answer. Close
         // it only when archive is requested, without dropping queued input.
-        if !record.ended && (record.status != AgentSessionStatus::Idle || !record.inbox.is_empty()) {
+        if !record.ended && (record.status != AgentSessionStatus::Idle || !record.inbox.is_empty())
+        {
             return Err("AGENT_SESSION_ARCHIVE_BUSY".into());
         }
         let ended = record.ended;
@@ -2012,6 +2144,10 @@ fn require_queued_item<'a>(
 
 fn inbox_operation_id(payload: &AgentSessionEventPayload) -> Option<&str> {
     match payload {
+        AgentSessionEventPayload::InboxItemResumed {
+            client_operation_id,
+            ..
+        } => Some(client_operation_id),
         AgentSessionEventPayload::InboxItemSteered {
             client_operation_id,
             ..
@@ -2128,6 +2264,13 @@ fn validate_event_transition(
     record: &AgentSessionRecord,
     event: &AgentSessionEvent,
 ) -> Result<(), String> {
+    if matches!(event.payload, AgentSessionEventPayload::SessionResumed {}) {
+        return if record.ended && !record.archived && record.header.subagent.is_none() {
+            Ok(())
+        } else {
+            Err("session/resumed requires an ended unarchived root Session".into())
+        };
+    }
     if record.ended {
         return Err("ended Agent session does not accept new events".into());
     }
@@ -2137,6 +2280,17 @@ fn validate_event_transition(
         return Err("terminal Agent status must be followed by session/ended".into());
     }
     match &event.payload {
+        AgentSessionEventPayload::InboxItemResumed { item_id, .. } => {
+            if record.events.iter().any(|previous| {
+                inbox_operation_id(&previous.payload) == inbox_operation_id(&event.payload)
+            }) {
+                return Err("Agent inbox resume operation was already committed".into());
+            }
+            if !record.inbox.paused_ids().contains(item_id) {
+                return Err("only paused Inbox items can be resumed".into());
+            }
+            Ok(())
+        }
         AgentSessionEventPayload::InboxItemSteered { item_id, .. } => {
             if record.events.iter().any(|previous| {
                 inbox_operation_id(&previous.payload) == inbox_operation_id(&event.payload)
@@ -2627,6 +2781,14 @@ fn validate_record_final(record: &AgentSessionRecord) -> Result<(), String> {
 
 fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Result<(), String> {
     match &event.payload {
+        AgentSessionEventPayload::SessionResumed {} => {
+            record.status = AgentSessionStatus::Idle;
+            record.ended = false;
+        }
+        AgentSessionEventPayload::InboxPaused { item_ids } => record.inbox.pause(item_ids)?,
+        AgentSessionEventPayload::InboxItemResumed { item_id, .. } => {
+            record.inbox.resume(item_id)?
+        }
         AgentSessionEventPayload::AgentStatus { status, .. } => record.status = *status,
         AgentSessionEventPayload::SessionEnded { status, .. } => {
             record.status = *status;
@@ -2721,6 +2883,23 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             if let Some(parent) = parent_agent_id {
                 validate_identifier(parent, "parentAgentId")?;
             }
+        }
+        Payload::SessionResumed {} => require_scope(event, false, false)?,
+        Payload::InboxPaused { item_ids } => {
+            require_scope(event, false, false)?;
+            validate_collection(item_ids, "paused Inbox items")?;
+            for item_id in item_ids {
+                validate_identifier(item_id, "itemId")?;
+            }
+        }
+        Payload::InboxItemResumed {
+            item_id,
+            previous_revision,
+            client_operation_id,
+        } => {
+            require_scope(event, false, false)?;
+            validate_mutation_event_identity(event, *previous_revision, client_operation_id)?;
+            validate_identifier(item_id, "itemId")?;
         }
         Payload::AgentStatus { reason, .. } | Payload::SessionEnded { reason, .. } => {
             require_scope(event, false, false)?;
