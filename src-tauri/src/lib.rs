@@ -11,6 +11,7 @@ mod health;
 mod identity_cache;
 mod keychain;
 mod known_hosts;
+mod llm;
 mod local_fs;
 mod menu;
 mod models;
@@ -216,6 +217,9 @@ pub fn run() {
             })?;
             app.manage(petdex::PetdexAdapter::new(home_dir));
             app.manage(credentials.clone());
+            let routes = llm::routes::RouteStore::open(database.clone(), credentials.clone())
+                .map_err(std::io::Error::other)?;
+            app.manage(llm::runtime::LlmRuntime { routes });
             app.manage(database);
             let runtime = app.state::<agent_runtime::AgentRuntime>();
             agent_runtime::configure_runtime(app.handle(), &runtime)?;
@@ -251,10 +255,15 @@ pub fn run() {
         .manage(RemoteIdentityCache::default())
         .manage(health::HealthState::default())
         .invoke_handler(tauri::generate_handler![
-            ai::ai_store_api_key,
-            ai::ai_has_api_key,
-            ai::ai_delete_api_key,
+            ai::ai_list_routes,
+            ai::ai_save_routes,
+            ai::ai_list_route_models,
+            ai::ai_resolve_selection,
+            ai::ai_convert_session_v4_to_v5,
+            ai::ai_list_session_migrations,
             ai::ai_list_models,
+            ai::ai_resolve_model,
+            ai::ai_model_declaration_template,
             agent_runtime::agent_runtime_create_session,
             agent_runtime::agent_runtime_start,
             agent_runtime::agent_runtime_select_model,

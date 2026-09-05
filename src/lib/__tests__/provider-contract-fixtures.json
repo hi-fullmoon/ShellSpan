@@ -137,7 +137,30 @@
       "kind": "openAiCompatible",
       "baseUrl": "http://127.0.0.1:1234/proxy/v1",
       "id": "fixture",
-      "requiresApiKey": false
+      "requiresApiKey": false,
+      "modelDefinition": {
+        "contextWindow": 65536,
+        "maxOutputTokens": 4096,
+        "toolCalling": "supported",
+        "textInput": "supported",
+        "imageInput": "unsupported",
+        "reasoning": [],
+        "compat": {
+          "cumulativeStream": false,
+          "supportsStreamUsage": false,
+          "nativeReasoning": false,
+          "splitReasoning": false,
+          "replayReasoningContent": false,
+          "thinkTagFallback": true,
+          "parallelToolCalls": false,
+          "strictSchema": false,
+          "preservesReasoningAcrossTurns": false,
+          "protocol": "openAiCompatible",
+          "reasoningEncoding": "none",
+          "clearThinking": false,
+          "defaultThinking": false
+        }
+      }
     },
     "reasoningBody": {}
   }

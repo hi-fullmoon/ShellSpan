@@ -61,6 +61,11 @@ async fn question_single_answer_entry_reattaches_original_turn_and_next_request(
         .model_factory(Arc::new(FakeFactory(model.clone())))
         .build();
     restored.configure(root.path().to_path_buf()).unwrap();
+    restored
+        .configure_model_preferences(
+            crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap(),
+        )
+        .unwrap();
     restored.answer_question(input.clone(), None).unwrap();
     idle(&restored, "questions").await;
     restored.answer_question(input.clone(), None).unwrap();
@@ -180,7 +185,7 @@ async fn question_every_jsonl_prefix_repairs_answer_result_and_step_once() {
     let last = events.iter().position(|e| matches!(&e.payload, AgentSessionEventPayload::StepEnd { reason } if reason == "toolsCompleted")).unwrap();
     for end in first..=last {
         let root = tempfile::tempdir().unwrap();
-        let dir = root.path().join("agent-runtime/sessions-v4");
+        let dir = root.path().join("agent-runtime/sessions-v5");
         std::fs::create_dir_all(&dir).unwrap();
         let lines: String = events[..=end]
             .iter()
@@ -192,6 +197,7 @@ async fn question_every_jsonl_prefix_repairs_answer_result_and_step_once() {
             .model_factory(Arc::new(FakeFactory(model.clone())))
             .build();
         restored.configure(root.path().to_path_buf()).unwrap();
+        configure_test_model_preferences(&restored, root.path(), &provider());
         if end == first {
             restored.start("prefix", provider(), None).unwrap();
             idle(&restored, "prefix").await;
@@ -254,7 +260,7 @@ async fn question_chain_every_prefix_preserves_unexecuted_queue_and_never_replay
     let last = events.iter().position(|e| matches!(&e.payload, AgentSessionEventPayload::StepEnd { reason } if reason == "toolsCompleted")).unwrap();
     for end in first..=last {
         let root = tempfile::tempdir().unwrap();
-        let dir = root.path().join("agent-runtime/sessions-v4");
+        let dir = root.path().join("agent-runtime/sessions-v5");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("prefix-chain.jsonl"),
@@ -271,6 +277,11 @@ async fn question_chain_every_prefix_preserves_unexecuted_queue_and_never_replay
             .native_tool_runtime(native.clone())
             .build();
         restored.configure(root.path().to_path_buf()).unwrap();
+        restored
+            .configure_model_preferences(
+                crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap(),
+            )
+            .unwrap();
         restored
             .start("prefix-chain", provider(), None)
             .unwrap_or_else(|e| panic!("prefix {end}: {e}"));
@@ -411,7 +422,7 @@ async fn question_sensitive_answer_retry_uses_raw_fingerprint_not_redacted_conte
     assert!(runtime.answer_question(changed, None).is_err());
     let logged = std::fs::read_to_string(
         root.path()
-            .join("agent-runtime/sessions-v4/secret-answer.jsonl"),
+            .join("agent-runtime/sessions-v5/secret-answer.jsonl"),
     )
     .unwrap();
     assert!(!logged.contains("first-private-answer"));
@@ -424,6 +435,11 @@ async fn question_sensitive_answer_retry_uses_raw_fingerprint_not_redacted_conte
     drop(runtime);
     let restored = AgentRuntimeBuilder::new().build();
     restored.configure(root.path().to_path_buf()).unwrap();
+    restored
+        .configure_model_preferences(
+            crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap(),
+        )
+        .unwrap();
     restored.answer_question(input, None).unwrap();
     assert_eq!(model.request_count(), 2);
 }
@@ -488,6 +504,10 @@ async fn question_real_http_resume_uses_current_credentials_and_original_tool_hi
         .followup("wire", "user".into(), "inspect".into())
         .unwrap();
     let provider = AiProviderConfig {
+        model_definition: Some(crate::llm::catalog::fixture_definition(
+            AiProviderKind::OpenAiCompatible,
+            32768,
+        )),
         id: "question-http-fixture".into(),
         kind: AiProviderKind::OpenAiCompatible,
         base_url: url,
@@ -495,26 +515,30 @@ async fn question_real_http_resume_uses_current_credentials_and_original_tool_hi
         requires_api_key: true,
         ..provider()
     };
+    let database = crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap();
+    database.save_preferences(&[("ai.providers".into(), serde_json::json!([{
+        "id":provider.id, "name":"Question route", "kind":provider.kind,
+        "baseUrl":provider.base_url, "model":provider.model, "profile":provider.profile,
+        "modelDefinition":provider.model_definition, "requiresApiKey":true,
+    }]).to_string())]).unwrap();
+    let credentials = crate::keychain::CredentialManager::in_memory_for_tests();
+    credentials.set_credential(crate::keychain::AI_KEY_SERVICE, &provider.id, "initial-fixture-key").unwrap();
+    let routes = crate::llm::routes::RouteStore::open(database.clone(), credentials.clone()).unwrap();
+    runtime.configure_llm(crate::llm::runtime::LlmRuntime { routes: routes.clone() }).unwrap();
     runtime
         .start("wire", provider.clone(), Some("initial-fixture-key".into()))
         .unwrap();
     idle(&runtime, "wire").await;
     let input = answer(&runtime, "wire");
     drop(runtime);
-    let credentials = crate::keychain::CredentialManager::in_memory_for_tests();
-    credentials
-        .set_credential(
-            crate::keychain::AI_KEY_SERVICE,
-            &provider.id,
-            "rotated-fixture-key",
-        )
-        .unwrap();
+    let first = routes.snapshot().unwrap();
+    routes.save(first.routes.clone(), first.default_selection.clone(), first.revision,
+        std::collections::BTreeMap::from([(provider.id.clone(), "rotated-fixture-key".into())])).unwrap();
     let restored = AgentRuntimeBuilder::new().build();
     restored.configure(root.path().to_path_buf()).unwrap();
-    assert!(restored.answer_question(input.clone(), None).is_err());
-    restored
-        .answer_question(input.clone(), Some(&credentials))
-        .unwrap();
+    let reopened = crate::llm::routes::RouteStore::open(database, credentials).unwrap();
+    restored.configure_llm(crate::llm::runtime::LlmRuntime { routes: reopened }).unwrap();
+    restored.answer_question(input.clone(), None).unwrap();
     idle(&restored, "wire").await;
     let bodies = tokio::time::timeout(std::time::Duration::from_secs(5), server)
         .await
@@ -534,7 +558,10 @@ async fn question_real_http_resume_uses_current_credentials_and_original_tool_hi
         1
     );
     let result = messages.iter().find(|m| m["role"] == "tool").unwrap();
-    assert_eq!(result["tool_call_id"], "wire-question");
+    // Credential rotation creates a new replay domain. The canonical internal
+    // call id remains valid history, while the old provider-native id must not
+    // cross that boundary.
+    assert_eq!(result["tool_call_id"], "call-1");
     assert!(result["content"].as_str().unwrap().contains("answers"));
     let events = all_events(&restored, "wire");
     assert_eq!(
@@ -549,7 +576,7 @@ async fn question_real_http_resume_uses_current_credentials_and_original_tool_hi
         .filter(|e| matches!(e.payload, AgentSessionEventPayload::RequestHeader { .. }))
         .all(|e| e.turn_id.as_ref() == Some(&input.identity.turn_id)));
     let log =
-        std::fs::read_to_string(root.path().join("agent-runtime/sessions-v4/wire.jsonl")).unwrap();
+        std::fs::read_to_string(root.path().join("agent-runtime/sessions-v5/wire.jsonl")).unwrap();
     assert!(!log.contains("fixture-key"));
 }
 
@@ -693,7 +720,7 @@ async fn question_failed_answer_write_keeps_pending_and_identity_is_strict() {
             .answer_question(serde_json::from_value(value).unwrap(), None)
             .is_err());
     }
-    let file = root.path().join("agent-runtime/sessions-v4/failure.jsonl");
+    let file = root.path().join("agent-runtime/sessions-v5/failure.jsonl");
     let backup = file.with_extension("backup");
     std::fs::rename(&file, &backup).unwrap();
     std::fs::create_dir(&file).unwrap();
@@ -752,6 +779,11 @@ async fn question_historical_child_can_resume_as_new_live_root() {
         .model_factory(Arc::new(FakeFactory(model.clone())))
         .build();
     restored.configure(root.path().to_path_buf()).unwrap();
+    restored
+        .configure_model_preferences(
+            crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap(),
+        )
+        .unwrap();
     restored
         .start(&child.header.session_id, provider(), None)
         .unwrap();
@@ -829,7 +861,7 @@ async fn question_cancelled_jsonl_prefix_recovery_finishes_cancellation_without_
         .unwrap();
     for end in first..events.len() - 1 {
         let root = tempfile::tempdir().unwrap();
-        let dir = root.path().join("agent-runtime/sessions-v4");
+        let dir = root.path().join("agent-runtime/sessions-v5");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("cancel-prefix.jsonl"),
@@ -844,6 +876,11 @@ async fn question_cancelled_jsonl_prefix_recovery_finishes_cancellation_without_
             .model_factory(Arc::new(FakeFactory(model.clone())))
             .build();
         restored.configure(root.path().to_path_buf()).unwrap();
+        restored
+            .configure_model_preferences(
+                crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap(),
+            )
+            .unwrap();
         assert!(restored.answer_question(input.clone(), None).is_err());
         restored.start("cancel-prefix", provider(), None).unwrap();
         idle(&restored, "cancel-prefix").await;
@@ -942,7 +979,7 @@ async fn question_request_storage_failure_never_installs_or_publishes_pending() 
         .position(|e| matches!(e.payload, AgentSessionEventPayload::ToolCall { .. }))
         .unwrap();
     let root = tempfile::tempdir().unwrap();
-    let dir = root.path().join("agent-runtime/sessions-v4");
+    let dir = root.path().join("agent-runtime/sessions-v5");
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("request-failure.jsonl");
     std::fs::write(
@@ -955,6 +992,11 @@ async fn question_request_storage_failure_never_installs_or_publishes_pending() 
     .unwrap();
     let restored = AgentRuntimeBuilder::new().build();
     restored.configure(root.path().to_path_buf()).unwrap();
+    restored
+        .configure_model_preferences(
+            crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap(),
+        )
+        .unwrap();
     let handle = restored
         .agents
         .attach(

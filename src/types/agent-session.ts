@@ -1,4 +1,30 @@
-export const AGENT_SESSION_EVENT_VERSION = 4 as const;
+export const AGENT_SESSION_EVENT_VERSION = 5 as const;
+
+export type AgentRequestSnapshot = { status: 'legacyUnknown' } | {
+  status: 'prepared'; routeId: string; routeRevision: number; adapterId: string;
+  modelId: string; catalogVersion: number; capabilities: import('@/lib/provider-contract').ModelDefinition;
+  endpointIdentity: string; replayDomainId: string; reasoningEffort?: string;
+  outputTokens: number; retryPolicy: import('@/lib/retry-policy').AiRetryPolicy;
+  timeouts: { requestHeadersMs: number; firstByteMs: number; streamIdleMs: number };
+  purpose: string; preparationVersion: number; projectionPolicy: string;
+  contentHash: string; images: readonly import('./agent-image').AgentImageRef[];
+};
+
+export type AgentReplayEnvelope =
+  | { status: 'legacyUnknown'; archivedProviderItems: boolean }
+  | { status: 'prepared'; version: number; adapterId: string; replayFormatVersion: number;
+      source: {
+        requestId: string; requestSnapshotDigest: string; routeId: string; routeRevision: number;
+        modelId: string; replayDomainId: string; requestContentHash: string;
+        preparationVersion: number; projectionPolicy: string;
+        imageProjectionRefs: readonly import('./agent-image').AgentImageRef[]; imageProjectionHash: string;
+        assistantContentHash: string;
+      };
+      response: Readonly<Record<string, unknown>>;
+      blocks: readonly {
+        index: number; kind: 'text' | 'reasoning' | 'toolCall'; contentHash: string;
+        metadata: Readonly<Record<string, unknown>>;
+      }[] };
 export type AgentSessionEventVersion = typeof AGENT_SESSION_EVENT_VERSION;
 
 export function isSupportedAgentSessionEventVersion(
@@ -99,14 +125,10 @@ export interface AgentSubagentBudget {
 }
 
 export interface AgentSubagentModel {
-  readonly profile?: string;
-  readonly retryPolicy?: import('@/lib/retry-policy').AiRetryPolicy;
-  readonly providerId: string;
-  readonly providerKind: 'ollama' | 'openAi' | 'openAiCompatible';
-  readonly baseUrl: string;
-  readonly model: string;
+  readonly routeId: string;
+  readonly modelId: string;
   readonly reasoningEffort?: string;
-  readonly requiresApiKey: boolean;
+  readonly routeRevision?: number;
 }
 
 export interface AgentSubagentSession {
@@ -356,9 +378,13 @@ export type AgentSessionEvent =
       usage: AgentSessionTokenUsage;
       stopReason: AgentSessionStopReason;
       interrupted: boolean;
+      replay?: AgentReplayEnvelope;
     }>
   | AgentSessionEventWithData<'request/header', {
       requestId: string;
+      /** Runtime validation requires both fields on every committed v5 header. */
+      snapshot?: AgentRequestSnapshot;
+      snapshotDigest?: string;
       providerId: string;
       model: string;
       reasoningEffort?: string;
@@ -740,7 +766,7 @@ export interface AgentRuntimeInjectionInput extends AgentSessionMessageInput {
 
 export interface AgentRuntimeStartInput {
   readonly sessionId: string;
-  readonly provider: import('./ai').AiProviderConfig;
+  readonly selection: import('./ai').ModelSelection;
 }
 
 export interface AgentSessionIdInput {

@@ -9,6 +9,7 @@ pub(super) fn request_events(
     entry: &AgentEntry,
     provider: &crate::ai::AiProviderConfig,
     request: &ModelRequest,
+    snapshot: &crate::llm::runtime::RequestSnapshot,
     reason: AgentRequestReason,
     attempt: u32,
 ) -> Vec<Payload> {
@@ -32,9 +33,7 @@ pub(super) fn request_events(
         header @ Payload::RequestHeader { .. } => Some(header),
         _ => None,
     });
-    let reasoning_effort = provider
-        .reasoning_effort
-        .map(|effort| format!("{effort:?}").to_ascii_lowercase());
+    let reasoning_effort = provider.reasoning_effort.clone();
     let mut header_request_id = request.request_id.clone();
     let snapshot_reason = if let Some(Payload::RequestHeader {
         request_id,
@@ -43,6 +42,7 @@ pub(super) fn request_events(
         reasoning_effort: previous_effort,
         system_prompt,
         tool_schemas,
+        snapshot_digest,
         series: previous_series,
         ..
     }) = previous_header
@@ -58,6 +58,7 @@ pub(super) fn request_events(
         } else if provider_id != &provider.id
             || model != &provider.model
             || previous_effort != &reasoning_effort
+            || snapshot_digest.as_deref() != Some(&snapshot.digest())
             || system_prompt != &request.system_prompt
             || tool_schemas != &request.tools
         {
@@ -73,6 +74,8 @@ pub(super) fn request_events(
         header_request_id.clone_from(&request.request_id);
         payloads.push(Payload::RequestHeader {
             request_id: request.request_id.clone(),
+            snapshot: Some(snapshot.clone()),
+            snapshot_digest: Some(snapshot.digest()),
             provider_id: provider.id.clone(),
             model: provider.model.clone(),
             reasoning_effort: reasoning_effort.clone(),

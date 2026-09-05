@@ -27,6 +27,8 @@ pub(crate) enum AgentSurfaceMessage {
         message_id: String,
         content: Vec<AgentAssistantContentBlock>,
         interrupted: bool,
+        #[serde(skip)]
+        replay: Option<crate::llm::replay::ReplayEnvelopeV5>,
     },
     Tool {
         call_id: String,
@@ -257,12 +259,28 @@ fn append_surface_events<'a>(
                 message_id,
                 content,
                 interrupted,
+                replay,
                 ..
-            } => messages.push(AgentSurfaceMessage::Assistant {
-                message_id: message_id.clone(),
-                content: content.clone(),
-                interrupted: *interrupted,
-            }),
+            } => {
+                let mut content = content.clone();
+                for block in &mut content {
+                    match block {
+                        AgentAssistantContentBlock::Reasoning { provider_item, .. } => {
+                            *provider_item = None;
+                        }
+                        AgentAssistantContentBlock::ToolCall { call } => {
+                            call.provider_call_id = None;
+                        }
+                        AgentAssistantContentBlock::Text { .. } => {}
+                    }
+                }
+                messages.push(AgentSurfaceMessage::Assistant {
+                    message_id: message_id.clone(),
+                    content,
+                    interrupted: *interrupted,
+                    replay: replay.clone(),
+                });
+            }
             AgentSessionEventPayload::ToolResult {
                 call_id,
                 name,
@@ -357,6 +375,7 @@ mod tests {
                     usage: AgentTokenUsage::default(),
                     stop_reason: AgentStopReason::Stop,
                     interrupted: false,
+                    replay: None,
                 },
             ),
         ];

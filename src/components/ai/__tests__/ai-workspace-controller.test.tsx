@@ -1,3 +1,4 @@
+vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/test/llm-resolver-fixture')).fixtureResolve }));
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,7 +14,9 @@ import { initI18n } from '@/locales';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAppStore } from '@/stores/appStore';
+import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import type { ResolvedModel } from '@/lib/provider-contract';
 
 const provider = {
   id: 'provider-test',
@@ -24,6 +27,47 @@ const provider = {
   model: 'model-test',
   requiresApiKey: true,
 };
+
+const routeCompat = {
+  protocol: 'openAiCompatible' as const, cumulativeStream: false, supportsStreamUsage: true,
+  nativeReasoning: false, splitReasoning: false, replayReasoningContent: false,
+  thinkTagFallback: false, parallelToolCalls: true, strictSchema: true,
+  preservesReasoningAcrossTurns: false, reasoningEncoding: 'effort' as const,
+  clearThinking: false, defaultThinking: false,
+};
+
+function routeModel(routeId: string, modelId: string): ResolvedModel {
+  return {
+    catalogVersion: 1, routeId, providerId: routeId, modelId, profile: 'generic',
+    kind: 'openAiCompatible', source: 'userDeclaration', capacityPolicy: 'explicit',
+    contextWindow: 8192, maxOutputTokens: 1024, toolCalling: 'supported',
+    textInput: 'supported', imageInput: 'unsupported', reasoning: [], compat: routeCompat,
+  };
+}
+
+function setNativeRoute(routeId: string, modelId: string, routeRevision: number): void {
+  const resolved = routeModel(routeId, modelId);
+  useLlmRoutesStore.setState({
+    snapshot: {
+      schemaVersion: 1, revision: 12, migrationComplete: true, migrationIssues: [],
+      defaultSelection: { routeId, modelId },
+      routes: [{
+        id: routeId, revision: routeRevision, displayName: 'RouteStore default',
+        adapterId: 'chat-completions', baseUrl: 'https://route.example',
+        auth: { kind: 'none' }, replayDomainId: 'route-domain', presetId: 'custom',
+        models: { [modelId]: {
+          contextWindow: resolved.contextWindow, maxOutputTokens: resolved.maxOutputTokens,
+          toolCalling: resolved.toolCalling, textInput: resolved.textInput,
+          imageInput: resolved.imageInput, reasoning: resolved.reasoning, compat: resolved.compat,
+        } },
+        defaults: { routeId, modelId },
+        retryPolicy: { maxAttempts: 3, initialDelayMs: 250, maxDelayMs: 4000, maxServerDelayMs: 30_000, jitterRatio: 0.2 },
+        timeouts: { requestHeadersMs: 30_000, firstByteMs: 30_000, streamIdleMs: 300_000 },
+      }],
+    },
+    status: 'ready', error: undefined, modelsByRoute: { [routeId]: [resolved] },
+  });
+}
 
 function adapter(changes: Partial<AiSessionControllerAdapter> = {}): AiSessionControllerAdapter {
   return {
@@ -149,9 +193,56 @@ beforeEach(async () => {
     defaultProviderId: provider.id,
   });
   useTerminalStore.setState({ sessions: [], activeSessionId: null });
+  useLlmRoutesStore.setState({ snapshot: undefined, status: 'idle', error: undefined, modelsByRoute: {} });
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+});
+
+it('uses the RouteStore global selection when the legacy default id differs', () => {
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  setNativeRoute('route-default', 'route-model', 7);
+  useAiSettingsStore.setState({ providers: [provider], defaultProviderId: provider.id });
+
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: adapter() }));
+
+  expect(result.current.providerLabel).toBe('RouteStore default');
+  expect(result.current.modelLabel).toBe('route-model');
+});
+
+it('shows an invalid frozen route revision without crashing or falling back', async () => {
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  connectedTerminal();
+  setNativeRoute('route-default', 'route-model', 9);
+  const base = runningAgentView();
+  const current: AiSessionView = {
+    ...base,
+    snapshot: {
+      ...base.snapshot,
+      value: {
+        ...base.snapshot.value,
+        header: {
+          ...base.snapshot.value.header,
+          modelSelection: { routeId: 'route-default', modelId: 'route-model', routeRevision: 8 },
+        },
+      },
+    },
+  };
+  const agent = adapter({
+    list: vi.fn(async () => ({ sessions: [current.summary] })),
+    open: vi.fn(async () => current),
+  });
+
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+  await waitFor(() => expect(result.current.view?.summary.id).toBe(current.summary.id));
+
+  expect(result.current.selectedProvider).toBeUndefined();
+  expect(result.current.agentUnavailableReason).toContain('INVALID_MODEL_SELECTION');
+  expect(result.current.modelLabel).toBe('route-model');
+});
 
 describe('AiWorkspaceController', () => {
   it.each(['terminal', 'roundTrip', 'newSession', 'otherSession'] as const)(
@@ -284,6 +375,7 @@ describe('AiWorkspaceController', () => {
     act(() => result.current.setDraft('keep this draft'));
     act(() => result.current.openSession(view.summary));
     await waitFor(() => expect(agent.subscribe).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.view?.throughSeq).toBe(10));
     expect(result.current.composer.draft).toBe('keep this draft');
     act(() => listeners[0]({ ...view, throughSeq: 999 }));
     expect(result.current.view?.throughSeq).toBe(10);

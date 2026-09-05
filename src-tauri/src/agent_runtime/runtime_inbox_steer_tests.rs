@@ -190,11 +190,11 @@ async fn inbox_steer_cold_running_log_requires_a_real_driver_but_replays_receipt
         .unwrap();
     // Capture the durable running log in a separate cold store, with no attach.
     let cold_root = tempfile::tempdir().unwrap();
-    let logs = cold_root.path().join("agent-runtime/sessions-v4");
+    let logs = cold_root.path().join("agent-runtime/sessions-v5");
     std::fs::create_dir_all(&logs).unwrap();
     let path = root
         .path()
-        .join(format!("agent-runtime/sessions-v4/{id}.jsonl"));
+        .join(format!("agent-runtime/sessions-v5/{id}.jsonl"));
     std::fs::copy(&path, logs.join(format!("{id}.jsonl"))).unwrap();
     let cold = AgentRuntime::default();
     cold.configure(cold_root.path().to_path_buf()).unwrap();

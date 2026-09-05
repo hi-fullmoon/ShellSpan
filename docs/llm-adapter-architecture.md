@@ -1,6 +1,6 @@
 # ShellSpan 多模型适配架构设计
 
-状态：设计提案，未实施。2026-09-05 基于当前工作区源码，包括正在进行的会话模型切换和图片相关修改。本文不改变 `agent-runtime-vnext.md` 所描述的现有运行契约。
+状态：A–E 已于 2026-09-05 完成实现、集成和离线验收。Anthropic 真实服务 smoke 因当前环境无授权凭据而保留为外部证据缺口；各阶段提交与验证见 [实施进度](llm-implementation-progress.md)。本文不改变 `agent-runtime-vnext.md` 所描述的现有运行契约。
 
 ## 1. 决策
 

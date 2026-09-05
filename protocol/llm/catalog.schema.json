@@ -1,0 +1,469 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://shellspan.local/protocol/llm/catalog.schema.json",
+  "title": "ShellSpan exact model catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "policy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "presets": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/preset"
+      }
+    }
+  },
+  "required": [
+    "version",
+    "policy",
+    "presets"
+  ],
+  "$defs": {
+    "compat": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cumulativeStream": {
+          "type": "boolean"
+        },
+        "supportsStreamUsage": {
+          "type": "boolean"
+        },
+        "nativeReasoning": {
+          "type": "boolean"
+        },
+        "splitReasoning": {
+          "type": "boolean"
+        },
+        "replayReasoningContent": {
+          "type": "boolean"
+        },
+        "thinkTagFallback": {
+          "type": "boolean"
+        },
+        "parallelToolCalls": {
+          "type": "boolean"
+        },
+        "strictSchema": {
+          "type": "boolean"
+        },
+        "preservesReasoningAcrossTurns": {
+          "type": "boolean"
+        },
+        "clearThinking": {
+          "type": "boolean"
+        },
+        "defaultThinking": {
+          "type": "boolean"
+        },
+        "protocol": {
+          "enum": [
+            "openAi",
+            "openAiCompatible",
+            "ollama",
+            "anthropicMessages"
+          ]
+        },
+        "reasoningEncoding": {
+          "enum": [
+            "none",
+            "responses",
+            "enableThinking",
+            "thinking",
+            "adaptive",
+            "thinkingEffort",
+            "effort",
+            "ollama",
+            "anthropicAdaptive"
+          ]
+        }
+      },
+      "required": [
+        "cumulativeStream",
+        "supportsStreamUsage",
+        "nativeReasoning",
+        "splitReasoning",
+        "replayReasoningContent",
+        "thinkTagFallback",
+        "parallelToolCalls",
+        "strictSchema",
+        "preservesReasoningAcrossTurns",
+        "clearThinking",
+        "defaultThinking",
+        "protocol",
+        "reasoningEncoding"
+      ]
+    },
+    "vision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxRequestImages": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "maxRequestImageBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20971520
+        },
+        "reservedTokensPerImage": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "imageTokenBudgetPolicy": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "maxRequestImages",
+        "maxRequestImageBytes",
+        "reservedTokensPerImage",
+        "imageTokenBudgetPolicy"
+      ]
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contextWindow": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "toolCalling": {
+          "enum": [
+            "supported",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "textInput": {
+          "enum": [
+            "supported",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "imageInput": {
+          "enum": [
+            "supported",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "reasoning": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "enum": [
+                  "off",
+                  "on",
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ]
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "id",
+              "displayName"
+            ]
+          }
+        },
+        "compat": {
+          "$ref": "#/$defs/compat"
+        },
+        "vision": {
+          "$ref": "#/$defs/vision"
+        }
+      },
+      "required": [
+        "contextWindow",
+        "maxOutputTokens",
+        "toolCalling",
+        "textInput",
+        "imageInput",
+        "reasoning",
+        "compat"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "imageInput": {
+                "const": "supported"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "vision"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "vision"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "preset": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "openAi",
+            "openAiCompatible",
+            "ollama",
+            "anthropicMessages"
+          ]
+        },
+        "legacyHosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "compat": {
+          "$ref": "#/$defs/compat"
+        },
+        "models": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^\\S(?:.*\\S)?$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/model"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "legacyHosts",
+        "compat",
+        "models"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "openAi"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "compat": {
+                "properties": {
+                  "protocol": {
+                    "const": "openAi"
+                  },
+                  "reasoningEncoding": {
+                    "enum": [
+                      "none",
+                      "responses"
+                    ]
+                  }
+                }
+              },
+              "models": {
+                "additionalProperties": {
+                  "properties": {
+                    "compat": {
+                      "properties": {
+                        "protocol": {
+                          "const": "openAi"
+                        },
+                        "reasoningEncoding": {
+                          "enum": [
+                            "none",
+                            "responses"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "ollama"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "compat": {
+                "properties": {
+                  "protocol": {
+                    "const": "ollama"
+                  },
+                  "reasoningEncoding": {
+                    "enum": [
+                      "none",
+                      "ollama"
+                    ]
+                  }
+                }
+              },
+              "models": {
+                "additionalProperties": {
+                  "properties": {
+                    "compat": {
+                      "properties": {
+                        "protocol": {
+                          "const": "ollama"
+                        },
+                        "reasoningEncoding": {
+                          "enum": [
+                            "none",
+                            "ollama"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "openAiCompatible"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "compat": {
+                "properties": {
+                  "protocol": {
+                    "const": "openAiCompatible"
+                  },
+                  "reasoningEncoding": {
+                    "enum": [
+                      "none",
+                      "enableThinking",
+                      "thinking",
+                      "adaptive",
+                      "thinkingEffort",
+                      "effort"
+                    ]
+                  }
+                }
+              },
+              "models": {
+                "additionalProperties": {
+                  "properties": {
+                    "compat": {
+                      "properties": {
+                        "protocol": {
+                          "const": "openAiCompatible"
+                        },
+                        "reasoningEncoding": {
+                          "enum": [
+                            "none",
+                            "enableThinking",
+                            "thinking",
+                            "adaptive",
+                            "thinkingEffort",
+                            "effort"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "anthropicMessages"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "compat": {
+                "properties": {
+                  "protocol": {
+                    "const": "anthropicMessages"
+                  },
+                  "reasoningEncoding": {
+                    "enum": [
+                      "none",
+                      "anthropicAdaptive"
+                    ]
+                  }
+                }
+              },
+              "models": {
+                "additionalProperties": {
+                  "properties": {
+                    "compat": {
+                      "properties": {
+                        "protocol": {
+                          "const": "anthropicMessages"
+                        },
+                        "reasoningEncoding": {
+                          "enum": [
+                            "none",
+                            "anthropicAdaptive"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

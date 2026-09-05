@@ -1,3 +1,4 @@
+vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.resolveModel }));
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,9 +7,12 @@ import {
   ProviderSetupDialog,
 } from '../provider-setup-dialog';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { DEFAULT_RETRY_POLICY } from '@/lib/retry-policy';
 
 const mocks = vi.hoisted(() => ({
+  native: false,
+  resolveModel: vi.fn(),
   invokeDeleteAiApiKey: vi.fn(),
   invokeHasAiApiKey: vi.fn(),
   invokeListAiModels: vi.fn(),
@@ -18,6 +22,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/tauri', () => ({
+  isTauriRuntime: () => mocks.native,
   invokeDeleteAiApiKey: mocks.invokeDeleteAiApiKey,
   invokeHasAiApiKey: mocks.invokeHasAiApiKey,
   invokeListAiModels: mocks.invokeListAiModels,
@@ -35,6 +40,7 @@ vi.mock('@/hooks/useI18n', () => ({
 }));
 
 const initialState = useAiSettingsStore.getState();
+const initialRoutesState = useLlmRoutesStore.getState();
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -48,7 +54,9 @@ function deferred<T>() {
 
 describe('ProviderSetupDialog', () => {
   beforeEach(() => {
+    mocks.native=false;
     vi.clearAllMocks();
+    mocks.resolveModel.mockImplementation(async (command, args) => (await import('@/test/llm-resolver-fixture')).fixtureResolve(command, args));
     mocks.invokeDeleteAiApiKey.mockResolvedValue(undefined);
     mocks.invokeHasAiApiKey.mockResolvedValue(false);
     mocks.invokeListAiModels.mockResolvedValue([]);
@@ -56,6 +64,7 @@ describe('ProviderSetupDialog', () => {
     mocks.invokeLoadPreferences.mockResolvedValue([]);
     mocks.invokeSavePreferences.mockResolvedValue(undefined);
     useAiSettingsStore.setState({ ...initialState, initialized: false }, true);
+    useLlmRoutesStore.setState({...initialRoutesState,snapshot:undefined,status:'idle',error:undefined,modelsByRoute:{}},true);
   });
 
   it('saves a disabled retry policy and blocks invalid values before connection testing', async () => {
@@ -75,6 +84,35 @@ describe('ProviderSetupDialog', () => {
     await user.click(screen.getByRole('button', { name: 'common.save' }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(provider.id));
     expect(useAiSettingsStore.getState().getProviderConfig(provider.id).retryPolicy).toEqual({ ...DEFAULT_RETRY_POLICY, maxAttempts: 1 });
+  });
+
+  it('persists an explicit high-output declaration in the existing provider settings', async () => {
+    const user = userEvent.setup();
+    const provider = useAiSettingsStore.getState().providers[0];
+    const onSaved = vi.fn();
+    render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={onSaved} />);
+    await screen.findByText(/settings.ai.profileLimits/);
+    await user.click(screen.getByRole('button', { name: 'settings.ai.declareModel' }));
+    const output = await screen.findByLabelText('settings.ai.maxOutput');
+    await user.clear(output); await user.type(output, '16384');
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(provider.id));
+    expect(useAiSettingsStore.getState().getProviderConfig(provider.id).modelDefinition).toMatchObject({ contextWindow: 32768, maxOutputTokens: 16384 });
+    const call = mocks.resolveModel.mock.calls[mocks.resolveModel.mock.calls.length - 1][1].provider;
+    expect(call).not.toHaveProperty('apiKey');
+  });
+
+  it('rejects an unsupported saved reasoning selection before writing credentials or preferences', async () => {
+    const user = userEvent.setup();
+    const provider = { ...useAiSettingsStore.getState().providers[0], reasoningEffort: 'max' as const };
+    const onSaved = vi.fn();
+    render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={onSaved} />);
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(mocks.resolveModel).toHaveBeenCalledWith('ai_resolve_model', expect.objectContaining({ provider: expect.objectContaining({ reasoningEffort: 'max' }) })));
+    await screen.findByRole('alert');
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(mocks.invokeStoreAiApiKey).not.toHaveBeenCalled();
+    expect(mocks.invokeDeleteAiApiKey).not.toHaveBeenCalled();
   });
 
   it('uses the shared compact shell and grouped responsive form layout', () => {
@@ -198,7 +236,7 @@ describe('ProviderSetupDialog', () => {
       model: 'deepseek-v4-flash',
     }));
     expect(saved).not.toHaveProperty('apiKey');
-    expect(mocks.invokeStoreAiApiKey).toHaveBeenCalledWith(saved?.id, 'secret-key');
+    expect(mocks.invokeStoreAiApiKey).not.toHaveBeenCalled();
     expect(onSaved).toHaveBeenCalledWith(saved?.id);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
@@ -218,10 +256,9 @@ describe('ProviderSetupDialog', () => {
     expect(screen.getByLabelText(/settings\.ai\.apiKey/)).toBeEnabled();
   });
 
-  it('rolls back a new provider when the keychain write fails', async () => {
+  it('does not call the retired provider-key command while editing a browser draft', async () => {
     const user = userEvent.setup();
     const onSaved = vi.fn();
-    const originalProviders = useAiSettingsStore.getState().providers;
     mocks.invokeStoreAiApiKey.mockRejectedValueOnce(new Error('keychain unavailable'));
     render(
       <ProviderSetupDialog open onOpenChange={vi.fn()} onSaved={onSaved} />,
@@ -234,33 +271,24 @@ describe('ProviderSetupDialog', () => {
     await user.type(screen.getByLabelText(/settings\.ai\.apiKey/), 'secret-key');
     await user.click(screen.getByRole('button', { name: 'common.save' }));
 
-    const feedback = await screen.findByRole('alert');
-    expect(feedback).toHaveTextContent('settings.ai.connectionFailed');
-    expect(feedback).not.toHaveTextContent('keychain unavailable');
-    expect(within(feedback).getByRole('button', { name: /keychain unavailable/ })).toBeInTheDocument();
-    expect(useAiSettingsStore.getState().providers).toEqual(originalProviders);
-    expect(onSaved).not.toHaveBeenCalled();
+    await waitFor(()=>expect(onSaved).toHaveBeenCalled());
+    expect(mocks.invokeStoreAiApiKey).not.toHaveBeenCalled();
   });
 
-  it('keeps an existing keychain credential when the key field is left blank', async () => {
-    const user = userEvent.setup();
+  it('does not consult the retired provider-key command for an existing browser draft', async () => {
     const provider = useAiSettingsStore.getState().providers[1];
     mocks.invokeHasAiApiKey.mockResolvedValueOnce(true);
-    const onSaved = vi.fn();
     render(
       <ProviderSetupDialog
         open
         provider={provider}
         onOpenChange={vi.fn()}
-        onSaved={onSaved}
+        onSaved={vi.fn()}
       />,
     );
 
-    expect(await screen.findByText('settings.ai.keyStored')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'common.save' }));
-
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(provider.id));
-    expect(mocks.invokeHasAiApiKey).toHaveBeenCalledWith(provider.id);
+    expect(screen.getByRole('button', { name: 'common.save' })).toBeDisabled();
+    expect(mocks.invokeHasAiApiKey).not.toHaveBeenCalled();
     expect(mocks.invokeStoreAiApiKey).not.toHaveBeenCalled();
     expect(useAiSettingsStore.getState().providers[1]).not.toHaveProperty('apiKey');
   });
@@ -483,7 +511,7 @@ describe('ProviderSetupDialog', () => {
     await user.clear(screen.getByLabelText('settings.ai.providerName'));
     await user.type(screen.getByLabelText('settings.ai.providerName'), 'Renamed provider');
     await user.clear(screen.getByLabelText('settings.ai.model'));
-    await user.type(screen.getByLabelText('settings.ai.model'), 'updated-model');
+    await user.type(screen.getByLabelText('settings.ai.model'), 'qwen3:8b');
     await user.keyboard('{Escape}');
     await user.click(screen.getByRole('button', { name: 'common.save' }));
 
@@ -491,9 +519,96 @@ describe('ProviderSetupDialog', () => {
     expect(useAiSettingsStore.getState().providers[0]).toEqual(expect.objectContaining({
       id: provider.id,
       name: 'Renamed provider',
-      model: 'updated-model',
+      model: 'qwen3:8b',
     }));
     expect(onSaved).toHaveBeenCalledWith(provider.id);
+  });
+
+  it('adds a model to an existing native route without writing legacy settings', async () => {
+    mocks.native = true;
+    const user = userEvent.setup();
+    const provider = useAiSettingsStore.getState().providers[0];
+    const resolved = await (await import('@/test/llm-resolver-fixture')).fixtureResolve(
+      'ai_resolve_model', { provider },
+    ) as import('@/lib/provider-contract').ResolvedModel;
+    const routeSave = vi.fn().mockResolvedValue(undefined);
+    const route = {
+      id: provider.id,
+      revision: 2,
+      displayName: provider.name,
+      adapterId: 'ollama' as const,
+      baseUrl: provider.baseUrl,
+      auth: { kind: 'none' as const },
+      replayDomainId: 'domain',
+      presetId: provider.preset,
+      models: {
+        [provider.model]: {
+          contextWindow: resolved.contextWindow,
+          maxOutputTokens: resolved.maxOutputTokens,
+          toolCalling: resolved.toolCalling,
+          textInput: resolved.textInput,
+          imageInput: resolved.imageInput,
+          reasoning: resolved.reasoning,
+          compat: resolved.compat,
+          vision: resolved.vision,
+        },
+      },
+      defaults: { routeId: provider.id, modelId: provider.model },
+      retryPolicy: DEFAULT_RETRY_POLICY,
+      timeouts: { requestHeadersMs: 30_000, firstByteMs: 30_000, streamIdleMs: 300_000 },
+    };
+    useLlmRoutesStore.setState({
+      ...initialRoutesState,
+      snapshot: {
+        schemaVersion: 1,
+        revision: 3,
+        migrationComplete: true,
+        migrationIssues: [],
+        defaultSelection: route.defaults,
+        routes: [route],
+      },
+      modelsByRoute: { [provider.id]: [resolved] },
+      status: 'ready',
+      save: routeSave,
+    }, true);
+    const legacyBefore = structuredClone(useAiSettingsStore.getState().providers);
+
+    render(<ProviderSetupDialog open provider={provider} addingModel onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+    const model = screen.getByLabelText('settings.ai.model');
+    await user.type(model, 'qwen3:8b');
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(routeSave).toHaveBeenCalledTimes(1));
+    const [routes] = routeSave.mock.calls[0];
+    expect(Object.keys(routes[0].models)).toEqual([provider.model, 'qwen3:8b']);
+    expect(routes[0].defaults).toEqual({ routeId: provider.id, modelId: 'qwen3:8b' });
+    expect(useAiSettingsStore.getState().providers).toEqual(legacyBefore);
+    expect(mocks.invokeSavePreferences).not.toHaveBeenCalled();
+  });
+
+  it('keeps RouteStore as the sole persisted state when a native save fails', async () => {
+    mocks.native=true;
+    const provider=useAiSettingsStore.getState().providers[0];
+    const resolved=await (await import('@/test/llm-resolver-fixture')).fixtureResolve('ai_resolve_model',{provider}) as import('@/lib/provider-contract').ResolvedModel;
+    const routeSave=vi.fn().mockRejectedValue(new Error('REVISION_CONFLICT'));
+    useLlmRoutesStore.setState({
+      ...initialRoutesState,
+      snapshot:{schemaVersion:1,revision:3,migrationComplete:true,migrationIssues:[],defaultSelection:{routeId:provider.id,modelId:provider.model},routes:[{
+        id:provider.id,revision:2,displayName:provider.name,adapterId:provider.kind==='ollama'?'ollama':'chat-completions',baseUrl:provider.baseUrl,auth:{kind:'none'},replayDomainId:'domain',presetId:provider.preset,
+        models:{[provider.model]:{contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision}},
+        defaults:{routeId:provider.id,modelId:provider.model},retryPolicy:provider.retryPolicy!,timeouts:{requestHeadersMs:30000,firstByteMs:30000,streamIdleMs:300000},
+      }]},
+      modelsByRoute:{[provider.id]:[resolved]},status:'ready',save:routeSave,
+    },true);
+    const before=structuredClone(useAiSettingsStore.getState().providers);
+    render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()}/>);
+    await userEvent.setup().click(screen.getByRole('button',{name:'common.save'}));
+    await waitFor(()=>expect(routeSave).toHaveBeenCalledTimes(1));
+    expect(useAiSettingsStore.getState().providers).toEqual(before);
+    expect(mocks.invokeSavePreferences).not.toHaveBeenCalled();
+    const feedback=await screen.findByRole('alert');
+    expect(within(feedback).getByRole('button',{name:/REVISION_CONFLICT/})).toBeVisible();
   });
 });
 
@@ -511,6 +626,14 @@ describe('buildProviderRequestEndpoint', () => {
       'http://127.0.0.1:11434',
       'ollama',
     )).toBe('http://127.0.0.1:11434/api/chat');
+    for (const baseUrl of [
+      'https://api.anthropic.com',
+      'https://api.anthropic.com/v1',
+      'https://api.anthropic.com/v1/messages',
+    ]) {
+      expect(buildProviderRequestEndpoint(baseUrl, 'anthropicMessages'))
+        .toBe('https://api.anthropic.com/v1/messages');
+    }
   });
 
   it.each([

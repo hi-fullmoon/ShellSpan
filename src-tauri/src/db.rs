@@ -219,6 +219,41 @@ pub(crate) struct Database {
 }
 
 impl Database {
+    /// Dedicated LLM document commit. CAS and the one-time legacy backup share SQLite's transaction.
+    pub(crate) fn commit_llm_routes(
+        &self,
+        expected: Option<u64>,
+        document: &str,
+        backup: Option<&str>,
+    ) -> Result<(), String> {
+        let mut conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let current: Option<String> = tx
+            .query_row(
+                "SELECT value FROM preferences WHERE key='llm.routes.v1'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let revision = current
+            .as_ref()
+            .map(|raw| serde_json::from_str::<serde_json::Value>(raw).map_err(|e| e.to_string()))
+            .transpose()?
+            .and_then(|v| v["revision"].as_u64());
+        if revision != expected {
+            return Err("REVISION_CONFLICT".into());
+        }
+        if let Some(backup) = backup {
+            tx.execute(
+                "INSERT OR IGNORE INTO preferences (key,value) VALUES ('llm.legacyBackup.v1',?1)",
+                [backup],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.execute("INSERT INTO preferences (key,value) VALUES ('llm.routes.v1',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [document]).map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
+    }
     pub(crate) fn open(db_path: &Path) -> Result<Self, String> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
@@ -708,6 +743,18 @@ impl Database {
                 params![key, value],
             )
             .map_err(|e| format!("failed to save preference {key}: {e}"))?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn delete_preferences(&self, keys: &[String]) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        for key in keys {
+            conn.execute("DELETE FROM preferences WHERE key=?1", [key])
+                .map_err(|e| e.to_string())?;
         }
         Ok(())
     }

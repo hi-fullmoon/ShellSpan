@@ -82,10 +82,13 @@ async fn drive_agent_inner(
 ) -> Result<AgentDriverSettlement, String> {
     let config = if let Some(subagent) = &entry.subagent {
         AgentDriverConfig {
-            max_steps_per_turn: Some(config.max_steps_per_turn.map_or(
-                subagent.budget.max_steps_per_turn as usize,
-                |limit| limit.min(subagent.budget.max_steps_per_turn as usize),
-            )),
+            max_steps_per_turn: Some(
+                config
+                    .max_steps_per_turn
+                    .map_or(subagent.budget.max_steps_per_turn as usize, |limit| {
+                        limit.min(subagent.budget.max_steps_per_turn as usize)
+                    }),
+            ),
             max_turns_per_session: config
                 .max_turns_per_session
                 .min(subagent.budget.max_turns as usize),
@@ -141,6 +144,15 @@ async fn drive_agent_inner(
         }
 
         let existing_scope = entry.scope()?;
+        if existing_scope.is_none()
+            && snapshot.inbox.next_turn.is_empty()
+            && snapshot.inbox.next_step.is_empty()
+        {
+            entry.set_phase(AgentLifecyclePhase::Idle)?;
+            append_status(sessions, entry, AgentSessionStatus::Idle, None)?;
+            return Ok(AgentDriverSettlement::Idle);
+        }
+        let mut prepared_model = entry.prepare_model()?;
         let (turn_id, step_id, mut step_index) = if let Some(AgentActiveScope {
             turn_id,
             step_id: Some(step_id),
@@ -168,11 +180,11 @@ async fn drive_agent_inner(
                 })
                 .count()
                 .saturating_add(1);
-            if let Some(limit) = config.max_steps_per_turn.filter(|limit| step_index > *limit) {
-                let reason = format!(
-                    "stepLimitExceeded: maximum {} Steps per Turn",
-                    limit
-                );
+            if let Some(limit) = config
+                .max_steps_per_turn
+                .filter(|limit| step_index > *limit)
+            {
+                let reason = format!("stepLimitExceeded: maximum {} Steps per Turn", limit);
                 close_open_scope(sessions, entry, &reason)?;
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
@@ -183,6 +195,7 @@ async fn drive_agent_inner(
                 sessions,
                 entry,
                 hooks,
+                &prepared_model,
                 compactions,
                 &turn_id,
                 &step_id,
@@ -204,16 +217,20 @@ async fn drive_agent_inner(
             )?;
             (turn_id, step_id, step_index)
         } else {
-            if snapshot.inbox.next_turn.is_empty() && snapshot.inbox.next_step.is_empty() {
-                entry.set_phase(AgentLifecyclePhase::Idle)?;
-                append_status(sessions, entry, AgentSessionStatus::Idle, None)?;
-                return Ok(AgentDriverSettlement::Idle);
-            }
             let turn_id = format!("turn-{}", Uuid::new_v4().simple());
             let step_id = format!("step-{}", Uuid::new_v4().simple());
-            if let Some(reason) =
-                apply_pre_step_hooks(sessions, entry, hooks, compactions, &turn_id, &step_id, 1, config.retry_policy)
-                    .await?
+            if let Some(reason) = apply_pre_step_hooks(
+                sessions,
+                entry,
+                hooks,
+                &prepared_model,
+                compactions,
+                &turn_id,
+                &step_id,
+                1,
+                config.retry_policy,
+            )
+            .await?
             {
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
@@ -241,6 +258,7 @@ async fn drive_agent_inner(
                 sessions,
                 entry,
                 tools,
+                &prepared_model,
                 compactions,
                 &turn_id,
                 &current_step_id,
@@ -274,22 +292,24 @@ async fn drive_agent_inner(
                 entry.set_scope(None)?;
                 break;
             }
-            if let Some(limit) = config.max_steps_per_turn.filter(|limit| step_index >= *limit) {
-                let reason = format!(
-                    "stepLimitExceeded: maximum {} Steps per Turn",
-                    limit
-                );
+            if let Some(limit) = config
+                .max_steps_per_turn
+                .filter(|limit| step_index >= *limit)
+            {
+                let reason = format!("stepLimitExceeded: maximum {} Steps per Turn", limit);
                 close_open_scope(sessions, entry, &reason)?;
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
                 return Ok(AgentDriverSettlement::Failed);
             }
             step_index += 1;
+            prepared_model = entry.prepare_model()?;
             current_step_id = format!("step-{}", Uuid::new_v4().simple());
             if let Some(reason) = apply_pre_step_hooks(
                 sessions,
                 entry,
                 hooks,
+                &prepared_model,
                 compactions,
                 &turn_id,
                 &current_step_id,
@@ -334,15 +354,18 @@ async fn apply_pre_step_hooks(
     sessions: &AgentSessionStore,
     entry: &Arc<AgentEntry>,
     hooks: &AgentHookBus,
+    model: &crate::llm::runtime::PreparedModel,
     compactions: &AgentCompactionManager,
     turn_id: &str,
     step_id: &str,
     step_index: usize,
     retry_policy: RetryPolicy,
 ) -> Result<Option<String>, String> {
-    let model = entry.model()?;
-    let compactions = compactions.clone().with_model(model.adapter, model.provider.clone(),
-        model.provider.retry_policy.unwrap_or(retry_policy));
+    let compactions = compactions.clone().with_model(
+        model.adapter.clone(),
+        model.provider.clone(),
+        model.provider.retry_policy.unwrap_or(retry_policy),
+    );
     let snapshot = sessions.snapshot(&entry.session_id)?;
     let surface_generation = snapshot.surface.generation;
     let assembly = assemble_model_input(&snapshot.header, model_tools_for(entry));
@@ -376,7 +399,7 @@ async fn apply_pre_step_hooks(
         .extend(pending.into_iter().map(|message| ModelMessage::User {
             content: message.content,
         }));
-    let budget = estimate_model_surface_budget(&model.provider, &request);
+    let budget = estimate_model_surface_budget(&model.provider, &request)?;
     let context = AgentPreStepContext {
         session_id: entry.session_id.clone(),
         turn_id: turn_id.to_string(),
@@ -455,12 +478,7 @@ fn retry_random_sample() -> f64 {
 }
 
 fn model_block_has_output(block: &ModelContentBlock) -> bool {
-    match block {
-        ModelContentBlock::Text { text } | ModelContentBlock::Reasoning { text, .. } => {
-            !text.trim().is_empty()
-        }
-        ModelContentBlock::ToolCall { .. } => true,
-    }
+    crate::llm::replay::model_block_has_output(block)
 }
 
 fn model_response_has_output(response: &ModelResponse) -> bool {
@@ -480,6 +498,7 @@ async fn run_step(
     sessions: &AgentSessionStore,
     entry: &Arc<AgentEntry>,
     tools: &AgentToolPipeline,
+    model: &crate::llm::runtime::PreparedModel,
     compactions: &AgentCompactionManager,
     turn_id: &str,
     step_id: &str,
@@ -487,13 +506,14 @@ async fn run_step(
     config: AgentDriverConfig,
 ) -> Result<StepSettlement, String> {
     // A step and all its retries retain one provider/adapter pair.
-    let model = entry.model()?;
     let config = AgentDriverConfig {
         retry_policy: model.provider.retry_policy.unwrap_or(config.retry_policy),
         ..config
     };
     let compactions = compactions.clone().with_model(
-        model.adapter.clone(), model.provider.clone(), config.retry_policy,
+        model.adapter.clone(),
+        model.provider.clone(),
+        config.retry_policy,
     );
     let permission_mode = sessions.snapshot(&entry.session_id)?.header.permission_mode;
     let mut attempt = 1_u32;
@@ -504,6 +524,7 @@ async fn run_step(
     };
     let mut pending_retry: Option<PendingRetry> = None;
     let mut cumulative_delay_ms = 0_u64;
+    let mut prepared_call: Option<crate::llm::runtime::PreparedCall> = None;
     loop {
         if entry.cancellation().is_cancelled() {
             return Ok(StepSettlement::Cancelled);
@@ -539,56 +560,61 @@ async fn run_step(
                 return Ok(StepSettlement::Cancelled);
             }
         }
-        let mut snapshot = sessions.snapshot(&entry.session_id)?;
-        snapshot.header.permission_mode = permission_mode;
-        let assembly = assemble_model_input(&snapshot.header, model_tools_for(entry));
-        ensure_model_context(
-            sessions,
-            entry,
-            turn_id,
-            step_id,
-            &snapshot.surface,
-            &assembly,
-        )?;
-        tools.skills.prepare_step(entry, turn_id, step_id).await?;
-        tools
-            .skills
-            .republish_if_missing(&entry.session_id, turn_id, step_id)?;
-        let surface = sessions.snapshot(&entry.session_id)?.surface;
-        let mut request = ModelRequest::from_surface(
-            request_id.clone(),
-            &surface,
-            assembly.system_prompt,
-            assembly.tools,
-        );
-        if let Some(mut inherited) = sessions.inherited_surface(&entry.session_id)? {
-            inherited.messages.retain(|message| {
+        let mut request = if let Some(call) = &prepared_call {
+            call.request(request_id.clone())
+        } else {
+            let mut snapshot = sessions.snapshot(&entry.session_id)?;
+            snapshot.header.permission_mode = permission_mode;
+            let assembly = assemble_model_input(&snapshot.header, model_tools_for(entry));
+            ensure_model_context(
+                sessions,
+                entry,
+                turn_id,
+                step_id,
+                &snapshot.surface,
+                &assembly,
+            )?;
+            tools.skills.prepare_step(entry, turn_id, step_id).await?;
+            tools
+                .skills
+                .republish_if_missing(&entry.session_id, turn_id, step_id)?;
+            let surface = sessions.snapshot(&entry.session_id)?.surface;
+            let mut request = ModelRequest::from_surface(
+                request_id.clone(),
+                &surface,
+                assembly.system_prompt,
+                assembly.tools,
+            );
+            if let Some(mut inherited) = sessions.inherited_surface(&entry.session_id)? {
+                inherited.messages.retain(|message| {
                 !matches!(
                     message,
                     super::AgentSurfaceMessage::User { source, .. }
                         if is_assembled_context_source(source) || source.producer_id == "shellspan.skills.v1"
                 )
             });
-            inherited.messages.retain(|m| !matches!(m, super::AgentSurfaceMessage::Tool { name, .. } if name == super::skills::SKILL_TOOL));
-            for message in &mut inherited.messages {
-                if let super::AgentSurfaceMessage::Assistant { content, .. } = message {
-                    content.retain(|b| !matches!(b, AgentAssistantContentBlock::ToolCall { call } if call.name == super::skills::SKILL_TOOL));
+                inherited.messages.retain(|m| !matches!(m, super::AgentSurfaceMessage::Tool { name, .. } if name == super::skills::SKILL_TOOL));
+                for message in &mut inherited.messages {
+                    if let super::AgentSurfaceMessage::Assistant { content, .. } = message {
+                        content.retain(|b| !matches!(b, AgentAssistantContentBlock::ToolCall { call } if call.name == super::skills::SKILL_TOOL));
+                    }
                 }
+                let mut inherited_messages = ModelRequest::from_surface(
+                    format!("{request_id}-inherited"),
+                    &inherited,
+                    String::new(),
+                    Vec::new(),
+                )
+                .messages;
+                inherited_messages.append(&mut request.messages);
+                request.messages = inherited_messages;
             }
-            let mut inherited_messages = ModelRequest::from_surface(
-                format!("{request_id}-inherited"),
-                &inherited,
-                String::new(),
-                Vec::new(),
-            )
-            .messages;
-            inherited_messages.append(&mut request.messages);
-            request.messages = inherited_messages;
-        }
+            request
+        };
         let request_surface_generation = request.surface_generation;
-        let budget = estimate_model_surface_budget(&model.provider, &request);
+        let budget = estimate_model_surface_budget(&model.provider, &request)?;
         if budget.requires_compaction() {
-            let before = surface.generation;
+            let before = request.surface_generation;
             compactions
                 .compact(
                     &entry.session_id,
@@ -612,6 +638,11 @@ async fn run_step(
                 ));
             }
         }
+        if prepared_call.is_none() {
+            prepared_call = Some(model.prepare_request(request, "step", &entry.cancellation())?);
+        }
+        let call = prepared_call.as_ref().expect("prepared call");
+        request = call.request(request_id.clone());
         let estimated_input_tokens = Some(budget.estimated_input_tokens);
         if entry.cancellation().is_cancelled() {
             return Ok(StepSettlement::Cancelled);
@@ -621,6 +652,7 @@ async fn run_step(
             entry,
             &model.provider,
             &request,
+            &call.snapshot,
             request_reason,
             attempt,
         )
@@ -658,9 +690,8 @@ async fn run_step(
             collected: Arc::clone(&collected),
             cancellation: cancellation.clone(),
         });
-        let response = model
-            .adapter
-            .stream(request, cancellation.clone(), sink)
+        let response = call
+            .stream(request_id.clone(), cancellation.clone(), sink)
             .await;
         let response = match response {
             _ if cancellation.is_cancelled() => Err(NormalizedModelError::cancelled()),
@@ -709,6 +740,7 @@ async fn run_step(
                         .map_err(|_| "model stream accumulator is unavailable".to_string())?
                         .is_empty() =>
             {
+                prepared_call = None;
                 let before = request_surface_generation;
                 sessions.append(
                     &entry.session_id,
@@ -865,11 +897,17 @@ fn ensure_model_context(
         .context
         .iter()
         .filter(|injection| {
-            surface.messages.iter().rev().find_map(|message| match message {
-                super::AgentSurfaceMessage::User { source, content, .. }
-                    if source.producer_id == injection.source.producer_id => Some(content),
-                _ => None,
-            }) != Some(&injection.content)
+            surface
+                .messages
+                .iter()
+                .rev()
+                .find_map(|message| match message {
+                    super::AgentSurfaceMessage::User {
+                        source, content, ..
+                    } if source.producer_id == injection.source.producer_id => Some(content),
+                    _ => None,
+                })
+                != Some(&injection.content)
         })
         .cloned()
         .map(|injection| AgentScopedPayload {
@@ -962,7 +1000,12 @@ async fn commit_response(
         content: model_content,
         finish_reason,
         usage: model_usage,
+        replay: _,
+        replay_envelope,
     } = response;
+    let replay = replay_envelope.ok_or_else(|| {
+        "REPLAY_CAPTURE_MISSING: successful prepared response has no replay envelope".to_string()
+    })?;
     // Providers may emit whitespace-only text beside valid reasoning/tool calls.
     // Drop only empty blocks before durable validation; retain all whitespace in
     // meaningful content, including code and formatted answers.
@@ -994,16 +1037,17 @@ async fn commit_response(
         .collect::<Vec<_>>();
     let usage = token_usage(model_usage);
     let stop_reason = stop_reason(finish_reason);
-    let content = model_content
+    // The Assistant event and its replay envelope bind the same redacted
+    // projection. Raw tool arguments remain above for policy/collision checks.
+    let committed_model_content = crate::llm::replay::committed_model_content(&model_content)
+        .map_err(crate::llm::replay::replay_error_string)?;
+    let content = committed_model_content
         .into_iter()
         .map(|block| match block {
             ModelContentBlock::Text { text } => AgentAssistantContentBlock::Text { text },
-            ModelContentBlock::Reasoning {
+            ModelContentBlock::Reasoning { text, .. } => AgentAssistantContentBlock::Reasoning {
                 text,
-                provider_item,
-            } => AgentAssistantContentBlock::Reasoning {
-                text,
-                provider_item,
+                provider_item: None,
             },
             ModelContentBlock::ToolCall { call } => AgentAssistantContentBlock::ToolCall {
                 call: Box::new(recorded_tool_call(call)),
@@ -1020,6 +1064,7 @@ async fn commit_response(
                 usage,
                 stop_reason,
                 interrupted: false,
+                replay: Some(replay),
             },
         },
         AgentScopedPayload {
@@ -1080,6 +1125,7 @@ fn append_interrupted_message(
             usage: AgentTokenUsage::default(),
             stop_reason,
             interrupted: true,
+            replay: None,
         },
     )?;
     Ok(())

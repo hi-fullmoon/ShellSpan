@@ -42,6 +42,8 @@ import { generateId } from '@/lib/utils';
 import { t } from '@/locales';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore';
+import { isTauriRuntime } from '@/lib/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import type { AppSection } from '@/types';
 import type { AgentPermissionMode } from '@/types/agent-approval';
@@ -179,9 +181,24 @@ export function useAiSessionController({
   const adapter = providedAdapter ?? ownedAdapter!;
   const terminalSessions = useTerminalStore((state) => state.sessions);
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
-  const providers = useAiSettingsStore((state) => state.providers);
+  const legacyProviders = useAiSettingsStore((state) => state.providers);
+  const routeSnapshot = useLlmRoutesStore((state) => state.snapshot);
+  const routeModels = useLlmRoutesStore((state) => state.modelsByRoute);
+  const hydrateRoutes = useLlmRoutesStore((state) => state.hydrate);
+  useEffect(()=>{if(isTauriRuntime()&&!routeSnapshot)void hydrateRoutes();},[routeSnapshot,hydrateRoutes]);
+  const providers = useMemo(()=>routeSnapshot ? routeProviderConfigs(routeSnapshot,routeModels) : isTauriRuntime() ? [] : legacyProviders,[routeSnapshot,routeModels,legacyProviders]);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
-  const provider = providers.find((item) => item.id === defaultProviderId) ?? providers[0];
+  const provider = useMemo(() => {
+    if (routeSnapshot) {
+      if (!routeSnapshot.defaultSelection) return undefined;
+      try {
+        return sessionProviderConfig(routeSnapshot.defaultSelection, providers);
+      } catch {
+        return undefined;
+      }
+    }
+    return providers.find((item) => item.id === defaultProviderId) ?? providers[0];
+  }, [defaultProviderId, providers, routeSnapshot]);
   const activeTerminal = terminalSessions.find((item) => item.sessionId === activeTerminalId);
   const [view, setView] = useState<AiSessionView | null>(null);
   const [openedSessionId, setOpenedSessionId] = useState<string | null>(null);
@@ -207,7 +224,12 @@ export function useAiSessionController({
   const settingsPending = useRef(false);
   const currentProviderConfig = useCallback((): AiProviderConfig => {
     const selection = viewRef.current?.snapshot.value.header.modelSelection;
-    return selection ? sessionProviderConfig(selection) : useAiSettingsStore.getState().getProviderConfig();
+    const routes=useLlmRoutesStore.getState();
+    const available=routes.snapshot ? routeProviderConfigs(routes.snapshot,routes.modelsByRoute) : isTauriRuntime() ? [] : useAiSettingsStore.getState().providers;
+    if(selection)return sessionProviderConfig(selection,available);
+    if(routes.snapshot?.defaultSelection)return sessionProviderConfig(routes.snapshot.defaultSelection,available);
+    if(isTauriRuntime())throw new Error('INVALID_MODEL_SELECTION: no default route');
+    return useAiSettingsStore.getState().getProviderConfig();
   }, []);
   const changeSettings = async (change: (sessionId: string) => Promise<void>): Promise<void> => {
     const sessionId = viewRef.current?.summary.id;
@@ -248,10 +270,10 @@ export function useAiSessionController({
   const claimWorkspace = useCallback(() => { automaticRestore.current.eligible = false; }, []);
   const canStartAgent = scope === 'terminal'
     && activeTerminal?.status === 'connected';
-  const agentUnavailableReason = canStartAgent
+  const terminalUnavailableReason = canStartAgent
     ? null
     : t('agent.availability.needsTerminal');
-  const hasProvider = Boolean(view?.snapshot.value.header.modelSelection?.model.trim() || provider?.model.trim());
+  const hasProvider = Boolean(view?.snapshot.value.header.modelSelection?.modelId.trim() || provider?.model.trim());
 
   const updateOptimistic = useCallback((updater: (
     current: readonly AiOptimisticSubmission[],
@@ -622,6 +644,16 @@ export function useAiSessionController({
       ),
     };
   }, [optimistic, view, workspaceScopeKey]);
+  const sessionProviderResolution = useMemo(() => {
+    const selection = visibleView?.snapshot.value.header.modelSelection;
+    if (!selection) return { provider: undefined, error: null };
+    try {
+      return { provider: sessionProviderConfig(selection, providers), error: null };
+    } catch (error) {
+      return { provider: undefined, error: normalizeAiSessionError(error).message };
+    }
+  }, [providers, visibleView]);
+  const agentUnavailableReason = sessionProviderResolution.error ?? terminalUnavailableReason;
   const pendingNodes = useMemo(() => (
     view ? [] : withOptimisticConversationNodes([], optimistic, workspaceScopeKey, null)
   ), [optimistic, view, workspaceScopeKey]);
@@ -912,8 +944,7 @@ export function useAiSessionController({
     },
     pendingNodes,
     composer,
-    selectedProvider: visibleView?.snapshot.value.header.modelSelection
-      ? sessionProviderConfig(visibleView.snapshot.value.header.modelSelection) : undefined,
+    selectedProvider: sessionProviderResolution.provider,
     selectedPermission: visibleView ? (visibleView.snapshot.value.header.permissionMode === 'operator'
       ? 'fullAccess' : 'autoApproveReadOnly') : undefined,
     settingsBusy,
@@ -925,8 +956,12 @@ export function useAiSessionController({
       if (!adapter.setPermission) throw new Error('Permission selection is unavailable');
       await adapter.setPermission(sessionId, permissionMode(mode));
     }),
-    providerLabel: provider?.name ?? '',
-    modelLabel: visibleView?.snapshot.value.header.modelSelection?.model ?? provider?.model ?? '',
+    providerLabel: routeSnapshot?.routes.find((route) => route.id === (
+      visibleView?.snapshot.value.header.modelSelection?.routeId ?? provider?.id
+    ))?.displayName ?? legacyProviders.find((item) => item.id === (
+      visibleView?.snapshot.value.header.modelSelection?.routeId ?? provider?.id
+    ))?.name ?? '',
+    modelLabel: visibleView?.snapshot.value.header.modelSelection?.modelId ?? provider?.model ?? '',
     canStartAgent,
     agentUnavailableReason,
     announcement,

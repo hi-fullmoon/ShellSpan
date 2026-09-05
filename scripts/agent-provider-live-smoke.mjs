@@ -7,25 +7,25 @@ const providers = [
   ].map(([name, prefix, suffix]) => ({ name,
     ready: Boolean(process.env[`SHELLSPAN_LIVE_${prefix}_API_KEY`]),
     missing: `SHELLSPAN_LIVE_${prefix}_API_KEY`,
-    test: `agent_runtime::model::tests::live_provider_basic_round_${suffix}`,
+    test: `llm::tests::live_provider_basic_round_${suffix}`,
   })),
   {
     name: 'MiniMax',
     ready: Boolean(process.env.SHELLSPAN_LIVE_MINIMAX_API_KEY),
     missing: 'SHELLSPAN_LIVE_MINIMAX_API_KEY',
-    test: 'agent_runtime::model::tests::live_provider_basic_round_minimax',
+    test: 'llm::tests::live_provider_basic_round_minimax',
   },
   {
     name: 'DeepSeek',
     ready: Boolean(process.env.SHELLSPAN_LIVE_DEEPSEEK_API_KEY),
     missing: 'SHELLSPAN_LIVE_DEEPSEEK_API_KEY',
-    test: 'agent_runtime::model::tests::live_provider_basic_round_deepseek',
+    test: 'llm::tests::live_provider_basic_round_deepseek',
   },
   {
     name: 'OpenAI-compatible no-reasoning (DeepSeek)',
     ready: Boolean(process.env.SHELLSPAN_LIVE_DEEPSEEK_API_KEY),
     missing: 'SHELLSPAN_LIVE_DEEPSEEK_API_KEY',
-    test: 'agent_runtime::model::tests::live_provider_basic_round_deepseek_no_reasoning',
+    test: 'llm::tests::live_provider_basic_round_deepseek_no_reasoning',
   },
   {
     name: 'Generic OpenAI-compatible',
@@ -34,7 +34,7 @@ const providers = [
       && process.env.SHELLSPAN_LIVE_COMPATIBLE_MODEL,
     ),
     missing: 'SHELLSPAN_LIVE_COMPATIBLE_BASE_URL and SHELLSPAN_LIVE_COMPATIBLE_MODEL',
-    test: 'agent_runtime::model::tests::live_provider_basic_round_compatible',
+    test: 'llm::tests::live_provider_basic_round_compatible',
   },
 ];
 

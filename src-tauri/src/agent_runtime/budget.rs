@@ -4,8 +4,6 @@ use crate::ai::AiProviderConfig;
 
 use super::{ModelMessage, ModelRequest};
 
-const MIN_CONTEXT_TOKENS: u64 = 8 * 1024;
-const MAX_CONTEXT_TOKENS: u64 = 2 * 1024 * 1024;
 const FIXED_SAFETY_TOKENS: u64 = 1_024;
 const COMPACTION_THRESHOLD_PERCENT: u64 = 85;
 const COMPACTION_TARGET_PERCENT: u64 = 60;
@@ -13,6 +11,7 @@ const COMPACTION_TARGET_PERCENT: u64 = 60;
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ModelSurfaceBudget {
+    pub(crate) reserved_tokens_per_image: u64,
     pub(crate) context_window: u64,
     pub(crate) output_reserve_tokens: u64,
     pub(crate) safety_reserve_tokens: u64,
@@ -37,11 +36,14 @@ impl ModelSurfaceBudget {
 pub(crate) fn estimate_model_surface_budget(
     provider: &AiProviderConfig,
     request: &ModelRequest,
-) -> ModelSurfaceBudget {
-    let context_window = provider_model_context_window(provider);
-    let output_reserve_tokens = super::provider::capabilities(provider)
-        .max_output_tokens
-        .min(context_window / 4);
+) -> Result<ModelSurfaceBudget, String> {
+    let model = crate::llm::catalog::resolve(provider)?;
+    let context_window = model.context_window;
+    let output_reserve_tokens = model.max_output_tokens;
+    let image_reserve = model
+        .vision
+        .as_ref()
+        .map_or(0, |v| v.reserved_tokens_per_image);
     let safety_reserve_tokens = (context_window / 20).max(FIXED_SAFETY_TOKENS);
     let usable_input_tokens = context_window
         .saturating_sub(output_reserve_tokens)
@@ -65,7 +67,7 @@ pub(crate) fn estimate_model_surface_budget(
     let message_tokens = request
         .messages
         .iter()
-        .map(model_message_tokens)
+        .map(|message| model_message_tokens(message, image_reserve))
         .sum::<u64>();
     let estimated_input_tokens = system_tokens
         .saturating_add(tool_schema_tokens)
@@ -74,7 +76,8 @@ pub(crate) fn estimate_model_surface_budget(
         .saturating_add(tool_schema_bytes)
         .saturating_add(message_bytes);
 
-    ModelSurfaceBudget {
+    Ok(ModelSurfaceBudget {
+        reserved_tokens_per_image: image_reserve,
         context_window,
         output_reserve_tokens,
         safety_reserve_tokens,
@@ -87,35 +90,7 @@ pub(crate) fn estimate_model_surface_budget(
         estimated_input_tokens,
         estimated_input_bytes,
         maximum_input_bytes: usable_input_tokens.saturating_mul(4),
-    }
-}
-
-pub(crate) fn provider_model_context_window(provider: &AiProviderConfig) -> u64 {
-    if let Some(explicit) =
-        context_window_hint(&provider.model).or_else(|| context_window_hint(&provider.id))
-    {
-        return explicit.clamp(MIN_CONTEXT_TOKENS, MAX_CONTEXT_TOKENS);
-    }
-    super::images::vision_route(provider)
-        .map(|route| route.context_window)
-        .unwrap_or_else(|_| super::provider::context_window(provider))
-}
-
-fn context_window_hint(value: &str) -> Option<u64> {
-    let lower = value.to_ascii_lowercase();
-    for marker in ["context-", "ctx-"] {
-        let Some(start) = lower.find(marker).map(|index| index + marker.len()) else {
-            continue;
-        };
-        let digits = lower[start..]
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect::<String>();
-        if let Ok(tokens) = digits.parse::<u64>() {
-            return Some(tokens);
-        }
-    }
-    None
+    })
 }
 
 fn model_message_bytes(message: &ModelMessage) -> u64 {
@@ -124,28 +99,22 @@ fn model_message_bytes(message: &ModelMessage) -> u64 {
         .unwrap_or(u64::MAX / 16)
 }
 
-pub(crate) fn measure_model_messages(messages: &[ModelMessage]) -> (u64, u64) {
+pub(crate) fn measure_model_messages(
+    messages: &[ModelMessage],
+    reserved_tokens_per_image: u64,
+) -> (u64, u64) {
     messages.iter().fold((0, 0), |(tokens, bytes), message| {
         (
-            tokens.saturating_add(model_message_tokens(message)),
+            tokens.saturating_add(model_message_tokens(message, reserved_tokens_per_image)),
             bytes.saturating_add(model_message_bytes(message)),
         )
     })
 }
 
-fn model_message_tokens(message: &ModelMessage) -> u64 {
+fn model_message_tokens(message: &ModelMessage, reserved_tokens_per_image: u64) -> u64 {
     let image_reserve = match message {
-        // Conservative admission reserve, never provider-reported usage. The exact route
-        // contract has the same reserve; geometry and encoded-byte limits are separate.
-        ModelMessage::UserImages { images, .. } => {
-            images.len() as u64
-                * super::images::VISION
-                    .routes
-                    .iter()
-                    .map(|r| r.reserved_tokens_per_image)
-                    .max()
-                    .unwrap_or(16384)
-        }
+        // Admission estimate from the selected model; never provider-reported usage.
+        ModelMessage::UserImages { images, .. } => images.len() as u64 * reserved_tokens_per_image,
         _ => 0,
     };
     // Four bytes per token is deliberately conservative for mixed prose,
@@ -164,20 +133,24 @@ fn estimate_tokens(bytes: u64) -> u64 {
 mod tests {
     use serde_json::json;
 
-    use crate::ai::{AiProviderKind, AiReasoningEffort};
+    use crate::ai::AiProviderKind;
 
     use super::*;
     use crate::agent_runtime::{ModelContentBlock, ModelToolCall, ModelToolDefinition};
 
-    fn provider(model: &str) -> AiProviderConfig {
+    fn provider(context: u64) -> AiProviderConfig {
         AiProviderConfig {
+            model_definition: Some(crate::llm::catalog::fixture_definition(
+                AiProviderKind::OpenAiCompatible,
+                context,
+            )),
             profile: None,
             retry_policy: None,
             id: "fixture".into(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "http://127.0.0.1".into(),
-            model: model.into(),
-            reasoning_effort: Some(AiReasoningEffort::Off),
+            model: "synthetic-budget".into(),
+            reasoning_effort: Some("off".to_string()),
             requires_api_key: false,
             api_key: None,
         }
@@ -207,6 +180,8 @@ mod tests {
                             },
                         },
                     ],
+                    replay: None,
+                    native_replay: None,
                 },
             ],
             tools: vec![ModelToolDefinition {
@@ -215,7 +190,7 @@ mod tests {
                 input_schema: json!({"type": "object"}),
             }],
         };
-        let budget = estimate_model_surface_budget(&provider("fixture-context-16384"), &request);
+        let budget = estimate_model_surface_budget(&provider(16384), &request).unwrap();
         assert_eq!(budget.context_window, 16_384);
         assert!(budget.system_tokens > 0);
         assert!(budget.tool_schema_tokens > 0);
@@ -237,7 +212,7 @@ mod tests {
             }],
             tools: Vec::new(),
         };
-        let budget = estimate_model_surface_budget(&provider("fixture-context-8192"), &request);
+        let budget = estimate_model_surface_budget(&provider(8192), &request).unwrap();
         assert!(budget.compaction_target_tokens < budget.compaction_threshold_tokens);
         assert!(budget.compaction_threshold_tokens < budget.context_window);
         assert!(budget.requires_compaction());

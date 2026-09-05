@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-pub(crate) const AGENT_SESSION_EVENT_VERSION: u8 = 4;
+pub(crate) const AGENT_SESSION_EVENT_VERSION: u8 = 5;
 pub(crate) const MAX_AGENT_MESSAGE_BYTES: usize = 128 * 1024;
 pub(crate) const MAX_AGENT_STREAM_DELTA_BYTES: usize = 4 * 1024;
 
@@ -212,18 +212,15 @@ pub(crate) struct AgentSubagentBudget {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentSubagentModel {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) profile: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) retry_policy: Option<serde_json::Value>,
-    pub(crate) provider_id: String,
-    pub(crate) provider_kind: String,
-    pub(crate) base_url: String,
-    pub(crate) model: String,
+    pub(crate) route_id: String,
+    pub(crate) model_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) reasoning_effort: Option<String>,
-    pub(crate) requires_api_key: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) route_revision: Option<u64>,
 }
+
+pub(crate) use crate::llm::replay::ReplayEnvelopeV5;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -329,13 +326,7 @@ pub(crate) struct AgentRequestSeries {
     pub(crate) starts_series: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct AgentRequestToolSchema {
-    pub(crate) name: String,
-    pub(crate) description: String,
-    pub(crate) input_schema: Value,
-}
+pub(crate) use crate::llm::types::ModelToolDefinition as AgentRequestToolSchema;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -628,10 +619,17 @@ pub(crate) enum AgentSessionEventPayload {
         usage: AgentTokenUsage,
         stop_reason: AgentStopReason,
         interrupted: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replay: Option<ReplayEnvelopeV5>,
     },
     #[serde(rename = "request/header")]
     RequestHeader {
         request_id: String,
+        /// Complete secret-free preparation record. D will validate replay envelopes against it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<crate::llm::runtime::RequestSnapshot>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_digest: Option<String>,
         provider_id: String,
         model: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1007,8 +1005,8 @@ mod tests {
     }
 
     #[test]
-    fn decoder_rejects_pre_v4_envelopes() {
-        for version in [2, 3] {
+    fn decoder_rejects_pre_v5_envelopes() {
+        for version in [2, 3, 4] {
             let old = serde_json::json!({
                 "version": version,
                 "sessionId": "session-1",
@@ -1017,15 +1015,15 @@ mod tests {
                 "type": "turn/start"
             });
             let error = serde_json::from_value::<AgentSessionEvent>(old).unwrap_err();
-            assert!(error.to_string().contains("expected 4"));
+            assert!(error.to_string().contains("expected 5"));
         }
     }
 
     #[test]
-    fn cross_language_v4_fixture_round_trips_without_field_loss() {
+    fn cross_language_v5_fixture_round_trips_without_field_loss() {
         let raw = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../src/test/fixtures/agent-session-v4.json"
+            "/../src/test/fixtures/agent-session-v5.json"
         ));
         let expected = serde_json::from_str::<Value>(raw).unwrap();
         let events = serde_json::from_str::<Vec<AgentSessionEvent>>(raw).unwrap();
@@ -1039,7 +1037,7 @@ mod tests {
     #[test]
     fn wire_decoder_rejects_unknown_envelope_and_payload_fields() {
         let unknown_envelope = serde_json::json!({
-            "version": 4,
+            "version": 5,
             "sessionId": "session-1",
             "seq": 0,
             "timeUnixMs": 1000,
@@ -1049,7 +1047,7 @@ mod tests {
         assert!(serde_json::from_value::<AgentSessionEvent>(unknown_envelope).is_err());
 
         let unknown_payload = serde_json::json!({
-            "version": 4,
+            "version": 5,
             "sessionId": "session-1",
             "seq": 0,
             "timeUnixMs": 1000,

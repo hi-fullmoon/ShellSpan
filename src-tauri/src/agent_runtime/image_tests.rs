@@ -18,7 +18,8 @@ async fn image_compaction_keeps_pixels_and_recovery_resolves_them_again() {
         String::new(),
         Vec::new(),
     );
-    let budget = crate::agent_runtime::estimate_model_surface_budget(&vision_provider(), &request);
+    let budget =
+        crate::agent_runtime::estimate_model_surface_budget(&vision_provider(), &request).unwrap();
     assert_eq!(budget.context_window, 128000);
     crate::agent_runtime::AgentCompactionManager::new(
         runtime.sessions.clone(),
@@ -162,6 +163,7 @@ pub(super) fn upload(format: ImageFormat) -> ImageUpload {
 }
 pub(super) fn vision_provider() -> AiProviderConfig {
     let mut value = provider();
+    value.model_definition = None;
     value.kind = crate::ai::AiProviderKind::OpenAiCompatible;
     value.profile = Some("qwen".into());
     value.model = "qwen3-vl-plus".into();
@@ -587,7 +589,7 @@ async fn image_every_log_prefix_repairs_claim_once_and_preserves_actual_model_in
     for end in enqueued..=header {
         for trailing in [false, true] {
             let dir = tempfile::tempdir().unwrap();
-            let logs = dir.path().join("agent-runtime/sessions-v4");
+            let logs = dir.path().join("agent-runtime/sessions-v5");
             std::fs::create_dir_all(&logs).unwrap();
             let mut lines = events[..=end]
                 .iter()

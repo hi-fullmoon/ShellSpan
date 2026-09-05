@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { parseRetryPolicy, type AiRetryPolicy } from '@/lib/retry-policy';
-import { shallow } from 'zustand/shallow';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type {
   AiProviderConfig,
@@ -15,11 +14,10 @@ import {
 import { createLogger } from '@/lib/logger';
 import { generateId } from '@/lib/utils';
 import {
-  effectiveReasoningEffort,
   isAiReasoningOption,
 } from '@/lib/ai-reasoning';
 
-import { isProviderProfile, resolveProviderProfile, validateProviderCapabilities } from '@/lib/provider-contract';
+import { isProviderProfile, resolveProviderProfile } from '@/lib/provider-contract';
 
 const logger = createLogger('aiSettingsStore');
 
@@ -47,6 +45,14 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     kind: 'openAi',
     baseUrl: 'https://api.openai.com',
     model: 'gpt-5.4-mini',
+    requiresApiKey: true,
+  },
+  {
+    preset: 'anthropic',
+    name: 'Anthropic',
+    kind: 'anthropicMessages',
+    baseUrl: 'https://api.anthropic.com',
+    model: 'claude-sonnet-5',
     requiresApiKey: true,
   },
   {
@@ -135,18 +141,20 @@ const defaults: AiPreferences = {
   contextLines: 200,
 };
 
-const PREFERENCE_KEYS = ['providers', 'defaultProviderId', 'contextLines'] as const;
+// RouteStore owns production connection/default state. These legacy fields are
+// hydrated only as an idempotent migration cache and are never written again.
+const PREFERENCE_KEYS = ['contextLines'] as const;
 
 function storageKey(key: keyof AiPreferences): string {
   return `ai.${key}`;
 }
 
 function isProviderKind(value: unknown): value is AiProviderKind {
-  return value === 'ollama' || value === 'openAi' || value === 'openAiCompatible';
+  return value === 'ollama' || value === 'openAi' || value === 'openAiCompatible' || value === 'anthropicMessages';
 }
 
 function isProviderPreset(value: unknown): value is AiProviderPreset {
-  return ['ollama', 'openai', 'deepseek', 'minimax', 'kimi', 'qwen', 'glm', 'custom'].includes(String(value));
+  return ['ollama', 'openai', 'anthropic', 'deepseek', 'minimax', 'kimi', 'qwen', 'glm', 'custom'].includes(String(value));
 }
 
 function sanitizeProviders(value: unknown): AiProviderProfile[] {
@@ -169,15 +177,16 @@ function sanitizeProviders(value: unknown): AiProviderProfile[] {
     providers.push({
       // Preserve invalid persisted values so request validation fails visibly.
       ...(provider.retryPolicy !== undefined ? { retryPolicy: provider.retryPolicy as AiRetryPolicy } : {}),
+      ...(provider.modelDefinition !== undefined ? { modelDefinition: provider.modelDefinition as AiProviderConfig['modelDefinition'] } : {}),
       id,
       name,
       kind: provider.kind,
       preset,
-      ...(isProviderProfile(provider.profile) ? { profile: provider.profile } : {}),
+      ...(provider.profile !== undefined ? { profile: provider.profile as AiProviderConfig['profile'] } : {}),
       baseUrl: typeof provider.baseUrl === 'string' ? provider.baseUrl : '',
       model: typeof provider.model === 'string' ? provider.model : '',
-      ...(isAiReasoningOption(provider.reasoningEffort)
-        ? { reasoningEffort: provider.reasoningEffort }
+      ...(provider.reasoningEffort !== undefined
+        ? { reasoningEffort: provider.reasoningEffort as AiProviderConfig['reasoningEffort'] }
         : {}),
       requiresApiKey: typeof provider.requiresApiKey === 'boolean'
         ? provider.requiresApiKey
@@ -245,18 +254,7 @@ let pendingPreferences: AiPreferences | undefined;
 let saveInFlight: Promise<void> | null = null;
 
 function preferenceEntries(preferences: AiPreferences): [string, string][] {
-  return PREFERENCE_KEYS.map((key) => [
-    storageKey(key),
-    JSON.stringify(key === 'providers'
-      ? preferences.providers.map((provider) => {
-          const safeProvider = { ...provider } as AiProviderProfile & {
-            apiKey?: unknown;
-          };
-          delete safeProvider.apiKey;
-          return safeProvider;
-        })
-      : preferences[key]),
-  ]);
+  return PREFERENCE_KEYS.map((key) => [storageKey(key), JSON.stringify(preferences[key])]);
 }
 
 async function savePendingPreferences(): Promise<void> {
@@ -337,6 +335,8 @@ export const useAiSettingsStore = create<AiSettingsState>()(
       providers: state.providers.map((provider) => {
         if (provider.id !== id) return provider;
         const updated = { ...provider, ...changes, id };
+        if (!('modelDefinition' in changes) && (['model', 'kind', 'profile', 'baseUrl'] as const)
+          .some(key => key in changes && changes[key] !== provider[key])) delete updated.modelDefinition;
         if (changes.retryPolicy !== undefined) parseRetryPolicy(changes.retryPolicy);
         if ('reasoningEffort' in changes && changes.reasoningEffort === undefined) {
           delete updated.reasoningEffort;
@@ -366,31 +366,33 @@ export const useAiSettingsStore = create<AiSettingsState>()(
       const provider = state.providers.find((item) => item.id === (id ?? state.defaultProviderId))
         ?? state.providers[0];
       if (!provider) throw new Error('No AI provider is configured');
-      const reasoningEffort = effectiveReasoningEffort(provider);
+      if (provider.profile !== undefined && !isProviderProfile(provider.profile)) throw new Error('UNKNOWN_PROFILE');
+      if (provider.reasoningEffort !== undefined && !isAiReasoningOption(provider.reasoningEffort)) throw new Error('UNSUPPORTED_REASONING_EFFORT');
+      const reasoningEffort = provider.reasoningEffort;
       const config: AiProviderConfig = {
         ...(provider.retryPolicy !== undefined ? { retryPolicy: parseRetryPolicy(provider.retryPolicy) } : {}),
+        modelDefinition: provider.modelDefinition,
         id: provider.id,
         kind: provider.kind,
         profile: resolveProviderProfile(provider),
         baseUrl: provider.baseUrl.trim(),
-        model: provider.model.trim(),
+        model: provider.model,
         ...(reasoningEffort ? { reasoningEffort } : {}),
         requiresApiKey: provider.requiresApiKey,
       };
-      validateProviderCapabilities(config);
       return config;
     },
   })),
 );
 
 useAiSettingsStore.subscribe(
-  (state): AiPreferences => ({
-    providers: state.providers,
-    defaultProviderId: state.defaultProviderId,
-    contextLines: state.contextLines,
-  }),
-  (preferences) => {
-    if (useAiSettingsStore.getState().initialized) schedulePreferencesSave(preferences);
+  (state) => state.contextLines,
+  () => {
+    const state = useAiSettingsStore.getState();
+    if (state.initialized) schedulePreferencesSave({
+      providers: state.providers,
+      defaultProviderId: state.defaultProviderId,
+      contextLines: state.contextLines,
+    });
   },
-  { equalityFn: shallow },
 );

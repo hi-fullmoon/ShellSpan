@@ -7,7 +7,9 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::ai::{api_key_for_provider, AiProviderConfig, AiProviderKind, AiReasoningEffort};
+#[cfg(test)]
+use crate::ai::api_key_for_provider;
+use crate::ai::AiProviderConfig;
 use crate::keychain::CredentialManager;
 
 use super::{
@@ -842,7 +844,11 @@ impl SubAgentManager {
         let child_session_id = format!("session-{}", Uuid::new_v4().simple());
         let child_task_id = format!("task-{}", Uuid::new_v4().simple());
         let parent_model = parent_entry.model()?;
-        let provider = provider_descriptor(&parent_model.provider);
+        let mut provider = provider_descriptor(&parent_model.provider);
+        provider.route_revision = parent_entry
+            .prepare_model()?
+            .route
+            .map(|route| route.revision);
         let metadata = AgentSubagentSession {
             descriptor_id: descriptor_id.clone(),
             parent_task_id: parent.header.task_id.clone(),
@@ -889,6 +895,11 @@ impl SubAgentManager {
             parent_model.provider.clone(),
             Arc::clone(&parent_model.adapter),
         )?);
+        *handle
+            .entry()
+            .model_registry
+            .lock()
+            .map_err(|_| "MODEL_REGISTRY_UNAVAILABLE")? = Some(self.models.clone());
         self.agents.set_owner(&handle.entry(), &parent_entry)?;
         self.handles
             .lock()
@@ -951,18 +962,28 @@ impl SubAgentManager {
             .header
             .subagent
             .ok_or_else(|| "Session is not a subagent".to_string())?;
-        let provider = provider_config(&subagent.provider)?;
+        let provider = self.models.restore_selection(&subagent.provider)?;
+        #[cfg(test)]
         let credentials = self
             .credentials
             .lock()
             .map_err(|_| "subagent credential resolver is unavailable".to_string())?
             .clone();
-        let api_key = match credentials {
-            Some(credentials) => api_key_for_provider(&credentials, &provider)?,
-            None if provider.requires_api_key => {
-                return Err("cold child resume requires the configured credential resolver".into())
+        #[cfg(not(test))]
+        let api_key = None;
+        #[cfg(test)]
+        let api_key = if self.models.uses_route_store() {
+            None
+        } else {
+            match credentials {
+                Some(credentials) => api_key_for_provider(&credentials, &provider)?,
+                None if provider.requires_api_key => {
+                    return Err(
+                        "cold child resume requires the configured credential resolver".into(),
+                    )
+                }
+                None => None,
             }
-            None => None,
         };
         let adapter = self.models.resolve(provider.clone(), api_key)?;
         let handle = Arc::new(self.agents.attach(
@@ -972,6 +993,10 @@ impl SubAgentManager {
             adapter,
         )?);
         let entry = handle.entry();
+        *entry
+            .model_registry
+            .lock()
+            .map_err(|_| "MODEL_REGISTRY_UNAVAILABLE")? = Some(self.models.clone());
         let parent_id = snapshot
             .header
             .parent_session_id
@@ -1588,79 +1613,10 @@ fn default_subagent_budget() -> AgentSubagentBudget {
 
 pub(super) fn provider_descriptor(provider: &AiProviderConfig) -> AgentSubagentModel {
     AgentSubagentModel {
-        profile: provider.profile.clone(),
-        retry_policy: provider
-            .retry_policy
-            .map(|policy| serde_json::to_value(policy).expect("validated retry policy")),
-        provider_id: provider.id.clone(),
-        provider_kind: match provider.kind {
-            AiProviderKind::Ollama => "ollama",
-            AiProviderKind::OpenAi => "openAi",
-            AiProviderKind::OpenAiCompatible => "openAiCompatible",
-        }
-        .into(),
-        base_url: provider.base_url.clone(),
-        model: provider.model.clone(),
-        reasoning_effort: provider.reasoning_effort.map(reasoning_name),
-        requires_api_key: provider.requires_api_key,
-    }
-}
-
-pub(super) fn provider_config(provider: &AgentSubagentModel) -> Result<AiProviderConfig, String> {
-    Ok(AiProviderConfig {
-        profile: provider.profile.clone(),
-        retry_policy: provider
-            .retry_policy
-            .clone()
-            .map(serde_json::from_value)
-            .transpose()
-            .map_err(|error| format!("persisted retry policy is invalid: {error}"))?,
-        id: provider.provider_id.clone(),
-        kind: match provider.provider_kind.as_str() {
-            "ollama" => AiProviderKind::Ollama,
-            "openAi" => AiProviderKind::OpenAi,
-            "openAiCompatible" => AiProviderKind::OpenAiCompatible,
-            _ => return Err("persisted subagent provider kind is invalid".into()),
-        },
-        base_url: provider.base_url.clone(),
-        model: provider.model.clone(),
-        reasoning_effort: provider
-            .reasoning_effort
-            .as_deref()
-            .map(parse_reasoning)
-            .transpose()?,
-        requires_api_key: provider.requires_api_key,
-        api_key: None,
-    })
-}
-
-fn reasoning_name(effort: AiReasoningEffort) -> String {
-    match effort {
-        AiReasoningEffort::Off => "off",
-        AiReasoningEffort::On => "on",
-        AiReasoningEffort::None => "none",
-        AiReasoningEffort::Minimal => "minimal",
-        AiReasoningEffort::Low => "low",
-        AiReasoningEffort::Medium => "medium",
-        AiReasoningEffort::High => "high",
-        AiReasoningEffort::Xhigh => "xhigh",
-        AiReasoningEffort::Max => "max",
-    }
-    .into()
-}
-
-fn parse_reasoning(value: &str) -> Result<AiReasoningEffort, String> {
-    match value {
-        "off" => Ok(AiReasoningEffort::Off),
-        "on" => Ok(AiReasoningEffort::On),
-        "none" => Ok(AiReasoningEffort::None),
-        "minimal" => Ok(AiReasoningEffort::Minimal),
-        "low" => Ok(AiReasoningEffort::Low),
-        "medium" => Ok(AiReasoningEffort::Medium),
-        "high" => Ok(AiReasoningEffort::High),
-        "xhigh" => Ok(AiReasoningEffort::Xhigh),
-        "max" => Ok(AiReasoningEffort::Max),
-        _ => Err("persisted subagent reasoning effort is invalid".into()),
+        route_id: provider.id.clone(),
+        model_id: provider.model.clone(),
+        reasoning_effort: provider.reasoning_effort.clone(),
+        route_revision: None,
     }
 }
 
@@ -1811,24 +1767,16 @@ mod retry_policy_tests {
     use super::*;
 
     #[test]
-    fn restored_child_keeps_proxy_profile_and_retry_policy_and_accepts_legacy_descriptor() {
+    fn child_descriptor_contains_only_model_selection() {
         let config: AiProviderConfig = serde_json::from_value(serde_json::json!({
             "id":"proxy", "profile":"deepseek", "kind":"openAiCompatible", "baseUrl":"https://proxy.example/v1",
             "model":"deepseek-v4-flash", "requiresApiKey":false,
             "retryPolicy":{"maxAttempts":1,"initialDelayMs":0,"maxDelayMs":500,"maxServerDelayMs":1000,"jitterRatio":0.5}
         })).unwrap();
         let encoded = serde_json::to_value(provider_descriptor(&config)).unwrap();
-        let restored = provider_config(&serde_json::from_value(encoded.clone()).unwrap()).unwrap();
-        assert_eq!(restored.retry_policy, config.retry_policy);
-        assert_eq!(restored.profile, config.profile);
-        let mut legacy = encoded;
-        legacy.as_object_mut().unwrap().remove("retryPolicy");
-        legacy.as_object_mut().unwrap().remove("profile");
-        let restored = provider_config(&serde_json::from_value(legacy).unwrap()).unwrap();
-        assert!(restored.profile.is_none());
         assert_eq!(
-            restored.retry_policy.unwrap_or_default(),
-            super::super::RetryPolicy::default()
+            encoded,
+            serde_json::json!({"routeId":"proxy","modelId":"deepseek-v4-flash"})
         );
     }
 }

@@ -69,10 +69,10 @@ describe('single Agent Runtime architecture', () => {
   });
 
   it('routes update_plan through the primary Session event pipeline', async () => {
-    const model = await readFile(path.join(runtimeRoot, 'model.rs'), 'utf8');
+    const modelTools = await readFile(path.join(runtimeRoot, 'model_tools.rs'), 'utf8');
     const pipeline = await readFile(path.join(runtimeRoot, 'tool_pipeline.rs'), 'utf8');
     const session = await readFile(path.join(runtimeRoot, 'session.rs'), 'utf8');
-    expect(model).toContain('name: "update_plan"');
+    expect(modelTools).toContain('name: "update_plan"');
     expect(pipeline).toContain('AgentSessionEventPayload::TaskPlan');
     expect(pipeline).toContain('sessionRuntimeAuthorized');
     expect(session).toContain('Payload::TaskPlan');

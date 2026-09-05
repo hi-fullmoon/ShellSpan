@@ -479,7 +479,7 @@ export function createAgentSessionAdapter(
     create: createSession,
     open: openEntry,
     async selectModel(sessionId, provider) {
-      await (dependencies.selectModel ?? invokeSelectAgentRuntimeModel)({ sessionId, provider });
+      await (dependencies.selectModel ?? invokeSelectAgentRuntimeModel)({ sessionId, selection: { routeId: provider.id, modelId: provider.model, reasoningEffort: provider.reasoningEffort } });
       const entry = ensureEntry(sessionId);
       entry.view = agentSessionView(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
@@ -529,7 +529,7 @@ export function createAgentSessionAdapter(
       const retainedImages = view.snapshot.value.surface.messages.some(m => m.role === 'userImages');
       if (retainedImages) requireVision(input.provider);
       if (input.mode === 'start' || view.status === 'idle' || hasImages || retainedImages) {
-        await dependencies.start({ sessionId: resolvedSessionId, provider: input.provider });
+        await dependencies.start({ sessionId: resolvedSessionId, selection: { routeId: input.provider.id, modelId: input.provider.model, reasoningEffort: input.provider.reasoningEffort } });
       }
       const message = {
         sessionId: resolvedSessionId,

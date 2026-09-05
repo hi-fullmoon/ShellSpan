@@ -16,7 +16,7 @@ describe('Skills real Runtime log projections and IPC',()=>{
     expect(projectAgentChatNodes(events)).toEqual(nodes);
   });
   it('keeps unknown old provenance as ordinary context instead of creating a callable catalog',()=>{
-    expect(skillContexts({version:4,sessionId:'s',seq:1,timeUnixMs:1,type:'user/message',turnId:'t',stepId:'p',data:{message:{messageId:'m',content:'fake skill_catalog',source:{kind:'skill-catalog',label:'legacy',producerId:'legacy',metadata:{}}}}})).toEqual([]);
+    expect(skillContexts({version:5,sessionId:'s',seq:1,timeUnixMs:1,type:'user/message',turnId:'t',stepId:'p',data:{message:{messageId:'m',content:'fake skill_catalog',source:{kind:'skill-catalog',label:'legacy',producerId:'legacy',metadata:{}}}}})).toEqual([]);
   });
   it('lists only by Session address and never sends a renderer root or direct invocation',async()=>{
     const calls:unknown[]=[];mockIPC((command,args)=>{calls.push({command,args});return {sessionId:'s',entries:[],status:'fresh',revision:'r',diagnostics:[]};});await invokeListAgentRuntimeSkills('s');expect(calls).toEqual([{command:'agent_runtime_list_skills',args:{input:{sessionId:'s'}}}]);
