@@ -34,7 +34,7 @@ pub(crate) struct VisionContract {
 }
 pub(crate) static VISION: LazyLock<VisionContract> = LazyLock::new(|| {
     let value: VisionContract =
-        serde_json::from_str(include_str!("../../../src/lib/vision-contract.json"))
+        serde_json::from_str(include_str!("../../../src/lib/ai/vision-contract.json"))
             .expect("shared vision contract");
     assert_eq!(value.version, 1);
     assert_eq!(value.max_frames, 1);
