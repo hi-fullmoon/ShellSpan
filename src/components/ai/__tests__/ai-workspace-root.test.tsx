@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
+import { createAiWorkspaceNavigationState } from '@/lib/ai/panel-route';
 import type { AiSessionView } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
@@ -80,6 +81,71 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiWorkspaceRoot Phase 3 skeleton', () => {
+  it('opens history over the conversation and preserves its draft and expanded process when dismissed', async () => {
+    const user = userEvent.setup();
+    const base = agentView();
+    const view = {
+      ...base,
+      nodes: base.nodes.map((node) => node.kind === 'turnProcess' ? { ...node, sessionId: 'history-overlay-test' } : node),
+    };
+    const onOpen = vi.fn();
+    function HistoryWorkspace(): React.ReactNode {
+      const [navigation, setNavigation] = useState(createAiWorkspaceNavigationState(view.summary.id));
+      const closeHistory = () => setNavigation(createAiWorkspaceNavigationState(view.summary.id));
+      return (
+        <AiWorkspaceRoot
+          view={view}
+          scope="workbench"
+          defaultDraft="Unsent draft"
+          navigation={navigation}
+          sessions={[view.summary]}
+          onHistory={() => setNavigation({ ...navigation, route: { kind: 'sessions' } })}
+          onBack={closeHistory}
+          onOpenSession={(summary) => { onOpen(summary); closeHistory(); }}
+        />
+      );
+    }
+    const { container } = render(<HistoryWorkspace />);
+    const composer = screen.getByTestId('ai-workspace-composer');
+    const conversation = container.querySelector('[data-message-scroller-viewport]');
+    const history = screen.getByRole('button', { name: 'Conversation history' });
+    await user.click(screen.getByRole('button', { name: 'Thought' }));
+    await user.click(history);
+
+    const popover = await screen.findByRole('dialog', { name: 'Session history' });
+    expect(popover).toContainElement(screen.getByRole('searchbox', { name: 'Search sessions' }));
+    expect(container.querySelector('[data-message-scroller-viewport]')).toBe(conversation);
+    expect(screen.getByTestId('ai-workspace-composer')).toBe(composer);
+    expect(composer).toHaveTextContent('Unsent draft');
+    expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute('aria-expanded', 'true');
+    expect(container.querySelector('.ai-route-header')).toBeNull();
+    await waitFor(() => expect(screen.getByRole('searchbox')).toHaveFocus());
+
+    await user.click(screen.getByRole('button', { name: 'Filter sessions' }));
+    expect(await screen.findAllByRole('menuitemradio')).toHaveLength(3);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    expect(popover).toBeVisible();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(history).toHaveFocus();
+    expect(screen.getByTestId('ai-workspace-composer')).toBe(composer);
+
+    await user.click(history);
+    await user.type(screen.getByRole('searchbox'), 'nginx');
+    await user.click(screen.getByRole('button', { name: /Check nginx and report evidence.*Completed/ }));
+    expect(onOpen).toHaveBeenCalledWith(view.summary);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    await user.click(history);
+    await user.click(history);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await user.click(history);
+    await user.click(composer);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(composer).toHaveTextContent('Unsent draft');
+  });
+
   it('keeps the stage6a question actionable outside collapsed process and preserves ordinary draft', async () => {
     const base = agentView();
     const pendingQuestion: NonNullable<AiSessionView['pendingQuestion']> = {

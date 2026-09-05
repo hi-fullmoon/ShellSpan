@@ -207,26 +207,7 @@ export function AiWorkspaceRoot({
       className="ai-workspace-root"
       aria-label={t('ai.workspace')}
     >
-      {route.kind === 'sessions' ? (
-        <AiSessionBrowser
-          sessions={sessions}
-          activeSessionKey={view ? sessionRouteKey(view.summary.kind, view.summary.id) : null}
-          loading={sessionsLoading}
-          error={sessionsError}
-          archivingId={archivingSessionId}
-          renamingId={renamingSessionId}
-          renameError={renameError}
-          canStartAgent={canStartAgent}
-          agentUnavailableReason={agentUnavailableReason}
-          onBack={() => onBack?.()}
-          onClose={onClose}
-          onNew={() => onNewSession?.()}
-          onRefresh={() => onRefreshSessions?.()}
-          onOpen={(summary) => onOpenSession?.(summary)}
-          onArchive={(summary) => onArchiveSession?.(summary)}
-          onRename={(summary, nextTitle) => onRenameSession?.(summary, nextTitle)}
-        />
-      ) : route.kind === 'toolDetails' ? (
+      {route.kind === 'toolDetails' ? (
         <AiToolDetails
           node={toolDetailsNode ?? null}
           onBack={() => onBack?.()}
@@ -248,6 +229,28 @@ export function AiWorkspaceRoot({
         status={status}
         onClose={onClose}
         onHistory={onHistory}
+        historyOpen={route.kind === 'sessions'}
+        onHistoryClose={onBack}
+        historyContent={(
+          <AiSessionBrowser
+            compact
+            sessions={sessions}
+            activeSessionKey={sessionLedgerKey}
+            loading={sessionsLoading}
+            error={sessionsError}
+            archivingId={archivingSessionId}
+            renamingId={renamingSessionId}
+            renameError={renameError}
+            canStartAgent={canStartAgent}
+            agentUnavailableReason={agentUnavailableReason}
+            onBack={() => onBack?.()}
+            onNew={() => onNewSession?.()}
+            onRefresh={() => onRefreshSessions?.()}
+            onOpen={(summary) => onOpenSession?.(summary)}
+            onArchive={(summary) => onArchiveSession?.(summary)}
+            onRename={(summary, nextTitle) => onRenameSession?.(summary, nextTitle)}
+          />
+        )}
         onNewSession={onNewSession && canStartAgent ? onNewSession : undefined}
       />
 

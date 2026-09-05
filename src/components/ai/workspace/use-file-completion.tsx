@@ -95,24 +95,24 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
     } catch (failure) { if (!abort.signal.aborted && currentKey.current === expected) setError(String(failure)); }
     finally { if (!abort.signal.aborted && currentKey.current === expected) setBinding(false); }
   };
-  const panel = open ? <Card size="sm" className="w-full min-w-0" data-file-completion="">
-      <CardHeader>
+  const panel = open ? <Card size="sm" className="w-full min-w-0 gap-1 pt-2 pb-0" data-file-completion="">
+      <CardHeader className="shrink-0 gap-0.5 px-2">
         <CardTitle>{t('ai.workspace.files.title')}</CardTitle>
         <CardDescription className="break-all">{result?.scope ? `${result.scope.target.label ?? result.scope.target.targetId} (${result.scope.target.kind === 'local' ? 'local' : `${result.scope.target.username}@${result.scope.target.host}:${result.scope.target.port}`}) · ${result.scope.root}` : targetLabel}</CardDescription>
       </CardHeader>
-      <CardContent className="flex min-w-0 flex-col gap-2">
-        <p className="text-xs text-muted-foreground">{t('ai.workspace.files.hint')}</p>
+      <CardContent className="flex min-h-0 min-w-0 flex-col gap-1 overflow-y-auto px-0">
+        <p className="px-2 text-xs text-muted-foreground">{t('ai.workspace.files.hint')}</p>
         {needsRoot && <p>{t('ai.workspace.files.rootKeyboard')}</p>}
         {needsRoot && <Button type="button" variant="outline" onMouseDown={e => e.preventDefault()} onClick={() => { setError(null); setRootOpen(true); }}>{t('ai.workspace.files.chooseRoot')}</Button>}
-        <div aria-live="polite" role="status">
+        <div aria-live="polite" role="status" className="shrink-0 px-2 empty:hidden">
           {loading && <span className="flex items-center gap-2"><Spinner />{t('ai.workspace.files.loading')}</span>}
           {error && <Alert><AlertDescription>{errorText(error)}</AlertDescription></Alert>}
           {result?.status === 'truncated' && <p>{t('ai.workspace.files.truncated')}</p>}
           {Boolean(result?.excluded) && <p>{t('ai.workspace.files.excluded')}</p>}
           {result?.status === 'ready' && result.entries.length === 0 && <EmptyState title={t('ai.workspace.files.empty')} />}
         </div>
-        <div id={id} role="listbox" aria-label={t('ai.workspace.files.title')} className="flex max-h-40 min-w-0 flex-col gap-1 overflow-y-auto">
-          {result?.entries.map((candidate, i) => <Button key={candidate.path} id={`${id}-${i}`} type="button" role="option" aria-selected={i === index} tabIndex={-1} variant={i === index ? 'secondary' : 'ghost'} className="w-full min-w-0 justify-start" onMouseDown={e => e.preventDefault()} onClick={() => choose(candidate)}>
+        <div id={id} role="listbox" aria-label={t('ai.workspace.files.title')} className="flex max-h-60 min-h-0 min-w-0 flex-col overflow-y-auto p-1">
+          {result?.entries.map((candidate, i) => <Button key={candidate.path} id={`${id}-${i}`} type="button" role="option" aria-selected={i === index} tabIndex={-1} variant={i === index ? 'secondary' : 'ghost'} className="w-full min-w-0 shrink-0 justify-start px-2" onMouseDown={e => e.preventDefault()} onClick={() => choose(candidate)}>
             {candidate.kind === 'directory' ? <FolderIcon data-icon="inline-start" /> : <FileIcon data-icon="inline-start" />}
             <span className="truncate" title={candidate.path}>{candidate.path}{candidate.kind === 'directory' ? '/' : ''}</span>
           </Button>)}
@@ -128,6 +128,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
       </DialogContent>
     </Dialog>;
   return { panel, dialog, open, editor,
+    dismiss: () => setDismissed(key),
     editorProps: {
       ref: editor,
       'aria-autocomplete': 'list' as const,

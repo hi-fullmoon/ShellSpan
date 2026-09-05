@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArchiveIcon,
+  ChevronDownIcon,
   EllipsisIcon,
   FilterIcon,
   PencilIcon,
@@ -217,6 +218,7 @@ function SessionRow({
 }
 
 export function AiSessionBrowser({
+  compact = false,
   sessions,
   activeSessionKey = null,
   loading,
@@ -234,6 +236,7 @@ export function AiSessionBrowser({
   onArchive,
   onRename,
 }: {
+  readonly compact?: boolean;
   readonly sessions: readonly AiSessionSummary[];
   readonly activeSessionKey?: string | null;
   readonly loading: boolean;
@@ -284,20 +287,22 @@ export function AiSessionBrowser({
   }, [renameTarget, renamingId, sessions, submittedTitle]);
 
   return (
-    <div className="ai-session-browser" data-slot="ai-session-browser">
-      <AiRouteHeader
-        title={t('ai.workspace.sessions.title')}
-        description={t('ai.workspace.sessions.description')}
-        onBack={onBack}
-        onClose={onClose}
-        actions={(
-          <NewSessionButton
-            canStartAgent={canStartAgent}
-            unavailableReason={agentUnavailableReason}
-            onNew={onNew}
-          />
-        )}
-      />
+    <div className="ai-session-browser" data-slot="ai-session-browser" data-compact={compact || undefined}>
+      {!compact && (
+        <AiRouteHeader
+          title={t('ai.workspace.sessions.title')}
+          description={t('ai.workspace.sessions.description')}
+          onBack={onBack}
+          onClose={onClose}
+          actions={(
+            <NewSessionButton
+              canStartAgent={canStartAgent}
+              unavailableReason={agentUnavailableReason}
+              onNew={onNew}
+            />
+          )}
+        />
+      )}
 
       <div className="ai-session-browser-toolbar">
         <InputGroup className="ai-session-search">
@@ -309,56 +314,65 @@ export function AiSessionBrowser({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             aria-label={t('ai.workspace.sessions.search')}
-            placeholder={t('common.search')}
+            placeholder={compact ? t('ai.workspace.sessions.search') : t('common.search')}
           />
         </InputGroup>
-        <DropdownMenu>
+        <div className="ai-session-browser-filters">
+          <DropdownMenu>
+            <Tooltip disabled={compact}>
+              <TooltipTrigger
+                render={(
+                  <DropdownMenuTrigger
+                    render={(
+                      compact ? (
+                        <Button variant="ghost" size="sm" aria-label={t('ai.workspace.sessions.filter')} />
+                      ) : (
+                        <AiHeaderIconButton aria-label={t('ai.workspace.sessions.filter')} />
+                      )
+                    )}
+                  />
+                )}
+              >
+                {compact ? (
+                  <>
+                    {t(`ai.workspace.sessions.filter.${filter}`)}
+                    <ChevronDownIcon data-icon="inline-end" />
+                  </>
+                ) : <FilterIcon data-icon="inline-start" />}
+              </TooltipTrigger>
+              <TooltipContent>{t(`ai.workspace.sessions.filter.${filter}`)}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{t('ai.workspace.sessions.filter')}</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={filter}
+                  onValueChange={(value) => setFilter(value as SessionFilter)}
+                >
+                  {FILTERS.map((value) => (
+                    <DropdownMenuRadioItem key={value} value={value}>
+                      {t(`ai.workspace.sessions.filter.${value}`)}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Tooltip>
             <TooltipTrigger
               render={(
-                <DropdownMenuTrigger
-                  render={(
-                    <AiHeaderIconButton
-                      aria-label={t('ai.workspace.sessions.filter')}
-                    />
-                  )}
+                <AiHeaderIconButton
+                  disabled={loading}
+                  onClick={onRefresh}
+                  aria-label={t('common.refresh')}
                 />
               )}
             >
-              <FilterIcon data-icon="inline-start" />
+              {loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
             </TooltipTrigger>
-            <TooltipContent>{t(`ai.workspace.sessions.filter.${filter}`)}</TooltipContent>
+            <TooltipContent>{t('common.refresh')}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>{t('ai.workspace.sessions.filter')}</DropdownMenuLabel>
-              <DropdownMenuRadioGroup
-                value={filter}
-                onValueChange={(value) => setFilter(value as SessionFilter)}
-              >
-                {FILTERS.map((value) => (
-                  <DropdownMenuRadioItem key={value} value={value}>
-                    {t(`ai.workspace.sessions.filter.${value}`)}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger
-            render={(
-              <AiHeaderIconButton
-                disabled={loading}
-                onClick={onRefresh}
-                aria-label={t('common.refresh')}
-              />
-            )}
-          >
-            {loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
-          </TooltipTrigger>
-          <TooltipContent>{t('common.refresh')}</TooltipContent>
-        </Tooltip>
+        </div>
       </div>
 
       {error && (

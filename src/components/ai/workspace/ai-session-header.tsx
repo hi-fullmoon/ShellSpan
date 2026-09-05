@@ -4,6 +4,7 @@ import {
   SquarePenIcon,
 } from 'lucide-react';
 
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
@@ -15,6 +16,9 @@ export interface AiSessionHeaderProps {
   readonly status: AiSessionStatus;
   readonly onClose?: () => void;
   readonly onHistory?: () => void;
+  readonly historyOpen?: boolean;
+  readonly historyContent?: React.ReactNode;
+  readonly onHistoryClose?: () => void;
   readonly onNewSession?: () => void;
 }
 
@@ -24,6 +28,9 @@ export function AiSessionHeader({
   status,
   onClose,
   onHistory,
+  historyOpen = false,
+  historyContent,
+  onHistoryClose,
   onNewSession,
 }: AiSessionHeaderProps): React.ReactNode {
   const { t } = useI18n();
@@ -49,20 +56,36 @@ export function AiSessionHeader({
       </div>
 
       <div className="ai-session-actions">
-        {onHistory && (
-          <Tooltip>
-            <TooltipTrigger
-              render={(
-                <AiHeaderIconButton
-                  onClick={onHistory}
-                  aria-label={t('ai.history')}
-                />
-              )}
+        {(onHistory || historyOpen) && (
+          <Popover
+            open={historyOpen}
+            onOpenChange={(open) => {
+              if (open) onHistory?.();
+              else onHistoryClose?.();
+            }}
+          >
+            <Tooltip disabled={historyOpen}>
+              <TooltipTrigger
+                render={(
+                  <PopoverTrigger
+                    render={<AiHeaderIconButton aria-label={t('ai.history')} />}
+                  />
+                )}
+              >
+                <HistoryIcon data-icon="inline-start" />
+              </TooltipTrigger>
+              <TooltipContent>{t('ai.history')}</TooltipContent>
+            </Tooltip>
+            <PopoverContent
+              side="bottom"
+              align="end"
+              sideOffset={8}
+              className="ai-session-history-popover"
             >
-              <HistoryIcon data-icon="inline-start" />
-            </TooltipTrigger>
-            <TooltipContent>{t('ai.history')}</TooltipContent>
-          </Tooltip>
+              <PopoverTitle className="sr-only">{t('ai.workspace.sessions.title')}</PopoverTitle>
+              {historyContent}
+            </PopoverContent>
+          </Popover>
         )}
 
         {onNewSession && (
