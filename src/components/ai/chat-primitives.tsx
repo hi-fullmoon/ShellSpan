@@ -28,6 +28,7 @@ import {
   useMessageScroller,
 } from '@/components/ui/message-scroller';
 import { useI18n } from '@/hooks/useI18n';
+import type { AiScrollAnchor } from '@/lib/ai/panel-route';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -38,15 +39,22 @@ interface MessageScrollerProps {
   className?: string;
   contentClassName?: string;
   ariaLabel?: string;
-  initialAnchor?: { readonly nodeKey: string; readonly offset: number; readonly scrollTop: number };
-  onAnchorChange?: (anchor: { readonly nodeKey: string; readonly offset: number; readonly scrollTop: number }) => void;
+  initialAnchor?: AiScrollAnchor;
+  onAnchorChange?: (anchor: AiScrollAnchor) => void;
+}
+
+function isAtBottom(viewport: HTMLElement): boolean {
+  return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1;
 }
 
 export const MessageScroller: React.FC<MessageScrollerProps> = (props) => {
   const openingAnchor = useRef(props.initialAnchor);
+  // Following the latest output is navigation state too. Restoring it through
+  // scrollToMessage would leave the primitive in its detached jump mode.
+  const readingAnchor = openingAnchor.current?.atBottom ? undefined : openingAnchor.current;
   return (
-    <MessageScrollerProvider autoScroll defaultScrollPosition={openingAnchor.current ? 'start' : 'end'}>
-      <ConversationScroller {...props} initialAnchor={openingAnchor.current} />
+    <MessageScrollerProvider autoScroll defaultScrollPosition={readingAnchor ? 'start' : 'end'}>
+      <ConversationScroller {...props} initialAnchor={readingAnchor} />
     </MessageScrollerProvider>
   );
 };
@@ -65,24 +73,33 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
   const viewportRef = useRef<HTMLDivElement>(null);
   const restoredAnchorRef = useRef(false);
   const restoreFrameRef = useRef<number | null>(null);
-  const { scrollToMessage, scrollToStart } = useMessageScroller();
+  const [positionReady, setPositionReady] = useState(false);
+  const { scrollToEnd, scrollToMessage, scrollToStart } = useMessageScroller();
 
   const cancelRestore = useCallback(() => {
     if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
     restoreFrameRef.current = null;
   }, []);
 
-  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const interruptRestore = useCallback(() => {
     cancelRestore();
+    setPositionReady(true);
+  }, [cancelRestore]);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    interruptRestore();
     if (!(event.target instanceof Element)
       || !event.target.closest('[data-slot="scroll-area-scrollbar"]')) return;
     // The custom scrollbar sits outside the viewport. Notify the primitive's
     // existing wheel-intent handler with zero movement so dragging releases
     // auto-follow even during its programmatic-scroll grace period.
     viewportRef.current?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 0 }));
-  }, [cancelRestore]);
+  }, [interruptRestore]);
 
-  useEffect(() => cancelRestore, [cancelRestore]);
+  useLayoutEffect(() => () => {
+    cancelRestore();
+    restoredAnchorRef.current = false;
+  }, [cancelRestore]);
 
   const readAnchor = useCallback(() => {
     const scrollport = viewportRef.current;
@@ -105,7 +122,10 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
       const nodeKey = row.querySelector<HTMLElement>('[data-ai-node-key]')?.dataset.aiNodeKey;
       if (!nodeKey) continue;
       const rect = row.getBoundingClientRect();
-      onAnchorChange({ nodeKey, offset: rect.top - viewportTop, scrollTop: scrollport.scrollTop });
+      onAnchorChange({
+        nodeKey, offset: rect.top - viewportTop, scrollTop: scrollport.scrollTop,
+        atBottom: isAtBottom(scrollport),
+      });
       break;
     }
   }, [onAnchorChange]);
@@ -113,36 +133,53 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
   useLayoutEffect(() => {
     const scrollport = viewportRef.current;
     const content = contentRef.current;
-    if (!initialAnchor || restoredAnchorRef.current || !scrollport || !content) return;
+    if (restoredAnchorRef.current || !scrollport || !content) return;
     const nodes = content.querySelectorAll<HTMLElement>('[data-ai-node-key]');
-    if (!nodes.length) return;
-    const node = [...nodes].find((candidate) => candidate.dataset.aiNodeKey === initialAnchor.nodeKey);
+    if (initialAnchor && !nodes.length) return;
+    const node = initialAnchor
+      ? [...nodes].find((candidate) => candidate.dataset.aiNodeKey === initialAnchor.nodeKey)
+      : undefined;
     const item = node?.closest<HTMLElement>('[data-slot="message-scroller-item"]');
-    if (item?.dataset.messageId) {
+    let restoreAnchor: () => void;
+    if (!initialAnchor) {
+      restoreAnchor = () => { scrollToEnd(); };
+    } else if (item?.dataset.messageId) {
       const messageId = item.dataset.messageId;
       const paddingTop = Number.parseFloat(getComputedStyle(content).paddingBlockStart) || 0;
       const options = { align: 'start' as const, scrollMargin: initialAnchor.offset - paddingTop };
-      scrollToMessage(messageId, options);
-      // Reopening reveals rows whose heights were estimated by content-visibility.
-      // Let them lay out before aligning the saved offset a final time.
-      restoreFrameRef.current = requestAnimationFrame(() => {
-        restoreFrameRef.current = requestAnimationFrame(() => {
-          restoreFrameRef.current = null;
-          scrollToMessage(messageId, options);
-        });
-      });
+      restoreAnchor = () => {
+        scrollToMessage(messageId, options);
+        // A jump can add a spacer to align a message beyond the natural end.
+        // Restoring a shorter/reflowed transcript must clamp to its real end.
+        const spacer = content.querySelector<HTMLElement>('[data-message-scroller-spacer]');
+        // An exact end position must also resume following, including anchors
+        // saved before atBottom was recorded.
+        if ((spacer && !spacer.hidden) || isAtBottom(scrollport)) scrollToEnd();
+      };
     } else {
-      scrollToStart();
-      scrollport.scrollTop = initialAnchor.scrollTop;
+      restoreAnchor = () => {
+        scrollToStart();
+        scrollport.scrollTop = initialAnchor.scrollTop;
+      };
     }
+    restoreAnchor();
+    // content-visibility initially estimates row heights. Keep the scroller's
+    // layout, but reveal it only after the visible rows and position are settled.
+    restoreFrameRef.current = requestAnimationFrame(() => {
+      restoreFrameRef.current = requestAnimationFrame(() => {
+        restoreFrameRef.current = null;
+        restoreAnchor();
+        setPositionReady(true);
+      });
+    });
     // Saved positions are restored once on mount. Prepending and streaming
     // remain owned by MessageScroller, without replaying saved scroll events.
     restoredAnchorRef.current = true;
-  }, [children, initialAnchor, scrollToMessage, scrollToStart]);
+  }, [children, initialAnchor, scrollToEnd, scrollToMessage, scrollToStart]);
 
   return (
     <MessageScrollerPrimitive
-      className={className}
+      className={cn(className, !positionReady && 'invisible')}
       data-follow-key={followKey}
       role="log"
       aria-label={ariaLabel}
@@ -151,9 +188,9 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
       <MessageScrollerViewport
         ref={viewportRef}
         onScroll={readAnchor}
-        onWheel={cancelRestore}
-        onTouchMove={cancelRestore}
-        onKeyDown={cancelRestore}
+        onWheel={interruptRestore}
+        onTouchMove={interruptRestore}
+        onKeyDown={interruptRestore}
       >
         <MessageScrollerContent ref={contentRef} className={cn('gap-4 px-3 py-4', contentClassName)}>
           {React.Children.toArray(children).map((child, index) => {

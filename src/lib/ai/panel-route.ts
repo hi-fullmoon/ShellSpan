@@ -10,6 +10,7 @@ export interface AiScrollAnchor {
   readonly nodeKey: string;
   readonly offset: number;
   readonly scrollTop: number;
+  readonly atBottom?: boolean;
 }
 
 export interface AiRouteReturnFocus {

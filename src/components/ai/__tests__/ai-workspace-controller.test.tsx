@@ -204,6 +204,43 @@ afterEach(() => {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 });
 
+describe('session archive', () => {
+  it('localizes a runtime rejection, refreshes stale rows, and suppresses duplicate requests', async () => {
+    useAppStore.setState({ locale: 'zh-CN' });
+    await initI18n('zh-CN');
+    const summary = { ...runningAgentView().summary, status: 'idle' as const };
+    let rejectArchive!: (reason: Error) => void;
+    const agent = adapter({
+      archive: vi.fn(() => new Promise<void>((_resolve, reject) => { rejectArchive = reject; })),
+      list: vi.fn(async () => ({ sessions: [{ ...summary, status: 'running' as const }] })),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    act(() => {
+      result.current.archiveSession(summary);
+      result.current.archiveSession(summary);
+    });
+    expect(agent.archive).toHaveBeenCalledTimes(1);
+    await act(async () => rejectArchive(new Error('AGENT_SESSION_ARCHIVE_BUSY')));
+    await waitFor(() => expect(result.current.archivingSessionId).toBeNull());
+    expect(result.current.sessionsError).toContain('请先停止会话或等待处理完成后再归档');
+    expect(result.current.sessions[0].status).toBe('running');
+    act(() => result.current.archiveSession(summary));
+    expect(agent.archive).toHaveBeenCalledTimes(1);
+    expect(agent.stop).not.toHaveBeenCalled();
+  });
+
+  it('archives an idle session once and refreshes the history after success', async () => {
+    const summary = { ...runningAgentView().summary, status: 'idle' as const };
+    const agent = adapter({ list: vi.fn(async () => ({ sessions: [{ ...summary, archived: true }] })) });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    act(() => result.current.archiveSession(summary));
+    await waitFor(() => expect(result.current.sessions[0]?.archived).toBe(true));
+    expect(result.current.sessionsError).toBeNull();
+    expect(agent.archive).toHaveBeenCalledWith(summary.id);
+    expect(agent.stop).not.toHaveBeenCalled();
+  });
+});
+
 it.each(['', ' \n\t '])('routes image-only text %j through image submission', async draft => {
   connectedTerminal();
   const send = vi.fn(async () => undefined), reportError = vi.fn();
@@ -391,8 +428,11 @@ describe('AiWorkspaceController', () => {
     connectedTerminal();
     const view = runningAgentView();
     const listeners: ((value: AiSessionView) => void)[] = [];
+    let finishRefresh!: (next: AiSessionView) => void;
     const agent = adapter({
-      open: vi.fn(async () => view),
+      open: vi.fn().mockResolvedValueOnce(view).mockImplementationOnce(() => new Promise<AiSessionView>((resolve) => {
+        finishRefresh = resolve;
+      })),
       subscribe: vi.fn((_id, listener) => { listeners.push(listener); return () => undefined; }),
     });
     const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
@@ -402,12 +442,36 @@ describe('AiWorkspaceController', () => {
     act(() => result.current.setDraft('keep this draft'));
     act(() => result.current.openSession(view.summary));
     await waitFor(() => expect(agent.subscribe).toHaveBeenCalledTimes(2));
+    expect(result.current.view?.summary.id).toBe(view.summary.id);
     await waitFor(() => expect(result.current.view?.throughSeq).toBe(10));
     expect(result.current.composer.draft).toBe('keep this draft');
     act(() => listeners[0]({ ...view, throughSeq: 999 }));
     expect(result.current.view?.throughSeq).toBe(10);
+    await act(async () => finishRefresh(view));
     act(() => listeners[1]({ ...view, throughSeq: 20 }));
     expect(result.current.view?.throughSeq).toBe(20);
+  });
+
+  it('retains the selected history session identity while its transcript is loading', async () => {
+    const first = runningAgentView();
+    const second = runningAgentView('agent-session-2');
+    let finishOpen!: (next: AiSessionView) => void;
+    const agent = adapter({
+      open: vi.fn().mockResolvedValueOnce(first).mockImplementationOnce(() => new Promise<AiSessionView>((resolve) => {
+        finishOpen = resolve;
+      })),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'workbench', adapter: agent }));
+    act(() => result.current.openSession(first.summary));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(first.summary.id));
+
+    act(() => result.current.openSession(second.summary));
+    expect(result.current.view).toBeNull();
+    expect(result.current.composer).toMatchObject({ sessionId: second.summary.id, runtimeStatus: second.status });
+    expect(result.current.navigation.route).toEqual({ kind: 'conversation', sessionId: second.summary.id });
+
+    await act(async () => finishOpen(second));
+    expect(result.current.view?.summary.id).toBe(second.summary.id);
   });
 
   it('keeps Workbench and terminal drafts separate', async () => {
@@ -511,8 +575,8 @@ describe('AiWorkspaceController', () => {
     const agent = adapter();
     render(<AiWorkspaceController scope="workbench" adapter={agent} />);
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Agent is unavailable');
-    expect(screen.getByRole('alert')).toHaveTextContent('Open a connected terminal');
+    expect(screen.getByRole('status', { name: 'Agent is unavailable' })).toHaveTextContent('Open a connected terminal');
+    expect(screen.getByRole('textbox')).toHaveAccessibleDescription('Open a connected terminal to start an Agent task.');
     expect(screen.getByRole('textbox')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.queryByRole('button', { name: 'New conversation' })).toBeNull();
 
@@ -521,7 +585,7 @@ describe('AiWorkspaceController', () => {
     expect(agent.submit).not.toHaveBeenCalled();
   });
 
-  it('requires the active terminal to remain connected before accepting Agent input', () => {
+  it('requires the active terminal to remain connected before accepting Agent input', async () => {
     connectedTerminal();
     useTerminalStore.setState((state) => ({
       sessions: state.sessions.map((session) => (
@@ -531,7 +595,7 @@ describe('AiWorkspaceController', () => {
     const agent = adapter();
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Open a connected terminal');
+    expect(await screen.findByRole('status', { name: 'Agent is unavailable' })).toHaveTextContent('Open a connected terminal');
     expect(screen.getByRole('textbox')).toHaveAttribute('aria-disabled', 'true');
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
     expect(agent.submit).not.toHaveBeenCalled();
