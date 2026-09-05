@@ -5,6 +5,7 @@ import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
 import { questionKey } from '@/types/agent-question';
 import { useImageDraft } from './use-image-draft';
 import { sessionProviderConfig } from '@/lib/ai/session-settings';
+import { listAllAiSessions } from '@/lib/ai/session-list';
 import type { AiProviderConfig } from '@/types/ai';
 import { requireVision } from '@/lib/ai/vision-contract';
 import { resolveAiSubmission } from '@/lib/ai/submission-policy';
@@ -42,6 +43,7 @@ import { generateId } from '@/lib/utils';
 import { t } from '@/locales';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { useAiDraftStore } from '@/stores/aiDraftStore';
 import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -53,6 +55,7 @@ import type {
 } from '@/types/agent-session';
 
 const OPTIMISTIC_COMMIT_TIMEOUT_MS = 15_000;
+type AiAnnouncement = Extract<AiComposerEffect, { type: 'announce' }>['reason'];
 
 export type AiSessionControllerAdapter = AiSessionAdapter<'agent'>;
 
@@ -83,7 +86,7 @@ export interface AiSessionController {
   readonly modelLabel: string;
   readonly canStartAgent: boolean;
   readonly agentUnavailableReason: string | null;
-  readonly announcement: string | null;
+  readonly announcement: AiAnnouncement | null;
   readonly navigation: AiWorkspaceNavigationState;
   readonly sessions: readonly AiSessionSummary[];
   readonly sessionsLoading: boolean;
@@ -203,8 +206,10 @@ export function useAiSessionController({
   const [view, setView] = useState<AiSessionView | null>(null);
   const [openedSessionId, setOpenedSessionId] = useState<string | null>(null);
   const [optimistic, setOptimistic] = useState<readonly AiOptimisticSubmission[]>([]);
-  const [announcement, setAnnouncement] = useState<string | null>(null);
-  const [composer, setComposer] = useState(() => createAiComposerState());
+  const [announcement, setAnnouncement] = useState<AiAnnouncement | null>(null);
+  const [composer, setComposer] = useState(() => createAiComposerState({
+    draft: useAiDraftStore.getState().drafts[`new:agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`] ?? '',
+  }));
   const [navigation, setNavigation] = useState(() => createAiWorkspaceNavigationState());
   const scrollAnchorsRef = useRef<Record<string, AiScrollAnchor | undefined>>({});
   const [sessions, setSessions] = useState<readonly AiSessionSummary[]>([]);
@@ -237,11 +242,13 @@ export function useAiSessionController({
     if (!sessionId || settingsPending.current) return;
     settingsPending.current = true;
     setSettingsBusy(true);
-    const context = viewRef.current?.summary.id;
+    const context = submissionContextRef.current;
     try {
       await change(sessionId);
     } catch (error) {
-      if (viewRef.current?.summary.id === context) setAnnouncement(normalizeAiSessionError(error).message);
+      if (mountedRef.current && submissionContextRef.current === context) {
+        dispatch({ type: 'error.reported', error: normalizeAiSessionError(error) });
+      }
     } finally {
       settingsPending.current = false;
       if (mountedRef.current) setSettingsBusy(false);
@@ -252,7 +259,6 @@ export function useAiSessionController({
   const mountedRef = useRef(true);
   const timeoutRef = useRef(new Map<string, number>());
   const effectExecutorRef = useRef<(effect: AiComposerEffect) => void>(() => undefined);
-  const draftBySessionRef = useRef(new Map<string, string>());
   const sessionListRequestRef = useRef(0);
 
   const workspaceScopeKey = `agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`;
@@ -303,7 +309,7 @@ export function useAiSessionController({
   const draftOwnerRef = useRef(navigationDraftKey(null));
 
   const saveCurrentDraft = useCallback((): void => {
-    draftBySessionRef.current.set(draftOwnerRef.current, composerRef.current.draft);
+    useAiDraftStore.getState().saveDraft(draftOwnerRef.current, composerRef.current.draft);
   }, []);
 
   const restoreDraft = useCallback((sessionId: string | null): void => {
@@ -311,7 +317,7 @@ export function useAiSessionController({
     draftOwnerRef.current = key;
     dispatch({
       type: 'draft.changed',
-      value: draftBySessionRef.current.get(key) ?? '',
+      value: useAiDraftStore.getState().drafts[key] ?? '',
     });
   }, [dispatch, navigationDraftKey]);
 
@@ -320,7 +326,7 @@ export function useAiSessionController({
     if (draftOwnerRef.current === key) return;
     // The new-conversation draft now belongs to the created session. Do not
     // resurrect its submitted text the next time a blank conversation opens.
-    draftBySessionRef.current.delete(draftOwnerRef.current);
+    useAiDraftStore.getState().saveDraft(draftOwnerRef.current, '');
     draftOwnerRef.current = key;
   }, [navigationDraftKey]);
 
@@ -337,7 +343,7 @@ export function useAiSessionController({
       runtimeStatus: summary?.status ?? 'idle',
       terminal: summary !== undefined && ['completed', 'cancelled', 'failed'].includes(summary.status),
       waitingApproval: summary?.status === 'waiting',
-      draft: draftBySessionRef.current.get(key) ?? '',
+      draft: useAiDraftStore.getState().drafts[key] ?? '',
       preferredBusyMode: composerRef.current.preferredBusyMode,
     });
     composerRef.current = next;
@@ -522,12 +528,13 @@ export function useAiSessionController({
   useEffect(() => {
     mountedRef.current = true;
     return () => {
+      saveCurrentDraft();
       mountedRef.current = false;
       for (const timeout of timeoutRef.current.values()) window.clearTimeout(timeout);
       timeoutRef.current.clear();
       ownedAdapter?.dispose();
     };
-  }, [ownedAdapter]);
+  }, [ownedAdapter, saveCurrentDraft]);
 
   useEffect(() => {
     resetComposer();
@@ -555,12 +562,12 @@ export function useAiSessionController({
       let sessionId = openedSessionId;
       if (!sessionId && scope === 'terminal' && activeTerminal) {
         if (!canPublish()) return;
-        const page = await adapter.list({
+        const summaries = await listAllAiSessions(adapter, {
           scopeKey: `terminal-${activeTerminal.sessionId}`,
           archived: false,
           limit: 100,
-        });
-        sessionId = page.sessions[0]?.id ?? null;
+        }, canPublish);
+        sessionId = summaries?.[0]?.id ?? null;
       }
       if (!canPublish() || !sessionId) return;
       const publish = (next: AiSessionView): void => {
@@ -672,9 +679,12 @@ export function useAiSessionController({
     setSessionsLoading(true);
     setSessionsError(null);
     try {
-      const page = await adapter.list({ limit: 200 });
-      if (!mountedRef.current || requestId !== sessionListRequestRef.current) return;
-      setSessions([...page.sessions].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+      const summaries = await listAllAiSessions(adapter, { limit: 200 }, () => (
+        mountedRef.current && requestId === sessionListRequestRef.current
+      ));
+      if (summaries && mountedRef.current && requestId === sessionListRequestRef.current) {
+        setSessions(summaries);
+      }
     } catch (error) {
       if (mountedRef.current && requestId === sessionListRequestRef.current) {
         setSessionsError(normalizeAiSessionError(error).message);
@@ -935,9 +945,13 @@ export function useAiSessionController({
         viewRef.current = next;
         setView(next);
       },
-      (error: unknown) => setAnnouncement(normalizeAiSessionError(error).message),
+      (error: unknown) => {
+        if (mountedRef.current && viewRef.current?.summary.id === current.summary.id) {
+          dispatch({ type: 'error.reported', error: normalizeAiSessionError(error) });
+        }
+      },
     ).finally(() => setLoadingOlder(false));
-  }, [adapter, loadingOlder]);
+  }, [adapter, dispatch, loadingOlder]);
 
   const loadArtifact = useCallback<AiSessionAdapter['loadArtifact']>((sessionId, artifactId, maxBytes) => (
     adapter.loadArtifact(sessionId, artifactId, maxBytes)
@@ -1014,8 +1028,13 @@ export function useAiSessionController({
           hasProvider, canCreateSession: canStartAgent, draft: composer.draft, hasImages: true, gesture,
           accelerated, preferredBusyMode: composer.preferredBusyMode, submitting: imageDraft.busy });
         if (decision.kind !== 'submit') { imageDraft.reportError(decision.kind === 'reject' ? decision.reason : 'sessionUnavailable'); return; }
-        // Recheck selected model BEFORE binding a cold Session. Adding images never creates one.
-        try { requireVision(currentProviderConfig()); }
+        // Use the same model for vision preflight and submission, even if navigation
+        // changes the current Session while native creation is pending.
+        let imageProvider: AiProviderConfig;
+        try {
+          imageProvider = currentProviderConfig();
+          requireVision(imageProvider);
+        }
         catch (e) { imageDraft.reportError(String(e)); return; }
         void imageDraft.send(async () => {
           const cold = await coldSkillSession.current;
@@ -1034,7 +1053,7 @@ export function useAiSessionController({
             }
           }
           await adapter.submit(op.sessionId, { clientOperationId: op.id, mode: op.mode, content: value.text,
-            images: value.images, provider: currentProviderConfig() });
+            images: value.images, provider: imageProvider });
         }, value => {
           if (!mountedRef.current || submissionContextRef.current !== context) return;
           if (composerRef.current.draft === value.text) dispatch({ type: 'draft.changed', value: '' });

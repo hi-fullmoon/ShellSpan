@@ -114,7 +114,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
         <div id={id} role="listbox" aria-label={t('ai.workspace.files.title')} className="flex max-h-60 min-h-0 min-w-0 flex-col overflow-y-auto p-1">
           {result?.entries.map((candidate, i) => <Button key={candidate.path} id={`${id}-${i}`} type="button" role="option" aria-selected={i === index} tabIndex={-1} variant={i === index ? 'secondary' : 'ghost'} className="w-full min-w-0 shrink-0 justify-start px-2" onMouseDown={e => e.preventDefault()} onClick={() => choose(candidate)}>
             {candidate.kind === 'directory' ? <FolderIcon data-icon="inline-start" /> : <FileIcon data-icon="inline-start" />}
-            <span className="truncate" title={candidate.path}>{candidate.path}{candidate.kind === 'directory' ? '/' : ''}</span>
+            <span className="truncate">{candidate.path}{candidate.kind === 'directory' ? '/' : ''}</span>
           </Button>)}
         </div>
       </CardContent>
