@@ -1,4 +1,5 @@
 import { AiComposerEditor } from './ai-composer-editor';
+import { AiCompletionPopover } from './ai-completion-popover';
 import { useFileCompletion } from './use-file-completion';
 import { useSkillCompletion } from './use-skill-completion';
 import { useMemo, useRef, useState } from 'react';
@@ -144,6 +145,7 @@ export function AiComposerSeat({
   const [localDraft, setLocalDraft] = useState(defaultDraft);
   const composingRef = useRef(false);
   const composingUntilRef = useRef(0);
+  const completionAnchor = useRef<HTMLDivElement>(null);
   const draft = composerState?.draft ?? controlledDraft ?? localDraft;
   const running = status === 'running' || status === 'waiting';
   const waitingApproval = composerState?.phase === 'waitingApproval';
@@ -197,7 +199,7 @@ export function AiComposerSeat({
   const submit = (gesture: 'keyboard' | 'primary', accelerated = false): void => {
     if (submitDisabled) return;
     if (stopPrimary) {
-      onStop?.();
+      if (gesture === 'primary') onStop?.();
       return;
     }
     if (onSubmitGesture) onSubmitGesture(gesture, accelerated);
@@ -285,7 +287,7 @@ export function AiComposerSeat({
           onOpenDetails={() => onOpenApprovalDetails?.()}
         />
       ) : (
-        <div className="ai-composer-input-anchor">
+        <div ref={completionAnchor} className="ai-composer-input-anchor">
           <InputGroup data-composer-card="" onClick={event => {
             if (event.target === event.currentTarget) completion.editor.current?.focus();
           }}>
@@ -302,7 +304,8 @@ export function AiComposerSeat({
               onBlur={() => { completion.editorProps.onBlur(); skillCompletion.editorProps.onBlur(); }}
               data-testid="ai-workspace-composer"
               value={draft}
-              disabled={waitingApproval || waitingQuestion || unavailable || imageLocked}
+              historyKey={JSON.stringify([composerState?.sessionId, skillsScopeKey])}
+              disabled={terminal || waitingApproval || waitingQuestion || unavailable || imageLocked}
               onChange={updateDraft}
               onPaste={(event) => {
                 if (!onPasteImages) return;
@@ -345,7 +348,6 @@ export function AiComposerSeat({
               }}
               placeholder={t('ai.workspace.composerPlaceholder', { pasteShortcut: getPlatform() === 'macos' ? '⌘V' : 'Ctrl+V' })}
             />
-            {completion.panel && <InputGroupAddon align="block-start" className="block min-w-0">{completion.panel}</InputGroupAddon>}
             {imageControls && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0">{imageControls}</InputGroupAddon>}
             <InputGroupAddon align="block-end" className="ai-composer-toolbar" onClick={event => {
               if (!(event.target as HTMLElement).closest('button, [role="button"]')) completion.editor.current?.focus();
@@ -473,7 +475,12 @@ export function AiComposerSeat({
               </div>
             </InputGroupAddon>
           </InputGroup>
-          {skillCompletion.panel}
+          <AiCompletionPopover anchor={completionAnchor} onDismiss={() => {
+            skillCompletion.dismiss();
+            completion.dismiss();
+          }}>
+            {skillCompletion.panel ?? completion.panel}
+          </AiCompletionPopover>
         </div>
       )}
       <span className="sr-only" aria-live="polite">
