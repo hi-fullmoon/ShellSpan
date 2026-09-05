@@ -94,6 +94,7 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
   </Card> : null;
   return {
     panel, open,
+    dismiss: () => setDismissed(key),
     commandNames: [...knownCommands.current.names],
     editorProps: {
       'aria-controls': open ? id : undefined,
