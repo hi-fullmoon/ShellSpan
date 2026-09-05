@@ -1405,7 +1405,7 @@ export default {
   'ai.thinking.inProgress': 'Thinking…',
   'ai.thinking.interrupted': 'Thinking interrupted',
   'ai.thinking.completed': 'Thought for {seconds} s',
-  'agent.emptyTitle': 'How can I help?',
+  'agent.emptyTitle': 'What would you like to accomplish?',
   'agent.emptyDescription': 'Tell me what you need. I can troubleshoot issues, work with files, or run commands.',
   'agent.conversation': 'Agent task conversation',
   'agent.session.status.idle': 'Idle',
