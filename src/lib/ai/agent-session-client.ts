@@ -61,7 +61,7 @@ export class AgentSessionCommittedClient {
       snapshot: this.snapshotValue,
       events: [...this.events],
       lastCommittedSeq: last?.seq,
-      hasTerminalEvent: this.events.some((event) => event.type === 'session/ended'),
+      hasTerminalEvent: [...this.events].reverse().find((event) => event.type === 'session/ended' || event.type === 'session/resumed')?.type === 'session/ended',
     };
   }
 

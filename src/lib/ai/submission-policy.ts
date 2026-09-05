@@ -6,6 +6,7 @@ export type AiBusyPreference = 'queue' | 'steer';
 export type AiSubmissionRejection =
   | 'empty'
   | 'submitting'
+  | 'stopping'
   | 'waitingApproval'
   | 'waitingQuestion'
   | 'terminal'
@@ -31,6 +32,7 @@ export interface AiSubmissionPolicyInput {
   readonly accelerated: boolean;
   readonly preferredBusyMode: AiBusyPreference;
   readonly submitting: boolean;
+  readonly stopping?: boolean;
 }
 
 function opposite(mode: AiBusyPreference): AiBusyPreference {
@@ -42,6 +44,7 @@ export function resolveAiSubmission(input: AiSubmissionPolicyInput): AiSubmissio
   const empty = input.draft.trim().length === 0 && !input.hasImages;
   const running = input.sessionStatus === 'running' || input.sessionStatus === 'waiting';
 
+  if (input.stopping) return { kind: 'reject', reason: 'stopping' };
   if (input.submitting) return { kind: 'reject', reason: 'submitting' };
   if (input.waitingQuestion) return { kind: 'reject', reason: 'waitingQuestion' };
   if (input.waitingApproval) return { kind: 'reject', reason: 'waitingApproval' };

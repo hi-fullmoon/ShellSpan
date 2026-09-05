@@ -499,6 +499,9 @@ export function projectAgentChatNodes(
     if (event.turnId) ensureTurn(event);
     switch (event.type) {
       case 'session/created':
+      case 'session/resumed':
+      case 'agent/inbox/paused':
+      case 'agent/inbox/item_resumed':
       case 'agent/created':
       case 'agent/inbox/reordered':
       case 'agent/inbox/item_steered':
@@ -519,6 +522,9 @@ export function projectAgentChatNodes(
       case 'task/evidence':
         break;
       case 'agent/status':
+        if (event.data.status === 'idle' && event.data.reason === 'stoppedByUser') {
+          upsertTurnError(event, 'cancelled', event.data.reason, 'session');
+        }
         if (event.data.status === 'completed' || event.data.status === 'failed'
           || event.data.status === 'cancelled') {
           settleStreamingOutput(event, event.data.status, 'session');

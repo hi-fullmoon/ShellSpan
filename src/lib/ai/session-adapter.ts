@@ -30,6 +30,7 @@ export type AiSessionSourceSnapshot = Readonly<{
 }>;
 
 export interface AiInboxItem {
+  readonly paused?: boolean;
   readonly id: string;
   readonly clientSubmissionId?: string;
   readonly lane: 'nextTurn' | 'nextStep';

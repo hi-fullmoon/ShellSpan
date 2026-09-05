@@ -297,6 +297,9 @@ type AgentSessionEventWithoutData<Type extends string> = AgentSessionEventBase &
  * durable replay, and live events all use the same v4 data model.
  */
 export type AgentSessionEvent =
+  | AgentSessionEventWithData<'session/resumed', Record<string, never>>
+  | AgentSessionEventWithData<'agent/inbox/paused', { itemIds: readonly string[] }>
+  | AgentSessionEventWithData<'agent/inbox/item_resumed', { itemId: string; previousRevision: number; clientOperationId: string }>
   | AgentSessionEventWithData<'session/created', {
       taskId: string;
       goal: string;
@@ -629,6 +632,7 @@ export interface AgentSessionSnapshot {
   readonly eventCount: number;
   readonly surface: AgentModelSurfaceSnapshot;
   readonly inbox: Readonly<{
+    pausedIds?: readonly string[];
     nextTurn: readonly AgentSessionInboxMessage[];
     nextStep: readonly AgentSessionInboxMessage[];
   }>;
@@ -737,6 +741,7 @@ export interface AgentSessionMessageInput {
 }
 
 export type AgentInboxMutation =
+  | Readonly<{ type: 'resume'; itemId: string }>
   | Readonly<{ type: 'update'; itemId: string; content: string }>
   | Readonly<{ type: 'remove'; itemId: string }>
   | Readonly<{ type: 'steer'; itemId: string }>
