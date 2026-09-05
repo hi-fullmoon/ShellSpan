@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { projectAgentActivity } from '@/lib/agent-session-projection';
-import fixture from '@/test/fixtures/agent-session-v4.json';
+import fixture from '@/test/fixtures/agent-session-v5.json';
 import {
   AGENT_SESSION_EVENT_VERSION,
   isSupportedAgentSessionEventVersion,
@@ -12,7 +12,7 @@ import {
 
 const events = fixture as unknown as readonly AgentSessionEvent[];
 
-describe('Agent Session Event v4 cross-language fixture', () => {
+describe('Agent Session Event v5 cross-language fixture', () => {
   it('round-trips the canonical JSON fields without loss', () => {
     const roundTripped = JSON.parse(JSON.stringify(events)) as unknown;
     expect(roundTripped).toEqual(fixture);

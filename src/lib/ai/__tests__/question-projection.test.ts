@@ -29,11 +29,8 @@ const requested = sessionEvent(base.length, {
       questions: [{ id: 'choice', question: 'Choose?', multi_select: false }],
     },
     provider: {
-      providerId: 'fixture',
-      providerKind: 'ollama',
-      baseUrl: 'http://localhost:11434',
-      model: 'fixture',
-      requiresApiKey: false,
+      routeId: 'fixture',
+      modelId: 'fixture',
     },
   },
 });

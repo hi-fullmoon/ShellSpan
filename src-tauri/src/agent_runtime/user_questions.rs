@@ -364,8 +364,9 @@ pub(crate) fn validate_payload(event: &AgentSessionEvent) -> Result<(), String> 
             provider,
         } => {
             arguments.validate()?;
-            let config = super::subagent::provider_config(provider)?;
-            crate::ai::validate_provider_config(&config, true)?;
+            if provider.route_id.trim().is_empty() || provider.model_id.trim().is_empty() {
+                return Err("question model selection is invalid".into());
+            }
             identity
         }
         AgentSessionEventPayload::QuestionAnswered {

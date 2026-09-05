@@ -1,9 +1,10 @@
+vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/test/llm-resolver-fixture')).fixtureResolve }));
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { useImageDraft } from '../workspace/use-image-draft';
 import type { ImageDraft } from '@/lib/ai/image-drafts';
 import { requireVision } from '@/lib/vision-contract';
-import { providerCapabilities } from '@/lib/provider-contract';
+import { providerCapabilities, loadResolvedModel } from '@/lib/provider-contract';
 import { initI18n } from '@/locales';
 import { useToastStore } from '@/stores/toastStore';
 
@@ -24,7 +25,7 @@ beforeEach(async () => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-describe('image draft count limit', () => {
+describe('image draft count limit', async () => {
   it.each([0, 19])('accepts exactly 20 images when the draft already has %i', async count => {
     mock.read.mockResolvedValue({ ...draft('A'), images: Array(count).fill(image) });
     mock.prepare.mockImplementation(async uploads => uploads);
@@ -77,7 +78,7 @@ describe('image draft count limit', () => {
   });
 });
 
-describe('image draft ownership and transaction boundaries', () => {
+describe('image draft ownership and transaction boundaries', async () => {
   it('shows pending previews before file reading finishes and keeps saved images intact', async () => {
     const bytes = deferred<ArrayBuffer>();
     const hook = renderHook(() => useImageDraft('A', 'text', vi.fn()));
@@ -182,21 +183,31 @@ describe('image draft ownership and transaction boundaries', () => {
     expect(hook.result.current.pendingFiles).toEqual([]);
   });
 });
-it('vision uses exact shared models and profile/protocol, including model-specific context', () => {
+it('vision uses exact backend DTOs and refuses unresolved or unknown models', async () => {
   const provider = { id: 'test', kind: 'openAiCompatible' as const, baseUrl: 'https://proxy.example', profile: 'qwen' as const, model: 'qwen3-vl-plus', requiresApiKey: false };
-  expect(() => requireVision(provider)).not.toThrow(); expect(providerCapabilities(provider).contextWindow).toBe(128000);
-  for (const model of ['qwen3-vl-plus-unknown', 'qwen-plus', 'deepseek-chat', 'MiniMax-M2.7']) expect(() => requireVision({ ...provider, model })).toThrow('UNSUPPORTED');
-  expect(() => requireVision({ ...provider, profile: 'generic' })).toThrow('UNSUPPORTED');
-  expect(() => requireVision({ ...provider, kind: 'ollama' })).toThrow('UNSUPPORTED');
+  await loadResolvedModel(provider);
+  expect(() => requireVision(provider)).not.toThrow();
+  expect(providerCapabilities(provider).contextWindow).toBe(128000);
+  for (const model of ['qwen3-vl-plus-unknown', 'qwen-plus', 'deepseek-chat', 'MiniMax-M2.7']) {
+    expect(() => requireVision({ ...provider, model })).toThrow('MODEL_RESOLUTION_PENDING');
+    await expect(loadResolvedModel({ ...provider, model })).rejects.toThrow('UNKNOWN_MODEL');
+    expect(() => requireVision({ ...provider, model })).toThrow('UNKNOWN_MODEL');
+  }
+  await expect(loadResolvedModel({ ...provider, profile: 'generic' })).rejects.toThrow('UNKNOWN_MODEL');
+  await expect(loadResolvedModel({ ...provider, kind: 'ollama' })).rejects.toThrow('UNKNOWN_MODEL');
 });
 
-it.each(['k3', 'k3-256k'])('accepts %s images for Kimi Code and explicitly configured proxies', model => {
+it.each(['k3', 'k3-256k'])('accepts %s images through the resolved Kimi connection', async model => {
   const provider = { id: 'kimi', kind: 'openAiCompatible' as const, baseUrl: 'https://api.kimi.com/coding', model, requiresApiKey: true };
+  await loadResolvedModel(provider);
   expect(() => requireVision(provider)).not.toThrow();
   expect(providerCapabilities(provider).contextWindow).toBe(262144);
-  expect(() => requireVision({ ...provider, model: ` ${model.toUpperCase()} ` })).not.toThrow();
-  expect(() => requireVision({ ...provider, profile: 'kimi', baseUrl: 'https://proxy.example/v1' })).not.toThrow();
-  expect(() => requireVision({ ...provider, model: `${model}-unknown` })).toThrow('UNSUPPORTED');
-  expect(() => requireVision({ ...provider, profile: 'generic' })).toThrow('UNSUPPORTED');
-  expect(() => requireVision({ ...provider, kind: 'openAi' })).toThrow('UNSUPPORTED');
+  await expect(loadResolvedModel({ ...provider, model: ` ${model.toUpperCase()} ` })).rejects.toThrow('UNKNOWN_MODEL');
+  const proxy = { ...provider, profile: 'kimi' as const, baseUrl: 'https://proxy.example/v1' };
+  await loadResolvedModel(proxy);
+  expect(() => requireVision(proxy)).not.toThrow();
+  for (const invalid of [{ ...provider, model: `${model}-unknown` }, { ...provider, profile: 'generic' as const }, { ...provider, kind: 'openAi' as const }]) {
+    await expect(loadResolvedModel(invalid)).rejects.toThrow('UNKNOWN_MODEL');
+    expect(() => requireVision(invalid)).toThrow('UNKNOWN_MODEL');
+  }
 });

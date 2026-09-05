@@ -31,7 +31,8 @@ describe('aiSettingsStore', () => {
     vi.useRealTimers();
   });
 
-  it('persists distinct Provider policies and snapshots each transmitted request config', async () => {
+  it('snapshots each request config without persisting legacy Provider state', async () => {
+    vi.useFakeTimers();
     useAiSettingsStore.setState({ initialized: true });
     const first = useAiSettingsStore.getState().providers[0].id;
     const second = useAiSettingsStore.getState().providers[1].id;
@@ -40,12 +41,11 @@ describe('aiSettingsStore', () => {
     const snapshot = useAiSettingsStore.getState().getProviderConfig(first);
     useAiSettingsStore.getState().updateProvider(first, { retryPolicy: { ...DEFAULT_RETRY_POLICY, maxAttempts: 4 } });
     expect(snapshot.retryPolicy?.maxAttempts).toBe(1);
+    await vi.advanceTimersByTimeAsync(400);
     await flushAiSettingsPreferences();
-    const calls = tauri.invokeSavePreferences.mock.calls;
-    const entries = calls[calls.length - 1][0] as [string, string][];
-    const restored = parseAiPreferences(entries);
-    expect(restored.providers.find(p => p.id === first)?.retryPolicy?.maxAttempts).toBe(4);
-    expect(restored.providers.find(p => p.id === second)?.retryPolicy).toEqual({ ...DEFAULT_RETRY_POLICY, maxAttempts: 8, maxServerDelayMs: 1000 });
+    expect(useAiSettingsStore.getState().getProviderConfig(first).retryPolicy?.maxAttempts).toBe(4);
+    expect(useAiSettingsStore.getState().getProviderConfig(second).retryPolicy).toEqual({ ...DEFAULT_RETRY_POLICY, maxAttempts: 8, maxServerDelayMs: 1000 });
+    expect(tauri.invokeSavePreferences).not.toHaveBeenCalled();
   });
 
   it('keeps invalid stored policy visible and rejects it when building a request', () => {
@@ -55,6 +55,19 @@ describe('aiSettingsStore', () => {
     expect(() => useAiSettingsStore.getState().getProviderConfig(provider.id)).toThrow('Invalid AI retry policy');
     expect(() => useAiSettingsStore.getState().updateProvider(provider.id, { retryPolicy: { ...DEFAULT_RETRY_POLICY, jitterRatio: Infinity } })).toThrow();
     expect(parseAiPreferences([preference('providers', [provider])]).providers[0].retryPolicy).toBeUndefined();
+  });
+
+  it('preserves malformed persisted capability choices and rejects them before request creation', () => {
+    const provider = initialState.providers[0];
+    for (const invalid of [{ profile: 'unknown-preset' }]) {
+      const restored = parseAiPreferences([preference('providers', [{ ...provider, ...invalid }])]);
+      useAiSettingsStore.setState(restored);
+      expect(useAiSettingsStore.getState().providers[0]).toMatchObject(invalid);
+      expect(() => useAiSettingsStore.getState().getProviderConfig(provider.id)).toThrow(/UNKNOWN_PROFILE|UNSUPPORTED_REASONING_EFFORT/);
+    }
+    const custom = parseAiPreferences([preference('providers', [{ ...provider, reasoningEffort: 'ultra' }])]);
+    useAiSettingsStore.setState(custom);
+    expect(useAiSettingsStore.getState().getProviderConfig(provider.id).reasoningEffort).toBe('ultra');
   });
 
   it('migrates the legacy single-provider preferences without losing values', () => {
@@ -129,7 +142,7 @@ describe('aiSettingsStore', () => {
     await flushAiSettingsPreferences();
     const entries = tauri.invokeSavePreferences.mock.lastCall![0] as [string, string][];
     expect(entries.map(([key]) => key))
-      .toEqual(['ai.providers', 'ai.defaultProviderId', 'ai.contextLines']);
+      .toEqual(['ai.contextLines']);
   });
 
   it('adds a preset and exposes it as the selected request config', () => {
@@ -146,6 +159,20 @@ describe('aiSettingsStore', () => {
     });
   });
 
+  it('adds Anthropic as a first-class Messages provider without storing a key', () => {
+    const id = useAiSettingsStore.getState().addProvider('anthropic');
+    expect(useAiSettingsStore.getState().getProviderConfig(id)).toEqual({
+      id,
+      profile: 'anthropic',
+      kind: 'anthropicMessages',
+      baseUrl: 'https://api.anthropic.com',
+      model: 'claude-sonnet-5',
+      requiresApiKey: true,
+    });
+    expect(useAiSettingsStore.getState().providers.find((provider) => provider.id === id))
+      .not.toHaveProperty('apiKey');
+  });
+
   it('keeps API version paths out of provider preset URLs', () => {
     const minimaxId = useAiSettingsStore.getState().addProvider('minimax');
     const kimiId = useAiSettingsStore.getState().addProvider('kimi');
@@ -160,7 +187,7 @@ describe('aiSettingsStore', () => {
       .not.toHaveProperty('reasoningEffort');
   });
 
-  it('persists supported thinking controls and only sends values valid for the active model', () => {
+  it('preserves thinking controls for explicit backend validation after a model change', () => {
     const kimiId = useAiSettingsStore.getState().addProvider('kimi');
     useAiSettingsStore.getState().updateProvider(kimiId, { reasoningEffort: 'max' });
 
@@ -169,7 +196,7 @@ describe('aiSettingsStore', () => {
 
     useAiSettingsStore.getState().updateProvider(kimiId, { model: 'kimi-for-coding' });
     expect(useAiSettingsStore.getState().getProviderConfig(kimiId))
-      .not.toHaveProperty('reasoningEffort');
+      .toHaveProperty('reasoningEffort', 'max');
     expect(useAiSettingsStore.getState().providers.find((provider) => provider.id === kimiId))
       .toHaveProperty('reasoningEffort', 'max');
 
@@ -192,7 +219,7 @@ describe('aiSettingsStore', () => {
 
     useAiSettingsStore.getState().updateProvider(minimaxId, { model: 'MiniMax-M2.7' });
     expect(useAiSettingsStore.getState().getProviderConfig(minimaxId))
-      .not.toHaveProperty('reasoningEffort');
+      .toHaveProperty('reasoningEffort', 'on');
   });
 
   it('drops legacy inline API keys from provider state and request configs', () => {
@@ -236,10 +263,7 @@ describe('aiSettingsStore', () => {
     });
     await vi.advanceTimersByTimeAsync(400);
 
-    const entries = tauri.invokeSavePreferences.mock.calls[0]?.[0] as [string, string][];
-    const storedProviders = entries.find(([key]) => key === 'ai.providers')?.[1] ?? '';
-    expect(storedProviders).not.toContain('must-not-be-persisted');
-    expect(storedProviders).not.toContain('apiKey');
+    expect(tauri.invokeSavePreferences).not.toHaveBeenCalled();
   });
 
   it('moves the default when deleting a provider and always retains one provider', () => {
@@ -253,11 +277,11 @@ describe('aiSettingsStore', () => {
     expect(useAiSettingsStore.getState().providers).toHaveLength(1);
   });
 
-  it('reports pending and saved states around the debounced database write', async () => {
+  it('reports pending and saved states around the debounced context-line write', async () => {
     vi.useFakeTimers();
     useAiSettingsStore.setState({ ...initialState, initialized: true }, true);
 
-    useAiSettingsStore.getState().updateProvider('openai', { model: 'gpt-updated' });
+    useAiSettingsStore.getState().setContextLines(321);
 
     expect(useAiSettingsStore.getState().persistenceStatus).toBe('pending');
     expect(tauri.invokeSavePreferences).not.toHaveBeenCalled();
@@ -268,15 +292,15 @@ describe('aiSettingsStore', () => {
     expect(useAiSettingsStore.getState().persistenceStatus).toBe('saved');
   });
 
-  it('flushes pending provider changes immediately before application exit', async () => {
+  it('flushes pending context-line changes immediately before application exit', async () => {
     vi.useFakeTimers();
     useAiSettingsStore.setState({ ...initialState, initialized: true }, true);
-    useAiSettingsStore.getState().updateProvider('openai', { model: 'gpt-exit' });
+    useAiSettingsStore.getState().setContextLines(444);
 
     await flushAiSettingsPreferences();
 
     expect(tauri.invokeSavePreferences).toHaveBeenCalledWith(expect.arrayContaining([
-      ['ai.providers', expect.stringContaining('gpt-exit')],
+      ['ai.contextLines', '444'],
     ]));
     expect(useAiSettingsStore.getState().persistenceStatus).toBe('saved');
     expect(vi.getTimerCount()).toBe(0);
@@ -286,7 +310,7 @@ describe('aiSettingsStore', () => {
     vi.useFakeTimers();
     tauri.invokeSavePreferences.mockRejectedValueOnce(new Error('database unavailable'));
     useAiSettingsStore.setState({ ...initialState, initialized: true }, true);
-    useAiSettingsStore.getState().updateProvider('openai', { model: 'gpt-retry' });
+    useAiSettingsStore.getState().setContextLines(555);
 
     await vi.advanceTimersByTimeAsync(400);
 
@@ -297,7 +321,7 @@ describe('aiSettingsStore', () => {
 
     expect(tauri.invokeSavePreferences).toHaveBeenCalledTimes(2);
     expect(tauri.invokeSavePreferences).toHaveBeenLastCalledWith(expect.arrayContaining([
-      ['ai.providers', expect.stringContaining('gpt-retry')],
+      ['ai.contextLines', '555'],
     ]));
     expect(useAiSettingsStore.getState().persistenceStatus).toBe('saved');
   });

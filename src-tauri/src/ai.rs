@@ -1,124 +1,17 @@
-use std::{collections::HashSet, time::Duration};
-
-use futures_util::StreamExt;
-use reqwest::{Client, Response, Url};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use tauri::State;
-use tokio_util::sync::CancellationToken;
-
 use crate::{
     db::Database,
     keychain::{CredentialManager, AI_KEY_SERVICE},
 };
-
-const AI_KEY_MIGRATION_PREFERENCE: &str = "ai.apiKeyStorageMigrationV4";
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::collections::HashSet;
+use tauri::State;
+// Temporary compatibility exports for existing command/Runtime callers.
+use crate::llm::config::validate_provider_id;
+pub(crate) use crate::llm::config::{validate_provider_config, AiProviderConfig};
 #[cfg(test)]
-const AGENT_MAX_OUTPUT_TOKENS: u64 = 4_096;
-pub(crate) const MAX_ERROR_BODY_BYTES: usize = 4 * 1024;
-pub(crate) const MAX_PROVIDER_NON_STREAM_RESPONSE_BYTES: usize = 1024 * 1024;
-pub(crate) const MAX_PROVIDER_STREAM_EVENT_BYTES: usize = 1024 * 1024;
-pub(crate) const MAX_PROVIDER_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-
-const ERROR_BODY_LIMIT_MESSAGE: &str =
-    "AI provider HTTP error body exceeded the 4 KiB response limit";
-const NON_STREAM_BODY_LIMIT_MESSAGE: &str =
-    "AI provider response exceeded the 1 MiB non-streaming limit";
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum AiProviderKind {
-    Ollama,
-    OpenAi,
-    OpenAiCompatible,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum AiReasoningEffort {
-    Off,
-    On,
-    None,
-    Minimal,
-    Low,
-    Medium,
-    High,
-    Xhigh,
-    Max,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AiProviderConfig {
-    #[serde(
-        default,
-        deserialize_with = "crate::agent_runtime::RetryPolicy::deserialize_optional"
-    )]
-    pub(crate) retry_policy: Option<crate::agent_runtime::RetryPolicy>,
-    #[serde(default)]
-    pub(crate) profile: Option<String>,
-    pub(crate) id: String,
-    pub(crate) kind: AiProviderKind,
-    pub(crate) base_url: String,
-    pub(crate) model: String,
-    #[serde(default)]
-    pub(crate) reasoning_effort: Option<AiReasoningEffort>,
-    pub(crate) requires_api_key: bool,
-    #[serde(default)]
-    pub(crate) api_key: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ProviderUsage {
-    pub(crate) uncached_input_tokens: Option<u64>,
-    pub(crate) cache_read_tokens: Option<u64>,
-    pub(crate) cache_write_tokens: Option<u64>,
-    pub(crate) output_tokens: Option<u64>,
-    pub(crate) reasoning_tokens: Option<u64>,
-    pub(crate) total_tokens: Option<u64>,
-}
-
-impl ProviderUsage {
-    pub(crate) fn is_empty(self) -> bool {
-        self.uncached_input_tokens.is_none()
-            && self.cache_read_tokens.is_none()
-            && self.cache_write_tokens.is_none()
-            && self.output_tokens.is_none()
-            && self.reasoning_tokens.is_none()
-            && self.total_tokens.is_none()
-    }
-
-    pub(crate) fn merge_latest(&mut self, next: Self) {
-        if next.uncached_input_tokens.is_some() {
-            self.uncached_input_tokens = next.uncached_input_tokens;
-        }
-        if next.cache_read_tokens.is_some() {
-            self.cache_read_tokens = next.cache_read_tokens;
-        }
-        if next.cache_write_tokens.is_some() {
-            self.cache_write_tokens = next.cache_write_tokens;
-        }
-        if next.output_tokens.is_some() {
-            self.output_tokens = next.output_tokens;
-        }
-        if next.reasoning_tokens.is_some() {
-            self.reasoning_tokens = next.reasoning_tokens;
-        }
-        if let Some(total_tokens) = next.total_tokens {
-            self.total_tokens = Some(total_tokens);
-        } else {
-            self.total_tokens =
-                self.uncached_input_tokens
-                    .zip(self.output_tokens)
-                    .and_then(|(input, output)| {
-                        input
-                            .checked_add(self.cache_read_tokens.unwrap_or_default())?
-                            .checked_add(output)
-                    });
-        }
-    }
-}
-
+pub(crate) use crate::llm::config::{AiProviderKind, AiReasoningEffort};
+const AI_KEY_MIGRATION_PREFERENCE: &str = "ai.apiKeyStorageMigrationV4";
 trait AiCredentialStore {
     fn set_api_key(&self, provider_id: &str, api_key: &str) -> Result<(), String>;
     fn get_api_key(&self, provider_id: &str) -> Result<Option<String>, String>;
@@ -234,406 +127,192 @@ fn migrate_inline_api_keys_with(
 }
 
 #[tauri::command]
-pub(crate) fn ai_store_api_key(
-    credentials: State<'_, CredentialManager>,
-    provider_id: String,
-    api_key: String,
-) -> Result<(), String> {
-    validate_provider_id(&provider_id)?;
-    let api_key = api_key.trim();
-    if api_key.is_empty() {
-        return Err("API key cannot be empty".to_string());
+pub(crate) fn ai_list_routes(
+    runtime: State<'_, crate::llm::runtime::LlmRuntime>,
+) -> Result<crate::llm::routes::RouteSnapshot, String> {
+    Ok(runtime.routes.snapshot()?.as_ref().clone())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SaveRouteDocumentInput {
+    routes: Vec<crate::llm::routes::ProviderRoute>,
+    #[serde(default)]
+    default_selection: Option<crate::llm::routes::ModelSelection>,
+    expected_revision: u64,
+    #[serde(default)]
+    secrets: BTreeMap<String, String>,
+}
+
+#[tauri::command]
+pub(crate) fn ai_save_routes(
+    runtime: State<'_, crate::llm::runtime::LlmRuntime>,
+    input: SaveRouteDocumentInput,
+) -> Result<crate::llm::routes::RouteSnapshot, String> {
+    Ok(runtime
+        .routes
+        .save(
+            input.routes,
+            input.default_selection,
+            input.expected_revision,
+            input.secrets,
+        )?
+        .as_ref()
+        .clone())
+}
+
+#[tauri::command]
+pub(crate) fn ai_list_route_models(
+    runtime: State<'_, crate::llm::runtime::LlmRuntime>,
+    route_id: String,
+) -> Result<RouteModelsResult, String> {
+    let snapshot = runtime.routes.snapshot()?;
+    let route = snapshot.route(&route_id)?;
+    let models = route
+        .model_catalog()?
+        .keys()
+        .map(|model_id| {
+            crate::llm::catalog::resolve(&route.provider(&crate::llm::routes::ModelSelection {
+                route_id: route_id.clone(),
+                model_id: model_id.clone(),
+                reasoning_effort: None,
+            })?)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(RouteModelsResult {
+        revision: snapshot.revision,
+        models,
+    })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RouteModelsResult {
+    revision: u64,
+    models: Vec<crate::llm::catalog::ResolvedModel>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ResolveSelectionInput {
+    selection: crate::llm::routes::ModelSelection,
+    expected_revision: u64,
+}
+
+#[tauri::command]
+pub(crate) fn ai_resolve_selection(
+    runtime: State<'_, crate::llm::runtime::LlmRuntime>,
+    input: ResolveSelectionInput,
+) -> Result<crate::llm::catalog::ResolvedModel, String> {
+    let snapshot = runtime.routes.snapshot()?;
+    let route = snapshot.route(&input.selection.route_id)?;
+    if route.revision != input.expected_revision {
+        return Err("REVISION_CONFLICT".into());
     }
-    credentials.set_credential(AI_KEY_SERVICE, &provider_id, api_key)
+    crate::llm::catalog::resolve(&route.provider(&input.selection)?)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ConvertSessionInput {
+    session_id: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionMigrationStatus {
+    session_id: String,
+    status: String,
 }
 
 #[tauri::command]
-pub(crate) fn ai_has_api_key(
-    credentials: State<'_, CredentialManager>,
-    provider_id: String,
-) -> Result<bool, String> {
-    validate_provider_id(&provider_id)?;
-    Ok(credentials
-        .get_credential(AI_KEY_SERVICE, &provider_id)?
-        .is_some_and(|value| !value.trim().is_empty()))
+pub(crate) fn ai_list_session_migrations(
+    app: tauri::AppHandle,
+) -> Result<Vec<SessionMigrationStatus>, String> {
+    use tauri::Manager;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("agent-runtime");
+    let old = root.join("sessions-v4");
+    let new = root.join("sessions-v5");
+    if !old.exists() {
+        return Ok(vec![]);
+    }
+    std::fs::read_dir(old)
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            entry
+                .path()
+                .file_stem()
+                .and_then(|v| v.to_str())
+                .map(str::to_string)
+        })
+        .map(|session_id| {
+            validate_provider_id(&session_id)?;
+            let status = if new.join(format!("{session_id}.jsonl")).exists() {
+                "converted"
+            } else if root
+                .join("sessions-v4")
+                .join(format!("{session_id}.migration.lock"))
+                .exists()
+            {
+                "failed"
+            } else {
+                "pending"
+            };
+            Ok(SessionMigrationStatus {
+                session_id,
+                status: status.into(),
+            })
+        })
+        .collect()
 }
 
 #[tauri::command]
-pub(crate) fn ai_delete_api_key(
-    credentials: State<'_, CredentialManager>,
-    provider_id: String,
-) -> Result<(), String> {
-    validate_provider_id(&provider_id)?;
-    credentials.delete_credential(AI_KEY_SERVICE, &provider_id)
+pub(crate) fn ai_convert_session_v4_to_v5(
+    app: tauri::AppHandle,
+    runtime: State<'_, crate::agent_runtime::AgentRuntime>,
+    input: ConvertSessionInput,
+) -> Result<crate::llm::migration::ConversionResult, String> {
+    validate_provider_id(&input.session_id)?;
+    use tauri::Manager;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("agent-runtime");
+    runtime.convert_v4_session(&root, &input.session_id)
 }
 
 #[tauri::command]
 pub(crate) async fn ai_list_models(
-    credentials: State<'_, CredentialManager>,
+    runtime: State<'_, crate::llm::runtime::LlmRuntime>,
     provider: AiProviderConfig,
 ) -> Result<Vec<String>, String> {
     validate_provider_config(&provider, false)?;
-    let api_key = connection_test_api_key(credentials.inner(), &provider)?;
-    let client = build_client()?;
-    let response = match provider.kind {
-        AiProviderKind::Ollama => client
-            .get(endpoint_url(&provider, "api/tags")?)
-            .send()
-            .await
-            .map_err(format_transport_error)?,
-        AiProviderKind::OpenAi | AiProviderKind::OpenAiCompatible => {
-            let request = client.get(endpoint_url(&provider, "models")?);
-            let request = if let Some(api_key) = api_key {
-                request.bearer_auth(api_key)
-            } else {
-                request
-            };
-            request.send().await.map_err(format_transport_error)?
-        }
-    };
-    let value = checked_json(response).await?;
-    let mut models = match provider.kind {
-        AiProviderKind::Ollama => value
-            .get("models")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|item| item.get("name").and_then(Value::as_str))
-            .map(str::to_string)
-            .collect::<Vec<_>>(),
-        AiProviderKind::OpenAi | AiProviderKind::OpenAiCompatible => value
-            .get("data")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|item| item.get("id").and_then(Value::as_str))
-            .map(str::to_string)
-            .collect::<Vec<_>>(),
-    };
-    models.sort();
-    models.dedup();
-    Ok(models)
-}
-
-pub(crate) fn take_sse_event(buffer: &mut Vec<u8>) -> Result<Option<String>, String> {
-    let lf = find_bytes(buffer, b"\n\n").map(|index| (index, 2));
-    let crlf = find_bytes(buffer, b"\r\n\r\n").map(|index| (index, 4));
-    let Some((index, separator_len)) = earliest_separator(lf, crlf) else {
-        return Ok(None);
-    };
-    ensure_provider_stream_frame_size(index)?;
-    let event = buffer.drain(..index).collect::<Vec<_>>();
-    buffer.drain(..separator_len);
-    String::from_utf8(event)
-        .map(Some)
-        .map_err(|error| format!("invalid UTF-8 in OpenAI stream event: {error}"))
-}
-
-pub(crate) async fn read_bounded_response_body(
-    response: Response,
-    cancellation: Option<&CancellationToken>,
-    max_bytes: usize,
-    limit_error: &'static str,
-) -> Result<Option<Vec<u8>>, String> {
-    if cancellation.is_some_and(CancellationToken::is_cancelled) {
-        return Ok(None);
-    }
-    if response
-        .content_length()
-        .is_some_and(|length| length > max_bytes as u64)
-    {
-        return Err(limit_error.to_string());
-    }
-    let mut stream = response.bytes_stream();
-    let mut body = Vec::new();
-    loop {
-        let next = if let Some(cancellation) = cancellation {
-            tokio::select! {
-                _ = cancellation.cancelled() => return Ok(None),
-                next = stream.next() => next,
-            }
-        } else {
-            stream.next().await
-        };
-        let Some(chunk) = next else { break };
-        let chunk = chunk.map_err(format_transport_error)?;
-        let next_len = body
-            .len()
-            .checked_add(chunk.len())
-            .ok_or_else(|| limit_error.to_string())?;
-        if next_len > max_bytes {
-            return Err(limit_error.to_string());
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(Some(body))
-}
-
-pub(crate) fn append_provider_stream_chunk(
-    buffer: &mut Vec<u8>,
-    chunk: &[u8],
-    response_bytes: &mut usize,
-) -> Result<(), String> {
-    *response_bytes = (*response_bytes)
-        .checked_add(chunk.len())
-        .ok_or_else(|| "AI provider stream size overflowed".to_string())?;
-    if *response_bytes > MAX_PROVIDER_STREAM_RESPONSE_BYTES {
-        return Err("AI provider stream exceeded the 16 MiB response limit".to_string());
-    }
-    buffer.extend_from_slice(chunk);
-    Ok(())
-}
-
-pub(crate) fn ensure_provider_stream_frame_size(frame_bytes: usize) -> Result<(), String> {
-    if frame_bytes > MAX_PROVIDER_STREAM_EVENT_BYTES {
-        Err("AI provider stream event exceeded the 1 MiB framing limit".to_string())
+    let temporary = provider
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let api_key = if temporary.is_some() {
+        temporary
     } else {
-        Ok(())
-    }
-}
-
-pub(crate) fn take_final_sse_event(buffer: &mut Vec<u8>) -> Result<Option<String>, String> {
-    if buffer.iter().all(|byte| byte.is_ascii_whitespace()) {
-        buffer.clear();
-        return Ok(None);
-    }
-    ensure_provider_stream_frame_size(buffer.len())?;
-    String::from_utf8(std::mem::take(buffer))
-        .map(Some)
-        .map_err(|error| format!("invalid UTF-8 in final AI stream event: {error}"))
-}
-
-pub(crate) fn sse_data(event: &str) -> String {
-    event
-        .lines()
-        .filter_map(|line| line.strip_prefix("data:"))
-        .map(str::trim_start)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-pub(crate) fn provider_usage_from_value(
-    kind: AiProviderKind,
-    value: &Value,
-) -> Option<ProviderUsage> {
-    let usage = match kind {
-        AiProviderKind::OpenAi => value
-            .pointer("/response/usage")
-            .or_else(|| value.get("usage"))?,
-        AiProviderKind::OpenAiCompatible => value.get("usage")?,
-        AiProviderKind::Ollama => value,
-    };
-    let (
-        input_tokens,
-        cache_read_tokens,
-        cache_write_tokens,
-        output_tokens,
-        reasoning_tokens,
-        explicit_total,
-    ) = match kind {
-        AiProviderKind::OpenAi => (
-            usage.get("input_tokens").and_then(Value::as_u64),
-            usage
-                .pointer("/input_tokens_details/cached_tokens")
-                .and_then(Value::as_u64),
-            None,
-            usage.get("output_tokens").and_then(Value::as_u64),
-            usage
-                .pointer("/output_tokens_details/reasoning_tokens")
-                .and_then(Value::as_u64),
-            usage.get("total_tokens").and_then(Value::as_u64),
-        ),
-        AiProviderKind::OpenAiCompatible => (
-            usage.get("prompt_tokens").and_then(Value::as_u64),
-            usage
-                .get("prompt_cache_hit_tokens")
-                .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
-                .and_then(Value::as_u64),
-            usage
-                .get("prompt_cache_creation_tokens")
-                .or_else(|| usage.pointer("/prompt_tokens_details/cache_creation_tokens"))
-                .and_then(Value::as_u64),
-            usage.get("completion_tokens").and_then(Value::as_u64),
-            usage
-                .pointer("/completion_tokens_details/reasoning_tokens")
-                .and_then(Value::as_u64),
-            usage.get("total_tokens").and_then(Value::as_u64),
-        ),
-        AiProviderKind::Ollama => (
-            usage.get("prompt_eval_count").and_then(Value::as_u64),
-            None,
-            None,
-            usage.get("eval_count").and_then(Value::as_u64),
-            None,
-            None,
-        ),
-    };
-    let uncached_input_tokens = usage
-        .get("prompt_cache_miss_tokens")
-        .and_then(Value::as_u64)
-        .or_else(|| {
-            input_tokens.map(|input| input.saturating_sub(cache_read_tokens.unwrap_or_default()))
-        });
-    let total_tokens = explicit_total.or_else(|| match (input_tokens, output_tokens) {
-        (Some(input), Some(output)) => input.checked_add(output),
-        _ => None,
-    });
-    let usage = ProviderUsage {
-        uncached_input_tokens,
-        cache_read_tokens,
-        cache_write_tokens,
-        output_tokens,
-        reasoning_tokens,
-        total_tokens,
-    };
-    (!usage.is_empty()).then_some(usage)
-}
-
-pub(crate) fn take_line(buffer: &mut Vec<u8>) -> Result<Option<String>, String> {
-    let Some(index) = buffer.iter().position(|byte| *byte == b'\n') else {
-        return Ok(None);
-    };
-    ensure_provider_stream_frame_size(index)?;
-    let mut line = buffer.drain(..index).collect::<Vec<_>>();
-    buffer.drain(..1);
-    if line.last() == Some(&b'\r') {
-        line.pop();
-    }
-    String::from_utf8(line)
-        .map(Some)
-        .map_err(|error| format!("invalid UTF-8 in Ollama stream event: {error}"))
-}
-
-fn find_bytes(buffer: &[u8], needle: &[u8]) -> Option<usize> {
-    buffer
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
-fn earliest_separator(
-    first: Option<(usize, usize)>,
-    second: Option<(usize, usize)>,
-) -> Option<(usize, usize)> {
-    match (first, second) {
-        (Some(first), Some(second)) => Some(if first.0 <= second.0 { first } else { second }),
-        (Some(value), None) | (None, Some(value)) => Some(value),
-        (None, None) => None,
-    }
-}
-
-pub(crate) fn validate_provider_config(
-    provider: &AiProviderConfig,
-    require_model: bool,
-) -> Result<(), String> {
-    validate_provider_id(&provider.id)?;
-    if let Some(policy) = provider.retry_policy {
-        policy.validate()?;
-    }
-    crate::agent_runtime::provider::validate(provider)?;
-    if require_model && provider.model.trim().is_empty() {
-        return Err("AI model cannot be empty".to_string());
-    }
-    let url = Url::parse(provider.base_url.trim())
-        .map_err(|_| "AI provider URL is invalid".to_string())?;
-    if !url.username().is_empty() || url.password().is_some() {
-        return Err("AI provider URL cannot contain credentials".to_string());
-    }
-    match url.scheme() {
-        "https" => Ok(()),
-        "http" if is_loopback_host(url.host_str()) => Ok(()),
-        _ => Err("AI provider URL must use HTTPS; HTTP is only allowed for localhost".to_string()),
-    }
-}
-
-fn validate_provider_id(provider_id: &str) -> Result<(), String> {
-    if provider_id.is_empty()
-        || provider_id.len() > 80
-        || !provider_id.chars().all(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
-        })
-    {
-        return Err("AI provider id is invalid".to_string());
-    }
-    Ok(())
-}
-
-fn is_loopback_host(host: Option<&str>) -> bool {
-    // `url::Url::host_str` has returned both bracketed and unbracketed IPv6
-    // literals across dependency versions. Keep the allow-list exact while
-    // accepting the canonical loopback spelling in either representation.
-    matches!(host, Some("localhost" | "127.0.0.1" | "::1" | "[::1]"))
-}
-
-pub(crate) fn apply_reasoning_effort(body: &mut Value, provider: &AiProviderConfig) {
-    crate::agent_runtime::provider::apply_reasoning(body, provider);
-}
-
-pub(crate) fn apply_output_token_limit(
-    body: &mut Value,
-    kind: AiProviderKind,
-    max_output_tokens: u64,
-) {
-    match kind {
-        AiProviderKind::OpenAi => body["max_output_tokens"] = json!(max_output_tokens),
-        AiProviderKind::OpenAiCompatible => body["max_tokens"] = json!(max_output_tokens),
-        AiProviderKind::Ollama => {
-            if !body.get("options").is_some_and(Value::is_object) {
-                body["options"] = json!({});
-            }
-            body["options"]["num_predict"] = json!(max_output_tokens);
+        let snapshot = runtime.routes.snapshot()?;
+        match snapshot.routes.iter().find(|route| route.id == provider.id) {
+            Some(route) => runtime.routes.credential(route)?,
+            None if provider.requires_api_key => return Err("MISSING_CREDENTIAL".into()),
+            None => None,
         }
-    }
+    };
+    crate::llm::discovery::list_models(&provider, api_key).await
 }
 
-pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Url, String> {
-    validate_provider_config(provider, false)?;
-    let mut url = Url::parse(provider.base_url.trim())
-        .map_err(|_| "failed to build AI provider endpoint".to_string())?;
-    let is_official_deepseek = matches!(provider.kind, AiProviderKind::OpenAiCompatible)
-        && url
-            .host_str()
-            .is_some_and(|host| host.eq_ignore_ascii_case("api.deepseek.com"));
-    let is_official_glm = matches!(provider.kind, AiProviderKind::OpenAiCompatible)
-        && url
-            .host_str()
-            .is_some_and(|host| host.eq_ignore_ascii_case("open.bigmodel.cn"));
-    let mut base_path = url.path().trim_end_matches('/').to_string();
-    let mut had_endpoint = false;
-    for endpoint_suffix in [
-        "/chat/completions",
-        "/responses",
-        "/models",
-        "/api/chat",
-        "/api/tags",
-        "/api/show",
-    ] {
-        if let Some(api_root) = base_path.strip_suffix(endpoint_suffix) {
-            base_path = api_root.to_string();
-            had_endpoint = true;
-            break;
-        }
-    }
-    if is_official_deepseek && base_path == "/v1" {
-        base_path.clear();
-    } else if is_official_glm {
-        if base_path.is_empty() || base_path == "/v1" {
-            base_path = "/api/paas/v4".to_string();
-        }
-    } else if !had_endpoint
-        && !matches!(provider.kind, AiProviderKind::Ollama)
-        && !base_path.ends_with("/v1")
-    {
-        base_path = format!("{}/v1", base_path.trim_end_matches('/'));
-    }
-    url.set_fragment(None);
-    url.set_path(&format!(
-        "{}/{}",
-        base_path.trim_end_matches('/'),
-        path.trim_start_matches('/'),
-    ));
-    Ok(url)
-}
-
+#[cfg(test)]
 fn api_key_from_store(
     credentials: &impl AiCredentialStore,
     provider: &AiProviderConfig,
@@ -654,9 +333,13 @@ fn api_key_from_store(
                 Ok(api_key)
             }
         }
+        AiProviderKind::AnthropicMessages => api_key
+            .map(Some)
+            .ok_or_else(|| "API key is required".to_string()),
     }
 }
 
+#[cfg(test)]
 pub(crate) fn api_key_for_provider(
     credentials: &CredentialManager,
     provider: &AiProviderConfig,
@@ -664,6 +347,7 @@ pub(crate) fn api_key_for_provider(
     api_key_from_store(credentials, provider)
 }
 
+#[cfg(test)]
 fn connection_test_api_key(
     credentials: &impl AiCredentialStore,
     provider: &AiProviderConfig,
@@ -680,69 +364,6 @@ fn connection_test_api_key(
     api_key_from_store(credentials, provider)
 }
 
-pub(crate) fn build_client() -> Result<Client, String> {
-    Client::builder()
-        .user_agent(concat!("ShellSpan/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(120))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|error| format!("failed to create AI HTTP client: {error}"))
-}
-
-pub(crate) fn build_streaming_client() -> Result<Client, String> {
-    Client::builder()
-        .user_agent(concat!("ShellSpan/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|error| format!("failed to create streaming AI HTTP client: {error}"))
-}
-
-async fn checked_response(response: Response) -> Result<Response, String> {
-    if response.status().is_success() {
-        return Ok(response);
-    }
-    let status = response.status();
-    let body = read_bounded_response_body(
-        response,
-        None,
-        MAX_ERROR_BODY_BYTES,
-        ERROR_BODY_LIMIT_MESSAGE,
-    )
-    .await?
-    .unwrap_or_default();
-    let body = String::from_utf8_lossy(&body);
-    Err(if body.trim().is_empty() {
-        format!("AI provider returned HTTP {status}")
-    } else {
-        format!("AI provider returned HTTP {status}: {body}")
-    })
-}
-
-async fn checked_json(response: Response) -> Result<Value, String> {
-    let response = checked_response(response).await?;
-    let body = read_bounded_response_body(
-        response,
-        None,
-        MAX_PROVIDER_NON_STREAM_RESPONSE_BYTES,
-        NON_STREAM_BODY_LIMIT_MESSAGE,
-    )
-    .await?
-    .unwrap_or_default();
-    serde_json::from_slice(&body).map_err(|error| format!("invalid AI provider response: {error}"))
-}
-
-pub(crate) fn format_transport_error(error: reqwest::Error) -> String {
-    if error.is_timeout() {
-        "AI provider request timed out".to_string()
-    } else if error.is_connect() {
-        "Could not connect to the AI provider".to_string()
-    } else {
-        format!("AI provider request failed: {error}")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -754,6 +375,9 @@ mod tests {
     };
 
     use super::*;
+    use crate::llm::{config::*, transport::*, usage::*};
+    use serde_json::json;
+    const AGENT_MAX_OUTPUT_TOKENS: u64 = 4_096;
 
     fn serve_http_body(
         status: u16,
@@ -1163,6 +787,7 @@ mod tests {
     #[test]
     fn validates_provider_url_security_contract() {
         let mut provider = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             id: "ollama".to_string(),
@@ -1203,6 +828,7 @@ mod tests {
     #[test]
     fn builds_versioned_openai_endpoints_from_a_service_root() {
         let provider = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             id: "minimax".to_string(),
@@ -1226,6 +852,7 @@ mod tests {
         );
 
         let api_root = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             base_url: "https://api.minimaxi.com/v1".to_string(),
@@ -1239,6 +866,7 @@ mod tests {
         );
 
         let service_root = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             base_url: "https://api.kimi.com/coding".to_string(),
@@ -1256,6 +884,7 @@ mod tests {
         );
 
         let deepseek = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             base_url: "https://api.deepseek.com/v1/chat/completions".to_string(),
@@ -1274,6 +903,7 @@ mod tests {
         );
 
         let glm = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
@@ -1285,6 +915,7 @@ mod tests {
             "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         );
         let glm_root = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             base_url: "https://open.bigmodel.cn".to_string(),
@@ -1299,13 +930,14 @@ mod tests {
     #[test]
     fn applies_reasoning_effort_in_each_supported_protocol_shape() {
         let compatible = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             id: "kimi".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.kimi.com/coding".to_string(),
             model: "k3".to_string(),
-            reasoning_effort: Some(AiReasoningEffort::Max),
+            reasoning_effort: Some("max".to_string()),
             requires_api_key: true,
             api_key: None,
         };
@@ -1323,13 +955,14 @@ mod tests {
         );
 
         let openai = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             id: "openai".to_string(),
             kind: AiProviderKind::OpenAi,
             base_url: "https://api.openai.com".to_string(),
             model: "gpt-5.4-mini".to_string(),
-            reasoning_effort: Some(AiReasoningEffort::High),
+            reasoning_effort: Some("high".to_string()),
             requires_api_key: true,
             api_key: None,
         };
@@ -1343,13 +976,14 @@ mod tests {
         );
 
         let deepseek = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             id: "deepseek".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.deepseek.com".to_string(),
             model: "deepseek-v4-flash".to_string(),
-            reasoning_effort: Some(AiReasoningEffort::Off),
+            reasoning_effort: Some("off".to_string()),
             requires_api_key: true,
             api_key: None,
         };
@@ -1364,7 +998,7 @@ mod tests {
         assert!(deepseek_body.get("reasoning_effort").is_none());
 
         let mut deepseek_high = deepseek.clone();
-        deepseek_high.reasoning_effort = Some(AiReasoningEffort::High);
+        deepseek_high.reasoning_effort = Some("high".to_string());
         let mut deepseek_high_body = json!({ "model": "deepseek-v4-flash" });
         apply_reasoning_effort(&mut deepseek_high_body, &deepseek_high);
         assert_eq!(
@@ -1381,13 +1015,14 @@ mod tests {
         );
 
         let minimax = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             id: "minimax".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.minimaxi.com".to_string(),
             model: "MiniMax-M3".to_string(),
-            reasoning_effort: Some(AiReasoningEffort::On),
+            reasoning_effort: Some("on".to_string()),
             requires_api_key: true,
             api_key: None,
         };
@@ -1401,13 +1036,14 @@ mod tests {
         );
 
         let qwen = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             id: "qwen".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
             model: "qwen3.8-max".to_string(),
-            reasoning_effort: Some(AiReasoningEffort::On),
+            reasoning_effort: Some("on".to_string()),
             requires_api_key: true,
             api_key: None,
         };
@@ -1420,13 +1056,14 @@ mod tests {
         assert!(qwen_body.get("thinking").is_none());
 
         let glm = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             id: "glm".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
             model: "glm-5.2".to_string(),
-            reasoning_effort: Some(AiReasoningEffort::High),
+            reasoning_effort: Some("high".to_string()),
             requires_api_key: true,
             api_key: None,
         };
@@ -1442,13 +1079,14 @@ mod tests {
         );
 
         let ollama = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             id: "ollama".to_string(),
             kind: AiProviderKind::Ollama,
             base_url: "http://127.0.0.1:11434".to_string(),
             model: "gpt-oss:20b".to_string(),
-            reasoning_effort: Some(AiReasoningEffort::Medium),
+            reasoning_effort: Some("medium".to_string()),
             requires_api_key: false,
             api_key: None,
         };
@@ -1469,6 +1107,7 @@ mod tests {
             .unwrap()
             .insert("minimax".to_string(), "  keychain-key  ".to_string());
         let provider = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             id: "minimax".to_string(),
@@ -1492,6 +1131,7 @@ mod tests {
     fn rejects_a_required_provider_without_a_saved_api_key() {
         let credentials = MockAiCredentials::default();
         let provider = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             id: "minimax".to_string(),
@@ -1513,6 +1153,7 @@ mod tests {
     fn connection_test_can_use_an_ephemeral_inline_key() {
         let credentials = MockAiCredentials::default();
         let provider = AiProviderConfig {
+            model_definition: None,
             profile: None,
             retry_policy: None,
             id: "provider-setup-draft".to_string(),
@@ -1635,4 +1276,20 @@ mod tests {
         assert!(!stored.contains("stale-key"));
         assert_eq!(credentials.key("openai").as_deref(), Some("current-key"));
     }
+}
+
+/// Credential-free capability DTO. Discovery and capability declaration are separate.
+#[tauri::command]
+pub(crate) fn ai_resolve_model(
+    provider: AiProviderConfig,
+) -> Result<crate::llm::catalog::ResolvedModel, String> {
+    validate_provider_config(&provider, true)?;
+    crate::llm::catalog::resolve(&provider)
+}
+
+#[tauri::command]
+pub(crate) fn ai_model_declaration_template(
+    provider: AiProviderConfig,
+) -> Result<crate::llm::catalog::ModelDefinition, String> {
+    crate::llm::catalog::declaration_template(&provider)
 }

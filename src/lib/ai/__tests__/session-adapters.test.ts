@@ -54,8 +54,7 @@ function snapshot(ended = false): AgentSessionSnapshot {
 
 it('projects model and permission changes from live events over an older snapshot', () => {
   const selected = {
-    providerId: 'other', providerKind: 'openAi' as const,
-    baseUrl: 'https://api.openai.com', model: 'gpt-5.6', requiresApiKey: true,
+    routeId: 'other', modelId: 'gpt-5.6',
     reasoningEffort: 'high',
   };
   const base = agentSessionEventFixture[0]!;
@@ -369,7 +368,10 @@ describe('AgentSessionAdapter', () => {
     await adapter.reject(approval);
     await adapter.loadArtifact('session-fixture', 'artifact-report', 4096);
 
-    expect(dependencies.start).toHaveBeenCalledWith({ sessionId: 'session-fixture', provider });
+    expect(dependencies.start).toHaveBeenCalledWith({
+      sessionId: 'session-fixture',
+      selection: { routeId: provider.id, modelId: provider.model, reasoningEffort: undefined },
+    });
     expect(dependencies.followup).toHaveBeenCalledWith({
       sessionId: 'session-fixture',
       messageId: 'operation-start',

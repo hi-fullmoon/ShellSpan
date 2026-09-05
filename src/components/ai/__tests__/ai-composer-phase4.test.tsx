@@ -10,6 +10,11 @@ import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (command: string, args?: Record<string, unknown>) => import('@/test/llm-resolver-fixture')
+    .then(({ fixtureResolve }) => fixtureResolve(command, args)),
+}));
+
 function Harness({
   initial,
   onSubmitGesture = vi.fn(),

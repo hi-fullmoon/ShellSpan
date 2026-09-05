@@ -1,0 +1,1751 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ShellSpan Agent Event v5",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "sessionId",
+    "seq",
+    "timeUnixMs",
+    "type"
+  ],
+  "properties": {
+    "version": {
+      "const": 5
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "timeUnixMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "turnId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stepId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "enum": [
+        "session/created",
+        "agent/created",
+        "agent/status",
+        "session/ended",
+        "agent/inbox/spliced",
+        "agent/inbox/item_updated",
+        "agent/inbox/item_removed",
+        "agent/inbox/item_steered",
+        "agent/inbox/reordered",
+        "session/model_selected",
+        "session/permission_changed",
+        "session/renamed",
+        "step/input_claim",
+        "file_reference/scope_bound",
+        "skill/catalog_observed",
+        "skill/catalog_published",
+        "skill/step_prepared",
+        "turn/start",
+        "turn/end",
+        "step/start",
+        "step/end",
+        "user/message",
+        "assistant/chunk",
+        "assistant/message",
+        "request/header",
+        "request/start",
+        "request/context",
+        "request/retry",
+        "request/failure",
+        "request/usage",
+        "tool/call",
+        "question/requested",
+        "question/answered",
+        "question/cancelled",
+        "tool/approval",
+        "tool/execution",
+        "tool/result",
+        "context/artifact",
+        "compaction/start",
+        "compaction/summary",
+        "compaction/end",
+        "subagent/descriptor",
+        "subagent/message",
+        "subagent/settled",
+        "subagent/detached",
+        "task/linked",
+        "task/plan",
+        "task/state",
+        "task/evidence"
+      ]
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "request/header"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "requestId",
+              "snapshot",
+              "snapshotDigest",
+              "providerId",
+              "model",
+              "reason",
+              "series",
+              "systemPrompt",
+              "toolSchemas",
+              "attempt"
+            ],
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "snapshot": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "status"
+                    ],
+                    "properties": {
+                      "status": {
+                        "const": "legacyUnknown"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "status",
+                      "routeId",
+                      "routeRevision",
+                      "adapterId",
+                      "modelId",
+                      "catalogVersion",
+                      "capabilities",
+                      "endpointIdentity",
+                      "replayDomainId",
+                      "outputTokens",
+                      "retryPolicy",
+                      "timeouts",
+                      "purpose",
+                      "preparationVersion",
+                      "projectionPolicy",
+                      "contentHash",
+                      "images"
+                    ],
+                    "properties": {
+                      "status": {
+                        "const": "prepared"
+                      },
+                      "routeId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "routeRevision": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "adapterId": {
+                        "enum": [
+                          "responses",
+                          "chat-completions",
+                          "ollama",
+                          "anthropic-messages"
+                        ]
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "catalogVersion": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "capabilities": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "contextWindow",
+                          "maxOutputTokens",
+                          "toolCalling",
+                          "textInput",
+                          "imageInput",
+                          "reasoning",
+                          "compat"
+                        ],
+                        "properties": {
+                          "contextWindow": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "maxOutputTokens": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "toolCalling": {
+                            "enum": [
+                              "supported",
+                              "unsupported",
+                              "unknown"
+                            ]
+                          },
+                          "textInput": {
+                            "enum": [
+                              "supported",
+                              "unsupported",
+                              "unknown"
+                            ]
+                          },
+                          "imageInput": {
+                            "enum": [
+                              "supported",
+                              "unsupported",
+                              "unknown"
+                            ]
+                          },
+                          "reasoning": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "id",
+                                "displayName"
+                              ],
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9_-]{1,80}$"
+                                },
+                                "displayName": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "wireValue": {}
+                              }
+                            }
+                          },
+                          "compat": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "protocol",
+                              "cumulativeStream",
+                              "supportsStreamUsage",
+                              "nativeReasoning",
+                              "splitReasoning",
+                              "replayReasoningContent",
+                              "thinkTagFallback",
+                              "parallelToolCalls",
+                              "strictSchema",
+                              "preservesReasoningAcrossTurns",
+                              "clearThinking",
+                              "defaultThinking",
+                              "reasoningEncoding"
+                            ],
+                            "properties": {
+                              "protocol": {
+                                "enum": [
+                                  "ollama",
+                                  "openAi",
+                                  "openAiCompatible",
+                                  "anthropicMessages"
+                                ]
+                              },
+                              "reasoningEncoding": {
+                                "enum": [
+                                  "none",
+                                  "responses",
+                                  "enableThinking",
+                                  "thinking",
+                                  "adaptive",
+                                  "thinkingEffort",
+                                  "effort",
+                                  "ollama",
+                                  "anthropicAdaptive"
+                                ]
+                              },
+                              "cumulativeStream": {
+                                "type": "boolean"
+                              },
+                              "supportsStreamUsage": {
+                                "type": "boolean"
+                              },
+                              "nativeReasoning": {
+                                "type": "boolean"
+                              },
+                              "splitReasoning": {
+                                "type": "boolean"
+                              },
+                              "replayReasoningContent": {
+                                "type": "boolean"
+                              },
+                              "thinkTagFallback": {
+                                "type": "boolean"
+                              },
+                              "parallelToolCalls": {
+                                "type": "boolean"
+                              },
+                              "strictSchema": {
+                                "type": "boolean"
+                              },
+                              "preservesReasoningAcrossTurns": {
+                                "type": "boolean"
+                              },
+                              "clearThinking": {
+                                "type": "boolean"
+                              },
+                              "defaultThinking": {
+                                "type": "boolean"
+                              }
+                            }
+                          },
+                          "vision": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "maxRequestImages",
+                              "maxRequestImageBytes",
+                              "reservedTokensPerImage",
+                              "imageTokenBudgetPolicy"
+                            ],
+                            "properties": {
+                              "maxRequestImages": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "maxRequestImageBytes": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "reservedTokensPerImage": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "imageTokenBudgetPolicy": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "endpointIdentity": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "replayDomainId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "reasoningEffort": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{1,80}$"
+                      },
+                      "outputTokens": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "retryPolicy": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "maxAttempts",
+                          "initialDelayMs",
+                          "maxDelayMs",
+                          "maxServerDelayMs",
+                          "jitterRatio"
+                        ],
+                        "properties": {
+                          "maxAttempts": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 8
+                          },
+                          "initialDelayMs": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "maxDelayMs": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "maxServerDelayMs": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "jitterRatio": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        }
+                      },
+                      "timeouts": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "requestHeadersMs",
+                          "firstByteMs",
+                          "streamIdleMs"
+                        ],
+                        "properties": {
+                          "requestHeadersMs": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 3600000
+                          },
+                          "firstByteMs": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 3600000
+                          },
+                          "streamIdleMs": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 3600000
+                          }
+                        }
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "preparationVersion": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "projectionPolicy": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "contentHash": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      "images": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "version",
+                            "sha256",
+                            "mediaType",
+                            "bytes",
+                            "width",
+                            "height",
+                            "name"
+                          ],
+                          "properties": {
+                            "version": {
+                              "const": 1
+                            },
+                            "sha256": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            },
+                            "mediaType": {
+                              "const": "image/png"
+                            },
+                            "bytes": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "width": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "height": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "snapshotDigest": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "providerId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reasoningEffort": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "series": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "seriesId",
+                  "requestIndex",
+                  "startsSeries"
+                ],
+                "properties": {
+                  "seriesId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "requestIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "startsSeries": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "snapshotReason": {
+                "enum": [
+                  "initial",
+                  "change",
+                  "resume",
+                  "series"
+                ]
+              },
+              "systemPrompt": {
+                "type": "string"
+              },
+              "toolSchemas": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "description",
+                    "inputSchema"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "inputSchema": {
+                      "type": "object"
+                    }
+                  }
+                }
+              },
+              "attempt": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "request/start"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "requestId",
+              "headerRequestId",
+              "providerId",
+              "model",
+              "reason",
+              "series",
+              "attempt"
+            ],
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "headerRequestId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "providerId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reasoningEffort": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "series": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "seriesId",
+                  "requestIndex",
+                  "startsSeries"
+                ],
+                "properties": {
+                  "seriesId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "requestIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "startsSeries": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "attempt": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "assistant/message"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "messageId",
+              "content",
+              "usage",
+              "stopReason",
+              "interrupted"
+            ],
+            "properties": {
+              "messageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "content": {
+                "type": "array"
+              },
+              "usage": {
+                "type": "object"
+              },
+              "stopReason": {
+                "type": "string"
+              },
+              "interrupted": {
+                "type": "boolean"
+              },
+              "replay": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "status",
+                      "archivedProviderItems"
+                    ],
+                    "properties": {
+                      "status": {
+                        "const": "legacyUnknown"
+                      },
+                      "archivedProviderItems": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "status",
+                      "version",
+                      "adapterId",
+                      "replayFormatVersion",
+                      "source",
+                      "response",
+                      "blocks"
+                    ],
+                    "properties": {
+                      "status": {
+                        "const": "prepared"
+                      },
+                      "version": {
+                        "const": 1
+                      },
+                      "adapterId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "replayFormatVersion": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "source": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "requestId",
+                          "requestSnapshotDigest",
+                          "routeId",
+                          "routeRevision",
+                          "modelId",
+                          "replayDomainId",
+                          "requestContentHash",
+                          "preparationVersion",
+                          "projectionPolicy",
+                          "imageProjectionRefs",
+                          "imageProjectionHash",
+                          "assistantContentHash"
+                        ],
+                        "properties": {
+                          "requestId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "requestSnapshotDigest": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "routeId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "routeRevision": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "modelId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "replayDomainId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "requestContentHash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "preparationVersion": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "projectionPolicy": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "imageProjectionRefs": {
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/$defs/imageRef"
+                            }
+                          },
+                          "imageProjectionHash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "assistantContentHash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          }
+                        }
+                      },
+                      "response": {
+                        "type": "object"
+                      },
+                      "blocks": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "index",
+                            "kind",
+                            "contentHash",
+                            "metadata"
+                          ],
+                          "properties": {
+                            "index": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "kind": {
+                              "enum": [
+                                "text",
+                                "reasoning",
+                                "toolCall"
+                              ]
+                            },
+                            "contentHash": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            },
+                            "metadata": {
+                              "type": "object"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session/model_selected"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "provider"
+            ],
+            "properties": {
+              "provider": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "routeId",
+                  "modelId"
+                ],
+                "properties": {
+                  "routeId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reasoningEffort": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,80}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routeId",
+        "modelId"
+      ],
+      "properties": {
+        "routeId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reasoningEffort": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        }
+      }
+    },
+    "requestSnapshot": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "const": "legacyUnknown"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "routeId",
+            "routeRevision",
+            "adapterId",
+            "modelId",
+            "catalogVersion",
+            "capabilities",
+            "endpointIdentity",
+            "replayDomainId",
+            "outputTokens",
+            "retryPolicy",
+            "timeouts",
+            "purpose",
+            "preparationVersion",
+            "projectionPolicy",
+            "contentHash",
+            "images"
+          ],
+          "properties": {
+            "status": {
+              "const": "prepared"
+            },
+            "routeId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "routeRevision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "adapterId": {
+              "enum": [
+                "responses",
+                "chat-completions",
+                "ollama",
+                "anthropic-messages"
+              ]
+            },
+            "modelId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "catalogVersion": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "capabilities": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "contextWindow",
+                "maxOutputTokens",
+                "toolCalling",
+                "textInput",
+                "imageInput",
+                "reasoning",
+                "compat"
+              ],
+              "properties": {
+                "contextWindow": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxOutputTokens": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "toolCalling": {
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unknown"
+                  ]
+                },
+                "textInput": {
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unknown"
+                  ]
+                },
+                "imageInput": {
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unknown"
+                  ]
+                },
+                "reasoning": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "displayName"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{1,80}$"
+                      },
+                      "displayName": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "wireValue": {}
+                    }
+                  }
+                },
+                "compat": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "protocol",
+                    "cumulativeStream",
+                    "supportsStreamUsage",
+                    "nativeReasoning",
+                    "splitReasoning",
+                    "replayReasoningContent",
+                    "thinkTagFallback",
+                    "parallelToolCalls",
+                    "strictSchema",
+                    "preservesReasoningAcrossTurns",
+                    "clearThinking",
+                    "defaultThinking",
+                    "reasoningEncoding"
+                  ],
+                  "properties": {
+                    "protocol": {
+                      "enum": [
+                        "ollama",
+                        "openAi",
+                        "openAiCompatible",
+                        "anthropicMessages"
+                      ]
+                    },
+                    "reasoningEncoding": {
+                      "enum": [
+                        "none",
+                        "responses",
+                        "enableThinking",
+                        "thinking",
+                        "adaptive",
+                        "thinkingEffort",
+                        "effort",
+                        "ollama",
+                        "anthropicAdaptive"
+                      ]
+                    },
+                    "cumulativeStream": {
+                      "type": "boolean"
+                    },
+                    "supportsStreamUsage": {
+                      "type": "boolean"
+                    },
+                    "nativeReasoning": {
+                      "type": "boolean"
+                    },
+                    "splitReasoning": {
+                      "type": "boolean"
+                    },
+                    "replayReasoningContent": {
+                      "type": "boolean"
+                    },
+                    "thinkTagFallback": {
+                      "type": "boolean"
+                    },
+                    "parallelToolCalls": {
+                      "type": "boolean"
+                    },
+                    "strictSchema": {
+                      "type": "boolean"
+                    },
+                    "preservesReasoningAcrossTurns": {
+                      "type": "boolean"
+                    },
+                    "clearThinking": {
+                      "type": "boolean"
+                    },
+                    "defaultThinking": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "vision": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "maxRequestImages",
+                    "maxRequestImageBytes",
+                    "reservedTokensPerImage",
+                    "imageTokenBudgetPolicy"
+                  ],
+                  "properties": {
+                    "maxRequestImages": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxRequestImageBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "reservedTokensPerImage": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "imageTokenBudgetPolicy": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            },
+            "endpointIdentity": {
+              "type": "string",
+              "minLength": 1
+            },
+            "replayDomainId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "reasoningEffort": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            },
+            "outputTokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retryPolicy": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "maxAttempts",
+                "initialDelayMs",
+                "maxDelayMs",
+                "maxServerDelayMs",
+                "jitterRatio"
+              ],
+              "properties": {
+                "maxAttempts": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                },
+                "initialDelayMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "maxDelayMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "maxServerDelayMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "jitterRatio": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
+            },
+            "timeouts": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requestHeadersMs",
+                "firstByteMs",
+                "streamIdleMs"
+              ],
+              "properties": {
+                "requestHeadersMs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3600000
+                },
+                "firstByteMs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3600000
+                },
+                "streamIdleMs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3600000
+                }
+              }
+            },
+            "purpose": {
+              "type": "string",
+              "minLength": 1
+            },
+            "preparationVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "projectionPolicy": {
+              "type": "string",
+              "minLength": 1
+            },
+            "contentHash": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "images": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "version",
+                  "sha256",
+                  "mediaType",
+                  "bytes",
+                  "width",
+                  "height",
+                  "name"
+                ],
+                "properties": {
+                  "version": {
+                    "const": 1
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "mediaType": {
+                    "const": "image/png"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "replayEnvelope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "archivedProviderItems"
+          ],
+          "properties": {
+            "status": {
+              "const": "legacyUnknown"
+            },
+            "archivedProviderItems": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "version",
+            "adapterId",
+            "replayFormatVersion",
+            "source",
+            "response",
+            "blocks"
+          ],
+          "properties": {
+            "status": {
+              "const": "prepared"
+            },
+            "version": {
+              "const": 1
+            },
+            "adapterId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "replayFormatVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "source": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requestId",
+                "requestSnapshotDigest",
+                "routeId",
+                "routeRevision",
+                "modelId",
+                "replayDomainId",
+                "requestContentHash",
+                "preparationVersion",
+                "projectionPolicy",
+                "imageProjectionRefs",
+                "imageProjectionHash",
+                "assistantContentHash"
+              ],
+              "properties": {
+                "requestId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "requestSnapshotDigest": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "routeId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "routeRevision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "modelId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "replayDomainId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "requestContentHash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "preparationVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "projectionPolicy": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "imageProjectionRefs": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/imageRef"
+                  }
+                },
+                "imageProjectionHash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "assistantContentHash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            },
+            "response": {
+              "type": "object"
+            },
+            "blocks": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "index",
+                  "kind",
+                  "contentHash",
+                  "metadata"
+                ],
+                "properties": {
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "kind": {
+                    "enum": [
+                      "text",
+                      "reasoning",
+                      "toolCall"
+                    ]
+                  },
+                  "contentHash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "metadata": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "modelDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contextWindow",
+        "maxOutputTokens",
+        "toolCalling",
+        "textInput",
+        "imageInput",
+        "reasoning",
+        "compat"
+      ],
+      "properties": {
+        "contextWindow": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "toolCalling": {
+          "enum": [
+            "supported",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "textInput": {
+          "enum": [
+            "supported",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "imageInput": {
+          "enum": [
+            "supported",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "reasoning": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "displayName"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,80}$"
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1
+              },
+              "wireValue": {}
+            }
+          }
+        },
+        "compat": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol",
+            "cumulativeStream",
+            "supportsStreamUsage",
+            "nativeReasoning",
+            "splitReasoning",
+            "replayReasoningContent",
+            "thinkTagFallback",
+            "parallelToolCalls",
+            "strictSchema",
+            "preservesReasoningAcrossTurns",
+            "clearThinking",
+            "defaultThinking",
+            "reasoningEncoding"
+          ],
+          "properties": {
+            "protocol": {
+              "enum": [
+                "ollama",
+                "openAi",
+                "openAiCompatible",
+                "anthropicMessages"
+              ]
+            },
+            "reasoningEncoding": {
+              "enum": [
+                "none",
+                "responses",
+                "enableThinking",
+                "thinking",
+                "adaptive",
+                "thinkingEffort",
+                "effort",
+                "ollama",
+                "anthropicAdaptive"
+              ]
+            },
+            "cumulativeStream": {
+              "type": "boolean"
+            },
+            "supportsStreamUsage": {
+              "type": "boolean"
+            },
+            "nativeReasoning": {
+              "type": "boolean"
+            },
+            "splitReasoning": {
+              "type": "boolean"
+            },
+            "replayReasoningContent": {
+              "type": "boolean"
+            },
+            "thinkTagFallback": {
+              "type": "boolean"
+            },
+            "parallelToolCalls": {
+              "type": "boolean"
+            },
+            "strictSchema": {
+              "type": "boolean"
+            },
+            "preservesReasoningAcrossTurns": {
+              "type": "boolean"
+            },
+            "clearThinking": {
+              "type": "boolean"
+            },
+            "defaultThinking": {
+              "type": "boolean"
+            }
+          }
+        },
+        "vision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxRequestImages",
+            "maxRequestImageBytes",
+            "reservedTokensPerImage",
+            "imageTokenBudgetPolicy"
+          ],
+          "properties": {
+            "maxRequestImages": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxRequestImageBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reservedTokensPerImage": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "imageTokenBudgetPolicy": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "imageRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "sha256",
+        "mediaType",
+        "bytes",
+        "width",
+        "height",
+        "name"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "mediaType": {
+          "const": "image/png"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "retryPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxAttempts",
+        "initialDelayMs",
+        "maxDelayMs",
+        "maxServerDelayMs",
+        "jitterRatio"
+      ],
+      "properties": {
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "initialDelayMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxDelayMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxServerDelayMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "jitterRatio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "timeouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestHeadersMs",
+        "firstByteMs",
+        "streamIdleMs"
+      ],
+      "properties": {
+        "requestHeadersMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        },
+        "firstByteMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        },
+        "streamIdleMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        }
+      }
+    }
+  }
+}

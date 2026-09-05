@@ -363,7 +363,7 @@ async fn skill_claim_every_complete_jsonl_prefix_recovers_one_input_and_prepared
         .unwrap();
     for end in from..=to {
         let storage = tempfile::tempdir().unwrap();
-        let dir = storage.path().join("agent-runtime/sessions-v4");
+        let dir = storage.path().join("agent-runtime/sessions-v5");
         std::fs::create_dir_all(&dir).unwrap();
         let mut lines = String::new();
         for e in &events[..=end] {
@@ -473,6 +473,10 @@ async fn skill_real_runtime_http_wire_catalog_slash_and_model_tool_body() {
         .start(
             "wire-skill",
             AiProviderConfig {
+                model_definition: Some(crate::llm::catalog::fixture_definition(
+                    AiProviderKind::OpenAiCompatible,
+                    32768,
+                )),
                 id: "skills-http".into(),
                 kind: AiProviderKind::OpenAiCompatible,
                 base_url: url,
@@ -533,7 +537,7 @@ async fn skill_model_tool_every_complete_prefix_reuses_committed_body_and_origin
         .unwrap();
     for end in from..=to {
         let storage = tempfile::tempdir().unwrap();
-        let dir = storage.path().join("agent-runtime/sessions-v4");
+        let dir = storage.path().join("agent-runtime/sessions-v5");
         std::fs::create_dir_all(&dir).unwrap();
         let lines = events[..=end]
             .iter()
@@ -620,13 +624,13 @@ async fn skill_retry_preparation_unknown_name_is_not_reloaded_and_form_is_ignore
 
 #[tokio::test]
 async fn skill_sensitive_complete_body_is_rejected_and_budget_blocks_oversized_first_request() {
-    for (session, body, model_name) in [
+    for (session, body, context_window) in [
         (
             "redaction",
             "password=super-sensitive-value".to_string(),
-            "test-model",
+            32768,
         ),
-        ("budget", "long instruction ".repeat(4000), "context-8192"),
+        ("budget", "long instruction ".repeat(4000), 8192),
     ] {
         let model = FakeAdapter::new(vec![reply("done", &[])]);
         let (_storage, runtime) = configured(model.clone());
@@ -640,7 +644,10 @@ async fn skill_sensitive_complete_body_is_rejected_and_budget_blocks_oversized_f
             .start(
                 session,
                 AiProviderConfig {
-                    model: model_name.into(),
+                    model_definition: Some(crate::llm::catalog::fixture_definition(
+                        AiProviderKind::Ollama,
+                        context_window,
+                    )),
                     ..provider()
                 },
                 None,
@@ -776,6 +783,11 @@ async fn skill_question_resume_reuses_prepared_body_and_answer_slash_does_not_in
         .build();
     runtime.configure(storage.path().into()).unwrap();
     runtime
+        .configure_model_preferences(
+            crate::db::Database::open(&storage.path().join("test-ai-settings.db")).unwrap(),
+        )
+        .unwrap();
+    runtime
         .answer_question(
             AnswerQuestionInput {
                 identity: record.identity,
@@ -834,7 +846,8 @@ async fn skill_compaction_republishes_catalog_and_preserves_durable_hashes() {
         let budget = crate::agent_runtime::estimate_model_surface_budget(
             &provider(),
             &model.requests.lock().unwrap()[0],
-        );
+        )
+        .unwrap();
         runtime
             .compactions
             .compact(

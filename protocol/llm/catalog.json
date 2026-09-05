@@ -1,0 +1,2241 @@
+{
+  "version": 1,
+  "policy": "Migrated ShellSpan limits; conservative application budgets, not current advertised provider maxima. Exact IDs only; discovery does not declare capabilities.",
+  "presets": {
+    "anthropic": {
+      "kind": "anthropicMessages",
+      "legacyHosts": [
+        "api.anthropic.com"
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "anthropicMessages",
+        "reasoningEncoding": "anthropicAdaptive",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "models": {
+        "claude-fable-5-1": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "supported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            },
+            {
+              "id": "max",
+              "displayName": "Max"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "anthropicMessages",
+            "reasoningEncoding": "anthropicAdaptive",
+            "clearThinking": false,
+            "defaultThinking": false
+          },
+          "vision": {
+            "maxRequestImages": 20,
+            "maxRequestImageBytes": 20971520,
+            "reservedTokensPerImage": 4096,
+            "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after immutable normalization; not provider-reported usage. Image count and byte limits are ShellSpan safety limits."
+          }
+        },
+        "claude-opus-5": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "supported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            },
+            {
+              "id": "max",
+              "displayName": "Max"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "anthropicMessages",
+            "reasoningEncoding": "anthropicAdaptive",
+            "clearThinking": false,
+            "defaultThinking": false
+          },
+          "vision": {
+            "maxRequestImages": 20,
+            "maxRequestImageBytes": 20971520,
+            "reservedTokensPerImage": 4096,
+            "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after immutable normalization; not provider-reported usage. Image count and byte limits are ShellSpan safety limits."
+          }
+        },
+        "claude-sonnet-5": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "supported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            },
+            {
+              "id": "max",
+              "displayName": "Max"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "anthropicMessages",
+            "reasoningEncoding": "anthropicAdaptive",
+            "clearThinking": false,
+            "defaultThinking": false
+          },
+          "vision": {
+            "maxRequestImages": 20,
+            "maxRequestImageBytes": 20971520,
+            "reservedTokensPerImage": 4096,
+            "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after immutable normalization; not provider-reported usage. Image count and byte limits are ShellSpan safety limits."
+          }
+        }
+      }
+    },
+    "openai": {
+      "kind": "openAi",
+      "legacyHosts": [
+        "api.openai.com"
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "models": {
+        "gpt-4.1": {
+          "contextWindow": 1047576,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "none",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-4.1-mini": {
+          "contextWindow": 1047576,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "none",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-4.1-nano": {
+          "contextWindow": 1047576,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "none",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "minimal",
+              "displayName": "Minimal"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5-mini": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "minimal",
+              "displayName": "Minimal"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5-nano": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "minimal",
+              "displayName": "Minimal"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5.1": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "none",
+              "displayName": "None"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5.2": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "none",
+              "displayName": "None"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5.2-codex": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5.3-codex": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5.3-codex-spark": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5.4": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "none",
+              "displayName": "None"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5.4-mini": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "none",
+              "displayName": "None"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5.5": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "none",
+              "displayName": "None"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5.6": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "none",
+              "displayName": "None"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            },
+            {
+              "id": "max",
+              "displayName": "Max"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5.6-sol": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "none",
+              "displayName": "None"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            },
+            {
+              "id": "max",
+              "displayName": "Max"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5.6-terra": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "none",
+              "displayName": "None"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            },
+            {
+              "id": "max",
+              "displayName": "Max"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-5.6-luna": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "none",
+              "displayName": "None"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            },
+            {
+              "id": "max",
+              "displayName": "Max"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "o1": {
+          "contextWindow": 131072,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "o3": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "o3-mini": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "o4-mini": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": false,
+            "parallelToolCalls": true,
+            "strictSchema": true,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAi",
+            "reasoningEncoding": "responses",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        }
+      }
+    },
+    "ollama": {
+      "kind": "ollama",
+      "legacyHosts": [],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "ollama",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "models": {
+        "qwen3": {
+          "contextWindow": 32768,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": true,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "ollama",
+            "reasoningEncoding": "ollama",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "qwen3:8b": {
+          "contextWindow": 32768,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": true,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "ollama",
+            "reasoningEncoding": "ollama",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "qwen3:32b": {
+          "contextWindow": 32768,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": true,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "ollama",
+            "reasoningEncoding": "ollama",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-oss:20b": {
+          "contextWindow": 32768,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": true,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "ollama",
+            "reasoningEncoding": "ollama",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "gpt-oss:120b": {
+          "contextWindow": 32768,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": true,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "ollama",
+            "reasoningEncoding": "ollama",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "deepseek-r1": {
+          "contextWindow": 32768,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": true,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "ollama",
+            "reasoningEncoding": "ollama",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "deepseek-v3.1": {
+          "contextWindow": 32768,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": false,
+            "thinkTagFallback": true,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "ollama",
+            "reasoningEncoding": "ollama",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        }
+      }
+    },
+    "deepseek": {
+      "kind": "openAiCompatible",
+      "legacyHosts": [
+        "api.deepseek.com"
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "models": {
+        "deepseek-chat": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "none",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "deepseek-reasoner": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "none",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "deepseek-v4-flash": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "max",
+              "displayName": "Max"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "thinkingEffort",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "deepseek-v4-pro": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "max",
+              "displayName": "Max"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "thinkingEffort",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        }
+      }
+    },
+    "minimax": {
+      "kind": "openAiCompatible",
+      "legacyHosts": [
+        "api.minimax.io",
+        "api.minimaxi.com"
+      ],
+      "compat": {
+        "cumulativeStream": true,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": true,
+        "replayReasoningContent": true,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "models": {
+        "MiniMax-M2": {
+          "contextWindow": 204800,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [],
+          "compat": {
+            "cumulativeStream": true,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": true,
+            "replayReasoningContent": true,
+            "thinkTagFallback": true,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "none",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "MiniMax-M2.1": {
+          "contextWindow": 204800,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [],
+          "compat": {
+            "cumulativeStream": true,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": true,
+            "replayReasoningContent": true,
+            "thinkTagFallback": true,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "none",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "MiniMax-M2.5": {
+          "contextWindow": 204800,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [],
+          "compat": {
+            "cumulativeStream": true,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": true,
+            "replayReasoningContent": true,
+            "thinkTagFallback": true,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "none",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "MiniMax-M2.7": {
+          "contextWindow": 204800,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [],
+          "compat": {
+            "cumulativeStream": true,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": true,
+            "replayReasoningContent": true,
+            "thinkTagFallback": true,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "none",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "MiniMax-M3": {
+          "contextWindow": 204800,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": true,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": true,
+            "replayReasoningContent": true,
+            "thinkTagFallback": true,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "adaptive",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        }
+      }
+    },
+    "qwen": {
+      "kind": "openAiCompatible",
+      "legacyHosts": [
+        "dashscope.aliyuncs.com",
+        "dashscope-intl.aliyuncs.com",
+        ".maas.aliyuncs.com"
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "models": {
+        "qwen3": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "enableThinking",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "qwen3.8-max": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "enableThinking",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "qwen3-235b-a22b": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "enableThinking",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "qwen3-235b-a22b-thinking-2507": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "none",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "qwen3-thinking-2507": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "none",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "qwen3-235b-a22b-instruct-2507": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": false,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "none",
+            "clearThinking": false,
+            "defaultThinking": false
+          }
+        },
+        "qwen3-vl-plus": {
+          "contextWindow": 128000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "supported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "enableThinking",
+            "clearThinking": false,
+            "defaultThinking": false
+          },
+          "vision": {
+            "maxRequestImages": 20,
+            "maxRequestImageBytes": 20971520,
+            "reservedTokensPerImage": 4096,
+            "imageTokenBudgetPolicy": "Reserve 4096 tokens per image after local normalization to at most 1048576 pixels and 2048 pixels per side. Qwen3-VL uses 32x32 pixels per token; this reservation includes headroom for resizing and image markers."
+          }
+        },
+        "qwen3-vl-flash": {
+          "contextWindow": 128000,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "supported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": false,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "enableThinking",
+            "clearThinking": false,
+            "defaultThinking": false
+          },
+          "vision": {
+            "maxRequestImages": 20,
+            "maxRequestImageBytes": 20971520,
+            "reservedTokensPerImage": 4096,
+            "imageTokenBudgetPolicy": "Reserve 4096 tokens per image after local normalization to at most 1048576 pixels and 2048 pixels per side. Qwen3-VL uses 32x32 pixels per token; this reservation includes headroom for resizing and image markers."
+          }
+        }
+      }
+    },
+    "glm": {
+      "kind": "openAiCompatible",
+      "legacyHosts": [
+        "open.bigmodel.cn"
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "models": {
+        "glm-4.5": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "thinking",
+            "clearThinking": true,
+            "defaultThinking": true
+          }
+        },
+        "glm-4.6": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "thinking",
+            "clearThinking": true,
+            "defaultThinking": true
+          }
+        },
+        "glm-4.7": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "thinking",
+            "clearThinking": true,
+            "defaultThinking": true
+          }
+        },
+        "glm-5": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "thinking",
+            "clearThinking": true,
+            "defaultThinking": true
+          }
+        },
+        "glm-5.1": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "on",
+              "displayName": "On"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "thinking",
+            "clearThinking": true,
+            "defaultThinking": true
+          }
+        },
+        "glm-5.2": {
+          "contextWindow": 65536,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "unsupported",
+          "reasoning": [
+            {
+              "id": "off",
+              "displayName": "Off"
+            },
+            {
+              "id": "minimal",
+              "displayName": "Minimal"
+            },
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "medium",
+              "displayName": "Medium"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "xhigh",
+              "displayName": "Xhigh"
+            },
+            {
+              "id": "max",
+              "displayName": "Max"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "thinkingEffort",
+            "clearThinking": true,
+            "defaultThinking": true
+          }
+        }
+      }
+    },
+    "kimi": {
+      "kind": "openAiCompatible",
+      "legacyHosts": [
+        "api.kimi.com"
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "models": {
+        "k3": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "supported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "max",
+              "displayName": "Max"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "effort",
+            "clearThinking": false,
+            "defaultThinking": false
+          },
+          "vision": {
+            "maxRequestImages": 20,
+            "maxRequestImageBytes": 20971520,
+            "reservedTokensPerImage": 4096,
+            "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after normalization to at most 1048576 pixels and 2048 pixels per side; not provider-reported usage. Image count and byte limits are application limits."
+          }
+        },
+        "k3-256k": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 4096,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "supported",
+          "reasoning": [
+            {
+              "id": "low",
+              "displayName": "Low"
+            },
+            {
+              "id": "high",
+              "displayName": "High"
+            },
+            {
+              "id": "max",
+              "displayName": "Max"
+            }
+          ],
+          "compat": {
+            "cumulativeStream": false,
+            "supportsStreamUsage": true,
+            "nativeReasoning": true,
+            "splitReasoning": false,
+            "replayReasoningContent": true,
+            "thinkTagFallback": false,
+            "parallelToolCalls": false,
+            "strictSchema": false,
+            "preservesReasoningAcrossTurns": true,
+            "protocol": "openAiCompatible",
+            "reasoningEncoding": "effort",
+            "clearThinking": false,
+            "defaultThinking": false
+          },
+          "vision": {
+            "maxRequestImages": 20,
+            "maxRequestImageBytes": 20971520,
+            "reservedTokensPerImage": 4096,
+            "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after normalization to at most 1048576 pixels and 2048 pixels per side; not provider-reported usage. Image count and byte limits are application limits."
+          }
+        }
+      }
+    },
+    "generic": {
+      "kind": "openAiCompatible",
+      "legacyHosts": [],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": false,
+        "nativeReasoning": false,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "models": {}
+    }
+  }
+}

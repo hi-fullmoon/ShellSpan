@@ -215,7 +215,10 @@ impl AgentInbox {
         }
         // Move the object, preserving identity, provenance, content and attachments.
         // seen_message_ids remains unchanged, so it cannot be enqueued again.
-        let message = self.next_turn.remove(index).expect("validated queued index");
+        let message = self
+            .next_turn
+            .remove(index)
+            .expect("validated queued index");
         self.next_step.push_back(message);
         Ok(())
     }

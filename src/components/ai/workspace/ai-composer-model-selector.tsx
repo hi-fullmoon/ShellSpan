@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { invokeResolveAiSelection, isTauriRuntime } from '@/lib/tauri';
+import { useResolvedModel } from '@/lib/provider-contract';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,11 +21,12 @@ import {
 } from '@/lib/ai-reasoning';
 import type { LocaleKey } from '@/locales';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
-import type { AiProviderConfig, AiProviderProfile, AiReasoningOption } from '@/types/ai';
+import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
+import type { AiProviderConfig, AiProviderProfile, AiProviderPreset, AiReasoningOption } from '@/types/ai';
 
 type ModelMenuPane = 'root' | 'model' | 'reasoning';
 
-const REASONING_LABEL_KEYS: Record<AiReasoningOption, LocaleKey> = {
+const REASONING_LABEL_KEYS: Record<string, LocaleKey> = {
   off: 'ai.reasoningEffort.off',
   on: 'ai.reasoningEffort.on',
   none: 'ai.reasoningEffort.off',
@@ -45,7 +48,7 @@ function groupProviders(providers: readonly AiProviderProfile[]): readonly Provi
   const groups = new Map<string, AiProviderProfile[]>();
   for (const provider of providers) {
     if (!provider.model.trim()) continue;
-    const key = `${provider.preset}:${provider.name}`;
+    const key = provider.id;
     const group = groups.get(key) ?? [];
     group.push(provider);
     groups.set(key, group);
@@ -75,18 +78,50 @@ export function AiComposerModelSelector({
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
   const updateProvider = useAiSettingsStore((state) => state.updateProvider);
   const [open, setOpen] = useState(false);
+  const routeSnapshot = useLlmRoutesStore((state) => state.snapshot);
+  const hydrateRoutes = useLlmRoutesStore((state) => state.hydrate);
+  const saveRoutes = useLlmRoutesStore((state) => state.save);
+  useEffect(() => { if (!routeSnapshot && isTauriRuntime()) void hydrateRoutes(); }, [routeSnapshot, hydrateRoutes]);
+  const modelsByRoute = useLlmRoutesStore((state) => state.modelsByRoute);
+  const routeStatus = useLlmRoutesStore((state) => state.status);
+  const routeError = useLlmRoutesStore((state) => state.error);
+  const nativeRouteMode = isTauriRuntime();
+  const routeProviders = useMemo(() => (routeSnapshot?.routes.flatMap(route =>
+    (modelsByRoute[route.id] ?? []).map(resolved => ({
+      model: resolved.modelId, modelDefinition: { contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision },
+      id: route.id, routeRevision: route.revision, name: route.displayName, preset: (route.presetId ?? 'custom') as AiProviderPreset,
+      kind: route.adapterId === 'responses' ? 'openAi' as const : route.adapterId === 'ollama' ? 'ollama' as const : 'openAiCompatible' as const,
+      profile: resolved.profile, baseUrl: route.baseUrl,
+      reasoningEffort: route.defaults?.modelId === resolved.modelId ? route.defaults.reasoningEffort : undefined,
+      requiresApiKey: route.auth.kind === 'keychain', retryPolicy: route.retryPolicy,
+    }))) ?? []), [routeSnapshot,modelsByRoute]);
+  const availableProviders = routeSnapshot ? routeProviders : nativeRouteMode ? [] : providers;
   const [pane, setPane] = useState<ModelMenuPane>('root');
-  const groups = useMemo(() => groupProviders(providers), [providers]);
-  const defaultProvider = providers.find((provider) => provider.id === defaultProviderId)
-    ?? providers[0];
+  const groups = useMemo(() => groupProviders(availableProviders), [availableProviders]);
+  const defaultSelection=routeSnapshot?.defaultSelection;
+  const defaultProvider = availableProviders.find((provider) => defaultSelection ? provider.id===defaultSelection.routeId && provider.model===defaultSelection.modelId : provider.id === defaultProviderId)
+    ?? availableProviders[0];
   const current: AiProviderProfile | undefined = selection
-    ? { name: selection.id, preset: 'custom', ...providers.find((item) => item.id === selection.id), ...selection }
+    ? { name: selection.id, preset: 'custom' as const, ...availableProviders.find((item) => item.id === selection.id && item.model === selection.model), ...selection }
     : defaultProvider;
-  const reasoningOptions = current ? reasoningEffortOptions(current) : [];
-  const reasoning = current ? effectiveReasoningEffort(current) : undefined;
+  const legacyResolution=useResolvedModel(!routeSnapshot ? current : undefined);
+  const [validatedModel,setValidatedModel]=useState<import('@/lib/provider-contract').ResolvedModel>();
+  const [selectionError,setSelectionError]=useState<string>();
+  useEffect(()=>{
+    if(!routeSnapshot||!current){setValidatedModel(undefined);setSelectionError(undefined);return;}
+    let cancelled=false; setValidatedModel(undefined); setSelectionError(undefined);
+    void invokeResolveAiSelection({routeId:current.id,modelId:current.model,reasoningEffort:current.reasoningEffort},current.routeRevision ?? routeSnapshot.revision)
+      .then(model=>{if(!cancelled)setValidatedModel(model);})
+      .catch(error=>{if(!cancelled)setSelectionError(`INVALID_MODEL_SELECTION: ${String(error)}`);});
+    return()=>{cancelled=true;};
+  },[routeSnapshot,current?.id,current?.model,current?.reasoningEffort,current?.routeRevision]);
+  const resolved = routeSnapshot ? validatedModel : legacyResolution.status==='ready'?legacyResolution.model:undefined;
+  const reasoningOptions = routeSnapshot ? (resolved?.reasoning.map(option=>option.id) ?? []) : (current ? reasoningEffortOptions(current) : []);
+  const candidateReasoning=!routeSnapshot&&current ? effectiveReasoningEffort(current) : undefined;
+  const reasoning = current?.reasoningEffort ? (reasoningOptions.includes(current.reasoningEffort) ? current.reasoningEffort : undefined) : candidateReasoning;
   const modelLabel = current?.model.trim() || t('ai.modelMissing');
   const reasoningLabel = reasoning
-    ? t(REASONING_LABEL_KEYS[reasoning])
+    ? resolved?.reasoning.find(o => o.id === reasoning)?.displayName ?? (REASONING_LABEL_KEYS[reasoning] ? t(REASONING_LABEL_KEYS[reasoning]) : reasoning)
     : t('ai.reasoningEffort.default');
   const hasReasoning = reasoningOptions.length > 0;
   const triggerLabel = hasReasoning
@@ -140,6 +175,7 @@ export function AiComposerModelSelector({
           setPane('root');
         }}
       >
+        {(routeStatus==='error'||selectionError||(routeSnapshot && !resolved)) && <DropdownMenuGroup><DropdownMenuLabel role="status">{routeStatus==='error' ? routeError : selectionError ?? t('settings.ai.capabilitiesLoading')}</DropdownMenuLabel></DropdownMenuGroup>}
         {pane === 'root' && (
           <DropdownMenuGroup>
             <DropdownMenuItem
@@ -169,17 +205,21 @@ export function AiComposerModelSelector({
           <DropdownMenuGroup key={group.id}>
             <DropdownMenuLabel>{group.label}</DropdownMenuLabel>
             <DropdownMenuRadioGroup
-              value={current?.id}
-              onValueChange={(providerId) => {
-                if (onSelect) void onSelect(useAiSettingsStore.getState().getProviderConfig(providerId));
-                else setDefaultProvider(providerId);
-                close();
+              value={current ? `${current.id}\u0000${current.model}` : undefined}
+              onValueChange={(value) => {
+                const [routeId, modelId]=value.split('\u0000'); const selected=availableProviders.find(p=>p.id===routeId&&p.model===modelId);
+                if (!selected) return;
+                const {name:_n,preset:_p,...config}=selected;
+                if (onSelect) void onSelect(config);
+                else if (routeSnapshot) void saveRoutes(routeSnapshot.routes,{routeId,modelId,reasoningEffort:selected.reasoningEffort}).then(close);
+                else if (!nativeRouteMode) setDefaultProvider(routeId);
+                if (onSelect || !routeSnapshot) close();
               }}
             >
               {group.providers.map((provider) => (
                 <DropdownMenuRadioItem
-                  key={provider.id}
-                  value={provider.id}
+                  key={`${provider.id}:${provider.model}`}
+                  value={`${provider.id}\u0000${provider.model}`}
                   closeOnClick
                   className="ai-model-menu-option"
                 >
@@ -203,8 +243,9 @@ export function AiComposerModelSelector({
                 if (onSelect) {
                   const { name: _name, preset: _preset, ...config } = current;
                   void onSelect({ ...config, ...patch });
-                } else updateProvider(current.id, patch);
-                close();
+                } else if (routeSnapshot) void saveRoutes(routeSnapshot.routes,{routeId:current.id,modelId:current.model,reasoningEffort:patch.reasoningEffort}).then(close);
+                else if (!nativeRouteMode) updateProvider(current.id, patch);
+                if (onSelect || !routeSnapshot) close();
               }}
             >
               <DropdownMenuRadioItem
@@ -221,7 +262,7 @@ export function AiComposerModelSelector({
                   closeOnClick
                   className="ai-model-menu-option"
                 >
-                  <span>{t(REASONING_LABEL_KEYS[option])}</span>
+                  <span>{resolved?.reasoning.find(o => o.id === option)?.displayName ?? option}</span>
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>

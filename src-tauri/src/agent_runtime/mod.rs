@@ -10,6 +10,7 @@ mod hooks;
 pub(crate) mod images;
 mod inbox;
 mod model;
+mod model_tools;
 mod native;
 mod native_adapter;
 mod native_contract;

@@ -8,7 +8,7 @@ import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
-import v4Fixture from '@/test/fixtures/agent-session-v4.json';
+import v4Fixture from '@/test/fixtures/agent-session-v5.json';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import '@/components/ai/ai-panel.css';
 

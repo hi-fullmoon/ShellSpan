@@ -15,7 +15,7 @@ import {
   agentSessionWaitingApprovalEventFixture,
 } from '@/test/fixtures/agent-session';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
-import v4Fixture from '@/test/fixtures/agent-session-v4.json';
+import v4Fixture from '@/test/fixtures/agent-session-v5.json';
 import type { AgentSessionEvent } from '@/types/agent-session';
 
 const ALL_AGENT_EVENT_TYPES = [
@@ -114,7 +114,7 @@ function requestHeader(
 }
 
 describe('AI Phase 3 chat projection', () => {
-  it('keeps the fixture exhaustive over the current Event v4 union', () => {
+  it('keeps the fixture exhaustive over the current Event v5 union', () => {
     expect(new Set(agentSessionAllEventFamiliesFixture.map((event) => event.type)))
       .toEqual(new Set(ALL_AGENT_EVENT_TYPES));
   });
@@ -462,17 +462,17 @@ describe('AI Phase 3 chat projection', () => {
     const compacted = [
       ...events,
       {
-        version: 4, sessionId: last.sessionId, seq: last.seq + 1,
+        version: 5, sessionId: last.sessionId, seq: last.seq + 1,
         timeUnixMs: last.timeUnixMs + 100, type: 'compaction/start',
         data: { reason: 'fixture pressure' },
       },
       {
-        version: 4, sessionId: last.sessionId, seq: last.seq + 2,
+        version: 5, sessionId: last.sessionId, seq: last.seq + 2,
         timeUnixMs: last.timeUnixMs + 200, type: 'compaction/summary',
         data: { summary: 'fixture summary', replacedThroughSeq: 6, surfaceGeneration: 1 },
       },
       {
-        version: 4, sessionId: last.sessionId, seq: last.seq + 3,
+        version: 5, sessionId: last.sessionId, seq: last.seq + 3,
         timeUnixMs: last.timeUnixMs + 300, type: 'compaction/end',
         data: { surfaceGeneration: 1, replacedThroughSeq: 6, status: 'completed' },
       },

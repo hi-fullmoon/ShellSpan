@@ -1,0 +1,979 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ShellSpan LLM route document v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "revision",
+    "routes",
+    "migrationComplete",
+    "migrationIssues"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "defaultSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routeId",
+        "modelId"
+      ],
+      "properties": {
+        "routeId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reasoningEffort": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        }
+      }
+    },
+    "migrationComplete": {
+      "type": "boolean"
+    },
+    "migrationIssues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "original",
+          "error"
+        ],
+        "properties": {
+          "original": {},
+          "error": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "revision",
+          "displayName",
+          "adapterId",
+          "baseUrl",
+          "auth",
+          "replayDomainId",
+          "retryPolicy",
+          "timeouts"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "adapterId": {
+            "enum": [
+              "responses",
+              "chat-completions",
+              "ollama",
+              "anthropic-messages"
+            ]
+          },
+          "baseUrl": {
+            "type": "string",
+            "minLength": 1
+          },
+          "auth": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "none"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "reference"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "keychain"
+                  },
+                  "reference": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
+          },
+          "replayDomainId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "presetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "models": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "contextWindow",
+                "maxOutputTokens",
+                "toolCalling",
+                "textInput",
+                "imageInput",
+                "reasoning",
+                "compat"
+              ],
+              "properties": {
+                "contextWindow": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxOutputTokens": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "toolCalling": {
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unknown"
+                  ]
+                },
+                "textInput": {
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unknown"
+                  ]
+                },
+                "imageInput": {
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unknown"
+                  ]
+                },
+                "reasoning": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "displayName"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{1,80}$"
+                      },
+                      "displayName": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "wireValue": {}
+                    }
+                  }
+                },
+                "compat": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "protocol",
+                    "cumulativeStream",
+                    "supportsStreamUsage",
+                    "nativeReasoning",
+                    "splitReasoning",
+                    "replayReasoningContent",
+                    "thinkTagFallback",
+                    "parallelToolCalls",
+                    "strictSchema",
+                    "preservesReasoningAcrossTurns",
+                    "clearThinking",
+                    "defaultThinking",
+                    "reasoningEncoding"
+                  ],
+                  "properties": {
+                    "protocol": {
+                      "enum": [
+                        "ollama",
+                        "openAi",
+                        "openAiCompatible",
+                        "anthropicMessages"
+                      ]
+                    },
+                    "reasoningEncoding": {
+                      "enum": [
+                        "none",
+                        "responses",
+                        "enableThinking",
+                        "thinking",
+                        "adaptive",
+                        "thinkingEffort",
+                        "effort",
+                        "ollama",
+                        "anthropicAdaptive"
+                      ]
+                    },
+                    "cumulativeStream": {
+                      "type": "boolean"
+                    },
+                    "supportsStreamUsage": {
+                      "type": "boolean"
+                    },
+                    "nativeReasoning": {
+                      "type": "boolean"
+                    },
+                    "splitReasoning": {
+                      "type": "boolean"
+                    },
+                    "replayReasoningContent": {
+                      "type": "boolean"
+                    },
+                    "thinkTagFallback": {
+                      "type": "boolean"
+                    },
+                    "parallelToolCalls": {
+                      "type": "boolean"
+                    },
+                    "strictSchema": {
+                      "type": "boolean"
+                    },
+                    "preservesReasoningAcrossTurns": {
+                      "type": "boolean"
+                    },
+                    "clearThinking": {
+                      "type": "boolean"
+                    },
+                    "defaultThinking": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "vision": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "maxRequestImages",
+                    "maxRequestImageBytes",
+                    "reservedTokensPerImage",
+                    "imageTokenBudgetPolicy"
+                  ],
+                  "properties": {
+                    "maxRequestImages": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxRequestImageBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "reservedTokensPerImage": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "imageTokenBudgetPolicy": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "modelOverrides": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "contextWindow",
+                "maxOutputTokens",
+                "toolCalling",
+                "textInput",
+                "imageInput",
+                "reasoning",
+                "compat"
+              ],
+              "properties": {
+                "contextWindow": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxOutputTokens": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "toolCalling": {
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unknown"
+                  ]
+                },
+                "textInput": {
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unknown"
+                  ]
+                },
+                "imageInput": {
+                  "enum": [
+                    "supported",
+                    "unsupported",
+                    "unknown"
+                  ]
+                },
+                "reasoning": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "displayName"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{1,80}$"
+                      },
+                      "displayName": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "wireValue": {}
+                    }
+                  }
+                },
+                "compat": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "protocol",
+                    "cumulativeStream",
+                    "supportsStreamUsage",
+                    "nativeReasoning",
+                    "splitReasoning",
+                    "replayReasoningContent",
+                    "thinkTagFallback",
+                    "parallelToolCalls",
+                    "strictSchema",
+                    "preservesReasoningAcrossTurns",
+                    "clearThinking",
+                    "defaultThinking",
+                    "reasoningEncoding"
+                  ],
+                  "properties": {
+                    "protocol": {
+                      "enum": [
+                        "ollama",
+                        "openAi",
+                        "openAiCompatible",
+                        "anthropicMessages"
+                      ]
+                    },
+                    "reasoningEncoding": {
+                      "enum": [
+                        "none",
+                        "responses",
+                        "enableThinking",
+                        "thinking",
+                        "adaptive",
+                        "thinkingEffort",
+                        "effort",
+                        "ollama",
+                        "anthropicAdaptive"
+                      ]
+                    },
+                    "cumulativeStream": {
+                      "type": "boolean"
+                    },
+                    "supportsStreamUsage": {
+                      "type": "boolean"
+                    },
+                    "nativeReasoning": {
+                      "type": "boolean"
+                    },
+                    "splitReasoning": {
+                      "type": "boolean"
+                    },
+                    "replayReasoningContent": {
+                      "type": "boolean"
+                    },
+                    "thinkTagFallback": {
+                      "type": "boolean"
+                    },
+                    "parallelToolCalls": {
+                      "type": "boolean"
+                    },
+                    "strictSchema": {
+                      "type": "boolean"
+                    },
+                    "preservesReasoningAcrossTurns": {
+                      "type": "boolean"
+                    },
+                    "clearThinking": {
+                      "type": "boolean"
+                    },
+                    "defaultThinking": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "vision": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "maxRequestImages",
+                    "maxRequestImageBytes",
+                    "reservedTokensPerImage",
+                    "imageTokenBudgetPolicy"
+                  ],
+                  "properties": {
+                    "maxRequestImages": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxRequestImageBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "reservedTokensPerImage": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "imageTokenBudgetPolicy": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "defaults": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "routeId",
+              "modelId"
+            ],
+            "properties": {
+              "routeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "modelId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reasoningEffort": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,80}$"
+              }
+            }
+          },
+          "retryPolicy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "maxAttempts",
+              "initialDelayMs",
+              "maxDelayMs",
+              "maxServerDelayMs",
+              "jitterRatio"
+            ],
+            "properties": {
+              "maxAttempts": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8
+              },
+              "initialDelayMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxDelayMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxServerDelayMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "jitterRatio": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "timeouts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "requestHeadersMs",
+              "firstByteMs",
+              "streamIdleMs"
+            ],
+            "properties": {
+              "requestHeadersMs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3600000
+              },
+              "firstByteMs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3600000
+              },
+              "streamIdleMs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3600000
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "not": {
+              "properties": {
+                "models": {},
+                "modelOverrides": {}
+              },
+              "required": [
+                "models",
+                "modelOverrides"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "adapterId": {
+                  "const": "anthropic-messages"
+                }
+              },
+              "required": [
+                "adapterId"
+              ]
+            },
+            "then": {
+              "properties": {
+                "auth": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "keychain"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routeId",
+        "modelId"
+      ],
+      "properties": {
+        "routeId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reasoningEffort": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        }
+      }
+    },
+    "auth": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "none"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "reference"
+          ],
+          "properties": {
+            "kind": {
+              "const": "keychain"
+            },
+            "reference": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "compat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "cumulativeStream",
+        "supportsStreamUsage",
+        "nativeReasoning",
+        "splitReasoning",
+        "replayReasoningContent",
+        "thinkTagFallback",
+        "parallelToolCalls",
+        "strictSchema",
+        "preservesReasoningAcrossTurns",
+        "clearThinking",
+        "defaultThinking",
+        "reasoningEncoding"
+      ],
+      "properties": {
+        "protocol": {
+          "enum": [
+            "ollama",
+            "openAi",
+            "openAiCompatible",
+            "anthropicMessages"
+          ]
+        },
+        "reasoningEncoding": {
+          "enum": [
+            "none",
+            "responses",
+            "enableThinking",
+            "thinking",
+            "adaptive",
+            "thinkingEffort",
+            "effort",
+            "ollama",
+            "anthropicAdaptive"
+          ]
+        },
+        "cumulativeStream": {
+          "type": "boolean"
+        },
+        "supportsStreamUsage": {
+          "type": "boolean"
+        },
+        "nativeReasoning": {
+          "type": "boolean"
+        },
+        "splitReasoning": {
+          "type": "boolean"
+        },
+        "replayReasoningContent": {
+          "type": "boolean"
+        },
+        "thinkTagFallback": {
+          "type": "boolean"
+        },
+        "parallelToolCalls": {
+          "type": "boolean"
+        },
+        "strictSchema": {
+          "type": "boolean"
+        },
+        "preservesReasoningAcrossTurns": {
+          "type": "boolean"
+        },
+        "clearThinking": {
+          "type": "boolean"
+        },
+        "defaultThinking": {
+          "type": "boolean"
+        }
+      }
+    },
+    "modelDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contextWindow",
+        "maxOutputTokens",
+        "toolCalling",
+        "textInput",
+        "imageInput",
+        "reasoning",
+        "compat"
+      ],
+      "properties": {
+        "contextWindow": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "toolCalling": {
+          "enum": [
+            "supported",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "textInput": {
+          "enum": [
+            "supported",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "imageInput": {
+          "enum": [
+            "supported",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "reasoning": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "displayName"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,80}$"
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1
+              },
+              "wireValue": {}
+            }
+          }
+        },
+        "compat": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol",
+            "cumulativeStream",
+            "supportsStreamUsage",
+            "nativeReasoning",
+            "splitReasoning",
+            "replayReasoningContent",
+            "thinkTagFallback",
+            "parallelToolCalls",
+            "strictSchema",
+            "preservesReasoningAcrossTurns",
+            "clearThinking",
+            "defaultThinking",
+            "reasoningEncoding"
+          ],
+          "properties": {
+            "protocol": {
+              "enum": [
+                "ollama",
+                "openAi",
+                "openAiCompatible",
+                "anthropicMessages"
+              ]
+            },
+            "reasoningEncoding": {
+              "enum": [
+                "none",
+                "responses",
+                "enableThinking",
+                "thinking",
+                "adaptive",
+                "thinkingEffort",
+                "effort",
+                "ollama",
+                "anthropicAdaptive"
+              ]
+            },
+            "cumulativeStream": {
+              "type": "boolean"
+            },
+            "supportsStreamUsage": {
+              "type": "boolean"
+            },
+            "nativeReasoning": {
+              "type": "boolean"
+            },
+            "splitReasoning": {
+              "type": "boolean"
+            },
+            "replayReasoningContent": {
+              "type": "boolean"
+            },
+            "thinkTagFallback": {
+              "type": "boolean"
+            },
+            "parallelToolCalls": {
+              "type": "boolean"
+            },
+            "strictSchema": {
+              "type": "boolean"
+            },
+            "preservesReasoningAcrossTurns": {
+              "type": "boolean"
+            },
+            "clearThinking": {
+              "type": "boolean"
+            },
+            "defaultThinking": {
+              "type": "boolean"
+            }
+          }
+        },
+        "vision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxRequestImages",
+            "maxRequestImageBytes",
+            "reservedTokensPerImage",
+            "imageTokenBudgetPolicy"
+          ],
+          "properties": {
+            "maxRequestImages": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxRequestImageBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reservedTokensPerImage": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "imageTokenBudgetPolicy": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "retryPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxAttempts",
+        "initialDelayMs",
+        "maxDelayMs",
+        "maxServerDelayMs",
+        "jitterRatio"
+      ],
+      "properties": {
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "initialDelayMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxDelayMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxServerDelayMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "jitterRatio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "timeouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestHeadersMs",
+        "firstByteMs",
+        "streamIdleMs"
+      ],
+      "properties": {
+        "requestHeadersMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        },
+        "firstByteMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        },
+        "streamIdleMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        }
+      }
+    }
+  }
+}

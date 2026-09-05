@@ -2,15 +2,11 @@ import type { AgentSubagentModel } from '@/types/agent-session';
 import type { AiProviderConfig } from '@/types/ai';
 
 /** Restore the credential-free provider selection recorded by the runtime. */
-export function sessionProviderConfig(selection: AgentSubagentModel): AiProviderConfig {
-  return {
-    id: selection.providerId,
-    kind: selection.providerKind,
-    baseUrl: selection.baseUrl,
-    model: selection.model,
-    profile: selection.profile as AiProviderConfig['profile'],
-    reasoningEffort: selection.reasoningEffort as AiProviderConfig['reasoningEffort'],
-    requiresApiKey: selection.requiresApiKey,
-    retryPolicy: selection.retryPolicy,
-  };
+export function sessionProviderConfig(selection: AgentSubagentModel, providers: readonly AiProviderConfig[] = []): AiProviderConfig {
+  const current = providers.find(p => p.id === selection.routeId && p.model === selection.modelId);
+  if (!current) throw new Error(`INVALID_MODEL_SELECTION: ${selection.routeId}/${selection.modelId}`);
+  if (selection.routeRevision !== undefined && current.routeRevision !== selection.routeRevision) {
+    throw new Error(`INVALID_MODEL_SELECTION: stale route revision ${selection.routeRevision}`);
+  }
+  return { ...current, routeRevision: selection.routeRevision ?? current.routeRevision, reasoningEffort: selection.reasoningEffort };
 }

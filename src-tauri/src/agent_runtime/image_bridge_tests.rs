@@ -54,7 +54,7 @@ async fn image_kimi_k3_submission_reaches_chat_transport_with_pixels() {
         provider.profile = Some("kimi".into());
         provider.model = model.into();
         provider.base_url = format!("http://{}", listener.local_addr().unwrap());
-        provider.reasoning_effort = Some(crate::ai::AiReasoningEffort::High);
+        provider.reasoning_effort = Some("high".to_string());
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let body = read_request(&mut socket).await;

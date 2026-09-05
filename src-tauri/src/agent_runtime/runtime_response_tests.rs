@@ -12,6 +12,12 @@ async fn whitespace_text_with_reasoning_and_tool_call_continues_after_approval()
             provider_item: None,
         },
     );
+    tool_response
+        .replay
+        .as_mut()
+        .unwrap()
+        .blocks
+        .insert(0, serde_json::json!({}));
     tool_response.finish_reason = ModelFinishReason::ToolCalls;
     set_tool_calls(
         &mut tool_response,

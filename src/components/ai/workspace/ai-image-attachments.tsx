@@ -5,15 +5,18 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
 import { imageErrorKey } from '@/lib/ai/image-error';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
-import { visionCapability } from '@/lib/vision-contract';
+import { useResolvedModel } from '@/lib/provider-contract';
 import { invokeAgentImagePreview } from '@/lib/tauri';
+import type { AiProviderConfig } from '@/types/ai';
 import type { AgentImageRef } from '@/types/agent-image';
 import type { useImageDraft } from './use-image-draft';
 import { AiImageDraftRail } from './ai-image-draft-rail';
 
-export function AiImageDraftControls({ state }: { state: ReturnType<typeof useImageDraft> }) {
+export function AiImageDraftControls({ state, selection }: { state: ReturnType<typeof useImageDraft>; selection?: AiProviderConfig }) {
   const { t } = useI18n();
-  const supported = useAiSettingsStore(s => Boolean(visionCapability(s.getProviderConfig())));
+  const provider = useAiSettingsStore(s => s.providers.find(p => p.id === s.defaultProviderId));
+  const resolution = useResolvedModel(selection ?? provider);
+  const supported = resolution.status === 'ready' && resolution.model.imageInput === 'supported';
   const previouslySupported = useRef(supported);
   useEffect(() => {
     if (!previouslySupported.current && supported && state.error?.includes('IMAGE_MODEL_UNSUPPORTED')) state.reportError(null);

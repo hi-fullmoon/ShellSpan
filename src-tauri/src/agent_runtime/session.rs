@@ -333,6 +333,12 @@ impl AgentSessionRecord {
     }
 }
 
+/// Validate a complete decoded log through the same replay path used by the
+/// production Session store, without publishing, repairing, or executing it.
+pub(crate) fn validate_session_events(events: Vec<AgentSessionEvent>) -> Result<(), String> {
+    AgentSessionRecord::from_events(events).map(|_| ())
+}
+
 #[derive(Default)]
 struct AgentSessionStoreInner {
     root: Option<PathBuf>,
@@ -350,6 +356,20 @@ pub(crate) struct AgentSessionStore {
 }
 
 impl AgentSessionStore {
+    pub(crate) fn with_offline_session_lock<T>(
+        &self,
+        session_id: &str,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "Agent session store is unavailable")?;
+        if inner.sessions.contains_key(session_id) {
+            return Err("MIGRATION_BUSY: session is loaded".into());
+        }
+        operation()
+    }
     #[cfg(test)]
     pub(crate) fn fail_appends_matching(&self, predicate: fn(&AgentSessionEventPayload) -> bool) {
         self.inner.lock().unwrap().append_failure = Some(predicate);
@@ -358,8 +378,8 @@ impl AgentSessionStore {
     pub(crate) fn configure(&self, app_data_root: PathBuf) -> Result<(), String> {
         let runtime_root = app_data_root.join("agent-runtime");
         // Earlier namespaces remain untouched. v4 logs are never migrated or dual-written.
-        let root = runtime_root.join("sessions-v4");
-        let archive_root = runtime_root.join("archives-v4");
+        let root = runtime_root.join("sessions-v5");
+        let archive_root = runtime_root.join("archives-v5");
         let mut inner = self
             .inner
             .lock()
@@ -1217,11 +1237,16 @@ impl AgentSessionStore {
                     return record.snapshot();
                 }
             }
-            return Err("client operation id was already committed with a different payload".into());
+            return Err(
+                "client operation id was already committed with a different payload".into(),
+            );
         }
         validate_mutable_session(record, "inbox mutation")?;
         if matches!(input.mutation, AgentInboxMutation::Steer { .. }) && !has_active_driver {
-            return Err("Agent inbox steer requires an active running driver; resume the Session first".into());
+            return Err(
+                "Agent inbox steer requires an active running driver; resume the Session first"
+                    .into(),
+            );
         }
         validate_expected_revision(record, input.expected_revision)?;
         let payload = match input.mutation {
@@ -1706,8 +1731,12 @@ impl AgentSessionStore {
         }
         let start = cursor as usize;
         let end = start.saturating_add(request.limit).min(record.events.len());
+        let mut events = record.events[start..end].to_vec();
+        for event in &mut events {
+            crate::llm::replay::public_event_projection(event);
+        }
         Ok(AgentSessionEventPage {
-            events: record.events[start..end].to_vec(),
+            events,
             next_cursor: (end < record.events.len()).then_some(end as u64),
         })
     }
@@ -1930,13 +1959,26 @@ fn require_queued_item<'a>(
 
 fn inbox_operation_id(payload: &AgentSessionEventPayload) -> Option<&str> {
     match payload {
-        AgentSessionEventPayload::InboxItemSteered { client_operation_id, .. }
-        | AgentSessionEventPayload::InboxItemUpdated { client_operation_id, .. }
-        | AgentSessionEventPayload::InboxItemRemoved { client_operation_id, .. }
-        | AgentSessionEventPayload::InboxReordered { client_operation_id, .. }
-        | AgentSessionEventPayload::SessionRenamed { client_operation_id, .. } => {
-            Some(client_operation_id)
+        AgentSessionEventPayload::InboxItemSteered {
+            client_operation_id,
+            ..
         }
+        | AgentSessionEventPayload::InboxItemUpdated {
+            client_operation_id,
+            ..
+        }
+        | AgentSessionEventPayload::InboxItemRemoved {
+            client_operation_id,
+            ..
+        }
+        | AgentSessionEventPayload::InboxReordered {
+            client_operation_id,
+            ..
+        }
+        | AgentSessionEventPayload::SessionRenamed {
+            client_operation_id,
+            ..
+        } => Some(client_operation_id),
         _ => None,
     }
 }
@@ -1957,7 +1999,8 @@ fn validate_steer_target(record: &AgentSessionRecord, item_id: &str) -> Result<(
         return Err("Agent inbox steer requires a running Session".into());
     }
     let last_turn_boundary = record.events.iter().rev().find(|event| {
-        matches!(event.payload,
+        matches!(
+            event.payload,
             AgentSessionEventPayload::TurnStart | AgentSessionEventPayload::TurnEnd { .. }
         )
     });
@@ -2129,6 +2172,84 @@ fn validate_event_transition(
                 return Err("request/start series index is not contiguous".into());
             }
             Ok(())
+        }
+        AgentSessionEventPayload::AssistantMessage {
+            content,
+            interrupted,
+            replay,
+            ..
+        } => {
+            if *interrupted {
+                if replay.is_some() {
+                    return Err("interrupted assistant message cannot carry replay metadata".into());
+                }
+                return Ok(());
+            }
+            let start = record.events.iter().rev().find_map(|previous| {
+                if previous.step_id != event.step_id {
+                    return None;
+                }
+                match &previous.payload {
+                    AgentSessionEventPayload::RequestStart {
+                        request_id,
+                        header_request_id,
+                        ..
+                    } => Some((request_id, header_request_id)),
+                    _ => None,
+                }
+            });
+            let Some((request_id, header_request_id)) = start else {
+                return match replay {
+                    None | Some(crate::llm::replay::ReplayEnvelopeV5::LegacyUnknown { .. }) => {
+                        Ok(())
+                    }
+                    Some(_) => Err("prepared replay requires a committed request/start".into()),
+                };
+            };
+            let header = record
+                .events
+                .iter()
+                .rev()
+                .find_map(|previous| match &previous.payload {
+                    AgentSessionEventPayload::RequestHeader {
+                        request_id,
+                        snapshot,
+                        snapshot_digest,
+                        ..
+                    } if request_id == header_request_id => {
+                        Some((snapshot.as_ref(), snapshot_digest.as_deref()))
+                    }
+                    _ => None,
+                });
+            let Some((Some(snapshot), Some(snapshot_digest))) = header else {
+                return Err(
+                    "assistant replay requires its committed request/header snapshot".into(),
+                );
+            };
+            if snapshot.digest() != snapshot_digest {
+                return Err("assistant replay request snapshot digest mismatch".into());
+            }
+            match (snapshot, replay) {
+                (
+                    crate::llm::runtime::RequestSnapshot::Prepared { .. },
+                    Some(envelope @ crate::llm::replay::ReplayEnvelopeV5::Prepared { .. }),
+                ) => crate::llm::replay::validate_agent_envelope(
+                    envelope, content, snapshot, request_id,
+                )
+                .map_err(crate::llm::replay::replay_error_string),
+                (
+                    crate::llm::runtime::RequestSnapshot::LegacyUnknown,
+                    Some(crate::llm::replay::ReplayEnvelopeV5::LegacyUnknown { .. }),
+                ) => Ok(()),
+                (crate::llm::runtime::RequestSnapshot::Prepared { .. }, _) => Err(
+                    "REPLAY_CAPTURE_MISSING: prepared response requires a prepared replay envelope"
+                        .into(),
+                ),
+                (crate::llm::runtime::RequestSnapshot::LegacyUnknown, _) => Err(
+                    "REPLAY_LEGACY_UNKNOWN: legacy response requires an explicit legacy envelope"
+                        .into(),
+                ),
+            }
         }
         AgentSessionEventPayload::FileReferenceScopeBound { scope } => {
             if record.header.target.as_ref() != Some(&scope.target)
@@ -2608,10 +2729,8 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
         Payload::SessionModelSelected { provider } => {
             require_scope(event, false, false)?;
             // Replay validates the recorded values, independently of today's model catalog.
-            super::subagent::provider_config(provider)?;
-            validate_text(&provider.provider_id, "providerId", false, MAX_LABEL_BYTES)?;
-            validate_text(&provider.base_url, "provider URL", false, MAX_LABEL_BYTES)?;
-            validate_text(&provider.model, "model", false, MAX_LABEL_BYTES)?;
+            validate_text(&provider.route_id, "routeId", false, MAX_LABEL_BYTES)?;
+            validate_text(&provider.model_id, "modelId", false, MAX_LABEL_BYTES)?;
             validate_optional_text(provider.reasoning_effort.as_deref(), "reasoning effort")?;
         }
         Payload::SessionPermissionChanged { .. } => {
@@ -2718,6 +2837,7 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             message_id,
             content,
             interrupted,
+            replay,
             ..
         } => {
             require_scope(event, true, true)?;
@@ -2731,18 +2851,35 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
                     AgentAssistantContentBlock::Text { text } => {
                         validate_text(text, "assistant text block", false, MAX_AGENT_MESSAGE_BYTES)?
                     }
-                    AgentAssistantContentBlock::Reasoning { text, .. } => validate_text(
+                    AgentAssistantContentBlock::Reasoning {
                         text,
-                        "assistant reasoning block",
-                        false,
-                        MAX_AGENT_MESSAGE_BYTES,
-                    )?,
+                        provider_item,
+                    } => {
+                        validate_text(
+                            text,
+                            "assistant reasoning block",
+                            false,
+                            MAX_AGENT_MESSAGE_BYTES,
+                        )?;
+                        if matches!(
+                            replay,
+                            Some(crate::llm::replay::ReplayEnvelopeV5::Prepared { .. })
+                        ) && provider_item.is_some()
+                        {
+                            return Err(
+                                "prepared replay stores native reasoning only in its envelope"
+                                    .into(),
+                            );
+                        }
+                    }
                     AgentAssistantContentBlock::ToolCall { call } => validate_tool_call(call)?,
                 }
             }
         }
         Payload::RequestHeader {
             request_id,
+            snapshot,
+            snapshot_digest,
             provider_id,
             model,
             reasoning_effort,
@@ -2753,6 +2890,15 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             ..
         } => {
             require_scope(event, true, true)?;
+            let snapshot = snapshot
+                .as_ref()
+                .ok_or("v5 request header requires a request snapshot")?;
+            let digest = snapshot_digest
+                .as_deref()
+                .ok_or("v5 request header requires a snapshot digest")?;
+            if snapshot.digest() != digest {
+                return Err("request snapshot digest mismatch".into());
+            }
             validate_identifier(request_id, "requestId")?;
             validate_text(provider_id, "providerId", false, MAX_LABEL_BYTES)?;
             validate_text(model, "model", false, MAX_LABEL_BYTES)?;
@@ -3312,31 +3458,14 @@ fn validate_subagent_session(
         }
     }
     validate_subagent_budget(&subagent.budget)?;
-    if let Some(value) = &subagent.provider.retry_policy {
-        let policy: super::RetryPolicy = serde_json::from_value(value.clone())
-            .map_err(|error| format!("subagent retry policy is invalid: {error}"))?;
-        policy.validate()?;
-    }
     validate_text(
-        &subagent.provider.provider_id,
-        "subagent providerId",
-        false,
-        MAX_LABEL_BYTES,
-    )?;
-    if !matches!(
-        subagent.provider.provider_kind.as_str(),
-        "ollama" | "openAi" | "openAiCompatible"
-    ) {
-        return Err("subagent provider kind is invalid".into());
-    }
-    validate_text(
-        &subagent.provider.base_url,
-        "subagent provider base URL",
+        &subagent.provider.route_id,
+        "subagent routeId",
         false,
         MAX_LABEL_BYTES,
     )?;
     validate_text(
-        &subagent.provider.model,
+        &subagent.provider.model_id,
         "subagent model",
         false,
         MAX_LABEL_BYTES,
@@ -3942,7 +4071,224 @@ mod tests {
 
     fn log_path(root: &tempfile::TempDir) -> PathBuf {
         root.path()
-            .join("agent-runtime/sessions-v4/session-1.jsonl")
+            .join("agent-runtime/sessions-v5/session-1.jsonl")
+    }
+
+    #[test]
+    fn ui_pages_hide_private_replay_while_restart_keeps_same_domain_authority() {
+        let (root, store) = configured();
+        create(&store);
+        store
+            .append(
+                "session-1",
+                Some("turn-1".into()),
+                None,
+                AgentSessionEventPayload::TurnStart,
+            )
+            .unwrap();
+        store
+            .append(
+                "session-1",
+                Some("turn-1".into()),
+                Some("step-1".into()),
+                AgentSessionEventPayload::StepStart,
+            )
+            .unwrap();
+        let snapshot = crate::llm::runtime::RequestSnapshot::Prepared {
+            route_id: "route-a".into(),
+            route_revision: 4,
+            adapter_id: "chat-completions".into(),
+            model_id: "model-a".into(),
+            catalog_version: 1,
+            capabilities: crate::llm::catalog::fixture_definition(
+                crate::llm::config::AiProviderKind::OpenAiCompatible,
+                8192,
+            ),
+            endpoint_identity: "https://example.test/v1/chat/completions".into(),
+            replay_domain_id: "domain-a".into(),
+            reasoning_effort: None,
+            output_tokens: 8192,
+            retry_policy: Default::default(),
+            timeouts: Default::default(),
+            purpose: "step".into(),
+            preparation_version: 1,
+            projection_policy: "immutable-png-v1-strict".into(),
+            content_hash: crate::llm::runtime::digest(b"request"),
+            images: Vec::new(),
+        };
+        let series = crate::agent_runtime::AgentRequestSeries {
+            series_id: "series-1".into(),
+            request_index: 0,
+            starts_series: true,
+        };
+        store
+            .append_batch(
+                "session-1",
+                vec![
+                    AgentScopedPayload {
+                        turn_id: Some("turn-1".into()),
+                        step_id: Some("step-1".into()),
+                        payload: AgentSessionEventPayload::RequestHeader {
+                            request_id: "request-1".into(),
+                            snapshot: Some(snapshot.clone()),
+                            snapshot_digest: Some(snapshot.digest()),
+                            provider_id: "route-a".into(),
+                            model: "model-a".into(),
+                            reasoning_effort: None,
+                            reason: crate::agent_runtime::AgentRequestReason::Initial,
+                            series: series.clone(),
+                            snapshot_reason: Some(
+                                crate::agent_runtime::AgentRequestSnapshotReason::Initial,
+                            ),
+                            system_prompt: "system".into(),
+                            tool_schemas: Vec::new(),
+                            attempt: 1,
+                        },
+                    },
+                    AgentScopedPayload {
+                        turn_id: Some("turn-1".into()),
+                        step_id: Some("step-1".into()),
+                        payload: AgentSessionEventPayload::RequestStart {
+                            request_id: "request-1".into(),
+                            header_request_id: "request-1".into(),
+                            provider_id: "route-a".into(),
+                            model: "model-a".into(),
+                            reasoning_effort: None,
+                            reason: crate::agent_runtime::AgentRequestReason::Initial,
+                            series,
+                            attempt: 1,
+                        },
+                    },
+                    AgentScopedPayload {
+                        turn_id: Some("turn-1".into()),
+                        step_id: Some("step-1".into()),
+                        payload: AgentSessionEventPayload::RequestStart {
+                            request_id: "request-2".into(),
+                            header_request_id: "request-1".into(),
+                            provider_id: "route-a".into(),
+                            model: "model-a".into(),
+                            reasoning_effort: None,
+                            reason: crate::agent_runtime::AgentRequestReason::Retry,
+                            series: crate::agent_runtime::AgentRequestSeries {
+                                series_id: "series-1".into(),
+                                request_index: 1,
+                                starts_series: false,
+                            },
+                            attempt: 2,
+                        },
+                    },
+                ],
+            )
+            .unwrap();
+        let model_content = vec![crate::llm::types::ModelContentBlock::Reasoning {
+            text: "display reasoning".into(),
+            provider_item: None,
+        }];
+        let envelope = crate::llm::replay::prepare_envelope(
+            crate::llm::registry::replay_codec("chat-completions").unwrap(),
+            "request-2",
+            &snapshot,
+            &model_content,
+            crate::llm::types::AdapterReplayCapture {
+                response: serde_json::json!({"id":"private-response-id"}),
+                blocks: vec![serde_json::json!({"reasoningDetails":[{
+                    "type":"reasoning.text", "text":"display reasoning",
+                    "signature":"private-reasoning-signature"
+                }]})],
+            },
+        )
+        .unwrap();
+        store
+            .append(
+                "session-1",
+                Some("turn-1".into()),
+                Some("step-1".into()),
+                AgentSessionEventPayload::AssistantMessage {
+                    message_id: "assistant-1".into(),
+                    content: vec![AgentAssistantContentBlock::Reasoning {
+                        text: "display reasoning".into(),
+                        provider_item: None,
+                    }],
+                    usage: crate::agent_runtime::AgentTokenUsage::default(),
+                    stop_reason: crate::agent_runtime::AgentStopReason::Stop,
+                    interrupted: false,
+                    replay: Some(envelope),
+                },
+            )
+            .unwrap();
+
+        let raw = serde_json::to_string(&store.all_events("session-1").unwrap()).unwrap();
+        assert!(raw.contains("private-response-id"));
+        assert!(raw.contains("private-reasoning-signature"));
+        let public = serde_json::to_string(
+            &store
+                .events_page(AgentSessionEventsRequest {
+                    session_id: "session-1".into(),
+                    cursor: None,
+                    limit: 100,
+                })
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(!public.contains("private-response-id"));
+        assert!(!public.contains("private-reasoning-signature"));
+        assert!(!public.contains("providerItem"));
+
+        let mut corrupt = store.all_events("session-1").unwrap();
+        let replay = corrupt
+            .iter_mut()
+            .find_map(|event| match &mut event.payload {
+                AgentSessionEventPayload::AssistantMessage {
+                    replay: Some(crate::llm::replay::ReplayEnvelopeV5::Prepared { blocks, .. }),
+                    ..
+                } => Some(blocks),
+                _ => None,
+            });
+        replay.unwrap()[0].content_hash = "0".repeat(64);
+        assert!(validate_session_events(corrupt)
+            .unwrap_err()
+            .contains("REPLAY_BLOCK_MISMATCH"));
+        let mut wrong_attempt = store.all_events("session-1").unwrap();
+        if let Some(crate::llm::replay::ReplayEnvelopeV5::Prepared { source, .. }) = wrong_attempt
+            .iter_mut()
+            .find_map(|event| match &mut event.payload {
+                AgentSessionEventPayload::AssistantMessage { replay, .. } => replay.as_mut(),
+                _ => None,
+            })
+        {
+            source.request_id = "request-1".into();
+        }
+        assert!(validate_session_events(wrong_attempt)
+            .unwrap_err()
+            .contains("REPLAY_SOURCE_MISMATCH"));
+
+        drop(store);
+        let restarted = AgentSessionStore::default();
+        restarted.configure(root.path().to_path_buf()).unwrap();
+        let restarted_raw = restarted.all_events("session-1").unwrap();
+        assert!(serde_json::to_string(&restarted_raw)
+            .unwrap()
+            .contains("private-reasoning-signature"));
+        let surface = restarted.snapshot("session-1").unwrap().surface;
+        let mut request = crate::llm::types::ModelRequest::from_surface(
+            "request-2".into(),
+            &surface,
+            "system".into(),
+            Vec::new(),
+        );
+        crate::llm::replay::project_history(
+            crate::llm::registry::replay_codec("chat-completions").unwrap(),
+            &mut request.messages,
+            crate::llm::replay::ReplayTarget {
+                route_id: "route-a",
+                model_id: "model-a",
+                replay_domain_id: "domain-a",
+            },
+        )
+        .unwrap();
+        assert!(serde_json::to_string(&request.messages)
+            .unwrap()
+            .contains("private-reasoning-signature"));
     }
 
     #[test]
@@ -3976,6 +4322,9 @@ mod tests {
         header["data"]["systemPrompt"] = "".into();
         header["data"]["toolSchemas"] = serde_json::json!([]);
         header["data"]["snapshotReason"] = "initial".into();
+        let snapshot = crate::llm::runtime::RequestSnapshot::LegacyUnknown;
+        header["data"]["snapshot"] = serde_json::to_value(&snapshot).unwrap();
+        header["data"]["snapshotDigest"] = snapshot.digest().into();
         append(header).unwrap();
         append(start.clone()).unwrap();
         assert!(append(start.clone())
@@ -4041,14 +4390,10 @@ mod tests {
             target_scope: vec![target()],
             budget: budget.clone(),
             provider: super::super::AgentSubagentModel {
-                profile: None,
-                retry_policy: None,
-                provider_id: "provider-1".into(),
-                provider_kind: "ollama".into(),
-                base_url: "http://127.0.0.1:11434".into(),
-                model: "test".into(),
+                route_id: "provider-1".into(),
+                model_id: "test".into(),
                 reasoning_effort: None,
-                requires_api_key: false,
+                route_revision: Some(1),
             },
         };
         (
@@ -4196,7 +4541,7 @@ mod tests {
         assert!(!log_path(&root).exists());
         assert!(root
             .path()
-            .join("agent-runtime/archives-v4/session-1.jsonl")
+            .join("agent-runtime/archives-v5/session-1.jsonl")
             .is_file());
         assert!(store
             .append(
@@ -4229,7 +4574,7 @@ mod tests {
         store.configure(root.path().to_path_buf()).unwrap();
         assert_eq!(fs::read(&previous_path).unwrap(), sentinel);
         assert!(store.snapshot("session-previous").is_err());
-        assert!(root.path().join("agent-runtime/sessions-v4").is_dir());
+        assert!(root.path().join("agent-runtime/sessions-v5").is_dir());
     }
 
     #[test]
@@ -4775,7 +5120,7 @@ mod tests {
         );
         assert!(root
             .path()
-            .join("agent-runtime/sessions-v4")
+            .join("agent-runtime/sessions-v5")
             .read_dir()
             .unwrap()
             .any(|entry| entry
@@ -5029,7 +5374,7 @@ mod tests {
         let (root, store) = configured();
         create(&store);
         assert_eq!(
-            fs::metadata(root.path().join("agent-runtime/sessions-v4"))
+            fs::metadata(root.path().join("agent-runtime/sessions-v5"))
                 .unwrap()
                 .permissions()
                 .mode()
@@ -5057,7 +5402,7 @@ mod tests {
         symlink(
             &external,
             root.path()
-                .join("agent-runtime/sessions-v4/session-link.jsonl"),
+                .join("agent-runtime/sessions-v5/session-link.jsonl"),
         )
         .unwrap();
 

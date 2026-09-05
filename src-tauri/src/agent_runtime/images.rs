@@ -1,6 +1,8 @@
 //! Image admission owns bytes; durable events own only verified immutable references.
 use std::collections::{BTreeMap, HashMap};
-use std::fs::{self, File, OpenOptions};
+#[cfg(unix)]
+use std::fs::File;
+use std::fs::{self, OpenOptions};
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -12,7 +14,7 @@ use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use super::{ModelMessage, ModelRequest};
-use crate::ai::{AiProviderConfig, AiProviderKind};
+use crate::ai::AiProviderConfig;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,18 +31,6 @@ pub(crate) struct VisionContract {
     pub max_normalized_pixels: u64,
     pub max_normalized_dimension: u32,
     pub max_normalized_bytes: usize,
-    pub routes: Vec<VisionRoute>,
-}
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct VisionRoute {
-    profile: String,
-    kind: String,
-    models: Vec<String>,
-    pub context_window: u64,
-    pub max_request_images: usize,
-    pub max_request_image_bytes: u64,
-    pub reserved_tokens_per_image: u64,
 }
 pub(crate) static VISION: LazyLock<VisionContract> = LazyLock::new(|| {
     let value: VisionContract =
@@ -50,12 +40,15 @@ pub(crate) static VISION: LazyLock<VisionContract> = LazyLock::new(|| {
     assert_eq!(value.max_frames, 1);
     value
 });
-pub(crate) fn vision_route(provider: &AiProviderConfig) -> Result<&'static VisionRoute, String> {
-    VISION.routes.iter().find(|route| {
-        provider.kind == AiProviderKind::OpenAiCompatible && route.kind == "openAiCompatible"
-            && route.profile == super::provider::profile_id(provider)
-            && route.models.iter().any(|model| model == &provider.model.trim().to_ascii_lowercase())
-    }).ok_or_else(|| "IMAGE_MODEL_UNSUPPORTED: image input is not enabled for this provider, protocol, and model".into())
+pub(crate) fn vision_route(
+    provider: &AiProviderConfig,
+) -> Result<crate::llm::catalog::VisionBudget, String> {
+    let model = crate::llm::catalog::resolve(provider)
+        .map_err(|e| format!("IMAGE_MODEL_UNSUPPORTED: {e}"))?;
+    model
+        .vision
+        .clone()
+        .ok_or_else(|| "IMAGE_MODEL_UNSUPPORTED: image input is not enabled for this model".into())
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

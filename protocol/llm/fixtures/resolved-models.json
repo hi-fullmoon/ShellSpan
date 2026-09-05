@@ -1,0 +1,2854 @@
+[
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-4.1",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-4.1",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 1047576,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-4.1-mini",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-4.1-mini",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 1047576,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-4.1-nano",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-4.1-nano",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 1047576,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "minimal",
+          "displayName": "Minimal"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5-mini",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5-mini",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "minimal",
+          "displayName": "Minimal"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5-nano",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5-nano",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "minimal",
+          "displayName": "Minimal"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5.1",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5.1",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "none",
+          "displayName": "None"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5.2",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5.2",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "none",
+          "displayName": "None"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5.2-codex",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5.2-codex",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5.3-codex",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5.3-codex",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5.3-codex-spark",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5.3-codex-spark",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5.4",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5.4",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "none",
+          "displayName": "None"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5.4-mini",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5.4-mini",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "none",
+          "displayName": "None"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5.5",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5.5",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "none",
+          "displayName": "None"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5.6",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5.6",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "none",
+          "displayName": "None"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5.6-sol",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5.6-sol",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "none",
+          "displayName": "None"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5.6-terra",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5.6-terra",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "none",
+          "displayName": "None"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-5.6-luna",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "gpt-5.6-luna",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "none",
+          "displayName": "None"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "o1",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "o1",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 131072,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "o3",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "o3",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "o3-mini",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "o3-mini",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "o4-mini",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "openai",
+      "kind": "openAi",
+      "modelId": "o4-mini",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 400000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": true,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAi",
+        "reasoningEncoding": "responses",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "qwen3",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "modelId": "qwen3",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 32768,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "ollama",
+        "reasoningEncoding": "ollama",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "qwen3:8b",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "modelId": "qwen3:8b",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 32768,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "ollama",
+        "reasoningEncoding": "ollama",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "qwen3:32b",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "modelId": "qwen3:32b",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 32768,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "ollama",
+        "reasoningEncoding": "ollama",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-oss:20b",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "modelId": "gpt-oss:20b",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 32768,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "ollama",
+        "reasoningEncoding": "ollama",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "gpt-oss:120b",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "modelId": "gpt-oss:120b",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 32768,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "ollama",
+        "reasoningEncoding": "ollama",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "deepseek-r1",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "modelId": "deepseek-r1",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 32768,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "ollama",
+        "reasoningEncoding": "ollama",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "deepseek-v3.1",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "ollama",
+      "kind": "ollama",
+      "modelId": "deepseek-v3.1",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 32768,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "ollama",
+        "reasoningEncoding": "ollama",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "deepseek",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "deepseek-chat",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "deepseek",
+      "kind": "openAiCompatible",
+      "modelId": "deepseek-chat",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "deepseek",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "deepseek-reasoner",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "deepseek",
+      "kind": "openAiCompatible",
+      "modelId": "deepseek-reasoner",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "deepseek",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "deepseek-v4-flash",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "deepseek",
+      "kind": "openAiCompatible",
+      "modelId": "deepseek-v4-flash",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "thinkingEffort",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "deepseek",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "deepseek-v4-pro",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "deepseek",
+      "kind": "openAiCompatible",
+      "modelId": "deepseek-v4-pro",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "thinkingEffort",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "minimax",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "MiniMax-M2",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "minimax",
+      "kind": "openAiCompatible",
+      "modelId": "MiniMax-M2",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 204800,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [],
+      "compat": {
+        "cumulativeStream": true,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": true,
+        "replayReasoningContent": true,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "minimax",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "MiniMax-M2.1",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "minimax",
+      "kind": "openAiCompatible",
+      "modelId": "MiniMax-M2.1",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 204800,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [],
+      "compat": {
+        "cumulativeStream": true,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": true,
+        "replayReasoningContent": true,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "minimax",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "MiniMax-M2.5",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "minimax",
+      "kind": "openAiCompatible",
+      "modelId": "MiniMax-M2.5",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 204800,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [],
+      "compat": {
+        "cumulativeStream": true,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": true,
+        "replayReasoningContent": true,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "minimax",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "MiniMax-M2.7",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "minimax",
+      "kind": "openAiCompatible",
+      "modelId": "MiniMax-M2.7",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 204800,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [],
+      "compat": {
+        "cumulativeStream": true,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": true,
+        "replayReasoningContent": true,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "minimax",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "MiniMax-M3",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "minimax",
+      "kind": "openAiCompatible",
+      "modelId": "MiniMax-M3",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 204800,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": true,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": true,
+        "replayReasoningContent": true,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "adaptive",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "qwen3",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "modelId": "qwen3",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "enableThinking",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "qwen3.8-max",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "modelId": "qwen3.8-max",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "enableThinking",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "qwen3-235b-a22b",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "modelId": "qwen3-235b-a22b",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "enableThinking",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "qwen3-235b-a22b-thinking-2507",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "modelId": "qwen3-235b-a22b-thinking-2507",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "qwen3-thinking-2507",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "modelId": "qwen3-thinking-2507",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "qwen3-235b-a22b-instruct-2507",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "modelId": "qwen3-235b-a22b-instruct-2507",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": false,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "qwen3-vl-plus",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "modelId": "qwen3-vl-plus",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 128000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "supported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "enableThinking",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "vision": {
+        "maxRequestImages": 20,
+        "maxRequestImageBytes": 20971520,
+        "reservedTokensPerImage": 4096,
+        "imageTokenBudgetPolicy": "Reserve 4096 tokens per image after local normalization to at most 1048576 pixels and 2048 pixels per side. Qwen3-VL uses 32x32 pixels per token; this reservation includes headroom for resizing and image markers."
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "qwen3-vl-flash",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "qwen",
+      "kind": "openAiCompatible",
+      "modelId": "qwen3-vl-flash",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 128000,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "supported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "enableThinking",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "vision": {
+        "maxRequestImages": 20,
+        "maxRequestImageBytes": 20971520,
+        "reservedTokensPerImage": 4096,
+        "imageTokenBudgetPolicy": "Reserve 4096 tokens per image after local normalization to at most 1048576 pixels and 2048 pixels per side. Qwen3-VL uses 32x32 pixels per token; this reservation includes headroom for resizing and image markers."
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "glm",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "glm-4.5",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "glm",
+      "kind": "openAiCompatible",
+      "modelId": "glm-4.5",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "thinking",
+        "clearThinking": true,
+        "defaultThinking": true
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "glm",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "glm-4.6",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "glm",
+      "kind": "openAiCompatible",
+      "modelId": "glm-4.6",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "thinking",
+        "clearThinking": true,
+        "defaultThinking": true
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "glm",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "glm-4.7",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "glm",
+      "kind": "openAiCompatible",
+      "modelId": "glm-4.7",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "thinking",
+        "clearThinking": true,
+        "defaultThinking": true
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "glm",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "glm-5",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "glm",
+      "kind": "openAiCompatible",
+      "modelId": "glm-5",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "thinking",
+        "clearThinking": true,
+        "defaultThinking": true
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "glm",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "glm-5.1",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "glm",
+      "kind": "openAiCompatible",
+      "modelId": "glm-5.1",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "on",
+          "displayName": "On"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "thinking",
+        "clearThinking": true,
+        "defaultThinking": true
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "glm",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "glm-5.2",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "glm",
+      "kind": "openAiCompatible",
+      "modelId": "glm-5.2",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 65536,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "unsupported",
+      "reasoning": [
+        {
+          "id": "off",
+          "displayName": "Off"
+        },
+        {
+          "id": "minimal",
+          "displayName": "Minimal"
+        },
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "thinkingEffort",
+        "clearThinking": true,
+        "defaultThinking": true
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "kimi",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "k3",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "kimi",
+      "kind": "openAiCompatible",
+      "modelId": "k3",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 262144,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "supported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "effort",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "vision": {
+        "maxRequestImages": 20,
+        "maxRequestImageBytes": 20971520,
+        "reservedTokensPerImage": 4096,
+        "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after normalization to at most 1048576 pixels and 2048 pixels per side; not provider-reported usage. Image count and byte limits are application limits."
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "kimi",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "k3-256k",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "kimi",
+      "kind": "openAiCompatible",
+      "modelId": "k3-256k",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 262144,
+      "maxOutputTokens": 4096,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "supported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "effort",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "vision": {
+        "maxRequestImages": 20,
+        "maxRequestImageBytes": 20971520,
+        "reservedTokensPerImage": 4096,
+        "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after normalization to at most 1048576 pixels and 2048 pixels per side; not provider-reported usage. Image count and byte limits are application limits."
+      }
+    }
+  }
+]

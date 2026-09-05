@@ -135,7 +135,7 @@ describe('AI Panel Phase 6 acceptance matrix', () => {
     const scenario = agentSessionBaselineScenarios[row.fixture];
 
     expect(scenario.events.length).toBeGreaterThan(0);
-    expect(scenario.events.every((event) => event.version === 4)).toBe(true);
+    expect(scenario.events.every((event) => event.version === 5)).toBe(true);
     expect(scenario.events.some((event) => event.type === row.activityEvent)).toBe(true);
 
     const conversation = projectAgentChatNodes(scenario.events);

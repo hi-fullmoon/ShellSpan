@@ -263,7 +263,7 @@ function topLevelSort(left: AiConversationNode, right: AiConversationNode): numb
 }
 
 /**
- * Project one committed Event v4 window into chat-readable nodes only.
+ * Project one committed Event v5 window into chat-readable nodes only.
  * Lifecycle and request diagnostics are projected independently by Activity.
  */
 export function projectAgentChatNodes(
@@ -995,7 +995,7 @@ export function projectAgentChatNodes(
         break;
       }
       default:
-        // Future Event v4 extensions remain visible in Activity, never as guessed chat copy.
+        // Future Event v5 extensions remain visible in Activity, never as guessed chat copy.
         break;
     }
   }

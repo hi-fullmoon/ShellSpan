@@ -179,6 +179,21 @@ impl Default for AgentRuntimeBuilder {
 }
 
 impl AgentRuntime {
+    pub(crate) fn convert_v4_session(
+        &self,
+        root: &std::path::Path,
+        session_id: &str,
+    ) -> Result<crate::llm::migration::ConversionResult, String> {
+        if self.agents.get(session_id)?.is_some() {
+            return Err("MIGRATION_BUSY: Agent is running".into());
+        }
+        self.sessions.with_offline_session_lock(session_id, || {
+            crate::llm::migration::convert_v4_to_v5(
+                &root.join("sessions-v4").join(format!("{session_id}.jsonl")),
+                &root.join("sessions-v5").join(format!("{session_id}.jsonl")),
+            )
+        })
+    }
     pub(crate) async fn prepare_images(
         &self,
         uploads: Vec<super::images::ImageUpload>,
@@ -329,7 +344,7 @@ impl AgentRuntime {
         if count > route.max_request_images {
             return Err("IMAGE_REQUEST_BUDGET: start a new session for more images".into());
         }
-        let budget = super::estimate_model_surface_budget(&entry.model()?.provider, &request);
+        let budget = super::estimate_model_surface_budget(&entry.model()?.provider, &request)?;
         if budget.estimated_input_tokens > budget.usable_input_tokens {
             return Err("IMAGE_TOKEN_BUDGET".into());
         }
@@ -420,7 +435,7 @@ impl AgentRuntime {
     pub(crate) fn answer_question(
         &self,
         input: super::user_questions::AnswerQuestionInput,
-        credentials: Option<&crate::keychain::CredentialManager>,
+        _credentials: Option<&crate::keychain::CredentialManager>,
     ) -> Result<AgentSessionSnapshot, String> {
         input.validate()?;
         let session_id = input.identity.session_id.clone();
@@ -449,14 +464,26 @@ impl AgentRuntime {
         }
         if self.agents.get(&session_id)?.is_none() {
             let selected = self.sessions.snapshot(&session_id)?.header.model_selection;
-            let provider = super::subagent::provider_config(selected.as_ref().unwrap_or(&question.provider))?;
+            let provider = self
+                .models
+                .restore_selection(selected.as_ref().unwrap_or(&question.provider))?;
             crate::ai::validate_provider_config(&provider, true)?;
-            let api_key = match credentials {
-                Some(credentials) => crate::ai::api_key_for_provider(credentials, &provider)?,
-                None if provider.requires_api_key => {
-                    return Err("question continuation requires provider credentials".into())
+            // Production continuations resolve the exact versioned credential in
+            // LlmRuntime::prepare_model. The legacy key lookup is retained only
+            // for isolated runtime unit tests which do not install a RouteStore.
+            #[cfg(not(test))]
+            let api_key = None;
+            #[cfg(test)]
+            let api_key = if self.models.uses_route_store() {
+                None
+            } else {
+                match _credentials {
+                    Some(credentials) => crate::ai::api_key_for_provider(credentials, &provider)?,
+                    None if provider.requires_api_key => {
+                        return Err("question continuation requires provider credentials".into())
+                    }
+                    None => None,
                 }
-                None => None,
             };
             self.start(&session_id, provider, api_key)?;
         }
@@ -469,6 +496,20 @@ impl AgentRuntime {
         self.sessions.snapshot(&session_id)
     }
 
+    pub(crate) fn configure_llm(
+        &self,
+        runtime: crate::llm::runtime::LlmRuntime,
+    ) -> Result<(), String> {
+        self.models.configure_llm(runtime)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn configure_model_preferences(
+        &self,
+        database: crate::db::Database,
+    ) -> Result<(), String> {
+        self.models.configure_preferences(database)
+    }
     pub(crate) fn configure_credentials(
         &self,
         credentials: crate::keychain::CredentialManager,
@@ -537,20 +578,46 @@ impl AgentRuntime {
         }
         crate::ai::validate_provider_config(&provider, true)?;
         // Retained image history must remain consumable by the selected model.
-        if snapshot.surface.messages.iter().any(|message| matches!(message,
-            super::AgentSurfaceMessage::UserImages { images, .. } if !images.is_empty()))
-            || snapshot.inbox.next_turn.iter().chain(&snapshot.inbox.next_step)
-                .any(|message| !message.images.is_empty()) {
+        if snapshot.surface.messages.iter().any(|message| {
+            matches!(message,
+            super::AgentSurfaceMessage::UserImages { images, .. } if !images.is_empty())
+        }) || snapshot
+            .inbox
+            .next_turn
+            .iter()
+            .chain(&snapshot.inbox.next_step)
+            .any(|message| !message.images.is_empty())
+        {
             super::images::vision_route(&provider)?;
         }
         let descriptor = super::subagent::provider_descriptor(&provider);
         let adapter = self.models.resolve(provider.clone(), api_key)?;
         let entry = self.agents.get(session_id)?;
-        let mut current = entry.as_ref().map(|entry| entry.model.lock()
-            .map_err(|_| "Agent model selection lock is unavailable".to_string())).transpose()?;
-        if self.sessions.snapshot(session_id)?.header.model_selection.as_ref() != Some(&descriptor) {
-            self.sessions.append(session_id, None, None,
-                super::AgentSessionEventPayload::SessionModelSelected { provider: descriptor })?;
+        let mut current = entry
+            .as_ref()
+            .map(|entry| {
+                entry
+                    .model
+                    .lock()
+                    .map_err(|_| "Agent model selection lock is unavailable".to_string())
+            })
+            .transpose()?;
+        if self
+            .sessions
+            .snapshot(session_id)?
+            .header
+            .model_selection
+            .as_ref()
+            != Some(&descriptor)
+        {
+            self.sessions.append(
+                session_id,
+                None,
+                None,
+                super::AgentSessionEventPayload::SessionModelSelected {
+                    provider: descriptor,
+                },
+            )?;
         }
         if let Some(current) = current.as_mut() {
             **current = super::AgentModelSelection { provider, adapter };
@@ -568,8 +635,12 @@ impl AgentRuntime {
             return Err("Permission selection requires an active root session".into());
         }
         if snapshot.header.permission_mode != Some(mode) {
-            self.sessions.append(session_id, None, None,
-                super::AgentSessionEventPayload::SessionPermissionChanged { mode })?;
+            self.sessions.append(
+                session_id,
+                None,
+                None,
+                super::AgentSessionEventPayload::SessionPermissionChanged { mode },
+            )?;
         }
         self.sessions.snapshot(session_id)
     }
@@ -589,11 +660,21 @@ impl AgentRuntime {
         }
         self.sessions.repair_step_claims(session_id)?;
         let adapter = self.models.resolve(provider.clone(), api_key)?;
-        if self.sessions.snapshot(session_id)?.header.model_selection.is_none() {
-            self.sessions.append(session_id, None, None,
+        if self
+            .sessions
+            .snapshot(session_id)?
+            .header
+            .model_selection
+            .is_none()
+        {
+            self.sessions.append(
+                session_id,
+                None,
+                None,
                 super::AgentSessionEventPayload::SessionModelSelected {
                     provider: super::subagent::provider_descriptor(&provider),
-                })?;
+                },
+            )?;
         }
         let handle = self.agents.attach(
             self.sessions.clone(),
@@ -602,6 +683,10 @@ impl AgentRuntime {
             adapter,
         )?;
         let entry = handle.entry();
+        *entry
+            .model_registry
+            .lock()
+            .map_err(|_| "MODEL_REGISTRY_UNAVAILABLE")? = Some(self.models.clone());
         let recovery = self.sessions.snapshot(session_id)?.recovery;
         if matches!(
             recovery.status,
@@ -731,11 +816,16 @@ impl AgentRuntime {
         // driver owns the next-step boundary (including the atomic TurnEnd
         // check); waking here could restart a stopped/recovered Session or
         // turn an already committed receipt into a scheduling failure.
-        let active = self.agents.get(&input.session_id).ok().flatten().is_some_and(|entry| {
-            entry.is_driver_active()
-                && !entry.cancellation().is_cancelled()
-                && entry.phase().ok() == Some(super::AgentLifecyclePhase::Running)
-        });
+        let active = self
+            .agents
+            .get(&input.session_id)
+            .ok()
+            .flatten()
+            .is_some_and(|entry| {
+                entry.is_driver_active()
+                    && !entry.cancellation().is_cancelled()
+                    && entry.phase().ok() == Some(super::AgentLifecyclePhase::Running)
+            });
         // Session checks receipts before this admission flag, so cold/stopped
         // instances can still acknowledge an earlier successful operation.
         self.sessions.mutate_inbox_with_driver(input, active)
@@ -1474,7 +1564,7 @@ mod tests {
     use tokio::sync::Notify;
     use tokio_util::sync::CancellationToken;
 
-    use crate::ai::{AiProviderKind, AiReasoningEffort};
+    use crate::ai::AiProviderKind;
 
     use super::*;
     use crate::agent_runtime::{
@@ -1784,6 +1874,10 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for FakeAdapter {
+        fn replay_codec(&self) -> &'static dyn crate::llm::adapter::ReplayCodec {
+            crate::llm::registry::replay_codec("ollama").unwrap()
+        }
+
         async fn stream(
             &self,
             request: ModelRequest,
@@ -1850,13 +1944,40 @@ mod tests {
 
     struct FakeFactory(Arc<FakeAdapter>);
 
+    struct RoutedFakeAdapter {
+        inner: Arc<FakeAdapter>,
+        codec: &'static dyn crate::llm::adapter::ReplayCodec,
+    }
+
+    #[async_trait]
+    impl ModelAdapter for RoutedFakeAdapter {
+        fn replay_codec(&self) -> &'static dyn crate::llm::adapter::ReplayCodec {
+            self.codec
+        }
+
+        async fn stream(
+            &self,
+            request: ModelRequest,
+            cancellation: CancellationToken,
+            sink: Arc<dyn ModelStreamSink>,
+        ) -> Result<ModelResponse, NormalizedModelError> {
+            self.inner.stream(request, cancellation, sink).await
+        }
+    }
+
     impl ModelAdapterFactory for FakeFactory {
         fn create(
             &self,
-            _provider: AiProviderConfig,
+            provider: AiProviderConfig,
             _api_key: Option<String>,
         ) -> Result<Arc<dyn ModelAdapter>, String> {
-            Ok(self.0.clone())
+            let adapter_id = crate::llm::routes::adapter_id(provider.kind);
+            let codec = crate::llm::registry::replay_codec(adapter_id)
+                .ok_or_else(|| format!("unknown fake replay adapter {adapter_id}"))?;
+            Ok(Arc::new(RoutedFakeAdapter {
+                inner: self.0.clone(),
+                codec,
+            }))
         }
     }
 
@@ -1915,13 +2036,19 @@ mod tests {
     }
 
     fn response(content: &str) -> ModelResponse {
+        let content = (!content.is_empty())
+            .then(|| ModelContentBlock::Text {
+                text: content.into(),
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
         ModelResponse {
-            content: (!content.is_empty())
-                .then(|| ModelContentBlock::Text {
-                    text: content.into(),
-                })
-                .into_iter()
-                .collect(),
+            replay: Some(crate::llm::types::AdapterReplayCapture {
+                response: serde_json::json!({}),
+                blocks: content.iter().map(|_| serde_json::json!({})).collect(),
+            }),
+            replay_envelope: None,
+            content,
             finish_reason: ModelFinishReason::Stop,
             usage: ModelUsage {
                 uncached_input_tokens: Some(10),
@@ -1933,6 +2060,14 @@ mod tests {
     }
 
     fn set_tool_calls(response: &mut ModelResponse, calls: Vec<ModelToolCall>) {
+        if let Some(replay) = &mut response.replay {
+            replay.blocks.extend(calls.iter().map(|call| {
+                call.provider_call_id.as_ref().map_or_else(
+                    || serde_json::json!({}),
+                    |id| serde_json::json!({"providerCallId": id}),
+                )
+            }));
+        }
         response.content.extend(
             calls
                 .into_iter()
@@ -1949,13 +2084,17 @@ mod tests {
 
     fn provider() -> AiProviderConfig {
         AiProviderConfig {
+            model_definition: Some(crate::llm::catalog::fixture_definition(
+                AiProviderKind::Ollama,
+                32768,
+            )),
             profile: None,
             retry_policy: None,
             id: "fake".into(),
             kind: AiProviderKind::Ollama,
             base_url: "http://127.0.0.1:11434".into(),
             model: "fake-model".into(),
-            reasoning_effort: Some(AiReasoningEffort::Off),
+            reasoning_effort: Some("off".to_string()),
             requires_api_key: false,
             api_key: None,
         }
@@ -1984,6 +2123,21 @@ mod tests {
         configured_with_native(adapter, config, Arc::new(FakeNativeRuntime))
     }
 
+    fn configure_test_model_preferences(
+        runtime: &AgentRuntime,
+        root: &std::path::Path,
+        config: &AiProviderConfig,
+    ) {
+        let database = crate::db::Database::open(&root.join("test-ai-settings.db")).unwrap();
+        database.save_preferences(&[("ai.providers".into(), serde_json::json!([{
+            "id":config.id, "kind":config.kind, "baseUrl":config.base_url, "model":config.model,
+            "profile":config.profile, "modelDefinition":config.model_definition,
+            "reasoningEffort":config.reasoning_effort,
+            "requiresApiKey":config.requires_api_key,
+        }]).to_string())]).unwrap();
+        runtime.configure_model_preferences(database).unwrap();
+    }
+
     fn configured_with_native(
         adapter: Arc<FakeAdapter>,
         config: AgentDriverConfig,
@@ -1996,6 +2150,7 @@ mod tests {
             .driver_config(config)
             .build();
         runtime.configure(root.path().to_path_buf()).unwrap();
+        configure_test_model_preferences(&runtime, root.path(), &provider());
         (root, runtime)
     }
 
@@ -2053,7 +2208,7 @@ mod tests {
                     AgentSessionEventPayload::RequestHeader { .. }
                 ))
                 .count(),
-            1
+            2
         );
         let starts = events
             .iter()
@@ -2093,6 +2248,7 @@ mod tests {
             &entry,
             &entry.model().unwrap().provider,
             &changed,
+            &crate::llm::runtime::RequestSnapshot::LegacyUnknown,
             AgentRequestReason::Initial,
             1,
         );
@@ -2111,6 +2267,7 @@ mod tests {
                 &entry,
                 &entry.model().unwrap().provider,
                 &changed,
+                &crate::llm::runtime::RequestSnapshot::LegacyUnknown,
                 AgentRequestReason::Initial,
                 1,
             )[0],
@@ -2127,6 +2284,7 @@ mod tests {
                 &entry,
                 &entry.model().unwrap().provider,
                 &changed,
+                &crate::llm::runtime::RequestSnapshot::LegacyUnknown,
                 AgentRequestReason::Recovery,
                 2,
             )[0],
@@ -2170,6 +2328,7 @@ mod tests {
             snapshots,
             vec![
                 AgentRequestSnapshotReason::Initial,
+                AgentRequestSnapshotReason::Change,
                 AgentRequestSnapshotReason::Resume
             ]
         );
@@ -2338,14 +2497,7 @@ mod tests {
     }
 
     fn all_events(runtime: &AgentRuntime, session_id: &str) -> Vec<AgentSessionEvent> {
-        runtime
-            .events(AgentSessionEventsRequest {
-                session_id: session_id.into(),
-                cursor: None,
-                limit: 1_024,
-            })
-            .unwrap()
-            .events
+        runtime.sessions.all_events(session_id).unwrap()
     }
 
     fn pending_approval(runtime: &AgentRuntime, session_id: &str) -> AgentToolDecisionInput {
@@ -2640,10 +2792,16 @@ mod tests {
             ModelMessage::User { content }
                 if content.contains("command result is recorded")
         )));
-        assert!(events.iter().any(|event| matches!(
+        assert!(events.iter().all(|event| !matches!(
             &event.payload,
             AgentSessionEventPayload::ToolCall { call }
-                if call.provider_call_id.as_deref() == Some("provider-call-1")
+                if call.provider_call_id.is_some()
+        )));
+        let raw_events = runtime.sessions.all_events("session-tool").unwrap();
+        assert!(raw_events.iter().any(|event| matches!(
+                &event.payload,
+                AgentSessionEventPayload::ToolCall { call }
+                    if call.provider_call_id.as_deref() == Some("provider-call-1")
         )));
         assert!(!events
             .iter()
@@ -2696,7 +2854,7 @@ mod tests {
                     AgentSessionEventPayload::RequestHeader { .. }
                 ))
                 .count(),
-            1
+            2
         );
         assert_eq!(
             events
@@ -2959,7 +3117,10 @@ mod tests {
             let native = RecordingNativeRuntime::new(requires_approval);
             let mut scripts = (0..9)
                 .map(|index| {
-                    tool_response(vec![native_call(&format!("call-{index}"), "list_directory")])
+                    tool_response(vec![native_call(
+                        &format!("call-{index}"),
+                        "list_directory",
+                    )])
                 })
                 .collect::<Vec<_>>();
             scripts.push(reply("All nine tools completed.", &[]));
@@ -2972,7 +3133,11 @@ mod tests {
             let session_id = "session-long-tool-turn";
             create(&runtime, session_id);
             runtime
-                .followup(session_id, "message-long-turn".into(), "inspect nine times".into())
+                .followup(
+                    session_id,
+                    "message-long-turn".into(),
+                    "inspect nine times".into(),
+                )
                 .unwrap();
             runtime.start(session_id, provider(), None).unwrap();
             runtime.await_idle(session_id).await.unwrap();
@@ -2990,7 +3155,10 @@ mod tests {
             assert_eq!(adapter.request_count(), 10);
             let types = event_types(&runtime, session_id);
             assert_eq!(types.iter().filter(|kind| *kind == "turn/start").count(), 1);
-            assert_eq!(types.iter().filter(|kind| *kind == "step/start").count(), 10);
+            assert_eq!(
+                types.iter().filter(|kind| *kind == "step/start").count(),
+                10
+            );
             assert_eq!(types.iter().filter(|kind| *kind == "turn/end").count(), 1);
             let snapshot = runtime.session(session_id).unwrap();
             assert_eq!(snapshot.status, AgentSessionStatus::Idle);
@@ -4233,6 +4401,7 @@ mod tests {
                 .followup("wire", "wire-message".into(), "go".into())
                 .unwrap();
             let mut config = provider();
+            config.model_definition = None;
             config.kind = AiProviderKind::OpenAiCompatible;
             config.profile = Some("deepseek".into());
             config.model = "deepseek-v4-flash".into();
@@ -4374,7 +4543,8 @@ mod tests {
                 .get("snapshot")
                 .unwrap()
                 .unwrap()
-                .model().unwrap()
+                .model()
+                .unwrap()
                 .provider
                 .retry_policy
                 .unwrap()
@@ -4414,11 +4584,7 @@ mod tests {
             runtime.await_idle(&child.header.session_id).await.unwrap();
             assert_eq!(adapter.request_count(), limit as usize);
             let descriptor = child.header.subagent.as_ref().unwrap();
-            assert_eq!(
-                descriptor.provider.retry_policy.as_ref().unwrap()["maxAttempts"],
-                limit
-            );
-            assert_eq!(descriptor.provider.profile.as_deref(), Some("ollama"));
+            assert_eq!(descriptor.provider.route_id, "fake");
         }
     }
 
@@ -4754,56 +4920,104 @@ mod tests {
 
     #[tokio::test]
     async fn session_settings_switch_at_next_request_and_survive_restart() {
-        let first = FakeAdapter::new(vec![FakeScript::Wait { response: Some(response("first")) }]);
+        let first = FakeAdapter::new(vec![FakeScript::Wait {
+            response: Some(response("first")),
+        }]);
         let second = FakeAdapter::new(vec![reply("second", &[])]);
         struct RoutingFactory(Arc<FakeAdapter>, Arc<FakeAdapter>);
         impl ModelAdapterFactory for RoutingFactory {
-            fn create(&self, provider: AiProviderConfig, _: Option<String>) -> Result<Arc<dyn ModelAdapter>, String> {
-                Ok(if provider.model == "second-model" { self.1.clone() } else { self.0.clone() })
+            fn create(
+                &self,
+                provider: AiProviderConfig,
+                _: Option<String>,
+            ) -> Result<Arc<dyn ModelAdapter>, String> {
+                Ok(if provider.model == "second-model" {
+                    self.1.clone()
+                } else {
+                    self.0.clone()
+                })
             }
         }
         let root = tempfile::tempdir().unwrap();
         let runtime = AgentRuntimeBuilder::new()
             .model_factory(Arc::new(RoutingFactory(first.clone(), second.clone())))
-            .native_tool_runtime(Arc::new(FakeNativeRuntime)).build();
+            .native_tool_runtime(Arc::new(FakeNativeRuntime))
+            .build();
         runtime.configure(root.path().to_path_buf()).unwrap();
         create(&runtime, "switch");
         create(&runtime, "other");
-        runtime.followup("switch", "one".into(), "first".into()).unwrap();
+        runtime
+            .followup("switch", "one".into(), "first".into())
+            .unwrap();
         runtime.start("switch", provider(), None).unwrap();
         first.started.notified().await;
         let mut selected = provider();
         selected.model = "second-model".into();
         selected.reasoning_effort = None;
-        runtime.select_model("switch", selected.clone(), None).unwrap();
-        runtime.set_permission_mode("switch", AgentSessionPermissionMode::Operator).unwrap();
+        runtime
+            .select_model("switch", selected.clone(), None)
+            .unwrap();
+        runtime
+            .set_permission_mode("switch", AgentSessionPermissionMode::Operator)
+            .unwrap();
         let revision = runtime.session("switch").unwrap().event_count;
         runtime.select_model("switch", selected, None).unwrap();
-        runtime.set_permission_mode("switch", AgentSessionPermissionMode::Operator).unwrap();
+        runtime
+            .set_permission_mode("switch", AgentSessionPermissionMode::Operator)
+            .unwrap();
         assert_eq!(runtime.session("switch").unwrap().event_count, revision);
         assert_eq!(second.request_count(), 0);
-        runtime.followup("switch", "two".into(), "next".into()).unwrap();
+        runtime
+            .followup("switch", "two".into(), "next".into())
+            .unwrap();
         first.release.notify_one();
         runtime.await_idle("switch").await.unwrap();
         assert_eq!(first.request_count(), 1);
         assert_eq!(second.request_count(), 1);
-        assert!(first.requests.lock().unwrap()[0].system_prompt.contains("request-approval mode"));
-        assert!(second.requests.lock().unwrap()[0].system_prompt.contains("operator mode"));
-        assert!(second.requests.lock().unwrap()[0].messages.iter().any(|message| matches!(message,
+        assert!(first.requests.lock().unwrap()[0]
+            .system_prompt
+            .contains("request-approval mode"));
+        assert!(second.requests.lock().unwrap()[0]
+            .system_prompt
+            .contains("operator mode"));
+        assert!(second.requests.lock().unwrap()[0]
+            .messages
+            .iter()
+            .any(|message| matches!(message,
             super::super::ModelMessage::User { content } if content.contains("\"operator\""))));
-        let models: Vec<_> = all_events(&runtime, "switch").into_iter().filter_map(|event| match event.payload {
-            AgentSessionEventPayload::RequestStart { model, .. } => Some(model), _ => None,
-        }).collect();
+        let models: Vec<_> = all_events(&runtime, "switch")
+            .into_iter()
+            .filter_map(|event| match event.payload {
+                AgentSessionEventPayload::RequestStart { model, .. } => Some(model),
+                _ => None,
+            })
+            .collect();
         assert_eq!(models, ["fake-model", "second-model"]);
-        assert_eq!(runtime.session("other").unwrap().header.permission_mode, Some(AgentSessionPermissionMode::RequestApproval));
-        assert!(runtime.session("other").unwrap().header.model_selection.is_none());
+        assert_eq!(
+            runtime.session("other").unwrap().header.permission_mode,
+            Some(AgentSessionPermissionMode::RequestApproval)
+        );
+        assert!(runtime
+            .session("other")
+            .unwrap()
+            .header
+            .model_selection
+            .is_none());
         let recovered = AgentRuntime::default();
         recovered.configure(root.path().to_path_buf()).unwrap();
         let header = recovered.session("switch").unwrap().header;
-        assert_eq!(header.model_selection.unwrap().model, "second-model");
-        assert_eq!(header.permission_mode, Some(AgentSessionPermissionMode::Operator));
-        runtime.set_permission_mode("switch", AgentSessionPermissionMode::ScopedAutopilot).unwrap();
-        assert_eq!(runtime.session("switch").unwrap().header.permission_mode, Some(AgentSessionPermissionMode::ScopedAutopilot));
+        assert_eq!(header.model_selection.unwrap().model_id, "second-model");
+        assert_eq!(
+            header.permission_mode,
+            Some(AgentSessionPermissionMode::Operator)
+        );
+        runtime
+            .set_permission_mode("switch", AgentSessionPermissionMode::ScopedAutopilot)
+            .unwrap();
+        assert_eq!(
+            runtime.session("switch").unwrap().header.permission_mode,
+            Some(AgentSessionPermissionMode::ScopedAutopilot)
+        );
     }
 
     #[tokio::test]

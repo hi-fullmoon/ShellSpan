@@ -3,7 +3,6 @@ use std::sync::Arc;
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::ai::{api_key_for_provider, validate_provider_config, AiProviderConfig};
 use crate::keychain::CredentialManager;
 
 use super::{
@@ -65,6 +64,11 @@ pub(crate) fn configure_runtime(app: &AppHandle, runtime: &AgentRuntime) -> Resu
         .app_data_dir()
         .map_err(|error| format!("failed to resolve Agent runtime root: {error}"))?;
     runtime.configure(root)?;
+    runtime.configure_llm(
+        app.state::<crate::llm::runtime::LlmRuntime>()
+            .inner()
+            .clone(),
+    )?;
     runtime.configure_native(app.clone())?;
     let emitter = app.clone();
     runtime.set_event_publisher(Arc::new(move |event| {
@@ -88,7 +92,14 @@ pub(crate) struct AgentSessionInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentRuntimeStartInput {
     session_id: String,
-    provider: AiProviderConfig,
+    selection: crate::llm::routes::ModelSelection,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentRuntimeModelSelectionInput {
+    session_id: String,
+    selection: crate::llm::routes::ModelSelection,
 }
 
 #[derive(Debug, Deserialize)]
@@ -229,10 +240,19 @@ pub(crate) fn agent_runtime_start(
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
     runtime.configure_credentials(credentials.inner().clone())?;
-    let provider = runtime.session(&input.session_id)?.header.model_selection
-        .as_ref().map(super::subagent::provider_config).transpose()?.unwrap_or(input.provider);
-    validate_provider_config(&provider, true)?;
-    let api_key = api_key_for_provider(credentials.inner(), &provider)?;
+    let selected = runtime.session(&input.session_id)?.header.model_selection;
+    let selection = selected
+        .map(|s| crate::llm::routes::ModelSelection {
+            route_id: s.route_id,
+            model_id: s.model_id,
+            reasoning_effort: s.reasoning_effort,
+        })
+        .unwrap_or(input.selection);
+    let llm = app.state::<crate::llm::runtime::LlmRuntime>();
+    let routes = llm.routes.snapshot()?;
+    let route = routes.route(&selection.route_id)?;
+    let provider = route.provider(&selection)?;
+    let api_key = llm.routes.credential(route)?;
     runtime.start(&input.session_id, provider, api_key)
 }
 
@@ -240,13 +260,16 @@ pub(crate) fn agent_runtime_start(
 pub(crate) fn agent_runtime_select_model(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
-    credentials: State<'_, CredentialManager>,
-    input: AgentRuntimeStartInput,
+    _credentials: State<'_, CredentialManager>,
+    input: AgentRuntimeModelSelectionInput,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
-    validate_provider_config(&input.provider, true)?;
-    let api_key = api_key_for_provider(credentials.inner(), &input.provider)?;
-    runtime.select_model(&input.session_id, input.provider, api_key)
+    let llm = app.state::<crate::llm::runtime::LlmRuntime>();
+    let snapshot = llm.routes.snapshot()?;
+    let route = snapshot.route(&input.selection.route_id)?;
+    let provider = route.provider(&input.selection)?;
+    let api_key = llm.routes.credential(route)?;
+    runtime.select_model(&input.session_id, provider, api_key)
 }
 
 #[derive(Debug, Deserialize)]

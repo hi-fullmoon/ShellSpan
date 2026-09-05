@@ -31,7 +31,7 @@ export function AiWorkspaceController({
   return (
     <AiWorkspaceRoot
       view={controller.view}
-      imageControls={controller.imageDraft.draft?.images.length || controller.imageDraft.busy || controller.imageDraft.locked || controller.imageDraft.error ? <AiImageDraftControls state={controller.imageDraft} /> : null}
+      imageControls={controller.imageDraft.draft?.images.length || controller.imageDraft.busy || controller.imageDraft.locked || controller.imageDraft.error ? <AiImageDraftControls state={controller.imageDraft} selection={controller.selectedProvider} /> : null}
       onPasteImages={controller.canStartAgent ? controller.imageDraft.add : undefined}
       hasImages={Boolean(controller.imageDraft.draft?.images.length)}
       imageBusy={controller.imageDraft.busy}

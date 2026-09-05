@@ -40,6 +40,7 @@ pub(crate) struct AgentEntry {
     // A new in-memory Agent starts a new series when a persisted session resumes.
     pub(crate) request_series_id: String,
     pub(crate) model: Mutex<AgentModelSelection>,
+    pub(crate) model_registry: Mutex<Option<super::ModelRegistry>>,
     pub(crate) capability_scope: Option<AgentCapabilityScope>,
     pub(crate) subagent: Option<AgentSubagentSession>,
     owner: Mutex<Option<std::sync::Weak<AgentEntry>>>,
@@ -66,6 +67,7 @@ impl AgentEntry {
             session_id,
             request_series_id: format!("series-{}", uuid::Uuid::new_v4().simple()),
             model: Mutex::new(AgentModelSelection { provider, adapter }),
+            model_registry: Mutex::new(None),
             capability_scope,
             subagent,
             owner: Mutex::new(None),
@@ -84,8 +86,28 @@ impl AgentEntry {
         self.cancellation.clone()
     }
 
+    pub(crate) fn prepare_model(&self) -> Result<crate::llm::runtime::PreparedModel, String> {
+        let model = self.model()?;
+        if let Some(registry) = self
+            .model_registry
+            .lock()
+            .map_err(|_| "MODEL_REGISTRY_UNAVAILABLE")?
+            .as_ref()
+        {
+            return registry.prepare(&model);
+        }
+        Ok(crate::llm::runtime::PreparedModel {
+            provider: model.provider,
+            adapter: model.adapter,
+            route: None,
+            images: None,
+        })
+    }
+
     pub(crate) fn model(&self) -> Result<AgentModelSelection, String> {
-        self.model.lock().map(|model| model.clone())
+        self.model
+            .lock()
+            .map(|model| model.clone())
             .map_err(|_| "Agent model selection lock is unavailable".into())
     }
 
@@ -358,7 +380,7 @@ mod tests {
     use async_trait::async_trait;
     use tempfile::TempDir;
 
-    use crate::ai::{AiProviderKind, AiReasoningEffort};
+    use crate::ai::AiProviderKind;
 
     use super::super::{
         CreateAgentSessionRequest, ModelRequest, ModelResponse, ModelStreamSink,
@@ -369,6 +391,10 @@ mod tests {
 
     #[async_trait]
     impl ModelAdapter for IdleAdapter {
+        fn replay_codec(&self) -> &'static dyn crate::llm::adapter::ReplayCodec {
+            crate::llm::registry::replay_codec("chat-completions").unwrap()
+        }
+
         async fn stream(
             &self,
             _request: ModelRequest,
@@ -401,13 +427,17 @@ mod tests {
 
     fn provider() -> AiProviderConfig {
         AiProviderConfig {
+            model_definition: Some(crate::llm::catalog::fixture_definition(
+                AiProviderKind::Ollama,
+                32768,
+            )),
             profile: None,
             retry_policy: None,
             id: "fake".into(),
             kind: AiProviderKind::Ollama,
             base_url: "http://127.0.0.1:11434".into(),
             model: "fake".into(),
-            reasoning_effort: Some(AiReasoningEffort::Off),
+            reasoning_effort: Some("off".to_string()),
             requires_api_key: false,
             api_key: None,
         }
