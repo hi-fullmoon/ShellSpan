@@ -988,7 +988,7 @@ export function useAiSessionController({
       if (imageDraft.draft?.images.length) {
         const decision = resolveAiSubmission({ sessionId: composer.sessionId, sessionStatus: composer.runtimeStatus,
           terminal: composer.terminal, waitingApproval: composer.waitingApproval, waitingQuestion: composer.waitingQuestion,
-          hasProvider, canCreateSession: canStartAgent, draft: composer.draft || '[image]', gesture,
+          hasProvider, canCreateSession: canStartAgent, draft: composer.draft, hasImages: true, gesture,
           accelerated, preferredBusyMode: composer.preferredBusyMode, submitting: imageDraft.busy });
         if (decision.kind !== 'submit') { imageDraft.reportError(decision.kind === 'reject' ? decision.reason : 'sessionUnavailable'); return; }
         // Recheck selected model BEFORE binding a cold Session. Adding images never creates one.

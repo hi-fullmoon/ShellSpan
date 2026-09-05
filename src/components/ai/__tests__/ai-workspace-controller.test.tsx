@@ -1,5 +1,5 @@
 vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/test/llm-resolver-fixture')).fixtureResolve }));
-import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,6 +17,8 @@ import { useAppStore } from '@/stores/appStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { ResolvedModel } from '@/lib/ai/provider-contract';
+import * as imageDraftModule from '@/components/ai/workspace/use-image-draft';
+import * as visionContract from '@/lib/ai/vision-contract';
 
 const provider = {
   id: 'provider-test',
@@ -200,6 +202,31 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup();
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+});
+
+it.each(['', ' \n\t '])('routes image-only text %j through image submission', async draft => {
+  connectedTerminal();
+  const send = vi.fn(async () => undefined), reportError = vi.fn();
+  const imageDraft = vi.spyOn(imageDraftModule, 'useImageDraft').mockReturnValue({
+    owner: 'test', draft: { owner: 'test', revision: 1, text: draft,
+      images: [{ name: 'fixture.png', mediaType: 'image/png', data: 'aGVsbG8=' }] },
+    pendingFiles: [], busy: false, locked: false, error: null,
+    send, reportError, add: vi.fn(), remove: vi.fn(), cancel: vi.fn(),
+  });
+  const vision = vi.spyOn(visionContract, 'requireVision').mockImplementation(() => undefined);
+  try {
+    const view = runningAgentView();
+    const agent = adapter({ list: vi.fn(async () => ({ sessions: [view.summary] })), open: vi.fn(async () => view) });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
+    act(() => result.current.setDraft(draft));
+    act(() => result.current.submit('primary'));
+    expect(send).toHaveBeenCalledOnce();
+    expect(reportError).not.toHaveBeenCalled();
+    expect(agent.stop).not.toHaveBeenCalled();
+  } finally {
+    imageDraft.mockRestore(); vision.mockRestore();
+  }
 });
 
 it('uses the RouteStore global selection when the legacy default id differs', () => {
@@ -519,8 +546,9 @@ describe('AiWorkspaceController', () => {
     render(<AiWorkspaceController scope="workbench" adapter={agent} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Agent history unavailable');
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    const history = await screen.findByRole('dialog', { name: 'Session history' });
+    expect(await within(history).findByRole('alert')).toHaveTextContent('Agent history unavailable');
+    fireEvent.click(within(history).getByRole('button', { name: 'Retry' }));
 
     expect(await screen.findByText('Run checks')).toBeVisible();
     expect(agent.list).toHaveBeenCalledTimes(2);
@@ -572,7 +600,7 @@ describe('AiWorkspaceController', () => {
     expect(approve).toHaveBeenCalledTimes(2);
   });
 
-  it('opens Agent history without stopping the Runtime and disables new Workbench sessions', async () => {
+  it('opens Agent history without stopping the Runtime and hides unavailable new Workbench sessions', async () => {
     const user = userEvent.setup();
     const view = runningAgentView();
     const unsubscribe = vi.fn();
@@ -593,7 +621,8 @@ describe('AiWorkspaceController', () => {
     expect(agent.stop).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
-    expect(screen.getByRole('button', { name: 'New conversation' })).toBeDisabled();
+    expect(await screen.findByRole('dialog', { name: 'Session history' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'New conversation' })).toBeNull();
     expect(unsubscribe).not.toHaveBeenCalled();
   });
 
