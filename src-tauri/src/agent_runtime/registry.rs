@@ -163,6 +163,14 @@ impl AgentEntry {
         self.idle.notify_waiters();
     }
 
+    /// Reserve the worker slot while archive validates and closes the durable
+    /// Session. Ended Agents may be in Stopping, so this also covers them.
+    pub(crate) fn try_acquire_archive(&self) -> bool {
+        self.driver_active
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
     pub(crate) fn is_driver_active(&self) -> bool {
         self.driver_active.load(Ordering::Acquire)
     }

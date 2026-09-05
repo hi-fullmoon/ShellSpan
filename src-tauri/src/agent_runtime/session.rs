@@ -1647,11 +1647,31 @@ impl AgentSessionStore {
             .sessions
             .get(session_id)
             .ok_or_else(|| "Agent session was not found".to_string())?;
-        if !record.ended {
-            return Err("only an ended Agent Session can be archived".into());
-        }
         if record.archived {
             return record.snapshot();
+        }
+        // An idle conversation remains continuable after its last answer. Close
+        // it only when archive is requested, without dropping queued input.
+        if !record.ended && (record.status != AgentSessionStatus::Idle || !record.inbox.is_empty()) {
+            return Err("AGENT_SESSION_ARCHIVE_BUSY".into());
+        }
+        let ended = record.ended;
+        let mut descendants = vec![session_id];
+        let mut visited = HashSet::new();
+        while let Some(parent_id) = descendants.pop() {
+            if !visited.insert(parent_id) {
+                continue;
+            }
+            for child in inner
+                .sessions
+                .values()
+                .filter(|child| child.header.parent_session_id.as_deref() == Some(parent_id))
+            {
+                if !child.ended {
+                    return Err("AGENT_SESSION_ARCHIVE_BUSY".into());
+                }
+                descendants.push(&child.header.session_id);
+            }
         }
         let root = inner.root.clone().expect("configured store has a root");
         let archive_root = inner
@@ -1663,17 +1683,50 @@ impl AgentSessionStore {
         if destination.exists() {
             return Err("Agent archive target already exists".into());
         }
-        fs::rename(&source, &destination)
-            .map_err(|error| format!("failed to archive Agent Session log: {error}"))?;
-        sync_parent(&source)?;
-        sync_parent(&destination)?;
-        restrict_file(&destination)?;
-        let record = inner
-            .sessions
-            .get_mut(session_id)
-            .expect("archived Session remains registered");
-        record.archived = true;
-        record.snapshot()
+        let (events, publisher) = if ended {
+            (Vec::new(), inner.publisher.clone())
+        } else {
+            append_payloads_locked(
+                &mut inner,
+                session_id,
+                vec![
+                    (
+                        None,
+                        None,
+                        AgentSessionEventPayload::AgentStatus {
+                            status: AgentSessionStatus::Completed,
+                            reason: Some("archived".into()),
+                        },
+                    ),
+                    (
+                        None,
+                        None,
+                        AgentSessionEventPayload::SessionEnded {
+                            status: AgentSessionStatus::Completed,
+                            reason: Some("archived".into()),
+                        },
+                    ),
+                ],
+            )?
+        };
+        let result = (|| {
+            fs::rename(&source, &destination)
+                .map_err(|error| format!("failed to archive Agent Session log: {error}"))?;
+            sync_parent(&source)?;
+            sync_parent(&destination)?;
+            restrict_file(&destination)?;
+            let record = inner
+                .sessions
+                .get_mut(session_id)
+                .expect("archived Session remains registered");
+            record.archived = true;
+            record.snapshot()
+        })();
+        drop(inner);
+        // Publish the committed close even if moving the file failed, so the UI
+        // still observes the durable state and can retry archive safely.
+        publish_events(publisher, &events);
+        result
     }
 
     pub(crate) fn list_page(

@@ -995,10 +995,49 @@ impl AgentRuntime {
     }
 
     pub(crate) fn archive_session(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
-        if self.agents.get(session_id)?.is_some() {
-            return Err("a running Agent Session cannot be archived".into());
+        let entry = self.agents.get(session_id)?;
+        let lease = if let Some(entry) = &entry {
+            if !entry.try_acquire_archive() {
+                return Err("AGENT_SESSION_ARCHIVE_BUSY".into());
+            }
+            Some(ActiveDriverLease(Arc::clone(entry)))
+        } else {
+            None
+        };
+        let result = (|| {
+            if let Some(entry) = &entry {
+                if !self.sessions.snapshot(session_id)?.ended
+                    && (entry.phase()? != AgentLifecyclePhase::Idle || entry.scope()?.is_some())
+                {
+                    return Err("AGENT_SESSION_ARCHIVE_BUSY".into());
+                }
+            }
+            let archived = self.sessions.archive(session_id)?;
+            if let Some(entry) = entry {
+                entry.stop_admission()?;
+                entry.set_phase(AgentLifecyclePhase::Disposed)?;
+                self.agents.detach(session_id)?;
+                self.handles
+                    .lock()
+                    .map_err(|_| "Agent handle registry is unavailable".to_string())?
+                    .remove(session_id);
+            }
+            Ok(archived)
+        })();
+        drop(lease);
+        if result.is_err()
+            && self.sessions.snapshot(session_id).is_ok_and(|snapshot| {
+                !snapshot.ended
+                    && (snapshot.status == super::AgentSessionStatus::Running
+                        || !snapshot.inbox.next_turn.is_empty()
+                        || !snapshot.inbox.next_step.is_empty())
+            })
+        {
+            // A message may have committed while archive reserved the worker
+            // slot. Its first wake was blocked; retry after releasing the slot.
+            let _ = self.wake(session_id);
         }
-        self.sessions.archive(session_id)
+        result
     }
 
     pub(crate) fn events(
@@ -1530,6 +1569,9 @@ impl AgentRuntime {
 
 #[cfg(test)]
 mod tests {
+    mod archive_tests {
+        include!("runtime_archive_tests.rs");
+    }
     mod response_tests {
         include!("runtime_response_tests.rs");
     }
