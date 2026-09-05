@@ -56,6 +56,28 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiComposerSeat Phase 4 behavior', () => {
+  it.each(['running', 'waiting'] as const)('stops %s only on an explicit primary action when empty', async status => {
+    const user = userEvent.setup();
+    const stop = vi.fn(), submit = vi.fn();
+    render(<Harness initial={createAiComposerState({ runtimeStatus: status, draft: ' \n ' })} onStop={stop} onSubmitGesture={submit} />);
+    const editor = screen.getByRole('textbox');
+    await user.click(editor);
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.keyDown(editor, { key: 'Enter', metaKey: true });
+    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true });
+    expect(stop).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Stop task' }));
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it.each(['completed', 'cancelled', 'failed'] as const)('disables editing and sending in a terminal %s session', status => {
+    render(<Harness initial={createAiComposerState({ runtimeStatus: status, terminal: true, draft: 'saved draft' })} />);
+    expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'false');
+    expect(screen.getByRole('textbox')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  });
+
   it('adds pasted images once without submitting the message', () => {
     const onPasteImages = vi.fn();
     const onSubmit = vi.fn();
