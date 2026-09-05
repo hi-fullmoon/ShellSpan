@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn provider_policy_defaults_and_limits_match_frontend_and_reject_invalid_input() {
         let contract: serde_json::Value =
-            serde_json::from_str(include_str!("../../../src/lib/retry-policy.json")).unwrap();
+            serde_json::from_str(include_str!("../../../src/lib/ai/retry-policy.json")).unwrap();
         assert_eq!(
             serde_json::to_value(RetryPolicy::default()).unwrap(),
             contract["defaults"]
