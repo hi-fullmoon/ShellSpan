@@ -84,7 +84,10 @@
         "task/linked",
         "task/plan",
         "task/state",
-        "task/evidence"
+        "task/evidence",
+        "session/resumed",
+        "agent/inbox/paused",
+        "agent/inbox/item_resumed"
       ]
     },
     "data": {
@@ -918,6 +921,101 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session/resumed"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {},
+            "required": []
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent/inbox/paused"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "itemIds": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "itemIds"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "agent/inbox/item_resumed"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "itemId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "previousRevision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "clientOperationId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "itemId",
+              "previousRevision",
+              "clientOperationId"
+            ]
           }
         }
       }
