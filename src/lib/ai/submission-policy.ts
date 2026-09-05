@@ -26,6 +26,7 @@ export interface AiSubmissionPolicyInput {
   readonly hasProvider: boolean;
   readonly canCreateSession: boolean;
   readonly draft: string;
+  readonly hasImages?: boolean;
   readonly gesture: 'keyboard' | 'primary' | 'retry';
   readonly accelerated: boolean;
   readonly preferredBusyMode: AiBusyPreference;
@@ -38,7 +39,7 @@ function opposite(mode: AiBusyPreference): AiBusyPreference {
 
 /** Resolve one Composer gesture without reading React, stores, or Runtime state. */
 export function resolveAiSubmission(input: AiSubmissionPolicyInput): AiSubmissionDecision {
-  const empty = input.draft.trim().length === 0;
+  const empty = input.draft.trim().length === 0 && !input.hasImages;
   const running = input.sessionStatus === 'running' || input.sessionStatus === 'waiting';
 
   if (input.submitting) return { kind: 'reject', reason: 'submitting' };

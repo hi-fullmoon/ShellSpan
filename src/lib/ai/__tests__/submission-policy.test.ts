@@ -20,6 +20,15 @@ const base: AiSubmissionPolicyInput = {
 };
 
 describe('resolveAiSubmission', () => {
+  it.each(['', '   ', '\n\t'])('accepts images with blank text %j without mapping them to Stop', draft => {
+    expect(resolveAiSubmission({ ...base, draft, hasImages: true }))
+      .toEqual({ kind: 'submit', mode: 'nextTurn' });
+    expect(resolveAiSubmission({ ...base, sessionId: null, draft, hasImages: true }))
+      .toEqual({ kind: 'submit', mode: 'start' });
+    expect(resolveAiSubmission({ ...base, sessionStatus: 'running', gesture: 'primary', draft, hasImages: true }))
+      .toEqual({ kind: 'submit', mode: 'nextTurn' });
+  });
+
   it.each([
     ['new plain', { sessionId: null }, { kind: 'submit', mode: 'start' }],
     ['new accelerated', { sessionId: null, accelerated: true }, { kind: 'submit', mode: 'start' }],
