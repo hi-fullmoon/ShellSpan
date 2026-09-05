@@ -2094,12 +2094,16 @@
   min-width: 0;
 }
 
-.ai-composer-input-anchor > [data-skill-completion] {
-  position: absolute;
-  bottom: calc(100% + var(--ai-composer-stack-gap));
-  inset-inline: 0;
-  max-height: min(360px, 50dvh);
-  overflow: hidden;
+.ai-completion-popup {
+  width: var(--anchor-width);
+  max-width: var(--available-width);
+  max-height: min(360px, var(--available-height));
+  overflow-y: auto;
+}
+
+.ai-completion-popup > [data-slot='card'] {
+  min-height: 0;
+  max-height: inherit;
 }
 
 .ai-composer-input-anchor > [data-slot='input-group'] {

@@ -25,6 +25,11 @@ initGlobalErrorLogging();
 
 async function bootstrap(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
+  if (import.meta.env.DEV && params.has('aiComposerVisual')) {
+    const { mountComposerPage } = await import('./test/agent-composer-page');
+    await mountComposerPage(document.getElementById('root')!);
+    return;
+  }
   if (import.meta.env.DEV && params.has('aiStage6dVisual')) {
     const { mountFilesPage } = await import('./test/agent-files-page');
     await mountFilesPage(document.getElementById('root')!);

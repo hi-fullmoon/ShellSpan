@@ -6,6 +6,14 @@
 @custom-variant dark (&:is([data-theme="dark"] *));
 
 @theme {
+  /* Move the gap around a fixed circle to avoid rotating and resampling its outline. */
+  --animate-spinner: spinner 1s linear infinite;
+
+  @keyframes spinner {
+    from { stroke-dashoffset: 0; }
+    to { stroke-dashoffset: -100; }
+  }
+
   --color-app-bg: var(--app-bg);
   --color-app-surface: var(--app-surface);
   --color-app-surface-muted: var(--app-surface-muted);
@@ -133,6 +141,71 @@
   --sidebar-accent-foreground: var(--app-text);
   --sidebar-border: var(--app-border);
   --sidebar-ring: var(--app-primary);
+}
+
+/* History is portalled outside the AI panel, so map its row tokens here. */
+.ai-session-history-popover {
+  --ai-shell-clearance: 12px;
+  --ds-ease-in-out: ease-in-out;
+  --dsw-alias-label-primary: var(--popover-foreground);
+  --dsw-alias-label-tertiary: var(--muted-foreground);
+  --dsw-alias-interactive-bg-hover: var(--accent);
+  --dsw-alias-interactive-bg-active: var(--muted);
+  --dsw-alias-state-business-primary: var(--primary);
+  --dsw-alias-state-error-primary: var(--destructive);
+  --dsw-alias-state-success-primary: var(--app-success);
+  --dsw-alias-state-warn-primary: var(--app-warning);
+  width: min(420px, calc(100vw - 16px));
+  height: min(380px, var(--available-height));
+  max-height: calc(100dvh - 56px);
+  gap: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 0;
+}
+
+.ai-session-browser-filters {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ai-session-browser[data-compact] .ai-session-browser-toolbar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px 8px 4px;
+}
+
+.ai-session-browser[data-compact] .ai-session-search {
+  height: 30px;
+  flex: none;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  box-shadow: none;
+}
+
+.ai-session-browser[data-compact] .ai-session-browser-filters {
+  justify-content: space-between;
+}
+
+.ai-session-browser[data-compact] .ai-session-browser-list {
+  min-height: 0;
+  padding: 0 4px 6px;
+}
+
+.ai-session-browser[data-compact] .ai-session-browser-list > [role='tree'] {
+  gap: 0;
+}
+
+.ai-session-browser[data-compact] :is(.ai-session-row, .ai-session-row-main) {
+  height: 28px;
+}
+
+.ai-session-browser[data-compact] .ai-session-row-status:not([data-state='running'], [data-state='waiting']) {
+  display: none;
 }
 
 /* The account menu uses one soft surface, with inset rounded action rows. */
