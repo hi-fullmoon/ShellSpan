@@ -962,7 +962,9 @@
   overscroll-behavior-x: contain;
 }
 
-.ai-panel-shell .ai-markdown-table-scroll::-webkit-scrollbar {
+.ai-panel-shell .ai-markdown-table-scroll::-webkit-scrollbar,
+.ai-panel-shell .ai-semantic-note-body::-webkit-scrollbar {
+  width: 4px;
   height: 4px;
 }
 
