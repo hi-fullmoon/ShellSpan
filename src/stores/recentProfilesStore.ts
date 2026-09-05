@@ -3,7 +3,7 @@ import {
   invokeListRecentProfiles,
   invokeTouchRecentProfile,
   invokeRemoveRecentProfile,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
 import { safeInvoke } from '@/lib/utils';
 

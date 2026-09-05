@@ -9,8 +9,8 @@ import {
 import { useTransferStore } from '@/stores/transferStore';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
-import { promptForMissingKeychainKey } from '@/lib/keychain-key-prompt';
-import { clearDirectoryListingCache } from '@/lib/directory-listing-cache';
+import { promptForMissingKeychainKey } from '@/lib/connections/keychain-key-prompt';
+import { clearDirectoryListingCache } from '@/lib/sftp/directory-listing-cache';
 import type { ReadRemoteFileResponse } from '@/types';
 
 const tauri = vi.hoisted(() => ({
@@ -39,9 +39,9 @@ const tauri = vi.hoisted(() => ({
   invokeUploadLocalPaths: vi.fn().mockResolvedValue({ items: [] }),
 }));
 
-vi.mock('@/lib/tauri', () => tauri);
+vi.mock('@/lib/ipc/tauri', () => tauri);
 
-vi.mock('@/lib/keychain-key-prompt', () => ({
+vi.mock('@/lib/connections/keychain-key-prompt', () => ({
   promptForMissingKeychainKey: vi.fn().mockResolvedValue(null),
 }));
 

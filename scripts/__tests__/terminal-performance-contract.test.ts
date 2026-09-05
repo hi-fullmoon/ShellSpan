@@ -22,7 +22,7 @@ import {
   getRecentTerminalOutput,
   getRecentTerminalOutputSnapshot,
   subscribeTerminalOutput,
-} from '@/lib/terminal-output-buffer';
+} from '@/lib/terminal/terminal-output-buffer';
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn().mockResolvedValue(undefined),
@@ -54,7 +54,7 @@ import {
   invokeResizeSession,
   invokeSetSessionOutputPaused,
   invokeWriteSession,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 
 beforeEach(() => {
   vi.clearAllMocks();

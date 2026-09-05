@@ -20,13 +20,13 @@ import {
   invokeRetrieveProfileSecret,
   invokeDeleteProfileSecret,
   invokeDeleteProfileSecrets,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { generateId } from '@/lib/utils';
 import { useRecentProfilesStore } from './recentProfilesStore';
 import { useToastStore } from './toastStore';
 import { t } from '@/locales';
 import { createLogger } from '@/lib/logger';
-import { sanitizeHostQuickActions } from '@/lib/host-quick-action-model';
+import { sanitizeHostQuickActions } from '@/lib/host/host-quick-action-model';
 
 const logger = createLogger('profileStore');
 

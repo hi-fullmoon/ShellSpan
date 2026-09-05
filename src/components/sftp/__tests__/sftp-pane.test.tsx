@@ -6,7 +6,7 @@ import { getSftpPaneConnectionKey, useSftpStore } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 import type { UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import { useAppStore } from '@/stores/appStore';
-import { invokeListLocalDirectory, invokeListRemoteDirectory } from '@/lib/tauri';
+import { invokeListLocalDirectory, invokeListRemoteDirectory } from '@/lib/ipc/tauri';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -45,7 +45,7 @@ vi.mock('../sftp-file-list', () => ({
   },
 }));
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeListLocalDirectory: vi.fn().mockResolvedValue({
     path: '/home',
     entries: [],

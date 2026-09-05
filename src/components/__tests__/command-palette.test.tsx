@@ -19,8 +19,8 @@ const { invokeListSftpBookmarks } = vi.hoisted(() => ({
   invokeListSftpBookmarks: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock('@/lib/tauri', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/tauri')>()),
+vi.mock('@/lib/ipc/tauri', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ipc/tauri')>()),
   invokeListSftpBookmarks,
 }));
 

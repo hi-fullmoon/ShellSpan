@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useSftpPaneActions } from '@/hooks/useSftpPaneActions';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
-import { invokeCopyRemoteToRemote, invokePasteLocalPaths, invokePickLocalFiles, invokePickLocalFolder, invokeRenameLocalPath, invokeTrashLocalPaths } from '@/lib/tauri';
+import { invokeCopyRemoteToRemote, invokePasteLocalPaths, invokePickLocalFiles, invokePickLocalFolder, invokeRenameLocalPath, invokeTrashLocalPaths } from '@/lib/ipc/tauri';
 import { useTransferStore } from '@/stores/transferStore';
 import type { ReadRemoteFileResponse } from '@/types';
 
@@ -66,7 +66,7 @@ vi.mock('@/hooks/useTransferListeners', () => ({
   useTransferListeners: vi.fn(),
 }));
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeCancelRemoteCopy: vi.fn().mockResolvedValue(undefined),
   invokeCopyLocalPaths: vi.fn().mockResolvedValue(undefined),
   invokeCopyRemoteToRemote: vi.fn().mockResolvedValue(undefined),

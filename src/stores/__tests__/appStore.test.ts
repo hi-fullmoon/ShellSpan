@@ -6,8 +6,8 @@ const mocks = vi.hoisted(() => ({
   savePreferences: vi.fn(),
 }));
 
-vi.mock('@/lib/petdex', () => ({ configurePetdex: mocks.configurePetdex }));
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/petdex/petdex', () => ({ configurePetdex: mocks.configurePetdex }));
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeLoadPreferences: mocks.loadPreferences,
   invokeSavePreferences: mocks.savePreferences,
 }));

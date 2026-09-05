@@ -13,15 +13,15 @@ import {
   listenToSshClosed,
   listenToSshData,
   listenToSshStatus,
-} from '@/lib/tauri';
-import { formatTerminalNoticeLine, formatTerminalStatusLine, shouldDisableTerminalInput, shouldReconnectFromInput } from '@/lib/terminal';
+} from '@/lib/ipc/tauri';
+import { formatTerminalNoticeLine, formatTerminalStatusLine, shouldDisableTerminalInput, shouldReconnectFromInput } from '@/lib/terminal/terminal';
 import { t } from '@/locales';
 import { createLogger } from '@/lib/logger';
 import {
   appendTerminalOutput,
   clearTerminalOutput,
   rebindTerminalOutput,
-} from '@/lib/terminal-output-buffer';
+} from '@/lib/terminal/terminal-output-buffer';
 import type {
   ClosedEvent,
   SessionStatus,

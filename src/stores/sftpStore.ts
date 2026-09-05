@@ -14,8 +14,8 @@ import {
   invokeAddSftpBookmark,
   invokeRemoveSftpBookmark,
   invokeDisconnectSftp,
-} from '@/lib/tauri';
-import type { SavedSftpTab } from '@/lib/sftp-workspace';
+} from '@/lib/ipc/tauri';
+import type { SavedSftpTab } from '@/lib/sftp/sftp-workspace';
 import { safeInvoke } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
 import {

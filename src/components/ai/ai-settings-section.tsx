@@ -22,7 +22,7 @@ import {
   invokeListAiSessionMigrations,
   invokeListAgentRuntimeSessions,
   isTauriRuntime,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';

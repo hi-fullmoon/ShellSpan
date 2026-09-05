@@ -30,7 +30,7 @@ vi.mock('@/hooks/useConnectSession', () => ({
   }),
 }));
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeCloseSession: vi.fn().mockResolvedValue(undefined),
   invokeListAgentRuntimeSessions: vi.fn().mockResolvedValue({
     sessions: [],

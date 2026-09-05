@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
-import { AgentSessionCommittedClient } from '@/lib/agent-session-client';
+import { AgentSessionCommittedClient } from '@/lib/ai/agent-session-client';
 import { agentSessionView } from '@/lib/ai/agent-session-adapter';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { agentSessionEventFixture, sessionEvent } from '@/test/fixtures/agent-session';

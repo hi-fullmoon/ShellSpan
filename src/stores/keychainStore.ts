@@ -5,7 +5,7 @@ import {
   invokeListKeyCredentials,
   invokeRetrieveKeyCredential,
   invokeDeleteKeyCredential,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { generateId } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
 

@@ -6,7 +6,7 @@ import {
   markStartupUpdateCheck,
   updateFlowReducer,
 } from '@/lib/update';
-import { invokeRequestAppRestart, isTauriRuntime } from '@/lib/tauri';
+import { invokeRequestAppRestart, isTauriRuntime } from '@/lib/ipc/tauri';
 import { useToastStore } from '@/stores/toastStore';
 import { t } from '@/locales';
 import type { UpdateStatus, UpdateVersionInfo } from '@/types';

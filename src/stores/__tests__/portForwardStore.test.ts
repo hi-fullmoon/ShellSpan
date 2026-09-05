@@ -14,7 +14,7 @@ const {
   invokeStopPortForward: vi.fn(),
 }));
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   buildRemoteConnectionRequest: (profile: ConnectionProfile) => ({
     host: profile.host,
     port: profile.port,
@@ -28,11 +28,11 @@ vi.mock('@/lib/tauri', () => ({
   invokeStopPortForward,
 }));
 
-vi.mock('@/lib/password-prompt', () => ({
+vi.mock('@/lib/connections/password-prompt', () => ({
   promptForMissingPassword: vi.fn(async (profile: ConnectionProfile) => profile),
 }));
 
-vi.mock('@/lib/keychain-key-prompt', () => ({
+vi.mock('@/lib/connections/keychain-key-prompt', () => ({
   ensureKeychainKeyForProfile: vi.fn(async (profile: ConnectionProfile) => profile),
 }));
 

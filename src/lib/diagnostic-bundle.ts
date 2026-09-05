@@ -1,4 +1,4 @@
-import { redactTerminalSecrets } from '@/lib/terminal-output-buffer';
+import { redactTerminalSecrets } from '@/lib/terminal/terminal-output-buffer';
 import type { ErrorCategory } from '@/lib/error';
 
 export interface DiagnosticBundleInput {

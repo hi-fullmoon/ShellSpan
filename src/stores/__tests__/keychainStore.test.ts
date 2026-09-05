@@ -8,7 +8,7 @@ const { invokeListKeyCredentials, invokeStoreKeyCredential, invokeRetrieveKeyCre
   invokeDeleteKeyCredential: vi.fn(),
 }));
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeListKeyCredentials,
   invokeStoreKeyCredential,
   invokeRetrieveKeyCredential,

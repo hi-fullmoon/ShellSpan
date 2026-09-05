@@ -5,19 +5,19 @@ import {
   invokeTrustHost,
   invokeWarmRemoteConnection,
   parseRemoteFsError,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { generateId } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { useSftpStore, type SftpSide } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
 import type { ConnectionProfile, RemoteFsError } from '@/types';
-import { promptForMissingPassword, persistPromptedPassword } from '@/lib/password-prompt';
+import { promptForMissingPassword, persistPromptedPassword } from '@/lib/connections/password-prompt';
 import { getToastErrorMessage } from '@/lib/error';
 import { createLogger } from '@/lib/logger';
 import {
   ensureKeychainKeyForProfile,
-} from '@/lib/keychain-key-prompt';
+} from '@/lib/connections/keychain-key-prompt';
 import { useProfileStore } from '@/stores/profileStore';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 

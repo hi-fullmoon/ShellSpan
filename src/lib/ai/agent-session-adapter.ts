@@ -1,8 +1,8 @@
-import { AgentSessionCommittedClient, type AgentSessionStreamState } from '@/lib/agent-session-client';
-import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeListAgentFileReferences } from '@/lib/tauri';
+import { AgentSessionCommittedClient, type AgentSessionStreamState } from '@/lib/ai/agent-session-client';
+import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeListAgentFileReferences } from '@/lib/ipc/tauri';
 import { projectQuestions } from './question-projection';
-import { invokeSubmitAgentImages } from '@/lib/tauri';
-import { requireVision } from '@/lib/vision-contract';
+import { invokeSubmitAgentImages } from '@/lib/ipc/tauri';
+import { requireVision } from '@/lib/ai/vision-contract';
 import {
   invokeAgentRuntimeFollowup,
   invokeAgentRuntimeSteer,
@@ -18,8 +18,8 @@ import {
   invokeStartAgentRuntime,
   invokeSelectAgentRuntimeModel,
   invokeSetAgentRuntimePermission,
-} from '@/lib/tauri';
-import { projectAgentActivity } from '@/lib/agent-session-projection';
+} from '@/lib/ipc/tauri';
+import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import type {
   AgentSessionEvent,
   AgentSessionListPage,

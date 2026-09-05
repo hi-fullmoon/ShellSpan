@@ -4,7 +4,7 @@ import {
   invokeListKnownHosts,
   invokeRemoveKnownHost,
   invokeTrustHost,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 
 interface KnownHostsState {
   hosts: KnownHostEntry[];

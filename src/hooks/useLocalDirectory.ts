@@ -4,7 +4,7 @@ import {
   invokeOpenPath,
   invokePreviewLocalFile,
   invokeSupersedeRemoteDirectoryRequest,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { getLocalizedErrorMessage } from '@/lib/error';
 import { useSftpStore, type SftpConnection, type SftpSide } from '@/stores/sftpStore';
 import {

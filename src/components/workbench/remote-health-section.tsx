@@ -36,8 +36,8 @@ import {
   deriveRemoteHealthStatuses,
   isRemoteHealthSnapshotStale,
   remoteHealthResultMatchesProfile,
-} from '@/lib/remote-health';
-import { formatClockTime, formatUptime } from '@/lib/monitor';
+} from '@/lib/host/remote-health';
+import { formatClockTime, formatUptime } from '@/lib/host/monitor';
 import { cn, formatBytes } from '@/lib/utils';
 import { useProfileStore } from '@/stores/profileStore';
 import { useRemoteHealthStore, type RemoteHealthEntry } from '@/stores/remoteHealthStore';

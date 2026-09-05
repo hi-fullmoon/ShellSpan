@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   listModels: vi.fn(),
   saveRoutes: vi.fn(),
 }));
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeListAiRoutes: mocks.listRoutes,
   invokeListAiRouteModels: mocks.listModels,
   invokeSaveAiRoutes: mocks.saveRoutes,

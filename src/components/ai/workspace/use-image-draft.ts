@@ -3,8 +3,8 @@ import { useToast } from '@/hooks/useToast';
 import { t } from '@/locales';
 import { readImageDraft, writeImageDraft, type ImageDraft } from '@/lib/ai/image-drafts';
 import { imageErrorKey } from '@/lib/ai/image-error';
-import { IMAGE_LIMITS } from '@/lib/vision-contract';
-import { invokeCancelAgentImageSubmission, invokePrepareAgentImages } from '@/lib/tauri';
+import { IMAGE_LIMITS } from '@/lib/ai/vision-contract';
+import { invokeCancelAgentImageSubmission, invokePrepareAgentImages } from '@/lib/ipc/tauri';
 import type { AgentImageUpload } from '@/types/agent-image';
 
 export function useImageDraft(owner: string, text: string, restoreText: (text: string) => void) {

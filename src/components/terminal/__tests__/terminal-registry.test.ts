@@ -5,7 +5,7 @@ import {
   appendTerminalOutput,
   getRecentTerminalOutput,
   getRecentTerminalOutputSnapshot,
-} from '@/lib/terminal-output-buffer';
+} from '@/lib/terminal/terminal-output-buffer';
 import { findHttpLinksInLine, resolveTerminalTheme, terminalRegistry } from '../registry/terminal-registry';
 
 const webglMocks = vi.hoisted(() => {
@@ -69,7 +69,7 @@ class RO {
 }
 globalThis.ResizeObserver = (globalThis.ResizeObserver ?? RO) as typeof ResizeObserver;
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeGetSessionStatus: vi.fn().mockResolvedValue({
     sessionId: 's1',
     status: 'connected',
@@ -313,7 +313,7 @@ describe('terminalRegistry', () => {
   });
 
   it('refits, resizes, and redraws an attached terminal before focusing it', async () => {
-    const { invokeResizeSession } = await import('@/lib/tauri');
+    const { invokeResizeSession } = await import('@/lib/ipc/tauri');
     const controller = createController('s1');
     controller.attach(document.createElement('div'));
     vi.mocked(invokeResizeSession).mockClear();
@@ -342,7 +342,7 @@ describe('terminalRegistry', () => {
   });
 
   it('rebinds a reconnected session without replacing its terminal or buffer', async () => {
-    const { invokeWriteSession, listenToSshData } = await import('@/lib/tauri');
+    const { invokeWriteSession, listenToSshData } = await import('@/lib/ipc/tauri');
     const controller = createController('s1');
     controller.write('history-before-reconnect\r\n');
     const terminal = controller.terminal;
@@ -438,7 +438,7 @@ describe('terminalRegistry', () => {
     vi.useFakeTimers();
 
     try {
-      const { invokeResizeSession } = await import('@/lib/tauri');
+      const { invokeResizeSession } = await import('@/lib/ipc/tauri');
       const controller = createController('s1');
       Object.defineProperty(controller.container, 'offsetParent', {
         configurable: true,
@@ -552,7 +552,7 @@ describe('terminalRegistry', () => {
   });
 
   it('writes connected input to the session', async () => {
-    const { invokeWriteSession } = await import('@/lib/tauri');
+    const { invokeWriteSession } = await import('@/lib/ipc/tauri');
     const getStatus = vi.fn().mockReturnValue('connected');
     const controller = terminalRegistry.create(
       's1',
@@ -569,7 +569,7 @@ describe('terminalRegistry', () => {
   });
 
   it('pauses backend output at the parser high watermark and resumes after draining', async () => {
-    const { invokeSetSessionOutputPaused, listenToSshData } = await import('@/lib/tauri');
+    const { invokeSetSessionOutputPaused, listenToSshData } = await import('@/lib/ipc/tauri');
     let dataHandler: ((event: TauriEvent<string>) => void) | undefined;
     vi.mocked(listenToSshData).mockImplementation(async (_sessionId, callback) => {
       dataHandler = callback;
@@ -597,7 +597,7 @@ describe('terminalRegistry', () => {
   });
 
   it('retries resuming backend output after a transient IPC failure', async () => {
-    const { invokeSetSessionOutputPaused, listenToSshData } = await import('@/lib/tauri');
+    const { invokeSetSessionOutputPaused, listenToSshData } = await import('@/lib/ipc/tauri');
     vi.mocked(invokeSetSessionOutputPaused)
       .mockReset()
       .mockResolvedValueOnce(undefined)
@@ -649,7 +649,7 @@ describe('terminalRegistry', () => {
   });
 
   it('drops input silently while connecting without a disconnected hint', async () => {
-    const { invokeWriteSession } = await import('@/lib/tauri');
+    const { invokeWriteSession } = await import('@/lib/ipc/tauri');
     const requestReconnect = vi.fn();
     const getStatus = vi.fn().mockReturnValue('connecting');
     const controller = terminalRegistry.create(
@@ -675,7 +675,7 @@ describe('terminalRegistry', () => {
   });
 
   it('shows disconnected hint and triggers reconnect on Enter', async () => {
-    const { invokeWriteSession } = await import('@/lib/tauri');
+    const { invokeWriteSession } = await import('@/lib/ipc/tauri');
     const requestReconnect = vi.fn();
     const getStatus = vi.fn().mockReturnValue('disconnected');
     const controller = terminalRegistry.create(
@@ -698,7 +698,7 @@ describe('terminalRegistry', () => {
   it('releases the auto-reconnect guard after an attempted reconnect settles', async () => {
     vi.useFakeTimers();
     try {
-      const { listenToSshClosed } = await import('@/lib/tauri');
+      const { listenToSshClosed } = await import('@/lib/ipc/tauri');
       let closedHandler: ((event: any) => void) | undefined;
       vi.mocked(listenToSshClosed).mockImplementation(async (_sessionId, callback) => {
         closedHandler = callback;

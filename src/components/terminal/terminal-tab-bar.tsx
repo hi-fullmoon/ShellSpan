@@ -21,7 +21,7 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
 import { PinIcon, XIcon } from 'lucide-react';
-import { invokeCloseSession } from '@/lib/tauri';
+import { invokeCloseSession } from '@/lib/ipc/tauri';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';

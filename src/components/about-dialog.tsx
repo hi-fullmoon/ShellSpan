@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/compact-dialog';
 import { useI18n } from '@/hooks/useI18n';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
-import { isTauriRuntime } from '@/lib/tauri';
+import { isTauriRuntime } from '@/lib/ipc/tauri';
 
 interface AboutDialogProps {
   open: boolean;

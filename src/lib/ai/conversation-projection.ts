@@ -5,7 +5,7 @@ import {
   agentEventTimestamp,
   agentToolEventKey,
   validateCommittedAgentEventWindow,
-} from '@/lib/agent-session-event-window';
+} from '@/lib/ai/agent-session-event-window';
 import type {
   AgentSessionAssistantContentBlock,
   AgentSessionEvent,

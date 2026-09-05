@@ -17,7 +17,7 @@ vi.mock('@/hooks/useI18n', () => ({
   }),
 }));
 
-vi.mock('@/lib/tauri', () => ({}));
+vi.mock('@/lib/ipc/tauri', () => ({}));
 
 const initialProfile = useProfileStore.getState();
 const initialApp = useAppStore.getState();

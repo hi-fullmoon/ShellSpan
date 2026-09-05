@@ -8,7 +8,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import type { ConnectionProfile } from '@/types';
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeCreateSession: vi.fn(),
   invokeCreateLocalSession: vi.fn(),
   invokeTrustHost: vi.fn(),
@@ -46,15 +46,15 @@ vi.mock('../useReconnectSession', () => ({
   useReconnectSession: vi.fn().mockReturnValue(vi.fn()),
 }));
 
-vi.mock('@/lib/password-prompt', async (importActual) => {
-  const actual = await importActual<typeof import('@/lib/password-prompt')>();
+vi.mock('@/lib/connections/password-prompt', async (importActual) => {
+  const actual = await importActual<typeof import('@/lib/connections/password-prompt')>();
   return {
     ...actual,
     promptForMissingPassword: vi.fn((p: ConnectionProfile) => Promise.resolve(p)),
   };
 });
 
-vi.mock('@/lib/keychain-key-prompt', () => ({
+vi.mock('@/lib/connections/keychain-key-prompt', () => ({
   promptForMissingKeychainKey: vi.fn().mockResolvedValue(null),
   getMissingKeychainKeyTarget: vi.fn().mockReturnValue(null),
   ensureKeychainKeyForProfile: vi.fn().mockImplementation((profile) => Promise.resolve(profile)),
@@ -68,13 +68,13 @@ import {
   invokeTrustHost,
   invokeStoreProfilePassword,
   invokeWriteSession,
-} from '@/lib/tauri';
-import { promptForMissingPassword } from '@/lib/password-prompt';
+} from '@/lib/ipc/tauri';
+import { promptForMissingPassword } from '@/lib/connections/password-prompt';
 import {
   ensureKeychainKeyForProfile,
   getMissingKeychainKeyTarget,
   promptForMissingKeychainKey,
-} from '@/lib/keychain-key-prompt';
+} from '@/lib/connections/keychain-key-prompt';
 
 const SUMMARY = {
   sessionId: 's1',

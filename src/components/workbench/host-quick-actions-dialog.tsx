@@ -53,7 +53,7 @@ import {
   runHostConnectionAction,
   validateHostQuickAction,
   type HostQuickActionValidationError,
-} from '@/lib/host-quick-actions';
+} from '@/lib/host/host-quick-actions';
 import { generateId } from '@/lib/utils';
 import { useProfileStore } from '@/stores/profileStore';
 import type {

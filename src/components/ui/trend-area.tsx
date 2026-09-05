@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { cn } from '@/lib/utils';
-import { buildTrendPath } from '@/lib/trend';
+import { buildTrendPath } from '@/lib/host/trend';
 
 interface TrendAreaProps {
   data: number[];

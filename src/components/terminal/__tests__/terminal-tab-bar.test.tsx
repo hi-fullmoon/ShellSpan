@@ -3,7 +3,7 @@ import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { TerminalTabBar } from '../terminal-tab-bar';
 import { useTerminalStore } from '@/stores/terminalStore';
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeCloseSession: vi.fn().mockResolvedValue(undefined),
   invokeListAgentRuntimeSessions: vi.fn().mockResolvedValue({
     sessions: [],

@@ -17,12 +17,12 @@ import {
   invokeResolveRemoteEntryOwners,
   invokeUpdateRemotePermissions,
   invokeUploadLocalPaths,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import {
   getCachedDirectoryListing,
   invalidateDirectoryListingCache,
   setCachedDirectoryListing,
-} from '@/lib/directory-listing-cache';
+} from '@/lib/sftp/directory-listing-cache';
 import {
   getSftpPaneConnection,
   getSftpPaneConnectionKey,
@@ -32,7 +32,7 @@ import {
 import { useTransferStore } from '@/stores/transferStore';
 import { createLogger } from '@/lib/logger';
 import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
-import { promptForMissingKeychainKey } from '@/lib/keychain-key-prompt';
+import { promptForMissingKeychainKey } from '@/lib/connections/keychain-key-prompt';
 import { normalizePortablePath } from '@/lib/path-utils';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';

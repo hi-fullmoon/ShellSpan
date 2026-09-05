@@ -22,12 +22,12 @@ import {
   importConnectionsTransactionally,
   parseConnectionImport,
   type ConnectionImportPreview,
-} from '@/lib/connection-import';
+} from '@/lib/connections/connection-import';
 import {
   invokeExportLogFile,
   invokePickLocalFiles,
   invokeReadTextFile,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { useKeychainStore } from '@/stores/keychainStore';
 import { createLogger } from '@/lib/logger';
 import { useRemoteHealthStore } from '@/stores/remoteHealthStore';

@@ -1,9 +1,9 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { getSftpPaneConnectionKey, useSftpStore } from '../sftpStore';
 import { runPathOperation, useTransferStore } from '../transferStore';
-import { invokeAddSftpBookmark, invokeDisconnectSftp, invokeRemoveSftpBookmark } from '@/lib/tauri';
+import { invokeAddSftpBookmark, invokeDisconnectSftp, invokeRemoveSftpBookmark } from '@/lib/ipc/tauri';
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   buildRemoteConnectionRequest: vi.fn((profile) => ({
     host: profile.host,
     port: profile.port,

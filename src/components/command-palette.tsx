@@ -36,8 +36,8 @@ import {
   insertHostCommandSnippet,
   openHostPath,
   runHostConnectionAction,
-} from '@/lib/host-quick-actions';
-import { invokeListSftpBookmarks } from '@/lib/tauri';
+} from '@/lib/host/host-quick-actions';
+import { invokeListSftpBookmarks } from '@/lib/ipc/tauri';
 import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';

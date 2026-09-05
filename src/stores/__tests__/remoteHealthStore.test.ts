@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { isRemoteHealthSnapshotStale } from '@/lib/remote-health';
+import { isRemoteHealthSnapshotStale } from '@/lib/host/remote-health';
 import { useProfileStore } from '@/stores/profileStore';
 import { useRemoteHealthStore } from '../remoteHealthStore';
 import type {
@@ -12,8 +12,8 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
 }));
 
-vi.mock('@/lib/tauri', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/tauri')>('@/lib/tauri');
+vi.mock('@/lib/ipc/tauri', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/ipc/tauri')>('@/lib/ipc/tauri');
   return {
     ...actual,
     invokeCollectRemoteHealthSnapshot: mocks.collect,

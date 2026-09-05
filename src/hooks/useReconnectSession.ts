@@ -6,16 +6,16 @@ import {
   invokeCloseSession,
   invokeCreateLocalSession,
   invokeCreateSession,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
-import { promptForMissingPassword } from '@/lib/password-prompt';
+import { promptForMissingPassword } from '@/lib/connections/password-prompt';
 import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
 import {
   ensureKeychainKeyForProfile,
   getMissingKeychainKeyTarget,
   promptForMissingKeychainKey,
-} from '@/lib/keychain-key-prompt';
+} from '@/lib/connections/keychain-key-prompt';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 
 const logger = createLogger('reconnect');

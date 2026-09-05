@@ -11,7 +11,7 @@ class RO {
 }
 globalThis.ResizeObserver = (globalThis.ResizeObserver ?? RO) as typeof ResizeObserver;
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeGetSessionStatus: vi.fn().mockResolvedValue({
     sessionId: 's1',
     status: 'connected',

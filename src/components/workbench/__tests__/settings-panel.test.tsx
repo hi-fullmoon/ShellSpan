@@ -27,14 +27,14 @@ const petdexFeedbackMocks = vi.hoisted(() => ({
   open: vi.fn(),
 }));
 
-vi.mock('@/lib/petdex', () => ({
+vi.mock('@/lib/petdex/petdex', () => ({
   configurePetdex: petdexMocks.configure,
   getPetdexStatus: petdexMocks.getStatus,
   listenToPetdexStatus: petdexMocks.listen,
   testPetdexConnection: petdexMocks.testConnection,
 }));
 
-vi.mock('@/lib/petdex-feedback', () => ({
+vi.mock('@/lib/petdex/petdex-feedback', () => ({
   openPetdexPhase3Feedback: petdexFeedbackMocks.open,
 }));
 

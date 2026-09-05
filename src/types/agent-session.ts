@@ -2,9 +2,9 @@ export const AGENT_SESSION_EVENT_VERSION = 5 as const;
 
 export type AgentRequestSnapshot = { status: 'legacyUnknown' } | {
   status: 'prepared'; routeId: string; routeRevision: number; adapterId: string;
-  modelId: string; catalogVersion: number; capabilities: import('@/lib/provider-contract').ModelDefinition;
+  modelId: string; catalogVersion: number; capabilities: import('@/lib/ai/provider-contract').ModelDefinition;
   endpointIdentity: string; replayDomainId: string; reasoningEffort?: string;
-  outputTokens: number; retryPolicy: import('@/lib/retry-policy').AiRetryPolicy;
+  outputTokens: number; retryPolicy: import('@/lib/ai/retry-policy').AiRetryPolicy;
   timeouts: { requestHeadersMs: number; firstByteMs: number; streamIdleMs: number };
   purpose: string; preparationVersion: number; projectionPolicy: string;
   contentHash: string; images: readonly import('./agent-image').AgentImageRef[];

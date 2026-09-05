@@ -34,7 +34,7 @@ import {
   TooltipProvider,
 } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/useToast';
-import { invokeExportLogFile } from '@/lib/tauri';
+import { invokeExportLogFile } from '@/lib/ipc/tauri';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -44,7 +44,7 @@ import { useTerminalStore } from '@/stores/terminalStore';
 import { useSftpStore } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
-import { isTauriRuntime } from '@/lib/tauri';
+import { isTauriRuntime } from '@/lib/ipc/tauri';
 import {
   WorkbenchPage,
   WorkbenchPageHeader,

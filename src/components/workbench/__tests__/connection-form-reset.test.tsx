@@ -30,7 +30,7 @@ vi.mock('@/hooks/useToast', () => ({
   }),
 }));
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokePickPrivateKeyFile: vi.fn(),
   invokeReadTextFile: vi.fn(() => Promise.resolve('')),
 }));

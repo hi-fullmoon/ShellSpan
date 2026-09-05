@@ -2,7 +2,7 @@ import {
   appendTerminalOutput,
   clearTerminalOutput,
   getRecentTerminalOutput,
-} from '@/lib/terminal-output-buffer';
+} from '@/lib/terminal/terminal-output-buffer';
 
 export const BUFFER_BURST_BYTES = 256 * 1024;
 export const BUFFER_CHUNK_BYTES = 4 * 1024;

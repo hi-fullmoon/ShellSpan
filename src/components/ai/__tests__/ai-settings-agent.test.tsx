@@ -11,8 +11,8 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 
-vi.mock('@/lib/tauri', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/lib/tauri')>(),
+vi.mock('@/lib/ipc/tauri', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/ipc/tauri')>(),
   invokeArchiveAgentRuntimeSession: mocks.archive,
   invokeCancelAgentRuntime: mocks.cancel,
   invokeListAgentRuntimeSessions: mocks.list,

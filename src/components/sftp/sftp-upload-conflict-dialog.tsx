@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { useI18n } from '@/hooks/useI18n';
 import { useLastValue } from '@/hooks/useLastValue';
 import type { PendingUploadConflict } from '@/hooks/useSftpPaneActions';
-import { kindLabel } from '@/lib/sftp-utils';
+import { kindLabel } from '@/lib/sftp/sftp-utils';
 import { FileWarningIcon } from 'lucide-react';
 import {
   SftpDialogBody,

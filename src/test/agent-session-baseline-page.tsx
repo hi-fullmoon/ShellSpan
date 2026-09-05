@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import '@/components/ai/ai-panel.css';
-import { projectAgentActivity } from '@/lib/agent-session-projection';
+import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AiSessionView } from '@/lib/ai/session-adapter';
 import { applyTheme } from '@/lib/theme';

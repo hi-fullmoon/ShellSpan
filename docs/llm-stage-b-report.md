@@ -68,7 +68,7 @@ cargo +1.95.0-x86_64-pc-windows-msvc test --manifest-path src-tauri/Cargo.toml -
 ```powershell
 pnpm install --frozen-lockfile
 pnpm exec tsc --noEmit
-pnpm exec vitest run src/lib/__tests__/provider-contract.test.ts src/lib/__tests__/ai-reasoning.test.ts src/lib/__tests__/model-resolution.test.tsx src/stores/__tests__/aiSettingsStore.test.ts src/components/ai/__tests__/provider-setup-dialog.test.tsx src/components/ai/__tests__/image-draft.test.tsx src/components/ai/__tests__/ai-workspace-controller.test.tsx src/test/fixtures/__tests__/agent-session-v4.test.ts --maxWorkers=1
+pnpm exec vitest run src/lib/ai/__tests__/provider-contract.test.ts src/lib/ai/__tests__/ai-reasoning.test.ts src/lib/ai/__tests__/model-resolution.test.tsx src/stores/__tests__/aiSettingsStore.test.ts src/components/ai/__tests__/provider-setup-dialog.test.tsx src/components/ai/__tests__/image-draft.test.tsx src/components/ai/__tests__/ai-workspace-controller.test.tsx src/test/fixtures/__tests__/agent-session-v4.test.ts --maxWorkers=1
 pnpm test:ai:stage4:frontend
 pnpm check:llm:catalog
 node scripts/check-rust-includes.mjs

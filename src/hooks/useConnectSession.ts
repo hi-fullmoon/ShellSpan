@@ -8,19 +8,19 @@ import {
   invokeCreateLocalSession,
   invokeCreateSession,
   invokeWriteSession,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
-import { promptForMissingPassword, persistPromptedPassword } from '@/lib/password-prompt';
+import { promptForMissingPassword, persistPromptedPassword } from '@/lib/connections/password-prompt';
 import { getErrorMessage, getToastErrorMessage } from '@/lib/error';
 import {
   ensureKeychainKeyForProfile,
   getMissingKeychainKeyTarget,
   promptForMissingKeychainKey,
-} from '@/lib/keychain-key-prompt';
-import { openHostKeyPrompt } from '@/lib/host-key-prompt';
+} from '@/lib/connections/keychain-key-prompt';
+import { openHostKeyPrompt } from '@/lib/host/host-key-prompt';
 import { useProfileStore } from '@/stores/profileStore';
-import { buildChangeDirectoryCommand } from '@/lib/host-context';
+import { buildChangeDirectoryCommand } from '@/lib/host/host-context';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 import { t } from '@/locales';
 

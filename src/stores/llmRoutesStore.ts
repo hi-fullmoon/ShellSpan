@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { invokeListAiRoutes, invokeListAiRouteModels, invokeSaveAiRoutes } from '@/lib/tauri';
-import type { ResolvedModel } from '@/lib/provider-contract';
+import { invokeListAiRoutes, invokeListAiRouteModels, invokeSaveAiRoutes } from '@/lib/ipc/tauri';
+import type { ResolvedModel } from '@/lib/ai/provider-contract';
 import type { ModelSelection, ProviderRoute, RouteSnapshot } from '@/types/ai';
 import type { AiProviderPreset, AiProviderProfile } from '@/types/ai';
 

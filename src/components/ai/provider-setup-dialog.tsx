@@ -10,7 +10,7 @@ import {
   ServerIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { DEFAULT_RETRY_POLICY, RETRY_LIMITS, parseRetryPolicy } from '@/lib/retry-policy';
+import { DEFAULT_RETRY_POLICY, RETRY_LIMITS, parseRetryPolicy } from '@/lib/ai/retry-policy';
 import { Button } from '@/components/ui/button';
 import {
   Combobox,
@@ -47,7 +47,7 @@ import { cn } from '@/lib/utils';
 import {
   invokeListAiModels,
   isTauriRuntime,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import type { LocaleKey } from '@/locales';
 import {
   AI_PROVIDER_PRESETS,
@@ -69,7 +69,7 @@ import {
   OpenAiBrandIcon,
 } from './provider-brand-icons';
 
-import { PROVIDER_PROFILE_IDS, resolveProviderProfile, useResolvedModel, profileProtocol, loadResolvedModel, type ModelDefinition, type Support } from '@/lib/provider-contract';
+import { PROVIDER_PROFILE_IDS, resolveProviderProfile, useResolvedModel, profileProtocol, loadResolvedModel, type ModelDefinition, type Support } from '@/lib/ai/provider-contract';
 
 type ProviderDraft = Omit<AiProviderProfile, 'id'> & { apiKey?: string };
 

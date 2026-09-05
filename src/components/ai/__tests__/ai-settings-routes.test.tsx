@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ResolvedModel } from '@/lib/provider-contract';
+import type { ResolvedModel } from '@/lib/ai/provider-contract';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 
 const mocks = vi.hoisted(() => ({
@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   isTauriRuntime: () => true,
   invokeListAiSessionMigrations: vi.fn().mockResolvedValue([]),
   invokeConvertAiSessionV4: vi.fn(),

@@ -6,7 +6,7 @@ const { invokeGetSystemHealth } = vi.hoisted(() => ({
   invokeGetSystemHealth: vi.fn(),
 }));
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   invokeGetSystemHealth,
 }));
 

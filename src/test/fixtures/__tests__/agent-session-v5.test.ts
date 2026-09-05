@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { projectAgentActivity } from '@/lib/agent-session-projection';
+import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import fixture from '@/test/fixtures/agent-session-v5.json';
 import {
   AGENT_SESSION_EVENT_VERSION,

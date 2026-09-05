@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/compact-dialog';
 import { Dialog } from '@/components/ui/dialog';
 import { useI18n } from '@/hooks/useI18n';
-import { buildHostOverview } from '@/lib/host-overview';
+import { buildHostOverview } from '@/lib/host/host-overview';
 import { useMonitorStore } from '@/stores/monitorStore';
 import { useSftpStore } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';

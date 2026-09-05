@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
-import { listenToSessionError } from '@/lib/tauri';
+import { listenToSessionError } from '@/lib/ipc/tauri';
 import { useHostKeyDialogStore } from '@/stores/hostKeyDialogStore';
-import { handleSessionErrorEvent, releaseSessionError } from '@/lib/host-key-prompt';
+import { handleSessionErrorEvent, releaseSessionError } from '@/lib/host/host-key-prompt';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { createLogger } from '@/lib/logger';
 import { HostKeyDialog } from './host-key-dialog';

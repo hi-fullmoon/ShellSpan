@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import visualManifest from '../../../../docs/ai-panel-phase5/evidence/manifest.json';
-import { projectAgentActivity } from '@/lib/agent-session-projection';
+import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import {

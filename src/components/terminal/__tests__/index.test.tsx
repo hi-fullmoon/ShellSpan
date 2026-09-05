@@ -6,7 +6,7 @@ import { terminalRegistry } from '../registry/terminal-registry';
 
 const mockConnect = vi.fn();
 
-vi.mock('@/lib/terminal-workspace-persistence', () => ({
+vi.mock('@/lib/terminal/terminal-workspace-persistence', () => ({
   clearTerminalWorkspace: vi.fn().mockResolvedValue(undefined),
   flushTerminalWorkspace: vi.fn().mockResolvedValue(undefined),
   stageTerminalWorkspace: vi.fn(),

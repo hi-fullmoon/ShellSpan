@@ -9,15 +9,15 @@ import {
   buildRemoteConnectionRequest,
   invokeCancelRemoteHealthSnapshot,
   invokeCollectRemoteHealthSnapshot,
-} from '@/lib/tauri';
+} from '@/lib/ipc/tauri';
 import { createOperationId } from '@/lib/operation-id';
 import { getErrorMessage } from '@/lib/error';
 import {
   remoteHealthResultMatchesProfile,
   REMOTE_HEALTH_TIMEOUT_MS,
-} from '@/lib/remote-health';
-import { promptForMissingPassword, persistPromptedPassword } from '@/lib/password-prompt';
-import { ensureKeychainKeyForProfile } from '@/lib/keychain-key-prompt';
+} from '@/lib/host/remote-health';
+import { promptForMissingPassword, persistPromptedPassword } from '@/lib/connections/password-prompt';
+import { ensureKeychainKeyForProfile } from '@/lib/connections/keychain-key-prompt';
 import { useProfileStore } from '@/stores/profileStore';
 import { createLogger } from '@/lib/logger';
 

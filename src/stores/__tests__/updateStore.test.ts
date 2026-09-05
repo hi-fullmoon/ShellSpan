@@ -13,7 +13,7 @@ vi.mock('@/stores/toastStore', () => ({
   },
 }));
 
-vi.mock('@/lib/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', () => ({
   isTauriRuntime: () => true,
   invokeRequestAppRestart: vi.fn(),
 }));

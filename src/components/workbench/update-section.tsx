@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { CheckCircle2Icon, DownloadIcon, RefreshCwIcon, RotateCcwIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { useUpdateStore } from '@/stores/updateStore';
-import { isTauriRuntime } from '@/lib/tauri';
+import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
