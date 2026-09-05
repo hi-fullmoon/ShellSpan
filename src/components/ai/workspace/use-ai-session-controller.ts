@@ -20,7 +20,7 @@ import {
   withOptimisticConversationNodes,
   type AiOptimisticSubmission,
 } from '@/lib/ai/optimistic-submission';
-import { normalizeAiSessionError } from '@/lib/ai/session-error';
+import { normalizeAiSessionError, sessionArchiveErrorMessage } from '@/lib/ai/session-error';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import {
@@ -211,6 +211,7 @@ export function useAiSessionController({
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [archivingSessionId, setArchivingSessionId] = useState<string | null>(null);
+  const archivePendingRef = useRef(false);
   const [approvalDecision, setApprovalDecision] = useState<'approve' | 'reject' | null>(null);
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -589,6 +590,9 @@ export function useAiSessionController({
   ]);
 
   useEffect(() => {
+    // An explicit history selection already owns the composer. A missing view
+    // here means its transcript is loading, not that a new session was opened.
+    if (!view && openedSessionId) return;
     if (view && viewRef.current !== view) return;
     if (view && draftOwnerRef.current !== navigationDraftKey(view.summary.id)) {
       saveCurrentDraft();
@@ -607,7 +611,7 @@ export function useAiSessionController({
       waitingApproval: view?.pendingApproval !== null && view?.pendingApproval !== undefined,
       waitingQuestion: Boolean(view?.pendingQuestion),
     });
-  }, [adoptDraft, dispatch, navigationDraftKey, restoreDraft, saveCurrentDraft, view]);
+  }, [adoptDraft, dispatch, navigationDraftKey, openedSessionId, restoreDraft, saveCurrentDraft, view]);
 
   useEffect(() => {
     if (!view) return;
@@ -690,15 +694,17 @@ export function useAiSessionController({
 
   const openSession = useCallback((summary: AiSessionSummary): void => {
     claimWorkspace();
+    const retainedView = viewRef.current?.summary.id === summary.id ? viewRef.current : null;
     resetComposer(summary);
     // Selecting the current history entry is a new visit too; renew its
     // subscription even when the session ID itself has not changed.
     setSkillNavigation((generation) => generation + 1);
     setOpenedSessionId(summary.id);
-    setView(null);
+    // Refreshing the visible session must not unmount its transcript/scroller.
+    setView(retainedView);
     setQueueMutation(null);
     queueOperationRef.current = null;
-    viewRef.current = null;
+    viewRef.current = retainedView;
     setNavigation((current) => ({
       ...current,
       route: { kind: 'conversation', sessionId: summary.id },
@@ -726,15 +732,32 @@ export function useAiSessionController({
   }, [claimWorkspace, resetComposer]);
 
   const archiveSession = useCallback((summary: AiSessionSummary): void => {
+    if (archivePendingRef.current || summary.archived) return;
+    const current = viewRef.current?.summary.id === summary.id
+      ? viewRef.current.summary
+      : sessions.find(session => session.id === summary.id) ?? summary;
+    setSessionsError(null);
+    if (current.status === 'running' || current.status === 'waiting') {
+      setSessionsError(t('ai.workspace.sessions.archiveBusy'));
+      return;
+    }
+    archivePendingRef.current = true;
     setArchivingSessionId(summary.id);
     void adapter.archive(summary.id).then(
       () => {
         if (viewRef.current?.summary.id === summary.id) newSession();
         void refreshSessions();
       },
-      (error: unknown) => setSessionsError(normalizeAiSessionError(error).message),
-    ).finally(() => setArchivingSessionId(null));
-  }, [adapter, newSession, refreshSessions]);
+      async (error: unknown) => {
+        const message = sessionArchiveErrorMessage(error, t);
+        await refreshSessions();
+        if (mountedRef.current) setSessionsError(message);
+      },
+    ).finally(() => {
+      archivePendingRef.current = false;
+      if (mountedRef.current) setArchivingSessionId(null);
+    });
+  }, [adapter, newSession, refreshSessions, sessions, t]);
 
   const executeQueueMutation = useCallback((intent: AiQueueMutationIntent, retry = false): void => {
     // React state alone cannot guard two clicks within the same render.

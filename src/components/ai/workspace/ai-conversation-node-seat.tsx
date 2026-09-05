@@ -154,17 +154,19 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
   const { t } = useI18n();
   return (
     <Message role="user">
-      <Bubble role="user">
-        <span className="ai-user-message-text">{node.content}</span>
-        <AiCommittedImages sessionId={node.sessionId} images={node.images} />
-        {node.delivery !== 'committed' && (
-          <span className="ai-user-delivery" data-state={node.delivery}>
-            {node.delivery === 'failed'
-              ? t('ai.workspace.messageNotSent')
-              : t('ai.workspace.messagePending')}
-          </span>
-        )}
-      </Bubble>
+      <AiCommittedImages sessionId={node.sessionId} images={node.images} />
+      {(node.content || node.delivery !== 'committed') && (
+        <Bubble role="user">
+          <span className="ai-user-message-text">{node.content}</span>
+          {node.delivery !== 'committed' && (
+            <span className="ai-user-delivery" data-state={node.delivery}>
+              {node.delivery === 'failed'
+                ? t('ai.workspace.messageNotSent')
+                : t('ai.workspace.messagePending')}
+            </span>
+          )}
+        </Bubble>
+      )}
       <MessageActions text={node.content} timestamp={node.timestamp} align="end" />
     </Message>
   );

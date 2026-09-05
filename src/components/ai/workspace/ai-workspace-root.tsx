@@ -160,21 +160,26 @@ export function AiWorkspaceRoot({
 }: AiWorkspaceRootProps): React.ReactNode {
   const { t } = useI18n();
   const rootRef = useRef<HTMLElement>(null);
+  const route = navigation.route;
   const sessionKind = view?.summary.kind ?? 'agent';
   const status = view?.status ?? composerState?.runtimeStatus ?? 'idle';
   const visibleNodes = view?.nodes ?? pendingNodes;
+  const selectedSessionId = view?.summary.id ?? composerState?.sessionId
+    ?? (route.kind === 'conversation' ? route.sessionId : null);
+  const sessionLoading = !view && selectedSessionId !== null && visibleNodes.length === 0;
   const taskSteps = view?.snapshot.kind === 'agent'
     ? view.snapshot.value.task.plan?.steps ?? []
     : [];
-  const hero = visibleNodes.length === 0 && status === 'idle' && composerState?.phase !== 'submitting';
-  const resolvedTitle = title ?? view?.summary.title ?? t('ai.newConversation');
+  const hero = !sessionLoading && visibleNodes.length === 0 && status === 'idle' && composerState?.phase !== 'submitting';
+  const resolvedTitle = title ?? view?.summary.title
+    ?? sessions.find((summary) => summary.id === selectedSessionId)?.title
+    ?? t('ai.newConversation');
   const heroTitle = scope === 'terminal'
     ? t('agent.emptyTitle')
     : t('ai.workbench.emptyTitle');
   const heroDescription = scope === 'terminal'
     ? t('agent.emptyDescription')
     : t('ai.workbench.empty');
-  const route = navigation.route;
   const sessionLedgerKey = view ? sessionRouteKey(view.summary.kind, view.summary.id) : null;
   const scrollAnchor = sessionLedgerKey
     ? navigation.scrollAnchorBySession[sessionLedgerKey]
@@ -261,8 +266,9 @@ export function AiWorkspaceRoot({
         <div
           data-slot="ai-workspace-content"
           className="ai-workspace-content"
+          aria-busy={sessionLoading || undefined}
         >
-          {hero ? (
+          {sessionLoading ? null : hero ? (
             <AiEmptyHero
               title={heroTitle}
               description={heroDescription}

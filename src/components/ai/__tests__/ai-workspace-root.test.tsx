@@ -81,6 +81,28 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiWorkspaceRoot Phase 3 skeleton', () => {
+  it('keeps the conversation layout and title while a history entry loads', async () => {
+    const view = agentView();
+    const navigation = createAiWorkspaceNavigationState(view.summary.id);
+    const { container, rerender } = render(
+      <AiWorkspaceRoot view={null} scope="workbench" navigation={navigation} sessions={[view.summary]} />,
+    );
+    const composer = screen.getByTestId('ai-workspace-composer');
+
+    expect(container.querySelector('[data-slot="ai-workspace-root"]')).toHaveAttribute('data-phase', 'active');
+    expect(container.querySelector('[data-slot="ai-empty-hero"]')).toBeNull();
+    expect(screen.getByRole('heading', { name: view.summary.title })).toBeVisible();
+    expect(container.querySelector('[data-slot="ai-workspace-content"]')).toHaveAttribute('aria-busy', 'true');
+    // Mount the scroller only with the transcript so its initial anchor is available.
+    expect(container.querySelector('[data-message-scroller-viewport]')).toBeNull();
+
+    rerender(<AiWorkspaceRoot view={view} scope="workbench" navigation={navigation} sessions={[view.summary]} />);
+    expect(container.querySelector('[data-slot="ai-workspace-root"]')).toHaveAttribute('data-phase', 'active');
+    expect(screen.getByTestId('ai-workspace-composer')).toBe(composer);
+    await waitFor(() => expect(screen.getByText('Check nginx now.')).toBeVisible());
+    expect(container.querySelector('[data-slot="ai-workspace-content"]')).not.toHaveAttribute('aria-busy', 'true');
+  });
+
   it('opens history over the conversation and preserves its draft and expanded process when dismissed', async () => {
     const user = userEvent.setup();
     const base = agentView();

@@ -99,15 +99,19 @@ export function AiArtifactDetails({
     | { readonly kind: 'loaded'; readonly artifact: AgentArtifactResponse }
     | { readonly kind: 'error'; readonly message: string }
   >({ kind: 'loading' });
+  const artifactId = node?.artifactId;
+  const artifactSha256 = node?.sha256;
 
+  // Streaming rebuilds conversation nodes; reload only when the artifact or its
+  // content revision changes so an already visible preview stays mounted.
   useEffect(() => {
     let active = true;
-    if (!node) {
+    if (artifactId === undefined) {
       setState({ kind: 'error', message: t('ai.workspace.details.notInWindow') });
       return () => { active = false; };
     }
     setState({ kind: 'loading' });
-    void load(sessionId, node.artifactId, ARTIFACT_PREVIEW_BYTES).then(
+    void load(sessionId, artifactId, ARTIFACT_PREVIEW_BYTES).then(
       (artifact) => { if (active) setState({ kind: 'loaded', artifact }); },
       (error: unknown) => {
         if (active) setState({
@@ -117,7 +121,7 @@ export function AiArtifactDetails({
       },
     );
     return () => { active = false; };
-  }, [load, node, sessionId, t]);
+  }, [load, artifactId, artifactSha256, sessionId, t]);
 
   return (
     <div className="ai-details-root" data-slot="ai-artifact-details">

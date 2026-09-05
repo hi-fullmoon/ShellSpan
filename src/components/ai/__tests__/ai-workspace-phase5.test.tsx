@@ -339,6 +339,33 @@ describe('AI workspace Phase 5 workflows', () => {
     );
     expect(await screen.findByText('lazy report')).toBeVisible();
     expect(loadArtifact).toHaveBeenCalledWith('agent-phase5', 'report', 256 * 1024);
+
+    // Streaming projections recreate the artifact node even when its content is unchanged.
+    const preview = screen.getByText('lazy report');
+    for (let throughSeq = 9; throughSeq < 12; throughSeq += 1) {
+      rerender(
+        <AiWorkspaceRoot
+          view={{ ...agentView(), throughSeq, nodes: [tool, { ...artifact }] }}
+          scope="terminal"
+          navigation={{ ...initial, route: { kind: 'artifactDetails', sessionId: 'agent-phase5', artifactId: 'report' } }}
+          loadArtifact={loadArtifact}
+        />,
+      );
+      expect(screen.queryByText('lazy report')).toBe(preview);
+      expect(loadArtifact).toHaveBeenCalledTimes(1);
+    }
+
+    // A real content revision still invalidates the preview.
+    rerender(
+      <AiWorkspaceRoot
+        view={{ ...agentView(), nodes: [tool, { ...artifact, sha256: 'updated-content' }] }}
+        scope="terminal"
+        navigation={{ ...initial, route: { kind: 'artifactDetails', sessionId: 'agent-phase5', artifactId: 'report' } }}
+        loadArtifact={loadArtifact}
+      />,
+    );
+    expect(await screen.findByText('lazy report')).toBeVisible();
+    expect(loadArtifact).toHaveBeenCalledTimes(2);
   });
 
   it.each([320, 400, 720])('keeps Session Browser single-column at %d px and confirms archive', async (width) => {
@@ -360,9 +387,9 @@ describe('AI workspace Phase 5 workflows', () => {
       </div>,
     );
     expect(container.querySelectorAll('aside')).toHaveLength(0);
-    expect(screen.getByText('Historical task')).toBeVisible();
+    await waitFor(() => expect(screen.getByText('Historical task')).toBeVisible());
     const sessionRow = screen.getByRole('treeitem');
-    const actionsButton = container.querySelector<HTMLButtonElement>('.ai-session-row-menu');
+    const actionsButton = sessionRow.querySelector<HTMLButtonElement>('.ai-session-row-menu');
     expect(actionsButton).not.toBeNull();
     fireEvent.click(actionsButton!);
     fireEvent.mouseLeave(sessionRow);

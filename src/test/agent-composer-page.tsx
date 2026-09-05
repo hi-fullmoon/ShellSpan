@@ -17,6 +17,7 @@ interface ComposerScene {
   status: AiSessionStatus;
   hero: boolean;
   terminal: boolean;
+  unavailableReason?: string | null;
 }
 
 const base = agentSessionBaselineView(agentSessionBaselineScenario('hello'));
@@ -36,7 +37,8 @@ function ComposerPage() {
     style={{ width: '100vw', height: '100vh' }}>
     <AiWorkspaceRoot
       view={scene.hero ? null : { ...base, status: scene.status, summary: { ...base.summary, id: scene.owner } }}
-      scope="workbench" canStartAgent
+      scope="workbench" canStartAgent={!scene.unavailableReason}
+      agentUnavailableReason={scene.unavailableReason}
       composerState={createAiComposerState({ sessionId: scene.hero ? null : scene.owner, draft: scene.draft,
         runtimeStatus: scene.status, terminal: scene.terminal })}
       skillsScopeKey={scene.owner}
