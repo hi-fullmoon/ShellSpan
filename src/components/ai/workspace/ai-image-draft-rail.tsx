@@ -22,7 +22,7 @@ function PendingImage({ file }: { file: File }) {
       <Skeleton className="absolute inset-0 size-full motion-reduce:animate-none" />
       {source && <img className="relative" src={source} alt={file.name} />}
     </AttachmentMedia>
-    {source && <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open" aria-label={`${t('ai.workspace.images.preview')} ${file.name}`} title={file.name} />} />}
+    {source && <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open" aria-label={`${t('ai.workspace.images.preview')} ${file.name}`} />} />}
     <span className="ai-image-thumbnail-loading" aria-hidden="true"><Spinner className="motion-reduce:animate-none" /></span>
   </Attachment></AiImagePreview>;
 }
@@ -77,7 +77,7 @@ export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, erro
             <AttachmentMedia variant="image" className="ai-image-thumbnail-media">
               <img src={source} alt={image.name} />
             </AttachmentMedia>
-            <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open" aria-label={`${t('ai.workspace.images.preview')} ${image.name}`} title={image.name} />} />
+            <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open" aria-label={`${t('ai.workspace.images.preview')} ${image.name}`} />} />
             <AttachmentActions className="ai-image-thumbnail-actions">
               <AttachmentAction variant="secondary" className="ai-image-thumbnail-remove" aria-label={`${t('ai.workspace.images.remove')} ${image.name}`} disabled={busy || locked} onClick={() => onRemove(index)}><XIcon /></AttachmentAction>
             </AttachmentActions>

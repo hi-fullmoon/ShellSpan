@@ -29,7 +29,7 @@ export function AiImageDraftControls({ state, selection }: { state: ReturnType<t
     {!!(state.draft?.images.length || state.pendingFiles.length) && <>
       <div className="flex min-w-0 items-center gap-2">
         <AiImageDraftRail key={state.owner} images={state.draft?.images ?? []} pendingFiles={state.pendingFiles} busy={state.busy} locked={state.locked} error={Boolean(state.error)} onRemove={index => void state.remove(index)} />
-        {(state.busy || state.locked) && <Button variant="ghost" size="icon-xs" aria-label={t('common.cancel')} title={t('common.cancel')} onClick={() => void state.cancel()}><XIcon /></Button>}
+        {(state.busy || state.locked) && <Button variant="ghost" size="icon-xs" aria-label={t('common.cancel')} onClick={() => void state.cancel()}><XIcon /></Button>}
       </div>
       <span className="sr-only" role="status">{state.pendingFiles.length ? t('ai.workspace.images.processing', { count: state.pendingFiles.length }) : t(state.locked ? 'ai.workspace.images.unconfirmed' : 'ai.workspace.images.draft')}</span>
     </>}
@@ -52,7 +52,7 @@ function CommittedImage({ sessionId, image }: { sessionId: string; image: AgentI
         : result.url ? <img src={result.url} alt={image.name} />
         : <Spinner className="motion-reduce:animate-none" />}
     </AttachmentMedia>
-    {result.url && <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open" aria-label={`${t('ai.workspace.images.preview')} ${image.name}`} title={image.name} />} />}
+    {result.url && <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open" aria-label={`${t('ai.workspace.images.preview')} ${image.name}`} />} />}
   </Attachment></AiImagePreview>;
 }
 export function AiCommittedImages({ sessionId, images }: { sessionId: string; images?: readonly AgentImageRef[] }) {

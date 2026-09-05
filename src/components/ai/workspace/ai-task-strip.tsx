@@ -62,7 +62,7 @@ export function AiTaskStrip({ steps }: AiTaskStripProps): React.ReactNode {
       >
         <ListTodoIcon aria-hidden="true" data-icon="inline-start" />
         <span className="ai-task-strip-title">{t('ai.workspace.tasks.title')}</span>
-        <span id={progressId} className="ai-task-strip-progress truncate" title={progress}>
+        <span id={progressId} className="ai-task-strip-progress truncate">
           {progress}
         </span>
         {open
@@ -77,7 +77,7 @@ export function AiTaskStrip({ steps }: AiTaskStripProps): React.ReactNode {
                 <TaskStatusIcon status={step.status} />
               </span>
               <span className="sr-only">{t(`ai.workspace.tasks.status.${step.status}`)}: </span>
-              <span className="min-w-0 truncate" title={step.detail ? `${step.title}\n${step.detail}` : step.title}>
+              <span className="min-w-0 truncate">
                 {step.title}
               </span>
             </li>

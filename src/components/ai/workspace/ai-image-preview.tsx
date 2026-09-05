@@ -83,14 +83,14 @@ function ImagePreviewContent({ source, name, onClose }: { source: string; name: 
       />
     </div>
     <div className="image-preview-actions">
-      <DialogClose render={<Button ref={closeButton} variant="secondary" size="icon" className="size-11 rounded-full" aria-label={t('common.close')} title={t('common.close')} />}><XIcon /></DialogClose>
+      <DialogClose render={<Button ref={closeButton} variant="secondary" size="icon" className="size-11 rounded-full" aria-label={t('common.close')} />}><XIcon /></DialogClose>
     </div>
     <div className="image-preview-zoom" role="group" aria-label={t('ai.workspace.images.zoom')}>
-      <Button variant="secondary" size="icon" className="size-10 rounded-full" aria-label={t('ai.workspace.images.zoomOut')} title={t('ai.workspace.images.zoomOut')} disabled={status !== 'ready' || view.zoom <= MIN_ZOOM} onClick={() => zoomBy(-25)}><MinusIcon /></Button>
-      <Button variant="plain" className="min-w-16 rounded-full tabular-nums" aria-label={t('ai.workspace.images.resetZoom')} title={t('ai.workspace.images.resetZoom')} disabled={status !== 'ready'} onClick={reset}>
+      <Button variant="secondary" size="icon" className="size-10 rounded-full" aria-label={t('ai.workspace.images.zoomOut')} disabled={status !== 'ready' || view.zoom <= MIN_ZOOM} onClick={() => zoomBy(-25)}><MinusIcon /></Button>
+      <Button variant="plain" className="min-w-16 rounded-full tabular-nums" aria-label={t('ai.workspace.images.resetZoom')} disabled={status !== 'ready'} onClick={reset}>
         <span aria-live="polite" aria-atomic="true">{view.zoom}%</span>
       </Button>
-      <Button variant="secondary" size="icon" className="size-10 rounded-full" aria-label={t('ai.workspace.images.zoomIn')} title={t('ai.workspace.images.zoomIn')} disabled={status !== 'ready' || view.zoom >= MAX_ZOOM} onClick={() => zoomBy(25)}><PlusIcon /></Button>
+      <Button variant="secondary" size="icon" className="size-10 rounded-full" aria-label={t('ai.workspace.images.zoomIn')} disabled={status !== 'ready' || view.zoom >= MAX_ZOOM} onClick={() => zoomBy(25)}><PlusIcon /></Button>
     </div>
   </DialogContent>;
 }

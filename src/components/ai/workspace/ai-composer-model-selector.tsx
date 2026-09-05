@@ -149,7 +149,6 @@ export function AiComposerModelSelector({
             className="ai-model-trigger"
             disabled={disabled || current === undefined || groups.length === 0}
             aria-label={t('ai.workspace.model.trigger', { selection: triggerLabel })}
-            title={triggerLabel}
           />
         )}
       >

@@ -151,7 +151,6 @@ function SessionRow({
   const canArchive = !summary.archived && !active;
   const hasActions = canRename || canArchive;
   const status = sessionStatusLabel(summary.status, t);
-  const title = `${summary.title} · ${status}`;
 
   return (
     <div
@@ -167,7 +166,6 @@ function SessionRow({
         className="ai-session-row-main"
         onClick={onOpen}
         aria-current={selected ? 'page' : undefined}
-        title={title}
       >
         <span className="ai-session-row-status" data-state={summary.status} aria-hidden="true" />
         <span className="ai-session-row-title">{summary.title}</span>

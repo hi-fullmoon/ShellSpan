@@ -226,7 +226,7 @@ export function AiQueueDock({
                 </form>
               ) : (
                 <div className="ai-queue-row-content">
-                  <span className="min-w-0 flex-1 truncate" title={item.content}>{item.content}</span>
+                  <span className="min-w-0 flex-1 truncate">{item.content}</span>
                   {item.lane === 'nextStep' && <Badge variant="secondary">{t('ai.workspace.queue.lane.nextStep')}</Badge>}
                   {item.state === 'pending' && (
                     <Spinner aria-label={t('ai.workspace.queue.state.pending')} />
