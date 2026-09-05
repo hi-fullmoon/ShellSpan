@@ -78,6 +78,7 @@ function agentDependencies(
     followup: vi.fn(async () => snapshot()),
     steer: vi.fn(async () => snapshot()),
     stop: vi.fn(async () => snapshot()),
+    resume: vi.fn(async () => snapshot()),
     approve: vi.fn(async () => snapshot()),
     reject: vi.fn(async () => snapshot()),
     answerQuestion: vi.fn(async () => snapshot()),
@@ -119,6 +120,40 @@ function agentDependencies(
 }
 
 describe('AgentSessionAdapter', () => {
+  it.each(['cancelled', 'failed', 'completed'] as const)('resumes an ended %s session before starting and submitting', async status => {
+    const base = agentSessionEventFixture[0]!;
+    const events: AgentSessionEvent[] = [base, { ...base, seq: 1, type: 'session/ended', data: { status } }];
+    const dependencies = agentDependencies(events);
+    const order: string[] = [];
+    const resume = vi.fn(async () => {
+      order.push('resume');
+      events.push({ ...base, seq: 2, type: 'session/resumed', data: {} });
+      return snapshot();
+    });
+    const start = vi.fn(async () => { order.push('start'); return snapshot(); });
+    const followup = vi.fn(async () => { order.push('followup'); return snapshot(); });
+    const adapter = createAgentSessionAdapter({ ...dependencies, resume, start, followup });
+    await adapter.submit('session-fixture', { content: 'continue', mode: 'nextTurn', clientOperationId: 'continue-1', provider });
+    expect(order).toEqual(['resume', 'start', 'followup']);
+    expect((await adapter.open('session-fixture')).snapshot.value.ended).toBe(false);
+    expect((await adapter.open('session-fixture')).status).toBe('idle');
+    adapter.dispose();
+  });
+
+  it('repairs a lost stop event before acknowledging the stop', async () => {
+    const base = agentSessionEventFixture[0]!;
+    const events: AgentSessionEvent[] = [base, { ...base, seq: 1, type: 'agent/status', data: { status: 'running' } }];
+    const dependencies = agentDependencies(events);
+    const stop = vi.fn(async () => {
+      events.push({ ...base, seq: 2, type: 'agent/status', data: { status: 'idle', reason: 'stoppedByUser' } });
+      return snapshot();
+    });
+    const adapter = createAgentSessionAdapter({ ...dependencies, stop });
+    await adapter.open('session-fixture');
+    await adapter.stop('session-fixture');
+    expect((await adapter.open('session-fixture')).status).toBe('idle');
+    adapter.dispose();
+  });
   it('prefers provider-reported prompt usage while retaining Runtime-estimated categories', () => {
     const events: readonly AgentSessionEvent[] = [
       ...agentSessionEventFixture.slice(0, 10),
