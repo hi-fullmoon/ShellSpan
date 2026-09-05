@@ -147,7 +147,8 @@ it('keeps the current session selection when a model change fails', async () => 
   const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
   await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
   await act(async () => result.current.selectModel({ ...provider, model: 'second-model' }));
-  expect(result.current.announcement).toBe('Provider unavailable');
+  expect(result.current.composer.lastError?.message).toBe('Provider unavailable');
+  expect(result.current.announcement).toBeNull();
   expect(result.current.settingsBusy).toBe(false);
   expect(result.current.modelLabel).toBe(provider.model);
 });
@@ -717,7 +718,7 @@ describe('AiWorkspaceController', () => {
 
     await user.type(textbox, 'newer draft');
     rejectSubmit?.(new Error('Network disconnected'));
-    await waitFor(() => expect(screen.getByText('Input was not delivered')).toBeVisible());
+    await waitFor(() => expect(screen.getByText('Action failed')).toBeVisible());
     expect(textbox.textContent).toBe('newer draft');
     expect(screen.getAllByText('first input')).toHaveLength(2);
   });

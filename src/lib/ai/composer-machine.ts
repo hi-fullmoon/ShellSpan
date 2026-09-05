@@ -85,6 +85,7 @@ export type AiComposerEvent =
   | Readonly<{ type: 'stop.requested' }>
   | Readonly<{ type: 'stop.succeeded' }>
   | Readonly<{ type: 'stop.failed'; error: AiSessionError }>
+  | Readonly<{ type: 'error.reported'; error: AiSessionError }>
   | Readonly<{ type: 'error.dismissed' }>;
 
 export interface AiComposerTransition {
@@ -353,9 +354,11 @@ export function reduceAiComposer(
         state: { ...state, phase: 'error', lastError: event.error },
         effects: [{ type: 'announce', reason: 'submissionFailed' }],
       };
+    case 'error.reported':
+      return { state: { ...state, lastError: event.error }, effects: [] };
     case 'error.dismissed':
       return {
-        state: { ...state, phase: runtimePhase(state), lastError: null },
+        state: { ...state, phase: state.phase === 'error' ? runtimePhase(state) : state.phase, lastError: null },
         effects: [],
       };
   }

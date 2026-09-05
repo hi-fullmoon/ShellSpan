@@ -23,6 +23,15 @@ function runningState(draft = 'Queue this'): AiComposerState {
 }
 
 describe('reduceAiComposer', () => {
+  it.each(['running', 'submitting', 'waitingApproval', 'waitingQuestion'] as const)(
+    'reports and dismisses action errors without changing the %s phase', phase => {
+      const state = createAiComposerState({ ...runningState(), phase });
+      const reported = dispatch(state, { type: 'error.reported', error: retryableError });
+      expect(reported.state).toEqual({ ...state, lastError: retryableError });
+      expect(reported.effects).toEqual([]);
+      expect(dispatch(reported.state, { type: 'error.dismissed' }).state).toEqual(state);
+    },
+  );
   it.each([
     ['idle', 'idle', false, 'idle'],
     ['running', 'running', false, 'running'],
