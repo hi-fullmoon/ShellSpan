@@ -2,6 +2,282 @@
 
 All notable changes to ShellSpan are documented in this file.
 
+
+## [v2.0.56](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.56) - 2026-09-07
+
+
+### Bug Fixes
+
+- **term:** capture PowerShell command status in scope
+- **runtime:** durably chunk oversized UTF-8 stream deltas
+- handle whitespace-only blocks and gate tools by session target
+- **ai:** harden provider configuration flow
+- **agent:** hide terminal wrapper protocol
+- **ai:** integrate safety and reliability hardening
+- **term:** preserve native PowerShell exit codes
+- **ai:** prevent duplicate tool call ids
+- **m6:** qualify Windows PTY test channel
+- **i18n:** rerender after locale initialization
+- **ai:** retry conversation persistence safely
+- **agent:** stabilize Windows PowerShell supervision
+- stabilize Windows agent terminal execution
+- **deployment:** use checked usize conversion for sqlite rollout integers
+- **term:** use standard VT input mode for ConPTY
+
+### CI/CD
+
+- run petdex phase 0 contract probe in quality gate
+
+### Chore
+
+- **locales:** add Ask mode copy for en-US and zh-CN
+- **deps:** add lexical and related dependencies
+- **petdex:** add phase 3 and phase 4 admission gate scripts
+- **ai:** capture phase 0 and phase 5 alignment evidence
+- drop legacy Agent library tests
+- **agent:** drop legacy contract schemas and v2 evaluation baseline
+- **scripts:** drop retired handoff scripts
+- integrate Petdex main with agent M0-M6
+- localize and style the AI Workspace surfaces
+- **ui:** refresh AI composer seat and queue dock
+- **github:** refresh CODEOWNERS and PR template
+- refresh locales, config, benchmark and live smoke script
+- **ui:** refresh spinner, base styles and main entry
+- **ui:** refresh terminal, sftp, workbench, base UI, hooks and locales
+- **hooks:** refresh useAppShortcuts
+- **agent:** relocate shared AI test fixtures
+- **db:** remove legacy operation history data
+- **i18n:** sync en and zh locale strings
+- **i18n:** sync zh and en strings
+- **i18n:** sync zh/en strings for composer and skills
+- **deps:** trim unused portable-pty constants
+- **agent:** update agent UI controller and title bar
+- **tauri:** update agent runtime images module
+- **core:** update backend, stores, types, locales, and shell
+- **scripts:** update browser scripts for contenteditable composer
+- **scripts:** update petdex phase 4 admission gate
+- update remaining files
+- update remaining files
+- update remaining files
+- update remaining files
+- update remaining files
+- **scripts:** update stage6c browser runtime script
+- update terminal scaffolding and AI sessions tests
+
+### Documentation
+
+- **ai:** add DeepSeek Harness implementation plan for AI panel
+- **llm:** add adapter architecture and implementation progress
+- **petdex:** add integration roadmap and validation evidence
+- **product-roadmap:** add termbridge agent roadmap
+- **agent:** complete terminal agent final acceptance pass
+- **agent:** consolidate Agent documentation under unified runtime
+- consolidate runtime contract and retire historical stage docs
+- **roadmap:** document Ask/Agent mode and v2 contract
+- **petdex:** document runtime boundaries and link from phase 0
+- **roadmap:** mark M4 complete
+- **agent:** record MiniMax live acceptance
+- **m6:** record acceptance waivers and completion
+- **agent:** record cross-machine M4 checkpoint
+- **ai:** record paused rollout and cross-device continuation
+- **m6:** record real Windows acceptance evidence
+- **ai:** record v3 runtime and workspace implementation outcome
+- **ai:** refresh agent runtime and terminal agent docs
+- **runtime:** refresh agent runtime and terminal agent notes
+- **ai:** refresh runtime docs and add phase 0 alignment plan
+- remove petdex roadmap and refine phase 4 admission docs
+- retire stale documentation corpus
+- streamline README intro and structure
+
+### Features
+
+- **agent:** add P2 v2 protocol state machines
+- **runtime:** add Qwen and GLM provider profiles
+- **agent:** add audited terminal coordinator
+- **petdex:** add backend lifecycle notification module
+- **ai:** add completion popover anchored to composer
+- **ai:** add conversation history dialog and session deletion backend
+- **agent:** add dedicated terminal workspace
+- **runbook:** add deployment v2 contract validation
+- add deterministic deployment rollouts
+- **agent:** add fenced terminal interaction protocol
+- **agent:** add fenced terminal lease foundation
+- **petdex:** add frontend integration library with settings toggle
+- **ai:** add history section to AI settings
+- **ai:** add local agent data clearing to settings
+- **ai:** add multi-model adapter architecture
+- **ui:** add popover primitive from base-ui
+- **ai:** add provider setup dialog
+- **deployment:** add reviewed user workflow
+- **agent:** add secure v3 runtime foundations
+- **ai:** add session adapters, projection and composer state machines
+- **ai:** add session interruption and resumption to backend runtime
+- **terminal:** add trackpad swipe carousel navigation
+- **ai:** add unified AI Workspace controller and seats
+- **protocol:** add v2 agent contract schema and fixtures
+- **ai:** add v2 contract types and ask task support
+- **runtime:** add v3 inbox mutation envelope and revision guards
+- **ai:** add zoomable image preview dialog
+- **runtime:** adjust agent prompt assembly
+- **settings:** align AI settings store with composer seat refresh
+- **runtime:** align providers with DeepSeek V4 and MiniMax contracts
+- **ai:** allow any command to be inserted into bound terminal
+- **agent:** complete M1 model tool loop
+- **agent:** complete M3 permissions and approval
+- **ai:** complete M4 agent product interface
+- **agent:** complete M4 recovery controls
+- **agent:** complete M5 fleet orchestration
+- **agent:** complete M5 persistence redaction and audit
+- **agent:** complete M7 phased rollout
+- **terminal:** coordinate selection guard with composer focus
+- **ai:** dedupe system prompt snapshots with request/start events
+- **agent:** defer provider capability probe and cache results
+- **petdex:** emit petdex events from ai, session and sftp commands
+- **agent:** establish M0 contracts and safety gate
+- **runbook:** execute reviewed single-host deployments
+- **ai:** expand reasoning effort options and move selector to panel
+- **vision:** expand vision contract and add image error helpers
+- **ai:** extend runtime event schema with interruption payloads
+- **lib:** extract composer submission policy module
+- **ai:** gate composer send/stop on explicit primary action
+- **runtime:** harden agent inbox, recovery, and skill wiring
+- **agent:** implement M2 PTY execution
+- **agent:** implement P2-A structured evidence and local risk engine
+- **runtime:** integrate Stage 6A-6D and final Stage 7 hardening
+- **ai:** integrate completion popover into workspace root
+- **ai:** integrate verified runtime hardening through stage 5
+- **ai:** isolate composer editor undo history per owner
+- **ai:** localize and recover from archive rejections
+- **ai:** localize interruption and resumption copy
+- **agent:** merge P2-0 protocol foundation
+- **agent:** merge P2-A evidence and risk foundation
+- **term:** merge audited agent terminal control
+- **ai:** paginate session list across cursors safely
+- **runbook:** persist executions and add reviewed rollback
+- **ai:** persist unsent AI drafts via shared store
+- **ai:** rebuild composer, skill completion, and image rail surfaces
+- **ai:** refine image draft rail and attachments
+- **ai:** refresh session adapters, projections and types
+- **agent:** replace generate-command fallback with read-only Ask
+- **workbench:** route agent files page through shared workspace shell
+- **ai:** route image-only drafts through image submission
+- **agent:** safely archive busy agent sessions
+- **skills:** ship builtin skill catalog and runtime loader
+- **ai:** show empty state for agent conversation history
+- **workbench:** show full connection notes in tooltip when truncated
+- **ai:** support Kimi K3 reasoning effort
+- **ai:** surface interruption controls and paused inbox in workspace ui
+- **ai:** switch composer to contenteditable editor
+- **ai:** switch panel to Ask/Agent dual mode with new input group
+- **ai:** track scope on AI session metadata
+- **workbench:** update AI workspace UI components
+- **runtime:** update agent runtime for session model and images
+- **lib:** wire builtin skills, completion, and projection contracts
+- **ai:** wire interruption and resumption into frontend state and ipc
+
+### Other
+
+- **agent:** checkpoint M4 recovery controls
+
+### Performance
+
+- **ai:** add long-conversation benchmark wiring
+- **ai:** refresh long-conversation benchmark and scripts
+
+### Refactoring
+
+- **ai:** adjust workspace composition and tests
+- **runtime:** align agent runtime to Event v4 contract
+- **ai:** align reasoning lib and adapter contracts
+- **agent:** align surviving Agent UI wiring with new runtime
+- **ai:** consolidate AI workspace surfaces and shared state
+- **ai:** consolidate workspace surfaces and retire legacy ai-content
+- **ai:** drop bulk delete from conversation history dialog
+- **workbench:** drop inline icons from action buttons
+- **deployment:** encode hashes explicitly and name all error categories
+- **runtime:** extract native authorization helper
+- extract shared SettingRow and SettingsGroup layout
+- **ai:** group system prompt snapshots across request series by turn
+- **ai:** hide internal session id in AgentApprovalCard target label
+- **ai:** hoist alerts above conversation in AI panel and Agent run view
+- **runtime:** isolate development and production data stores
+- move AI provider API keys to OS keychain
+- **workbench:** move petdex settings into new experimental section
+- **lib:** organize modules by domain
+- **workbench:** polish connection, host and settings components
+- **ai:** refine agent permission, approval and assistant UX
+- **workbench:** refresh monitor, settings, remote health, and update sections
+- remove operation history feature
+- rename project from TermBridge to ShellSpan
+- **terminal:** replace trackpad carousel hook with native scroll viewport
+- **agent:** replace v3 runtime with unified agent_runtime module
+- retire Deployment Runbook v2 subsystem
+- retire Runbook v1 and multi-host executor
+- **ai:** retire legacy Agent UI surfaces and approval shim
+- **ai:** retire legacy ask adapter, aiStore and session helpers
+- **agent:** retire milestone Agent UI surfaces and tests
+- **agent:** retire the Diagnostic Agent subsystem
+- **ai:** route AiPanel through Workspace and refresh base primitives
+- **petdex:** split into arbiter, delivery, transport, types modules
+- **agent:** split tool-result broker into prepare and wait phases
+- **ui:** standardize dialog and panel padding to 16px
+- **runtime:** streamline agent runtime driver, events and petdex
+- **ai:** surface composer errors through state machine
+- **ai:** update agent approval, permission, and panel
+- **stores:** update appStore and tests
+- **ui:** update button and confirm-delete dialog
+- **workbench:** update connection form and connect session hook
+- **terminal:** update pane, tab bar, registry and shortcuts
+- **stores:** update port forward, remote health, and transfer stores
+- **workbench:** update settings panel and tests
+- **sftp:** update sftp tab bar
+- **ui:** update shared UI primitives
+- **terminal:** update terminal component and store
+- **terminal:** update terminal store and components
+- **workbench:** update workbench components and panels
+
+### Style
+
+- **ui:** drop focus-visible border from input-group
+- **ai:** drop redundant title attributes from workspace controls
+- **ai:** refine empty hero layout and copy
+- **ai:** share scrollbar width styling with semantic note body
+- **ai:** size permission trigger and menu icons
+- **ai:** widen semantic note scrollbar to 6px
+
+### Testing
+
+- **agent:** add MiniMax live provider acceptance
+- **petdex:** add backend contract probe and frontend unit tests
+- **ai:** add browser checks for agent composer
+- **ai:** add shared agent and ask streaming fixtures
+- **ai:** add workspace recovery coverage
+- **e2e:** align Stage 6B/6C/6D scripts with skill completion redesign
+- **m6:** bound native PTY acceptance
+- **ai:** characterize updated AiPanel and Agent permissions
+- **agent-terminal:** close phase 5 acceptance
+- **ai:** cover AI workspace controller and seat units
+- **ai:** cover Ask/Agent dual mode and v2 contract
+- **lib:** cover agent sessions, projections, and conversation state
+- **ai:** cover ai library state machines, adapters and runtime bridge
+- **runtime:** cover inbox steering, skill bridge, and image flows
+- **ai:** cover interruption flow in browser scripts
+- **ai:** cover runtime-safe Agent target identifier
+- **m6:** drive ConPTY through interactive PowerShell
+- **ai:** expand workspace, composer, and identity coverage
+- **ai:** extend workspace and composer coverage for interruption flow
+- finalize M6 acceptance evidence
+- **m6:** keep ConPTY input alive through shell exit
+- **m6:** mirror production ConPTY I/O order
+- preserve M6 security acceptance progress
+- **m6:** read ConPTY after bounded child exit
+- **ai:** refresh workspace and projection suites
+- **ai:** refresh workspace and projection suites for v4 runtime
+- **m6:** send ConPTY terminal enter as carriage return
+- **agent:** stabilize Windows shell acceptance deadlines
+- **m6:** stream ConPTY output before teardown
+- **ai:** update AI workspace and session adapter tests
+- **ai:** update composer tests for contenteditable editor
 ## [v2.1.0](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.1.0) - 2026-08-30
 
 ### Features
