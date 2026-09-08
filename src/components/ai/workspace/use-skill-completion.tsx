@@ -65,6 +65,9 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
     requestAnimationFrame(() => {
       if (editor.current?.value === next.text) {
         editor.current.focus(); editor.current.setSelectionRange(next.caret, next.caret);
+        // The controlled value update briefly moves the caret to the draft's end,
+        // clearing dismissal. Keep the selected skill closed when restoring its caret.
+        setDismissed(JSON.stringify([scopeKey, next.text, next.caret, next.caret]));
       }
     });
   };
