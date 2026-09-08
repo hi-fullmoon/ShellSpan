@@ -9,7 +9,7 @@ import { useAppStore } from '@/stores/appStore';
 import type { SkillUserList } from '@/types/agent-skill';
 
 beforeEach(async () => { Element.prototype.scrollIntoView = vi.fn(); useAppStore.setState({ locale: 'en-US' }); await initI18n('en-US'); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('slash skill menu', () => {
   it('lists without a directory, filters locally, inserts with keyboard and sends only after selection', async () => {
@@ -31,8 +31,12 @@ describe('slash skill menu', () => {
     render(<AiComposerSeat phase="hero" status="idle" defaultDraft="check /syszzz then /var/log" onListSkills={query} />);
     const editor = screen.getByRole('textbox') as HTMLDivElement;
     await user.click(editor); await act(async () => selectEditorText(editor, 10, 10));
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => frames.push(callback));
     await user.click(await screen.findByRole('option', { name: /system-status/ }));
     expect(editor.textContent).toBe('check /system-status then /var/log');
+    // Restore the insertion caret after the controlled editor value has committed.
+    await act(async () => { frames.splice(0).forEach(callback => callback(performance.now())); });
     expect(screen.queryByRole('listbox')).toBeNull();
     await act(async () => selectEditorText(editor, editor.textContent!.length, editor.textContent!.length));
     expect(screen.queryByRole('listbox')).toBeNull();
