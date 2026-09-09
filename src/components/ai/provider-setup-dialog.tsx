@@ -69,7 +69,7 @@ import {
   OpenAiBrandIcon,
 } from './provider-brand-icons';
 
-import { PROVIDER_PROFILE_IDS, resolveProviderProfile, useResolvedModel, profileProtocol, loadResolvedModel, type ModelDefinition, type Support } from '@/lib/ai/provider-contract';
+import { PROVIDER_PROFILE_IDS, resolveProviderProfile, useResolvedModel, profileProtocol, type ModelDefinition } from '@/lib/ai/provider-contract';
 
 type ProviderDraft = Omit<AiProviderProfile, 'id'> & { apiKey?: string };
 
@@ -282,23 +282,6 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   };
 
 
-  const updateDefinition = (changes: Partial<ModelDefinition>): void => {
-    if (draft?.modelDefinition) updateDraft({ modelDefinition: { ...draft.modelDefinition, ...changes } });
-  };
-  const enableDeclaration = async (): Promise<void> => {
-    if (!draft) return;
-    const identity = draft;
-    try {
-      const definition = resolution.status === 'ready' ? {
-        contextWindow: resolution.model.contextWindow, maxOutputTokens: resolution.model.maxOutputTokens,
-        toolCalling: resolution.model.toolCalling, textInput: resolution.model.textInput,
-        imageInput: resolution.model.imageInput, reasoning: resolution.model.reasoning,
-        compat: resolution.model.compat, vision: resolution.model.vision,
-      } : await invoke<ModelDefinition>('ai_model_declaration_template', { provider: { id: provider?.id ?? 'draft', kind: draft.kind, profile: resolveProviderProfile(draft), baseUrl: draft.baseUrl, model: draft.model, requiresApiKey: false } });
-      setDraft(current => current === identity ? { ...current, modelDefinition: definition } : current);
-    } catch (error) { setFeedback({ kind: 'error', message: String(error) }); }
-  };
-
   const handlePresetChange = (preset: AiProviderPresetDefinition | null): void => {
     invalidateModelRequest();
     setShowApiKey(false);
@@ -374,8 +357,8 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
       } else if (!nativeRouteMode) {
         const newProviderId = addProvider(draft.preset, changes);
         providerId = newProviderId;
-      } else throw new Error('ROUTE_STATE_NOT_LOADED');
-      if (!providerId) throw new Error('No AI provider was saved');
+      } else throw new Error(t('settings.ai.routeStateUnavailable'));
+      if (!providerId) throw new Error(t('settings.ai.providerSaveFailed'));
       if (routeSnapshot) {
         const existing=routeSnapshot.routes.find(route=>route.id===providerId);
         const existingModels=existing?.models ?? Object.fromEntries((routeModels[providerId] ?? []).map(model=>[
@@ -410,7 +393,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <CompactDialogContent className="max-w-2xl [&_[data-slot=dialog-close]]:size-6">
         <CompactDialogHeader
-          title={addingModel ? 'Add model' : t(provider ? 'settings.ai.editProviderTitle' : 'settings.ai.addProviderTitle')}
+          title={addingModel ? t('settings.ai.addModelTitle') : t(provider ? 'settings.ai.editProviderTitle' : 'settings.ai.addProviderTitle')}
         />
 
         <form
@@ -599,35 +582,6 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 </Combobox>
               </Field>
             </FieldGroup>
-            {draft && <FieldGroup>
-              <Field>
-                <FieldDescription>{t('settings.ai.declaredHint')}</FieldDescription>
-                <Button variant="outline" size="sm" onClick={() => draft.modelDefinition ? updateDraft({ modelDefinition: undefined }) : void enableDeclaration()}>
-                  {t(draft.modelDefinition ? 'settings.ai.useCatalog' : 'settings.ai.declareModel')}
-                </Button>
-                {resolution.status === 'error' && <Button variant="ghost" size="sm" onClick={() => void loadResolvedModel({ ...draft, id: provider?.id ?? 'draft' }, true).catch(() => {})}>{t('settings.ai.capabilityRetry')}</Button>}
-              </Field>
-              {draft.modelDefinition && <>
-                <Field><FieldLabel htmlFor="model-context">{t('settings.ai.contextWindow')}</FieldLabel><Input id="model-context" type="number" value={draft.modelDefinition.contextWindow} onChange={e => updateDefinition({ contextWindow: Number(e.target.value) })} /></Field>
-                <Field><FieldLabel htmlFor="model-output">{t('settings.ai.maxOutput')}</FieldLabel><Input id="model-output" type="number" value={draft.modelDefinition.maxOutputTokens} onChange={e => updateDefinition({ maxOutputTokens: Number(e.target.value) })} /></Field>
-                {(['toolCalling', 'imageInput'] as const).map(field => <Field key={field}>
-                  <FieldLabel htmlFor={`model-${field}`}>{t(field === 'toolCalling' ? 'settings.ai.toolSupport' : 'settings.ai.imageSupport')}</FieldLabel>
-                  <Combobox items={['unknown', 'unsupported', 'supported'] as Support[]} value={draft.modelDefinition![field]} onValueChange={value => {
-                    if (!value) return;
-                    updateDefinition({ [field]: value, ...(field === 'imageInput' ? { vision: value === 'supported' ? {
-                      maxRequestImages: 20, maxRequestImageBytes: 20971520, reservedTokensPerImage: 4096,
-                      imageTokenBudgetPolicy: 'User-declared application admission estimate for normalized PNG; not provider usage.',
-                    } : undefined } : {}) });
-                  }}><ComboboxInput id={`model-${field}`} /><ComboboxContent><ComboboxList>{value => <ComboboxItem key={value} value={value}>{value}</ComboboxItem>}</ComboboxList></ComboboxContent></Combobox>
-                </Field>)}
-                {draft.modelDefinition.vision && (['maxRequestImages', 'maxRequestImageBytes', 'reservedTokensPerImage'] as const).map(field => <Field key={field}>
-                  <FieldLabel htmlFor={`model-${field}`}>{t(field === 'maxRequestImages' ? 'settings.ai.imageCount' : field === 'maxRequestImageBytes' ? 'settings.ai.imageBytes' : 'settings.ai.imageTokens')}</FieldLabel>
-                  <Input id={`model-${field}`} type="number" value={draft.modelDefinition!.vision![field]} onChange={e => updateDefinition({ vision: { ...draft.modelDefinition!.vision!, [field]: Number(e.target.value) } })} />
-                </Field>)}
-              </>}
-            </FieldGroup>}
-
-
             {draft && <FieldGroup className="gap-2.5 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
               <FieldDescription className="@min-[30rem]:col-span-2">{t('settings.ai.retryDescription')}</FieldDescription>
               {(Object.keys(DEFAULT_RETRY_POLICY) as (keyof typeof DEFAULT_RETRY_POLICY)[]).map(key => (
@@ -635,6 +589,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                   <FieldLabel htmlFor={`retry-${key}`}>{t(`settings.ai.retry.${key}`)}</FieldLabel>
                   <Input
                     id={`retry-${key}`}
+                    className={SYSTEM_INPUT_CLASS}
                     type="number"
                     min={key === 'maxAttempts' ? 1 : 0}
                     max={key === 'maxAttempts' ? RETRY_LIMITS.maxAttempts : key === 'jitterRatio' ? 1 : RETRY_LIMITS.maxDelayMs}
@@ -714,7 +669,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                   role={feedback.kind === 'error' ? 'alert' : 'status'}
                   aria-atomic="true"
                   className={cn(
-                    'flex min-w-0 items-center gap-0.5 text-xs font-medium',
+                    'flex h-6 min-w-0 items-center gap-0.5 text-xs font-medium leading-none',
                     feedback.kind === 'error' ? 'text-destructive' : 'text-app-success',
                   )}
                 >
@@ -745,10 +700,10 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
               )}
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" size="xs" onClick={() => handleOpenChange(false)}>
+              <Button type="button" variant="outline" size="sm" onClick={() => handleOpenChange(false)}>
                 {t('common.cancel')}
               </Button>
-              <Button type="submit" size="xs" disabled={!canSave || busy}>
+              <Button type="submit" size="sm" disabled={!canSave || busy}>
                 {t('common.save')}
               </Button>
             </div>

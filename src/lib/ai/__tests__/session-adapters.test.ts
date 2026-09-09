@@ -83,6 +83,7 @@ function agentDependencies(
     reject: vi.fn(async () => snapshot()),
     answerQuestion: vi.fn(async () => snapshot()),
     archive: vi.fn(async () => snapshot()),
+    delete: vi.fn(async () => undefined),
     list: vi.fn(async () => ({ sessions: [], recoveryNotices: [] })),
     mutateInbox: vi.fn(async () => snapshot()),
     rename: vi.fn(async () => snapshot()),
@@ -366,7 +367,7 @@ describe('AgentSessionAdapter', () => {
     adapter.dispose();
   });
 
-  it('maps submit, stop, and approval intentions without owning Runtime state', async () => {
+  it('maps submit, stop, delete, and approval intentions without owning Runtime state', async () => {
     const dependencies = agentDependencies(agentSessionEventFixture);
     const adapter = createAgentSessionAdapter(dependencies);
 
@@ -389,6 +390,7 @@ describe('AgentSessionAdapter', () => {
       provider,
     });
     await adapter.stop('session-fixture');
+    await adapter.delete('session-fixture');
     const approval = {
       sessionId: 'session-fixture',
       turnId: 'turn-1',
@@ -426,6 +428,7 @@ describe('AgentSessionAdapter', () => {
       content: 'Run verification next.',
     });
     expect(dependencies.stop).toHaveBeenCalledWith({ sessionId: 'session-fixture' });
+    expect(dependencies.delete).toHaveBeenCalledWith({ sessionId: 'session-fixture' });
     const approvalDecision = {
       sessionId: 'session-fixture',
       turnId: 'turn-1',

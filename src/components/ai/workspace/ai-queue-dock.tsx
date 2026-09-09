@@ -68,8 +68,8 @@ function IconAction({
             ref={buttonRef}
             type="button"
             variant="ghost"
-            size="icon"
-            className="size-7 shrink-0"
+            size="icon-xs"
+            className="shrink-0"
             disabled={disabled}
             onClick={onClick}
             aria-label={label}
@@ -243,7 +243,7 @@ export function AiQueueDock({
                     <div className="ai-queue-actions">
                       {laneItems.length > 1 && onReorder && <DropdownMenu>
                         <DropdownMenuTrigger render={(
-                          <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0"
+                          <Button type="button" variant="ghost" size="icon-xs" className="shrink-0"
                             disabled={pending} aria-label={t('ai.workspace.queue.reorder')} />
                         )}>
                           <ArrowDownUpIcon data-icon="inline-start" />

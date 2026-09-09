@@ -39,7 +39,9 @@ describe('conversation terminal output state', () => {
 
         for (const kind of ['reasoning', 'assistantMessage'] as const) {
           const draft = before.find((node) => node.kind === kind)!;
-          expect(draft).toMatchObject({ state: 'streaming' });
+          expect(draft).toMatchObject({
+            state: kind === 'reasoning' ? 'settled' : 'streaming',
+          });
           expect(after.find((node) => node.kind === kind)).toMatchObject({
             ...draft,
             state: kind === 'reasoning' ? 'interrupted' : status,
@@ -72,6 +74,27 @@ describe('conversation terminal output state', () => {
         ]));
     },
   );
+
+  it('drops provisionally settled reasoning when the request fails before commit', () => {
+    const nodes = flatten(projectAgentChatNodes([
+      ...streamingEvents,
+      sessionEvent(streamingEvents.length, {
+        ...scope,
+        type: 'request/failure',
+        data: {
+          requestId: 'request-01',
+          attempt: 1,
+          maxAttempts: 1,
+          cumulativeDelayMs: 0,
+          interrupted: false,
+          failure: { kind: 'transport', message: 'connection lost' },
+        },
+      }),
+    ]));
+
+    expect(nodes.some((node) => node.kind === 'reasoning')).toBe(false);
+    expect(nodes.some((node) => node.kind === 'assistantMessage')).toBe(false);
+  });
 
   it('settles only the ending step and preserves the next step as streaming', () => {
     const events = [

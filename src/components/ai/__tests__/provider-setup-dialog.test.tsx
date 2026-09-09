@@ -73,6 +73,8 @@ describe('ProviderSetupDialog', () => {
     const onSaved = vi.fn();
     render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={onSaved} />);
     const attempts = screen.getByRole('spinbutton', { name: 'settings.ai.retry.maxAttempts' });
+    expect(attempts).toHaveClass('bg-transparent');
+    expect(attempts).not.toHaveClass('bg-background');
     await user.clear(attempts);
     await user.type(attempts, '9');
     expect(attempts).toHaveAttribute('aria-invalid', 'true');
@@ -86,20 +88,12 @@ describe('ProviderSetupDialog', () => {
     expect(useAiSettingsStore.getState().getProviderConfig(provider.id).retryPolicy).toEqual({ ...DEFAULT_RETRY_POLICY, maxAttempts: 1 });
   });
 
-  it('persists an explicit high-output declaration in the existing provider settings', async () => {
-    const user = userEvent.setup();
+  it('keeps advanced model capability overrides out of the provider editor', async () => {
     const provider = useAiSettingsStore.getState().providers[0];
-    const onSaved = vi.fn();
-    render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={onSaved} />);
+    render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
     await screen.findByText(/settings.ai.profileLimits/);
-    await user.click(screen.getByRole('button', { name: 'settings.ai.declareModel' }));
-    const output = await screen.findByLabelText('settings.ai.maxOutput');
-    await user.clear(output); await user.type(output, '16384');
-    await user.click(screen.getByRole('button', { name: 'common.save' }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(provider.id));
-    expect(useAiSettingsStore.getState().getProviderConfig(provider.id).modelDefinition).toMatchObject({ contextWindow: 32768, maxOutputTokens: 16384 });
-    const call = mocks.resolveModel.mock.calls[mocks.resolveModel.mock.calls.length - 1][1].provider;
-    expect(call).not.toHaveProperty('apiKey');
+    expect(screen.queryByRole('button', { name: 'settings.ai.declareModel' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('settings.ai.maxOutput')).not.toBeInTheDocument();
   });
 
   it('rejects an unsupported saved reasoning selection before writing credentials or preferences', async () => {
@@ -139,8 +133,8 @@ describe('ProviderSetupDialog', () => {
     expect(dialog).not.toHaveTextContent('settings.ai.connectionDetailsHint');
     expect(dialog).not.toHaveTextContent('settings.ai.credentialsHint');
     expect(dialog).toHaveClass('[&_[data-slot=dialog-close]]:size-6');
-    expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveClass('h-6');
-    expect(screen.getByRole('button', { name: 'common.save' })).toHaveClass('h-6');
+    expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveClass('h-8');
+    expect(screen.getByRole('button', { name: 'common.save' })).toHaveClass('h-8');
     expect(fieldGroups?.[0]).toHaveClass(
       '@min-[30rem]:grid',
       '@min-[30rem]:grid-cols-2',
@@ -323,6 +317,7 @@ describe('ProviderSetupDialog', () => {
     const scrollArea = dialog.querySelector<HTMLElement>('[data-slot="provider-dialog-scroll-area"]');
     expect(feedback).toHaveTextContent('settings.ai.ready');
     expect(feedback).not.toHaveTextContent('settings.ai.connectionSuccess:2');
+    expect(feedback).toHaveClass('h-6', 'items-center', 'leading-none');
     expect(footer).toContainElement(feedback);
     expect(scrollArea).not.toContainElement(feedback);
 
@@ -574,6 +569,7 @@ describe('ProviderSetupDialog', () => {
     const legacyBefore = structuredClone(useAiSettingsStore.getState().providers);
 
     render(<ProviderSetupDialog open provider={provider} addingModel onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+    expect(screen.getByText('settings.ai.addModelTitle')).toBeInTheDocument();
     const model = screen.getByLabelText('settings.ai.model');
     await user.type(model, 'qwen3:8b');
     await user.keyboard('{Escape}');
