@@ -7,13 +7,11 @@ import { useI18n } from '@/hooks/useI18n';
 import { useDisableContextMenu } from '@/hooks/useDisableContextMenu';
 import { Spinner } from '@/components/ui/empty-state';
 import { Toaster } from '@/components/ui/sonner';
+import { SettingsPanel } from '@/components/workbench/settings-panel';
 
 const Workbench = React.memo(React.lazy(() => import('@/components/workbench')));
 const Terminal = React.memo(React.lazy(() => import('@/components/terminal')));
 const Sftp = React.memo(React.lazy(() => import('@/components/sftp')));
-const SettingsPanel = React.lazy(() => import('@/components/workbench/settings-panel').then((module) => ({
-  default: module.SettingsPanel,
-})));
 
 import { useTransferListeners } from '@/hooks/useTransferListeners';
 import { useMonitorEvents } from '@/hooks/useMonitorEvents';
@@ -249,9 +247,7 @@ export const App: React.FC = () => {
       <AboutDialog open={aboutDialogOpen} onClose={() => setAboutDialogOpen(false)} />
 
       {settingsDialogOpen && (
-        <Suspense fallback={null}>
-          <SettingsPanel open onOpenChange={setSettingsDialogOpen} />
-        </Suspense>
+        <SettingsPanel open onOpenChange={setSettingsDialogOpen} />
       )}
 
       <ConfirmationDialog
