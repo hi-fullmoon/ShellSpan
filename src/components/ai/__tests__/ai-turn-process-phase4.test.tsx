@@ -111,7 +111,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     const processBody = container.querySelector<HTMLElement>('.ai-turn-process-body');
     expect(getComputedStyle(processBody!).marginLeft).toBe('7px');
     expect(getComputedStyle(processBody!).paddingLeft).toBe('15px');
-    expect(getComputedStyle(process.querySelector('.ai-disclosure-leading')!).translate).toBe('none');
+    expect(getComputedStyle(process.querySelector('.ai-disclosure-leading')!).translate).toBe('0 1px');
     expect(container.querySelector('.ai-turn-process-separator')).toBeNull();
     const reasoning = screen.getByRole('button', {
       name: 'Reasoning Read the frozen context. Answer directly.',
@@ -204,6 +204,60 @@ describe('AI Phase 4 Turn Process renderer', () => {
     await user.keyboard(' ');
     expect(updatedTrigger).toHaveAttribute('aria-expanded', 'true');
     expect(updatedTrigger).toHaveFocus();
+  });
+
+  it('keeps the streaming reasoning preview on the newest line and newest text', () => {
+    const firstReasoning = reasoningNode({
+      state: 'streaming',
+      content: 'Earlier reasoning.\nThe current reasoning starts here',
+    });
+    const running = processNode({
+      key: 'turn-process:phase4-live-summary',
+      sessionId: 'phase4-session-live-summary',
+      turnId: 'phase4-turn-live-summary',
+      answerGeneration: 'phase4-generation-live-summary',
+      status: 'running',
+      hasEndBoundary: false,
+      children: [firstReasoning],
+      childKeys: [firstReasoning.key],
+    });
+    const { container, rerender } = render(<AiConversationNodeList nodes={[running]} />);
+    const reasoning = screen.getByRole('button', {
+      name: 'Thinking… The current reasoning starts here',
+    });
+    const summary = container.querySelector<HTMLElement>(
+      '.ai-reasoning-row .ai-disclosure-summary',
+    )!;
+    Object.defineProperty(summary, 'scrollWidth', { configurable: true, value: 360 });
+
+    const updatedContent = `${firstReasoning.content} and keeps receiving newer text`;
+    rerender(<AiConversationNodeList nodes={[{
+      ...running,
+      lastSeq: running.lastSeq + 1,
+      children: [{ ...firstReasoning, lastSeq: firstReasoning.lastSeq + 1, content: updatedContent }],
+    }]} />);
+
+    expect(screen.getByRole('button', {
+      name: 'Thinking… The current reasoning starts here and keeps receiving newer text',
+    })).toBe(reasoning);
+    expect(summary).toHaveTextContent('The current reasoning starts here and keeps receiving newer text');
+    expect(summary.scrollLeft).toBe(360);
+
+    rerender(<AiConversationNodeList nodes={[{
+      ...running,
+      status: 'completed',
+      hasEndBoundary: true,
+      lastSeq: running.lastSeq + 2,
+      children: [{
+        ...firstReasoning,
+        state: 'completed',
+        lastSeq: firstReasoning.lastSeq + 2,
+        content: updatedContent,
+      }],
+    }]} />);
+
+    expect(screen.getByRole('button', { name: 'Reasoning Earlier reasoning.' })).toBe(reasoning);
+    expect(summary.scrollLeft).toBe(0);
   });
 
   it('keeps the live process open and preserves child focus when the turn completes', async () => {
@@ -389,9 +443,19 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(container.querySelector('.ai-assistant-actions')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
-    await user.click(within(footer).getByRole('button', { name: 'Copy' }));
+    const copyButton = within(footer).getByRole('button', { name: 'Copy' });
+    const usageButton = within(footer).getByRole('button', { name: 'Usage 144 tok' });
+    expect(copyButton).toHaveClass('ai-turn-stat-trigger');
+    expect(copyButton).toHaveClass('hover:bg-accent');
+    expect(getComputedStyle(copyButton).borderRadius)
+      .toBe(getComputedStyle(usageButton).borderRadius);
+    expect(getComputedStyle(copyButton).overflow).toBe('hidden');
+    expect(getComputedStyle(copyButton.querySelector('svg')!).width)
+      .toBe(getComputedStyle(usageButton.querySelector('svg')!).width);
+
+    await user.click(copyButton);
     expect(await navigator.clipboard.readText()).toBe('Hello! How can I help?');
-    await user.click(within(footer).getByRole('button', { name: 'Usage 144 tok' }));
+    await user.click(usageButton);
     const usage = await screen.findByRole('dialog', { name: 'Turn usage' });
     expect(usage.querySelector('[data-stat="cacheRead"]')).toHaveTextContent('64 tok');
     expect(usage.querySelector('[data-stat="cacheWrite"]')).toHaveTextContent('8 tok');
