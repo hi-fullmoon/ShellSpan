@@ -323,7 +323,12 @@ export function AiSessionBrowser({
                   <DropdownMenuTrigger
                     render={(
                       compact ? (
-                        <Button variant="ghost" size="sm" aria-label={t('ai.workspace.sessions.filter')} />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7"
+                          aria-label={t('ai.workspace.sessions.filter')}
+                        />
                       ) : (
                         <AiHeaderIconButton aria-label={t('ai.workspace.sessions.filter')} />
                       )
