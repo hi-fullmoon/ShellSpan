@@ -40,7 +40,7 @@ async fn reply_http(socket: &mut tokio::net::TcpStream, content_type: &str, body
 #[ignore = "requires Stage 6B controller bridge runner"]
 async fn skill_controller_bridge() {
     let ready = std::env::var("SHELLSPAN_SKILLS_BRIDGE_READY")
-        .expect("use scripts/ai-runtime-stage6b-controller.mjs");
+        .expect("set SHELLSPAN_SKILLS_BRIDGE_READY to the bridge ready-file path");
     let storage = tempfile::tempdir().unwrap();
     let runtime = AgentRuntimeBuilder::new().build();
     runtime.configure(storage.path().to_path_buf()).unwrap();
