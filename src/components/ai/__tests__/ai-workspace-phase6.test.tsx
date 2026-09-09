@@ -47,6 +47,11 @@ describe('Phase 6 Queue Dock', () => {
 
     expect(row?.querySelectorAll(':scope > svg')).toHaveLength(1);
     expect(row?.querySelector('.ai-queue-row-content > svg')).toBeNull();
+    const actions = row?.querySelectorAll<HTMLButtonElement>('.ai-queue-actions button') ?? [];
+    expect(actions).toHaveLength(2);
+    for (const action of actions) {
+      expect(action).toHaveClass('size-6', '[&_svg]:size-3');
+    }
   });
 
   it('supports keyboard edit, remove, and complete same-lane reorder intents', async () => {
@@ -151,11 +156,9 @@ describe('Phase 6 Session Browser rename', () => {
       />,
     );
 
-    const newSessionButtons = screen.getAllByRole('button', { name: 'New conversation' });
-    expect(newSessionButtons).toHaveLength(2);
-    await user.click(newSessionButtons[0]);
-    await user.click(newSessionButtons[1]);
-    expect(onNewSession).toHaveBeenCalledTimes(2);
+    const newSessionButton = screen.getByRole('button', { name: 'New conversation' });
+    await user.click(newSessionButton);
+    expect(onNewSession).toHaveBeenCalledOnce();
     expect(screen.queryByRole('menuitem')).toBeNull();
   });
 
@@ -248,7 +251,13 @@ describe('Phase 6 Session Browser rename', () => {
       'Running',
       'Archived',
     ]);
-    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('menuitemradio', { name: 'Running' }));
+    expect(screen.queryByRole('menuitemradio')).toBeNull();
+    expect(screen.getAllByRole('treeitem')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Filter sessions' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: 'All' }));
+    expect(screen.queryByRole('menuitemradio')).toBeNull();
 
     await user.type(screen.getByRole('searchbox', { name: 'Search sessions' }), 'completed');
     expect(screen.getAllByRole('treeitem')).toHaveLength(1);

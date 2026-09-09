@@ -8,6 +8,7 @@ import {
   RefreshCwIcon,
   SearchIcon,
   SquarePenIcon,
+  Trash2Icon,
 } from 'lucide-react';
 
 import {
@@ -132,6 +133,7 @@ function SessionRow({
   locale,
   onOpen,
   onArchive,
+  onDelete = () => undefined,
   onRename,
 }: {
   readonly summary: AiSessionSummary;
@@ -140,6 +142,7 @@ function SessionRow({
   readonly locale: string;
   readonly onOpen: () => void;
   readonly onArchive: () => void;
+  readonly onDelete: () => void;
   readonly onRename: () => void;
 }): React.ReactNode {
   const { t } = useI18n();
@@ -149,7 +152,8 @@ function SessionRow({
     || summary.status === 'cancelled';
   const canRename = summary.kind === 'agent' && !summary.archived && !terminal;
   const canArchive = !summary.archived && !active;
-  const hasActions = canRename || canArchive;
+  const canDelete = summary.archived;
+  const hasActions = canRename || canArchive || canDelete;
   const status = sessionStatusLabel(summary.status, t);
 
   return (
@@ -207,6 +211,12 @@ function SessionRow({
                   {t('ai.workspace.sessions.archive')}
                 </DropdownMenuItem>
               )}
+              {canDelete && (
+                <DropdownMenuItem variant="destructive" onClick={onDelete}>
+                  <Trash2Icon />
+                  {t('ai.workspace.sessions.delete')}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -222,6 +232,7 @@ export function AiSessionBrowser({
   loading,
   error,
   archivingId,
+  deletingId = null,
   renamingId = null,
   renameError = null,
   canStartAgent = false,
@@ -232,6 +243,7 @@ export function AiSessionBrowser({
   onRefresh = () => undefined,
   onOpen,
   onArchive,
+  onDelete = () => undefined,
   onRename,
 }: {
   readonly compact?: boolean;
@@ -240,6 +252,7 @@ export function AiSessionBrowser({
   readonly loading: boolean;
   readonly error: string | null;
   readonly archivingId: string | null;
+  readonly deletingId?: string | null;
   readonly renamingId?: string | null;
   readonly renameError?: string | null;
   readonly canStartAgent?: boolean;
@@ -250,12 +263,14 @@ export function AiSessionBrowser({
   readonly onRefresh?: () => void;
   readonly onOpen: (summary: AiSessionSummary) => void;
   readonly onArchive: (summary: AiSessionSummary) => void;
+  readonly onDelete?: (summary: AiSessionSummary) => void;
   readonly onRename?: (summary: AiSessionSummary, title: string) => void;
 }): React.ReactNode {
   const { locale, t } = useI18n();
   const [filter, setFilter] = useState<SessionFilter>('all');
   const [query, setQuery] = useState('');
   const [archiveTarget, setArchiveTarget] = useState<AiSessionSummary | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AiSessionSummary | null>(null);
   const [renameTarget, setRenameTarget] = useState<AiSessionSummary | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [submittedTitle, setSubmittedTitle] = useState<string | null>(null);
@@ -353,7 +368,7 @@ export function AiSessionBrowser({
                   onValueChange={(value) => setFilter(value as SessionFilter)}
                 >
                   {FILTERS.map((value) => (
-                    <DropdownMenuRadioItem key={value} value={value}>
+                    <DropdownMenuRadioItem key={value} value={value} closeOnClick>
                       {t(`ai.workspace.sessions.filter.${value}`)}
                     </DropdownMenuRadioItem>
                   ))}
@@ -396,17 +411,6 @@ export function AiSessionBrowser({
               icon={query ? <SearchIcon /> : <ArchiveIcon />}
               title={query ? t('common.noSearchResults') : t('ai.workspace.sessions.emptyTitle')}
               description={query ? undefined : t('ai.workspace.sessions.emptyDescription')}
-              action={(
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!canStartAgent}
-                  onClick={onNew}
-                >
-                  <SquarePenIcon data-icon="inline-start" />
-                  {t('ai.newConversation')}
-                </Button>
-              )}
             />
           )}
           {visible.length > 0 && (
@@ -416,10 +420,11 @@ export function AiSessionBrowser({
                   key={`${summary.kind}:${summary.id}`}
                   summary={summary}
                   selected={`${summary.kind}:${summary.id}` === activeSessionKey}
-                  busy={archivingId === summary.id || renamingId === summary.id}
+                  busy={archivingId === summary.id || deletingId === summary.id || renamingId === summary.id}
                   locale={locale}
                   onOpen={() => onOpen(summary)}
                   onArchive={() => setArchiveTarget(summary)}
+                  onDelete={() => setDeleteTarget(summary)}
                   onRename={() => {
                     setRenameTarget(summary);
                     setRenameValue(summary.title);
@@ -443,6 +448,20 @@ export function AiSessionBrowser({
         onConfirm={() => {
           if (archiveTarget) onArchive(archiveTarget);
           setArchiveTarget(null);
+        }}
+      />
+
+      <ConfirmationDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        title={t('ai.workspace.sessions.deleteConfirmTitle')}
+        description={t('ai.workspace.sessions.deleteConfirmDescription', { title: deleteTarget?.title ?? '' })}
+        confirmLabel={t('ai.workspace.sessions.delete')}
+        confirmVariant="destructive"
+        confirmDisabled={!deleteTarget || deletingId !== null}
+        onConfirm={() => {
+          if (deleteTarget) onDelete(deleteTarget);
+          setDeleteTarget(null);
         }}
       />
 

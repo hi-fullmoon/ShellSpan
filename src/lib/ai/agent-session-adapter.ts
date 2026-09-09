@@ -8,6 +8,7 @@ import {
   invokeAgentRuntimeSteer,
   invokeApproveAgentRuntimeTool,
   invokeArchiveAgentRuntimeSession,
+  invokeDeleteAgentRuntimeSession,
   invokeInterruptAgentRuntime,
   invokeResumeAgentRuntime,
   invokeCreateAgentRuntimeSession,
@@ -99,6 +100,7 @@ export interface AgentSessionAdapterDependencies {
   readonly approve: typeof invokeApproveAgentRuntimeTool;
   readonly reject: typeof invokeRejectAgentRuntimeTool;
   readonly archive: typeof invokeArchiveAgentRuntimeSession;
+  readonly delete: typeof invokeDeleteAgentRuntimeSession;
   readonly list: typeof invokeListAgentRuntimeSessions;
   readonly mutateInbox: typeof invokeMutateAgentRuntimeInbox;
   readonly rename: typeof invokeRenameAgentRuntimeSession;
@@ -122,6 +124,7 @@ const defaultDependencies: AgentSessionAdapterDependencies = {
   approve: invokeApproveAgentRuntimeTool,
   reject: invokeRejectAgentRuntimeTool,
   archive: invokeArchiveAgentRuntimeSession,
+  delete: invokeDeleteAgentRuntimeSession,
   list: invokeListAgentRuntimeSessions,
   mutateInbox: invokeMutateAgentRuntimeInbox,
   rename: invokeRenameAgentRuntimeSession,
@@ -596,6 +599,13 @@ export function createAgentSessionAdapter(
     },
     async archive(sessionId: string): Promise<void> {
       await dependencies.archive({ sessionId });
+    },
+    async delete(sessionId: string): Promise<void> {
+      await dependencies.delete({ sessionId });
+      const entry = entries.get(sessionId);
+      entry?.stopListening();
+      entry?.client.disconnect();
+      entries.delete(sessionId);
     },
     async mutateInbox(input: AiInboxMutationInput): Promise<void> {
       const { type, sessionId, expectedRevision, clientOperationId } = input;

@@ -410,6 +410,32 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
   });
 
+  it('hides approved process markers when the Agent session has full access', async () => {
+    const user = userEvent.setup();
+    const base = agentView();
+    const withPermission = (permissionMode: 'requestApproval' | 'operator'): AiSessionView => ({
+      ...base,
+      snapshot: {
+        kind: 'agent',
+        value: {
+          ...base.snapshot.value,
+          header: { ...base.snapshot.value.header, permissionMode },
+        },
+      },
+    });
+    const { container, rerender } = render(
+      <AiWorkspaceRoot view={withPermission('requestApproval')} scope="terminal" />,
+    );
+    const process = screen.getByRole('button', { name: 'Process complete' });
+    if (process.getAttribute('aria-expanded') === 'false') await user.click(process);
+
+    expect(container.querySelectorAll('[data-ai-process-child="approvalMarker"]')).toHaveLength(1);
+
+    rerender(<AiWorkspaceRoot view={withPermission('operator')} scope="terminal" />);
+
+    expect(container.querySelector('[data-ai-process-child="approvalMarker"]')).toBeNull();
+  });
+
   it('keeps the Agent conversation mounted before the first running node commits', async () => {
     const view = agentView();
     render(

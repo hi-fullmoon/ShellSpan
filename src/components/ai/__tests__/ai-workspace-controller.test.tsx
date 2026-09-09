@@ -84,6 +84,7 @@ function adapter(changes: Partial<AiSessionControllerAdapter> = {}): AiSessionCo
     reject: vi.fn(async () => undefined),
     answerQuestion: vi.fn(async () => undefined),
     archive: vi.fn(async () => undefined),
+    delete: vi.fn(async () => undefined),
     mutateInbox: vi.fn(async () => undefined),
     rename: vi.fn(async () => undefined),
     refresh: vi.fn(async () => { throw new Error('unused refresh'); }),
@@ -257,6 +258,38 @@ describe('session archive', () => {
     expect(result.current.sessionsError).toBeNull();
     expect(agent.archive).toHaveBeenCalledWith(summary.id);
     expect(agent.stop).not.toHaveBeenCalled();
+  });
+});
+
+describe('archived session deletion', () => {
+  it('deletes an archived session once and removes it from history', async () => {
+    const summary = { ...runningAgentView().summary, status: 'completed' as const, archived: true };
+    let resolveDelete!: () => void;
+    const agent = adapter({
+      delete: vi.fn(() => new Promise<void>((resolve) => { resolveDelete = resolve; })),
+      list: vi.fn(async () => ({ sessions: [] })),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    await act(async () => result.current.refreshSessions());
+    act(() => {
+      result.current.deleteSession(summary);
+      result.current.deleteSession(summary);
+    });
+    expect(agent.delete).toHaveBeenCalledTimes(1);
+    expect(result.current.deletingSessionId).toBe(summary.id);
+
+    await act(async () => resolveDelete());
+    await waitFor(() => expect(result.current.deletingSessionId).toBeNull());
+    expect(result.current.sessions).toEqual([]);
+    expect(result.current.sessionsError).toBeNull();
+  });
+
+  it('rejects deletion requests for unarchived sessions in the controller', () => {
+    const summary = { ...runningAgentView().summary, status: 'completed' as const, archived: false };
+    const agent = adapter();
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    act(() => result.current.deleteSession(summary));
+    expect(agent.delete).not.toHaveBeenCalled();
   });
 });
 
@@ -962,6 +995,35 @@ it('shares an explicitly frozen cold Session between paths and Skills and never 
   expect(agent.create).toHaveBeenCalledWith(expect.objectContaining({request:expect.objectContaining({target:expect.objectContaining({rootPath:'/chosen',kind:'remote'})})}));
   expect(agent.listSkills).toHaveBeenCalledWith(cold.summary.id);
   expect(agent.listFileReferences).toHaveBeenCalledWith(cold.summary.id,'',expect.any(AbortSignal));
+});
+
+it('freezes the current interactive shell directory for the first path query', async () => {
+  connectedTerminal();
+  const cold = runningAgentView();
+  const paths = { entries: [], scope: null, status: 'ready' as const, code: null, excluded: 0 };
+  const resolveTerminalDirectory = vi.fn(async () => '/srv/current-project');
+  const agent = adapter({
+    create: vi.fn(async () => cold),
+    listFileReferences: vi.fn(async () => paths),
+  });
+  const { result } = renderHook(() => useAiSessionController({
+    scope: 'terminal',
+    adapter: agent,
+    resolveTerminalDirectory,
+  }));
+
+  await act(async () => {
+    await result.current.listFileReferences('', new AbortController().signal);
+  });
+
+  expect(resolveTerminalDirectory).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'terminal-1' }));
+  expect(agent.create).toHaveBeenCalledWith(expect.objectContaining({
+    request: expect.objectContaining({
+      target: expect.objectContaining({ kind: 'remote', rootPath: '/srv/current-project' }),
+    }),
+  }));
+  expect(agent.listFileReferences).toHaveBeenCalledWith(cold.summary.id, '', expect.any(AbortSignal));
+  expect(result.current.skillsNeedsRoot).toBe(false);
 });
 
 it('drops a delayed file result after navigation A to B to A without clearing the new target', async () => {

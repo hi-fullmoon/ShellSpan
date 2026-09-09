@@ -432,6 +432,12 @@ export async function invokeArchiveAgentRuntimeSession(
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_archive_session', { input });
 }
 
+export async function invokeDeleteAgentRuntimeSession(
+  input: AgentSessionIdInput,
+): Promise<void> {
+  return invokeLogged<void>('agent_runtime_delete_session', { input });
+}
+
 export async function invokeInspectAgentRuntimeRecovery(
   input: AgentSessionIdInput,
 ): Promise<AgentRecoveryCheckpoint> {

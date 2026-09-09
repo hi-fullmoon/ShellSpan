@@ -55,7 +55,24 @@ function askConversationNodes(nodes: readonly AiConversationNode[]): readonly Ai
         ? 'streaming'
         : reasoning.some((child) => child.state === 'interrupted')
           ? 'interrupted'
-          : 'completed',
+          : reasoning.some((child) => child.state === 'settled')
+            ? 'settled'
+            : 'completed',
+    }];
+  });
+}
+
+function omitApprovedMarkers(nodes: readonly AiConversationNode[]): readonly AiConversationNode[] {
+  return nodes.flatMap((node): readonly AiConversationNode[] => {
+    if (node.kind === 'approvalMarker' && node.status === 'approved') return [];
+    if (node.kind !== 'turnProcess') return [node];
+    const children = node.children.filter((child) => (
+      child.kind !== 'approvalMarker' || child.status !== 'approved'
+    ));
+    return children.length === node.children.length ? [node] : [{
+      ...node,
+      childKeys: children.map((child) => child.key),
+      children,
     }];
   });
 }
@@ -84,6 +101,7 @@ export interface AiWorkspaceRootProps {
   readonly sessionsLoading?: boolean;
   readonly sessionsError?: string | null;
   readonly archivingSessionId?: string | null;
+  readonly deletingSessionId?: string | null;
   readonly approvalDecision?: 'approve' | 'reject' | null;
   readonly approvalError?: string | null;
   readonly onListFileReferences?: import('@/types/agent-file-reference').ListFileReferences;
@@ -113,6 +131,7 @@ export interface AiWorkspaceRootProps {
   readonly onClose?: () => void;
   readonly onOpenSession?: (summary: AiSessionSummary) => void;
   readonly onArchiveSession?: (summary: AiSessionSummary) => void;
+  readonly onDeleteSession?: (summary: AiSessionSummary) => void;
   readonly onUpdateQueueItem?: (item: AiInboxItem, content: string) => void;
   readonly onRemoveQueueItem?: (item: AiInboxItem) => void;
   readonly onSteerQueueItem?: (item: AiInboxItem) => void;
@@ -151,6 +170,7 @@ export function AiWorkspaceRoot({
   sessionsLoading = false,
   sessionsError = null,
   archivingSessionId = null,
+  deletingSessionId = null,
   approvalDecision = null,
   approvalError = null,
   onAnswerQuestion,
@@ -180,6 +200,7 @@ export function AiWorkspaceRoot({
   onClose,
   onOpenSession,
   onArchiveSession,
+  onDeleteSession,
   onUpdateQueueItem,
   onRemoveQueueItem,
   onSteerQueueItem,
@@ -222,7 +243,9 @@ export function AiWorkspaceRoot({
   const surfaceMode = mode ?? 'agent';
   const conversationNodes = surfaceMode === 'ask'
     ? askConversationNodes(visibleNodes)
-    : visibleNodes;
+    : view?.snapshot.kind === 'agent' && view.snapshot.value.header.permissionMode === 'operator'
+      ? omitApprovedMarkers(visibleNodes)
+      : visibleNodes;
   const sessionLedgerKey = view ? sessionRouteKey(view.summary.kind, view.summary.id) : null;
   const scrollAnchor = sessionLedgerKey
     ? navigation.scrollAnchorBySession[sessionLedgerKey]
@@ -291,6 +314,7 @@ export function AiWorkspaceRoot({
             loading={sessionsLoading}
             error={sessionsError}
             archivingId={archivingSessionId}
+            deletingId={deletingSessionId}
             renamingId={renamingSessionId}
             renameError={renameError}
             canStartAgent={canStartAgent}
@@ -300,6 +324,7 @@ export function AiWorkspaceRoot({
             onRefresh={() => onRefreshSessions?.()}
             onOpen={(summary) => onOpenSession?.(summary)}
             onArchive={(summary) => onArchiveSession?.(summary)}
+            onDelete={(summary) => onDeleteSession?.(summary)}
             onRename={(summary, nextTitle) => onRenameSession?.(summary, nextTitle)}
           />
         )}

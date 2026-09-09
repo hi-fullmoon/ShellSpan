@@ -401,6 +401,36 @@ describe('AI workspace Phase 5 workflows', () => {
     expect(archive).toHaveBeenCalledWith(sessions[0]);
   });
 
+  it('offers permanent deletion only for archived sessions and requires confirmation', async () => {
+    const user = userEvent.setup();
+    const deleteSession = vi.fn();
+    const sessions: readonly AiSessionSummary[] = [{
+      id: 'agent-archived', kind: 'agent', title: 'Archived task', updatedAt: '2026-09-03T00:00:00.000Z',
+      status: 'completed', scopeKey: 'workbench', archived: true,
+    }];
+    render(
+      <AiWorkspaceRoot
+        view={agentView()}
+        scope="terminal"
+        navigation={{ ...createAiWorkspaceNavigationState(), route: { kind: 'sessions' } }}
+        sessions={sessions}
+        onDeleteSession={deleteSession}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Filter sessions' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Archived' }));
+    const actionsButton = (await screen.findByRole('treeitem')).querySelector<HTMLButtonElement>('.ai-session-row-menu');
+    expect(actionsButton).not.toBeNull();
+    await user.click(actionsButton!);
+    expect(screen.queryByRole('menuitem', { name: 'Archive' })).toBeNull();
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete permanently' }));
+    expect(screen.getByRole('alertdialog')).toHaveAccessibleName('Permanently delete this session?');
+    expect(screen.getByText(/cannot be undone/)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Delete permanently' }));
+    expect(deleteSession).toHaveBeenCalledWith(sessions[0]);
+  });
+
   it('renders committed Agent nodes directly in the conversation-only surface', async () => {
     const user = userEvent.setup();
     render(

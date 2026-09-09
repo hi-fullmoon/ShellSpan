@@ -33,7 +33,7 @@ function adapter(changes: Partial<AiSessionControllerAdapter> = {}): AiSessionCo
     kind: 'agent', list: vi.fn(async () => ({ sessions: [] })), create: vi.fn(async () => view()), open: vi.fn(async () => view()),
     subscribe: vi.fn(() => () => undefined), submit: vi.fn(async (sessionId, input) => ({ sessionId: sessionId!, clientOperationId: input.clientOperationId, mode: input.mode })),
     stop: vi.fn(async () => {}), approve: vi.fn(async () => {}), reject: vi.fn(async () => {}), answerQuestion: vi.fn(async () => {}),
-    archive: vi.fn(async () => {}), mutateInbox: vi.fn(async () => {}), rename: vi.fn(async () => {}), refresh: vi.fn(async () => view()),
+    archive: vi.fn(async () => {}), delete: vi.fn(async () => {}), mutateInbox: vi.fn(async () => {}), rename: vi.fn(async () => {}), refresh: vi.fn(async () => view()),
     loadOlder: vi.fn(async () => []), loadArtifact: vi.fn(async () => { throw Error('unused'); }), dispose: vi.fn(), ...changes,
   };
 }

@@ -173,6 +173,7 @@ export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
   approve(input: AiApprovalDecisionInput): Promise<void>;
   reject(input: AiApprovalDecisionInput): Promise<void>;
   archive(sessionId: string): Promise<void>;
+  delete(sessionId: string): Promise<void>;
   mutateInbox(input: AiInboxMutationInput): Promise<void>;
   rename(input: AiSessionRenameInput): Promise<void>;
   refresh(sessionId: string): Promise<AiSessionView>;
