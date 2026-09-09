@@ -92,4 +92,25 @@ describe('AiSessionHeader', () => {
       }
     },
   );
+
+  it('uses a shorter filter button in the compact session browser', () => {
+    render(
+      <AiSessionBrowser
+        compact
+        sessions={[]}
+        loading={false}
+        error={null}
+        archivingId={null}
+        canStartAgent
+        onBack={vi.fn()}
+        onClose={vi.fn()}
+        onNew={vi.fn()}
+        onRefresh={vi.fn()}
+        onOpen={vi.fn()}
+        onArchive={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Filter sessions' })).toHaveClass('h-7');
+  });
 });
