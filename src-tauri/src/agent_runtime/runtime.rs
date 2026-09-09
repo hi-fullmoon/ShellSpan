@@ -1124,6 +1124,10 @@ impl AgentRuntime {
         result
     }
 
+    pub(crate) fn delete_session(&self, session_id: &str) -> Result<(), String> {
+        self.sessions.delete_archived(session_id)
+    }
+
     pub(crate) fn events(
         &self,
         request: AgentSessionEventsRequest,
