@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@/components/ai/ai-panel.css';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
+import { AiComposerModelSelector } from '@/components/ai/workspace/ai-composer-model-selector';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
 import { createAiComposerState, type AiComposerPhase } from '@/lib/ai/composer-machine';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
@@ -53,7 +54,9 @@ function ComposerPage({ mode }: { readonly mode: 'ask' | 'agent' }) {
       onSubmitGesture={() => setScene(current => ({ ...current, draft: '', status: 'running', hero: false }))}
       onStop={() => setStops(current => current + 1)}
       onListSkills={listSkills} onListFileReferences={listFiles}
-      modelLabel="deepseek-v4" onOpenModel={() => undefined}
+      modelLabel="deepseek-v4"
+      modelControl={<AiComposerModelSelector />}
+      onOpenModel={() => undefined}
     />
   </main>;
 }
