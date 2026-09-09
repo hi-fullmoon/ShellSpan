@@ -236,6 +236,46 @@ describe('MessageScroller', () => {
     await waitFor(() => expect(scrollTop).toBe(500));
   });
 
+  it('returns to the live edge when a followed submission is appended', async () => {
+    let itemCount = 3;
+    let followEndKey = 'user-1';
+    const thread = () => (
+      <MessageScroller
+        followKey={String(itemCount)}
+        followEndKey={followEndKey}
+      >
+        {Array.from({ length: itemCount }, (_, index) => (
+          <div key={index} data-ai-node-key={`node-${index}`}>Message {index}</div>
+        ))}
+      </MessageScroller>
+    );
+    const { container, rerender } = render(thread());
+    const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
+    let scrollTop = 200;
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, get: () => itemCount * 100 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => { scrollTop = value; },
+      },
+      scrollTo: {
+        configurable: true,
+        value: vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); }),
+      },
+    });
+
+    scrollTop = 100;
+    fireEvent.wheel(viewport, { deltaY: -100 });
+    fireEvent.scroll(viewport);
+    itemCount = 4;
+    followEndKey = 'user-2';
+    rerender(thread());
+
+    await waitFor(() => expect(scrollTop).toBe(300));
+  });
+
   it('keeps the first visible node anchored when older rows are prepended', async () => {
     let keys = ['node-0', 'node-1', 'node-2'];
     const saved = vi.fn();

@@ -7,6 +7,7 @@ import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { createAiWorkspaceNavigationState } from '@/lib/ai/panel-route';
+import { createAiComposerState } from '@/lib/ai/composer-machine';
 import type { AiSessionView } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
@@ -314,13 +315,84 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     const reasoning = screen.getByRole('button', { name: 'Thought' });
     expect(reasoning).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelector('[data-ai-node-kind="userMessage"]')?.closest('[data-slot="message-scroller-item"]'))
+      .toHaveAttribute('data-scroll-anchor', 'false');
     expect(container.querySelector('[data-ai-node-kind="turnProcess"]')).toBeNull();
-    expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toBeNull();
+    expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toBeInTheDocument();
+    const footer = screen.getByLabelText('Turn statistics');
+    expect(within(footer).getByRole('button', { name: 'Copy' })).toBeVisible();
+    expect(within(footer).getByRole('button', { name: 'Usage 144 tok' })).toBeVisible();
+    expect(within(footer).getByRole('button', { name: 'Time 1.1s' })).toBeVisible();
     expect(screen.queryByText('Read the frozen context. Answer directly.')).toBeNull();
 
+    await user.click(within(footer).getByRole('button', { name: 'Copy' }));
+    expect(await navigator.clipboard.readText()).toBe('Hello! How can I help?');
     await user.click(reasoning);
     expect(reasoning).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Read the frozen context. Answer directly.')).toBeVisible();
+  });
+
+  it('expands Ask reasoning while streaming and collapses it when thinking settles', () => {
+    const base = agentView('running');
+    const view = {
+      ...base,
+      nodes: projectAgentChatNodes(agentSessionBaselineScenarios['streaming-reasoning'].events),
+      status: 'running' as const,
+      summary: { ...base.summary, status: 'running' as const },
+    };
+    const { container, rerender } = render(
+      <AiWorkspaceRoot view={view} scope="workbench" mode="ask" />,
+    );
+
+    const thinking = screen.getByRole('button', { name: 'Thinking…' });
+    expect(thinking).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Read the frozen context. Prepare a concise answer.')).toBeVisible();
+    expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+    expect(screen.queryByText('Working…')).toBeNull();
+
+    const settledNodes = view.nodes.map((node) => node.kind === 'turnProcess' ? ({
+      ...node,
+      status: 'completed' as const,
+      hasEndBoundary: true,
+      children: node.children.map((child) => child.kind === 'reasoning'
+        ? { ...child, state: 'completed' as const }
+        : child),
+    }) : node);
+    rerender(
+      <AiWorkspaceRoot
+        view={{
+          ...view,
+          nodes: settledNodes,
+          status: 'completed',
+          summary: { ...view.summary, status: 'completed' },
+        }}
+        scope="workbench"
+        mode="ask"
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Thought' }))
+      .toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Read the frozen context. Prepare a concise answer.')).toBeNull();
+  });
+
+  it('shows immediate Ask feedback before the first model output arrives', () => {
+    const nodes = projectAgentChatNodes(agentSessionBaselineScenarios.hello.events)
+      .filter((node) => node.kind === 'userMessage');
+    const { container } = render(
+      <AiWorkspaceRoot
+        view={null}
+        pendingNodes={nodes}
+        composerState={createAiComposerState({ phase: 'submitting', runtimeStatus: 'idle' })}
+        scope="workbench"
+        mode="ask"
+      />,
+    );
+
+    expect(container.querySelector('[data-ai-thinking-indicator]'))
+      .toHaveTextContent('Thinking…');
+    expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+    expect(screen.queryByText('Working…')).toBeNull();
   });
 
   it('renders Agent sessions through the conversation-only surface', () => {

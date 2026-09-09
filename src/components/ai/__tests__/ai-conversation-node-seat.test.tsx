@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AiConversationNodeList,
+  aiAskConversationNodeRenderers,
   aiConversationNodeRenderers,
   type AiConversationNodeRendererMap,
 } from '@/components/ai/workspace/ai-conversation-node-seat';
@@ -58,6 +59,39 @@ describe('AiConversationNodeList', () => {
     cleanup();
     useAppStore.setState({ locale: 'en-US' });
     await initI18n('en-US');
+  });
+
+  it('animates Ask reasoning height while preserving the collapsible contract', async () => {
+    const user = userEvent.setup();
+    const reasoning: AiConversationNodeOf<'reasoning'> = {
+      kind: 'reasoning',
+      key: 'reasoning:ask-motion',
+      sourceKind: 'agent',
+      sessionId: 'ask-motion-session',
+      turnId: 'ask-motion-turn',
+      stepId: null,
+      firstSeq: 1,
+      lastSeq: 2,
+      timestamp: '2026-09-09T00:00:00.000Z',
+      requestId: 'ask-motion-request',
+      summary: 'Check the facts',
+      content: 'Check the facts before answering.',
+      state: 'completed',
+    };
+    const { container } = render(
+      <div className="ai-panel-shell">
+        <AiConversationNodeList nodes={[reasoning]} renderers={aiAskConversationNodeRenderers} />
+      </div>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Thought' }));
+    const panel = container.querySelector<HTMLElement>(
+      '.ai-ask-reasoning-row [data-slot="collapsible-content"]',
+    );
+    expect(panel).toBeInTheDocument();
+    expect(getComputedStyle(panel!).height).toBe('var(--collapsible-panel-height)');
+    expect(getComputedStyle(panel!).overflow).toBe('hidden');
+    expect(getComputedStyle(panel!).transitionProperty).toBe('height, opacity');
   });
 
   it('renders Agent projections through the keyed node seat', async () => {
@@ -292,6 +326,11 @@ describe('AiConversationNodeList', () => {
 
     await user.click(within(runningSeat).getByRole('button', { name: 'Command: Run diagnostics' }));
     expect(runningSeat.querySelector('[data-ai-tool-view="terminal"]')).toBeInTheDocument();
+    const toolPanel = runningSeat.querySelector<HTMLElement>(
+      '.ai-tool-row-root > [data-slot="collapsible-content"]',
+    );
+    expect(getComputedStyle(toolPanel!).transitionProperty).toBe('height, opacity');
+    expect(getComputedStyle(toolPanel!).overflow).toBe('hidden');
     const inspect = within(runningSeat).getByRole('button', { name: 'Open details for terminal.exec' });
     await user.click(inspect);
     expect(openTool).toHaveBeenCalledWith(running);
