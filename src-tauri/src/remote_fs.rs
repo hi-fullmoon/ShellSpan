@@ -6062,7 +6062,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires the isolated tests/ssh-e2e Docker service and is run by scripts/run-sftp-benchmark.ps1"]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_sftp_transfer_benchmark() {
         let host =
             std::env::var("SHELLSPAN_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());

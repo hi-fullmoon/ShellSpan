@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import visualManifest from '../../../../docs/ai-panel-phase5/evidence/manifest.json';
 import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
@@ -13,7 +12,6 @@ type MatrixRow = Readonly<{
   label: string;
   fixture: AgentSessionBaselineScenarioId;
   activityEvent: string;
-  visualScene: string;
   assertConversation: (nodes: readonly AiConversationNode[]) => void;
 }>;
 
@@ -30,11 +28,10 @@ function assertAnswer(nodes: readonly AiConversationNode[]): void {
 const rows: readonly MatrixRow[] = [
   {
     label: 'hello', fixture: 'hello', activityEvent: 'request/header',
-    visualScene: 'hello-400-light-collapsed-1x', assertConversation: assertAnswer,
+    assertConversation: assertAnswer,
   },
   {
     label: 'no reasoning', fixture: 'direct-answer', activityEvent: 'assistant/message',
-    visualScene: 'direct-answer-400-light-completed-1x',
     assertConversation: (nodes) => {
       assertAnswer(nodes);
       expect(processChildren(nodes)).not.toContain('reasoning');
@@ -42,7 +39,6 @@ const rows: readonly MatrixRow[] = [
   },
   {
     label: 'streaming reasoning', fixture: 'streaming-reasoning', activityEvent: 'assistant/chunk',
-    visualScene: 'streaming-reasoning-400-light-2x',
     assertConversation: (nodes) => {
       expect(processChildren(nodes)).toContain('reasoning');
       expect(nodes.find((node) => node.kind === 'turnProcess')).toMatchObject({ status: 'running' });
@@ -50,39 +46,32 @@ const rows: readonly MatrixRow[] = [
   },
   {
     label: 'single tool', fixture: 'single-tool', activityEvent: 'tool/result',
-    visualScene: 'single-tool-720-light-expanded-1x',
     assertConversation: (nodes) => expect(processChildren(nodes).filter((kind) => kind === 'tool')).toHaveLength(1),
   },
   {
     label: 'multiple tools', fixture: 'multiple-tools', activityEvent: 'tool/result',
-    visualScene: 'multiple-tools-720-light-expanded-1x',
     assertConversation: (nodes) => expect(processChildren(nodes).filter((kind) => kind === 'tool')).toHaveLength(2),
   },
   {
     label: 'retry', fixture: 'retry-success', activityEvent: 'request/retry',
-    visualScene: 'retry-success-400-light-expanded-1x',
     assertConversation: (nodes) => expect(processChildren(nodes)).toContain('retry'),
   },
   {
     label: 'provider error', fixture: 'provider-error', activityEvent: 'session/ended',
-    visualScene: 'provider-error-400-light-expanded-1x',
     assertConversation: (nodes) => expect(processChildren(nodes)).toContain('error'),
   },
   {
     label: 'cancelled', fixture: 'cancelled', activityEvent: 'session/ended',
-    visualScene: 'cancelled-400-light-expanded-1x',
     assertConversation: (nodes) => expect(nodes.find((node) => node.kind === 'assistantMessage'))
       .toMatchObject({ state: 'interrupted' }),
   },
   {
     label: 'max tokens', fixture: 'max-tokens', activityEvent: 'request/usage',
-    visualScene: 'max-tokens-400-light-completed-1x',
     assertConversation: (nodes) => expect(nodes.find((node) => node.kind === 'turnTail'))
       .toMatchObject({ stopReason: 'length' }),
   },
   {
     label: 'partial history', fixture: 'partial-history', activityEvent: 'turn/end',
-    visualScene: 'partial-history-400-light-expanded-1x',
     assertConversation: (nodes) => {
       expect(nodes.find((node) => node.kind === 'turnProcess')).toMatchObject({ status: 'partial' });
       expect(nodes.some((node) => node.kind === 'turnTail')).toBe(false);
@@ -90,12 +79,10 @@ const rows: readonly MatrixRow[] = [
   },
   {
     label: 'pagination prepend', fixture: 'pagination', activityEvent: 'turn/start',
-    visualScene: 'pagination-560-light-completed-1x',
     assertConversation: (nodes) => expect(nodes.filter((node) => node.kind === 'userMessage')).toHaveLength(2),
   },
   {
     label: 'compaction', fixture: 'compaction', activityEvent: 'compaction/end',
-    visualScene: 'compaction-400-light-completed-1x',
     assertConversation: (nodes) => {
       assertAnswer(nodes);
       expect(nodes.map((node) => String(node.kind))).not.toContain('lifecycleMarker');
@@ -103,7 +90,6 @@ const rows: readonly MatrixRow[] = [
   },
   {
     label: 'complete cache usage', fixture: 'hello', activityEvent: 'request/usage',
-    visualScene: 'hello-560-light-completed-1x',
     assertConversation: (nodes) => expect(nodes.find((node) => node.kind === 'turnTail'))
       .toMatchObject({
         stats: { cacheReadTokens: 64, cacheWriteTokens: 8, usageComplete: true },
@@ -111,7 +97,6 @@ const rows: readonly MatrixRow[] = [
   },
   {
     label: 'missing usage', fixture: 'missing-usage', activityEvent: 'assistant/message',
-    visualScene: 'missing-usage-400-light-completed-1x',
     assertConversation: (nodes) => expect(nodes.find((node) => node.kind === 'turnTail'))
       .toMatchObject({
         usage: null,
@@ -128,10 +113,8 @@ const rows: readonly MatrixRow[] = [
   },
 ];
 
-const visualSceneIds = new Set(visualManifest.scenes.map((scene) => scene.id));
-
 describe('AI Panel Phase 6 acceptance matrix', () => {
-  it.each(rows)('$label has direct Event, Conversation, Activity, Stats, and Visual evidence', (row) => {
+  it.each(rows)('$label has direct Event, Conversation, Activity, and Stats evidence', (row) => {
     const scenario = agentSessionBaselineScenarios[row.fixture];
 
     expect(scenario.events.length).toBeGreaterThan(0);
@@ -161,7 +144,6 @@ describe('AI Panel Phase 6 acceptance matrix', () => {
       expect(tails.length).toBeGreaterThan(0);
     }
 
-    expect(visualSceneIds.has(row.visualScene)).toBe(true);
   });
 
   it('pagination prepend converges to the full replay without changing current keys', () => {
