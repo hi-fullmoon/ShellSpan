@@ -326,6 +326,12 @@ describe('AI Phase 3 chat projection', () => {
       content: 'Read the frozen context. Answer directly.',
       state: 'streaming',
     });
+    expect(processChild(committed, 'reasoning')).toMatchObject({
+      key: firstReasoning?.key,
+      content: 'Read the frozen context. Answer directly.',
+      state: 'completed',
+      lastSeq: events[messageIndex]?.seq,
+    });
     expect(committedAnswer).toMatchObject({
       key: streamingAnswer?.key,
       state: 'completed',

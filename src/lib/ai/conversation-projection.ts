@@ -495,6 +495,25 @@ export function projectAgentChatNodes(
     }
   };
 
+  const settleStreamingReasoning = (
+    event: RuntimeEventLike,
+    state: Exclude<AiReasoningNode['state'], 'streaming'>,
+  ): void => {
+    const turnId = eventTurnId(event);
+    const stepId = eventStepId(event);
+    const turn = turnId ? turns.get(turnId) : undefined;
+    for (const nodes of [turn?.children, unscopedNodes]) {
+      if (!nodes) continue;
+      for (const [key, node] of nodes) {
+        if (node.kind !== 'reasoning'
+          || node.state !== 'streaming'
+          || node.turnId !== turnId
+          || node.stepId !== stepId) continue;
+        nodes.set(key, { ...node, lastSeq: event.seq, state });
+      }
+    }
+  };
+
   for (const event of events) {
     if (event.turnId) ensureTurn(event);
     switch (event.type) {
@@ -808,6 +827,13 @@ export function projectAgentChatNodes(
             reasoning,
             event.data.interrupted ? 'interrupted' : 'completed',
             true,
+          );
+        } else {
+          // A committed assistant message closes any reasoning stream from the
+          // same step even when the provider omits reasoning from final content.
+          settleStreamingReasoning(
+            event,
+            event.data.interrupted ? 'interrupted' : 'completed',
           );
         }
         upsertAssistantText(
