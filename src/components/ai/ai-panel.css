@@ -3,10 +3,10 @@
  * this subtree so the terminal, SFTP, and workbench retain ShellSpan's theme. */
 .ai-panel-shell,
 .ai-turn-stat-panel {
-  --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas,
-    'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+  --dsw-font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial,
+    sans-serif;
+  --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
   --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --ds-transition-duration: 0.2s;
   --ds-transition-duration-fast: 0.1s;
@@ -70,8 +70,7 @@
 
   --dsw-shadow-lv1: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
   --dsw-shadow-lv2: 0 4px 12px 0 rgba(0, 0, 0, 0.02), 0 2px 8px 0 rgba(0, 0, 0, 0.04);
-  --dsw-shadow-lv3:
-    0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
+  --dsw-shadow-lv3: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
   --dsw-elevation-stroke-color: var(--dsw-alias-border-l4);
 
   /* Re-seat ShellSpan/shadcn semantic tokens inside the AI surface only. */
@@ -196,12 +195,9 @@
 .ai-panel-shell,
 .ai-panel-shell * {
   --dsw-elevation-stroke: 0 0 0 0.5px var(--dsw-elevation-stroke-color);
-  --dsw-elevation-panel:
-    var(--dsw-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02);
-  --dsw-elevation-prominent:
-    var(--dsw-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.04), 0 0 20px 0 rgba(0, 0, 0, 0.05);
-  --dsw-elevation-soft:
-    var(--dsw-elevation-stroke), 0 4px 16px 0 rgba(0, 0, 0, 0.03), 0 0 24px 0 rgba(0, 0, 0, 0.03);
+  --dsw-elevation-panel: var(--dsw-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02);
+  --dsw-elevation-prominent: var(--dsw-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.04), 0 0 20px 0 rgba(0, 0, 0, 0.05);
+  --dsw-elevation-soft: var(--dsw-elevation-stroke), 0 4px 16px 0 rgba(0, 0, 0, 0.03), 0 0 24px 0 rgba(0, 0, 0, 0.03);
 }
 
 @supports (corner-shape: superellipse(1.5)) {
@@ -641,9 +637,7 @@
   display: flex;
   width: 100%;
   min-width: 0;
-  max-width: calc(
-    var(--ai-composer-card-max-width) + var(--ai-shell-clearance) + var(--ai-shell-clearance)
-  );
+  max-width: calc(var(--ai-composer-card-max-width) + var(--ai-shell-clearance) + var(--ai-shell-clearance));
   margin-inline: auto;
   padding: 0 var(--ai-shell-clearance) 8px;
 }
@@ -690,10 +684,7 @@
 
 .ai-conversation-content {
   width: min(
-    calc(
-      100% - var(--ai-shell-clearance) - var(--ai-transcript-extra-inset)
-      - var(--ai-shell-clearance) - var(--ai-transcript-extra-inset)
-    ),
+    calc(100% - var(--ai-shell-clearance) - var(--ai-transcript-extra-inset) - var(--ai-shell-clearance) - var(--ai-transcript-extra-inset)),
     var(--ai-chat-content-max-width)
   );
   min-width: 0;
@@ -1125,23 +1116,18 @@
 }
 
 .ai-turn-process-body {
+  box-sizing: border-box;
   display: flex;
+  width: calc(100% - 7px);
+  margin-left: 7px;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 0 2px;
+  gap: 6px;
+  padding: 6px 0 2px 15px;
+  border-left: 0.5px solid var(--dsw-alias-border-l2);
 }
 
 .ai-turn-process-trigger {
   height: 24px;
-}
-
-.ai-turn-process-separator[data-slot='separator'] {
-  height: 0.5px;
-  background: var(--dsw-alias-border-l2);
-}
-
-.ai-turn-process:not([data-expanded]) .ai-turn-process-separator {
-  margin-bottom: 8px;
 }
 
 .ai-turn-process-child:empty {
@@ -1252,6 +1238,26 @@
   line-height: 20px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+:is(.ai-semantic-note, .ai-reasoning-row, .ai-turn-process, .ai-tool-row-root) > [data-slot='collapsible-content'] {
+  height: var(--collapsible-panel-height);
+  overflow: hidden;
+  opacity: 1;
+  transition-property: height, opacity;
+  transition-duration: var(--ds-transition-duration), var(--ds-transition-duration-fast);
+  transition-timing-function: var(--ds-ease-in-out);
+  will-change: height, opacity;
+}
+
+:is(.ai-semantic-note, .ai-reasoning-row, .ai-turn-process, .ai-tool-row-root)
+  > [data-slot='collapsible-content']:is([data-starting-style], [data-ending-style]) {
+  height: 0;
+  opacity: 0;
+}
+
+.ai-turn-process > [data-slot='collapsible-content'] {
+  transition-duration: var(--ds-transition-duration-slow), var(--ds-transition-duration);
 }
 
 .ai-tool-row-root,
@@ -1692,7 +1698,9 @@
   border-radius: 12px;
   background: var(--popover);
   color: var(--popover-foreground);
-  box-shadow: 0 0 0 1px var(--dsw-alias-border-l1), var(--dsw-shadow-lv3);
+  box-shadow:
+    0 0 0 1px var(--dsw-alias-border-l1),
+    var(--dsw-shadow-lv3);
   font-family: var(--dsw-font-family);
   font-size: 13px;
   line-height: 18px;
@@ -1840,7 +1848,7 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  padding: 12px 16px;
+  padding: 12px 12px;
 }
 
 .ai-details-empty,
@@ -1931,8 +1939,8 @@
 
 /* Tool details use full-width sections instead of the inset chat previews. */
 [data-slot='ai-tool-details'] .ai-details-body {
-  gap: 16px;
-  padding: 20px 16px 24px;
+  gap: 8px;
+  padding: 12px;
 }
 
 .ai-detail-summary {
@@ -2097,9 +2105,7 @@
   display: flex;
   width: 100%;
   min-width: 0;
-  max-width: calc(
-    var(--ai-composer-card-max-width) + var(--ai-shell-clearance) + var(--ai-shell-clearance)
-  );
+  max-width: calc(var(--ai-composer-card-max-width) + var(--ai-shell-clearance) + var(--ai-shell-clearance));
   margin-inline: auto;
   flex-direction: column;
   flex: none;
@@ -2117,11 +2123,7 @@
   bottom: 100%;
   left: 0;
   height: 36px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--dsw-alias-bg-base) 0%, transparent) 0,
-    var(--dsw-alias-bg-base) 36px
-  );
+  background: linear-gradient(180deg, color-mix(in srgb, var(--dsw-alias-bg-base) 0%, transparent) 0, var(--dsw-alias-bg-base) 36px);
   content: '';
   pointer-events: none;
 }
@@ -2155,7 +2157,9 @@
   border-radius: 22px;
   background: var(--dsw-specific-input-major);
   box-shadow: var(--dsw-elevation-soft);
-  transition: border-color 160ms ease, box-shadow 160ms ease;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .ai-composer-input-anchor > [data-slot='input-group']:hover {
@@ -2163,7 +2167,9 @@
 }
 
 .ai-composer-input-anchor > [data-slot='input-group']:has([data-slot='input-group-control']:focus-visible) {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent), var(--dsw-elevation-soft);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent),
+    var(--dsw-elevation-soft);
 }
 
 .ai-composer-seat [data-slot='input-group-control'] {
@@ -2354,7 +2360,9 @@
 
 .ai-composer-seat[data-ai-mode='ask'] .ai-composer-input-anchor > [data-slot='input-group'] {
   border-radius: 18px;
-  box-shadow: 0 0 0 0.5px var(--dsw-alias-border-l2), 0 8px 28px rgba(13, 88, 82, 0.08);
+  box-shadow:
+    0 0 0 0.5px var(--dsw-alias-border-l2),
+    0 8px 28px rgba(13, 88, 82, 0.08);
 }
 
 .ai-composer-trailing {
@@ -2442,12 +2450,7 @@
 
 /* Composer controls already inherit the shadcn Button focus ring. Suppress the
  * AI shell's second outline so keyboard focus stays visible without a double halo. */
-.ai-panel-shell :is(
-  .ai-permission-trigger,
-  .ai-model-trigger,
-  .ai-busy-preference-trigger,
-  .ai-composer-primary
-):focus-visible {
+.ai-panel-shell :is(.ai-permission-trigger, .ai-model-trigger, .ai-busy-preference-trigger, .ai-composer-primary):focus-visible {
   outline: none;
   outline-offset: 0;
 }
@@ -2508,7 +2511,9 @@
   border-radius: 12px;
   padding: 12px;
   background: var(--dsw-specific-menu);
-  box-shadow: var(--dsw-shadow-lv3), 0 0 0 0.5px var(--dsw-alias-border-l1);
+  box-shadow:
+    var(--dsw-shadow-lv3),
+    0 0 0 0.5px var(--dsw-alias-border-l1);
   color: var(--dsw-alias-label-secondary);
   font-size: 12px;
   line-height: 20px;
@@ -2991,8 +2996,7 @@
 }
 
 .ai-panel-drawer {
-  --shadow-dialog:
-    0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
+  --shadow-dialog: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
 }
 
 @container ai-workspace (min-width: 400px) {
