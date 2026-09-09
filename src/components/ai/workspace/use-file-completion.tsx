@@ -46,7 +46,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
     const generation = ++version.current;
     const abort = new AbortController();
     setResult(null); setError(null); setIndex(0); setLoading(false);
-    if (!open || needsRoot || rootOpen || !query) return () => { abort.abort(); version.current++; };
+    if (!open || rootOpen || !query) return () => { abort.abort(); version.current++; };
     setLoading(true);
     const timer = setTimeout(() => {
       void query(queryText, abort.signal).then(value => {
