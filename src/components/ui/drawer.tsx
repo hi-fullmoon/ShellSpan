@@ -44,13 +44,15 @@ function DrawerContent({
   className,
   children,
   showCloseButton = true,
+  keepMounted = false,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean;
+  keepMounted?: boolean;
 }) {
   const { t } = useI18n();
   return (
-    <DrawerPortal>
+    <DrawerPortal keepMounted={keepMounted}>
       <DrawerOverlay />
       <DialogPrimitive.Popup
         data-slot="drawer-content"

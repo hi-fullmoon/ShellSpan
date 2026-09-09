@@ -139,6 +139,30 @@ describe('AI panel production path and immutable shell', () => {
     expect(handle).toHaveAttribute('aria-valuenow', '400');
   });
 
+  it.each([1_200, 420])('keeps each open surface mounted across section changes at %d px', (width) => {
+    setViewport(width);
+    useAiPanelStore.setState({ panelOpenBySection: { workbench: true, terminal: true } });
+    render(<div><AiPanel /></div>);
+
+    const workbenchPanel = document.querySelector<HTMLElement>('[data-slot="ai-panel"][data-ai-scope="workbench"]');
+    const terminalPanel = document.querySelector<HTMLElement>('[data-slot="ai-panel"][data-ai-scope="terminal"]');
+    expect(workbenchPanel).not.toHaveAttribute('hidden');
+    expect(terminalPanel).toHaveAttribute('hidden');
+
+    act(() => useAppStore.setState({ activeSection: 'terminal' }));
+    expect(document.querySelector('[data-slot="ai-panel"][data-ai-scope="workbench"]'))
+      .toBe(workbenchPanel);
+    expect(document.querySelector('[data-slot="ai-panel"][data-ai-scope="terminal"]'))
+      .toBe(terminalPanel);
+    expect(workbenchPanel).toHaveAttribute('hidden');
+    expect(terminalPanel).not.toHaveAttribute('hidden');
+
+    act(() => useAppStore.setState({ activeSection: 'workbench' }));
+    expect(document.querySelector('[data-slot="ai-panel"][data-ai-scope="workbench"]'))
+      .toBe(workbenchPanel);
+    expect(workbenchPanel).not.toHaveAttribute('hidden');
+  });
+
   it('keeps the desktop aside and compact Drawer structures', () => {
     const { unmount } = render(<div><AiPanel /></div>);
     expect(screen.getByRole('complementary', { name: 'ai.workbench.title' }))

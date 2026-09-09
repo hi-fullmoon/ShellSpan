@@ -115,6 +115,7 @@ export const AiPanelResizeHandle: React.FC<AiPanelResizeHandleProps> = ({
 export interface AiPanelShellProps {
   children: React.ReactNode;
   open: boolean;
+  visible?: boolean;
   panelTitle: string;
   scope: AppSection;
   onOpenChange: (open: boolean) => void;
@@ -123,6 +124,7 @@ export interface AiPanelShellProps {
 export const AiPanelShell: React.FC<AiPanelShellProps> = ({
   children,
   open,
+  visible = open,
   panelTitle,
   scope,
   onOpenChange,
@@ -173,6 +175,7 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
   }, [applyPendingPanelWidth]);
 
   useEffect(() => {
+    if (!visible) return;
     const applyContainerWidth = (nextWidth: number): void => {
       const width = nextWidth > 0 ? nextWidth : window.innerWidth;
       setContainerWidth((current) => Math.abs(current - width) < 1 ? current : width);
@@ -193,7 +196,7 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
 
     window.addEventListener('resize', handleWindowResize);
     return () => window.removeEventListener('resize', handleWindowResize);
-  }, [compactViewport, measureContainerWidth, open]);
+  }, [compactViewport, measureContainerWidth, open, visible]);
 
   useEffect(() => () => {
     if (resizeFrameRef.current !== null) {
@@ -207,8 +210,8 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!open && resizeStartRef.current) finishPanelResize();
-  }, [finishPanelResize, open]);
+    if ((!open || !visible) && resizeStartRef.current) finishPanelResize();
+  }, [finishPanelResize, open, visible]);
 
   if (!open) return null;
 
@@ -222,6 +225,7 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
       className="ai-panel-shell"
       style={{ width: compactViewport ? '100%' : panelWidth }}
       aria-label={panelTitle}
+      hidden={!visible}
     >
       {!compactViewport && (
         <AiPanelResizeHandle
@@ -284,8 +288,9 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
   return (
     <TooltipProvider>
       {compactViewport ? (
-        <Drawer open={open} onOpenChange={onOpenChange}>
+        <Drawer open={visible} onOpenChange={onOpenChange}>
           <DrawerContent
+            keepMounted
             showCloseButton={false}
             className="ai-panel-drawer max-w-none gap-0 overflow-hidden rounded-none border-l-0 bg-transparent p-0 shadow-[var(--shadow-dialog)]"
             style={{ width: `min(100vw, ${Math.max(panelWidth, AI_PANEL_MIN_WIDTH)}px)` }}
@@ -302,27 +307,29 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
 export const AiPanel: React.FC = () => {
   const { t } = useI18n();
   const activeSection = useAppStore((state) => state.activeSection);
-  const panelSection = activeSection === 'terminal' ? 'terminal' : 'workbench';
-  const open = useAiPanelStore((state) => (
-    activeSection !== 'sftp' && state.panelOpenBySection[panelSection]
-  ));
+  const workbenchOpen = useAiPanelStore((state) => state.panelOpenBySection.workbench);
+  const terminalOpen = useAiPanelStore((state) => state.panelOpenBySection.terminal);
   const setOpen = useAiPanelStore((state) => state.setOpen);
-  const panelTitle = activeSection === 'terminal'
-    ? t('ai.terminal.title')
-    : t('ai.workbench.title');
   return (
-    <AiPanelShell
-      key={panelSection}
-      open={open}
-      panelTitle={panelTitle}
-      scope={activeSection}
-      onOpenChange={(nextOpen) => setOpen(nextOpen, panelSection)}
-    >
-      {panelSection === 'terminal' ? (
-        <TerminalAgentController onClose={() => setOpen(false, panelSection)} />
-      ) : (
-        <WorkbenchAskController onClose={() => setOpen(false, panelSection)} />
-      )}
-    </AiPanelShell>
+    <>
+      <AiPanelShell
+        open={workbenchOpen}
+        visible={activeSection === 'workbench'}
+        panelTitle={t('ai.workbench.title')}
+        scope="workbench"
+        onOpenChange={(nextOpen) => setOpen(nextOpen, 'workbench')}
+      >
+        <WorkbenchAskController onClose={() => setOpen(false, 'workbench')} />
+      </AiPanelShell>
+      <AiPanelShell
+        open={terminalOpen}
+        visible={activeSection === 'terminal'}
+        panelTitle={t('ai.terminal.title')}
+        scope="terminal"
+        onOpenChange={(nextOpen) => setOpen(nextOpen, 'terminal')}
+      >
+        <TerminalAgentController onClose={() => setOpen(false, 'terminal')} />
+      </AiPanelShell>
+    </>
   );
 };
