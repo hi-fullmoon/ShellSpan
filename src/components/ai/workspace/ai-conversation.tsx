@@ -5,7 +5,10 @@ import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNode, AiConversationNodeOf, AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiScrollAnchor } from '@/lib/ai/panel-route';
 import { MessageScroller } from '../chat-primitives';
-import { AiConversationNodeSeat } from './ai-conversation-node-seat';
+import {
+  AiConversationNodeSeat,
+  type AiConversationNodeRendererMap,
+} from './ai-conversation-node-seat';
 
 function followKey(nodes: readonly AiConversationNode[], throughSeq: number | null): string {
   const last = nodes[nodes.length - 1];
@@ -19,6 +22,7 @@ function followKey(nodes: readonly AiConversationNode[], throughSeq: number | nu
 
 export interface AiConversationProps {
   readonly nodes: readonly AiConversationNode[];
+  readonly renderers?: AiConversationNodeRendererMap;
   readonly status: AiSessionStatus;
   readonly throughSeq: number | null;
   readonly initialAnchor?: AiScrollAnchor;
@@ -32,6 +36,7 @@ export interface AiConversationProps {
 
 export function AiConversation({
   nodes,
+  renderers,
   status,
   throughSeq,
   initialAnchor,
@@ -64,6 +69,7 @@ export function AiConversation({
         <AiConversationNodeSeat
           key={node.key}
           node={node}
+          renderers={renderers}
           scrollAnchor={node.kind === 'userMessage'}
           onOpenTool={onOpenTool}
           onOpenArtifact={onOpenArtifact}

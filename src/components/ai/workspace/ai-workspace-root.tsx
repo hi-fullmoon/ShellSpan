@@ -18,6 +18,7 @@ import type { AppSection } from '@/types';
 import { AiComposerSeat } from './ai-composer-seat';
 import { AiEmptyHero } from './ai-empty-hero';
 import { AiConversation } from './ai-conversation';
+import { aiAskConversationNodeRenderers } from './ai-conversation-node-seat';
 import { AiSessionHeader } from './ai-session-header';
 import { AiSessionBrowser } from './ai-session-browser';
 import { AiToolDetails } from './ai-tool-details';
@@ -26,6 +27,36 @@ import type { AiQueueMutationState } from './use-ai-session-controller';
 
 export interface AiWorkspaceSubmitInput {
   readonly content: string;
+}
+
+function askConversationNodes(nodes: readonly AiConversationNode[]): readonly AiConversationNode[] {
+  return nodes.flatMap((node): readonly AiConversationNode[] => {
+    if (
+      node.kind === 'userMessage'
+      || node.kind === 'assistantMessage'
+      || node.kind === 'question'
+      || node.kind === 'error'
+      || node.kind === 'reasoning'
+    ) return [node];
+    if (node.kind !== 'turnProcess') return [];
+    const reasoning = node.children.filter((child) => child.kind === 'reasoning');
+    const first = reasoning[0];
+    if (!first) return [];
+    return [{
+      ...first,
+      key: `ask-reasoning:${node.key}`,
+      stepId: null,
+      firstSeq: node.firstSeq,
+      lastSeq: node.lastSeq,
+      content: reasoning.map((child) => child.content).filter(Boolean).join('\n\n'),
+      summary: first.summary,
+      state: reasoning.some((child) => child.state === 'streaming')
+        ? 'streaming'
+        : reasoning.some((child) => child.state === 'interrupted')
+          ? 'interrupted'
+          : 'completed',
+    }];
+  });
 }
 
 export interface AiWorkspaceRootProps {
@@ -189,12 +220,7 @@ export function AiWorkspaceRoot({
     : t('ai.workbench.empty');
   const surfaceMode = mode ?? 'agent';
   const conversationNodes = surfaceMode === 'ask'
-    ? visibleNodes.filter((node) => (
-        node.kind === 'userMessage'
-        || node.kind === 'assistantMessage'
-        || node.kind === 'question'
-        || node.kind === 'error'
-      ))
+    ? askConversationNodes(visibleNodes)
     : visibleNodes;
   const sessionLedgerKey = view ? sessionRouteKey(view.summary.kind, view.summary.id) : null;
   const scrollAnchor = sessionLedgerKey
@@ -300,6 +326,7 @@ export function AiWorkspaceRoot({
             <AiConversation
               key={sessionLedgerKey ?? 'pending'}
               nodes={conversationNodes}
+              renderers={surfaceMode === 'ask' ? aiAskConversationNodeRenderers : undefined}
               status={status}
               throughSeq={view?.throughSeq ?? null}
               initialAnchor={scrollAnchor}
