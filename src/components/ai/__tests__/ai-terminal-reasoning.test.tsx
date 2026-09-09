@@ -12,7 +12,7 @@ afterEach(() => cleanup());
 
 describe('terminal reasoning display', () => {
   it.each([
-    ['zh-CN', '思考中…', '思考已中断', '过程失败'],
+    ['zh-CN', '思考中…', '思考已中断', '处理失败'],
     ['en-US', 'Thinking…', 'Thinking interrupted', 'Process failed'],
   ] as const)('stops thinking after runtime failure in %s and when replaying history', async (
     locale, thinkingLabel, interruptedLabel, processLabel,
@@ -41,7 +41,8 @@ describe('terminal reasoning display', () => {
     ];
     const nodes = projectAgentChatNodes(failedEvents);
     view.rerender(<AiConversationNodeList nodes={nodes} />);
-    await user.click(screen.getByRole('button', { name: processLabel }));
+    const liveProcess = screen.getByRole('button', { name: processLabel });
+    if (liveProcess.getAttribute('aria-expanded') === 'false') await user.click(liveProcess);
 
     async function expectStopped(container: HTMLElement) {
       expect(screen.queryByText(thinkingLabel)).not.toBeInTheDocument();

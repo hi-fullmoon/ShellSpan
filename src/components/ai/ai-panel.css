@@ -1130,6 +1130,10 @@
   height: 24px;
 }
 
+.ai-turn-process-trigger > .ai-disclosure-leading {
+  translate: none;
+}
+
 .ai-turn-process-child:empty {
   display: none;
 }
@@ -1807,11 +1811,6 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-.ai-turn-status[data-ai-running-indicator] [data-slot='marker-icon'] {
-  /* Align the spinner optically with the status text without shifting its rotation axis. */
-  translate: 0 1px;
 }
 
 .ai-load-older {

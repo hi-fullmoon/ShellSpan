@@ -102,7 +102,7 @@ describe('AiConversationNodeList', () => {
     expect(document.querySelector('[data-ai-node-key="turn-process:turn-1"]'))
       .toHaveAttribute('data-ai-node-kind', 'turnProcess');
     expect(document.querySelector('[data-ai-node-key="tool:turn-1:step-1:call-health"]')).not.toBeInTheDocument();
-    const process = screen.getByRole('button', { name: 'Thought' });
+    const process = screen.getByRole('button', { name: 'Process complete' });
     expect(process).toHaveAttribute('aria-expanded', 'false');
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Command: active' })).not.toBeInTheDocument();

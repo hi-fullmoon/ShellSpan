@@ -133,7 +133,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const composer = screen.getByTestId('ai-workspace-composer');
     const conversation = container.querySelector('[data-message-scroller-viewport]');
     const history = screen.getByRole('button', { name: 'Conversation history' });
-    await user.click(screen.getByRole('button', { name: 'Thought' }));
+    await user.click(screen.getByRole('button', { name: 'Process complete' }));
     await user.click(history);
 
     const popover = await screen.findByRole('dialog', { name: 'Session history' });
@@ -141,7 +141,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(container.querySelector('[data-message-scroller-viewport]')).toBe(conversation);
     expect(screen.getByTestId('ai-workspace-composer')).toBe(composer);
     expect(composer).toHaveTextContent('Unsent draft');
-    expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'true');
     expect(container.querySelector('.ai-route-header')).toBeNull();
     await waitFor(() => expect(screen.getByRole('searchbox')).toHaveFocus());
 
@@ -182,7 +182,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const props = { scope: 'workbench' as const, canStartAgent: true, defaultDraft: 'ordinary unsent draft', onAnswerQuestion, onSubmit };
     const view = { ...base, pendingQuestion, status: 'waiting' as const };
     const { container, rerender } = render(<AiWorkspaceRoot {...props} view={view} />);
-    expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'false');
     const panel = container.querySelector('[data-slot="ai-question-panel"]')!;
     expect(panel.closest('[data-ai-node-kind="turnProcess"]')).toBeNull();
     expect(container.querySelectorAll('[data-message-scroller-viewport]')).toHaveLength(1);
@@ -220,7 +220,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       expect(root).toHaveAttribute('data-phase', 'active');
       expect(screen.getByText('Check nginx now.')).toBeVisible();
       expect(root?.querySelector('[data-ai-node-kind="turnProcess"]')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'false');
       expect(screen.getByRole('textbox')).toBeVisible();
       expect(screen.getByRole('button', { name: 'Conversation history' })).toBeVisible();
       expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
@@ -300,7 +300,10 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(container.querySelectorAll('[data-ai-node-kind="turnProcess"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-ai-node-kind="reasoning"]')).toHaveLength(0);
     expect(container.querySelectorAll('[data-tool-state="running"]')).toHaveLength(0);
-    expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('Working…');
+    const runningIndicator = container.querySelector('[data-ai-running-indicator]');
+    expect(runningIndicator).toHaveTextContent('Working…');
+    expect(runningIndicator?.querySelector('[data-slot="marker-icon"]')).toBeNull();
+    expect(runningIndicator?.querySelector('[data-slot="marker-content"]')).toHaveClass('shimmer');
   });
 
   it('keeps one collapsed reasoning row in Ask while hiding the full Agent process', async () => {
