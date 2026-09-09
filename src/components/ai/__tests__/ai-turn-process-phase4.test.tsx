@@ -94,7 +94,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
       'systemPrompt', 'userMessage', 'turnProcess', 'assistantMessage', 'turnTail',
     ]);
     expect(screen.getByRole('button', { name: 'System prompt' })).toHaveAttribute('aria-expanded', 'false');
-    const process = screen.getByRole('button', { name: 'Thought' });
+    const process = screen.getByRole('button', { name: 'Process complete' });
     expect(process).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByText('Hello! How can I help?')).toBeVisible();
 
@@ -105,6 +105,14 @@ describe('AI Phase 4 Turn Process renderer', () => {
     );
     expect(getComputedStyle(processPanel!).transitionProperty).toBe('height, opacity');
     expect(getComputedStyle(processPanel!).overflow).toBe('hidden');
+    expect(getComputedStyle(processPanel!).transitionDuration).toBe(
+      'var(--ds-transition-duration-slow), var(--ds-transition-duration)',
+    );
+    const processBody = container.querySelector<HTMLElement>('.ai-turn-process-body');
+    expect(getComputedStyle(processBody!).marginLeft).toBe('7px');
+    expect(getComputedStyle(processBody!).paddingLeft).toBe('15px');
+    expect(getComputedStyle(process.querySelector('.ai-disclosure-leading')!).translate).toBe('none');
+    expect(container.querySelector('.ai-turn-process-separator')).toBeNull();
     const reasoning = screen.getByRole('button', {
       name: 'Reasoning Read the frozen context. Answer directly.',
     });
@@ -124,7 +132,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     const { container } = render(<AiConversationNodeList nodes={nodes} />);
 
     expect(container.querySelector('[data-ai-node-kind="turnProcess"]')).toBeEmptyDOMElement();
-    expect(screen.queryByRole('button', { name: 'Thought' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Process complete' })).not.toBeInTheDocument();
     expect(screen.getByText('Hello! How can I help?')).toBeVisible();
     expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toBeInTheDocument();
   });
@@ -167,7 +175,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     const user = userEvent.setup();
     const events = agentSessionBaselineScenarios['streaming-reasoning'].events;
     const { rerender } = render(<AiConversationNodeList nodes={projectAgentChatNodes(events)} />);
-    const trigger = screen.getByRole('button', { name: 'Thinking' });
+    const trigger = screen.getByRole('button', { name: 'Processing' });
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', {
       name: 'Thinking… Read the frozen context. Prepare a concise answer.',
@@ -188,7 +196,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     } as AgentSessionEvent;
     rerender(<AiConversationNodeList nodes={projectAgentChatNodes([...events, nextEvent])} />);
 
-    const updatedTrigger = screen.getByRole('button', { name: 'Thinking' });
+    const updatedTrigger = screen.getByRole('button', { name: 'Processing' });
     expect(updatedTrigger).toBe(trigger);
     expect(updatedTrigger).toHaveAttribute('aria-expanded', 'false');
     expect(updatedTrigger).toHaveFocus();
@@ -198,7 +206,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(updatedTrigger).toHaveFocus();
   });
 
-  it('folds terminal process content once and restores focus from a hidden child', async () => {
+  it('keeps the live process open and preserves child focus when the turn completes', async () => {
     const user = userEvent.setup();
     const context = contextNode();
     const running = processNode({
@@ -231,10 +239,37 @@ describe('AI Phase 4 Turn Process renderer', () => {
     }]} />);
 
     await waitFor(() => {
-      const process = screen.getByRole('button', { name: 'Thought' });
-      expect(process).toHaveAttribute('aria-expanded', 'false');
-      expect(process).toHaveFocus();
+      expect(screen.getByRole('button', { name: 'Process complete' }))
+        .toHaveAttribute('aria-expanded', 'true');
+      expect(contextTrigger).toHaveFocus();
     });
+  });
+
+  it('preserves a manual collapse when the live process completes', async () => {
+    const user = userEvent.setup();
+    const running = processNode({
+      key: 'turn-process:phase4-manual-collapse',
+      sessionId: 'phase4-session-manual-collapse',
+      turnId: 'phase4-turn-manual-collapse',
+      answerGeneration: 'phase4-generation-manual-collapse',
+      status: 'running',
+      hasEndBoundary: false,
+    });
+    const { rerender } = render(<AiConversationNodeList nodes={[running]} />);
+    const process = screen.getByRole('button', { name: 'Processing' });
+
+    await user.click(process);
+    expect(process).toHaveAttribute('aria-expanded', 'false');
+
+    rerender(<AiConversationNodeList nodes={[{
+      ...running,
+      status: 'completed',
+      hasEndBoundary: true,
+      lastSeq: running.lastSeq + 1,
+    }]} />);
+
+    expect(screen.getByRole('button', { name: 'Process complete' }))
+      .toHaveAttribute('aria-expanded', 'false');
   });
 
   it('scopes manual disclosure state to session, Turn, and answer generation', async () => {
@@ -246,18 +281,18 @@ describe('AI Phase 4 Turn Process renderer', () => {
       answerGeneration: 'generation-one',
     });
     const { rerender } = render(<AiConversationNodeList nodes={[first]} />);
-    await user.click(screen.getByRole('button', { name: 'Thought' }));
-    expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute('aria-expanded', 'true');
+    await user.click(screen.getByRole('button', { name: 'Process complete' }));
+    expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'true');
 
     rerender(<AiConversationNodeList nodes={[{
       ...first,
       answerGeneration: 'generation-two',
       lastSeq: first.lastSeq + 1,
     }]} />);
-    expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'false');
 
     rerender(<AiConversationNodeList nodes={[{ ...first, lastSeq: first.lastSeq + 2 }]} />);
-    expect(screen.getByRole('button', { name: 'Thought' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('keeps partial history expanded and omits a misleading terminal tail', () => {
