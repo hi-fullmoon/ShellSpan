@@ -257,6 +257,50 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
   );
 }
 
+function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reasoning'> }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const isStreaming = node.state === 'streaming';
+  const title = isStreaming
+    ? t('ai.thinking.inProgress')
+    : node.state === 'interrupted'
+      ? t('ai.thinking.interrupted')
+      : t('ai.thinking');
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div
+        className="ai-reasoning-row ai-ask-reasoning-row"
+        data-state={isStreaming ? 'running' : node.state === 'interrupted' ? 'interrupted' : 'ok'}
+        data-expanded={open || undefined}
+        role={isStreaming ? 'status' : undefined}
+      >
+        <CollapsibleTrigger
+          render={(
+            <Button
+              type="button"
+              variant="plain"
+              size="sm"
+              className="ai-disclosure-row"
+              aria-label={title}
+              aria-expanded={open}
+            />
+          )}
+        >
+          <span className="ai-disclosure-leading" aria-hidden="true">
+            <AtomIcon />
+            <ChevronDownIcon className="ai-disclosure-chevron" />
+          </span>
+          <span className={cn('ai-disclosure-title', isStreaming && 'shimmer')}>{title}</span>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="ai-reasoning-body">{node.content || node.summary}</div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  );
+}
+
 function ToolNodeView({
   node,
   onOpenTool,
@@ -517,6 +561,11 @@ export const aiConversationNodeRenderers = {
   error: ErrorNodeView,
   turnProcess: TurnProcessRow,
   turnTail: AiTurnFooter,
+} satisfies AiConversationNodeRendererMap;
+
+export const aiAskConversationNodeRenderers = {
+  ...aiConversationNodeRenderers,
+  reasoning: AskReasoningNodeView,
 } satisfies AiConversationNodeRendererMap;
 
 function assertNever(value: never): never {

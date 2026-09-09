@@ -11,6 +11,7 @@ import type { AiSessionView } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { agentSessionEventFixture } from '@/test/fixtures/agent-session';
+import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
 
 function runningHierarchyView(): AiSessionView {
   const base = agentView('running');
@@ -299,6 +300,27 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(container.querySelectorAll('[data-ai-node-kind="reasoning"]')).toHaveLength(0);
     expect(container.querySelectorAll('[data-tool-state="running"]')).toHaveLength(0);
     expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('Working…');
+  });
+
+  it('keeps one collapsed reasoning row in Ask while hiding the full Agent process', async () => {
+    const user = userEvent.setup();
+    const view = {
+      ...agentView(),
+      nodes: projectAgentChatNodes(agentSessionBaselineScenarios.hello.events),
+    };
+    const { container } = render(
+      <AiWorkspaceRoot view={view} scope="workbench" mode="ask" />,
+    );
+
+    const reasoning = screen.getByRole('button', { name: 'Thought' });
+    expect(reasoning).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelector('[data-ai-node-kind="turnProcess"]')).toBeNull();
+    expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toBeNull();
+    expect(screen.queryByText('Read the frozen context. Answer directly.')).toBeNull();
+
+    await user.click(reasoning);
+    expect(reasoning).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Read the frozen context. Answer directly.')).toBeVisible();
   });
 
   it('renders Agent sessions through the conversation-only surface', () => {
