@@ -590,18 +590,35 @@ describe('AiWorkspaceController', () => {
     expect(result.current.navigation.scrollAnchorBySession[`agent:${view.summary.id}`]).toEqual(anchor);
   });
 
-  it('shows an explicit disabled Agent state in Workbench without submitting a fallback', async () => {
-    const agent = adapter();
+  it('runs Workbench as a target-isolated Ask conversation without terminal capabilities', async () => {
+    const agent = adapter({
+      submit: vi.fn(async (_sessionId, input) => ({
+        sessionId: 'ask-workbench-created',
+        clientOperationId: input.clientOperationId,
+        mode: input.mode,
+      })),
+    });
     render(<AiWorkspaceController scope="workbench" adapter={agent} />);
 
-    expect(screen.getByRole('status', { name: 'Agent is unavailable' })).toHaveTextContent('Open a connected terminal');
-    expect(screen.getByRole('textbox')).toHaveAccessibleDescription('Open a connected terminal to start an Agent task.');
+    expect(screen.queryByRole('status', { name: 'Agent is unavailable' })).toBeNull();
     expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
-    expect(screen.queryByRole('button', { name: 'New conversation' })).toBeNull();
+    expect(screen.getByText('Q&A only · No terminal access')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
-    await waitFor(() => expect(agent.list).toHaveBeenCalledTimes(1));
-    expect(agent.submit).not.toHaveBeenCalled();
+    await userEvent.setup().type(screen.getByRole('textbox'), 'Explain SSH keepalives');
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({
+      create: expect.objectContaining({
+        request: expect.objectContaining({
+          target: expect.objectContaining({ targetId: 'workbench-ai' }),
+          capabilityScope: {
+            toolNames: ['ask_user_question'],
+            effects: ['none'],
+            targetIds: ['workbench-ai'],
+          },
+        }),
+      }),
+    })));
   });
 
   it('requires the active terminal to remain connected before accepting Agent input', async () => {
@@ -623,6 +640,7 @@ describe('AiWorkspaceController', () => {
   it('retries Agent history through the single production adapter', async () => {
     const agent = adapter({
       list: vi.fn()
+        .mockResolvedValueOnce({ sessions: [] })
         .mockRejectedValueOnce(new Error('Agent history unavailable'))
         .mockResolvedValueOnce({ sessions: [runningAgentView().summary] }),
     });
@@ -634,7 +652,7 @@ describe('AiWorkspaceController', () => {
     fireEvent.click(within(history).getByRole('button', { name: 'Retry' }));
 
     expect(await screen.findByText('Run checks')).toBeVisible();
-    expect(agent.list).toHaveBeenCalledTimes(2);
+    expect(agent.list).toHaveBeenCalledTimes(3);
   });
 
   it('keeps approval authority adapter-owned across failure, pending commit, and draft restoration', async () => {
@@ -683,7 +701,7 @@ describe('AiWorkspaceController', () => {
     expect(approve).toHaveBeenCalledTimes(2);
   });
 
-  it('opens Agent history without stopping the Runtime and hides unavailable new Workbench sessions', async () => {
+  it('opens Ask history without stopping the Runtime and offers a separate new conversation', async () => {
     const user = userEvent.setup();
     const view = runningAgentView();
     const unsubscribe = vi.fn();
@@ -705,7 +723,7 @@ describe('AiWorkspaceController', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
     expect(await screen.findByRole('dialog', { name: 'Session history' })).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'New conversation' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
     expect(unsubscribe).not.toHaveBeenCalled();
   });
 

@@ -30,17 +30,18 @@ const listFiles = async () => ({
   entries: Array.from({ length: 16 }, (_, i) => ({ path: `src/file-${i}.ts`, kind: 'file' as const })),
 });
 
-function ComposerPage() {
+function ComposerPage({ mode }: { readonly mode: 'ask' | 'agent' }) {
   const [scene, setScene] = useState<ComposerScene>({ draft: '', owner: 'A', status: 'idle', hero: false, terminal: false });
   const [stops, setStops] = useState(0);
   Object.assign(window, {
     composerTest: { update: (patch: Partial<ComposerScene>) => setScene(current => ({ ...current, ...patch })) },
   });
-  return <main className="ai-panel-shell" data-ai-scope="workbench" data-composer-test-ready data-stop-count={stops}
+  return <main className="ai-panel-shell" data-ai-scope={mode === 'ask' ? 'workbench' : 'terminal'} data-composer-test-ready data-stop-count={stops}
     style={{ width: '100vw', height: '100vh' }}>
     <AiWorkspaceRoot
+      mode={mode}
       view={scene.hero ? null : { ...base, status: scene.status, summary: { ...base.summary, id: scene.owner } }}
-      scope="workbench" canStartAgent={!scene.unavailableReason}
+      scope={mode === 'ask' ? 'workbench' : 'terminal'} canStartAgent={!scene.unavailableReason}
       agentUnavailableReason={scene.unavailableReason}
       composerState={createAiComposerState({ sessionId: scene.hero ? null : scene.owner, draft: scene.draft,
         runtimeStatus: scene.status, phase: scene.phase, terminal: scene.terminal })}
@@ -61,8 +62,9 @@ export async function mountComposerPage(root: HTMLElement) {
   const params = new URLSearchParams(location.search);
   const theme = params.get('theme') === 'dark' ? 'dark' : 'light';
   const locale = params.get('locale') === 'zh-CN' ? 'zh-CN' : 'en-US';
+  const mode = params.get('mode') === 'ask' ? 'ask' : 'agent';
   useAppStore.setState({ locale, theme });
   await initI18n(locale); applyTheme(theme);
   document.body.style.margin = '0'; document.body.style.overflow = 'hidden';
-  createRoot(root).render(<ComposerPage />);
+  createRoot(root).render(<ComposerPage mode={mode} />);
 }

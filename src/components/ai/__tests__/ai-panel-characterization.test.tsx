@@ -97,7 +97,7 @@ describe('AI panel production path and immutable shell', () => {
     expect(getComputedStyle(header as Element).paddingBlockStart).toMatch(/^0(?:px)?$/);
     expect(getComputedStyle(header as Element).paddingBlockEnd).toMatch(/^0(?:px)?$/);
     expect(within(panel).getByRole('textbox'))
-      .toHaveAttribute('aria-label', 'ai.workspace.composerPlaceholder');
+      .toHaveAttribute('aria-label', 'ai.workbench.composerPlaceholder');
     expect(panel.querySelector('[data-slot="panel-empty-state"]')).toBeNull();
   });
 

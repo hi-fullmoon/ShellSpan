@@ -10,6 +10,7 @@ import {
   InfoIcon,
   ListPlusIcon,
   RotateCcwIcon,
+  ShieldCheckIcon,
   SquareIcon,
   XIcon,
 } from 'lucide-react';
@@ -47,6 +48,7 @@ import { AiTaskStrip } from './ai-task-strip';
 import type { AiQueueMutationState } from './use-ai-session-controller';
 
 export interface AiComposerSeatProps {
+  readonly mode?: 'ask' | 'agent';
   readonly imageControls?: React.ReactNode;
   readonly onPasteImages?: (files: File[]) => void | Promise<void>;
   readonly hasImages?: boolean;
@@ -100,6 +102,7 @@ export interface AiComposerSeatProps {
 
 /** Harness-aligned Composer surface backed by the existing ShellSpan state machine. */
 export function AiComposerSeat({
+  mode = 'agent',
   imageControls, onPasteImages, hasImages = false, imageBusy = false, imageLocked = false,
   phase,
   status,
@@ -153,7 +156,7 @@ export function AiComposerSeat({
   const completionAnchor = useRef<HTMLDivElement>(null);
   const draft = composerState?.draft ?? controlledDraft ?? localDraft;
   const running = status === 'running' || status === 'waiting';
-  const waitingApproval = composerState?.phase === 'waitingApproval';
+  const waitingApproval = mode === 'agent' && composerState?.phase === 'waitingApproval';
   const waitingQuestion = Boolean(pendingQuestion) || composerState?.phase === 'waitingQuestion';
   const submitting = composerState?.phase === 'submitting' || imageBusy;
   const terminal = composerState?.terminal ?? false;
@@ -166,6 +169,7 @@ export function AiComposerSeat({
     || waitingQuestion
     || waitingApproval
     || submitting
+    || (mode === 'ask' && running && !empty)
     || (stopPrimary
       ? onStop === undefined
       : unavailable || empty || (onSubmitGesture === undefined && onSubmit === undefined));
@@ -226,9 +230,10 @@ export function AiComposerSeat({
       data-slot="ai-composer-seat"
       data-composer-seat=""
       data-phase={phase}
+      data-ai-mode={mode}
       className="ai-composer-seat"
     >
-      <AiTaskStrip steps={taskSteps} />
+      {mode === 'agent' && <AiTaskStrip steps={taskSteps} />}
       <div className="ai-composer-notices">
         {status === 'failed' && onRetryTurn && !terminal && <Button variant="outline" size="sm" disabled={stopping || submitting || unavailable} onClick={onRetryTurn}><RotateCcwIcon data-icon="inline-start" />{t('ai.workspace.retryTurn')}</Button>}
         {waitingApproval && !pendingApproval && (
@@ -275,7 +280,7 @@ export function AiComposerSeat({
       </div>
       {stopping && <Alert size="sm" variant="subtle" role="status"><AlertDescription>{t('ai.workspace.stopping')}</AlertDescription></Alert>}
       {completion.dialog}
-      <AiQueueDock
+      {mode === 'agent' && <AiQueueDock
         items={queueItems}
         mutation={queueMutation}
         running={status === 'running'}
@@ -286,7 +291,7 @@ export function AiComposerSeat({
         onResume={onResumeQueueItem}
         onReorder={onReorderQueueLane}
         onRetry={onRetryQueueMutation}
-      />
+      />}
       {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
       {waitingQuestion && <Alert><AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle><AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>{onStop && <Button type="button" variant="outline" onClick={onStop}>{t('ai.workspace.stop')}</Button>}</Alert>}
       {waitingApproval && pendingApproval && (
@@ -359,15 +364,22 @@ export function AiComposerSeat({
                 if (event.repeat) return;
                 submit('keyboard', event.metaKey || event.ctrlKey);
               }}
-              placeholder={t('ai.workspace.composerPlaceholder', { pasteShortcut: getPlatform() === 'macos' ? '⌘V' : 'Ctrl+V' })}
+              placeholder={mode === 'ask'
+                ? t('ai.workbench.composerPlaceholder')
+                : t('ai.workspace.composerPlaceholder', { pasteShortcut: getPlatform() === 'macos' ? '⌘V' : 'Ctrl+V' })}
             />
             {imageControls && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0">{imageControls}</InputGroupAddon>}
             <InputGroupAddon align="block-end" className="ai-composer-toolbar" onClick={event => {
               if (!(event.target as HTMLElement).closest('button, [role="button"]')) completion.editor.current?.focus();
             }}>
               <div className="ai-composer-tools">
-                {permissionControl}
-                {running && (
+                {mode === 'ask' ? (
+                  <span className="ai-composer-mode-note">
+                    <ShieldCheckIcon aria-hidden="true" />
+                    {t('ai.workbench.capabilityNote')}
+                  </span>
+                ) : permissionControl}
+                {mode === 'agent' && running && (
                   <DropdownMenu>
                     <Tooltip>
                       <TooltipTrigger

@@ -1,6 +1,8 @@
 import {
+  MessageCircleQuestionIcon,
   HistoryIcon,
   PanelRightCloseIcon,
+  SquareTerminalIcon,
   SquarePenIcon,
 } from 'lucide-react';
 
@@ -14,6 +16,7 @@ export interface AiSessionHeaderProps {
   readonly title: string;
   readonly context: string;
   readonly status: AiSessionStatus;
+  readonly mode?: 'ask' | 'agent';
   readonly onClose?: () => void;
   readonly onHistory?: () => void;
   readonly historyOpen?: boolean;
@@ -26,6 +29,7 @@ export function AiSessionHeader({
   title,
   context,
   status,
+  mode = 'agent',
   onClose,
   onHistory,
   historyOpen = false,
@@ -45,9 +49,13 @@ export function AiSessionHeader({
       data-slot="ai-workspace-header"
       data-session-status={status}
       className="ai-session-header"
+      data-ai-mode={mode}
     >
       <div className="ai-session-title-cluster">
-        <span className="ai-session-status-dot" data-state={status} aria-hidden="true" />
+        <span className="ai-session-mode-icon" aria-hidden="true">
+          {mode === 'ask' ? <MessageCircleQuestionIcon /> : <SquareTerminalIcon />}
+          <span className="ai-session-status-dot" data-state={status} />
+        </span>
         <span className="ai-session-heading">
           <h2 className="ai-session-title">{title}</h2>
           <span className="ai-session-context">{context}</span>

@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { usePlatform } from '@/hooks/usePlatform';
 import { SectionNav } from './section-nav';
 import { WindowControls } from './window-controls';
-import { SparklesIcon } from 'lucide-react';
+import { MessageCircleQuestionIcon, SquareTerminalIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useAppStore } from '@/stores/appStore';
@@ -22,6 +22,9 @@ export const TitleBar: React.FC = () => {
   const aiLabel = activeSection === 'terminal'
     ? t('ai.terminal.toggle')
     : t('ai.workbench.toggle');
+  const AiToggleIcon = activeSection === 'terminal'
+    ? SquareTerminalIcon
+    : MessageCircleQuestionIcon;
 
   return (
     <div
@@ -41,8 +44,9 @@ export const TitleBar: React.FC = () => {
             onClick={() => toggleAi(panelSection)}
             aria-pressed={aiOpen}
             aria-label={aiLabel}
+            data-ai-mode={panelSection === 'terminal' ? 'agent' : 'ask'}
           >
-            <SparklesIcon />
+            <AiToggleIcon />
           </Button>
         )}
         {!isMacOS && <WindowControls />}
