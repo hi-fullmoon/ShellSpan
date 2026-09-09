@@ -61,14 +61,17 @@ describe('composer path completion', () => {
     await user.click(await screen.findByRole('option',{name:'plain.txt'}));
     expect(editor.textContent!).toBe('email a@b.com and @plain.txt suffix');
   });
-  it('asks explicitly for a root without calling discovery, and displays localized failures', async () => {
-    const user=userEvent.setup();const query=vi.fn(async(_q:string,_signal:AbortSignal,_root?:string)=>({...result,status:'error' as const,code:'Denied',entries:[]}));
+  it('tries the shell root before offering explicit binding, and displays localized failures', async () => {
+    const user=userEvent.setup();const query=vi.fn(async(_q:string,_signal:AbortSignal,root?:string)=>({...result,status:'error' as const,code:root ? 'Denied' : 'RootRequired',entries:[]}));
     render(<AiComposerSeat phase="hero" status="idle" skillsNeedsRoot projectTargetLabel="Remote target" onListFileReferences={query}/>);
-    await user.type(screen.getByRole('textbox'),'@'); expect(query).not.toHaveBeenCalled();
+    await user.type(screen.getByRole('textbox'),'@');
+    await waitFor(()=>expect(query).toHaveBeenCalledWith('',expect.any(AbortSignal)));
+    expect(await screen.findByRole('alert')).toHaveTextContent('no frozen project directory');
     await user.keyboard('{Enter}');
     await user.type(screen.getByRole('textbox',{name:'Project directory'}),'/project');
     await user.click(screen.getByRole('button',{name:'Bind directory'})); expect(await screen.findByRole('alert')).toHaveTextContent('access was denied');
     expect(query.mock.calls[0]?.[0]).toBe('');
+    expect(query.mock.calls[1]?.[2]).toBe('/project');
     expect(screen.getByTestId('ai-workspace-composer').textContent).toBe('@');
   });
 });
