@@ -65,6 +65,18 @@ interface AiSettingsSectionProps {
   embedded?: boolean;
 }
 
+type SessionMigration = {
+  sessionId: string;
+  status: 'pending' | 'converted' | 'failed';
+  error?: string;
+};
+
+const MIGRATION_STATUS_KEYS: Record<SessionMigration['status'], LocaleKey> = {
+  pending: 'settings.ai.migration.pending',
+  converted: 'settings.ai.migration.converted',
+  failed: 'settings.ai.migration.failed',
+};
+
 export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded = false }) => {
   const { t } = useI18n();
   const { error: showError, success: showSuccess } = useToast();
@@ -81,8 +93,9 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [agentActionBusy, setAgentActionBusy] = useState(false);
   const [clearAgentOpen, setClearAgentOpen] = useState(false);
-  const [migrations,setMigrations]=useState<{sessionId:string;status:string}[]>([]);
-  useEffect(()=>{ if(isTauriRuntime()) void invokeListAiSessionMigrations().then(setMigrations).catch(error=>setMigrations([{sessionId:'migration',status:String(error)}])); },[]);
+  const [migrations,setMigrations]=useState<SessionMigration[]>([]);
+  const [migrationLoadError, setMigrationLoadError] = useState<string>();
+  useEffect(()=>{ if(isTauriRuntime()) void invokeListAiSessionMigrations().then(setMigrations).catch(error=>setMigrationLoadError(String(error))); },[]);
   const routeSnapshot=useLlmRoutesStore(state=>state.snapshot);
   const modelsByRoute=useLlmRoutesStore(state=>state.modelsByRoute);
   const hydrateRoutes=useLlmRoutesStore(state=>state.hydrate);
@@ -199,11 +212,11 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                       : provider.model) || t('ai.modelMissing')} · {t(PRESET_DESCRIPTION_KEYS[provider.preset])}
                   </p>
                   {routeSnapshot?.routes.find(route=>route.id===provider.id) && (
-                    <div className="flex flex-wrap gap-1" aria-label={`${provider.name} models`}>
+                    <div className="flex flex-wrap gap-1" aria-label={t('settings.ai.modelsLabel', { name: provider.name })}>
                       {(modelsByRoute[provider.id] ?? []).map(model=>(
                         <Badge key={model.modelId} variant="secondary">
                           {model.modelId}
-                          {Boolean(routeSnapshot.routes.find(route=>route.id===provider.id)?.models) && (modelsByRoute[provider.id]?.length ?? 0)>1 && <Button variant="ghost" size="icon-xs" aria-label={`Remove ${model.modelId}`} onClick={()=>{
+                          {Boolean(routeSnapshot.routes.find(route=>route.id===provider.id)?.models) && (modelsByRoute[provider.id]?.length ?? 0)>1 && <Button variant="ghost" size="icon-xs" aria-label={t('settings.ai.removeModel', { model: model.modelId })} onClick={()=>{
                             const route=routeSnapshot.routes.find(item=>item.id===provider.id)!;
                             const models={...(route.models ?? {})}; delete models[model.modelId];
                             const fallback=Object.keys(models)[0];
@@ -240,7 +253,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                     setEditOpen(true);
                   }}
                 >
-                  Add model
+                  {t('settings.ai.addModel')}
                 </Button>
                 <Button
                   variant="outline"
@@ -299,9 +312,12 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         </SettingRow>
       </SettingsGroup>
 
-      {migrations.length>0 && <SettingsGroup title="Conversation log migration" titleId="ai-log-migration-heading">
-        {migrations.map(migration=><SettingRow key={migration.sessionId} label={migration.sessionId} description={migration.status}>
-          {migration.status==='pending' && <Button size="xs" variant="outline" onClick={()=>void invokeConvertAiSessionV4(migration.sessionId).then(()=>setMigrations(items=>items.map(item=>item.sessionId===migration.sessionId?{...item,status:'converted'}:item))).catch(error=>setMigrations(items=>items.map(item=>item.sessionId===migration.sessionId?{...item,status:String(error)}:item)))}>Convert to v5</Button>}
+      {(migrations.length>0 || migrationLoadError) && <SettingsGroup title={t('settings.ai.migration.title')} titleId="ai-log-migration-heading">
+        {migrationLoadError && <SettingRow label={t('settings.ai.migration.loadFailed')} description={migrationLoadError} />}
+        {migrations.map(migration=><SettingRow key={migration.sessionId} label={migration.sessionId} description={migration.error
+          ? t('settings.ai.migration.failedWithReason', { reason: migration.error })
+          : t(MIGRATION_STATUS_KEYS[migration.status])}>
+          {migration.status==='pending' && <Button size="xs" variant="outline" onClick={()=>void invokeConvertAiSessionV4(migration.sessionId).then(()=>setMigrations(items=>items.map(item=>item.sessionId===migration.sessionId?{...item,status:'converted'}:item))).catch(error=>setMigrations(items=>items.map(item=>item.sessionId===migration.sessionId?{...item,status:'failed',error:String(error)}:item)))}>{t('settings.ai.migration.convert')}</Button>}
         </SettingRow>)}
       </SettingsGroup>}
 
