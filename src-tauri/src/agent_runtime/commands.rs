@@ -453,6 +453,16 @@ pub(crate) fn agent_runtime_archive_session(
 }
 
 #[tauri::command]
+pub(crate) fn agent_runtime_delete_session(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentSessionIdInput,
+) -> Result<(), String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.delete_session(&input.session_id)
+}
+
+#[tauri::command]
 pub(crate) fn agent_runtime_get_events(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,

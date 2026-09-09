@@ -299,6 +299,7 @@ pub fn run() {
             agent_runtime::agent_runtime_get_session,
             agent_runtime::agent_runtime_list_sessions,
             agent_runtime::agent_runtime_archive_session,
+            agent_runtime::agent_runtime_delete_session,
             agent_runtime::agent_runtime_get_events,
             agent_runtime::agent_runtime_get_committed_events,
             agent_runtime::agent_runtime_get_artifact,

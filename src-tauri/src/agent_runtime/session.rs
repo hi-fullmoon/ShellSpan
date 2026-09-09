@@ -1861,6 +1861,28 @@ impl AgentSessionStore {
         result
     }
 
+    pub(crate) fn delete_archived(&self, session_id: &str) -> Result<(), String> {
+        validate_identifier(session_id, "sessionId")?;
+        let mut inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| "Agent session was not found".to_string())?;
+        if !record.archived {
+            return Err("only an archived Agent Session can be deleted".into());
+        }
+        let archive_root = inner
+            .archive_root
+            .clone()
+            .expect("configured store has an archive root");
+        let path = session_path(&archive_root, session_id);
+        fs::remove_file(&path)
+            .map_err(|error| format!("failed to delete archived Agent Session log: {error}"))?;
+        sync_parent(&path)?;
+        inner.sessions.remove(session_id);
+        Ok(())
+    }
+
     pub(crate) fn list_page(
         &self,
         request: AgentSessionListRequest,
@@ -4791,6 +4813,32 @@ mod tests {
         let restarted = AgentSessionStore::default();
         restarted.configure(root.path().to_path_buf()).unwrap();
         assert!(restarted.snapshot("session-1").unwrap().archived);
+    }
+
+    #[test]
+    fn only_archived_logs_can_be_permanently_deleted() {
+        let (root, store) = configured();
+        create(&store);
+        assert_eq!(
+            store.delete_archived("session-1").unwrap_err(),
+            "only an archived Agent Session can be deleted"
+        );
+        assert!(log_path(&root).is_file());
+
+        store.cancel("session-1").unwrap();
+        store.archive("session-1").unwrap();
+        let archived_path = root
+            .path()
+            .join("agent-runtime/archives-v5/session-1.jsonl");
+        assert!(archived_path.is_file());
+
+        store.delete_archived("session-1").unwrap();
+        assert!(!archived_path.exists());
+        assert!(store.snapshot("session-1").is_err());
+
+        let restarted = AgentSessionStore::default();
+        restarted.configure(root.path().to_path_buf()).unwrap();
+        assert!(restarted.snapshot("session-1").is_err());
     }
 
     #[test]
