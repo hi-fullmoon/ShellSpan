@@ -340,7 +340,7 @@ export function AiSessionBrowser({
               </TooltipTrigger>
               <TooltipContent>{t(`ai.workspace.sessions.filter.${filter}`)}</TooltipContent>
             </Tooltip>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="start">
               <DropdownMenuGroup>
                 <DropdownMenuLabel>{t('ai.workspace.sessions.filter')}</DropdownMenuLabel>
                 <DropdownMenuRadioGroup
