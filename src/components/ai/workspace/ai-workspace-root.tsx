@@ -37,6 +37,7 @@ function askConversationNodes(nodes: readonly AiConversationNode[]): readonly Ai
       || node.kind === 'question'
       || node.kind === 'error'
       || node.kind === 'reasoning'
+      || node.kind === 'turnTail'
     ) return [node];
     if (node.kind !== 'turnProcess') return [];
     const reasoning = node.children.filter((child) => child.kind === 'reasoning');
@@ -327,6 +328,9 @@ export function AiWorkspaceRoot({
               key={sessionLedgerKey ?? 'pending'}
               nodes={conversationNodes}
               renderers={surfaceMode === 'ask' ? aiAskConversationNodeRenderers : undefined}
+              runningIndicator={surfaceMode}
+              pending={surfaceMode === 'ask' && composerState?.phase === 'submitting'}
+              followUserSubmissions={surfaceMode === 'ask'}
               status={status}
               throughSeq={view?.throughSeq ?? null}
               initialAnchor={scrollAnchor}
