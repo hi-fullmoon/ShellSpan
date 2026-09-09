@@ -100,11 +100,20 @@ describe('AI Phase 4 Turn Process renderer', () => {
 
     await user.click(process);
     expect(process).toHaveAttribute('aria-expanded', 'true');
+    const processPanel = container.querySelector<HTMLElement>(
+      '.ai-turn-process > [data-slot="collapsible-content"]',
+    );
+    expect(getComputedStyle(processPanel!).transitionProperty).toBe('height, opacity');
+    expect(getComputedStyle(processPanel!).overflow).toBe('hidden');
     const reasoning = screen.getByRole('button', {
       name: 'Reasoning Read the frozen context. Answer directly.',
     });
     expect(reasoning).toHaveAttribute('aria-expanded', 'false');
     await user.click(reasoning);
+    const reasoningPanel = container.querySelector<HTMLElement>(
+      '.ai-reasoning-row > [data-slot="collapsible-content"]',
+    );
+    expect(getComputedStyle(reasoningPanel!).transitionProperty).toBe('height, opacity');
     expect((await screen.findAllByText('Read the frozen context. Answer directly.'))
       .some((element) => element.classList.contains('ai-reasoning-body'))).toBe(true);
     expect(screen.getByText('Hello! How can I help?')).toBeVisible();
@@ -190,6 +199,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
   });
 
   it('folds terminal process content once and restores focus from a hidden child', async () => {
+    const user = userEvent.setup();
     const context = contextNode();
     const running = processNode({
       key: 'turn-process:phase4-focus',
@@ -203,6 +213,13 @@ describe('AI Phase 4 Turn Process renderer', () => {
     });
     const { rerender } = render(<AiConversationNodeList nodes={[running]} />);
     const contextTrigger = screen.getByRole('button', { name: 'Runtime context' });
+    await user.click(contextTrigger);
+    const contextPanel = document.querySelector<HTMLElement>(
+      '.ai-semantic-note > [data-slot="collapsible-content"]',
+    );
+    expect(getComputedStyle(contextPanel!).transitionProperty).toBe('height, opacity');
+    expect(getComputedStyle(contextPanel!).overflow).toBe('hidden');
+    await user.click(contextTrigger);
     contextTrigger.focus();
     expect(contextTrigger).toHaveFocus();
 
