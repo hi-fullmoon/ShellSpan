@@ -179,6 +179,20 @@
   --dsw-specific-selector: rgb(53, 54, 56);
 }
 
+/* Ask and Agent are separate products, not two labels on one surface. Ask uses
+ * a conversational violet accent; terminal Agent keeps the operational blue. */
+.ai-panel-shell[data-ai-scope='workbench'] {
+  --dsw-alias-state-business-primary: rgb(112, 82, 232);
+  --dsw-alias-state-business-tertiary: rgb(239, 235, 255);
+  --dsw-specific-bubble: rgb(242, 239, 255);
+}
+
+[data-theme='dark'] .ai-panel-shell[data-ai-scope='workbench'] {
+  --dsw-alias-state-business-primary: rgb(169, 142, 255);
+  --dsw-alias-state-business-tertiary: rgb(60, 50, 91);
+  --dsw-specific-bubble: rgb(49, 43, 67);
+}
+
 .ai-panel-shell,
 .ai-panel-shell * {
   --dsw-elevation-stroke: 0 0 0 0.5px var(--dsw-elevation-stroke-color);
@@ -281,6 +295,32 @@
 
 .ai-session-title-cluster {
   gap: 8px;
+}
+
+.ai-session-mode-icon {
+  position: relative;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--dsw-alias-state-business-tertiary);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.ai-session-mode-icon > svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ai-session-mode-icon .ai-session-status-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--dsw-alias-bg-base);
 }
 
 .ai-session-heading {
@@ -618,6 +658,19 @@
 .ai-empty-hero [data-slot='empty-state-heading'] {
   min-width: 0;
   text-align: center;
+}
+
+.ai-empty-hero [data-slot='empty-state-icon'] {
+  width: 52px;
+  height: 52px;
+  border-radius: 18px;
+  background: var(--dsw-alias-state-business-tertiary);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.ai-empty-hero [data-slot='empty-state-icon'] svg {
+  width: 23px;
+  height: 23px;
 }
 
 .ai-empty-hero [data-slot='empty-state-title'] {
@@ -2277,6 +2330,31 @@
 .ai-composer-tools {
   flex: 0 1 auto;
   gap: 4px;
+}
+
+.ai-composer-mode-note {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-composer-mode-note svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.ai-composer-seat[data-ai-mode='ask'] .ai-composer-input-anchor > [data-slot='input-group'] {
+  border-radius: 18px;
+  box-shadow: 0 0 0 0.5px var(--dsw-alias-border-l2), 0 8px 28px rgba(71, 52, 138, 0.08);
 }
 
 .ai-composer-trailing {

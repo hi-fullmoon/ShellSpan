@@ -5,7 +5,10 @@ import { useI18n } from '@/hooks/useI18n';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useAppStore } from '@/stores/appStore';
 import type { AppSection } from '@/types';
-import { AiWorkspaceController } from './workspace/ai-workspace-controller';
+import {
+  TerminalAgentController,
+  WorkbenchAskController,
+} from './workspace/ai-workspace-controller';
 import './ai-panel.css';
 
 const AI_PANEL_DEFAULT_WIDTH = 400;
@@ -14,6 +17,10 @@ const AI_PANEL_MAX_WIDTH = 720;
 const MAIN_CONTENT_MIN_WIDTH = 480;
 const AI_PANEL_KEYBOARD_RESIZE_STEP = 24;
 const AI_PANEL_WIDTH_STORAGE_KEY = 'shellspan.aiPanelWidth';
+
+function aiPanelWidthStorageKey(scope: AppSection): string {
+  return `${AI_PANEL_WIDTH_STORAGE_KEY}.${scope === 'terminal' ? 'terminal' : 'workbench'}`;
+}
 
 export function getAiPanelWidthBounds(containerWidth: number): { min: number; max: number } {
   if (containerWidth < MAIN_CONTENT_MIN_WIDTH) {
@@ -29,9 +36,12 @@ export function clampAiPanelWidth(width: number, containerWidth: number): number
   return Math.round(Math.min(Math.max(width, bounds.min), bounds.max));
 }
 
-function initialAiPanelWidth(): number {
+function initialAiPanelWidth(scope: AppSection): number {
   if (typeof window === 'undefined') return AI_PANEL_DEFAULT_WIDTH;
-  const storedWidth = Number(window.localStorage.getItem(AI_PANEL_WIDTH_STORAGE_KEY));
+  const storedWidth = Number(
+    window.localStorage.getItem(aiPanelWidthStorageKey(scope))
+      ?? window.localStorage.getItem(AI_PANEL_WIDTH_STORAGE_KEY),
+  );
   return Number.isFinite(storedWidth) && storedWidth > 0
     ? storedWidth
     : AI_PANEL_DEFAULT_WIDTH;
@@ -117,7 +127,7 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
   scope,
   onOpenChange,
 }) => {
-  const [panelWidth, setPanelWidth] = useState(initialAiPanelWidth);
+  const [panelWidth, setPanelWidth] = useState(() => initialAiPanelWidth(scope));
   const [containerWidth, setContainerWidth] = useState(() => window.innerWidth);
   const [resizing, setResizing] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
@@ -133,10 +143,10 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      window.localStorage.setItem(AI_PANEL_WIDTH_STORAGE_KEY, String(panelWidth));
+      window.localStorage.setItem(aiPanelWidthStorageKey(scope), String(panelWidth));
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [panelWidth]);
+  }, [panelWidth, scope]);
 
   const measureContainerWidth = useCallback((): number => {
     if (compactViewport) return window.innerWidth;
@@ -302,15 +312,17 @@ export const AiPanel: React.FC = () => {
     : t('ai.workbench.title');
   return (
     <AiPanelShell
+      key={panelSection}
       open={open}
       panelTitle={panelTitle}
       scope={activeSection}
       onOpenChange={(nextOpen) => setOpen(nextOpen, panelSection)}
     >
-      <AiWorkspaceController
-        scope={panelSection}
-        onClose={() => setOpen(false, panelSection)}
-      />
+      {panelSection === 'terminal' ? (
+        <TerminalAgentController onClose={() => setOpen(false, panelSection)} />
+      ) : (
+        <WorkbenchAskController onClose={() => setOpen(false, panelSection)} />
+      )}
     </AiPanelShell>
   );
 };

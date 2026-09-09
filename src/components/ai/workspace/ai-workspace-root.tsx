@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { MessageCircleQuestionIcon, SquareTerminalIcon } from 'lucide-react';
 
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
@@ -28,6 +29,7 @@ export interface AiWorkspaceSubmitInput {
 }
 
 export interface AiWorkspaceRootProps {
+  readonly mode?: 'ask' | 'agent';
   readonly imageControls?: React.ReactNode;
   readonly onPasteImages?: (files: File[]) => void | Promise<void>;
   readonly hasImages?: boolean;
@@ -98,6 +100,7 @@ export interface AiWorkspaceRootProps {
 }
 
 export function AiWorkspaceRoot({
+  mode,
   imageControls, onPasteImages, hasImages, imageBusy, imageLocked,
   view,
   scope,
@@ -177,13 +180,22 @@ export function AiWorkspaceRoot({
   const hero = !sessionLoading && visibleNodes.length === 0 && status === 'idle' && composerState?.phase !== 'submitting';
   const resolvedTitle = title ?? view?.summary.title
     ?? sessions.find((summary) => summary.id === selectedSessionId)?.title
-    ?? t('ai.newConversation');
+    ?? t(scope === 'workbench' ? 'ai.workbench.conversationTitle' : 'ai.newConversation');
   const heroTitle = scope === 'terminal'
     ? t('agent.emptyTitle')
     : t('ai.workbench.emptyTitle');
   const heroDescription = scope === 'terminal'
     ? t('agent.emptyDescription')
     : t('ai.workbench.empty');
+  const surfaceMode = mode ?? 'agent';
+  const conversationNodes = surfaceMode === 'ask'
+    ? visibleNodes.filter((node) => (
+        node.kind === 'userMessage'
+        || node.kind === 'assistantMessage'
+        || node.kind === 'question'
+        || node.kind === 'error'
+      ))
+    : visibleNodes;
   const sessionLedgerKey = view ? sessionRouteKey(view.summary.kind, view.summary.id) : null;
   const scrollAnchor = sessionLedgerKey
     ? navigation.scrollAnchorBySession[sessionLedgerKey]
@@ -213,6 +225,7 @@ export function AiWorkspaceRoot({
       data-slot="ai-workspace-root"
       data-phase={hero ? 'hero' : 'active'}
       data-session-kind={sessionKind}
+      data-ai-mode={surfaceMode}
       className="ai-workspace-root"
       aria-label={t('ai.workspace')}
     >
@@ -234,8 +247,11 @@ export function AiWorkspaceRoot({
       <>
       <AiSessionHeader
         title={resolvedTitle}
-        context={t(scope === 'terminal' ? 'section.terminal' : 'section.workbench')}
+        context={mode
+          ? t(surfaceMode === 'agent' ? 'ai.terminal.scopeDescription' : 'ai.workbench.scopeDescription')
+          : t(scope === 'terminal' ? 'section.terminal' : 'section.workbench')}
         status={status}
+        mode={surfaceMode}
         onClose={onClose}
         onHistory={onHistory}
         historyOpen={route.kind === 'sessions'}
@@ -276,11 +292,14 @@ export function AiWorkspaceRoot({
             <AiEmptyHero
               title={heroTitle}
               description={heroDescription}
+              icon={surfaceMode === 'ask'
+                ? <MessageCircleQuestionIcon />
+                : <SquareTerminalIcon />}
             />
           ) : (
             <AiConversation
               key={sessionLedgerKey ?? 'pending'}
-              nodes={visibleNodes}
+              nodes={conversationNodes}
               status={status}
               throughSeq={view?.throughSeq ?? null}
               initialAnchor={scrollAnchor}
@@ -295,7 +314,12 @@ export function AiWorkspaceRoot({
         </div>
 
         <AiComposerSeat
-          imageControls={imageControls} onPasteImages={onPasteImages} hasImages={hasImages} imageBusy={imageBusy} imageLocked={imageLocked}
+          mode={surfaceMode}
+          imageControls={surfaceMode === 'agent' ? imageControls : undefined}
+          onPasteImages={surfaceMode === 'agent' ? onPasteImages : undefined}
+          hasImages={surfaceMode === 'agent' ? hasImages : false}
+          imageBusy={surfaceMode === 'agent' ? imageBusy : false}
+          imageLocked={surfaceMode === 'agent' ? imageLocked : false}
           phase={hero ? 'hero' : 'active'}
           status={status}
           draft={draft}
@@ -303,19 +327,19 @@ export function AiWorkspaceRoot({
           providerLabel={providerLabel}
           modelLabel={modelLabel}
           modelControl={modelControl}
-          contextUsage={view?.contextUsage}
-          permissionControl={permissionControl}
+          contextUsage={surfaceMode === 'agent' ? view?.contextUsage : undefined}
+          permissionControl={surfaceMode === 'agent' ? permissionControl : undefined}
           composerState={composerState}
-          inbox={view?.inbox}
-          taskSteps={taskSteps}
-          queueMutation={queueMutation}
+          inbox={surfaceMode === 'agent' ? view?.inbox : undefined}
+          taskSteps={surfaceMode === 'agent' ? taskSteps : undefined}
+          queueMutation={surfaceMode === 'agent' ? queueMutation : undefined}
           queueMutable={Boolean(view && !view.summary.archived && !view.snapshot.value.ended)}
           announcement={announcement}
-          pendingApproval={view?.pendingApproval}
+          pendingApproval={surfaceMode === 'agent' ? view?.pendingApproval : undefined}
           pendingQuestion={view?.pendingQuestion}
           onAnswerQuestion={onAnswerQuestion}
-          onListFileReferences={onListFileReferences}
-          onListSkills={onListSkills}
+          onListFileReferences={surfaceMode === 'agent' ? onListFileReferences : undefined}
+          onListSkills={surfaceMode === 'agent' ? onListSkills : undefined}
           skillsScopeKey={skillsScopeKey}
           skillsNeedsRoot={skillsNeedsRoot}
           projectTargetLabel={projectTargetLabel}
@@ -327,18 +351,18 @@ export function AiWorkspaceRoot({
           onSubmitGesture={onSubmitGesture}
           onStop={onStop}
           onRetryTurn={onRetryTurn}
-          onBusyPreferenceChange={onBusyPreferenceChange}
-          onUpdateQueueItem={onUpdateQueueItem}
-          onRemoveQueueItem={onRemoveQueueItem}
-          onSteerQueueItem={onSteerQueueItem}
-          onResumeQueueItem={onResumeQueueItem}
-          onReorderQueueLane={onReorderQueueLane}
-          onRetryQueueMutation={onRetryQueueMutation}
+          onBusyPreferenceChange={surfaceMode === 'agent' ? onBusyPreferenceChange : undefined}
+          onUpdateQueueItem={surfaceMode === 'agent' ? onUpdateQueueItem : undefined}
+          onRemoveQueueItem={surfaceMode === 'agent' ? onRemoveQueueItem : undefined}
+          onSteerQueueItem={surfaceMode === 'agent' ? onSteerQueueItem : undefined}
+          onResumeQueueItem={surfaceMode === 'agent' ? onResumeQueueItem : undefined}
+          onReorderQueueLane={surfaceMode === 'agent' ? onReorderQueueLane : undefined}
+          onRetryQueueMutation={surfaceMode === 'agent' ? onRetryQueueMutation : undefined}
           onRetryFailedDraft={onRetryFailedDraft}
           onDismissError={onDismissError}
           onOpenModel={onOpenModel}
-          onApprove={onApprove}
-          onReject={onReject}
+          onApprove={surfaceMode === 'agent' ? onApprove : undefined}
+          onReject={surfaceMode === 'agent' ? onReject : undefined}
           onOpenApprovalDetails={() => {
             const approval = view?.pendingApproval;
             if (!view || !approval) return;

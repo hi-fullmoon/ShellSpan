@@ -55,6 +55,7 @@ import type {
 } from '@/types/agent-session';
 
 const OPTIMISTIC_COMMIT_TIMEOUT_MS = 15_000;
+export const WORKBENCH_AI_TARGET_ID = 'workbench-ai';
 type AiAnnouncement = Extract<AiComposerEffect, { type: 'announce' }>['reason'];
 
 export type AiSessionControllerAdapter = AiSessionAdapter<'agent'>;
@@ -185,6 +186,7 @@ export function useAiSessionController({
     providedAdapter ? null : createAgentSessionAdapter()
   ), [providedAdapter]);
   const adapter = providedAdapter ?? ownedAdapter!;
+  const canRestoreWorkbench = providedAdapter !== undefined || isTauriRuntime();
   const terminalSessions = useTerminalStore((state) => state.sessions);
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
   const legacyProviders = useAiSettingsStore((state) => state.providers);
@@ -264,7 +266,9 @@ export function useAiSessionController({
   const effectExecutorRef = useRef<(effect: AiComposerEffect) => void>(() => undefined);
   const sessionListRequestRef = useRef(0);
 
-  const workspaceScopeKey = `agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`;
+  const workspaceScopeKey = scope === 'workbench'
+    ? 'ask:workbench'
+    : `agent:terminal:${activeTerminal?.sessionId ?? 'disconnected'}`;
   const appliedWorkspaceRef = useRef(workspaceScopeKey);
   const workspaceChanging = appliedWorkspaceRef.current !== workspaceScopeKey;
   const submissionContextRef = useRef({ key: workspaceScopeKey });
@@ -278,11 +282,11 @@ export function useAiSessionController({
     automaticRestore.current = { key: workspaceScopeKey, eligible: true };
   }
   const claimWorkspace = useCallback(() => { automaticRestore.current.eligible = false; }, []);
-  const canStartAgent = scope === 'terminal'
-    && activeTerminal?.status === 'connected';
-  const terminalUnavailableReason = canStartAgent
-    ? null
-    : t('agent.availability.needsTerminal');
+  const canStartAgent = scope === 'workbench'
+    || activeTerminal?.status === 'connected';
+  const terminalUnavailableReason = scope === 'terminal' && !canStartAgent
+    ? t('agent.availability.needsTerminal')
+    : null;
   const hasProvider = Boolean(view?.snapshot.value.header.modelSelection?.modelId.trim() || provider?.model.trim());
 
   const updateOptimistic = useCallback((updater: (
@@ -364,6 +368,29 @@ export function useAiSessionController({
   const createInput = useCallback((
     content: string,
   ): Extract<AiCreateSessionInput, { kind: 'agent' }> => {
+    if (scope === 'workbench') {
+      const sessionId = `ask-workbench-${operationId()}`;
+      return {
+        kind: 'agent',
+        request: {
+          sessionId,
+          taskId: `conversation-${sessionId}`,
+          goal: content,
+          target: {
+            kind: 'local',
+            targetId: WORKBENCH_AI_TARGET_ID,
+            sessionId: WORKBENCH_AI_TARGET_ID,
+            label: t('ai.workbench.title'),
+          },
+          permissionMode: 'requestApproval',
+          capabilityScope: {
+            toolNames: ['ask_user_question'],
+            effects: ['none'],
+            targetIds: [WORKBENCH_AI_TARGET_ID],
+          },
+        },
+      };
+    }
     if (scope !== 'terminal' || !activeTerminal || activeTerminal.status !== 'connected') {
       throw new Error(t('ai.workspace.error.connectedTerminalRequired'));
     }
@@ -381,7 +408,7 @@ export function useAiSessionController({
         successCriteria: [content],
       },
     };
-  }, [activeTerminal, operationId, scope]);
+  }, [activeTerminal, operationId, scope, t]);
 
   const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}`;
   const projectEpoch = useRef({ key: projectKey });
@@ -563,10 +590,12 @@ export function useAiSessionController({
       || (automaticRestore.current === restore && (established || restore.eligible)));
     const open = async (): Promise<void> => {
       let sessionId = openedSessionId;
-      if (!sessionId && scope === 'terminal' && activeTerminal) {
+      if (!sessionId && ((scope === 'workbench' && canRestoreWorkbench) || activeTerminal)) {
         if (!canPublish()) return;
         const summaries = await listAllAiSessions(adapter, {
-          scopeKey: `terminal-${activeTerminal.sessionId}`,
+          scopeKey: scope === 'workbench'
+            ? WORKBENCH_AI_TARGET_ID
+            : `terminal-${activeTerminal!.sessionId}`,
           archived: false,
           limit: 100,
         }, canPublish);
@@ -592,6 +621,7 @@ export function useAiSessionController({
   }, [
     activeTerminal,
     adapter,
+    canRestoreWorkbench,
     dispatch,
     openedSessionId,
     scope,
@@ -682,7 +712,10 @@ export function useAiSessionController({
     setSessionsLoading(true);
     setSessionsError(null);
     try {
-      const summaries = await listAllAiSessions(adapter, { limit: 200 }, () => (
+      const scopeKey = scope === 'workbench'
+        ? WORKBENCH_AI_TARGET_ID
+        : activeTerminal ? `terminal-${activeTerminal.sessionId}` : '__no-terminal__';
+      const summaries = await listAllAiSessions(adapter, { scopeKey, limit: 200 }, () => (
         mountedRef.current && requestId === sessionListRequestRef.current
       ));
       if (summaries && mountedRef.current && requestId === sessionListRequestRef.current) {
@@ -697,7 +730,7 @@ export function useAiSessionController({
         setSessionsLoading(false);
       }
     }
-  }, [adapter]);
+  }, [activeTerminal, adapter, scope]);
 
   const openSessions = useCallback((): void => {
     claimWorkspace();

@@ -30,6 +30,7 @@ export function AiWorkspaceController({
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
   return (
     <AiWorkspaceRoot
+      mode={scope === 'workbench' ? 'ask' : 'agent'}
       view={controller.view}
       imageControls={controller.imageDraft.draft?.images.length || controller.imageDraft.busy || controller.imageDraft.locked || controller.imageDraft.error ? <AiImageDraftControls state={controller.imageDraft} selection={controller.selectedProvider} /> : null}
       onPasteImages={controller.canStartAgent ? controller.imageDraft.add : undefined}
@@ -111,4 +112,16 @@ export function AiWorkspaceController({
       onClose={onClose}
     />
   );
+}
+
+type AiScopedControllerProps = Omit<AiWorkspaceControllerProps, 'scope'>;
+
+/** Lightweight, terminal-free question and answer surface. */
+export function WorkbenchAskController(props: AiScopedControllerProps): React.ReactNode {
+  return <AiWorkspaceController {...props} scope="workbench" />;
+}
+
+/** Full Agent surface bound to the active terminal session. */
+export function TerminalAgentController(props: AiScopedControllerProps): React.ReactNode {
+  return <AiWorkspaceController {...props} scope="terminal" />;
 }
