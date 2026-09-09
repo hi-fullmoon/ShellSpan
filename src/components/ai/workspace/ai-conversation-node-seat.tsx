@@ -259,13 +259,24 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
 
 function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reasoning'> }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(node.state === 'streaming');
+  const previousStateRef = useRef(node.state);
   const isStreaming = node.state === 'streaming';
   const title = isStreaming
     ? t('ai.thinking.inProgress')
     : node.state === 'interrupted'
       ? t('ai.thinking.interrupted')
       : t('ai.thinking');
+
+  useLayoutEffect(() => {
+    const previousState = previousStateRef.current;
+    if (previousState === 'streaming' && node.state !== 'streaming') {
+      setOpen(false);
+    } else if (previousState !== 'streaming' && node.state === 'streaming') {
+      setOpen(true);
+    }
+    previousStateRef.current = node.state;
+  }, [node.state]);
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -452,9 +463,6 @@ function TurnProcessDisclosure({
   const stateKey = turnProcessDisclosureKey(node);
   const stored = turnProcessDisclosures.get(stateKey);
   const [open, setOpen] = useState(stored?.open ?? !isSettledTurnProcess(node.status));
-  const previousStatusRef = useRef(stored?.status ?? node.status);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
   const label = t(turnProcessLabelKey(node.status));
   const summary = turnProcessSummary(node, t);
 
@@ -464,21 +472,12 @@ function TurnProcessDisclosure({
   };
 
   useLayoutEffect(() => {
-    const previousStatus = previousStatusRef.current;
-    if (!isSettledTurnProcess(previousStatus) && isSettledTurnProcess(node.status)) {
-      if (rootRef.current?.contains(document.activeElement)) triggerRef.current?.focus();
-      storeTurnProcessDisclosure(stateKey, { open: false, status: node.status });
-      setOpen(false);
-    } else {
-      storeTurnProcessDisclosure(stateKey, { open, status: node.status });
-    }
-    previousStatusRef.current = node.status;
+    storeTurnProcessDisclosure(stateKey, { open, status: node.status });
   }, [node.status, open, stateKey]);
 
   return (
     <Collapsible open={open} onOpenChange={updateOpen}>
       <div
-        ref={rootRef}
         className="ai-turn-process"
         data-expanded={open || undefined}
         data-status={node.status}
@@ -487,7 +486,6 @@ function TurnProcessDisclosure({
         <CollapsibleTrigger
           render={(
             <Button
-              ref={triggerRef}
               type="button"
               variant="plain"
               size="sm"
@@ -508,7 +506,6 @@ function TurnProcessDisclosure({
             </>
           )}
         </CollapsibleTrigger>
-        <Separator className="ai-turn-process-separator" />
         <CollapsibleContent>
           <div className="ai-turn-process-body">
             {node.children.map((child) => (

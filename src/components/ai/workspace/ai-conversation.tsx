@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker';
 import { Spinner } from '@/components/ui/spinner';
+import { AtomIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNode, AiConversationNodeOf, AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiScrollAnchor } from '@/lib/ai/panel-route';
@@ -23,6 +24,9 @@ function followKey(nodes: readonly AiConversationNode[], throughSeq: number | nu
 export interface AiConversationProps {
   readonly nodes: readonly AiConversationNode[];
   readonly renderers?: AiConversationNodeRendererMap;
+  readonly runningIndicator?: 'agent' | 'ask' | 'none';
+  readonly pending?: boolean;
+  readonly followUserSubmissions?: boolean;
   readonly status: AiSessionStatus;
   readonly throughSeq: number | null;
   readonly initialAnchor?: AiScrollAnchor;
@@ -37,6 +41,9 @@ export interface AiConversationProps {
 export function AiConversation({
   nodes,
   renderers,
+  runningIndicator = 'agent',
+  pending = false,
+  followUserSubmissions = false,
   status,
   throughSeq,
   initialAnchor,
@@ -49,11 +56,30 @@ export function AiConversation({
 }: AiConversationProps): React.ReactNode {
   const { t } = useI18n();
   const running = status === 'running' || status === 'waiting';
+  let latestUserIndex = -1;
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    if (nodes[index]?.kind === 'userMessage') {
+      latestUserIndex = index;
+      break;
+    }
+  }
+  const visibleResponseStarted = nodes.slice(latestUserIndex + 1).some((node) => (
+    node.kind === 'reasoning'
+    || node.kind === 'question'
+    || node.kind === 'error'
+    || (node.kind === 'assistantMessage'
+      && node.blocks.some((block) => block.type === 'text' && block.text.length > 0))
+  ));
+  const showAskThinking = (running || pending)
+    && runningIndicator === 'ask'
+    && !visibleResponseStarted;
+  const latestUserKey = latestUserIndex >= 0 ? nodes[latestUserIndex]?.key : undefined;
   return (
     <MessageScroller
       className="min-h-0 flex-1"
       contentClassName="ai-conversation-content"
       followKey={followKey(nodes, throughSeq)}
+      followEndKey={followUserSubmissions ? latestUserKey : undefined}
       ariaLabel={t('ai.conversation')}
       initialAnchor={initialAnchor}
       onAnchorChange={onAnchorChange}
@@ -70,12 +96,25 @@ export function AiConversation({
           key={node.key}
           node={node}
           renderers={renderers}
-          scrollAnchor={node.kind === 'userMessage'}
+          scrollAnchor={node.kind === 'userMessage' && !followUserSubmissions}
           onOpenTool={onOpenTool}
           onOpenArtifact={onOpenArtifact}
         />
       ))}
-      {running && (
+      {showAskThinking && (
+        <Marker
+          className="ai-turn-status w-fit"
+          role="status"
+          aria-live="polite"
+          data-ai-thinking-indicator=""
+        >
+          <MarkerIcon>
+            <AtomIcon aria-hidden="true" />
+          </MarkerIcon>
+          <MarkerContent className="shimmer">{t('ai.thinking.inProgress')}</MarkerContent>
+        </Marker>
+      )}
+      {running && runningIndicator === 'agent' && (
         <Marker
           className="ai-turn-status w-fit"
           role="status"

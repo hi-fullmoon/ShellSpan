@@ -36,6 +36,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 interface MessageScrollerProps {
   children: React.ReactNode;
   followKey: string;
+  followEndKey?: string;
   className?: string;
   contentClassName?: string;
   ariaLabel?: string;
@@ -62,6 +63,7 @@ export const MessageScroller: React.FC<MessageScrollerProps> = (props) => {
 const ConversationScroller: React.FC<MessageScrollerProps> = ({
   children,
   followKey,
+  followEndKey,
   className,
   contentClassName,
   ariaLabel,
@@ -75,6 +77,7 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
   const restoreFrameRef = useRef<number | null>(null);
   const [positionReady, setPositionReady] = useState(false);
   const { scrollToEnd, scrollToMessage, scrollToStart } = useMessageScroller();
+  const followEndKeyRef = useRef(followEndKey);
 
   const cancelRestore = useCallback(() => {
     if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
@@ -85,6 +88,15 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
     cancelRestore();
     setPositionReady(true);
   }, [cancelRestore]);
+
+  useLayoutEffect(() => {
+    const previous = followEndKeyRef.current;
+    followEndKeyRef.current = followEndKey;
+    if (followEndKey === undefined || followEndKey === previous) return;
+    cancelRestore();
+    scrollToEnd();
+    setPositionReady(true);
+  }, [cancelRestore, followEndKey, scrollToEnd]);
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     interruptRestore();
