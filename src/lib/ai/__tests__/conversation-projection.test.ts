@@ -316,6 +316,21 @@ describe('AI Phase 3 chat projection', () => {
     const second = projectAgentChatNodes(events.slice(0, reasoningIndexes[1] + 1));
     const streaming = projectAgentChatNodes(events.slice(0, textIndex + 1));
     const committed = projectAgentChatNodes(events.slice(0, messageIndex + 1));
+    const textEvent = events[textIndex]!;
+    const continuedTextEvent: AgentSessionEvent = {
+      version: textEvent.version,
+      sessionId: textEvent.sessionId,
+      seq: textEvent.seq + 1,
+      timeUnixMs: textEvent.timeUnixMs + 100,
+      turnId: textEvent.turnId,
+      stepId: textEvent.stepId,
+      type: 'assistant/chunk',
+      data: { requestId: 'request-01', textDelta: ' Still answering.' },
+    };
+    const continuedStreaming = projectAgentChatNodes([
+      ...events.slice(0, textIndex + 1),
+      continuedTextEvent,
+    ]);
 
     const firstReasoning = processChild(first, 'reasoning');
     const secondReasoning = processChild(second, 'reasoning');
@@ -325,6 +340,16 @@ describe('AI Phase 3 chat projection', () => {
       key: firstReasoning?.key,
       content: 'Read the frozen context. Answer directly.',
       state: 'streaming',
+    });
+    expect(processChild(streaming, 'reasoning')).toMatchObject({
+      key: firstReasoning?.key,
+      content: 'Read the frozen context. Answer directly.',
+      state: 'settled',
+      lastSeq: events[textIndex]?.seq,
+    });
+    expect(processChild(continuedStreaming, 'reasoning')).toMatchObject({
+      state: 'settled',
+      lastSeq: events[textIndex]?.seq,
     });
     expect(processChild(committed, 'reasoning')).toMatchObject({
       key: firstReasoning?.key,
@@ -336,6 +361,34 @@ describe('AI Phase 3 chat projection', () => {
       key: streamingAnswer?.key,
       state: 'completed',
       blocks: expect.arrayContaining([{ type: 'text', text: 'Hello! How can I help?' }]),
+    });
+  });
+
+  it('keeps reasoning streaming across whitespace-only answer chunks', () => {
+    const events = agentSessionBaselineScenarios.hello.events;
+    const reasoningIndexes = events.flatMap((event, index) => (
+      event.type === 'assistant/chunk' && event.data.reasoningDelta !== undefined ? [index] : []
+    ));
+    const reasoningIndex = reasoningIndexes[reasoningIndexes.length - 1]!;
+    const reasoningEvent = events[reasoningIndex]!;
+    const whitespaceEvent: AgentSessionEvent = {
+      version: reasoningEvent.version,
+      sessionId: reasoningEvent.sessionId,
+      seq: reasoningEvent.seq + 1,
+      timeUnixMs: reasoningEvent.timeUnixMs + 100,
+      turnId: reasoningEvent.turnId,
+      stepId: reasoningEvent.stepId,
+      type: 'assistant/chunk',
+      data: { requestId: 'request-01', textDelta: '\n\n\n' },
+    };
+    const nodes = projectAgentChatNodes([
+      ...events.slice(0, reasoningIndex + 1),
+      whitespaceEvent,
+    ]);
+
+    expect(processChild(nodes, 'reasoning')).toMatchObject({
+      state: 'streaming',
+      lastSeq: reasoningEvent.seq,
     });
   });
 

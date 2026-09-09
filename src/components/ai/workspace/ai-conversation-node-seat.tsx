@@ -209,6 +209,7 @@ function AssistantMessageNodeView({
 function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reasoning'> }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const summaryRef = useRef<HTMLSpanElement>(null);
   const isStreaming = node.state === 'streaming';
   const lines = node.content.trim().split('\n');
   const summary = (isStreaming ? lines[lines.length - 1] : lines[0]) || node.summary.trim();
@@ -217,6 +218,16 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
     : node.state === 'interrupted'
       ? t('ai.thinking.interrupted')
       : t('ai.workspace.reasoning');
+
+  useLayoutEffect(() => {
+    const element = summaryRef.current;
+    if (!element) return;
+    // A reasoning paragraph can stream for a long time without a newline. Keep
+    // the visible one-line preview pinned to its newest text while it grows,
+    // then restore the usual leading summary when the reasoning settles.
+    element.scrollLeft = isStreaming ? element.scrollWidth : 0;
+  }, [isStreaming, summary]);
+
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
@@ -245,7 +256,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
           {summary && (
             <>
               <span className="ai-disclosure-separator" aria-hidden="true" />
-              <span className="ai-disclosure-summary">{summary}</span>
+              <span ref={summaryRef} className="ai-disclosure-summary">{summary}</span>
             </>
           )}
         </CollapsibleTrigger>
