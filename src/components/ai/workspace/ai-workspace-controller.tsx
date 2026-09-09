@@ -52,6 +52,7 @@ export function AiWorkspaceController({
       sessionsLoading={controller.sessionsLoading}
       sessionsError={controller.sessionsError}
       archivingSessionId={controller.archivingSessionId}
+      deletingSessionId={controller.deletingSessionId}
       approvalDecision={controller.approvalDecision}
       approvalError={controller.approvalError}
       loadingOlder={controller.loadingOlder}
@@ -93,6 +94,7 @@ export function AiWorkspaceController({
       onNewSession={controller.newSession}
       onOpenSession={controller.openSession}
       onArchiveSession={controller.archiveSession}
+      onDeleteSession={controller.deleteSession}
       onUpdateQueueItem={controller.updateQueueItem}
       onRemoveQueueItem={controller.removeQueueItem}
       onSteerQueueItem={controller.steerQueueItem}
