@@ -104,7 +104,7 @@ describe('route-backed AI settings', () => {
           baseUrl: 'https://example.com',
           auth: { kind: 'none' },
           replayDomainId: 'domain-a',
-          presetId: 'custom',
+          presetId: 'generic',
           models: {
             'model-a': definition('model-a'),
             'model-b': definition('model-b'),

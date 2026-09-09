@@ -67,15 +67,27 @@ interface AiSettingsSectionProps {
 
 type SessionMigration = {
   sessionId: string;
-  status: 'pending' | 'converted' | 'failed';
+  status: string;
   error?: string;
 };
 
-const MIGRATION_STATUS_KEYS: Record<SessionMigration['status'], LocaleKey> = {
+const MIGRATION_STATUS_KEYS = {
   pending: 'settings.ai.migration.pending',
   converted: 'settings.ai.migration.converted',
   failed: 'settings.ai.migration.failed',
-};
+} satisfies Record<string, LocaleKey>;
+
+function normalizeProviderPreset(presetId: string | undefined): AiProviderPreset {
+  return presetId && Object.prototype.hasOwnProperty.call(PRESET_DESCRIPTION_KEYS, presetId)
+    ? presetId as AiProviderPreset
+    : 'custom';
+}
+
+function migrationStatusKey(status: string): LocaleKey {
+  return Object.prototype.hasOwnProperty.call(MIGRATION_STATUS_KEYS, status)
+    ? MIGRATION_STATUS_KEYS[status as keyof typeof MIGRATION_STATUS_KEYS]
+    : 'settings.ai.migration.failed';
+}
 
 export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded = false }) => {
   const { t } = useI18n();
@@ -104,7 +116,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   useEffect(()=>{ if(nativeRouteMode&&!routeSnapshot) void hydrateRoutes(); },[nativeRouteMode,routeSnapshot,hydrateRoutes]);
   const providers = useMemo(() => routeSnapshot ? routeSnapshot.routes.map(route => {
     const resolved=modelsByRoute[route.id]?.find(model=>model.modelId===route.defaults?.modelId) ?? modelsByRoute[route.id]?.[0];
-    return { id:route.id,name:route.displayName,preset:(route.presetId ?? 'custom') as AiProviderPreset,
+    return { id:route.id,name:route.displayName,preset:normalizeProviderPreset(route.presetId),
       kind:(route.adapterId==='responses'?'openAi':route.adapterId==='ollama'?'ollama':route.adapterId==='anthropic-messages'?'anthropicMessages':'openAiCompatible') as 'openAi'|'ollama'|'anthropicMessages'|'openAiCompatible',
       profile:resolved?.profile,baseUrl:route.baseUrl,model:resolved?.modelId ?? route.defaults?.modelId ?? '',reasoningEffort:route.defaults?.reasoningEffort,
       modelDefinition:resolved ? {contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision}:undefined,
@@ -316,7 +328,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         {migrationLoadError && <SettingRow label={t('settings.ai.migration.loadFailed')} description={migrationLoadError} />}
         {migrations.map(migration=><SettingRow key={migration.sessionId} label={migration.sessionId} description={migration.error
           ? t('settings.ai.migration.failedWithReason', { reason: migration.error })
-          : t(MIGRATION_STATUS_KEYS[migration.status])}>
+          : t(migrationStatusKey(migration.status))}>
           {migration.status==='pending' && <Button size="xs" variant="outline" onClick={()=>void invokeConvertAiSessionV4(migration.sessionId).then(()=>setMigrations(items=>items.map(item=>item.sessionId===migration.sessionId?{...item,status:'converted'}:item))).catch(error=>setMigrations(items=>items.map(item=>item.sessionId===migration.sessionId?{...item,status:'failed',error:String(error)}:item)))}>{t('settings.ai.migration.convert')}</Button>}
         </SettingRow>)}
       </SettingsGroup>}
