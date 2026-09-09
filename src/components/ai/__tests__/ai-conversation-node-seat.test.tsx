@@ -235,6 +235,11 @@ describe('AiConversationNodeList', () => {
 
     const userArticle = screen.getByRole('article', { name: 'Your message' });
     const assistantArticle = screen.getByRole('article', { name: 'AI assistant message' });
+    const userCopyButton = within(userArticle).getByRole('button', { name: 'Copy' });
+    expect(getComputedStyle(userCopyButton).display).toBe('grid');
+    expect(getComputedStyle(userCopyButton).placeItems).toBe('center');
+    expect(getComputedStyle(userCopyButton).paddingLeft).toBe('0px');
+    expect(getComputedStyle(userCopyButton).paddingRight).toBe('0px');
     expect(userArticle.querySelector('.ai-message-bubble-user')).toBeInTheDocument();
     expect(assistantArticle.querySelector('.ai-message-bubble-assistant')).toBeInTheDocument();
     expect(assistantArticle.querySelector('.ai-message-bubble-content')).toHaveStyle({ padding: '0px' });

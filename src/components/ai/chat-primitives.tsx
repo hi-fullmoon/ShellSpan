@@ -297,9 +297,10 @@ export const MessageActions: React.FC<{
   align: 'start' | 'end';
   timestamp?: string;
   className?: string;
+  actionClassName?: string;
   children?: React.ReactNode;
   reveal?: 'hover' | 'always';
-}> = ({ text, align, timestamp, className, children, reveal = 'hover' }) => {
+}> = ({ text, align, timestamp, className, actionClassName, children, reveal = 'hover' }) => {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const resetTimerRef = useRef<number | null>(null);
@@ -334,15 +335,15 @@ export const MessageActions: React.FC<{
           render={(
             <Button
               type="button"
-              variant="plain"
-              size="icon"
-              className="ai-message-action"
+              variant="ghost"
+              size="icon-sm"
+              className={cn('ai-message-action', actionClassName)}
               aria-label={copied ? t('common.copied') : t('common.copy')}
               onClick={copy}
             />
           )}
         >
-          {copied ? <CheckIcon /> : <CopyIcon />}
+          {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
         </TooltipTrigger>
         <TooltipContent>{copied ? t('common.copied') : t('common.copy')}</TooltipContent>
       </Tooltip>}
