@@ -180,17 +180,17 @@
 }
 
 /* Ask and Agent are separate products, not two labels on one surface. Ask uses
- * a conversational violet accent; terminal Agent keeps the operational blue. */
+ * a conversational teal accent; terminal Agent keeps the operational blue. */
 .ai-panel-shell[data-ai-scope='workbench'] {
-  --dsw-alias-state-business-primary: rgb(112, 82, 232);
-  --dsw-alias-state-business-tertiary: rgb(239, 235, 255);
-  --dsw-specific-bubble: rgb(242, 239, 255);
+  --dsw-alias-state-business-primary: rgb(13, 148, 136);
+  --dsw-alias-state-business-tertiary: rgb(226, 247, 244);
+  --dsw-specific-bubble: rgb(235, 249, 247);
 }
 
 [data-theme='dark'] .ai-panel-shell[data-ai-scope='workbench'] {
-  --dsw-alias-state-business-primary: rgb(169, 142, 255);
-  --dsw-alias-state-business-tertiary: rgb(60, 50, 91);
-  --dsw-specific-bubble: rgb(49, 43, 67);
+  --dsw-alias-state-business-primary: rgb(94, 234, 212);
+  --dsw-alias-state-business-tertiary: rgb(30, 69, 65);
+  --dsw-specific-bubble: rgb(31, 57, 54);
 }
 
 .ai-panel-shell,
@@ -2354,7 +2354,7 @@
 
 .ai-composer-seat[data-ai-mode='ask'] .ai-composer-input-anchor > [data-slot='input-group'] {
   border-radius: 18px;
-  box-shadow: 0 0 0 0.5px var(--dsw-alias-border-l2), 0 8px 28px rgba(71, 52, 138, 0.08);
+  box-shadow: 0 0 0 0.5px var(--dsw-alias-border-l2), 0 8px 28px rgba(13, 88, 82, 0.08);
 }
 
 .ai-composer-trailing {
@@ -2438,6 +2438,18 @@
 
 .ai-model-trigger [data-icon='inline-end'][data-open] {
   transform: rotate(180deg);
+}
+
+/* Composer controls already inherit the shadcn Button focus ring. Suppress the
+ * AI shell's second outline so keyboard focus stays visible without a double halo. */
+.ai-panel-shell :is(
+  .ai-permission-trigger,
+  .ai-model-trigger,
+  .ai-busy-preference-trigger,
+  .ai-composer-primary
+):focus-visible {
+  outline: none;
+  outline-offset: 0;
 }
 
 .ai-context-meter {
@@ -2638,7 +2650,7 @@
 .ai-model-menu,
 .ai-permission-menu,
 .ai-busy-preference-menu {
-  border-radius: 20px;
+  border-radius: 12px;
   background: var(--popover);
   box-shadow:
     0 0 1px 0 rgba(0, 0, 0, 0.2),
@@ -2678,6 +2690,13 @@
   gap: 8px;
   padding-block: 7px;
   padding-left: 10px;
+}
+
+.ai-model-menu-cell,
+.ai-model-menu-option,
+.ai-permission-menu-option,
+.ai-busy-preference-menu [data-slot='dropdown-menu-radio-item'] {
+  border-radius: 8px;
 }
 
 .ai-permission-menu {
