@@ -47,6 +47,7 @@ import { useAiDraftStore } from '@/stores/aiDraftStore';
 import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
+import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
 import type { AppSection } from '@/types';
 import type { AgentPermissionMode } from '@/types/agent-approval';
 import type {
@@ -65,6 +66,7 @@ export interface UseAiSessionControllerInput {
   readonly adapter?: AiSessionControllerAdapter;
   readonly now?: () => number;
   readonly operationId?: () => string;
+  readonly resolveTerminalDirectory?: (session: TerminalSession) => Promise<string | null>;
 }
 
 export interface AiSessionController {
@@ -93,6 +95,7 @@ export interface AiSessionController {
   readonly sessionsLoading: boolean;
   readonly sessionsError: string | null;
   readonly archivingSessionId: string | null;
+  readonly deletingSessionId: string | null;
   readonly approvalDecision: 'approve' | 'reject' | null;
   readonly approvalError: string | null;
   readonly loadingOlder: boolean;
@@ -111,6 +114,7 @@ export interface AiSessionController {
   readonly newSession: () => void;
   readonly refreshSessions: () => void;
   readonly archiveSession: (summary: AiSessionSummary) => void;
+  readonly deleteSession: (summary: AiSessionSummary) => void;
   readonly updateQueueItem: (item: AiInboxItem, content: string) => void;
   readonly removeQueueItem: (item: AiInboxItem) => void;
   readonly steerQueueItem: (item: AiInboxItem) => void;
@@ -181,6 +185,7 @@ export function useAiSessionController({
   adapter: providedAdapter,
   now = Date.now,
   operationId = generateId,
+  resolveTerminalDirectory = readTerminalCurrentDirectory,
 }: UseAiSessionControllerInput): AiSessionController {
   const ownedAdapter = useMemo<AiSessionControllerAdapter | null>(() => (
     providedAdapter ? null : createAgentSessionAdapter()
@@ -222,6 +227,8 @@ export function useAiSessionController({
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [archivingSessionId, setArchivingSessionId] = useState<string | null>(null);
   const archivePendingRef = useRef(false);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const deletePendingRef = useRef(false);
   const [approvalDecision, setApprovalDecision] = useState<'approve' | 'reject' | null>(null);
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -359,11 +366,19 @@ export function useAiSessionController({
   }, [navigationDraftKey, saveCurrentDraft, updateOptimistic, workspaceScopeKey]);
 
   const coldSkillSession = useRef<Promise<AiSessionView> | null>(null);
+  const terminalDirectory = useRef<{
+    epoch: { key: string };
+    promise: Promise<string | null>;
+  } | null>(null);
   const imageDraft = useImageDraft(navigationDraftKey(openedSessionId ?? view?.summary.id ?? null), composer.draft,
     value => { claimWorkspace(); dispatch({ type: 'draft.changed', value }); });
   const [skillNavigation, setSkillNavigation] = useState(0);
   const [skillRoot, setSkillRoot] = useState<string | null>(null);
-  useEffect(() => { coldSkillSession.current = null; setSkillRoot(null); }, [workspaceScopeKey, openedSessionId]);
+  useEffect(() => {
+    coldSkillSession.current = null;
+    terminalDirectory.current = null;
+    setSkillRoot(null);
+  }, [workspaceScopeKey, openedSessionId]);
 
   const createInput = useCallback((
     content: string,
@@ -418,8 +433,24 @@ export function useAiSessionController({
     let sessionId = viewRef.current?.summary.id ?? openedSessionId;
     if (!sessionId) {
       if (!coldSkillSession.current) {
-        const selectedRoot = root?.trim();
-        if (!selectedRoot || !(/^(?:\/|[A-Za-z]:[\\/])/.test(selectedRoot)) || /[\x00-\x1f]/.test(selectedRoot)) throw new Error(t('ai.workspace.skills.absoluteRoot'));
+        let selectedRoot = root?.trim();
+        if (!selectedRoot && scope === 'terminal' && activeTerminal?.status === 'connected') {
+          if (terminalDirectory.current?.epoch !== epoch) {
+            terminalDirectory.current = {
+              epoch,
+              promise: resolveTerminalDirectory(activeTerminal),
+            };
+          }
+          selectedRoot = (await terminalDirectory.current.promise)?.trim();
+        }
+        if (!selectedRoot || !(/^(?:\/|[A-Za-z]:[\\/])/.test(selectedRoot)) || /[\x00-\x1f]/.test(selectedRoot)) throw new Error(`RootRequired: ${t('ai.workspace.skills.absoluteRoot')}`);
+        if (projectEpoch.current !== epoch) throw new Error('Cancelled');
+        const concurrentSession = coldSkillSession.current as Promise<AiSessionView> | null;
+        if (concurrentSession) {
+          const concurrentSessionId = (await concurrentSession).summary.id;
+          if (projectEpoch.current !== epoch) throw new Error('Cancelled');
+          return concurrentSessionId;
+        }
         claimWorkspace();
         const input = createInput(composerRef.current.draft.trim() || t('ai.workspace.skills.title'));
         const target = input.request.target!;
@@ -435,7 +466,7 @@ export function useAiSessionController({
     }
     if (projectEpoch.current !== epoch) throw new Error('Cancelled');
     return sessionId;
-  }, [adapter, claimWorkspace, createInput, openedSessionId, skillNavigation, t]);
+  }, [activeTerminal, adapter, claimWorkspace, createInput, openedSessionId, resolveTerminalDirectory, scope, skillNavigation, t]);
 
   const listSkills = useCallback(async (root?: string): Promise<import('@/types/agent-skill').SkillUserList> => {
     // Browsing bundled instructions must not create a cold Session or freeze a directory.
@@ -805,6 +836,27 @@ export function useAiSessionController({
     });
   }, [adapter, newSession, refreshSessions, sessions, t]);
 
+  const deleteSession = useCallback((summary: AiSessionSummary): void => {
+    if (deletePendingRef.current || !summary.archived) return;
+    deletePendingRef.current = true;
+    setDeletingSessionId(summary.id);
+    setSessionsError(null);
+    void adapter.delete(summary.id).then(
+      () => {
+        setSessions((current) => current.filter((session) => session.id !== summary.id));
+        if (viewRef.current?.summary.id === summary.id) newSession();
+        void refreshSessions();
+      },
+      async () => {
+        await refreshSessions();
+        if (mountedRef.current) setSessionsError(t('ai.workspace.sessions.deleteFailed'));
+      },
+    ).finally(() => {
+      deletePendingRef.current = false;
+      if (mountedRef.current) setDeletingSessionId(null);
+    });
+  }, [adapter, newSession, refreshSessions, t]);
+
   const executeQueueMutation = useCallback((intent: AiQueueMutationIntent, retry = false): void => {
     // React state alone cannot guard two clicks within the same render.
     if (queueOperationRef.current?.pending) return;
@@ -1043,6 +1095,7 @@ export function useAiSessionController({
     sessionsLoading,
     sessionsError,
     archivingSessionId,
+    deletingSessionId,
     approvalDecision,
     approvalError,
     loadingOlder,
@@ -1139,6 +1192,7 @@ export function useAiSessionController({
     newSession,
     refreshSessions: () => { void refreshSessions(); },
     archiveSession,
+    deleteSession,
     updateQueueItem: (item, content) => executeQueueMutation({
       type: 'update', itemId: item.id, content,
     }),

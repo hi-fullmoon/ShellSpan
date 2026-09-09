@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
+  CheckIcon,
+  MessageCircleQuestionIcon,
+  SendIcon,
+} from 'lucide-react';
+import {
   Card,
   CardHeader,
   CardTitle,
@@ -16,6 +21,7 @@ import {
   FieldDescription,
   FieldError,
 } from '@/components/ui/field';
+import { Badge } from '@/components/ui/badge';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -33,6 +39,8 @@ export interface AiQuestionPanelProps {
   readonly question: AgentQuestionView;
   readonly onAnswer?: (input: AnswerQuestionInput) => Promise<void>;
 }
+
+const recommendedSuffix = /\s+\(Recommended\)$/i;
 
 export function AiQuestionPanel({
   question,
@@ -82,30 +90,38 @@ export function AiQuestionPanel({
   };
   return (
     <Card
-      className="max-h-[60vh]"
+      className="ai-question-panel"
       data-slot="ai-question-panel"
       data-question-id={question.identity.questionRequestId}
     >
-      <CardHeader className="shrink-0">
-        <CardTitle>{t('ai.workspace.question.title')}</CardTitle>
+      <CardHeader className="ai-question-panel-header">
+        <CardTitle className="ai-question-panel-title">
+          <MessageCircleQuestionIcon aria-hidden="true" />
+          {t('ai.workspace.question.title')}
+        </CardTitle>
         <CardDescription>
           {t('ai.workspace.question.description')}
         </CardDescription>
       </CardHeader>
-      <CardContent className="min-h-0 overflow-y-auto">
-        <FieldGroup>
+      <CardContent className="ai-question-panel-content">
+        <FieldGroup className="ai-question-list">
           {question.questions.map((q, index) => {
             const answer = answers.find((a) => a.id === q.id)!;
             const inputId = `${question.identity.questionRequestId}-${index}`;
             const tooLong =
               new TextEncoder().encode(answer.custom ?? '').length > 8192;
             return (
-              <FieldSet key={q.id} disabled={pending}>
+              <FieldSet
+                key={q.id}
+                className="ai-question-item"
+                disabled={pending}
+              >
                 <FieldLegend>{q.header ?? q.question}</FieldLegend>
                 {q.header && <FieldDescription>{q.question}</FieldDescription>}
                 {q.options && (
                   <Field>
                     <ToggleGroup
+                      className="ai-question-options"
                       aria-label={q.question}
                       multiple={q.multi_select}
                       value={[...answer.selected]}
@@ -124,37 +140,61 @@ export function AiQuestionPanel({
                       {q.options.map((option) => (
                         <ToggleGroupItem
                           key={option.label}
+                          className="ai-question-option"
                           value={option.label}
                           disabled={pending}
+                          aria-label={option.label}
                           aria-description={option.description}
                         >
-                          {option.label}
+                          <span className="ai-question-option-copy">
+                            <span className="ai-question-option-heading">
+                              <span>
+                                {option.label.replace(recommendedSuffix, '')}
+                              </span>
+                              {recommendedSuffix.test(option.label) && (
+                                <Badge variant="secondary" size="sm">
+                                  {t('ai.workspace.question.recommended')}
+                                </Badge>
+                              )}
+                            </span>
+                            {option.description && (
+                              <span className="ai-question-option-description">
+                                {option.description}
+                              </span>
+                            )}
+                          </span>
+                          {answer.selected.includes(option.label) && (
+                            <CheckIcon aria-hidden="true" />
+                          )}
                         </ToggleGroupItem>
                       ))}
                     </ToggleGroup>
-                    {q.options.map(
-                      (option) =>
-                        option.description && (
-                          <FieldDescription key={option.label}>
-                            {option.label}: {option.description}
-                          </FieldDescription>
-                        ),
-                    )}
                   </Field>
                 )}
                 <Field
+                  className="ai-question-custom-field"
                   data-invalid={tooLong || undefined}
                   data-disabled={pending || undefined}
                 >
                   <FieldLabel htmlFor={inputId}>
-                    {t('ai.workspace.question.custom')}
+                    {t(
+                      q.options
+                        ? 'ai.workspace.question.custom'
+                        : 'ai.workspace.question.answer',
+                    )}
                   </FieldLabel>
                   <Textarea
+                    className="ai-question-textarea"
                     id={inputId}
                     value={answer.custom ?? ''}
                     disabled={pending}
                     aria-invalid={tooLong || undefined}
                     maxLength={8192}
+                    placeholder={t(
+                      q.options
+                        ? 'ai.workspace.question.customPlaceholder'
+                        : 'ai.workspace.question.answerPlaceholder',
+                    )}
                     onChange={(event) =>
                       update({
                         id: q.id,
@@ -176,14 +216,20 @@ export function AiQuestionPanel({
           })}
         </FieldGroup>
       </CardContent>
-      <CardFooter className="flex shrink-0 flex-col items-start gap-2">
-        {error && <FieldError role="alert">{error}</FieldError>}
+      <CardFooter className="ai-question-panel-footer">
+        <div className="ai-question-footer-message">
+          {error && <FieldError role="alert">{error}</FieldError>}
+        </div>
         <Button
           type="button"
           disabled={pending || invalid || !onAnswer}
           onClick={() => void submit()}
         >
-          {pending && <Spinner data-icon="inline-start" />}
+          {pending ? (
+            <Spinner data-icon="inline-start" />
+          ) : (
+            <SendIcon data-icon="inline-start" />
+          )}
           {t(
             pending
               ? 'ai.workspace.question.submitting'
