@@ -23,7 +23,11 @@ vi.mock('@/hooks/useToast', () => ({
 }));
 
 vi.mock('@/hooks/useI18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({
+    t: (key: string, variables?: Record<string, string | number>) => variables
+      ? `${key}:${Object.values(variables).join(':')}`
+      : key,
+  }),
 }));
 
 vi.mock('../provider-setup-dialog', () => ({
@@ -119,7 +123,7 @@ describe('route-backed AI settings', () => {
 
   it('deletes one explicit model and moves both route defaults to a valid fallback', async () => {
     render(<AiSettingsSection />);
-    fireEvent.click(screen.getByRole('button', { name: 'Remove model-b' }));
+    fireEvent.click(screen.getByRole('button', { name: 'settings.ai.removeModel:model-b' }));
 
     await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
     const [routes, defaultSelection] = mocks.save.mock.calls[0];
