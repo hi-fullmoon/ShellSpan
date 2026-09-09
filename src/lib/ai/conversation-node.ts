@@ -68,7 +68,8 @@ export interface AiReasoningNode extends AiConversationNodeBase {
   readonly requestId: string | null;
   readonly summary: string;
   readonly content: string;
-  readonly state: 'streaming' | 'completed' | 'interrupted';
+  /** `settled` means reasoning output stopped, but the assistant message is not committed yet. */
+  readonly state: 'streaming' | 'settled' | 'completed' | 'interrupted';
 }
 
 export interface AiToolDetailRef {

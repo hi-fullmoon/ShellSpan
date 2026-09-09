@@ -92,7 +92,7 @@ export function AiTurnFooter({ node }: { readonly node: AiConversationNodeOf<'tu
     <div className="ai-turn-tail" data-status={node.status} data-stop-reason={node.stopReason ?? undefined}
       aria-label={t('ai.workspace.stats.label')}>
       <MessageActions text={node.summaryText ?? ''} timestamp={node.timestamp} align="start"
-        reveal="always" className="ai-turn-stats">
+        reveal="always" className="ai-turn-stats" actionClassName="ai-turn-stat-trigger">
         {hasUsage && (
           <StatPopover icon={<DatabaseIcon aria-hidden="true" />} title={label('usageTitle')}
             label={t('ai.workspace.turnFooter.usage', {

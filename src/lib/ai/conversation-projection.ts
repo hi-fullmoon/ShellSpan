@@ -479,7 +479,9 @@ export function projectAgentChatNodes(
     for (const nodes of nodeMaps) {
       for (const [key, node] of nodes) {
         if ((node.kind !== 'reasoning' && node.kind !== 'assistantMessage')
-          || node.state !== 'streaming'
+          || (node.kind === 'reasoning'
+            ? node.state !== 'streaming' && node.state !== 'settled'
+            : node.state !== 'streaming')
           || (scope !== 'session' && node.turnId !== eventTurnId(event))
           || (scope === 'step' && node.stepId !== eventStepId(event))) continue;
         // Runtime failures can end a scope without committing an assistant/message.
@@ -505,8 +507,11 @@ export function projectAgentChatNodes(
     for (const nodes of [turn?.children, unscopedNodes]) {
       if (!nodes) continue;
       for (const [key, node] of nodes) {
-        if (node.kind !== 'reasoning'
-          || node.state !== 'streaming'
+        if (node.kind !== 'reasoning') continue;
+        const canTransition = state === 'settled'
+          ? node.state === 'streaming'
+          : node.state === 'streaming' || node.state === 'settled';
+        if (!canTransition
           || node.turnId !== turnId
           || node.stepId !== stepId) continue;
         nodes.set(key, { ...node, lastSeq: event.seq, state });
@@ -796,7 +801,9 @@ export function projectAgentChatNodes(
           if (!nodes) continue;
           for (const [key, node] of nodes) {
             if ((node.kind === 'assistantMessage' || node.kind === 'reasoning')
-              && node.requestId === event.data.requestId && node.state === 'streaming') {
+              && node.requestId === event.data.requestId
+              && (node.state === 'streaming'
+                || (node.kind === 'reasoning' && node.state === 'settled'))) {
               nodes.delete(key);
             }
           }
@@ -814,6 +821,11 @@ export function projectAgentChatNodes(
           upsertReasoning(event, event.data.reasoningDelta, 'streaming', false);
         }
         if (event.data.textDelta) {
+          // Once answer text starts streaming, the provider has moved from its
+          // reasoning phase to its response phase. Settle the visible reasoning
+          // immediately instead of leaving "Thinking…" active beside the answer.
+          // A later reasoning delta can still reopen the same node as streaming.
+          if (event.data.textDelta.trim()) settleStreamingReasoning(event, 'settled');
           upsertAssistantText(event, event.data.requestId, event.data.textDelta, 'streaming');
         }
         break;
