@@ -1,6 +1,5 @@
 import { Button } from '@/components/ui/button';
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker';
-import { Spinner } from '@/components/ui/spinner';
 import { AtomIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNode, AiConversationNodeOf, AiSessionStatus } from '@/lib/ai/conversation-node';
@@ -121,10 +120,7 @@ export function AiConversation({
           aria-live="polite"
           data-ai-running-indicator=""
         >
-          <MarkerIcon>
-            <Spinner className="motion-reduce:animate-none" aria-hidden="true" />
-          </MarkerIcon>
-          <MarkerContent>
+          <MarkerContent className="shimmer">
             {status === 'waiting' ? t('agent.session.status.waiting') : t('ai.workspace.processing')}
           </MarkerContent>
         </Marker>
