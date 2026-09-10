@@ -54,9 +54,6 @@ pub(crate) struct ReplayBlockV5 {
     deny_unknown_fields
 )]
 pub(crate) enum ReplayEnvelopeV5 {
-    LegacyUnknown {
-        archived_provider_items: bool,
-    },
     Prepared {
         version: u32,
         adapter_id: String,
@@ -212,13 +209,7 @@ pub(crate) fn image_projection_hash(
         content_hash,
         images,
         ..
-    } = snapshot
-    else {
-        return Err(replay_error(
-            "REPLAY_SOURCE_INVALID",
-            "prepared replay requires a prepared request snapshot",
-        ));
-    };
+    } = snapshot;
     super::runtime::try_digest(
         &serde_json::to_vec(&json!({
             "preparationVersion": preparation_version,
@@ -248,13 +239,7 @@ pub(crate) fn prepare_envelope(
         projection_policy,
         images,
         ..
-    } = snapshot
-    else {
-        return Err(replay_error(
-            "REPLAY_SOURCE_INVALID",
-            "normal responses cannot use a legacy request snapshot",
-        ));
-    };
+    } = snapshot;
     if adapter_id != codec.adapter_id() {
         return Err(replay_error(
             "REPLAY_ADAPTER_MISMATCH",
@@ -345,12 +330,7 @@ pub(crate) fn validate_agent_envelope(
     snapshot: &RequestSnapshot,
     request_id: &str,
 ) -> Result<(), NormalizedModelError> {
-    let ReplayEnvelopeV5::Prepared { adapter_id, .. } = envelope else {
-        return Err(replay_error(
-            "REPLAY_LEGACY_UNKNOWN",
-            "legacy replay metadata cannot be validated as prepared",
-        ));
-    };
+    let ReplayEnvelopeV5::Prepared { adapter_id, .. } = envelope;
     let codec = super::registry::replay_codec(adapter_id).ok_or_else(|| {
         replay_error(
             "REPLAY_ADAPTER_UNKNOWN",
@@ -408,13 +388,7 @@ fn validate_envelope_common(
         source,
         response,
         blocks,
-    } = envelope
-    else {
-        return Err(replay_error(
-            "REPLAY_LEGACY_UNKNOWN",
-            "legacy replay metadata is not executable",
-        ));
-    };
+    } = envelope;
     if *version != REPLAY_ENVELOPE_VERSION {
         return Err(replay_error(
             "REPLAY_VERSION_UNKNOWN",
@@ -444,13 +418,7 @@ fn validate_envelope_common(
         projection_policy,
         images,
         ..
-    } = snapshot
-    else {
-        return Err(replay_error(
-            "REPLAY_SOURCE_INVALID",
-            "prepared replay references legacy request",
-        ));
-    };
+    } = snapshot;
     if source.request_id != request_id
         || source.request_snapshot_digest != snapshot.digest()
         || source.route_id != *route_id
@@ -903,10 +871,7 @@ mod tests {
                 source,
                 blocks,
                 ..
-            } = &mut candidate
-            else {
-                unreachable!()
-            };
+            } = &mut candidate;
             match mutation {
                 0 => *version = 9,
                 1 => *replay_format_version = 9,
@@ -958,9 +923,8 @@ mod tests {
                 json!({"reasoningDetails":[{"type":"reasoning.text","text":"plan","signature":"opaque"}]}),
             ],
         );
-        if let ReplayEnvelopeV5::Prepared { blocks, .. } = &mut corrupted_reasoning {
-            blocks[0].metadata["reasoningDetails"][0]["unknown"] = json!(true);
-        }
+        let ReplayEnvelopeV5::Prepared { blocks, .. } = &mut corrupted_reasoning;
+        blocks[0].metadata["reasoningDetails"][0]["unknown"] = json!(true);
         assert!(validate_model_envelope(
             &corrupted_reasoning,
             &reasoning,
@@ -974,9 +938,7 @@ mod tests {
     #[test]
     fn image_projection_binding_contains_only_immutable_refs_and_rejects_changes() {
         let mut source = snapshot("responses");
-        let RequestSnapshot::Prepared { images, .. } = &mut source else {
-            unreachable!()
-        };
+        let RequestSnapshot::Prepared { images, .. } = &mut source;
         images.push(crate::agent_runtime::images::ImageRef {
             version: 1,
             sha256: "a".repeat(64),
@@ -1002,9 +964,7 @@ mod tests {
         assert!(encoded.contains(&"a".repeat(64)));
         assert!(!encoded.contains("data:image"));
         let mut changed = source.clone();
-        let RequestSnapshot::Prepared { images, .. } = &mut changed else {
-            unreachable!()
-        };
+        let RequestSnapshot::Prepared { images, .. } = &mut changed;
         images[0].sha256 = "b".repeat(64);
         assert!(validate_model_envelope(
             &envelope,
@@ -1075,10 +1035,7 @@ mod tests {
         let (
             ReplayEnvelopeV5::Prepared { source: first, .. },
             ReplayEnvelopeV5::Prepared { source: second, .. },
-        ) = (first, second)
-        else {
-            unreachable!()
-        };
+        ) = (first, second);
         assert_ne!(first.request_id, second.request_id);
         assert_eq!(
             first.request_snapshot_digest,
@@ -1086,33 +1043,6 @@ mod tests {
         );
         assert_eq!(first.request_content_hash, second.request_content_hash);
         assert_eq!(first.image_projection_hash, second.image_projection_hash);
-    }
-
-    #[test]
-    fn legacy_and_cross_domain_history_never_execute_archived_provider_items() {
-        let mut messages = vec![ModelMessage::Assistant {
-            content: vec![ModelContentBlock::Reasoning {
-                text: "display only".into(),
-                provider_item: Some(json!({"type":"reasoning","id":"forged-native-id"})),
-            }],
-            replay: Some(ReplayEnvelopeV5::LegacyUnknown {
-                archived_provider_items: true,
-            }),
-            native_replay: None,
-        }];
-        project_history(
-            super::super::registry::replay_codec("responses").unwrap(),
-            &mut messages,
-            ReplayTarget {
-                route_id: "route-a",
-                model_id: "model-a",
-                replay_domain_id: "domain-a",
-            },
-        )
-        .unwrap();
-        assert!(!serde_json::to_string(&messages)
-            .unwrap()
-            .contains("forged-native-id"));
     }
 
     #[test]
@@ -1128,7 +1058,7 @@ mod tests {
                 content: vec![
                     crate::agent_runtime::AgentAssistantContentBlock::Reasoning {
                         text: "display".into(),
-                        provider_item: Some(json!({"id":"legacy-private-item"})),
+                        provider_item: Some(json!({"id":"untrusted-private-item"})),
                     },
                     crate::agent_runtime::AgentAssistantContentBlock::ToolCall {
                         call: Box::new(crate::agent_runtime::RecordedToolCall {
@@ -1146,14 +1076,12 @@ mod tests {
                 usage: Default::default(),
                 stop_reason: crate::agent_runtime::AgentStopReason::ToolCalls,
                 interrupted: false,
-                replay: Some(ReplayEnvelopeV5::LegacyUnknown {
-                    archived_provider_items: true,
-                }),
+                replay: None,
             },
         );
         public_event_projection(&mut event);
         let encoded = serde_json::to_string(&event).unwrap();
-        assert!(!encoded.contains("legacy-private-item"));
+        assert!(!encoded.contains("untrusted-private-item"));
         assert!(!encoded.contains("private-provider-call"));
         assert!(!encoded.contains("\"replay\""));
         assert!(encoded.contains("\"callId\":\"call\""));

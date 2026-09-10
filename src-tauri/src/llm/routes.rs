@@ -8,7 +8,6 @@ use crate::{
     keychain::{CredentialManager, AI_KEY_SERVICE},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashSet},
     sync::{Arc, Mutex},
@@ -68,7 +67,6 @@ pub(crate) struct ProviderRoute {
     #[serde(default)]
     pub defaults: Option<ModelSelection>,
     pub retry_policy: crate::agent_runtime::RetryPolicy,
-    #[serde(default)]
     pub timeouts: RouteTimeouts,
 }
 impl ProviderRoute {
@@ -123,15 +121,13 @@ impl ProviderRoute {
             // Retry recovery is an application policy, not a route or model setting.
             // Keep the route field wire-compatible, but always use the runtime default.
             retry_policy: None,
-            profile: Some(
-                match self.kind()? {
-                    AiProviderKind::OpenAi => "openai",
-                    AiProviderKind::Ollama => "ollama",
-                    AiProviderKind::AnthropicMessages => "anthropic",
-                    _ => "generic",
-                }
-                .into(),
-            ),
+            profile: match self.kind()? {
+                AiProviderKind::OpenAi => "openai",
+                AiProviderKind::Ollama => "ollama",
+                AiProviderKind::AnthropicMessages => "anthropic",
+                _ => "generic",
+            }
+            .into(),
             id: self.id.clone(),
             kind: self.kind()?,
             base_url: self.base_url.clone(),
@@ -185,22 +181,22 @@ impl ProviderRoute {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct MigrationIssue {
-    pub original: Value,
-    pub error: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RouteSnapshot {
     pub schema_version: u32,
     pub revision: u64,
     pub routes: Vec<ProviderRoute>,
     pub default_selection: Option<ModelSelection>,
-    pub migration_complete: bool,
-    pub migration_issues: Vec<MigrationIssue>,
 }
 impl RouteSnapshot {
+    fn initial() -> Self {
+        Self {
+            schema_version: 1,
+            revision: 1,
+            routes: Vec::new(),
+            default_selection: None,
+        }
+    }
+
     pub fn route(&self, id: &str) -> Result<&ProviderRoute, String> {
         self.routes
             .iter()
@@ -237,11 +233,10 @@ impl RouteStore {
                 serde_json::from_str(value).map_err(|e| format!("INVALID_ROUTE_DOCUMENT: {e}"))?
             }
             None => {
-                let (snapshot, backup) = migrate(&preferences)?;
+                let snapshot = RouteSnapshot::initial();
                 database.commit_llm_routes(
                     None,
                     &serde_json::to_string(&snapshot).map_err(|e| e.to_string())?,
-                    Some(&backup),
                 )?;
                 snapshot
             }
@@ -279,8 +274,6 @@ impl RouteStore {
                 .ok_or("REVISION_EXHAUSTED")?,
             routes,
             default_selection,
-            migration_complete: current.migration_complete,
-            migration_issues: current.migration_issues.clone(),
         };
         for id in secrets.keys() {
             if !candidate.routes.iter().any(|r| &r.id == id) {
@@ -374,7 +367,7 @@ impl RouteStore {
         }
         if let Err(error) = self
             .database
-            .commit_llm_routes(Some(expected_revision), &raw, None)
+            .commit_llm_routes(Some(expected_revision), &raw)
         {
             for (reference, _) in &staged {
                 let _ = self
@@ -432,113 +425,6 @@ impl RouteStore {
     }
 }
 
-fn migrate(preferences: &[(String, String)]) -> Result<(RouteSnapshot, String), String> {
-    let backup = preferences
-        .iter()
-        .find(|(k, _)| k == "ai.providers")
-        .map(|(_, v)| v.clone())
-        .unwrap_or_else(|| "[]".into());
-    let items: Vec<Value> =
-        serde_json::from_str(&backup).map_err(|e| format!("INVALID_LEGACY_CONFIGURATION: {e}"))?;
-    let mut snapshot = RouteSnapshot {
-        schema_version: 1,
-        revision: 1,
-        routes: vec![],
-        default_selection: None,
-        migration_complete: true,
-        migration_issues: vec![],
-    };
-    for mut original in items.clone() {
-        // Inline credentials have already been migrated by the existing startup migration.
-        if let Some(object) = original.as_object_mut() {
-            object.remove("apiKey");
-        }
-        let convert = || -> Result<ProviderRoute, String> {
-            let mut object = original
-                .as_object()
-                .ok_or("invalid legacy provider")?
-                .clone();
-            let name = object
-                .remove("name")
-                .and_then(|v| v.as_str().map(str::to_string))
-                .unwrap_or_default();
-            object.remove("preset");
-            object.remove("enabled");
-            object.remove("hasApiKey");
-            let provider: AiProviderConfig =
-                serde_json::from_value(Value::Object(object)).map_err(|e| e.to_string())?;
-            let model = catalog::resolve(&provider)?;
-            let selection = ModelSelection {
-                route_id: provider.id.clone(),
-                model_id: provider.model.clone(),
-                reasoning_effort: provider.reasoning_effort.clone(),
-            };
-            let route = ProviderRoute {
-                id: provider.id.clone(),
-                revision: 1,
-                display_name: if name.is_empty() {
-                    provider.id.clone()
-                } else {
-                    name
-                },
-                adapter_id: adapter_id(provider.kind).into(),
-                base_url: provider.base_url.clone(),
-                auth: if provider.requires_api_key {
-                    RouteAuth::Keychain {
-                        reference: provider.id,
-                    }
-                } else {
-                    RouteAuth::None
-                },
-                replay_domain_id: uuid::Uuid::new_v4().to_string(),
-                preset_id: Some(model.profile.clone()),
-                models: Some(BTreeMap::from([(provider.model, model.definition)])),
-                model_overrides: None,
-                defaults: Some(selection),
-                retry_policy: provider.retry_policy.unwrap_or_default(),
-                timeouts: RouteTimeouts::default(),
-            };
-            route.validate()?;
-            Ok(route)
-        };
-        match convert() {
-            Ok(route) if !snapshot.routes.iter().any(|r| r.id == route.id) => {
-                snapshot.routes.push(route)
-            }
-            Ok(_) => snapshot.migration_issues.push(MigrationIssue {
-                original,
-                error: "DUPLICATE_ROUTE".into(),
-            }),
-            Err(error) => snapshot
-                .migration_issues
-                .push(MigrationIssue { original, error }),
-        }
-    }
-    let default_id = preferences
-        .iter()
-        .find(|(k, _)| k == "ai.defaultProviderId")
-        .and_then(|(_, v)| serde_json::from_str::<String>(v).ok());
-    snapshot.default_selection = default_id.and_then(|id| {
-        snapshot
-            .routes
-            .iter()
-            .find(|r| r.id == id)
-            .and_then(|r| r.defaults.clone())
-            .or_else(|| {
-                items
-                    .iter()
-                    .find(|v| v["id"] == id)
-                    .and_then(|v| v["model"].as_str())
-                    .map(|model_id| ModelSelection {
-                        route_id: id,
-                        model_id: model_id.into(),
-                        reasoning_effort: None,
-                    })
-            })
-    });
-    Ok((snapshot, backup))
-}
-
 pub(crate) fn adapter_id(kind: AiProviderKind) -> &'static str {
     match kind {
         AiProviderKind::OpenAi => "responses",
@@ -551,32 +437,22 @@ pub(crate) fn adapter_id(kind: AiProviderKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn legacy(id: &str, model: &str) -> Value {
-        serde_json::json!({"id":id,"name":"Same name","preset":"ollama","profile":"ollama","kind":"ollama","baseUrl":"http://127.0.0.1:11434","model":model,"requiresApiKey":false,"retryPolicy":{"maxAttempts":3,"initialDelayMs":250,"maxDelayMs":4000,"maxServerDelayMs":30000,"jitterRatio":0.2}})
-    }
     #[test]
-    fn migration_keeps_connections_separate_and_default_selection() {
-        let raw = serde_json::to_string(&vec![legacy("a", "qwen3"), legacy("b", "qwen3")]).unwrap();
-        let prefs = vec![
-            ("ai.providers".into(), raw.clone()),
-            (
-                "ai.defaultProviderId".into(),
-                serde_json::to_string("b").unwrap(),
-            ),
-        ];
-        let (result, backup) = migrate(&prefs).unwrap();
-        assert_eq!(backup, raw);
-        assert_eq!(result.routes.len(), 2);
-        assert_eq!(result.routes[0].display_name, result.routes[1].display_name);
-        assert_eq!(result.default_selection.unwrap().route_id, "b");
-    }
-    #[test]
-    fn invalid_legacy_is_preserved_for_repair() {
-        let bad = serde_json::json!({"id":"broken","name":"Broken","preset":"custom","kind":"unknown","baseUrl":"x","model":"x","requiresApiKey":false});
-        let raw = serde_json::to_string(&vec![bad.clone()]).unwrap();
-        let (result, _) = migrate(&[("ai.providers".into(), raw)]).unwrap();
-        assert!(result.routes.is_empty());
-        assert_eq!(result.migration_issues[0].original, bad);
+    fn missing_route_document_starts_with_an_empty_current_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("db.sqlite")).unwrap();
+        db.save_preferences(&[(
+            "ai.providers".into(),
+            r#"[{"id":"obsolete-provider"}]"#.into(),
+        )])
+        .unwrap();
+        let store = RouteStore::open(db.clone(), CredentialManager::in_memory_for_tests()).unwrap();
+        assert_eq!(*store.snapshot().unwrap(), RouteSnapshot::initial());
+        let preferences = db.load_preferences().unwrap();
+        assert!(preferences.iter().any(|(key, _)| key == ROUTES_KEY));
+        assert!(!preferences
+            .iter()
+            .any(|(key, _)| key == "llm.legacyBackup.v1"));
     }
     #[test]
     fn validates_mutual_exclusion_duplicate_and_unknown_adapter() {
@@ -637,17 +513,15 @@ mod tests {
             revision: 1,
             routes: vec![],
             default_selection: None,
-            migration_complete: true,
-            migration_issues: vec![],
         };
         let raw = serde_json::to_string(&empty).unwrap();
-        db.commit_llm_routes(None, &raw, None).unwrap();
+        db.commit_llm_routes(None, &raw).unwrap();
         let mut next = empty;
         next.revision = 2;
         let next = serde_json::to_string(&next).unwrap();
-        db.commit_llm_routes(Some(1), &next, None).unwrap();
+        db.commit_llm_routes(Some(1), &next).unwrap();
         assert_eq!(
-            db.commit_llm_routes(Some(1), &next, None).unwrap_err(),
+            db.commit_llm_routes(Some(1), &next).unwrap_err(),
             "REVISION_CONFLICT"
         );
     }

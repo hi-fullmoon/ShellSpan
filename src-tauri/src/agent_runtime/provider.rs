@@ -1,8 +1,8 @@
-//! Compatibility names for legacy tests; runtime facts live in llm::catalog.
+//! Cross-language provider contract tests.
 #[cfg(test)]
 use crate::ai::AiProviderConfig;
 #[cfg(test)]
-pub(crate) use crate::llm::catalog::legacy_profile as profile_id;
+pub(crate) use crate::llm::catalog::profile_id;
 #[cfg(test)]
 fn validate(p: &AiProviderConfig) -> Result<(), String> {
     crate::llm::catalog::resolve(p).map(|_| ())
@@ -27,7 +27,7 @@ mod tests {
                 serde_json::from_value(fixture["provider"].clone()).unwrap();
             validate(&provider).unwrap();
             assert_eq!(
-                profile_id(&provider),
+                profile_id(&provider).unwrap(),
                 fixture["provider"]["profile"].as_str().unwrap()
             );
             let mut body = json!({});
@@ -40,9 +40,9 @@ mod tests {
         let mut provider: AiProviderConfig = serde_json::from_value(json!({"id":"x","profile":"qwen","kind":"openAiCompatible","baseUrl":"https://proxy.example/v1","model":"qwen3-thinking-2507","requiresApiKey":false,"reasoningEffort":"off"})).unwrap();
         assert!(validate(&provider).unwrap_err().contains("Unsupported"));
         provider.reasoning_effort = None;
-        provider.profile = Some("openai".into());
+        provider.profile = "openai".into();
         assert!(validate(&provider).unwrap_err().contains("protocol"));
-        provider.profile = Some("unknown".into());
+        provider.profile = "unknown".into();
         assert!(validate(&provider).unwrap_err().contains("Unknown"));
     }
 }

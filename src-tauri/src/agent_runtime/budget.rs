@@ -144,7 +144,7 @@ mod tests {
                 AiProviderKind::OpenAiCompatible,
                 context,
             )),
-            profile: None,
+            profile: "generic".into(),
             retry_policy: None,
             id: "fixture".into(),
             kind: AiProviderKind::OpenAiCompatible,

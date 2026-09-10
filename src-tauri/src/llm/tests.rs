@@ -227,7 +227,7 @@ fn deepseek_reasoning_text_tools_and_usage_keep_provider_order_and_detail() {
     let sink: Arc<dyn ModelStreamSink> = recording.clone();
     let provider = AiProviderConfig {
         model_definition: None,
-        profile: None,
+        profile: "deepseek".into(),
         retry_policy: None,
         id: "deepseek".into(),
         kind: AiProviderKind::OpenAiCompatible,
@@ -301,7 +301,7 @@ fn deepseek_reasoning_text_tools_and_usage_keep_provider_order_and_detail() {
 fn qwen_and_glm_profiles_enable_native_reasoning_and_stream_usage() {
     let qwen = AiProviderConfig {
         model_definition: None,
-        profile: None,
+        profile: "qwen".into(),
         retry_policy: None,
         id: "qwen".into(),
         kind: AiProviderKind::OpenAiCompatible,
@@ -313,7 +313,7 @@ fn qwen_and_glm_profiles_enable_native_reasoning_and_stream_usage() {
     };
     let glm = AiProviderConfig {
         model_definition: None,
-        profile: None,
+        profile: "glm".into(),
         retry_policy: None,
         id: "glm".into(),
         kind: AiProviderKind::OpenAiCompatible,
@@ -341,7 +341,7 @@ fn minimax_cumulative_reasoning_text_and_tool_fragments_are_deduplicated() {
     let sink: Arc<dyn ModelStreamSink> = recording.clone();
     let provider = AiProviderConfig {
         model_definition: None,
-        profile: None,
+        profile: "minimax".into(),
         retry_policy: None,
         id: "minimax".into(),
         kind: AiProviderKind::OpenAiCompatible,
@@ -647,7 +647,7 @@ async fn live_stream_distinguishes_first_byte_and_idle_timeouts() {
                     AiProviderKind::OpenAiCompatible,
                     65536,
                 )),
-                profile: None,
+                profile: "generic".into(),
                 retry_policy: None,
                 id: "timeout-test".into(),
                 kind: AiProviderKind::OpenAiCompatible,
@@ -832,7 +832,7 @@ async fn cross_domain_responses_wire_never_contains_old_native_state() {
     .unwrap();
     let mut untrusted_content = canonical.clone();
     if let ModelContentBlock::Reasoning { provider_item, .. } = &mut untrusted_content[0] {
-        *provider_item = Some(json!({"type":"reasoning","id":"legacy-provider-item-bypass"}));
+        *provider_item = Some(json!({"type":"reasoning","id":"untrusted-provider-item-bypass"}));
     }
     let provider = AiProviderConfig {
         id: "route-a".into(),
@@ -842,7 +842,7 @@ async fn cross_domain_responses_wire_never_contains_old_native_state() {
         requires_api_key: true,
         api_key: None,
         reasoning_effort: None,
-        profile: None,
+        profile: "openai".into(),
         model_definition: Some(definition.clone()),
         retry_policy: None,
     };
@@ -852,7 +852,7 @@ async fn cross_domain_responses_wire_never_contains_old_native_state() {
     let prepared = crate::llm::runtime::PreparedModel {
         provider,
         adapter,
-        route: Some(crate::llm::routes::ProviderRoute {
+        route: crate::llm::routes::ProviderRoute {
             id: "route-a".into(),
             revision: 8,
             display_name: "Rotated account".into(),
@@ -868,7 +868,7 @@ async fn cross_domain_responses_wire_never_contains_old_native_state() {
             defaults: None,
             retry_policy: Default::default(),
             timeouts: Default::default(),
-        }),
+        },
         images: None,
     };
     let call = prepared
@@ -921,7 +921,7 @@ async fn cross_domain_responses_wire_never_contains_old_native_state() {
         "old-reasoning-id",
         "old-private-state",
         "old-function-item",
-        "legacy-provider-item-bypass",
+        "untrusted-provider-item-bypass",
     ] {
         assert!(
             !encoded.contains(forbidden),
@@ -1011,7 +1011,7 @@ async fn chat_usage_after_finish_reason_in_a_separate_http_chunk_is_retained() {
         );
     let provider = AiProviderConfig {
         model_definition: None,
-        profile: Some("minimax".into()),
+        profile: "minimax".into(),
         retry_policy: None,
         id: "split-usage".into(),
         kind: AiProviderKind::OpenAiCompatible,
@@ -1186,7 +1186,7 @@ async fn actual_chat_request_body_matches_the_assembled_prompt_and_canonical_too
     let (base_url, body_receiver, server) = serve_recording_sse(sse);
     let provider = AiProviderConfig {
         model_definition: None,
-        profile: Some("minimax".into()),
+        profile: "minimax".into(),
         retry_policy: None,
         id: "wire-minimax".into(),
         kind: AiProviderKind::OpenAiCompatible,
@@ -1266,7 +1266,7 @@ async fn generic_compatible_request_omits_unsupported_stream_usage_options() {
                     AiProviderKind::OpenAiCompatible,
                     65536,
                 )),
-                profile: None,
+                profile: "generic".into(),
                 retry_policy: None,
                 id: "wire-compatible".into(),
                 kind: AiProviderKind::OpenAiCompatible,
@@ -1332,16 +1332,17 @@ async fn run_live_provider_basic_round(
             AiProviderKind::OpenAiCompatible,
             65536,
         )),
-        profile: match prefix {
-            "OPENAI" => Some("openai".into()),
-            "OLLAMA" => Some("ollama".into()),
-            "DEEPSEEK" => Some("deepseek".into()),
-            "MINIMAX" => Some("minimax".into()),
-            "QWEN" => Some("qwen".into()),
-            "GLM" => Some("glm".into()),
-            "KIMI" => Some("kimi".into()),
-            _ => None,
-        },
+        profile: (match prefix {
+            "OPENAI" => "openai",
+            "OLLAMA" => "ollama",
+            "DEEPSEEK" => "deepseek",
+            "MINIMAX" => "minimax",
+            "QWEN" => "qwen",
+            "GLM" => "glm",
+            "KIMI" => "kimi",
+            _ => panic!("unknown live provider prefix"),
+        })
+        .into(),
         retry_policy: None,
         id: format!("live-{}", prefix.to_ascii_lowercase()),
         kind,
@@ -1606,7 +1607,7 @@ async fn every_profile_proxy_request_stream_usage_and_history_fixture() {
         declared.context_window = 32768;
         declared.max_output_tokens = 16384;
         provider.model_definition = Some(declared);
-        let profile = provider.profile.clone().unwrap();
+        let profile = provider.profile.clone();
         let sse = match provider.kind {
                 AiProviderKind::OpenAi => concat!(
                     "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"READY\"}\n\n",
@@ -1620,7 +1621,7 @@ async fn every_profile_proxy_request_stream_usage_and_history_fixture() {
                         json!({"choices":[{"delta":{"content":"READY","tool_calls":[{"index":0,"id":"call-wire","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"x\"}"}}]},"finish_reason":"tool_calls"}]}),
                         json!({"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}))
                 },
-                AiProviderKind::AnthropicMessages => unreachable!("legacy profile fixture"),
+                AiProviderKind::AnthropicMessages => unreachable!("chat profile fixture"),
             };
         let (base_url, receiver, server) = serve_recording_sse(sse);
         provider.base_url = base_url;
@@ -1637,7 +1638,7 @@ async fn every_profile_proxy_request_stream_usage_and_history_fixture() {
             AiProviderKind::OpenAi => &body["max_output_tokens"],
             AiProviderKind::OpenAiCompatible => &body["max_tokens"],
             AiProviderKind::Ollama => &body["options"]["num_predict"],
-            AiProviderKind::AnthropicMessages => unreachable!("legacy profile fixture"),
+            AiProviderKind::AnthropicMessages => unreachable!("chat profile fixture"),
         };
         assert_eq!(wire_output, &json!(16384), "{profile}");
         server.join().unwrap();

@@ -51,7 +51,7 @@ async fn image_kimi_k3_submission_reaches_chat_transport_with_pixels() {
         skill_tests::create_skill_session(&runtime, "images", storage.path());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let mut provider = image_tests::vision_provider();
-        provider.profile = Some("kimi".into());
+        provider.profile = "kimi".into();
         provider.model = model.into();
         provider.base_url = format!("http://{}", listener.local_addr().unwrap());
         provider.reasoning_effort = Some("high".to_string());
