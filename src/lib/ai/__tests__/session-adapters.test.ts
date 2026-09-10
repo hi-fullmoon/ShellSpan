@@ -22,6 +22,7 @@ import { AGENT_SESSION_EVENT_VERSION } from '@/types/agent-session';
 
 const provider = {
   id: 'provider-test',
+  profile: 'openai' as const,
   kind: 'openAi' as const,
   baseUrl: 'https://example.invalid',
   model: 'model-test',
@@ -497,7 +498,7 @@ describe('AgentSessionAdapter', () => {
 
 
 describe('Committed queue steering', () => {
-  it('replays a lane migration, original attachment and single conversation identity through consumption', () => {
+  it('replays a lane reassignment, original attachment and single conversation identity through consumption', () => {
     const queued = projectAgentInbox(agentSessionSteerFixture.slice(0, 7));
     expect(queued.map((item) => [item.id, item.lane])).toEqual([
       ['existing-step', 'nextStep'], ['queued-steer', 'nextStep'],

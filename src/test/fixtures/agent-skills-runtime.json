@@ -1221,10 +1221,7 @@
       "attempt": 1,
       "providerId": "skills-http",
       "model": "test-model",
-      "snapshot": {
-        "status": "legacyUnknown"
-      },
-      "snapshotDigest": "27b94d8ea5415bc573ee41111a6921bd928a29ea728958e9b09547b298ed2942"
+      "snapshotReason": "initial"
     }
   },
   {
@@ -1288,11 +1285,7 @@
       ],
       "usage": {},
       "stopReason": "toolCalls",
-      "interrupted": false,
-      "replay": {
-        "status": "legacyUnknown",
-        "archivedProviderItems": true
-      }
+      "interrupted": false
     }
   },
   {
@@ -2429,10 +2422,7 @@
       "attempt": 1,
       "providerId": "skills-http",
       "model": "test-model",
-      "snapshot": {
-        "status": "legacyUnknown"
-      },
-      "snapshotDigest": "27b94d8ea5415bc573ee41111a6921bd928a29ea728958e9b09547b298ed2942"
+      "snapshotReason": "change"
     }
   },
   {
@@ -2484,11 +2474,7 @@
       ],
       "usage": {},
       "stopReason": "stop",
-      "interrupted": false,
-      "replay": {
-        "status": "legacyUnknown",
-        "archivedProviderItems": true
-      }
+      "interrupted": false
     }
   },
   {
