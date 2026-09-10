@@ -610,19 +610,22 @@ function renderNode(
 export function aiConversationNodeRevision(node: AiConversationNode): string {
   const base = `${node.kind}:${node.key}:${node.lastSeq}`;
   switch (node.kind) {
-    case 'systemPrompt': return `${base}:${node.requestIds.join(',')}:${node.content}`;
-    case 'contextInjection': return `${base}:${node.provenance.kind}:${node.content}`;
-    case 'userMessage': return `${base}:${node.delivery}:${node.content}`;
-    case 'assistantMessage': return `${base}:${node.state}:${node.hasTurnTail ?? false}:${JSON.stringify(node.blocks)}`;
-    case 'reasoning': return `${base}:${node.state}:${node.summary}:${node.content}`;
-    case 'tool': return `${base}:${node.state}:${node.durationMs ?? ''}:${node.error ?? ''}`;
+    // Committed node content is immutable for a given lastSeq. Only optimistic
+    // delivery and local presentation state can change without a new event.
+    case 'userMessage': return `${base}:${node.delivery}`;
+    case 'assistantMessage': return `${base}:${node.state}:${node.hasTurnTail ?? false}`;
+    case 'reasoning': return `${base}:${node.state}`;
+    case 'tool': return `${base}:${node.state}`;
     case 'question': return `${base}:${node.question.status}:${node.lastSeq}`;
-    case 'artifact': return `${base}:${node.sha256}:${node.sizeBytes ?? ''}`;
-    case 'approvalMarker': return `${base}:${node.status}:${node.prompt ?? ''}`;
-    case 'retry': return `${base}:${node.attempt}:${node.reason}`;
-    case 'error': return `${base}:${node.state}:${node.code ?? ''}:${node.message}`;
-    case 'turnProcess': return `${base}:${node.status}:${node.answerGeneration}:${node.hasStartBoundary}:${node.hasEndBoundary}:${node.children.map(aiConversationNodeRevision).join('|')}`;
-    case 'turnTail': return `${base}:${node.status}:${node.endReason}:${JSON.stringify(node.stats)}:${JSON.stringify(node.sessionStats)}:${node.summaryText ?? ''}:${node.durationMs ?? ''}:${JSON.stringify(node.models)}`;
+    case 'approvalMarker': return `${base}:${node.status}`;
+    case 'error': return `${base}:${node.state}`;
+    case 'turnProcess': return `${base}:${node.status}:${node.answerGeneration}:${node.hasStartBoundary}:${node.hasEndBoundary}:${node.children.length}`;
+    case 'turnTail': return `${base}:${node.status}`;
+    case 'systemPrompt':
+    case 'contextInjection':
+    case 'artifact':
+    case 'retry':
+      return base;
     default: return assertNever(node);
   }
 }

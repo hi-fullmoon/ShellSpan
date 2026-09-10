@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   AgentSessionCommittedClient,
+  type AgentSessionStreamState,
   type AgentSessionStreamTransport,
 } from '@/lib/ai/agent-session-client';
 import { agentSessionSteerFixture, sessionEvent } from '@/test/fixtures/agent-session';
@@ -113,6 +114,54 @@ describe('AgentSessionCommittedClient', () => {
     source.replace([created, running, turn]);
     source.publish(turn);
     expect((await client.settled()).events.map((event) => event.seq)).toEqual([0, 1, 2]);
+  });
+
+  it('coalesces a burst of live stream chunks into one published state', async () => {
+    const source = transport([created]);
+    const client = new AgentSessionCommittedClient('session-fixture', source);
+    const published: AgentSessionStreamState[] = [];
+    client.onChange((state) => published.push(state));
+    await client.connect();
+    published.length = 0;
+
+    for (let seq = 1; seq <= 3; seq += 1) {
+      source.publish(sessionEvent(seq, {
+        type: 'assistant/chunk',
+        turnId: 'turn-1',
+        stepId: 'step-1',
+        data: { requestId: 'request-1', textDelta: `chunk-${seq}` },
+      }));
+    }
+
+    await client.settled();
+    expect(published).toHaveLength(1);
+    expect(published[0]?.lastCommittedSeq).toBe(3);
+  });
+
+  it('publishes pending state when background animation frames are paused', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    const source = transport([created]);
+    const client = new AgentSessionCommittedClient('session-fixture', source);
+    const published: AgentSessionStreamState[] = [];
+    client.onChange((state) => published.push(state));
+    try {
+      await client.connect();
+      published.length = 0;
+      source.publish(sessionEvent(1, {
+        type: 'agent/status',
+        data: { status: 'running' },
+      }));
+
+      await vi.advanceTimersByTimeAsync(50);
+      expect(published).toHaveLength(1);
+      expect(published[0]?.lastCommittedSeq).toBe(1);
+    } finally {
+      client.disconnect();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 
   it('falls back to snapshot plus full replay when incremental backfill stays gapped', async () => {

@@ -45,10 +45,13 @@ export class AgentSessionCommittedClient {
   private readonly events: AgentSessionEvent[] = [];
   private readonly listeners = new Set<(state: AgentSessionStreamState) => void>();
   private snapshotValue?: AgentSessionSnapshot;
+  private hasTerminalEventValue = false;
   private unlisten?: () => void;
   private work = Promise.resolve();
   private buffering = false;
   private buffered: AgentSessionEvent[] = [];
+  private emitPending = false;
+  private cancelScheduledEmit?: () => void;
 
   constructor(
     private readonly sessionId: string,
@@ -61,7 +64,7 @@ export class AgentSessionCommittedClient {
       snapshot: this.snapshotValue,
       events: [...this.events],
       lastCommittedSeq: last?.seq,
-      hasTerminalEvent: [...this.events].reverse().find((event) => event.type === 'session/ended' || event.type === 'session/resumed')?.type === 'session/ended',
+      hasTerminalEvent: this.hasTerminalEventValue,
     };
   }
 
@@ -88,7 +91,7 @@ export class AgentSessionCommittedClient {
       const buffered = this.buffered.sort((left, right) => left.seq - right.seq);
       this.buffered = [];
       for (const event of buffered) await this.ingestLive(event);
-      this.emit();
+      this.publishNow(true);
       return this.state();
     } catch (error) {
       // A rootless image draft may probe its durable ID before creating the Session.
@@ -109,10 +112,14 @@ export class AgentSessionCommittedClient {
     this.unlisten = undefined;
     this.buffering = false;
     this.buffered = [];
+    this.cancelScheduledEmit?.();
+    this.cancelScheduledEmit = undefined;
+    this.emitPending = false;
   }
 
   async settled(): Promise<AgentSessionStreamState> {
     await this.work;
+    this.publishNow();
     return this.state();
   }
 
@@ -142,7 +149,7 @@ export class AgentSessionCommittedClient {
       await this.fullResync();
     }
     this.merge(event);
-    this.emit();
+    this.scheduleEmit();
   }
 
   private async fetchAfter(afterSeq: number | undefined): Promise<void> {
@@ -163,6 +170,7 @@ export class AgentSessionCommittedClient {
   private async fullResync(): Promise<void> {
     this.snapshotValue = await this.transport.snapshot(this.sessionId);
     this.events.length = 0;
+    this.hasTerminalEventValue = false;
     await this.fetchAfter(undefined);
   }
 
@@ -179,6 +187,8 @@ export class AgentSessionCommittedClient {
       throw new Error(`Committed Agent stream has a gap before seq ${event.seq}`);
     }
     this.events.push(event);
+    if (event.type === 'session/ended') this.hasTerminalEventValue = true;
+    if (event.type === 'session/resumed') this.hasTerminalEventValue = false;
   }
 
   private validateEnvelope(event: AgentSessionEvent): void {
@@ -196,7 +206,31 @@ export class AgentSessionCommittedClient {
     }
   }
 
-  private emit(): void {
+  private scheduleEmit(): void {
+    if (this.emitPending) return;
+    this.emitPending = true;
+    if (typeof globalThis.requestAnimationFrame === 'function') {
+      const frame = globalThis.requestAnimationFrame(() => this.publishNow());
+      // Background WebViews can pause animation frames. Keep a bounded fallback
+      // so committed approvals, questions, and terminal state still propagate.
+      const fallback = globalThis.setTimeout(() => this.publishNow(), 50);
+      this.cancelScheduledEmit = () => {
+        globalThis.cancelAnimationFrame(frame);
+        globalThis.clearTimeout(fallback);
+      };
+      return;
+    }
+    const timer = globalThis.setTimeout(() => this.publishNow(), 16);
+    this.cancelScheduledEmit = () => globalThis.clearTimeout(timer);
+  }
+
+  private publishNow(force = false): void {
+    if (!this.emitPending && !force) return;
+    if (this.emitPending) {
+      this.cancelScheduledEmit?.();
+      this.cancelScheduledEmit = undefined;
+      this.emitPending = false;
+    }
     const state = this.state();
     for (const listener of this.listeners) listener(state);
   }
