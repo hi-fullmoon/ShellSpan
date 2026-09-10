@@ -262,7 +262,7 @@ function sanitizePortForwardRules(value: unknown): PortForwardRule[] {
 }
 
 export interface ConnectionExportFile {
-  schemaVersion: 1 | 2 | 3;
+  schemaVersion: 3;
   exportedAt: string;
   profiles: ExportedProfile[];
 }
@@ -303,7 +303,7 @@ export function parseConnectionExport(content: string): ConnectionImportCandidat
   try {
     const parsed = JSON.parse(content) as Partial<ConnectionExportFile>;
     if (
-      (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2 && parsed.schemaVersion !== 3)
+      parsed.schemaVersion !== 3
       || !Array.isArray(parsed.profiles)
     ) return [];
     return parsed.profiles.flatMap((profile, index) => {

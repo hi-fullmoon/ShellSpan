@@ -50,8 +50,7 @@ export function parseTerminalWorkspace(raw: string | null): TerminalWorkspaceSna
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== 'object') return { sessions: [], layout: null };
     const workspace = value as Record<string, unknown>;
-    // Snapshots written before versioning are the only supported legacy shape.
-    if (workspace.version !== undefined && workspace.version !== TERMINAL_WORKSPACE_VERSION) {
+    if (workspace.version !== TERMINAL_WORKSPACE_VERSION) {
       return { sessions: [], layout: null };
     }
     const sessions = Array.isArray(workspace.sessions)
