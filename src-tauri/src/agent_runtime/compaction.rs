@@ -2723,7 +2723,7 @@ mod tests {
     fn semantic_summarizer(adapter: Arc<SemanticFixture>) -> SemanticCompactionSummarizer {
         SemanticCompactionSummarizer { adapter, provider: serde_json::from_value(serde_json::json!({
             "id":"summary", "kind":"openAiCompatible", "profile":"deepseek", "baseUrl":"https://proxy.example/v1",
-            "model":"deepseek-v4-flash", "requiresApiKey":false })).unwrap(), retry_policy: super::super::RetryPolicy {
+            "model":"deepseek-flash", "requiresApiKey":false })).unwrap(), retry_policy: super::super::RetryPolicy {
                 initial_delay_ms: 0, max_delay_ms: 0, ..Default::default()
             } }
     }

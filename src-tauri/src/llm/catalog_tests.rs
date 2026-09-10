@@ -146,6 +146,43 @@ fn custom_capacity_is_not_inferred_or_clamped_to_obsolete_hint_bounds() {
 }
 
 #[test]
+fn unknown_model_template_is_conservative_and_immediately_resolvable() {
+    let mut p = provider("deepseek-preview");
+    let definition = declaration_template(&p).unwrap();
+    assert_eq!(definition.context_window, DEFAULT_CONTEXT_WINDOW);
+    assert_eq!(definition.max_output_tokens, DEFAULT_MAX_OUTPUT_TOKENS);
+    assert_eq!(definition.tool_calling, Support::Unknown);
+    assert_eq!(definition.text_input, Support::Supported);
+    assert_eq!(definition.image_input, Support::Unsupported);
+    assert!(definition.reasoning.is_empty());
+
+    p.model_definition = Some(definition);
+    assert_eq!(resolve(&p).unwrap().source, "userDeclaration");
+}
+
+#[test]
+fn deepseek_retired_names_remain_routable_but_are_not_discoverable() {
+    let mut p = provider("deepseek-v4-flash");
+    p.profile = "deepseek".into();
+    let resolved = resolve(&p).unwrap();
+    assert_eq!(resolved.model_id, "deepseek-v4-flash");
+    assert_eq!(
+        resolved.compat.reasoning_encoding,
+        ReasoningEncoding::ThinkingEffort
+    );
+
+    p.model = "deepseek-v4-flash-vision-exp".into();
+    assert_eq!(resolve(&p).unwrap().image_input, Support::Unsupported);
+    assert!(!preset_models("deepseek", p.kind)
+        .unwrap()
+        .contains_key("deepseek-v4-flash"));
+    assert_eq!(
+        alias_target("deepseek", "deepseek-v4-flash"),
+        Some("deepseek-flash")
+    );
+}
+
+#[test]
 fn invalid_capacity_and_protocol_fail_while_string_reasoning_is_allowed() {
     let mut p = provider("custom");
     p.model_definition = Some(fixture_definition(p.kind, 32768));

@@ -1824,7 +1824,7 @@
       "profile": "deepseek",
       "kind": "openAiCompatible",
       "baseUrl": "https://proxy.example/v1",
-      "model": "deepseek-chat",
+      "model": "deepseek-flash",
       "requiresApiKey": false
     },
     "resolved": {
@@ -1833,89 +1833,7 @@
       "providerId": "fixture",
       "profile": "deepseek",
       "kind": "openAiCompatible",
-      "modelId": "deepseek-chat",
-      "source": "builtinCatalog",
-      "capacityPolicy": "conservativeApplicationBudget",
-      "contextWindow": 65536,
-      "maxOutputTokens": 4096,
-      "toolCalling": "supported",
-      "textInput": "supported",
-      "imageInput": "unsupported",
-      "reasoning": [],
-      "compat": {
-        "cumulativeStream": false,
-        "supportsStreamUsage": true,
-        "nativeReasoning": true,
-        "splitReasoning": false,
-        "replayReasoningContent": true,
-        "thinkTagFallback": false,
-        "parallelToolCalls": false,
-        "strictSchema": false,
-        "preservesReasoningAcrossTurns": true,
-        "protocol": "openAiCompatible",
-        "reasoningEncoding": "none",
-        "clearThinking": false,
-        "defaultThinking": false
-      }
-    }
-  },
-  {
-    "provider": {
-      "id": "fixture",
-      "profile": "deepseek",
-      "kind": "openAiCompatible",
-      "baseUrl": "https://proxy.example/v1",
-      "model": "deepseek-reasoner",
-      "requiresApiKey": false
-    },
-    "resolved": {
-      "catalogVersion": 1,
-      "routeId": "fixture",
-      "providerId": "fixture",
-      "profile": "deepseek",
-      "kind": "openAiCompatible",
-      "modelId": "deepseek-reasoner",
-      "source": "builtinCatalog",
-      "capacityPolicy": "conservativeApplicationBudget",
-      "contextWindow": 65536,
-      "maxOutputTokens": 4096,
-      "toolCalling": "supported",
-      "textInput": "supported",
-      "imageInput": "unsupported",
-      "reasoning": [],
-      "compat": {
-        "cumulativeStream": false,
-        "supportsStreamUsage": true,
-        "nativeReasoning": true,
-        "splitReasoning": false,
-        "replayReasoningContent": true,
-        "thinkTagFallback": false,
-        "parallelToolCalls": false,
-        "strictSchema": false,
-        "preservesReasoningAcrossTurns": true,
-        "protocol": "openAiCompatible",
-        "reasoningEncoding": "none",
-        "clearThinking": false,
-        "defaultThinking": false
-      }
-    }
-  },
-  {
-    "provider": {
-      "id": "fixture",
-      "profile": "deepseek",
-      "kind": "openAiCompatible",
-      "baseUrl": "https://proxy.example/v1",
-      "model": "deepseek-v4-flash",
-      "requiresApiKey": false
-    },
-    "resolved": {
-      "catalogVersion": 1,
-      "routeId": "fixture",
-      "providerId": "fixture",
-      "profile": "deepseek",
-      "kind": "openAiCompatible",
-      "modelId": "deepseek-v4-flash",
+      "modelId": "deepseek-flash",
       "source": "builtinCatalog",
       "capacityPolicy": "conservativeApplicationBudget",
       "contextWindow": 65536,

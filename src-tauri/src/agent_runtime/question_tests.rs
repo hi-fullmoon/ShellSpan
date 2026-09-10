@@ -519,7 +519,7 @@ async fn question_real_http_resume_uses_current_credentials_and_original_tool_hi
         base_url: provider.base_url.clone(),
         auth: crate::llm::routes::RouteAuth::Keychain { reference: "pending".into() },
         replay_domain_id: "pending".into(),
-        preset_id: None,
+        preset_id: "generic".into(),
         models: Some(std::collections::BTreeMap::from([(
             provider.model.clone(),
             provider.model_definition.clone().unwrap(),

@@ -921,23 +921,7 @@
         "defaultThinking": false
       },
       "models": {
-        "deepseek-chat": {
-          "contextWindow": 65536,
-          "maxOutputTokens": 4096,
-          "toolCalling": "supported",
-          "textInput": "supported",
-          "imageInput": "unsupported",
-          "reasoning": []
-        },
-        "deepseek-reasoner": {
-          "contextWindow": 65536,
-          "maxOutputTokens": 4096,
-          "toolCalling": "supported",
-          "textInput": "supported",
-          "imageInput": "unsupported",
-          "reasoning": []
-        },
-        "deepseek-v4-flash": {
+        "deepseek-flash": {
           "contextWindow": 65536,
           "maxOutputTokens": 4096,
           "toolCalling": "supported",
@@ -1477,6 +1461,25 @@
           }
         }
       }
+    },
+    "openrouter": {
+      "kind": "openAiCompatible",
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": false,
+        "nativeReasoning": false,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": true,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": false,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "none",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "models": {}
     },
     "generic": {
       "kind": "openAiCompatible",

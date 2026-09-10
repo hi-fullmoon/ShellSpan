@@ -232,7 +232,7 @@ fn deepseek_reasoning_text_tools_and_usage_keep_provider_order_and_detail() {
         id: "deepseek".into(),
         kind: AiProviderKind::OpenAiCompatible,
         base_url: "https://api.deepseek.com".into(),
-        model: "deepseek-reasoner".into(),
+        model: "deepseek-flash".into(),
         reasoning_effort: None,
         requires_api_key: true,
         api_key: None,
@@ -862,7 +862,7 @@ async fn cross_domain_responses_wire_never_contains_old_native_state() {
                 reference: "new-key-version".into(),
             },
             replay_domain_id: "new-account-domain".into(),
-            preset_id: None,
+            preset_id: "openai".into(),
             models: Some(BTreeMap::from([("model-a".into(), definition)])),
             model_overrides: None,
             defaults: None,
@@ -1466,7 +1466,7 @@ async fn live_provider_basic_round_deepseek() {
         "DEEPSEEK",
         AiProviderKind::OpenAiCompatible,
         "https://api.deepseek.com",
-        "deepseek-v4-flash",
+        "deepseek-flash",
         Some("high".to_string()),
         true,
         true,
@@ -1483,7 +1483,7 @@ async fn live_provider_basic_round_deepseek_no_reasoning() {
         "DEEPSEEK",
         AiProviderKind::OpenAiCompatible,
         "https://api.deepseek.com",
-        "deepseek-v4-flash",
+        "deepseek-flash",
         Some("off".to_string()),
         true,
         false,
@@ -1700,7 +1700,7 @@ async fn every_profile_proxy_request_stream_usage_and_history_fixture() {
 
 #[test]
 fn deepseek_replays_reasoning_on_all_assistant_messages_including_non_tool_turns() {
-    let provider: AiProviderConfig = serde_json::from_value(json!({"id":"x","profile":"deepseek","kind":"openAiCompatible","model":"deepseek-v4-flash","baseUrl":"https://proxy.example/v1","requiresApiKey":false})).unwrap();
+    let provider: AiProviderConfig = serde_json::from_value(json!({"id":"x","profile":"deepseek","kind":"openAiCompatible","model":"deepseek-flash","baseUrl":"https://proxy.example/v1","requiresApiKey":false})).unwrap();
     let messages = (0..2)
         .map(|index| ModelMessage::Assistant {
             content: vec![

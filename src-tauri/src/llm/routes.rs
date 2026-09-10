@@ -58,8 +58,7 @@ pub(crate) struct ProviderRoute {
     pub base_url: String,
     pub auth: RouteAuth,
     pub replay_domain_id: String,
-    #[serde(default)]
-    pub preset_id: Option<String>,
+    pub preset_id: String,
     #[serde(default)]
     pub models: Option<BTreeMap<String, ModelDefinition>>,
     #[serde(default)]
@@ -87,10 +86,7 @@ impl ProviderRoute {
         }
         let mut models = match &self.models {
             Some(models) => models.clone(),
-            None => catalog::preset_models(
-                self.preset_id.as_deref().ok_or("UNKNOWN_PROFILE")?,
-                self.kind()?,
-            )?,
+            None => catalog::preset_models(&self.preset_id, self.kind()?)?,
         };
         if let Some(overrides) = &self.model_overrides {
             for (id, definition) in overrides {
@@ -112,24 +108,30 @@ impl ProviderRoute {
         if selection.route_id != self.id {
             return Err("UNKNOWN_ROUTE".into());
         }
-        let definition = self
-            .model_catalog()?
+        let kind = self.kind()?;
+        let mut models = self.model_catalog()?;
+        let definition = models
             .remove(&selection.model_id)
+            .or_else(|| {
+                self.models
+                    .is_none()
+                    .then(|| catalog::alias_target(&self.preset_id, &selection.model_id))
+                    .flatten()
+                    .and_then(|target| models.remove(target))
+            })
             .ok_or("UNKNOWN_MODEL")?;
         let provider = AiProviderConfig {
             model_definition: Some(definition),
             // Retry recovery is an application policy, not a route or model setting.
             // Keep the route field wire-compatible, but always use the runtime default.
             retry_policy: None,
-            profile: match self.kind()? {
-                AiProviderKind::OpenAi => "openai",
-                AiProviderKind::Ollama => "ollama",
-                AiProviderKind::AnthropicMessages => "anthropic",
-                _ => "generic",
-            }
-            .into(),
+            // Preserve the route's capability profile. OpenAI-compatible presets
+            // share an adapter, but their built-in model catalogs and compatibility
+            // behavior are profile-specific (for example, kimi/k3 is not
+            // generic/k3).
+            profile: self.preset_id.clone(),
             id: self.id.clone(),
-            kind: self.kind()?,
+            kind,
             base_url: self.base_url.clone(),
             model: selection.model_id.clone(),
             reasoning_effort: selection.reasoning_effort.clone(),
@@ -464,7 +466,7 @@ mod tests {
             base_url: "https://example.com".into(),
             auth: RouteAuth::None,
             replay_domain_id: "domain".into(),
-            preset_id: Some("generic".into()),
+            preset_id: "generic".into(),
             models: None,
             model_overrides: None,
             defaults: None,
@@ -490,7 +492,7 @@ mod tests {
             base_url: "https://api.anthropic.com".into(),
             auth: RouteAuth::None,
             replay_domain_id: "domain".into(),
-            preset_id: None,
+            preset_id: "anthropic".into(),
             models: Some(BTreeMap::from([("fixture-model".into(), definition)])),
             model_overrides: None,
             defaults: None,
@@ -538,7 +540,7 @@ mod tests {
                 reference: "pending".into(),
             },
             replay_domain_id: "pending".into(),
-            preset_id: None,
+            preset_id: "generic".into(),
             models: Some(BTreeMap::from([("fixture-model".into(), definition)])),
             model_overrides: None,
             defaults: Some(ModelSelection {
@@ -564,6 +566,73 @@ mod tests {
 
         let provider = route.provider(route.defaults.as_ref().unwrap()).unwrap();
         assert_eq!(provider.retry_policy, None);
+    }
+
+    #[test]
+    fn route_provider_preserves_openai_compatible_preset_profile() {
+        let route = ProviderRoute {
+            id: "kimi".into(),
+            revision: 1,
+            display_name: "Kimi Code".into(),
+            adapter_id: "chat-completions".into(),
+            base_url: "https://api.kimi.com/coding".into(),
+            auth: RouteAuth::Keychain {
+                reference: "fixture".into(),
+            },
+            replay_domain_id: "domain".into(),
+            preset_id: "kimi".into(),
+            models: None,
+            model_overrides: None,
+            defaults: Some(ModelSelection {
+                route_id: "kimi".into(),
+                model_id: "k3".into(),
+                reasoning_effort: None,
+            }),
+            retry_policy: Default::default(),
+            timeouts: Default::default(),
+        };
+
+        let provider = route.provider(route.defaults.as_ref().unwrap()).unwrap();
+        assert_eq!(provider.profile, "kimi");
+        assert_eq!(catalog::resolve(&provider).unwrap().profile, "kimi");
+    }
+
+    #[test]
+    fn inherited_deepseek_route_accepts_a_hidden_callable_alias() {
+        let route = ProviderRoute {
+            id: "deepseek".into(),
+            revision: 1,
+            display_name: "DeepSeek".into(),
+            adapter_id: "chat-completions".into(),
+            base_url: "https://api.deepseek.com".into(),
+            auth: RouteAuth::Keychain {
+                reference: "fixture".into(),
+            },
+            replay_domain_id: "domain".into(),
+            preset_id: "deepseek".into(),
+            models: None,
+            model_overrides: None,
+            defaults: Some(ModelSelection {
+                route_id: "deepseek".into(),
+                model_id: "deepseek-v4-flash".into(),
+                reasoning_effort: None,
+            }),
+            retry_policy: Default::default(),
+            timeouts: Default::default(),
+        };
+
+        assert!(!route
+            .model_catalog()
+            .unwrap()
+            .contains_key("deepseek-v4-flash"));
+        route.validate().unwrap();
+        assert_eq!(
+            route
+                .provider(route.defaults.as_ref().unwrap())
+                .unwrap()
+                .model,
+            "deepseek-v4-flash"
+        );
     }
 
     #[test]
@@ -635,7 +704,7 @@ mod tests {
             first_domain
         );
         let mut protocol_change = second.routes.clone();
-        protocol_change[0].preset_id = Some("generic".into());
+        protocol_change[0].preset_id = "qwen".into();
         let third = store
             .save(protocol_change, None, second.revision, BTreeMap::new())
             .unwrap();

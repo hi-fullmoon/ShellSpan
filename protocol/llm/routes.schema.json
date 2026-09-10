@@ -51,6 +51,7 @@
           "baseUrl",
           "auth",
           "replayDomainId",
+          "presetId",
           "retryPolicy",
           "timeouts"
         ],
