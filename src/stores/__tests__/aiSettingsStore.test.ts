@@ -66,7 +66,7 @@ describe('aiSettingsStore', () => {
       profile: 'deepseek',
       kind: 'openAiCompatible',
       baseUrl: 'https://api.deepseek.com',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       requiresApiKey: true,
     });
   });
@@ -83,6 +83,18 @@ describe('aiSettingsStore', () => {
     });
     expect(useAiSettingsStore.getState().providers.find((provider) => provider.id === id))
       .not.toHaveProperty('apiKey');
+  });
+
+  it('adds OpenRouter as a dynamic-catalog provider', () => {
+    const id = useAiSettingsStore.getState().addProvider('openrouter');
+    expect(useAiSettingsStore.getState().getProviderConfig(id)).toEqual({
+      id,
+      profile: 'openrouter',
+      kind: 'openAiCompatible',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      model: '',
+      requiresApiKey: true,
+    });
   });
 
   it('keeps API version paths out of provider preset URLs', () => {

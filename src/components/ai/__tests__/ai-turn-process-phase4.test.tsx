@@ -452,7 +452,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(usage.querySelector('[data-stat="uncachedInput"]')).toHaveTextContent('56 tok');
     expect(usage.querySelector('[data-stat="outputTokens"]')).toHaveTextContent('24 tok');
     expect(usage.querySelector('[data-stat="reasoningTokens"]')).toHaveTextContent('10 tok');
-    expect(usage.querySelector('[data-stat="models"]')).toHaveTextContent('deepseek/deepseek-reasoner');
+    expect(usage.querySelector('[data-stat="models"]')).toHaveTextContent('deepseek/deepseek-flash');
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 

@@ -33,6 +33,7 @@ import {
   MiniMaxBrandIcon,
   OllamaBrandIcon,
   OpenAiBrandIcon,
+  OpenRouterBrandIcon,
   QwenBrandIcon,
 } from './provider-brand-icons';
 import { ProviderSetupDialog } from './provider-setup-dialog';
@@ -47,6 +48,7 @@ const PRESET_DESCRIPTION_KEYS: Record<AiProviderPreset, LocaleKey> = {
   kimi: 'settings.ai.preset.kimi',
   qwen: 'settings.ai.preset.qwen',
   glm: 'settings.ai.preset.glm',
+  openrouter: 'settings.ai.preset.openrouter',
   custom: 'settings.ai.preset.custom',
 };
 
@@ -59,6 +61,7 @@ const PRESET_ICONS: Record<AiProviderPreset, React.ComponentType<React.SVGProps<
   kimi: KimiBrandIcon,
   qwen: QwenBrandIcon,
   glm: GlmBrandIcon,
+  openrouter: OpenRouterBrandIcon,
   custom: ServerIcon,
 };
 
@@ -66,8 +69,8 @@ interface AiSettingsSectionProps {
   embedded?: boolean;
 }
 
-function normalizeProviderPreset(presetId: string | undefined): AiProviderPreset {
-  return presetId && Object.prototype.hasOwnProperty.call(PRESET_DESCRIPTION_KEYS, presetId)
+function normalizeProviderPreset(presetId: string): AiProviderPreset {
+  return Object.prototype.hasOwnProperty.call(PRESET_DESCRIPTION_KEYS, presetId)
     ? presetId as AiProviderPreset
     : 'custom';
 }
@@ -168,7 +171,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         title={t('settings.ai.providers')}
         titleId="ai-model-providers-heading"
         action={(
-          <Button size="xs" onClick={() => setAddOpen(true)}>
+          <Button size="sm" onClick={() => setAddOpen(true)}>
             <PlusIcon data-icon="inline-start" />
             {t('settings.ai.addProvider')}
           </Button>
@@ -217,7 +220,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                 {!isDefault && (
                   <Button
                     variant="outline"
-                    size="xs"
+                    size="sm"
                     onClick={() => {
                       const route=routeSnapshot?.routes.find(item=>item.id===provider.id);
                       if(routeSnapshot && route?.defaults) void saveRoutes(routeSnapshot.routes,route.defaults);
@@ -229,7 +232,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                 )}
                 <Button
                   variant="outline"
-                  size="xs"
+                  size="sm"
                   onClick={() => {
                     setSelectedProviderId(provider.id);
                     setEditOpen(true);
@@ -273,7 +276,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           <Button
             className="w-full @min-[32rem]:w-auto"
             variant="destructiveOutline"
-            size="xs"
+            size="sm"
             disabled={agentActionBusy}
             onClick={() => setClearAgentOpen(true)}
           >
@@ -308,7 +311,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         title={t('settings.ai.deleteProviderTitle', { name: selectedProvider?.name ?? '' })}
         description={t('settings.ai.deleteProviderDescription')}
         onConfirm={() => void handleDeleteProvider()}
-        buttonSize="xs"
+        buttonSize="sm"
       />
 
       <ConfirmationDialog
@@ -318,7 +321,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         description={t('settings.ai.agent.clearActiveDescription')}
         confirmLabel={t('settings.ai.agent.clearConfirm')}
         confirmVariant="destructive"
-        buttonSize="xs"
+        buttonSize="sm"
         onConfirm={() => void handleClearAgentSessions()}
       />
     </div>

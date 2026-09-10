@@ -1,7 +1,7 @@
 import type { ProviderProfileId } from '@/lib/ai/provider-contract';
 import type { AiRetryPolicy } from '@/lib/ai/retry-policy';
 export type AiProviderKind = 'ollama' | 'openAi' | 'openAiCompatible' | 'anthropicMessages';
-export type AiProviderPreset = 'ollama' | 'openai' | 'anthropic' | 'deepseek' | 'minimax' | 'kimi' | 'qwen' | 'glm' | 'custom';
+export type AiProviderPreset = 'ollama' | 'openai' | 'anthropic' | 'deepseek' | 'minimax' | 'kimi' | 'qwen' | 'glm' | 'openrouter' | 'custom';
 export type AiReasoningEffort = string;
 export type AiReasoningOption = string;
 
@@ -34,7 +34,7 @@ export interface ProviderRoute {
   id: string; revision: number; displayName: string;
   adapterId: 'responses' | 'chat-completions' | 'ollama' | 'anthropic-messages'; baseUrl: string;
   auth: { kind: 'none' } | { kind: 'keychain'; reference: string };
-  replayDomainId: string; presetId?: string;
+  replayDomainId: string; presetId: string;
   models?: Record<string, import('@/lib/ai/provider-contract').ModelDefinition>;
   modelOverrides?: Record<string, import('@/lib/ai/provider-contract').ModelDefinition>;
   defaults?: ModelSelection; retryPolicy: AiRetryPolicy;

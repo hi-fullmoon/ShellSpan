@@ -7,7 +7,7 @@ import type { AiProviderPreset, AiProviderProfile } from '@/types/ai';
 export function routeProviderConfigs(snapshot: RouteSnapshot, modelsByRoute: Record<string, ResolvedModel[]>): AiProviderProfile[] {
   return snapshot.routes.flatMap(route => (modelsByRoute[route.id] ?? []).map(resolved => ({
     id: route.id, routeRevision: route.revision, name: route.displayName,
-    preset: (route.presetId ?? 'custom') as AiProviderPreset,
+    preset: (route.presetId === 'generic' ? 'custom' : route.presetId) as AiProviderPreset,
     kind: route.adapterId === 'responses' ? 'openAi' as const
       : route.adapterId === 'ollama' ? 'ollama' as const
         : route.adapterId === 'anthropic-messages' ? 'anthropicMessages' as const

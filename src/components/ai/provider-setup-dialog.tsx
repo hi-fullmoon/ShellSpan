@@ -76,6 +76,7 @@ import {
   MiniMaxBrandIcon,
   OllamaBrandIcon,
   OpenAiBrandIcon,
+  OpenRouterBrandIcon,
   QwenBrandIcon,
 } from './provider-brand-icons';
 
@@ -114,6 +115,7 @@ const PRESET_ICONS: Record<AiProviderPreset, React.ComponentType<React.SVGProps<
   kimi: KimiBrandIcon,
   qwen: QwenBrandIcon,
   glm: GlmBrandIcon,
+  openrouter: OpenRouterBrandIcon,
   custom: ServerIcon,
 };
 
@@ -129,6 +131,7 @@ const PROFILE_ICONS: Record<
   qwen: QwenBrandIcon,
   glm: GlmBrandIcon,
   kimi: KimiBrandIcon,
+  openrouter: OpenRouterBrandIcon,
   generic: ServerIcon,
 };
 
@@ -239,12 +242,19 @@ function modelDefinitionForSave(
   const displayName = model.displayName === undefined
     ? definition.displayName
     : model.displayName.trim() || undefined;
+  const contextWindow = model.contextWindow ?? definition.contextWindow;
+  const maxOutputTokens = model.maxOutputTokens
+    ?? Math.min(definition.maxOutputTokens, contextWindow);
   return {
     ...definition,
     ...(displayName ? { displayName } : { displayName: undefined }),
-    ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
-    ...(model.maxOutputTokens === undefined ? {} : { maxOutputTokens: model.maxOutputTokens }),
+    contextWindow,
+    maxOutputTokens,
   };
+}
+
+function isUnknownModelFailure(reason: unknown): boolean {
+  return (reason instanceof Error ? reason.message : String(reason)).includes('UNKNOWN_MODEL');
 }
 
 export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
@@ -551,8 +561,14 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
             }
             const config = draftConfig({ ...draft, model: model.id.trim(), modelDefinition: undefined }, provider?.id);
             const { apiKey: _apiKey, ...modelConfig } = config;
-            const resolved = await invoke<ModelDefinition & { modelId: string }>('ai_resolve_model', { provider: modelConfig });
-            return [model.id.trim(), modelDefinitionForSave(model, modelDefinitionOf(resolved))] as const;
+            try {
+              const resolved = await invoke<ModelDefinition & { modelId: string }>('ai_resolve_model', { provider: modelConfig });
+              return [model.id.trim(), modelDefinitionForSave(model, modelDefinitionOf(resolved))] as const;
+            } catch (reason) {
+              if (!isUnknownModelFailure(reason)) throw reason;
+              const fallback = await invoke<ModelDefinition>('ai_model_declaration_template', { provider: modelConfig });
+              return [model.id.trim(), modelDefinitionForSave(model, fallback)] as const;
+            }
           }));
       const selectedDefinition = modelCatalogMode === 'inherited'
         ? inheritedResolved && modelDefinitionOf(inheritedResolved)
@@ -819,7 +835,9 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                     {draft && resolution.status !== 'ready' && (
                       <FieldDescription aria-live="polite">
                         {resolution.status === 'error'
-                          ? resolution.error
+                          ? isUnknownModelFailure(resolution.error)
+                            ? t('settings.ai.unknownModelDescription')
+                            : resolution.error
                           : t('settings.ai.capabilitiesLoading')}
                       </FieldDescription>
                     )}

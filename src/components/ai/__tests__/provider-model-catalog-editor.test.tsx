@@ -65,6 +65,13 @@ function Editor({ discover = async () => [] }: { discover?: () => Promise<Discov
 }
 
 describe('ProviderModelCatalogEditor', () => {
+  it('aligns the default-model control height with model inputs', () => {
+    render(<Editor />);
+
+    expect(screen.getByRole('combobox', { name: 'settings.ai.defaultModel' })).toHaveClass('h-8!');
+    expect(screen.getByLabelText('settings.ai.modelIdNumber:1')).toHaveClass('h-8');
+  });
+
   it('adds and edits a model row while naming duplicate model ids', async () => {
     const user = userEvent.setup();
     render(<Editor />);
@@ -84,7 +91,7 @@ describe('ProviderModelCatalogEditor', () => {
     const user = userEvent.setup();
     const discover = vi.fn().mockResolvedValue([
       { id: 'model-a' },
-      { id: 'model-b', name: 'Model B', contextWindow: 64_000, maxOutputTokens: 16_000 },
+      { id: 'model-b', name: 'Model B', contextWindow: 64_000, maxOutputTokens: 16_000, definition },
       { id: 'model-c' },
     ]);
     render(<Editor discover={discover} />);
@@ -94,10 +101,11 @@ describe('ProviderModelCatalogEditor', () => {
     const picker = screen.getByRole('dialog', { name: 'settings.ai.chooseModelsTitle' });
     expect(picker).toBeVisible();
     expect(screen.getByRole('checkbox', { name: 'model-a' })).not.toBeChecked();
-    expect(screen.getByRole('checkbox', { name: /model-b/ })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'model-c' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /model-b/ })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'model-c' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'settings.ai.addSelectedModels' })).toBeDisabled();
 
-    await user.click(screen.getByRole('checkbox', { name: 'model-c' }));
+    await user.click(screen.getByRole('checkbox', { name: /model-b/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.addSelectedModels' }));
     expect(screen.getByLabelText('settings.ai.modelIdNumber:1')).toHaveValue('model-a');
     expect(screen.getByLabelText('settings.ai.modelIdNumber:2')).toHaveValue('model-b');
@@ -105,7 +113,21 @@ describe('ProviderModelCatalogEditor', () => {
     await user.click(screen.getByRole('button', { name: 'settings.ai.modelAdvancedNumber:2' }));
     expect(screen.getByLabelText('settings.ai.contextWindow')).toHaveValue(64_000);
     expect(screen.getByLabelText('settings.ai.maxOutput')).toHaveValue(16_000);
+    expect(screen.queryByRole('button', { name: 'settings.ai.declareModel' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('settings.ai.modelIdNumber:3')).not.toBeInTheDocument();
+  });
+
+  it('does not bulk-select an oversized dynamic catalog', async () => {
+    const user = userEvent.setup();
+    const discover = vi.fn().mockResolvedValue(Array.from({ length: 75 }, (_value, index) => ({
+      id: `model-${String(index + 1).padStart(2, '0')}`,
+    })));
+    render(<Editor discover={discover} />);
+
+    await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
+    expect(await screen.findByText('settings.ai.modelSelectionLimit:50')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'settings.ai.selectAll' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'settings.ai.addSelectedModels' })).toBeDisabled();
   });
 
   it('validates empty, duplicate, and invalid-capacity catalogs', () => {

@@ -89,7 +89,7 @@ export function AiComposerModelSelector({
   const routeProviders = useMemo(() => (routeSnapshot?.routes.flatMap(route =>
     (modelsByRoute[route.id] ?? []).map(resolved => ({
       model: resolved.modelId, modelDefinition: { displayName:resolved.displayName,contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision },
-      id: route.id, routeRevision: route.revision, name: route.displayName, preset: (route.presetId ?? 'custom') as AiProviderPreset,
+      id: route.id, routeRevision: route.revision, name: route.displayName, preset: (route.presetId === 'generic' ? 'custom' : route.presetId) as AiProviderPreset,
       kind: route.adapterId === 'responses' ? 'openAi' as const : route.adapterId === 'ollama' ? 'ollama' as const : 'openAiCompatible' as const,
       profile: resolved.profile, baseUrl: route.baseUrl,
       reasoningEffort: route.defaults?.modelId === resolved.modelId ? route.defaults.reasoningEffort : undefined,

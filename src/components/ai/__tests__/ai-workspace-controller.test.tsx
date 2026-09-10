@@ -57,7 +57,7 @@ function setNativeRoute(routeId: string, modelId: string, routeRevision: number)
       routes: [{
         id: routeId, revision: routeRevision, displayName: 'RouteStore default',
         adapterId: 'chat-completions', baseUrl: 'https://route.example',
-        auth: { kind: 'none' }, replayDomainId: 'route-domain', presetId: 'custom',
+        auth: { kind: 'none' }, replayDomainId: 'route-domain', presetId: 'generic',
         models: { [modelId]: {
           contextWindow: resolved.contextWindow, maxOutputTokens: resolved.maxOutputTokens,
           toolCalling: resolved.toolCalling, textInput: resolved.textInput,
@@ -726,11 +726,11 @@ describe('AiWorkspaceController', () => {
 
     act(() => publish?.(pending));
     expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
-    await user.click(screen.getByRole('button', { name: 'Approve once' }));
+    await user.click(screen.getByRole('button', { name: 'Allow once' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Approval conflict');
 
-    await user.click(screen.getByRole('button', { name: 'Approve once' }));
-    expect(screen.getByRole('button', { name: 'Approve once' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Allow once' }));
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled();
     act(() => publish?.({ ...running, pendingApproval: null }));
     await waitFor(() => expect(screen.getByRole('textbox').textContent).toBe('draft survives approval'));
     expect(approve).toHaveBeenCalledTimes(2);

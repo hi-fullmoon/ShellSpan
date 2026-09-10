@@ -38,7 +38,7 @@ const tool: AiConversationNodeOf<'tool'> = {
   durationMs: null,
   detailRef: { kind: 'agentTool', sessionId: 'agent-phase5', callId: 'call-phase5' },
   evidenceRefs: ['evidence-1'],
-  input: { command: 'systemctl restart nginx' },
+  input: { command: 'systemctl restart nginx', explanation: 'Restart the web server to apply its new configuration.' },
   output: null,
   error: null,
   target: { kind: 'remote', targetId: 'prod-1', sessionId: 'terminal-1', label: 'Production' },
@@ -81,8 +81,8 @@ const pendingApproval: AiPendingApproval = {
   callId: tool.callId,
   approvalId: 'approval-phase5',
   risk: 'stateChange',
-  prompt: 'Restart nginx',
-  reason: 'Service configuration changed',
+  prompt: 'Allow exec_command on prod-1 for Session task task-1?\n\nNative effect: StateChange\nTTL: 60000 ms',
+  reason: 'nativePolicyRequiresApproval',
   expiresAtUnixMs: 2_000,
   toolName: tool.name,
   target: tool.target,
@@ -181,13 +181,18 @@ describe('AI workspace Phase 5 workflows', () => {
     );
 
     expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
-    expect(screen.getByRole('group', { name: /Approval required/ })).toBeVisible();
-    expect(screen.getByText('Production')).toBeVisible();
-    expect(screen.getAllByText('stateChange')).not.toHaveLength(0);
-    expect(screen.getByRole('button', { name: 'Approve once' })).not.toHaveFocus();
-    await user.click(screen.getByRole('button', { name: 'View full parameters' }));
+    expect(screen.getByRole('group', { name: /Allow this command/ })).toBeVisible();
+    expect(screen.getByText(/will run on Production/)).toBeVisible();
+    expect(screen.getByText('systemctl restart nginx')).toBeVisible();
+    expect(screen.getByText('Restart the web server to apply its new configuration.')).toBeVisible();
+    expect(screen.getByText('Modifies the system')).toBeVisible();
+    expect(screen.queryByText('stateChange')).toBeNull();
+    expect(screen.queryByText(/Native effect:/)).toBeNull();
+    expect(screen.queryByText('nativePolicyRequiresApproval')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Allow once' })).not.toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'View technical details' }));
     expect(openTool).toHaveBeenCalledWith(tool);
-    await user.click(screen.getByRole('button', { name: 'Approve once' }));
+    await user.click(screen.getByRole('button', { name: 'Allow once' }));
     expect(approve).toHaveBeenCalledOnce();
 
     rerender(
@@ -211,7 +216,7 @@ describe('AI workspace Phase 5 workflows', () => {
         approvalDecision="approve"
       />,
     );
-    expect(screen.getByRole('button', { name: 'Approve once' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled();
     expect(screen.getByText('Submitting approval decision')).toBeInTheDocument();
 
     rerender(
@@ -221,8 +226,8 @@ describe('AI workspace Phase 5 workflows', () => {
       />,
     );
     expect(screen.getByRole('alert')).toHaveTextContent('Runtime refused the decision');
-    expect(screen.getByRole('button', { name: 'Approve once' })).toBeEnabled();
-    expect(screen.getByRole('group', { name: /Approval required/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeEnabled();
+    expect(screen.getByRole('group', { name: /Allow this command/ })).toBeVisible();
   });
 
   it('uses single-stack tool details and returns focus to the originating row', async () => {

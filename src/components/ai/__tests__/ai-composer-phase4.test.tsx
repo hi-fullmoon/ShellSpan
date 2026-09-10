@@ -243,7 +243,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
       .toMatchObject({ reasoningEffort: 'on' });
   });
 
-  it('keeps the model selection text from shrinking or eliding in the composer toolbar', async () => {
+  it('elides the model selection before it can push composer actions out of bounds', async () => {
     const minimax = {
       id: 'minimax-profile', preset: 'minimax' as const, profile: 'minimax' as const, name: 'MiniMax',
       kind: 'openAiCompatible' as const, baseUrl: 'https://api.minimaxi.com',
@@ -255,9 +255,12 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     await screen.findByText('Default');
     const trigger = screen.getByRole('button', { name: /Model selection: MiniMax-M3/ });
     const modelName = screen.getByText('MiniMax-M3');
-    expect(getComputedStyle(trigger).maxWidth).toBe('none');
-    expect(getComputedStyle(trigger).flexShrink).toBe('0');
-    expect(getComputedStyle(modelName).overflow).not.toBe('hidden');
+    expect(getComputedStyle(trigger).maxWidth).toBe('100%');
+    expect(getComputedStyle(trigger).flexShrink).toBe('1');
+    expect(getComputedStyle(trigger).overflow).toBe('hidden');
+    expect(getComputedStyle(modelName).overflow).toBe('hidden');
+    expect(getComputedStyle(modelName).maxWidth).toBe('240px');
+    expect(getComputedStyle(modelName).textOverflow).toBe('ellipsis');
     expect(getComputedStyle(modelName).whiteSpace).toBe('nowrap');
   });
 

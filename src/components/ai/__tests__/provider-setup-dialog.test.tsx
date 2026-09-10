@@ -118,12 +118,13 @@ describe('ProviderSetupDialog', () => {
       'qwen',
       'glm',
       'kimi',
+      'openrouter',
       'generic',
     ]);
     options.forEach((option) => {
       expect(option.querySelector('svg')).toBeInTheDocument();
     });
-    for (const profile of ['anthropic', 'qwen', 'glm']) {
+    for (const profile of ['anthropic', 'qwen', 'glm', 'openrouter']) {
       const option = options.find(candidate => candidate.textContent === profile);
       expect(option?.querySelector('svg')).not.toHaveAttribute('data-lucide', 'server');
       expect(option?.querySelector('svg path')).toHaveAttribute('d');
@@ -238,7 +239,7 @@ describe('ProviderSetupDialog', () => {
     const baseUrlInput = screen.getByLabelText('settings.ai.baseUrl');
     expect(baseUrlInput).toHaveValue('https://api.deepseek.com');
     expect(baseUrlInput.closest('[data-slot="field"]')).toHaveClass('@min-[30rem]:col-span-2');
-    expect(modelInput).toHaveValue('deepseek-v4-flash');
+    expect(modelInput).toHaveValue('deepseek-flash');
     const endpointLabel = 'settings.ai.requestEndpoint:https://api.deepseek.com/chat/completions';
     const endpointButton = screen.getByRole('button', { name: endpointLabel });
     expect(endpointButton).toHaveClass(
@@ -268,7 +269,7 @@ describe('ProviderSetupDialog', () => {
       name: 'DeepSeek',
       preset: 'deepseek',
       baseUrl: 'https://api.deepseek.com',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
     }));
     expect(saved).not.toHaveProperty('apiKey');
     expect(mocks.invokeStoreAiApiKey).not.toHaveBeenCalled();
@@ -289,6 +290,42 @@ describe('ProviderSetupDialog', () => {
 
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(screen.getByLabelText(/settings\.ai\.apiKey/)).toBeEnabled();
+  });
+
+  it('discovers OpenRouter models into its initially empty catalog', async () => {
+    mocks.invokeListAiModels.mockResolvedValue([{
+      id: 'deepseek/deepseek-flash',
+      name: 'DeepSeek Flash',
+      contextWindow: 1_048_576,
+      maxOutputTokens: 384_000,
+    }]);
+    const user = userEvent.setup();
+    render(<ProviderSetupDialog open onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+
+    const providerInput = screen.getByRole('combobox', { name: 'settings.ai.chooseProvider' });
+    await user.click(providerInput);
+    await user.type(providerInput, 'OpenRouter');
+    await user.click(await screen.findByRole('option', { name: /OpenRouter/ }));
+    await user.type(screen.getByLabelText(/settings\.ai\.apiKey/), 'router-key');
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
+
+    expect(screen.getByLabelText('settings.ai.baseUrl')).toHaveValue('https://openrouter.ai/api/v1');
+    expect(screen.queryByLabelText('settings.ai.modelIdNumber:1')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
+    await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledWith(expect.objectContaining({
+      profile: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      model: '',
+      apiKey: 'router-key',
+    })));
+    await user.click(screen.getByRole('checkbox', { name: /deepseek\/deepseek-flash/ }));
+    await user.click(screen.getByRole('button', { name: 'settings.ai.addSelectedModels' }));
+
+    expect(screen.getByLabelText('settings.ai.modelIdNumber:1'))
+      .toHaveValue('deepseek/deepseek-flash');
+    await user.click(screen.getByRole('button', { name: 'settings.ai.modelAdvancedNumber:1' }));
+    expect(screen.getByLabelText('settings.ai.contextWindow')).toHaveValue(1_048_576);
+    expect(screen.getByLabelText('settings.ai.maxOutput')).toHaveValue(384_000);
   });
 
   it('does not call the retired provider-key command while editing a browser draft', async () => {
@@ -352,6 +389,7 @@ describe('ProviderSetupDialog', () => {
       requiresApiKey: false,
     }));
     expect(useAiSettingsStore.getState().providers).toHaveLength(originalCount);
+    await user.click(screen.getByRole('button', { name: 'settings.ai.selectAll' }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.addSelectedModels' }));
     const feedback = await screen.findByRole('status');
     const dialog = screen.getByRole('dialog', { name: 'settings.ai.addProviderTitle' });
@@ -428,7 +466,7 @@ describe('ProviderSetupDialog', () => {
     });
 
     await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
-    expect(screen.getByLabelText('settings.ai.modelIdNumber:1')).toHaveValue('deepseek-v4-flash');
+    expect(screen.getByLabelText('settings.ai.modelIdNumber:1')).toHaveValue('deepseek-flash');
     expect(screen.queryByText('settings.ai.connectionSuccess:1')).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'stale-ollama-model' })).not.toBeInTheDocument();
   });
@@ -594,6 +632,84 @@ describe('ProviderSetupDialog', () => {
       })));
   });
 
+  it('materializes a conservative definition when saving an uncatalogued model', async () => {
+    mocks.native = true;
+    const provider = {
+      id: 'deepseek-route',
+      preset: 'deepseek' as const,
+      profile: 'deepseek' as const,
+      name: 'DeepSeek',
+      kind: 'openAiCompatible' as const,
+      baseUrl: 'https://api.deepseek.com',
+      model: 'deepseek-preview',
+      requiresApiKey: false,
+    };
+    const fallback = {
+      contextWindow: 262_144,
+      maxOutputTokens: 32_768,
+      toolCalling: 'unknown' as const,
+      textInput: 'supported' as const,
+      imageInput: 'unsupported' as const,
+      reasoning: [],
+      compat: {
+        protocol: 'openAiCompatible' as const,
+        cumulativeStream: false,
+        supportsStreamUsage: true,
+        nativeReasoning: true,
+        splitReasoning: false,
+        replayReasoningContent: true,
+        thinkTagFallback: false,
+        parallelToolCalls: false,
+        strictSchema: false,
+        preservesReasoningAcrossTurns: true,
+        reasoningEncoding: 'none' as const,
+        clearThinking: false,
+        defaultThinking: false,
+      },
+    };
+    mocks.resolveModel.mockImplementation(async (command, args) => {
+      if (command === 'ai_model_declaration_template') return fallback;
+      return (await import('@/test/llm-resolver-fixture')).fixtureResolve(command, args);
+    });
+    const routeSave = vi.fn().mockResolvedValue(undefined);
+    useLlmRoutesStore.setState({
+      ...initialRoutesState,
+      snapshot: {
+        schemaVersion: 1,
+        revision: 3,
+        defaultSelection: { routeId: provider.id, modelId: provider.model },
+        routes: [{
+          id: provider.id,
+          revision: 2,
+          displayName: provider.name,
+          adapterId: 'chat-completions',
+          baseUrl: provider.baseUrl,
+          auth: { kind: 'none' },
+          replayDomainId: 'domain',
+          presetId: provider.profile,
+          models: {},
+          defaults: { routeId: provider.id, modelId: provider.model },
+          retryPolicy: { ...DEFAULT_RETRY_POLICY },
+          timeouts: { requestHeadersMs: 30_000, firstByteMs: 30_000, streamIdleMs: 300_000 },
+        }],
+      },
+      modelsByRoute: { [provider.id]: [] },
+      status: 'ready',
+      save: routeSave,
+    }, true);
+
+    render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
+    expect(await screen.findByText('settings.ai.unknownModelDescription')).toBeVisible();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(routeSave).toHaveBeenCalledTimes(1));
+    expect(routeSave.mock.calls[0][0][0]).toEqual(expect.objectContaining({
+      presetId: 'deepseek',
+      models: { 'deepseek-preview': fallback },
+    }));
+  });
+
   it('removes a model in the draft and saves the remaining model as the route default', async () => {
     mocks.native = true;
     const baseProvider = useAiSettingsStore.getState().providers[0];
@@ -632,7 +748,7 @@ describe('ProviderSetupDialog', () => {
           baseUrl: provider.baseUrl,
           auth: { kind: 'none' },
           replayDomainId: 'domain',
-          presetId: provider.preset,
+          presetId: provider.profile,
           models: {
             [first.modelId]: {
               contextWindow: first.contextWindow,
@@ -702,7 +818,7 @@ describe('ProviderSetupDialog', () => {
           baseUrl: provider.baseUrl,
           auth: { kind: 'none' },
           replayDomainId: 'domain',
-          presetId: provider.preset,
+          presetId: provider.profile,
           modelOverrides: { [provider.model]: override },
           defaults: { routeId: provider.id, modelId: provider.model },
           retryPolicy: { ...DEFAULT_RETRY_POLICY },
@@ -750,7 +866,7 @@ describe('ProviderSetupDialog', () => {
           baseUrl: provider.baseUrl,
           auth: { kind: 'none' },
           replayDomainId: 'domain',
-          presetId: provider.preset,
+          presetId: provider.profile,
           models: { [provider.model]: provider.modelDefinition ?? resolved },
           defaults: { routeId: provider.id, modelId: provider.model },
           retryPolicy: { ...DEFAULT_RETRY_POLICY },
@@ -838,7 +954,7 @@ describe('ProviderSetupDialog', () => {
     useLlmRoutesStore.setState({
       ...initialRoutesState,
       snapshot:{schemaVersion:1,revision:3,defaultSelection:{routeId:provider.id,modelId:provider.model},routes:[{
-        id:provider.id,revision:2,displayName:provider.name,adapterId:provider.kind==='ollama'?'ollama':'chat-completions',baseUrl:provider.baseUrl,auth:{kind:'none'},replayDomainId:'domain',presetId:provider.preset,
+        id:provider.id,revision:2,displayName:provider.name,adapterId:provider.kind==='ollama'?'ollama':'chat-completions',baseUrl:provider.baseUrl,auth:{kind:'none'},replayDomainId:'domain',presetId:provider.profile,
         models:{[provider.model]:{contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision}},
         defaults:{routeId:provider.id,modelId:provider.model},retryPolicy:provider.retryPolicy!,timeouts:{requestHeadersMs:30000,firstByteMs:30000,streamIdleMs:300000},
       }]},

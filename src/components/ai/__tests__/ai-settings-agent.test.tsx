@@ -60,7 +60,13 @@ describe('Agent Session settings', () => {
   it('cancels then archives sessions through the typed runtime commands', async () => {
     render(<AiSettingsSection />);
     fireEvent.click(screen.getByRole('button', { name: 'settings.ai.agent.clearSessions' }));
-    fireEvent.click(screen.getByRole('button', { name: 'settings.ai.agent.clearConfirm' }));
+    const confirmButton = screen.getByRole('button', { name: 'settings.ai.agent.clearConfirm' });
+    const cancelButton = screen.getByRole('button', { name: 'common.cancel' });
+
+    expect(confirmButton).toHaveClass('h-8');
+    expect(cancelButton).toHaveClass('h-8');
+
+    fireEvent.click(confirmButton);
 
     await waitFor(() => expect(mocks.archive).toHaveBeenCalledWith({
       sessionId: 'agent-session-1',
