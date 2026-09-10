@@ -19,11 +19,10 @@
 
 .agent-visible-terminal-aura {
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--app-primary) 18%, transparent), transparent 22px) left / 22px 100% no-repeat,
-    linear-gradient(270deg, color-mix(in srgb, var(--app-primary) 18%, transparent), transparent 22px) right / 22px 100% no-repeat,
-    linear-gradient(180deg, color-mix(in srgb, var(--app-primary) 14%, transparent), transparent 18px) top / 100% 18px no-repeat,
-    linear-gradient(0deg, color-mix(in srgb, var(--app-primary) 14%, transparent), transparent 18px) bottom / 100% 18px no-repeat;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-primary) 34%, transparent);
+    linear-gradient(90deg, color-mix(in srgb, var(--app-primary) 18%, transparent), transparent 40px) left / 40px 100% no-repeat,
+    linear-gradient(270deg, color-mix(in srgb, var(--app-primary) 18%, transparent), transparent 40px) right / 40px 100% no-repeat,
+    linear-gradient(180deg, color-mix(in srgb, var(--app-primary) 14%, transparent), transparent 32px) top / 100% 32px no-repeat,
+    linear-gradient(0deg, color-mix(in srgb, var(--app-primary) 14%, transparent), transparent 32px) bottom / 100% 32px no-repeat;
 }
 
 .image-preview-overlay {
