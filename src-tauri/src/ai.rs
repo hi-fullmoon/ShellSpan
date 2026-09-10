@@ -61,9 +61,18 @@ pub(crate) fn ai_list_route_models(
 ) -> Result<RouteModelsResult, String> {
     let snapshot = runtime.routes.snapshot()?;
     let route = snapshot.route(&route_id)?;
-    let models = route
-        .model_catalog()?
-        .keys()
+    let mut model_ids = route.model_catalog()?.into_keys().collect::<Vec<_>>();
+    for selection in [route.defaults.as_ref(), snapshot.default_selection.as_ref()]
+        .into_iter()
+        .flatten()
+        .filter(|selection| selection.route_id == route_id)
+    {
+        if !model_ids.contains(&selection.model_id) {
+            model_ids.push(selection.model_id.clone());
+        }
+    }
+    let models = model_ids
+        .iter()
         .map(|model_id| {
             crate::llm::catalog::resolve(&route.provider(&crate::llm::routes::ModelSelection {
                 route_id: route_id.clone(),
@@ -111,6 +120,9 @@ pub(crate) async fn ai_list_models(
     provider: AiProviderConfig,
 ) -> Result<Vec<crate::llm::discovery::DiscoveredModel>, String> {
     validate_provider_config(&provider, false)?;
+    if let Some(models) = crate::llm::discovery::catalog_models(&provider)? {
+        return Ok(models);
+    }
     let temporary = provider
         .api_key
         .as_deref()
@@ -621,7 +633,7 @@ mod tests {
             profile: "deepseek".into(),
             retry_policy: None,
             base_url: "https://api.deepseek.com/v1/chat/completions".to_string(),
-            model: "deepseek-v4-flash".to_string(),
+            model: "deepseek-flash".to_string(),
             ..service_root
         };
         assert_eq!(
@@ -715,12 +727,12 @@ mod tests {
             id: "deepseek".to_string(),
             kind: AiProviderKind::OpenAiCompatible,
             base_url: "https://api.deepseek.com".to_string(),
-            model: "deepseek-v4-flash".to_string(),
+            model: "deepseek-flash".to_string(),
             reasoning_effort: Some("off".to_string()),
             requires_api_key: true,
             api_key: None,
         };
-        let mut deepseek_body = json!({ "model": "deepseek-v4-flash" });
+        let mut deepseek_body = json!({ "model": "deepseek-flash" });
         apply_reasoning_effort(&mut deepseek_body, &deepseek);
         assert_eq!(
             deepseek_body
@@ -732,7 +744,7 @@ mod tests {
 
         let mut deepseek_high = deepseek.clone();
         deepseek_high.reasoning_effort = Some("high".to_string());
-        let mut deepseek_high_body = json!({ "model": "deepseek-v4-flash" });
+        let mut deepseek_high_body = json!({ "model": "deepseek-flash" });
         apply_reasoning_effort(&mut deepseek_high_body, &deepseek_high);
         assert_eq!(
             deepseek_high_body

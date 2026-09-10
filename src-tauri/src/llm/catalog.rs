@@ -206,6 +206,29 @@ static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
     value
 });
 
+const MODEL_ALIASES: &[(&str, &str, &str)] = &[
+    ("deepseek", "deepseek-v4-flash", "deepseek-flash"),
+    ("deepseek", "deepseek-v4-flash-vision-exp", "deepseek-flash"),
+];
+
+pub(crate) fn alias_target(profile: &str, model: &str) -> Option<&'static str> {
+    MODEL_ALIASES
+        .iter()
+        .find(|(alias_profile, alias, _)| *alias_profile == profile && *alias == model)
+        .map(|(_, _, target)| *target)
+}
+
+fn catalog_model<'a>(
+    profile: &str,
+    model: &str,
+    preset: &'a Preset,
+) -> Option<&'a CatalogModelDefinition> {
+    preset
+        .models
+        .get(model)
+        .or_else(|| alias_target(profile, model).and_then(|target| preset.models.get(target)))
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ResolvedModel {
@@ -373,9 +396,7 @@ pub(crate) fn resolve(provider: &AiProviderConfig) -> Result<ResolvedModel, Stri
     let profile = profile_id(provider)?;
     let definition = match provider.model_definition.as_ref() {
         Some(definition) => definition.clone(),
-        None => CATALOG.presets[profile]
-            .models
-            .get(&provider.model)
+        None => catalog_model(profile, &provider.model, &CATALOG.presets[profile])
             .map(|model| model.resolve(&CATALOG.presets[profile].compat))
             .ok_or_else(|| {
                 format!(
@@ -476,16 +497,21 @@ pub(crate) fn apply_reasoning(
     }
 }
 
-/// Draft for explicit user declaration; zero capacities deliberately cannot resolve.
+pub(crate) const DEFAULT_CONTEXT_WINDOW: u64 = 262_144;
+pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: u64 = 32_768;
+
+/// Conservative, usable definition for a model outside the built-in catalog.
+/// The OpenAI-style protocols used by ShellSpan carry text and tools; image
+/// input and reasoning remain disabled until an exact definition declares them.
 pub(crate) fn declaration_template(provider: &AiProviderConfig) -> Result<ModelDefinition, String> {
     validate_profile(provider)?;
     Ok(ModelDefinition {
         display_name: None,
-        context_window: 0,
-        max_output_tokens: 0,
+        context_window: DEFAULT_CONTEXT_WINDOW,
+        max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
         tool_calling: Support::Unknown,
         text_input: Support::Supported,
-        image_input: Support::Unknown,
+        image_input: Support::Unsupported,
         reasoning: vec![],
         compat: CATALOG.presets[profile_id(provider)?].compat.clone(),
         vision: None,

@@ -1768,13 +1768,13 @@ mod retry_policy_tests {
     fn child_descriptor_contains_only_model_selection() {
         let config: AiProviderConfig = serde_json::from_value(serde_json::json!({
             "id":"proxy", "profile":"deepseek", "kind":"openAiCompatible", "baseUrl":"https://proxy.example/v1",
-            "model":"deepseek-v4-flash", "requiresApiKey":false,
+            "model":"deepseek-flash", "requiresApiKey":false,
             "retryPolicy":{"maxAttempts":1,"initialDelayMs":0,"maxDelayMs":500,"maxServerDelayMs":1000,"jitterRatio":0.5}
         })).unwrap();
         let encoded = serde_json::to_value(provider_descriptor(&config)).unwrap();
         assert_eq!(
             encoded,
-            serde_json::json!({"routeId":"proxy","modelId":"deepseek-v4-flash"})
+            serde_json::json!({"routeId":"proxy","modelId":"deepseek-flash"})
         );
     }
 }

@@ -418,7 +418,7 @@ pub(crate) fn fixture_route(provider: &AiProviderConfig) -> ProviderRoute {
             RouteAuth::None
         },
         replay_domain_id: format!("fixture-domain-{}", provider.id),
-        preset_id: Some(provider.profile.clone()),
+        preset_id: provider.profile.clone(),
         models: provider.model_definition.clone().map(|definition| {
             std::collections::BTreeMap::from([(provider.model.clone(), definition)])
         }),

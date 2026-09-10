@@ -314,7 +314,7 @@ mod stage_c_tests {
                 reference: "pending".into(),
             },
             replay_domain_id: "pending".into(),
-            preset_id: None,
+            preset_id: "generic".into(),
             models: Some(BTreeMap::from([("child-model".into(), definition)])),
             model_overrides: None,
             defaults: Some(selection.clone()),

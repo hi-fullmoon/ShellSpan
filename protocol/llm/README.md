@@ -37,4 +37,6 @@ Example:
 
 Run `pnpm check:llm:catalog` and `cargo test --manifest-path src-tauri/Cargo.toml llm::catalog_tests --lib`. The Rust fixture test verifies that compact catalog entries still resolve to the complete `ResolvedModel` contract consumed by the UI and runtime.
 
-Custom route `models` and `modelOverrides` remain full `ModelDefinition` values. Unlike trusted built-in entries, they must explicitly carry `compat`; this keeps persisted user declarations self-contained and prevents an absent field from enabling a capability.
+Custom route `models` and `modelOverrides` remain full `ModelDefinition` values. Unlike trusted built-in entries, they must explicitly carry `compat`; this keeps persisted user declarations self-contained and prevents an absent field from enabling a capability. The provider editor materializes every model before saving: an exact built-in ID inherits its catalog definition, while an uncatalogued ID starts with a 262,144-token context window, 32,768-token output cap, text support, unknown tool support, and no image or reasoning support. Discovered capacities and user edits override those fallbacks in the persisted definition.
+
+The `openrouter` profile intentionally has no static models. Its catalog changes independently of ShellSpan releases, so the provider editor reads `GET /api/v1/models`, excludes entries carrying an `expiration_date`, retains each exact model slug, and adopts OpenRouter's capacities, tool parameters, reasoning-effort support, and input modalities into a complete persisted definition.

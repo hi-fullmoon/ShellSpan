@@ -4664,7 +4664,7 @@ mod tests {
             config.model_definition = None;
             config.kind = AiProviderKind::OpenAiCompatible;
             config.profile = "deepseek".into();
-            config.model = "deepseek-v4-flash".into();
+            config.model = "deepseek-flash".into();
             config.reasoning_effort = None;
             config.base_url = url;
             config.retry_policy = Some(instant_policy(3));
