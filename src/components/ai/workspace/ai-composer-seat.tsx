@@ -237,7 +237,19 @@ export function AiComposerSeat({
     >
       {mode === 'agent' && <AiTaskStrip steps={taskSteps} />}
       <div className="ai-composer-notices">
-        {status === 'failed' && onRetryTurn && !terminal && <Button variant="outline" size="sm" disabled={stopping || submitting || unavailable} onClick={onRetryTurn}><RotateCcwIcon data-icon="inline-start" />{t('ai.workspace.retryTurn')}</Button>}
+        {status === 'failed' && onRetryTurn && !terminal && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="self-center rounded-full"
+            disabled={stopping || submitting || unavailable}
+            onClick={onRetryTurn}
+          >
+            <RotateCcwIcon data-icon="inline-start" />
+            {t('ai.workspace.retryTurn')}
+          </Button>
+        )}
         {waitingApproval && !pendingApproval && (
           <Alert size="sm">
             <AlertTitle>{t('ai.workspace.approvalWaiting')}</AlertTitle>

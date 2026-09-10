@@ -93,6 +93,17 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
   });
 
+  it('presents retrying a failed turn as a compact secondary action', async () => {
+    const user = userEvent.setup();
+    const retryTurn = vi.fn();
+    render(<AiComposerSeat phase="active" status="failed" onRetryTurn={retryTurn} />);
+
+    const button = screen.getByRole('button', { name: 'Retry this turn' });
+    expect(button).toHaveClass('self-center', 'rounded-full', 'bg-secondary');
+    await user.click(button);
+    expect(retryTurn).toHaveBeenCalledOnce();
+  });
+
   it('adds pasted images once without submitting the message', () => {
     const onPasteImages = vi.fn();
     const onSubmit = vi.fn();
