@@ -43,7 +43,7 @@ export const ResponsiveCardGrid: React.FC<ResponsiveCardGridProps> = ({
   minColumnWidth,
   columns = 3,
   breakpoints = DEFAULT_BREAKPOINTS,
-  gap = '0.5rem',
+  gap = '2rem',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -90,16 +90,11 @@ export const ResponsiveCardGrid: React.FC<ResponsiveCardGridProps> = ({
   const currentColumns = useMemo(() => {
     let result = positiveInteger(columns, 'columns');
 
-    for (const { minWidth, columns: breakpointColumns } of [...breakpoints].sort(
-      (a, b) => a.minWidth - b.minWidth,
-    )) {
+    for (const { minWidth, columns: breakpointColumns } of [...breakpoints].sort((a, b) => a.minWidth - b.minWidth)) {
       if (!Number.isFinite(minWidth) || minWidth < 0) {
         throw new Error('breakpoint minWidth must be a non-negative number');
       }
-      const validColumns = positiveInteger(
-        breakpointColumns,
-        'breakpoint columns',
-      );
+      const validColumns = positiveInteger(breakpointColumns, 'breakpoint columns');
       if (containerWidth >= minWidth) result = validColumns;
     }
 
@@ -111,9 +106,7 @@ export const ResponsiveCardGrid: React.FC<ResponsiveCardGridProps> = ({
       return `repeat(${currentColumns}, minmax(0, 1fr))`;
     }
 
-    const cssWidth = typeof minColumnWidth === 'number'
-      ? `${positiveInteger(minColumnWidth, 'minColumnWidth')}px`
-      : minColumnWidth.trim();
+    const cssWidth = typeof minColumnWidth === 'number' ? `${positiveInteger(minColumnWidth, 'minColumnWidth')}px` : minColumnWidth.trim();
     if (!cssWidth) {
       throw new Error('minColumnWidth must not be empty');
     }

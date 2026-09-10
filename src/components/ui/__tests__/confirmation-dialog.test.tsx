@@ -30,7 +30,8 @@ describe('ConfirmationDialog', () => {
     const cancelButton = screen.getByRole('button', { name: 'common.cancel' });
 
     expect(dialog).toHaveClass('max-w-sm', 'gap-0', 'overflow-hidden', 'p-0');
-    expect(header).toHaveClass('border-b', 'px-4', 'py-3');
+    expect(header).toHaveClass('flex', 'flex-row', 'items-center', 'gap-3', 'border-b', 'px-4', 'py-3', 'text-left');
+    expect(screen.getByRole('heading', { name: 'Confirm action' })).toHaveClass('flex-1', 'text-sm', 'leading-5');
     expect(confirmButton).toHaveClass('bg-destructive', 'h-8');
     expect(cancelButton).toHaveClass('h-8');
     expect(dialog.querySelector('[data-slot="alert-dialog-media"]')).toBeInTheDocument();
