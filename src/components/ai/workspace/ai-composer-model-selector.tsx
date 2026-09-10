@@ -93,7 +93,7 @@ export function AiComposerModelSelector({
       kind: route.adapterId === 'responses' ? 'openAi' as const : route.adapterId === 'ollama' ? 'ollama' as const : 'openAiCompatible' as const,
       profile: resolved.profile, baseUrl: route.baseUrl,
       reasoningEffort: route.defaults?.modelId === resolved.modelId ? route.defaults.reasoningEffort : undefined,
-      requiresApiKey: route.auth.kind === 'keychain', retryPolicy: route.retryPolicy,
+      requiresApiKey: route.auth.kind === 'keychain',
     }))) ?? []), [routeSnapshot,modelsByRoute]);
   const availableProviders = routeSnapshot ? routeProviders : nativeRouteMode ? [] : providers;
   const [pane, setPane] = useState<ModelMenuPane>('root');

@@ -123,6 +123,7 @@ describe('route-backed AI settings', () => {
 
   it('deletes one explicit model and moves both route defaults to a valid fallback', async () => {
     render(<AiSettingsSection />);
+    expect(screen.queryByRole('button', { name: 'settings.ai.addModel' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'settings.ai.removeModel:model-b' }));
 
     await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));

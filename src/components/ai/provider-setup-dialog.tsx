@@ -2,16 +2,28 @@ import { invoke } from '@tauri-apps/api/core';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2Icon,
+  ChevronDownIcon,
   CircleAlertIcon,
   EyeIcon,
   EyeOffIcon,
   InfoIcon,
   RefreshCwIcon,
   ServerIcon,
+  Settings2Icon,
 } from 'lucide-react';
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { DEFAULT_RETRY_POLICY, RETRY_LIMITS, parseRetryPolicy } from '@/lib/ai/retry-policy';
+import { DEFAULT_RETRY_POLICY } from '@/lib/ai/retry-policy';
 import { Button } from '@/components/ui/button';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import {
   Combobox,
   ComboboxContent,
@@ -36,6 +48,7 @@ import {
   InputGroupInput,
 } from '@/components/ui/input-group';
 import { Spinner } from '@/components/ui/spinner';
+import { Separator } from '@/components/ui/separator';
 import {
   Tooltip,
   TooltipContent,
@@ -73,10 +86,6 @@ import { PROVIDER_PROFILE_IDS, resolveProviderProfile, useResolvedModel, profile
 
 type ProviderDraft = Omit<AiProviderProfile, 'id'> & { apiKey?: string };
 
-function retryPolicyValid(value: unknown): boolean {
-  try { parseRetryPolicy(value); return true; } catch { return false; }
-}
-
 function modelDefinitionValid(definition: ModelDefinition | undefined): boolean {
   if (!definition
     || !Number.isSafeInteger(definition.contextWindow)
@@ -104,7 +113,6 @@ function isUnknownModelError(error: string): boolean {
 interface ProviderSetupDialogProps {
   open: boolean;
   provider?: AiProviderProfile;
-  addingModel?: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (providerId: string) => void;
   onDelete?: () => void;
@@ -213,7 +221,6 @@ function draftConfig(
   return {
     modelDefinition: draft.modelDefinition,
     id: providerId ?? 'provider-setup-draft',
-    retryPolicy: parseRetryPolicy(draft.retryPolicy),
     kind: draft.kind,
     profile: resolveProviderProfile(draft),
     baseUrl: draft.baseUrl.trim(),
@@ -227,7 +234,6 @@ function draftConfig(
 export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   open,
   provider,
-  addingModel = false,
   onOpenChange,
   onSaved,
   onDelete,
@@ -235,12 +241,12 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const { t } = useI18n();
   const addProvider = useAiSettingsStore((state) => state.addProvider);
   const updateProvider = useAiSettingsStore((state) => state.updateProvider);
-  const removeProvider = useAiSettingsStore((state) => state.removeProvider);
   const [draft, setDraft] = useState<ProviderDraft>();
   const resolution = useResolvedModel(draft ? { ...draft, id: provider?.id ?? 'draft' } : undefined);
   const [models, setModels] = useState<string[]>([]);
   const [hasStoredApiKey, setHasStoredApiKey] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>();
   const routeSnapshot = useLlmRoutesStore((state) => state.snapshot);
@@ -262,16 +268,14 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
       setBusy(false);
       return;
     }
-    setDraft(provider ? {
-      ...provider,
-      ...(addingModel ? { model: '', modelDefinition: undefined, reasoningEffort: undefined } : {}),
-    } : undefined);
+    setDraft(provider ? { ...provider } : undefined);
     setModels([]);
     setHasStoredApiKey(false);
     setShowApiKey(false);
+    setAdvancedOpen(false);
     setBusy(false);
     setFeedback(undefined);
-  }, [open, provider, addingModel]);
+  }, [open, provider]);
 
   useEffect(() => {
     if (!open || !provider?.requiresApiKey) return;
@@ -290,7 +294,6 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     : undefined;
   const canTest = Boolean(
     draft
-    && retryPolicyValid(draft.retryPolicy)
     && requestEndpoint
     && (!draft.requiresApiKey || draft.apiKey?.trim() || (provider && hasStoredApiKey)),
   );
@@ -306,7 +309,6 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     && draft.model.trim()
     && !needsModelDeclaration
     && !hasInvalidModelDeclaration
-    && (!addingModel || resolution.status === 'ready' || modelDefinitionValid(draft.modelDefinition))
     && (!nativeRouteMode || routeSnapshot),
   );
 
@@ -335,6 +337,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     try {
       const { apiKey: _apiKey, ...providerConfig } = draftConfig(draft, provider?.id);
       const definition = await invoke<ModelDefinition>('ai_model_declaration_template', { provider: providerConfig });
+      setAdvancedOpen(true);
       setDraft((current) => current === identity ? { ...current, modelDefinition: definition } : current);
     } catch (reason) {
       setFeedback({
@@ -353,11 +356,13 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     setShowApiKey(false);
     if (!preset) {
       setDraft(undefined);
+      setAdvancedOpen(false);
       setModels([]);
       setFeedback(undefined);
       return;
     }
     setDraft({ ...preset });
+    setAdvancedOpen(preset.preset === 'custom');
     setModels([]);
     setFeedback(undefined);
   };
@@ -402,10 +407,9 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     setFeedback(undefined);
     const changes = {
       modelDefinition: draft.modelDefinition,
-      retryPolicy: parseRetryPolicy(draft.retryPolicy),
       name: draft.name.trim(),
       kind: draft.kind,
-    profile: resolveProviderProfile(draft),
+      profile: resolveProviderProfile(draft),
       baseUrl: draft.baseUrl.trim(),
       model: draft.model,
       ...(draft.reasoningEffort ? { reasoningEffort: draft.reasoningEffort } : {}),
@@ -435,7 +439,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
           ...(existing ?? { id:providerId, revision:routeSnapshot.revision, replayDomainId:'pending', auth:draft.requiresApiKey?{kind:'keychain' as const,reference:'pending'}:{kind:'none' as const}, timeouts:{requestHeadersMs:30000,firstByteMs:30000,streamIdleMs:300000} }),
           auth:draft.requiresApiKey?(existing?.auth.kind==='keychain'?existing.auth:{kind:'keychain' as const,reference:'pending'}):{kind:'none' as const},
           displayName:draft.name.trim(), adapterId:(draft.kind==='openAi'?'responses':draft.kind==='ollama'?'ollama':draft.kind==='anthropicMessages'?'anthropic-messages':'chat-completions') as 'responses'|'ollama'|'anthropic-messages'|'chat-completions',
-          baseUrl:draft.baseUrl.trim(), presetId:resolveProviderProfile(draft), retryPolicy:parseRetryPolicy(draft.retryPolicy),
+          baseUrl:draft.baseUrl.trim(), presetId:resolveProviderProfile(draft), retryPolicy:{...DEFAULT_RETRY_POLICY},
           models:{...existingModels,[draft.model]:{contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision}},
           modelOverrides:undefined,
           defaults:{routeId:providerId,modelId:draft.model,...(draft.reasoningEffort?{reasoningEffort:draft.reasoningEffort}:{})},
@@ -458,9 +462,12 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <CompactDialogContent className="max-w-2xl [&_[data-slot=dialog-close]]:size-6">
+      <CompactDialogContent className="max-w-xl [&_[data-slot=dialog-close]]:size-6">
         <CompactDialogHeader
-          title={addingModel ? t('settings.ai.addModelTitle') : t(provider ? 'settings.ai.editProviderTitle' : 'settings.ai.addProviderTitle')}
+          title={t(provider ? 'settings.ai.editProviderTitle' : 'settings.ai.addProviderTitle')}
+          description={provider
+            ? t('settings.ai.editProviderDescription', { name: provider.name })
+            : t('settings.ai.addProviderDescription')}
         />
 
         <form
@@ -472,10 +479,10 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
         >
           <CompactDialogBody
             data-slot="provider-dialog-scroll-area"
-            className="@container gap-5"
+            className="@container gap-4"
           >
-            <FieldGroup className="gap-2.5 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
-              <Field>
+            <FieldGroup className="gap-4">
+              {!provider && <Field>
                 <FieldLabel htmlFor="ai-new-provider-preset">{t('settings.ai.chooseProvider')}</FieldLabel>
                 <Combobox
                   items={PRESET_OPTIONS}
@@ -518,92 +525,46 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                     </ComboboxList>
                   </ComboboxContent>
                 </Combobox>
-              </Field>
+              </Field>}
+
+              {draft?.requiresApiKey && (
+                <Field>
+                  <div className="flex items-center justify-between gap-2">
+                    <FieldLabel htmlFor="ai-new-provider-key">
+                      {t('settings.ai.apiKey')}
+                      <span className="text-muted-foreground">{t('settings.ai.required')}</span>
+                    </FieldLabel>
+                    {provider && (
+                      <Badge variant={hasStoredApiKey ? 'secondary' : 'outline'}>
+                        {t(hasStoredApiKey ? 'settings.ai.keyStored' : 'settings.ai.keyMissing')}
+                      </Badge>
+                    )}
+                  </div>
+                  <InputGroup className={SYSTEM_INPUT_GROUP_CLASS}>
+                    <InputGroupInput
+                      id="ai-new-provider-key"
+                      type={showApiKey ? 'text' : 'password'}
+                      value={draft.apiKey ?? ''}
+                      placeholder={hasStoredApiKey ? '••••••••' : 'sk-...'}
+                      onChange={(event) => updateDraft({ apiKey: event.target.value })}
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupButton
+                        aria-label={t(showApiKey ? 'settings.ai.hideApiKey' : 'settings.ai.showApiKey')}
+                        onClick={() => setShowApiKey((visible) => !visible)}
+                      >
+                        {showApiKey ? <EyeOffIcon /> : <EyeIcon />}
+                      </InputGroupButton>
+                    </InputGroupAddon>
+                  </InputGroup>
+                </Field>
+              )}
 
               <Field data-disabled={!draft || undefined}>
-                <FieldLabel htmlFor="ai-new-provider-name">{t('settings.ai.providerName')}</FieldLabel>
-                <Input
-                  id="ai-new-provider-name"
-                  className={SYSTEM_INPUT_CLASS}
-                  value={draft?.name ?? ''}
-                  placeholder={t('settings.ai.providerNamePlaceholder')}
-                  disabled={!draft}
-                  onChange={(event) => updateDraft({ name: event.target.value })}
-                />
-              </Field>
-            </FieldGroup>
-
-            <FieldGroup className="gap-2.5 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
-              <Field data-disabled={!draft || undefined}>
-                <FieldLabel htmlFor="ai-provider-profile">{t('settings.ai.profile')}</FieldLabel>
-                <Combobox items={PROVIDER_PROFILE_IDS} value={draft ? resolveProviderProfile(draft) : null}
-                  onValueChange={(profile) => {
-                    if (!profile || !draft) return;
-                    const kind = profileProtocol(profile);
-                    updateDraft({ profile, kind, reasoningEffort: undefined });
-                  }}>
-                  <ComboboxInput id="ai-provider-profile" className={SYSTEM_INPUT_GROUP_CLASS} disabled={!draft} />
-                  <ComboboxContent>
-                    <ComboboxEmpty>{t('settings.ai.providerNoResults')}</ComboboxEmpty>
-                    <ComboboxList>{(profile) => <ComboboxItem key={profile} value={profile}>{profile}</ComboboxItem>}</ComboboxList>
-                  </ComboboxContent>
-                </Combobox>
-                {draft && <FieldDescription aria-live="polite">{resolution.status === 'ready'
-                  ? `${t('settings.ai.profileLimits', { context: resolution.model.contextWindow, output: resolution.model.maxOutputTokens })} · ${t(resolution.model.source === 'builtinCatalog' ? 'settings.ai.builtinSource' : 'settings.ai.userSource')}`
-                  : resolution.status === 'error' ? resolution.error : t('settings.ai.capabilitiesLoading')}</FieldDescription>}
-              </Field>
-              <Field data-disabled={!draft || undefined}>
-                <FieldLabel htmlFor="ai-new-provider-protocol">{t('settings.ai.protocol')}</FieldLabel>
-                <Input
-                  id="ai-new-provider-protocol"
-                  className={SYSTEM_INPUT_CLASS}
-                  value={draft ? t(PROTOCOL_LABEL_KEYS[draft.kind]) : ''}
-                  placeholder={t('settings.ai.chooseProviderFirst')}
-                  disabled
-                  readOnly
-                />
-              </Field>
-
-              <Field data-disabled={!draft || undefined} data-invalid={Boolean(draft && !requestEndpoint) || undefined}>
-                <div className="flex items-center gap-1">
-                  <FieldLabel htmlFor="ai-new-provider-url">{t('settings.ai.baseUrl')}</FieldLabel>
-                  {requestEndpointLabel && (
-                    <TooltipProvider delay={100}>
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <Button
-                              type="button"
-                              variant="plain"
-                              size="xs"
-                              className="relative size-4 p-0 after:absolute after:-inset-1"
-                              aria-label={requestEndpointLabel}
-                            />
-                          }
-                        >
-                          <InfoIcon />
-                        </TooltipTrigger>
-                        <TooltipContent align="start">
-                          {requestEndpointLabel}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  )}
-                </div>
-                <Input
-                  id="ai-new-provider-url"
-                  className={SYSTEM_INPUT_CLASS}
-                  value={draft?.baseUrl ?? ''}
-                  placeholder="https://..."
-                  disabled={!draft}
-                  aria-invalid={Boolean(draft && !requestEndpoint) || undefined}
-                  onChange={(event) => updateDraft({ baseUrl: event.target.value })}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                />
-              </Field>
-
-              <Field data-disabled={!draft || undefined} className="@min-[30rem]:col-span-2">
                 <div className="flex items-center justify-between gap-2">
                   <FieldLabel htmlFor="ai-new-provider-model">{t('settings.ai.model')}</FieldLabel>
                   <Button
@@ -649,28 +610,166 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 </Combobox>
               </Field>
             </FieldGroup>
-            {draft && (needsModelDeclaration || draft.modelDefinition) && (
-              <FieldGroup className="gap-2.5 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
-                <Field className="@min-[30rem]:col-span-2">
-                  <FieldDescription>
-                    {needsModelDeclaration
-                      ? t('settings.ai.unknownModelDescription')
-                      : t('settings.ai.declaredHint')}
-                  </FieldDescription>
+            {needsModelDeclaration && (
+              <Alert variant="warning">
+                <CircleAlertIcon aria-hidden />
+                <AlertTitle>{t('settings.ai.unknownModelTitle')}</AlertTitle>
+                <AlertDescription className="flex flex-col items-start gap-2">
+                  <span>{t('settings.ai.unknownModelDescription')}</span>
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
+                    size="xs"
                     disabled={busy}
-                    onClick={() => draft.modelDefinition
-                      ? updateDraft({ modelDefinition: undefined })
-                      : void enableModelDeclaration()}
+                    onClick={() => void enableModelDeclaration()}
                   >
-                    {t(draft.modelDefinition ? 'settings.ai.useCatalog' : 'settings.ai.declareModel')}
+                    {t('settings.ai.declareModel')}
                   </Button>
-                </Field>
-                {draft.modelDefinition && (
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <Collapsible
+              open={advancedOpen}
+              onOpenChange={setAdvancedOpen}
+              className="rounded-lg border"
+            >
+              <CollapsibleTrigger
+                render={(
+                  <Button
+                    type="button"
+                    variant="plain"
+                    className="h-auto w-full justify-between rounded-lg px-3 py-2.5"
+                    disabled={!draft}
+                  />
+                )}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <Settings2Icon data-icon="inline-start" />
+                  <span className="flex min-w-0 flex-col items-start gap-0.5">
+                    <span>{t('settings.ai.advancedSettings')}</span>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {t('settings.ai.advancedSettingsDescription')}
+                    </span>
+                  </span>
+                </span>
+                <ChevronDownIcon
+                  data-icon="inline-end"
+                  className={cn('transition-transform', advancedOpen && 'rotate-180')}
+                />
+              </CollapsibleTrigger>
+
+              <CollapsibleContent>
+                <Separator />
+                <FieldGroup className="gap-3 p-3 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
+                  <Field data-disabled={!draft || undefined}>
+                    <FieldLabel htmlFor="ai-new-provider-name">{t('settings.ai.providerName')}</FieldLabel>
+                    <Input
+                      id="ai-new-provider-name"
+                      className={SYSTEM_INPUT_CLASS}
+                      value={draft?.name ?? ''}
+                      placeholder={t('settings.ai.providerNamePlaceholder')}
+                      disabled={!draft}
+                      onChange={(event) => updateDraft({ name: event.target.value })}
+                    />
+                  </Field>
+
+                  <Field data-disabled={!draft || undefined}>
+                    <FieldLabel htmlFor="ai-provider-profile">{t('settings.ai.profile')}</FieldLabel>
+                    <Combobox
+                      items={PROVIDER_PROFILE_IDS}
+                      value={draft ? resolveProviderProfile(draft) : null}
+                      onValueChange={(profile) => {
+                        if (!profile || !draft) return;
+                        const kind = profileProtocol(profile);
+                        updateDraft({ profile, kind, reasoningEffort: undefined });
+                      }}
+                    >
+                      <ComboboxInput id="ai-provider-profile" className={SYSTEM_INPUT_GROUP_CLASS} disabled={!draft} />
+                      <ComboboxContent>
+                        <ComboboxEmpty>{t('settings.ai.providerNoResults')}</ComboboxEmpty>
+                        <ComboboxList>
+                          {(profile) => <ComboboxItem key={profile} value={profile}>{profile}</ComboboxItem>}
+                        </ComboboxList>
+                      </ComboboxContent>
+                    </Combobox>
+                    {draft && (
+                      <FieldDescription aria-live="polite">
+                        {resolution.status === 'ready'
+                          ? `${t('settings.ai.profileLimits', { context: resolution.model.contextWindow, output: resolution.model.maxOutputTokens })} · ${t(resolution.model.source === 'builtinCatalog' ? 'settings.ai.builtinSource' : 'settings.ai.userSource')}`
+                          : resolution.status === 'error' ? resolution.error : t('settings.ai.capabilitiesLoading')}
+                      </FieldDescription>
+                    )}
+                  </Field>
+
+                  <Field data-disabled={!draft || undefined}>
+                    <FieldLabel htmlFor="ai-new-provider-protocol">{t('settings.ai.protocol')}</FieldLabel>
+                    <Input
+                      id="ai-new-provider-protocol"
+                      className={SYSTEM_INPUT_CLASS}
+                      value={draft ? t(PROTOCOL_LABEL_KEYS[draft.kind]) : ''}
+                      placeholder={t('settings.ai.chooseProviderFirst')}
+                      disabled
+                      readOnly
+                    />
+                  </Field>
+
+                  <Field data-disabled={!draft || undefined} data-invalid={Boolean(draft && !requestEndpoint) || undefined}>
+                    <div className="flex items-center gap-1">
+                      <FieldLabel htmlFor="ai-new-provider-url">{t('settings.ai.baseUrl')}</FieldLabel>
+                      {requestEndpointLabel && (
+                        <TooltipProvider delay={100}>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={(
+                                <Button
+                                  type="button"
+                                  variant="plain"
+                                  size="xs"
+                                  className="relative size-4 p-0 after:absolute after:-inset-1"
+                                  aria-label={requestEndpointLabel}
+                                />
+                              )}
+                            >
+                              <InfoIcon />
+                            </TooltipTrigger>
+                            <TooltipContent align="start">{requestEndpointLabel}</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                    </div>
+                    <Input
+                      id="ai-new-provider-url"
+                      className={SYSTEM_INPUT_CLASS}
+                      value={draft?.baseUrl ?? ''}
+                      placeholder="https://..."
+                      disabled={!draft}
+                      aria-invalid={Boolean(draft && !requestEndpoint) || undefined}
+                      onChange={(event) => updateDraft({ baseUrl: event.target.value })}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                    />
+                  </Field>
+
+                  {draft?.modelDefinition && (
                   <>
+                    <Separator className="@min-[30rem]:col-span-2" />
+                    <Field className="@min-[30rem]:col-span-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <FieldLabel>{t('settings.ai.modelCapabilities')}</FieldLabel>
+                          <FieldDescription>{t('settings.ai.declaredHint')}</FieldDescription>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => updateDraft({ modelDefinition: undefined })}
+                        >
+                          {t('settings.ai.useCatalog')}
+                        </Button>
+                      </div>
+                    </Field>
                     <Field data-invalid={draft.modelDefinition.contextWindow <= 0 || undefined}>
                       <FieldLabel htmlFor="model-context">{t('settings.ai.contextWindow')}</FieldLabel>
                       <Input
@@ -783,71 +882,9 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                     )}
                   </>
                 )}
-              </FieldGroup>
-            )}
-            {draft && <FieldGroup className="gap-2.5 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
-              <FieldDescription className="@min-[30rem]:col-span-2">{t('settings.ai.retryDescription')}</FieldDescription>
-              {(Object.keys(DEFAULT_RETRY_POLICY) as (keyof typeof DEFAULT_RETRY_POLICY)[]).map(key => (
-                <Field key={key} data-invalid={!retryPolicyValid(draft.retryPolicy)}>
-                  <FieldLabel htmlFor={`retry-${key}`}>{t(`settings.ai.retry.${key}`)}</FieldLabel>
-                  <Input
-                    id={`retry-${key}`}
-                    className={SYSTEM_INPUT_CLASS}
-                    type="number"
-                    min={key === 'maxAttempts' ? 1 : 0}
-                    max={key === 'maxAttempts' ? RETRY_LIMITS.maxAttempts : key === 'jitterRatio' ? 1 : RETRY_LIMITS.maxDelayMs}
-                    step={key === 'jitterRatio' ? 'any' : 1}
-                    value={Number.isFinite((draft.retryPolicy ?? DEFAULT_RETRY_POLICY)[key]) ? (draft.retryPolicy ?? DEFAULT_RETRY_POLICY)[key] : ''}
-                    aria-invalid={!retryPolicyValid(draft.retryPolicy)}
-                    onChange={event => setDraft(current => current ? {
-                      ...current,
-                      retryPolicy: { ...DEFAULT_RETRY_POLICY, ...current.retryPolicy, [key]: event.target.value === '' ? NaN : Number(event.target.value) },
-                    } : current)}
-                  />
-                </Field>
-              ))}
-              {!retryPolicyValid(draft.retryPolicy) && <FieldDescription role="alert">{t('settings.ai.retryInvalid')}</FieldDescription>}
-            </FieldGroup>}
-            <FieldGroup className="gap-2.5">
-              <Field data-disabled={!draft || undefined}>
-                <div className="flex items-center justify-between gap-2">
-                  <FieldLabel htmlFor="ai-new-provider-key">
-                    {t('settings.ai.apiKey')}
-                    {draft?.requiresApiKey && (
-                      <span className="text-muted-foreground">{t('settings.ai.required')}</span>
-                    )}
-                  </FieldLabel>
-                  {provider && draft?.requiresApiKey && (
-                    <Badge variant={hasStoredApiKey ? 'secondary' : 'outline'}>
-                      {t(hasStoredApiKey ? 'settings.ai.keyStored' : 'settings.ai.keyMissing')}
-                    </Badge>
-                  )}
-                </div>
-                <InputGroup className={SYSTEM_INPUT_GROUP_CLASS}>
-                  <InputGroupInput
-                    id="ai-new-provider-key"
-                    type={showApiKey ? 'text' : 'password'}
-                    value={draft?.apiKey ?? ''}
-                    placeholder={hasStoredApiKey ? '••••••••' : 'sk-...'}
-                    disabled={!draft || !draft.requiresApiKey}
-                    onChange={(event) => updateDraft({ apiKey: event.target.value })}
-                    autoComplete="off"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                  />
-                  <InputGroupAddon align="inline-end">
-                    <InputGroupButton
-                      aria-label={t(showApiKey ? 'settings.ai.hideApiKey' : 'settings.ai.showApiKey')}
-                      disabled={!draft || !draft.requiresApiKey}
-                      onClick={() => setShowApiKey((visible) => !visible)}
-                    >
-                      {showApiKey ? <EyeOffIcon /> : <EyeIcon />}
-                    </InputGroupButton>
-                  </InputGroupAddon>
-                </InputGroup>
-              </Field>
-            </FieldGroup>
+                </FieldGroup>
+              </CollapsibleContent>
+            </Collapsible>
           </CompactDialogBody>
 
           <CompactDialogFooter className="sm:justify-between">
@@ -857,16 +894,6 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                   {t('settings.ai.deleteProvider')}
                 </Button>
               )}
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                disabled={!canTest || busy}
-                onClick={() => void handleLoadModels()}
-              >
-                {busy && <Spinner data-icon="inline-start" />}
-                {t('settings.ai.verifyConnection')}
-              </Button>
               {feedback && (
                 <div
                   role={feedback.kind === 'error' ? 'alert' : 'status'}
