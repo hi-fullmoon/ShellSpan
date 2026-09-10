@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_RETRY_POLICY } from '@/lib/ai/retry-policy';
 import {
   flushAiSettingsPreferences,
   parseAiPreferences,
@@ -31,30 +30,32 @@ describe('aiSettingsStore', () => {
     vi.useRealTimers();
   });
 
-  it('snapshots each request config without persisting legacy Provider state', async () => {
+  it('ignores per-provider retry settings and leaves recovery to the runtime default', async () => {
     vi.useFakeTimers();
     useAiSettingsStore.setState({ initialized: true });
     const first = useAiSettingsStore.getState().providers[0].id;
     const second = useAiSettingsStore.getState().providers[1].id;
-    useAiSettingsStore.getState().updateProvider(first, { retryPolicy: { ...DEFAULT_RETRY_POLICY, maxAttempts: 1 } });
-    useAiSettingsStore.getState().updateProvider(second, { retryPolicy: { ...DEFAULT_RETRY_POLICY, maxAttempts: 8, maxServerDelayMs: 1000 } });
+    const customRetry = { maxAttempts: 1, initialDelayMs: 0, maxDelayMs: 0, maxServerDelayMs: 0, jitterRatio: 0 };
+    useAiSettingsStore.getState().updateProvider(first, { retryPolicy: customRetry });
+    useAiSettingsStore.getState().updateProvider(second, { retryPolicy: customRetry });
     const snapshot = useAiSettingsStore.getState().getProviderConfig(first);
-    useAiSettingsStore.getState().updateProvider(first, { retryPolicy: { ...DEFAULT_RETRY_POLICY, maxAttempts: 4 } });
-    expect(snapshot.retryPolicy?.maxAttempts).toBe(1);
+    expect(snapshot).not.toHaveProperty('retryPolicy');
     await vi.advanceTimersByTimeAsync(400);
     await flushAiSettingsPreferences();
-    expect(useAiSettingsStore.getState().getProviderConfig(first).retryPolicy?.maxAttempts).toBe(4);
-    expect(useAiSettingsStore.getState().getProviderConfig(second).retryPolicy).toEqual({ ...DEFAULT_RETRY_POLICY, maxAttempts: 8, maxServerDelayMs: 1000 });
+    expect(useAiSettingsStore.getState().providers[0]).not.toHaveProperty('retryPolicy');
+    expect(useAiSettingsStore.getState().providers[1]).not.toHaveProperty('retryPolicy');
     expect(tauri.invokeSavePreferences).not.toHaveBeenCalled();
   });
 
-  it('keeps invalid stored policy visible and rejects it when building a request', () => {
+  it('drops legacy stored retry policies while loading preferences', () => {
     const provider = initialState.providers[0];
-    const restored = parseAiPreferences([preference('providers', [{ ...provider, retryPolicy: { ...DEFAULT_RETRY_POLICY, maxAttempts: 999 } }])]);
+    const restored = parseAiPreferences([preference('providers', [{
+      ...provider,
+      retryPolicy: { maxAttempts: 999 },
+    }])]);
     useAiSettingsStore.setState(restored);
-    expect(() => useAiSettingsStore.getState().getProviderConfig(provider.id)).toThrow('Invalid AI retry policy');
-    expect(() => useAiSettingsStore.getState().updateProvider(provider.id, { retryPolicy: { ...DEFAULT_RETRY_POLICY, jitterRatio: Infinity } })).toThrow();
-    expect(parseAiPreferences([preference('providers', [provider])]).providers[0].retryPolicy).toBeUndefined();
+    expect(useAiSettingsStore.getState().providers[0]).not.toHaveProperty('retryPolicy');
+    expect(useAiSettingsStore.getState().getProviderConfig(provider.id)).not.toHaveProperty('retryPolicy');
   });
 
   it('preserves malformed persisted capability choices and rejects them before request creation', () => {

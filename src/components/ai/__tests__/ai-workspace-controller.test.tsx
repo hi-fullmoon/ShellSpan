@@ -828,8 +828,10 @@ describe('AiWorkspaceController', () => {
     });
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Visible terminal' }));
-    await userEvent.setup().type(screen.getByRole('textbox'), 'Show this command');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Command execution: Background' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Visible terminal' }));
+    await user.type(screen.getByRole('textbox'), 'Show this command');
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
 
     await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({
@@ -859,8 +861,8 @@ describe('AiWorkspaceController', () => {
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
     await waitFor(() => expect(agent.open).toHaveBeenCalledWith(view.summary.id));
-    expect(await screen.findByRole('button', { name: 'Visible terminal' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Background' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Command execution: Visible terminal' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Command execution: Background' })).toBeNull();
   });
 
   it('routes Agent Enter, accelerated Enter, and Stop to distinct adapter intentions', async () => {

@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { parseRetryPolicy, type AiRetryPolicy } from '@/lib/ai/retry-policy';
 import { subscribeWithSelector } from 'zustand/middleware';
 import type {
   AiProviderConfig,
@@ -176,7 +175,6 @@ function sanitizeProviders(value: unknown): AiProviderProfile[] {
     ) continue;
     providers.push({
       // Preserve invalid persisted values so request validation fails visibly.
-      ...(provider.retryPolicy !== undefined ? { retryPolicy: provider.retryPolicy as AiRetryPolicy } : {}),
       ...(provider.modelDefinition !== undefined ? { modelDefinition: provider.modelDefinition as AiProviderConfig['modelDefinition'] } : {}),
       id,
       name,
@@ -323,10 +321,11 @@ export const useAiSettingsStore = create<AiSettingsState>()(
       }
     },
     addProvider: (preset, changes) => {
-      if (changes?.retryPolicy !== undefined) parseRetryPolicy(changes.retryPolicy);
+      const safeChanges = { ...changes };
+      delete safeChanges.retryPolicy;
       const provider = {
         ...createProviderProfile(preset, get().providers),
-        ...changes,
+        ...safeChanges,
       };
       set((state) => ({ providers: [...state.providers, provider] }));
       return provider.id;
@@ -334,11 +333,13 @@ export const useAiSettingsStore = create<AiSettingsState>()(
     updateProvider: (id, changes) => set((state) => ({
       providers: state.providers.map((provider) => {
         if (provider.id !== id) return provider;
-        const updated = { ...provider, ...changes, id };
-        if (!('modelDefinition' in changes) && (['model', 'kind', 'profile', 'baseUrl'] as const)
-          .some(key => key in changes && changes[key] !== provider[key])) delete updated.modelDefinition;
-        if (changes.retryPolicy !== undefined) parseRetryPolicy(changes.retryPolicy);
-        if ('reasoningEffort' in changes && changes.reasoningEffort === undefined) {
+        const safeChanges = { ...changes };
+        delete safeChanges.retryPolicy;
+        const updated = { ...provider, ...safeChanges, id };
+        delete updated.retryPolicy;
+        if (!('modelDefinition' in safeChanges) && (['model', 'kind', 'profile', 'baseUrl'] as const)
+          .some(key => key in safeChanges && safeChanges[key] !== provider[key])) delete updated.modelDefinition;
+        if ('reasoningEffort' in safeChanges && safeChanges.reasoningEffort === undefined) {
           delete updated.reasoningEffort;
         }
         return updated;
@@ -370,7 +371,6 @@ export const useAiSettingsStore = create<AiSettingsState>()(
       if (provider.reasoningEffort !== undefined && !isAiReasoningOption(provider.reasoningEffort)) throw new Error('UNSUPPORTED_REASONING_EFFORT');
       const reasoningEffort = provider.reasoningEffort;
       const config: AiProviderConfig = {
-        ...(provider.retryPolicy !== undefined ? { retryPolicy: parseRetryPolicy(provider.retryPolicy) } : {}),
         modelDefinition: provider.modelDefinition,
         id: provider.id,
         kind: provider.kind,

@@ -67,30 +67,29 @@ describe('ProviderSetupDialog', () => {
     useLlmRoutesStore.setState({...initialRoutesState,snapshot:undefined,status:'idle',error:undefined,modelsByRoute:{}},true);
   });
 
-  it('saves a disabled retry policy and blocks invalid values before connection testing', async () => {
+  it('uses the built-in retry policy without exposing provider controls', async () => {
     const user = userEvent.setup();
-    const provider = useAiSettingsStore.getState().providers[0];
+    const provider = {
+      ...useAiSettingsStore.getState().providers[0],
+      retryPolicy: { ...DEFAULT_RETRY_POLICY, maxAttempts: 1 },
+    };
     const onSaved = vi.fn();
     render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={onSaved} />);
-    const attempts = screen.getByRole('spinbutton', { name: 'settings.ai.retry.maxAttempts' });
-    expect(attempts).toHaveClass('bg-transparent');
-    expect(attempts).not.toHaveClass('bg-background');
-    await user.clear(attempts);
-    await user.type(attempts, '9');
-    expect(attempts).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByRole('button', { name: 'common.save' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'settings.ai.verifyConnection' })).toBeDisabled();
-    expect(mocks.invokeListAiModels).not.toHaveBeenCalled();
-    await user.clear(attempts);
-    await user.type(attempts, '1');
+
+    expect(screen.queryByRole('spinbutton', { name: /settings\.ai\.retry/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'common.save' }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(provider.id));
-    expect(useAiSettingsStore.getState().getProviderConfig(provider.id).retryPolicy).toEqual({ ...DEFAULT_RETRY_POLICY, maxAttempts: 1 });
+    expect(useAiSettingsStore.getState().getProviderConfig(provider.id).retryPolicy).toBeUndefined();
+    expect(mocks.resolveModel).toHaveBeenCalledWith(
+      'ai_resolve_model',
+      expect.objectContaining({ provider: expect.not.objectContaining({ retryPolicy: expect.anything() }) }),
+    );
   });
 
   it('keeps advanced model capability overrides out of the provider editor', async () => {
     const provider = useAiSettingsStore.getState().providers[0];
     render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await screen.findByText(/settings.ai.profileLimits/);
     expect(screen.queryByRole('button', { name: 'settings.ai.declareModel' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('settings.ai.maxOutput')).not.toBeInTheDocument();
@@ -122,23 +121,20 @@ describe('ProviderSetupDialog', () => {
     const inputs = dialog.querySelectorAll('[data-slot="input"]');
     const inputGroups = dialog.querySelectorAll('[data-slot="input-group"]');
     const fieldGroups = scrollArea?.querySelectorAll('[data-slot="field-group"]');
-    expect(dialog).toHaveClass('max-w-2xl', 'gap-0', 'p-0');
-    expect(scrollArea).toHaveClass('overflow-y-auto', 'px-4', 'py-3', 'gap-5');
+    expect(dialog).toHaveClass('max-w-xl', 'gap-0', 'p-0');
+    expect(scrollArea).toHaveClass('overflow-y-auto', 'px-4', 'py-3', 'gap-4');
     expect(scrollArea).not.toHaveClass('pr-1');
-    expect(fieldGroups).toHaveLength(3);
+    expect(fieldGroups).toHaveLength(1);
     expect(screen.queryByText('settings.ai.provider', { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText('settings.ai.connectionDetails', { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText('settings.ai.credentials', { exact: true })).not.toBeInTheDocument();
-    expect(dialog).not.toHaveTextContent('settings.ai.addProviderDescription');
+    expect(dialog).toHaveTextContent('settings.ai.addProviderDescription');
     expect(dialog).not.toHaveTextContent('settings.ai.connectionDetailsHint');
     expect(dialog).not.toHaveTextContent('settings.ai.credentialsHint');
     expect(dialog).toHaveClass('[&_[data-slot=dialog-close]]:size-6');
     expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveClass('h-8');
     expect(screen.getByRole('button', { name: 'common.save' })).toHaveClass('h-8');
-    expect(fieldGroups?.[0]).toHaveClass(
-      '@min-[30rem]:grid',
-      '@min-[30rem]:grid-cols-2',
-    );
+    expect(fieldGroups?.[0]).toHaveClass('gap-4');
     expect(providerControl).toHaveClass(
       'has-[[data-slot=input-group-control]:focus-visible]:border-input',
       'has-[[data-slot=input-group-control]:focus-visible]:ring-1',
@@ -148,7 +144,7 @@ describe('ProviderSetupDialog', () => {
       'has-[[data-slot=input-group-control]:focus-visible]:border-ring',
       'has-[[data-slot=input-group-control]:focus-visible]:ring-3',
     );
-    expect(inputGroups).toHaveLength(4);
+    expect(inputGroups).toHaveLength(2);
     inputGroups.forEach((inputGroup) => {
       expect(inputGroup).toHaveClass(
         'h-9',
@@ -195,9 +191,15 @@ describe('ProviderSetupDialog', () => {
 
     expect(useAiSettingsStore.getState().providers).toHaveLength(originalCount);
     expect(providerInput).toHaveValue('DeepSeek');
+    const apiKeyInput = screen.getByLabelText(/settings\.ai\.apiKey/);
+    const modelInput = screen.getByLabelText('settings.ai.model');
+    expect(apiKeyInput.compareDocumentPosition(modelInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByLabelText('settings.ai.providerName')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('settings.ai.baseUrl')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     expect(screen.getByLabelText('settings.ai.providerName')).toHaveValue('DeepSeek');
     expect(screen.getByLabelText('settings.ai.baseUrl')).toHaveValue('https://api.deepseek.com');
-    expect(screen.getByLabelText('settings.ai.model')).toHaveValue('deepseek-v4-flash');
+    expect(modelInput).toHaveValue('deepseek-v4-flash');
     const endpointLabel = 'settings.ai.requestEndpoint:https://api.deepseek.com/chat/completions';
     const endpointButton = screen.getByRole('button', { name: endpointLabel });
     expect(endpointButton).toHaveClass(
@@ -303,7 +305,6 @@ describe('ProviderSetupDialog', () => {
 
     await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledWith({
       id: 'provider-setup-draft',
-      retryPolicy: DEFAULT_RETRY_POLICY,
       profile: 'ollama',
       kind: 'ollama',
       baseUrl: 'http://127.0.0.1:11434',
@@ -343,7 +344,7 @@ describe('ProviderSetupDialog', () => {
     await user.click(providerInput);
     await user.type(providerInput, 'Ollama');
     await user.click(await screen.findByRole('option', { name: /Ollama/ }));
-    await user.click(screen.getByRole('button', { name: 'settings.ai.verifyConnection' }));
+    await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
 
     const feedback = await screen.findByRole('alert');
     expect(feedback).toHaveTextContent('settings.ai.connectionFailed');
@@ -383,7 +384,6 @@ describe('ProviderSetupDialog', () => {
       await pendingModels.promise;
     });
 
-    expect(screen.getByLabelText('settings.ai.baseUrl')).toHaveValue('https://api.deepseek.com');
     expect(screen.getByLabelText('settings.ai.model')).toHaveValue('deepseek-v4-flash');
     expect(screen.queryByText('settings.ai.connectionSuccess:1')).not.toBeInTheDocument();
     await user.click(screen.getByLabelText('settings.ai.model'));
@@ -466,6 +466,7 @@ describe('ProviderSetupDialog', () => {
       await pendingModels.promise;
     });
 
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     expect(screen.getByLabelText('settings.ai.providerName')).toHaveValue(providerB.name);
     expect(screen.getByLabelText('settings.ai.baseUrl')).toHaveValue(providerB.baseUrl);
     expect(screen.getByLabelText('settings.ai.model')).toHaveValue('');
@@ -502,7 +503,8 @@ describe('ProviderSetupDialog', () => {
     );
 
     expect(screen.getByText('settings.ai.editProviderTitle')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'settings.ai.chooseProvider' })).toBeDisabled();
+    expect(screen.queryByRole('combobox', { name: 'settings.ai.chooseProvider' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.clear(screen.getByLabelText('settings.ai.providerName'));
     await user.type(screen.getByLabelText('settings.ai.providerName'), 'Renamed provider');
     await user.clear(screen.getByLabelText('settings.ai.model'));
@@ -517,90 +519,6 @@ describe('ProviderSetupDialog', () => {
       model: 'qwen3:8b',
     }));
     expect(onSaved).toHaveBeenCalledWith(provider.id);
-  });
-
-  it('declares and adds an uncatalogued model to an existing native route without writing legacy settings', async () => {
-    mocks.native = true;
-    const user = userEvent.setup();
-    const provider = useAiSettingsStore.getState().providers[0];
-    const resolved = await (await import('@/test/llm-resolver-fixture')).fixtureResolve(
-      'ai_resolve_model', { provider },
-    ) as import('@/lib/ai/provider-contract').ResolvedModel;
-    mocks.resolveModel.mockImplementation(async (command, args) => {
-      if (command === 'ai_model_declaration_template') {
-        return {
-          contextWindow: 0,
-          maxOutputTokens: 0,
-          toolCalling: 'unknown',
-          textInput: 'supported',
-          imageInput: 'unknown',
-          reasoning: [],
-          compat: resolved.compat,
-        };
-      }
-      return (await import('@/test/llm-resolver-fixture')).fixtureResolve(command, args);
-    });
-    const routeSave = vi.fn().mockResolvedValue(undefined);
-    const route = {
-      id: provider.id,
-      revision: 2,
-      displayName: provider.name,
-      adapterId: 'ollama' as const,
-      baseUrl: provider.baseUrl,
-      auth: { kind: 'none' as const },
-      replayDomainId: 'domain',
-      presetId: provider.preset,
-      models: {
-        [provider.model]: {
-          contextWindow: resolved.contextWindow,
-          maxOutputTokens: resolved.maxOutputTokens,
-          toolCalling: resolved.toolCalling,
-          textInput: resolved.textInput,
-          imageInput: resolved.imageInput,
-          reasoning: resolved.reasoning,
-          compat: resolved.compat,
-          vision: resolved.vision,
-        },
-      },
-      defaults: { routeId: provider.id, modelId: provider.model },
-      retryPolicy: DEFAULT_RETRY_POLICY,
-      timeouts: { requestHeadersMs: 30_000, firstByteMs: 30_000, streamIdleMs: 300_000 },
-    };
-    useLlmRoutesStore.setState({
-      ...initialRoutesState,
-      snapshot: {
-        schemaVersion: 1,
-        revision: 3,
-        migrationComplete: true,
-        migrationIssues: [],
-        defaultSelection: route.defaults,
-        routes: [route],
-      },
-      modelsByRoute: { [provider.id]: [resolved] },
-      status: 'ready',
-      save: routeSave,
-    }, true);
-    const legacyBefore = structuredClone(useAiSettingsStore.getState().providers);
-
-    render(<ProviderSetupDialog open provider={provider} addingModel onOpenChange={vi.fn()} onSaved={vi.fn()} />);
-    expect(screen.getByText('settings.ai.addModelTitle')).toBeInTheDocument();
-    const model = screen.getByLabelText('settings.ai.model');
-    await user.type(model, 'private-model-v1');
-    await user.keyboard('{Escape}');
-    const declare = await screen.findByRole('button', { name: 'settings.ai.declareModel' });
-    expect(screen.getByRole('button', { name: 'common.save' })).toBeDisabled();
-    expect(screen.getByText('settings.ai.unknownModelDescription')).toBeInTheDocument();
-    await user.click(declare);
-    await user.type(await screen.findByLabelText('settings.ai.contextWindow'), '32768');
-    await user.type(screen.getByLabelText('settings.ai.maxOutput'), '4096');
-    await user.click(screen.getByRole('button', { name: 'common.save' }));
-
-    await waitFor(() => expect(routeSave).toHaveBeenCalledTimes(1));
-    const [routes] = routeSave.mock.calls[0];
-    expect(Object.keys(routes[0].models)).toEqual([provider.model, 'private-model-v1']);
-    expect(routes[0].defaults).toEqual({ routeId: provider.id, modelId: 'private-model-v1' });
-    expect(useAiSettingsStore.getState().providers).toEqual(legacyBefore);
-    expect(mocks.invokeSavePreferences).not.toHaveBeenCalled();
   });
 
   it('keeps RouteStore as the sole persisted state when a native save fails', async () => {
@@ -621,6 +539,7 @@ describe('ProviderSetupDialog', () => {
     render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()}/>);
     await userEvent.setup().click(screen.getByRole('button',{name:'common.save'}));
     await waitFor(()=>expect(routeSave).toHaveBeenCalledTimes(1));
+    expect(routeSave.mock.calls[0][0][0].retryPolicy).toEqual(DEFAULT_RETRY_POLICY);
     expect(useAiSettingsStore.getState().providers).toEqual(before);
     expect(mocks.invokeSavePreferences).not.toHaveBeenCalled();
     const feedback=await screen.findByRole('alert');

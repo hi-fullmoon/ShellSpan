@@ -2564,11 +2564,6 @@
   gap: 4px;
 }
 
-.ai-execution-surface-selector,
-.ai-execution-surface-option {
-  min-width: 0;
-}
-
 .ai-execution-surface-label {
   max-width: 96px;
 }
@@ -2636,6 +2631,7 @@
 }
 
 .ai-permission-trigger,
+.ai-execution-surface-trigger,
 .ai-model-trigger,
 .ai-busy-preference-trigger {
   min-width: 0;
@@ -2646,12 +2642,14 @@
   line-height: 18px;
 }
 
-.ai-permission-trigger {
+.ai-permission-trigger,
+.ai-execution-surface-trigger {
   max-width: 154px;
   padding-inline: 7px;
 }
 
-.ai-permission-trigger [data-icon='inline-start'] {
+.ai-permission-trigger [data-icon='inline-start'],
+.ai-execution-surface-trigger [data-icon='inline-start'] {
   width: 16px;
   height: 16px;
 }
@@ -2685,7 +2683,7 @@
 
 /* Composer controls already inherit the shadcn Button focus ring. Suppress the
  * AI shell's second outline so keyboard focus stays visible without a double halo. */
-.ai-panel-shell :is(.ai-permission-trigger, .ai-model-trigger, .ai-busy-preference-trigger, .ai-composer-primary):focus-visible {
+.ai-panel-shell :is(.ai-permission-trigger, .ai-execution-surface-trigger, .ai-model-trigger, .ai-busy-preference-trigger, .ai-composer-primary):focus-visible {
   outline: none;
   outline-offset: 0;
 }
@@ -2864,6 +2862,7 @@
 
 .ai-model-menu,
 .ai-permission-menu,
+.ai-execution-surface-menu,
 .ai-busy-preference-menu {
   --popover: rgb(255, 255, 255);
   --popover-foreground: rgb(15, 17, 21);
@@ -2877,6 +2876,7 @@
 
 [data-theme='dark'] .ai-model-menu,
 [data-theme='dark'] .ai-permission-menu,
+[data-theme='dark'] .ai-execution-surface-menu,
 [data-theme='dark'] .ai-busy-preference-menu {
   --popover: rgb(38, 40, 45);
   --popover-foreground: rgb(242, 243, 245);
@@ -2889,6 +2889,7 @@
 
 .ai-model-menu,
 .ai-permission-menu,
+.ai-execution-surface-menu,
 .ai-busy-preference-menu {
   border-radius: 10px;
   background: var(--popover);
@@ -2925,7 +2926,8 @@
 }
 
 .ai-model-menu-option,
-.ai-permission-menu-option {
+.ai-permission-menu-option,
+.ai-execution-surface-menu-option {
   min-height: 34px;
   gap: 6px;
   padding-block: 5px;
@@ -2935,17 +2937,20 @@
 .ai-model-menu-cell,
 .ai-model-menu-option,
 .ai-permission-menu-option,
+.ai-execution-surface-menu-option,
 .ai-busy-preference-menu [data-slot='dropdown-menu-radio-item'] {
   border-radius: 8px;
 }
 
-.ai-permission-menu {
+.ai-permission-menu,
+.ai-execution-surface-menu {
   width: 200px;
   max-width: calc(100vw - 16px);
   padding: 3px;
 }
 
-.ai-permission-menu-option > svg {
+.ai-permission-menu-option > svg,
+.ai-execution-surface-menu-option > svg {
   width: 16px;
   height: 16px;
 }
@@ -3258,22 +3263,32 @@
   }
 }
 
+@container ai-workspace (max-width: 479px) {
+  .ai-permission-trigger-label,
+  .ai-execution-surface-label,
+  .ai-busy-preference-label,
+  :is(.ai-permission-trigger, .ai-execution-surface-trigger, .ai-busy-preference-trigger) [data-icon='inline-end'] {
+    display: none;
+  }
+
+  .ai-permission-trigger,
+  .ai-execution-surface-trigger,
+  .ai-busy-preference-trigger {
+    width: 28px;
+    min-width: 28px;
+    flex: none;
+    padding: 0;
+  }
+}
+
 @container ai-workspace (max-width: 399px) {
   .ai-empty-hero [data-slot='empty-state-title'] {
     font-size: 22px;
     line-height: 28px;
   }
 
-  .ai-permission-trigger-label,
-  .ai-execution-surface-label,
-  .ai-busy-preference-label,
   .ai-model-trigger-reasoning {
     display: none;
-  }
-
-  .ai-permission-trigger {
-    width: 28px;
-    padding: 0;
   }
 
   .ai-model-trigger {

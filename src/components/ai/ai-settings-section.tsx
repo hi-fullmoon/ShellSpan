@@ -101,7 +101,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const [selectedProviderId, setSelectedProviderId] = useState(defaultProviderId);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [addingModel, setAddingModel] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [agentActionBusy, setAgentActionBusy] = useState(false);
   const [clearAgentOpen, setClearAgentOpen] = useState(false);
@@ -120,7 +119,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       kind:(route.adapterId==='responses'?'openAi':route.adapterId==='ollama'?'ollama':route.adapterId==='anthropic-messages'?'anthropicMessages':'openAiCompatible') as 'openAi'|'ollama'|'anthropicMessages'|'openAiCompatible',
       profile:resolved?.profile,baseUrl:route.baseUrl,model:resolved?.modelId ?? route.defaults?.modelId ?? '',reasoningEffort:route.defaults?.reasoningEffort,
       modelDefinition:resolved ? {contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision}:undefined,
-      requiresApiKey:route.auth.kind==='keychain',retryPolicy:route.retryPolicy };
+      requiresApiKey:route.auth.kind==='keychain' };
   }) : nativeRouteMode ? [] : legacyProviders, [routeSnapshot,modelsByRoute,legacyProviders,nativeRouteMode]);
 
   const selectedProvider = useMemo(
@@ -261,18 +260,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                   size="xs"
                   onClick={() => {
                     setSelectedProviderId(provider.id);
-                    setAddingModel(true);
-                    setEditOpen(true);
-                  }}
-                >
-                  {t('settings.ai.addModel')}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={() => {
-                    setSelectedProviderId(provider.id);
-                    setAddingModel(false);
                     setEditOpen(true);
                   }}
                 >
@@ -342,10 +329,9 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       <ProviderSetupDialog
         open={editOpen}
         provider={selectedProvider}
-        addingModel={addingModel}
-        onOpenChange={(open)=>{setEditOpen(open);if(!open)setAddingModel(false);}}
+        onOpenChange={setEditOpen}
         onSaved={(providerId) => setSelectedProviderId(providerId)}
-        onDelete={!addingModel && providers.length > 1
+        onDelete={providers.length > 1
           ? () => {
               setEditOpen(false);
               setDeleteOpen(true);
