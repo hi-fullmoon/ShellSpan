@@ -692,7 +692,7 @@ export function projectAgentChatNodes(
       case 'request/header':
       case 'request/start': {
         const turn = ensureTurn(event);
-        if (event.type === 'request/start' || event.data.snapshotReason === undefined) {
+        {
           const facts: RequestFacts = {
             requestId: event.data.requestId,
             providerId: event.data.providerId,
@@ -717,11 +717,10 @@ export function projectAgentChatNodes(
           break;
         }
 
-        // Snapshot state spans Turns. Config/tool-only changes belong in Activity;
-        // legacy per-step headers do not declare real message-series boundaries.
-        const boundary = event.data.snapshotReason !== undefined
-          ? event.data.snapshotReason !== 'change'
-          : event.data.reason === 'recovery';
+        // Snapshot state spans Turns. Resume and replacement-series boundaries
+        // intentionally re-state the prompt; config/tool-only changes do not.
+        const boundary = event.data.snapshotReason === 'resume'
+          || event.data.snapshotReason === 'series';
         const showsPrompt = previousPromptContent === undefined || boundary
           || previousPromptContent !== event.data.systemPrompt;
         previousPromptContent = event.data.systemPrompt;
@@ -740,10 +739,7 @@ export function projectAgentChatNodes(
           });
           break;
         }
-        const key = systemPrompts.size === 0
-          && event.data.snapshotReason === undefined
-          ? `system-prompt:${event.sessionId}`
-          : `system-prompt:${event.data.requestId}`;
+        const key = `system-prompt:${event.data.requestId}`;
         latestPromptKey = key;
         systemPrompts.set(key, {
           kind: 'systemPrompt',

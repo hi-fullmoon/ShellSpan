@@ -233,7 +233,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     },
   );
 
-  it('hides legacy mode chrome and always routes visible new-session actions to Agent', async () => {
+  it('hides obsolete mode chrome and always routes visible new-session actions to Agent', async () => {
     const user = userEvent.setup();
     const onNewSession = vi.fn();
     const { container } = render(

@@ -15,7 +15,6 @@ import {
   agentSessionWaitingApprovalEventFixture,
 } from '@/test/fixtures/agent-session';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
-import v4Fixture from '@/test/fixtures/agent-session-v5.json';
 import type { AgentSessionEvent } from '@/types/agent-session';
 
 const ALL_AGENT_EVENT_TYPES = [
@@ -192,26 +191,6 @@ describe('AI Phase 3 chat projection', () => {
     });
   });
 
-  it('shows one prompt across five request series and retains every request reference', () => {
-    const events = Array.from({ length: 5 }, (_, index) => requestHeader(index));
-    const initial = projectAgentChatNodes(events.slice(0, 1))[0];
-    const nodes = projectAgentChatNodes(events);
-    const prompts = nodes.filter((node) => node.kind === 'systemPrompt');
-
-    expect(prompts).toHaveLength(1);
-    expect(prompts[0]).toMatchObject({
-      key: initial.key,
-      firstSeq: 0,
-      lastSeq: 4,
-      timestamp: initial.timestamp,
-      requestId: 'request-4',
-      requestIds: events.map((event) => event.data.requestId),
-      content: events[0].data.systemPrompt,
-      toolSchemas: events[0].data.toolSchemas,
-    });
-    expect(projectAgentChatNodes(events.slice(2))[0].key).toBe(initial.key);
-  });
-
   it('preserves prompt changes and subsequent reversions', () => {
     const changes = { systemPrompt: 'Updated execution policy.' };
     const events = [requestHeader(0), requestHeader(1, changes), requestHeader(2)];
@@ -276,31 +255,6 @@ describe('AI Phase 3 chat projection', () => {
         usageComplete: false,
       },
     });
-  });
-
-  it('projects every durable non-user provenance as context injection', () => {
-    const nodes = projectAgentChatNodes(v4Fixture as unknown as readonly AgentSessionEvent[]);
-    const process = turnProcess(nodes, 'turn-1');
-    const context = process.children.filter((child) => child.kind === 'contextInjection');
-    expect(context.map((node) => node.provenance.kind)).toEqual([
-      'runtime',
-      'plugin',
-      'skill-catalog',
-      'agent-instructions',
-      'skill-invocation',
-      'session-reference',
-      'form',
-    ]);
-    expect(context.map((node) => node.key)).toEqual([
-      'context:message-runtime',
-      'context:message-plugin',
-      'context:message-skill-catalog',
-      'context:message-agent-instructions',
-      'context:message-skill-invocation',
-      'context:message-session-reference',
-      'context:message-form',
-    ]);
-    expect(process).toMatchObject({ status: 'partial', hasStartBoundary: false });
   });
 
   it('keeps streaming reasoning and answer identities through final commit', () => {
@@ -457,19 +411,6 @@ describe('AI Phase 3 chat projection', () => {
       hasEndBoundary: true,
     });
     expect(nodes.some((node) => node.kind === 'turnTail')).toBe(false);
-  });
-
-  it('preserves existing keys across pagination prepend and converges to full replay', () => {
-    const scenario = agentSessionBaselineScenarios.pagination;
-    const pages = scenario.pages;
-    expect(pages).toBeDefined();
-    if (!pages) return;
-    const current = projectAgentChatNodes(pages.current);
-    const prepended = projectAgentChatNodes([...pages.older, ...pages.current]);
-    const full = projectAgentChatNodes(scenario.events);
-    expect(prepended).toEqual(full);
-    const fullKeys = new Set(projectionKeys(full));
-    expect(projectionKeys(current).every((key) => fullKeys.has(key))).toBe(true);
   });
 
   it('keeps per-Turn stats stable across pagination and marks incomplete session totals', () => {

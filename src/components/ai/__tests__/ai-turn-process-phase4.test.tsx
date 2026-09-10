@@ -8,7 +8,6 @@ import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
-import v4Fixture from '@/test/fixtures/agent-session-v5.json';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import '@/components/ai/ai-panel.css';
 
@@ -347,16 +346,6 @@ describe('AI Phase 4 Turn Process renderer', () => {
 
     rerender(<AiConversationNodeList nodes={[{ ...first, lastSeq: first.lastSeq + 2 }]} />);
     expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'true');
-  });
-
-  it('keeps partial history expanded and omits a misleading terminal tail', () => {
-    const nodes = projectAgentChatNodes(v4Fixture as unknown as readonly AgentSessionEvent[]);
-    const { container } = render(<AiConversationNodeList nodes={nodes} />);
-    const process = screen.getByRole('button', { name: 'Process history' });
-
-    expect(process).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('button', { name: 'Runtime context' })).toBeVisible();
-    expect(container.querySelector('[data-ai-node-kind="turnTail"]')).not.toBeInTheDocument();
   });
 
   it.each([

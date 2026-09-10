@@ -1,6 +1,6 @@
 export const AGENT_SESSION_EVENT_VERSION = 5 as const;
 
-export type AgentRequestSnapshot = { status: 'legacyUnknown' } | {
+export type AgentRequestSnapshot = {
   status: 'prepared'; routeId: string; routeRevision: number; adapterId: string;
   modelId: string; catalogVersion: number; capabilities: import('@/lib/ai/provider-contract').ModelDefinition;
   endpointIdentity: string; replayDomainId: string; reasoningEffort?: string;
@@ -11,8 +11,7 @@ export type AgentRequestSnapshot = { status: 'legacyUnknown' } | {
 };
 
 export type AgentReplayEnvelope =
-  | { status: 'legacyUnknown'; archivedProviderItems: boolean }
-  | { status: 'prepared'; version: number; adapterId: string; replayFormatVersion: number;
+  { status: 'prepared'; version: number; adapterId: string; replayFormatVersion: number;
       source: {
         requestId: string; requestSnapshotDigest: string; routeId: string; routeRevision: number;
         modelId: string; replayDomainId: string; requestContentHash: string;
@@ -327,7 +326,7 @@ type AgentSessionEventWithoutData<Type extends string> = AgentSessionEventBase &
 /**
  * Canonical UI wire contract for the append-only Agent Session Event Log.
  * The envelope deliberately matches the Rust serde representation so fixtures,
- * durable replay, and live events all use the same v4 data model.
+ * durable replay, and live events all use the same v5 data model.
  */
 export type AgentSessionEvent =
   | AgentSessionEventWithData<'session/resumed', Record<string, never>>
@@ -419,16 +418,14 @@ export type AgentSessionEvent =
     }>
   | AgentSessionEventWithData<'request/header', {
       requestId: string;
-      /** Runtime validation requires both fields on every committed v5 header. */
-      snapshot?: AgentRequestSnapshot;
-      snapshotDigest?: string;
+      snapshot: AgentRequestSnapshot;
+      snapshotDigest: string;
       providerId: string;
       model: string;
       reasoningEffort?: string;
       reason: AgentSessionRequestReason;
       series: AgentSessionRequestSeries;
-      /** Why a full snapshot was recorded; absent in older per-request headers. */
-      snapshotReason?: 'initial' | 'change' | 'resume' | 'series';
+      snapshotReason: 'initial' | 'change' | 'resume' | 'series';
       systemPrompt: string;
       toolSchemas: readonly AgentSessionRequestToolSchema[];
       attempt: number;

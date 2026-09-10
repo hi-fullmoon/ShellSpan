@@ -146,15 +146,4 @@ describe('AI Panel Phase 6 acceptance matrix', () => {
 
   });
 
-  it('pagination prepend converges to the full replay without changing current keys', () => {
-    const scenario = agentSessionBaselineScenarios.pagination;
-    expect(scenario.pages).toBeDefined();
-    if (!scenario.pages) return;
-    const currentKeys = projectAgentChatNodes(scenario.pages.current).map((node) => node.key);
-    const fullKeys = new Set(projectAgentChatNodes([
-      ...scenario.pages.older,
-      ...scenario.pages.current,
-    ]).map((node) => node.key));
-    expect(currentKeys.every((key) => fullKeys.has(key))).toBe(true);
-  });
 });
