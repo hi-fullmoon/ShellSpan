@@ -28,7 +28,7 @@ pub(super) fn create_skill_session(runtime: &AgentRuntime, session: &str, root: 
                 local_root: None,
             }),
             permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
-            execution_surface: Default::default(),
+            execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
             success_criteria: vec!["Skills reach model".into()],
             capability_scope: None,
             subagent: None,
@@ -87,7 +87,7 @@ async fn skill_builtin_rootless_local_remote_slash_model_permissions_and_replay(
             parent_session_id: None,
             target: Some(target.clone()),
             permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
-            execution_surface: Default::default(),
+            execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
             success_criteria: vec!["Diagnose without a directory".into()],
             capability_scope: None,
             subagent: None,
@@ -480,6 +480,7 @@ async fn skill_real_runtime_http_wire_catalog_slash_and_model_tool_body() {
                     32768,
                 )),
                 id: "skills-http".into(),
+                profile: "generic".into(),
                 kind: AiProviderKind::OpenAiCompatible,
                 base_url: url,
                 model: "test-model".into(),
@@ -784,11 +785,7 @@ async fn skill_question_resume_reuses_prepared_body_and_answer_slash_does_not_in
         .model_factory(Arc::new(FakeFactory(model.clone())))
         .build();
     runtime.configure(storage.path().into()).unwrap();
-    runtime
-        .configure_model_preferences(
-            crate::db::Database::open(&storage.path().join("test-ai-settings.db")).unwrap(),
-        )
-        .unwrap();
+    runtime.configure_test_model(provider()).unwrap();
     runtime
         .answer_question(
             AnswerQuestionInput {
