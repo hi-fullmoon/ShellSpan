@@ -30,7 +30,7 @@ export const CompactAlertDialogHeader: React.FC<React.ComponentProps<typeof Aler
 }) => (
   <AlertDialogHeader
     className={cn(
-      'shrink-0 place-items-start gap-1 border-b border-app-border/60 px-4 py-3 text-left',
+      'flex shrink-0 flex-row items-center gap-3 border-b border-app-border/60 px-4 py-3 text-left',
       className,
     )}
     {...props}
@@ -41,7 +41,7 @@ export const CompactAlertDialogTitle: React.FC<React.ComponentProps<typeof Alert
   className,
   ...props
 }) => (
-  <AlertDialogTitle className={cn('text-sm leading-5', className)} {...props} />
+  <AlertDialogTitle className={cn('min-w-0 flex-1 text-sm leading-5', className)} {...props} />
 );
 
 export const CompactAlertDialogDescription: React.FC<React.ComponentProps<typeof AlertDialogDescription>> = ({
