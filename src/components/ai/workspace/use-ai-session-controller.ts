@@ -51,6 +51,7 @@ import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-di
 import type { AppSection } from '@/types';
 import type { AgentPermissionMode } from '@/types/agent-approval';
 import type {
+  AgentExecutionSurface,
   AgentSessionPermissionMode,
   AgentSessionTarget,
 } from '@/types/agent-session';
@@ -72,9 +73,11 @@ export interface UseAiSessionControllerInput {
 export interface AiSessionController {
   readonly selectedProvider?: AiProviderConfig;
   readonly selectedPermission?: AgentPermissionMode;
+  readonly selectedExecutionSurface: AgentExecutionSurface;
   readonly settingsBusy: boolean;
   readonly selectModel: (provider: AiProviderConfig) => Promise<void>;
   readonly selectPermission: (mode: AgentPermissionMode) => Promise<void>;
+  readonly selectExecutionSurface: (surface: AgentExecutionSurface) => void;
   readonly imageDraft: ReturnType<typeof useImageDraft>;
   readonly listFileReferences: import('@/types/agent-file-reference').ListFileReferences;
   readonly listSkills: (root?: string) => Promise<import('@/types/agent-skill').SkillUserList>;
@@ -239,6 +242,7 @@ export function useAiSessionController({
   const composerRef = useRef(composer);
   const viewRef = useRef(view);
   const [settingsBusy, setSettingsBusy] = useState(false);
+  const [newExecutionSurface, setNewExecutionSurface] = useState<AgentExecutionSurface>('direct');
   const settingsPending = useRef(false);
   const currentProviderConfig = useCallback((): AiProviderConfig => {
     const selection = viewRef.current?.snapshot.value.header.modelSelection;
@@ -398,6 +402,7 @@ export function useAiSessionController({
             label: t('ai.workbench.title'),
           },
           permissionMode: 'requestApproval',
+          executionSurface: 'direct',
           capabilityScope: {
             toolNames: ['ask_user_question'],
             effects: ['none'],
@@ -420,10 +425,11 @@ export function useAiSessionController({
         permissionMode: permissionMode(
           useAgentPermissionStore.getState().getMode(activeTerminal.sessionId),
         ),
+        executionSurface: newExecutionSurface,
         successCriteria: [content],
       },
     };
-  }, [activeTerminal, operationId, scope, t]);
+  }, [activeTerminal, newExecutionSurface, operationId, scope, t]);
 
   const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}`;
   const projectEpoch = useRef({ key: projectKey });
@@ -599,6 +605,7 @@ export function useAiSessionController({
 
   useEffect(() => {
     resetComposer();
+    setNewExecutionSurface('direct');
     appliedWorkspaceRef.current = workspaceScopeKey;
     if (composerRef.current.draft) claimWorkspace();
     setOpenedSessionId(null);
@@ -796,6 +803,7 @@ export function useAiSessionController({
     setSkillNavigation((generation) => generation + 1);
     setSkillRoot(null);
     resetComposer();
+    setNewExecutionSurface('direct');
     setOpenedSessionId(null);
     setView(null);
     setQueueMutation(null);
@@ -1072,6 +1080,8 @@ export function useAiSessionController({
     selectedProvider: sessionProviderResolution.provider,
     selectedPermission: visibleView ? (visibleView.snapshot.value.header.permissionMode === 'operator'
       ? 'fullAccess' : 'autoApproveReadOnly') : undefined,
+    selectedExecutionSurface: visibleView?.snapshot.value.header.executionSurface
+      ?? newExecutionSurface,
     settingsBusy,
     selectModel: (provider) => changeSettings(async (sessionId) => {
       if (!adapter.selectModel) throw new Error('Model selection is unavailable');
@@ -1081,6 +1091,11 @@ export function useAiSessionController({
       if (!adapter.setPermission) throw new Error('Permission selection is unavailable');
       await adapter.setPermission(sessionId, permissionMode(mode));
     }),
+    selectExecutionSurface: (surface) => {
+      if (viewRef.current || composerRef.current.sessionId) return;
+      claimWorkspace();
+      setNewExecutionSurface(surface);
+    },
     providerLabel: routeSnapshot?.routes.find((route) => route.id === (
       visibleView?.snapshot.value.header.modelSelection?.routeId ?? provider?.id
     ))?.displayName ?? legacyProviders.find((item) => item.id === (

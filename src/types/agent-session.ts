@@ -62,6 +62,39 @@ export type AgentSessionEffect =
 
 export type AgentSessionPermissionMode = 'requestApproval' | 'scopedAutopilot' | 'operator';
 
+export type AgentExecutionSurface = 'direct' | 'boundTerminal';
+
+export type AgentTerminalLeaseReleaseReason =
+  | 'completed'
+  | 'cancelled'
+  | 'timedOut'
+  | 'failed'
+  | 'takenOver'
+  | 'terminalClosed'
+  | 'shutdown';
+
+export interface AgentTerminalLeaseEvent {
+  sessionId: string;
+  agentSessionId: string;
+  taskId: string;
+  operationId: string;
+  acquiredAtUnixMs: number;
+  state: 'acquired' | 'released';
+  commandDisplay?: string;
+  reason?: AgentTerminalLeaseReleaseReason;
+}
+
+export interface AgentTerminalLeaseControlInput {
+  sessionId: string;
+  agentSessionId: string;
+  operationId: string;
+  terminalConnected?: boolean;
+  outputListenerReady?: boolean;
+  hasPendingUserInput?: boolean;
+  hasUnverifiedUserSubmission?: boolean;
+  hasCredentialPrompt?: boolean;
+}
+
 export type AgentSessionInboxLane = 'nextTurn' | 'nextStep';
 export type AgentSessionInboxOperation = 'enqueued' | 'claimed' | 'discarded';
 
@@ -306,6 +339,7 @@ export type AgentSessionEvent =
       parentSessionId?: string;
       target?: AgentSessionTarget;
       permissionMode?: AgentSessionPermissionMode;
+      executionSurface: AgentExecutionSurface;
       successCriteria?: readonly string[];
       capabilityScope?: AgentCapabilityScope;
       subagent?: AgentSubagentSession;
@@ -618,6 +652,7 @@ export interface AgentSessionHeader {
   readonly parentSessionId?: string;
   readonly target?: AgentSessionTarget;
   readonly permissionMode?: AgentSessionPermissionMode;
+  readonly executionSurface: AgentExecutionSurface;
   readonly successCriteria?: readonly string[];
   readonly capabilityScope?: AgentCapabilityScope;
   readonly subagent?: AgentSubagentSession;
@@ -676,6 +711,7 @@ export interface CreateAgentSessionRequest {
   readonly parentSessionId?: string;
   readonly target?: AgentSessionTarget;
   readonly permissionMode?: AgentSessionPermissionMode;
+  readonly executionSurface: AgentExecutionSurface;
   readonly successCriteria?: readonly string[];
   readonly capabilityScope?: AgentCapabilityScope;
   readonly subagent?: AgentSubagentSession;

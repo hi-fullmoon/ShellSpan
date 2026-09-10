@@ -89,10 +89,14 @@ pub(crate) fn emit_status(
 }
 
 pub(crate) fn emit_data(app: &AppHandle, session_id: &str, chunk: String) -> Result<(), String> {
-    if let Some(runtime) = app.try_state::<agent_runtime::AgentRuntime>() {
-        runtime.observe_terminal_output(session_id, &chunk);
+    let display = app
+        .try_state::<agent_runtime::AgentRuntime>()
+        .map(|runtime| runtime.observe_terminal_output(session_id, &chunk))
+        .unwrap_or(chunk);
+    if display.is_empty() {
+        return Ok(());
     }
-    app.emit(&format!("{SSH_DATA_EVENT_PREFIX}{session_id}"), chunk)
+    app.emit(&format!("{SSH_DATA_EVENT_PREFIX}{session_id}"), display)
         .map_err(|error| format!("failed to emit data event: {error}"))
 }
 
@@ -157,6 +161,11 @@ pub(crate) fn emit_closed(
     reason_kind: ClosedReasonKind,
     retryable: bool,
 ) -> Result<(), String> {
+    if let Some(runtime) = app.try_state::<agent_runtime::AgentRuntime>() {
+        if let Err(error) = runtime.terminal_closed(session_id) {
+            log::warn!("Failed to clean Agent terminal lease after terminal close session_id={session_id}: {error}");
+        }
+    }
     app.emit(
         SSH_CLOSED_EVENT,
         ClosedEvent {
@@ -292,6 +301,8 @@ pub fn run() {
             agent_runtime::agent_runtime_rename_session,
             agent_runtime::agent_runtime_inject,
             agent_runtime::agent_runtime_cancel,
+            agent_runtime::agent_runtime_terminal_lease_ready,
+            agent_runtime::agent_runtime_takeover_terminal,
             agent_runtime::agent_runtime_interrupt,
             agent_runtime::agent_runtime_resume,
             agent_runtime::agent_runtime_approve_tool,

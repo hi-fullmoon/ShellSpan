@@ -868,6 +868,7 @@ impl SubAgentManager {
             parent_session_id: Some(parent_session_id.into()),
             target: target_scope.first().cloned(),
             permission_mode: parent.header.permission_mode,
+            execution_surface: parent.header.execution_surface,
             success_criteria: parent.header.success_criteria.clone(),
             capability_scope: Some(capability_scope.clone()),
             subagent: Some(metadata),

@@ -6,6 +6,7 @@ import { resetTerminalLeader } from '../terminal-leader';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
+import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -59,6 +60,7 @@ beforeEach(() => {
     shortcuts: { ...DEFAULT_SHORTCUTS },
   });
   (terminalRegistry.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+  agentTerminalLeaseState.clearAll();
   Object.assign(navigator, {
     clipboard: {
       writeText: vi.fn().mockResolvedValue(undefined),
@@ -66,6 +68,25 @@ beforeEach(() => {
     },
   });
 });
+
+function setAgentLease(overrides: Partial<Parameters<typeof agentTerminalLeaseState.set>[0]> = {}) {
+  const requestTakeover = vi.fn();
+  agentTerminalLeaseState.set({
+    sessionId: 's1',
+    agentSessionId: 'agent-session-123456789',
+    taskId: 'task-1',
+    operationId: 'operation-1',
+    acquiredAtUnixMs: 1_000,
+    state: 'acquired',
+    commandDisplay: '[Agent] $ echo [REDACTED]',
+    inputBlocked: false,
+    takeoverRequested: false,
+    takeoverFailed: false,
+    requestTakeover,
+    ...overrides,
+  });
+  return requestTakeover;
+}
 
 function makeMockTerminal(selection = '') {
   const handlers: Array<(event: KeyboardEvent) => boolean> = [];
@@ -135,6 +156,100 @@ describe('TerminalPane', () => {
     const { container } = render(<TerminalPane activeSession={makeSession()} />);
     expect(screen.queryByRole('button', { name: 'terminal.tab.search' })).not.toBeInTheDocument();
     expect(container.querySelector('div.h-full.w-full.p-0')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-terminal-lease-bar')).not.toBeInTheDocument();
+  });
+
+  it('shows a non-overlaying Agent lease bar with identity, Rust display text, and runtime', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(3_000);
+    try {
+      const clearInterval = vi.spyOn(window, 'clearInterval');
+      setAgentLease();
+      const { container } = render(<TerminalPane activeSession={makeSession()} />);
+      const bar = screen.getByTestId('agent-terminal-lease-bar');
+      expect(bar).toHaveAttribute('data-operation-id', 'operation-1');
+      expect(bar).toHaveTextContent('terminal.agentLease.agentIdentity');
+      expect(bar).toHaveTextContent('[Agent] $ echo [REDACTED]');
+      expect(bar).toHaveTextContent('2s');
+      expect(bar).not.toHaveClass('absolute');
+      expect(container.querySelector('.min-h-0.flex-1')).toContainElement(
+        container.querySelector('div.h-full.w-full.p-0'),
+      );
+
+      act(() => vi.advanceTimersByTime(2_000));
+      expect(bar).toHaveTextContent('4s');
+
+      act(() => agentTerminalLeaseState.clear('s1', 'operation-1'));
+      expect(screen.queryByTestId('agent-terminal-lease-bar')).not.toBeInTheDocument();
+      expect(clearInterval).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('routes the takeover button and Escape through the lease action', async () => {
+    const requestTakeover = setAgentLease();
+    const terminal = makeMockTerminal();
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }));
+    expect(requestTakeover).toHaveBeenCalledOnce();
+
+    const escape = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    });
+    expect(terminal.getCustomKeyEventHandlers()[0](escape)).toBe(false);
+    expect(escape.defaultPrevented).toBe(true);
+    expect(requestTakeover).toHaveBeenCalledTimes(2);
+  });
+
+  it('announces a blocked input accessibly without removing the lease bar', () => {
+    setAgentLease();
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    act(() => {
+      agentTerminalLeaseState.update('s1', 'operation-1', (lease) => ({
+        ...lease,
+        inputBlocked: true,
+      }));
+    });
+
+    const bar = screen.getByRole('status');
+    expect(bar).toHaveAttribute('aria-live', 'polite');
+    expect(bar).toHaveTextContent('terminal.agentLease.inputBlockedAccessibleHint');
+  });
+
+  it('keeps search and copy keyboard interactions available during a lease', async () => {
+    setAgentLease();
+    vi.stubGlobal('navigator', { ...navigator, platform: 'Linux x86_64' });
+    const terminal = makeMockTerminal('selected output');
+    render(<TerminalPane activeSession={makeSession()} />);
+    const handler = terminal.getCustomKeyEventHandlers()[0];
+
+    const find = new KeyboardEvent('keydown', {
+      key: 'f',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => { expect(handler(find)).toBe(false); });
+    expect(screen.getByPlaceholderText('terminal.search.placeholder')).toBeInTheDocument();
+
+    const copy = new KeyboardEvent('keydown', {
+      key: 'c',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    expect(handler(copy)).toBe(false);
+    await vi.waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('selected output');
+    });
+    expect(terminal.getSelectionChangeHandlers().length).toBeGreaterThan(0);
+    vi.unstubAllGlobals();
   });
 
   it('opens the search bar via the keyboard shortcut and closes it', async () => {

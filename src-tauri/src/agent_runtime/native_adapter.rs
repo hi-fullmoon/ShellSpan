@@ -472,7 +472,10 @@ fn normalize_arguments(
             json!({
                 "command": arguments.command,
                 "explanation": arguments.explanation,
-                "channel": "direct",
+                "channel": match request.execution_surface {
+                    super::AgentExecutionSurface::Direct => "direct",
+                    super::AgentExecutionSurface::BoundTerminal => "pty",
+                },
                 "cwd": cwd,
                 "background": false,
                 "elevated": false
@@ -583,7 +586,7 @@ fn current_unix_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_runtime::ModelToolCall;
+    use crate::agent_runtime::{AgentExecutionSurface, ModelToolCall};
 
     fn local_target() -> AgentSessionTarget {
         AgentSessionTarget {
@@ -618,6 +621,7 @@ mod tests {
             },
             target: local_target(),
             permission_mode: AgentSessionPermissionMode::RequestApproval,
+            execution_surface: AgentExecutionSurface::Direct,
         }
     }
 
@@ -635,6 +639,17 @@ mod tests {
         assert_eq!(name, "exec_command");
         assert_eq!(arguments["channel"], "direct");
         assert_eq!(arguments["cwd"], "/workspace");
+        assert_eq!(arguments["background"], false);
+        assert_eq!(arguments["elevated"], false);
+
+        let mut visible = request(
+            "run_terminal_command",
+            json!({ "command": "pwd", "explanation": "inspect visibly" }),
+        );
+        visible.execution_surface = AgentExecutionSurface::BoundTerminal;
+        let (name, arguments) = normalize_arguments(&visible, &target).unwrap();
+        assert_eq!(name, "exec_command");
+        assert_eq!(arguments["channel"], "pty");
         assert_eq!(arguments["background"], false);
         assert_eq!(arguments["elevated"], false);
 
@@ -660,6 +675,15 @@ mod tests {
         assert_eq!(
             normalize_arguments(&request("list_directory", arguments.clone()), &target,).unwrap(),
             ("list_directory".into(), arguments)
+        );
+        let mut visible_file = request("list_directory", json!({ "path": ".", "pageSize": 20 }));
+        visible_file.execution_surface = AgentExecutionSurface::BoundTerminal;
+        assert_eq!(
+            normalize_arguments(&visible_file, &target).unwrap(),
+            (
+                "list_directory".into(),
+                json!({ "path": ".", "pageSize": 20 })
+            )
         );
         assert!(normalize_arguments(&request("browser_eval", json!({})), &target).is_err());
         assert_eq!(

@@ -63,6 +63,7 @@ export interface AiComposerSeatProps {
   readonly modelControl?: React.ReactNode;
   readonly contextUsage?: AiContextUsage;
   readonly permissionControl?: React.ReactNode;
+  readonly executionSurfaceControl?: React.ReactNode;
   readonly composerState?: AiComposerState;
   readonly inbox?: readonly AiInboxItem[];
   readonly taskSteps?: readonly AgentSessionPlanStep[];
@@ -112,6 +113,7 @@ export function AiComposerSeat({
   modelControl,
   contextUsage,
   permissionControl,
+  executionSurfaceControl,
   composerState,
   inbox = [],
   taskSteps = [],
@@ -379,6 +381,7 @@ export function AiComposerSeat({
                     {t('ai.workbench.capabilityNote')}
                   </span>
                 ) : permissionControl}
+                {mode === 'agent' && executionSurfaceControl}
                 {mode === 'agent' && running && (
                   <DropdownMenu>
                     <Tooltip>

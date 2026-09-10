@@ -19,6 +19,9 @@ vi.mock('@/lib/logger', () => ({
 import {
   buildRemoteConnectionRequest,
   buildSessionCreateRequest,
+  invokeCreateAgentRuntimeSession,
+  invokeAgentTerminalLeaseReady,
+  invokeTakeoverAgentTerminal,
   invokeCancelRemoteFileRead,
   invokeStoreKeyCredential,
   invokeListKeyCredentials,
@@ -159,6 +162,49 @@ describe('host key trust serialization', () => {
         expectedFingerprint: 'ED25519 SHA256:confirmed',
       },
     });
+  });
+});
+
+describe('Agent Session execution surface serialization', () => {
+  it('passes the frozen execution surface through the IPC request unchanged', async () => {
+    invokeMock.mockResolvedValue({});
+    const request = {
+      sessionId: 'agent-visible',
+      taskId: 'task-visible',
+      goal: 'Show command execution',
+      permissionMode: 'requestApproval' as const,
+      executionSurface: 'boundTerminal' as const,
+    };
+
+    await invokeCreateAgentRuntimeSession(request);
+
+    expect(invokeMock).toHaveBeenCalledWith('agent_runtime_create_session', { request });
+  });
+});
+
+describe('Agent terminal lease control serialization', () => {
+  const input = {
+    sessionId: 'terminal-1',
+    agentSessionId: 'agent-1',
+    operationId: 'operation-1',
+  };
+
+  it('binds ready and takeover commands to the same operation identity', async () => {
+    invokeMock.mockResolvedValue(true);
+
+    await expect(invokeAgentTerminalLeaseReady(input)).resolves.toBe(true);
+    await expect(invokeTakeoverAgentTerminal(input)).resolves.toBe(true);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(
+      1,
+      'agent_runtime_terminal_lease_ready',
+      { input },
+    );
+    expect(invokeMock).toHaveBeenNthCalledWith(
+      2,
+      'agent_runtime_takeover_terminal',
+      { input },
+    );
   });
 });
 

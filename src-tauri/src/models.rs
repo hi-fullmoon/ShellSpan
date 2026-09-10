@@ -1663,7 +1663,9 @@ impl SessionManager {
         Ok(())
     }
 
-    pub(crate) fn write_user_session(&self, session_id: &str, data: String) -> Result<(), String> {
+    /// Raw terminal input sink. Production callers must authorize a typed
+    /// `TerminalInputSource` through the Agent Runtime before reaching here.
+    pub(crate) fn write_session_input(&self, session_id: &str, data: String) -> Result<(), String> {
         let guard = self
             .registry
             .lock()
@@ -1906,7 +1908,7 @@ mod session_manager_tests {
             .unwrap();
 
         manager
-            .write_user_session("local-1", "echo user\\n".to_string())
+            .write_session_input("local-1", "echo user\\n".to_string())
             .unwrap();
         assert_eq!(written_data(&receiver), vec!["echo user\\n"]);
 

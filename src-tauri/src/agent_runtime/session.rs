@@ -11,12 +11,12 @@ use uuid::Uuid;
 use crate::redaction::{redact_json_value, redact_sensitive_text};
 
 use super::{
-    derive_surface, derive_task, AgentAssistantContentBlock, AgentInbox, AgentInboxLane,
-    AgentInboxMessage, AgentInboxOperation, AgentMessageSource, AgentRecoveryCheckpoint,
-    AgentSessionEvent, AgentSessionEventPayload, AgentSessionPermissionMode, AgentSessionStatus,
-    AgentSessionTarget, AgentSubagentSession, AgentSurfaceSnapshot, AgentTaskProjection,
-    RecordedToolCall, AGENT_SESSION_EVENT_VERSION, MAX_AGENT_MESSAGE_BYTES,
-    MAX_AGENT_STREAM_DELTA_BYTES,
+    derive_surface, derive_task, AgentAssistantContentBlock, AgentExecutionSurface, AgentInbox,
+    AgentInboxLane, AgentInboxMessage, AgentInboxOperation, AgentMessageSource,
+    AgentRecoveryCheckpoint, AgentSessionEvent, AgentSessionEventPayload,
+    AgentSessionPermissionMode, AgentSessionStatus, AgentSessionTarget, AgentSubagentSession,
+    AgentSurfaceSnapshot, AgentTaskProjection, RecordedToolCall, AGENT_SESSION_EVENT_VERSION,
+    MAX_AGENT_MESSAGE_BYTES, MAX_AGENT_STREAM_DELTA_BYTES,
 };
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
@@ -52,6 +52,8 @@ pub(crate) struct AgentSessionHeader {
     pub(crate) target: Option<AgentSessionTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) permission_mode: Option<AgentSessionPermissionMode>,
+    #[serde(default)]
+    pub(crate) execution_surface: AgentExecutionSurface,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) success_criteria: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -73,6 +75,8 @@ pub(crate) struct CreateAgentSessionRequest {
     pub(crate) target: Option<AgentSessionTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) permission_mode: Option<AgentSessionPermissionMode>,
+    #[serde(default)]
+    pub(crate) execution_surface: AgentExecutionSurface,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) success_criteria: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -260,6 +264,7 @@ impl AgentSessionRecord {
             parent_session_id,
             target,
             permission_mode,
+            execution_surface,
             success_criteria,
             capability_scope,
             subagent,
@@ -276,6 +281,7 @@ impl AgentSessionRecord {
             parent_session_id: parent_session_id.clone(),
             target: target.clone(),
             permission_mode: *permission_mode,
+            execution_surface: *execution_surface,
             success_criteria: success_criteria.clone(),
             capability_scope: capability_scope.clone(),
             subagent: subagent.clone(),
@@ -2033,6 +2039,7 @@ fn create_session_events(
                 parent_session_id: request.parent_session_id.clone(),
                 target: request.target.clone(),
                 permission_mode: request.permission_mode,
+                execution_surface: request.execution_surface,
                 success_criteria: request.success_criteria.clone(),
                 capability_scope: request.capability_scope.clone(),
                 subagent: request.subagent.clone(),
@@ -4306,6 +4313,7 @@ mod tests {
                 parent_session_id: None,
                 target: None,
                 permission_mode: None,
+                execution_surface: Default::default(),
                 success_criteria: Vec::new(),
                 capability_scope: None,
                 subagent: None,
@@ -4326,6 +4334,77 @@ mod tests {
     fn log_path(root: &tempfile::TempDir) -> PathBuf {
         root.path()
             .join("agent-runtime/sessions-v5/session-1.jsonl")
+    }
+
+    #[test]
+    fn execution_surface_is_persisted_in_session_created_and_restored_from_header() {
+        let (root, store) = configured();
+        let snapshot = store
+            .create(CreateAgentSessionRequest {
+                session_id: "visible-session".into(),
+                task_id: "visible-task".into(),
+                goal: "Show commands in the bound terminal".into(),
+                parent_session_id: None,
+                target: None,
+                permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
+                execution_surface: AgentExecutionSurface::BoundTerminal,
+                success_criteria: Vec::new(),
+                capability_scope: None,
+                subagent: None,
+            })
+            .unwrap();
+        assert_eq!(
+            snapshot.header.execution_surface,
+            AgentExecutionSurface::BoundTerminal
+        );
+        assert!(matches!(
+            &store.all_events("visible-session").unwrap()[0].payload,
+            AgentSessionEventPayload::SessionCreated {
+                execution_surface: AgentExecutionSurface::BoundTerminal,
+                ..
+            }
+        ));
+
+        drop(store);
+        let restarted = AgentSessionStore::default();
+        restarted.configure(root.path().to_path_buf()).unwrap();
+        assert_eq!(
+            restarted
+                .snapshot("visible-session")
+                .unwrap()
+                .header
+                .execution_surface,
+            AgentExecutionSurface::BoundTerminal
+        );
+    }
+
+    #[test]
+    fn legacy_session_created_without_execution_surface_defaults_to_direct() {
+        let (root, store) = configured();
+        create(&store);
+        drop(store);
+
+        let path = log_path(&root);
+        let raw = fs::read_to_string(&path).unwrap();
+        let mut lines = raw.lines().map(str::to_owned).collect::<Vec<_>>();
+        let mut legacy_created: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+        legacy_created["data"]
+            .as_object_mut()
+            .unwrap()
+            .remove("executionSurface");
+        lines[0] = serde_json::to_string(&legacy_created).unwrap();
+        fs::write(&path, format!("{}\n", lines.join("\n"))).unwrap();
+
+        let restarted = AgentSessionStore::default();
+        restarted.configure(root.path().to_path_buf()).unwrap();
+        assert_eq!(
+            restarted
+                .snapshot("session-1")
+                .unwrap()
+                .header
+                .execution_surface,
+            AgentExecutionSurface::Direct
+        );
     }
 
     #[test]
@@ -4658,6 +4737,7 @@ mod tests {
                 parent_session_id: Some("session-1".into()),
                 target: Some(target()),
                 permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
+                execution_surface: Default::default(),
                 success_criteria: Vec::new(),
                 capability_scope: Some(scope.clone()),
                 subagent: Some(metadata),
@@ -4689,6 +4769,7 @@ mod tests {
                 parent_session_id: None,
                 target: Some(target()),
                 permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
+                execution_surface: Default::default(),
                 success_criteria: Vec::new(),
                 capability_scope: None,
                 subagent: None,
@@ -5167,6 +5248,7 @@ mod tests {
                 parent_session_id: None,
                 target: None,
                 permission_mode: None,
+                execution_surface: Default::default(),
                 success_criteria: Vec::new(),
                 capability_scope: None,
                 subagent: None,
@@ -5453,6 +5535,7 @@ mod tests {
                     parent_session_id: None,
                     target: None,
                     permission_mode: None,
+                    execution_surface: Default::default(),
                     success_criteria: Vec::new(),
                     capability_scope: None,
                     subagent: None,

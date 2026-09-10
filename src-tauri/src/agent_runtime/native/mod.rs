@@ -9,6 +9,7 @@ mod pty;
 mod registry;
 mod runtime;
 pub(crate) mod scoped_read;
+mod terminal_lease;
 
 pub(crate) use call_policy::*;
 pub(crate) use capability::*;
@@ -20,3 +21,4 @@ pub(crate) use process::*;
 pub(crate) use pty::*;
 pub(crate) use registry::*;
 pub(crate) use runtime::*;
+pub(crate) use terminal_lease::*;

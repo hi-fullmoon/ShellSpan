@@ -568,6 +568,64 @@ describe('terminalRegistry', () => {
     expect(invokeWriteSession).toHaveBeenCalledWith('s1', 'hello');
   });
 
+  it('announces the first blocked Agent-owned input and honors suppression counts', async () => {
+    const { invokeWriteSession } = await import('@/lib/ipc/tauri');
+    const controller = createController('s1');
+    controller.attach(document.createElement('div'));
+    const writeln = vi.spyOn(controller.terminal, 'writeln');
+    const firstBlocked = vi.fn();
+    const secondBlocked = vi.fn();
+    const releaseFirst = controller.suppressUserInput(firstBlocked);
+    const releaseSecond = controller.suppressUserInput(secondBlocked);
+
+    await expect(controller.writeUserInput('a')).resolves.toBe(false);
+    await expect(controller.writeUserInput('b')).resolves.toBe(false);
+    expect(invokeWriteSession).not.toHaveBeenCalled();
+    expect(firstBlocked).toHaveBeenCalledOnce();
+    expect(secondBlocked).toHaveBeenCalledOnce();
+    expect(writeln).toHaveBeenCalledOnce();
+
+    releaseFirst();
+    await expect(controller.writeUserInput('still blocked')).resolves.toBe(false);
+    expect(invokeWriteSession).not.toHaveBeenCalled();
+
+    releaseSecond();
+    await expect(controller.writeUserInput('accepted')).resolves.toBe(true);
+    expect(invokeWriteSession).toHaveBeenCalledWith('s1', 'accepted');
+  });
+
+  it('detects pending input, unverified submissions, and credential prompts for ready ACK', async () => {
+    const { listenToSshData } = await import('@/lib/ipc/tauri');
+    let dataHandler: ((event: TauriEvent<string>) => void) | undefined;
+    vi.mocked(listenToSshData).mockImplementation(async (_sessionId, callback) => {
+      dataHandler = callback;
+      return () => {};
+    });
+    const controller = createController('s1');
+    await vi.waitFor(() => expect(dataHandler).toBeDefined());
+
+    await controller.writeUserInput('echo half');
+    expect(controller.hasPendingUserInput()).toBe(true);
+    await controller.writeUserInput('\r');
+    expect(controller.hasPendingUserInput()).toBe(false);
+    expect(controller.hasUnverifiedUserSubmission()).toBe(true);
+
+    dataHandler!({ event: 'ssh-data:s1', id: 1, payload: 'output\r\n' });
+    expect(controller.hasUnverifiedUserSubmission()).toBe(false);
+    dataHandler!({ event: 'ssh-data:s1', id: 2, payload: '\u001b[33mPassword:\u001b[0m ' });
+    expect(controller.hasKnownCredentialPrompt()).toBe(true);
+    dataHandler!({ event: 'ssh-data:s1', id: 3, payload: 'accepted\r\n$ ' });
+    expect(controller.hasKnownCredentialPrompt()).toBe(false);
+    dataHandler!({
+      event: 'ssh-data:s1',
+      id: 4,
+      payload: 'The authenticity of host cannot be established. Continue connecting (yes/no)? ',
+    });
+    expect(controller.hasKnownCredentialPrompt()).toBe(true);
+    dataHandler!({ event: 'ssh-data:s1', id: 5, payload: 'Host key accepted\r\n$ ' });
+    expect(controller.hasKnownCredentialPrompt()).toBe(false);
+  });
+
   it('pauses backend output at the parser high watermark and resumes after draining', async () => {
     const { invokeSetSessionOutputPaused, listenToSshData } = await import('@/lib/ipc/tauri');
     let dataHandler: ((event: TauriEvent<string>) => void) | undefined;

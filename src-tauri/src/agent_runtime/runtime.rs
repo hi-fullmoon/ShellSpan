@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::ai::AiProviderConfig;
 use base64::Engine;
+use tauri::Emitter;
 
 use super::{
     drive_agent, recover_open_scope, AgentArtifactStore, AgentCompactionManager, AgentDriverConfig,
@@ -518,6 +519,13 @@ impl AgentRuntime {
     }
 
     pub(crate) fn configure_native(&self, app: tauri::AppHandle) -> Result<(), String> {
+        let emitter = app.clone();
+        self.native_engine
+            .set_terminal_lease_publisher(Arc::new(move |event| {
+                if let Err(error) = emitter.emit(super::AGENT_TERMINAL_LEASE_EVENT, event) {
+                    log::warn!("Failed to publish Agent terminal lease event: {error}");
+                }
+            }))?;
         if let Some(slot) = &self.native_slot {
             slot.install(Arc::new(NativeToolAdapter::new(
                 app,
@@ -527,8 +535,56 @@ impl AgentRuntime {
         Ok(())
     }
 
-    pub(crate) fn observe_terminal_output(&self, session_id: &str, chunk: &str) {
-        self.native_engine.observe_pty_output(session_id, chunk);
+    pub(crate) fn observe_terminal_output(&self, session_id: &str, chunk: &str) -> String {
+        self.native_engine.observe_pty_output(session_id, chunk)
+    }
+
+    pub(crate) fn write_user_terminal_input(
+        &self,
+        sessions: &crate::models::SessionManager,
+        session_id: &str,
+        data: String,
+    ) -> Result<(), String> {
+        self.native_engine
+            .write_user_terminal_input(sessions, session_id, data)
+    }
+
+    pub(crate) fn acknowledge_terminal_lease_ready(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+        operation_id: &str,
+        terminal_connected: bool,
+        output_listener_ready: bool,
+        has_pending_user_input: bool,
+        has_unverified_user_submission: bool,
+        has_credential_prompt: bool,
+    ) -> Result<bool, String> {
+        self.native_engine.acknowledge_terminal_lease_ready(
+            session_id,
+            agent_session_id,
+            operation_id,
+            terminal_connected,
+            output_listener_ready,
+            has_pending_user_input,
+            has_unverified_user_submission,
+            has_credential_prompt,
+        )
+    }
+
+    pub(crate) fn takeover_terminal(
+        &self,
+        sessions: &crate::models::SessionManager,
+        session_id: &str,
+        agent_session_id: &str,
+        operation_id: &str,
+    ) -> Result<bool, String> {
+        self.native_engine
+            .takeover_terminal(sessions, session_id, agent_session_id, operation_id)
+    }
+
+    pub(crate) fn terminal_closed(&self, session_id: &str) -> Result<bool, String> {
+        self.native_engine.terminal_closed(session_id)
     }
 
     pub(crate) fn prepare_for_shutdown(
@@ -1700,15 +1756,16 @@ mod tests {
     use super::*;
     use crate::agent_runtime::{
         AgentAfterToolContext, AgentAfterToolDecision, AgentAfterToolHook, AgentBeforeToolContext,
-        AgentBeforeToolDecision, AgentBeforeToolHook, AgentFleetControlRequest,
-        AgentFleetPlanRequest, AgentFleetTargetRequest, AgentPreStepContext, AgentPreStepDecision,
-        AgentRecoveryStatus, AgentSessionEffect, AgentSessionPermissionMode, AgentSessionStatus,
-        AgentSessionTarget, AgentSubagentRole, AgentSubagentSpawnRequest, AgentToolApprovalStatus,
-        AgentToolFailedHook, AgentToolResultStatus, ModelAdapter, ModelContentBlock,
-        ModelFinishReason, ModelMessage, ModelRequest, ModelResponse, ModelStreamSink,
-        ModelToolCall, ModelUsage, NativeToolArtifact, NativeToolIdempotency,
-        NativeToolPreparation, NativeToolRequest, NativeToolResult, NativeToolRuntime,
-        NormalizedModelError, NormalizedModelErrorKind, RecordedToolCall, StreamDelta,
+        AgentBeforeToolDecision, AgentBeforeToolHook, AgentExecutionSurface,
+        AgentFleetControlRequest, AgentFleetPlanRequest, AgentFleetTargetRequest,
+        AgentPreStepContext, AgentPreStepDecision, AgentRecoveryStatus, AgentSessionEffect,
+        AgentSessionPermissionMode, AgentSessionStatus, AgentSessionTarget, AgentSubagentRole,
+        AgentSubagentSpawnRequest, AgentToolApprovalStatus, AgentToolFailedHook,
+        AgentToolResultStatus, ModelAdapter, ModelContentBlock, ModelFinishReason, ModelMessage,
+        ModelRequest, ModelResponse, ModelStreamSink, ModelToolCall, ModelUsage,
+        NativeToolArtifact, NativeToolIdempotency, NativeToolPreparation, NativeToolRequest,
+        NativeToolResult, NativeToolRuntime, NormalizedModelError, NormalizedModelErrorKind,
+        RecordedToolCall, StreamDelta,
     };
     use crate::agent_runtime::{AgentStopReason, RetryPolicy};
 
@@ -2306,6 +2363,7 @@ mod tests {
                     local_root: None,
                 }),
                 permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
+                execution_surface: Default::default(),
                 success_criteria: vec!["command result is recorded".into()],
                 capability_scope: None,
                 subagent: None,
@@ -3142,7 +3200,18 @@ mod tests {
                 )
             })
             .unwrap();
-        assert!(approved < result);
+        let dispatched = events
+            .iter()
+            .position(|event| {
+                matches!(
+                    &event.payload,
+                    AgentSessionEventPayload::ToolExecution { call_id, .. }
+                        if call_id == &decision.call_id
+                )
+            })
+            .unwrap();
+        assert!(approved < dispatched);
+        assert!(dispatched < result);
         assert!(events.iter().any(|event| matches!(
             &event.payload,
             AgentSessionEventPayload::AssistantMessage { content, .. }
@@ -3240,6 +3309,81 @@ mod tests {
         assert!(recovered.task.evidence.iter().any(|evidence| {
             evidence.kind == "artifact-integrity" && evidence.summary.contains("missing")
         }));
+    }
+
+    #[tokio::test]
+    async fn bound_terminal_result_is_redacted_before_model_context_and_session_persistence() {
+        let native = RecordingNativeRuntime::new(false);
+        let adapter = FakeAdapter::new(vec![
+            tool_response(vec![native_call(
+                "call-visible-secret",
+                "run_terminal_command",
+            )]),
+            reply("The visible command completed safely.", &[]),
+        ]);
+        let (root, runtime) =
+            configured_with_native(adapter.clone(), AgentDriverConfig::default(), native);
+        runtime
+            .create_session(CreateAgentSessionRequest {
+                session_id: "session-visible-secret".into(),
+                task_id: "task-visible-secret".into(),
+                goal: "exercise bound terminal redaction boundaries".into(),
+                parent_session_id: None,
+                target: Some(AgentSessionTarget {
+                    kind: "local".into(),
+                    target_id: "target-local".into(),
+                    session_id: "terminal-local".into(),
+                    label: Some("Local".into()),
+                    profile_id: None,
+                    host: None,
+                    port: None,
+                    username: None,
+                    cwd: None,
+                    root_path: None,
+                    local_root: None,
+                }),
+                permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
+                execution_surface: AgentExecutionSurface::BoundTerminal,
+                success_criteria: vec!["no plaintext secret crosses the Rust boundary".into()],
+                capability_scope: None,
+                subagent: None,
+            })
+            .unwrap();
+        runtime
+            .followup(
+                "session-visible-secret",
+                "message-visible-secret".into(),
+                "run the fixture command".into(),
+            )
+            .unwrap();
+        runtime
+            .start("session-visible-secret", provider(), None)
+            .unwrap();
+        runtime.await_idle("session-visible-secret").await.unwrap();
+
+        assert_eq!(adapter.request_count(), 2);
+        let model_context = serde_json::to_string(&adapter.requests.lock().unwrap()[1]).unwrap();
+        assert!(model_context.contains("[REDACTED]"));
+        assert!(!model_context.contains("top-secret-native-value"));
+
+        let events = serde_json::to_string(
+            &runtime
+                .sessions
+                .all_events("session-visible-secret")
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(events.contains("[REDACTED]"));
+        assert!(!events.contains("top-secret-native-value"));
+        let persisted = std::fs::read_to_string(
+            root.path()
+                .join("agent-runtime")
+                .join("sessions-v5")
+                .join("session-visible-secret.jsonl"),
+        )
+        .unwrap();
+        assert!(persisted.contains("[REDACTED]"));
+        assert!(!persisted.contains("top-secret-native-value"));
     }
 
     #[tokio::test]

@@ -21,7 +21,7 @@ function view(id = 'session-a'): AiSessionView {
   return {
     summary: { id, kind: 'agent', title: id, updatedAt: '2026-09-03T00:00:00.000Z', status: 'running', scopeKey: 'terminal-terminal-1', archived: false },
     snapshot: { kind: 'agent', value: {
-      header: { sessionId: id, taskId: 'task', goal: id, createdAtUnixMs: 1, target: { kind: 'remote', targetId: 'terminal-terminal-1', sessionId: 'terminal-1' } },
+      header: { sessionId: id, taskId: 'task', goal: id, executionSurface: 'direct', createdAtUnixMs: 1, target: { kind: 'remote', targetId: 'terminal-terminal-1', sessionId: 'terminal-1' } },
       status: 'running', ended: false, archived: false, eventCount: 0,
       surface: { generation: 0, messages: [] }, inbox: { nextTurn: [], nextStep: [] }, task: { evidence: [] }, recovery: { kind: 'idle', status: 'none', summary: '', lastCommittedSeq: 0 },
     } },

@@ -339,7 +339,8 @@ export interface TerminalController {
   simulateInput(data: string): void;
   hasPendingUserInput(): boolean;
   hasUnverifiedUserSubmission(): boolean;
-  suppressUserInput(): () => void;
+  hasKnownCredentialPrompt(): boolean;
+  suppressUserInput(onBlocked?: () => void): () => void;
   writeUserInput(data: string): Promise<boolean>;
   writeInput(data: string): Promise<void>;
   whenOutputReady(): Promise<void>;
@@ -372,8 +373,11 @@ class TerminalControllerImpl implements TerminalController {
   private readonly requestReconnect: RequestReconnectCallback;
   private inputBlockedNoticeRef = false;
   private userInputSuppressions = 0;
+  private readonly userInputBlockedListeners = new Set<() => void>();
+  private agentInputBlockedNoticeRef = false;
   private pendingUserInputText = '';
   private unverifiedUserSubmission = false;
+  private recentOutputTail = '';
   private reconnectRequestedRef = false;
   private inputGraceDeadlineRef = 0;
   private listenerGeneration = 0;
@@ -608,6 +612,10 @@ class TerminalControllerImpl implements TerminalController {
     const generation = this.listenerGeneration;
     const sessionId = this.sessionId;
     const dataUnlisten = await listenToSshData(sessionId, (event) => {
+      if (event.payload) {
+        this.unverifiedUserSubmission = false;
+        this.recentOutputTail = `${this.recentOutputTail}${event.payload}`.slice(-4096);
+      }
       const displayPayload = this.filterSessionOutput(event.payload);
       for (const listener of this.outputListeners) {
         try {
@@ -947,14 +955,20 @@ class TerminalControllerImpl implements TerminalController {
     this.handleInput(data);
   }
 
-  suppressUserInput(): () => void {
+  suppressUserInput(onBlocked?: () => void): () => void {
     if (this.disposed) return () => {};
     this.userInputSuppressions += 1;
+    if (onBlocked) this.userInputBlockedListeners.add(onBlocked);
     let released = false;
     return () => {
       if (released) return;
       released = true;
       this.userInputSuppressions = Math.max(0, this.userInputSuppressions - 1);
+      if (onBlocked) this.userInputBlockedListeners.delete(onBlocked);
+      if (this.userInputSuppressions === 0) {
+        this.agentInputBlockedNoticeRef = false;
+        this.userInputBlockedListeners.clear();
+      }
     };
   }
 
@@ -964,6 +978,15 @@ class TerminalControllerImpl implements TerminalController {
 
   hasUnverifiedUserSubmission(): boolean {
     return this.unverifiedUserSubmission;
+  }
+
+  hasKnownCredentialPrompt(): boolean {
+    const tail = this.recentOutputTail
+      .replace(/\u001b\][\s\S]*?(?:\u0007|\u001b\\)/g, '')
+      .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+      .replace(/\u001b[@-_]/g, '')
+      .trimEnd();
+    return /(?:password|passphrase|one[- ]time (?:password|code)|verification code|otp|continue connecting|host key)[^\r\n]{0,160}[:?]\s*$/i.test(tail);
   }
 
   private inputLineNeedsContinuation(value: string): boolean {
@@ -1067,6 +1090,15 @@ class TerminalControllerImpl implements TerminalController {
     }
     if (this.userInputSuppressions > 0) {
       logger.debug(`Dropped user input while an Agent command owns session=${this.sessionId}`);
+      if (!this.agentInputBlockedNoticeRef) {
+        this.agentInputBlockedNoticeRef = true;
+        this.writeSystemLine(formatTerminalNoticeLine(
+          t('terminal.agentLease.inputBlockedLabel'),
+          t('terminal.agentLease.inputBlockedHint'),
+          '33',
+        ));
+        for (const listener of this.userInputBlockedListeners) listener();
+      }
       return Promise.resolve(false);
     }
     if (Date.now() < this.inputGraceDeadlineRef) {
@@ -1152,6 +1184,10 @@ class TerminalControllerImpl implements TerminalController {
     this.pendingOutputCharacters = 0;
     this.pendingUserInputText = '';
     this.unverifiedUserSubmission = false;
+    this.recentOutputTail = '';
+    this.userInputSuppressions = 0;
+    this.userInputBlockedListeners.clear();
+    this.agentInputBlockedNoticeRef = false;
     this.outputGeneration += 1;
     this.sessionId = sessionId;
     rebindTerminalOutput(previousSessionId, sessionId);
@@ -1232,6 +1268,9 @@ class TerminalControllerImpl implements TerminalController {
     clearTerminalOutput(this.sessionId);
     this.outputListeners.clear();
     this.outputFilters.clear();
+    this.userInputSuppressions = 0;
+    this.userInputBlockedListeners.clear();
+    this.agentInputBlockedNoticeRef = false;
     this.lifecycleListeners.clear();
     this.removeFromRegistry(this.sessionId);
   }

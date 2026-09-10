@@ -4,6 +4,9 @@
 > 适用范围：ShellSpan Terminal Agent  
 > 最后更新：2026-09-09
 
+Phase 1 的发布门禁、证据映射与手工步骤见
+[`agent-visible-terminal-execution-acceptance.md`](agent-visible-terminal-execution-acceptance.md)。
+
 ## 1. 背景
 
 ShellSpan 当前将 Agent 会话绑定到一个本地或远程终端目标，但模型公开工具 `run_terminal_command` 默认通过独立执行通道运行。命令及输出会进入 Agent 工具调用记录，却不会像用户输入一样实时显示在当前绑定的 xterm 终端中。

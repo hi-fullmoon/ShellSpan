@@ -78,6 +78,8 @@ import type {
   AgentSessionRenameInput,
   AgentSessionSnapshot,
   AgentSubagentSpawnRequest,
+  AgentTerminalLeaseControlInput,
+  AgentTerminalLeaseEvent,
   CreateAgentSessionRequest,
 } from '@/types/agent-session';
 
@@ -430,6 +432,18 @@ export async function invokeArchiveAgentRuntimeSession(
   input: AgentSessionIdInput,
 ): Promise<AgentSessionSnapshot> {
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_archive_session', { input });
+}
+
+export async function invokeAgentTerminalLeaseReady(
+  input: AgentTerminalLeaseControlInput,
+): Promise<boolean> {
+  return invokeLogged<boolean>('agent_runtime_terminal_lease_ready', { input });
+}
+
+export async function invokeTakeoverAgentTerminal(
+  input: AgentTerminalLeaseControlInput,
+): Promise<boolean> {
+  return invokeLogged<boolean>('agent_runtime_takeover_terminal', { input });
 }
 
 export async function invokeDeleteAgentRuntimeSession(
@@ -869,6 +883,14 @@ export async function listenToAgentRuntimeSession(
   callback: EventCallback<AgentSessionEvent>,
 ): Promise<UnlistenFn> {
   return listen<AgentSessionEvent>('agent-runtime-session-event', (event) => {
+    callback(event);
+  });
+}
+
+export async function listenToAgentTerminalLease(
+  callback: EventCallback<AgentTerminalLeaseEvent>,
+): Promise<UnlistenFn> {
+  return listen<AgentTerminalLeaseEvent>('agent-terminal-lease', (event) => {
     callback(event);
   });
 }

@@ -126,6 +126,7 @@ mod tests {
                     parent_session_id: None,
                     target: None,
                     permission_mode: None,
+                    execution_surface: Default::default(),
                     success_criteria: Vec::new(),
                     capability_scope: None,
                     subagent: None,
