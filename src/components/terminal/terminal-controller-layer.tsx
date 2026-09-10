@@ -17,6 +17,7 @@ import type {
 import type { AgentTerminalLeaseEvent } from '@/types/agent-session';
 
 const logger = createLogger('agent-terminal-lease');
+export const TAKEOVER_CONFIRMATION_TIMEOUT_MS = 5_000;
 
 export interface AgentTerminalLeaseDisplayFilter extends TerminalOutputFilter {
   readonly operationId: string;
@@ -46,6 +47,8 @@ interface ActiveLeaseResources {
   removeDisplayFilter?: () => void;
   removeLifecycle?: () => void;
   takeoverRequested: boolean;
+  takeoverAttempt: number;
+  takeoverTimer?: ReturnType<typeof setTimeout>;
 }
 
 export interface AgentTerminalLeaseCoordinator {
@@ -61,6 +64,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     const { lease, controller } = active;
     const current = activeLeases.get(lease.sessionId);
     if (current?.lease.operationId !== lease.operationId) return;
+    if (active.takeoverTimer !== undefined) clearTimeout(active.takeoverTimer);
     activeLeases.delete(lease.sessionId);
     active.removeLifecycle?.();
     active.removeDisplayFilter?.();
@@ -84,23 +88,68 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       || active.takeoverRequested
     ) return;
     active.takeoverRequested = true;
+    active.takeoverAttempt += 1;
+    const attempt = active.takeoverAttempt;
     agentTerminalLeaseState.update(sessionId, operationId, (lease) => ({
       ...lease,
       takeoverRequested: true,
+      takeoverFailed: false,
     }));
+    active.takeoverTimer = setTimeout(() => {
+      const current = activeLeases.get(sessionId);
+      if (
+        current !== active
+        || current.lease.operationId !== operationId
+        || current.takeoverAttempt !== attempt
+      ) return;
+      active.takeoverTimer = undefined;
+      active.takeoverRequested = false;
+      agentTerminalLeaseState.update(sessionId, operationId, (lease) => ({
+        ...lease,
+        takeoverRequested: false,
+        takeoverFailed: true,
+      }));
+      logger.warn(`Timed out waiting for Agent terminal takeover ${operationId}`);
+    }, TAKEOVER_CONFIRMATION_TIMEOUT_MS);
     void invokeTakeoverAgentTerminal({
       sessionId,
       agentSessionId: active.lease.agentSessionId,
       operationId,
     }).then((accepted) => {
-      if (accepted) return;
+      const current = activeLeases.get(sessionId);
+      if (
+        current !== active
+        || current.lease.operationId !== operationId
+        || current.takeoverAttempt !== attempt
+      ) return;
+      if (active.takeoverTimer !== undefined) clearTimeout(active.takeoverTimer);
+      active.takeoverTimer = undefined;
+      if (accepted) {
+        // The command only resolves true after the backend has interrupted the
+        // operation and released its lease. Clean up here as a fallback in case
+        // the matching release event is delayed or dropped by the webview.
+        cleanup(active, true);
+        return;
+      }
+      active.takeoverRequested = false;
       agentTerminalLeaseState.update(sessionId, operationId, (lease) => ({
         ...lease,
+        takeoverRequested: false,
         takeoverFailed: true,
       }));
     }).catch((error) => {
+      const current = activeLeases.get(sessionId);
+      if (
+        current !== active
+        || current.lease.operationId !== operationId
+        || current.takeoverAttempt !== attempt
+      ) return;
+      if (active.takeoverTimer !== undefined) clearTimeout(active.takeoverTimer);
+      active.takeoverTimer = undefined;
+      active.takeoverRequested = false;
       agentTerminalLeaseState.update(sessionId, operationId, (lease) => ({
         ...lease,
+        takeoverRequested: false,
         takeoverFailed: true,
       }));
       logger.warn(`Failed to take over Agent terminal lease ${operationId}`, error);
@@ -126,6 +175,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         lease: acquiredLease,
         controller,
         takeoverRequested: false,
+        takeoverAttempt: 0,
       };
       activeLeases.set(lease.sessionId, active);
       if (controller) {

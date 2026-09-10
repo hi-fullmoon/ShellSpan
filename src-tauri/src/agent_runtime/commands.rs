@@ -55,12 +55,15 @@ pub(crate) fn agent_runtime_terminal_lease_ready(
 }
 
 #[tauri::command]
-pub(crate) fn agent_runtime_takeover_terminal(
+pub(crate) async fn agent_runtime_takeover_terminal(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     sessions: State<'_, crate::models::SessionManager>,
     input: AgentTerminalLeaseControlInput,
 ) -> Result<bool, String> {
+    // Keep takeover off Tauri's synchronous IPC path: releasing the lease
+    // publishes an event back to the same webview, which must remain free to
+    // receive it and update the terminal UI.
     configure_runtime(&app, &runtime)?;
     runtime.takeover_terminal(
         &sessions,

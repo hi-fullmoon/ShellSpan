@@ -8,6 +8,8 @@ import type { TerminalSession as TerminalSessionState } from '@/stores/terminalS
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 
+const toastMocks = vi.hoisted(() => ({ error: vi.fn() }));
+
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
     t: (key: string) => key,
@@ -20,7 +22,7 @@ vi.mock('@/hooks/useI18n', () => ({
 vi.mock('@/hooks/useToast', () => ({
   useToast: () => ({
     success: vi.fn(),
-    error: vi.fn(),
+    error: toastMocks.error,
   }),
 }));
 
@@ -172,6 +174,11 @@ describe('TerminalPane', () => {
       expect(bar).toHaveTextContent('[Agent] $ echo [REDACTED]');
       expect(bar).toHaveTextContent('2s');
       expect(bar).not.toHaveClass('absolute');
+      expect(bar).toHaveClass('border-app-border/40');
+      expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"] > span'))
+        .toHaveClass('w-[6ch]', 'font-mono', 'tabular-nums');
+      expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
+        .toHaveAttribute('data-slot', 'button');
       expect(container.querySelector('.min-h-0.flex-1')).toContainElement(
         container.querySelector('div.h-full.w-full.p-0'),
       );
@@ -194,6 +201,18 @@ describe('TerminalPane', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }));
     expect(requestTakeover).toHaveBeenCalledOnce();
+
+    act(() => {
+      agentTerminalLeaseState.update('s1', 'operation-1', (lease) => ({
+        ...lease,
+        takeoverRequested: true,
+      }));
+    });
+    const pendingButton = screen.getByRole('button', { name: 'terminal.agentLease.takingOver' });
+    expect(pendingButton).toBeDisabled();
+    expect(pendingButton).toHaveAttribute('aria-busy', 'true');
+    expect(pendingButton).toHaveTextContent('terminal.agentLease.takeover');
+    expect(pendingButton.querySelector('[data-slot="spinner"]')).toBeInTheDocument();
 
     const escape = new KeyboardEvent('keydown', {
       key: 'Escape',
@@ -219,6 +238,25 @@ describe('TerminalPane', () => {
     const bar = screen.getByRole('status');
     expect(bar).toHaveAttribute('aria-live', 'polite');
     expect(bar).toHaveTextContent('terminal.agentLease.inputBlockedAccessibleHint');
+  });
+
+  it('reports takeover failure once through a toast without replacing the lease hint', () => {
+    setAgentLease({ takeoverFailed: true });
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    const bar = screen.getByRole('status');
+    expect(toastMocks.error).toHaveBeenCalledOnce();
+    expect(toastMocks.error).toHaveBeenCalledWith('terminal.agentLease.takeoverFailed');
+    expect(bar).toHaveTextContent('terminal.agentLease.inputLocked');
+    expect(bar).not.toHaveTextContent('terminal.agentLease.takeoverFailed');
+
+    act(() => {
+      agentTerminalLeaseState.update('s1', 'operation-1', (lease) => ({
+        ...lease,
+        inputBlocked: true,
+      }));
+    });
+    expect(toastMocks.error).toHaveBeenCalledOnce();
   });
 
   it('keeps search and copy keyboard interactions available during a lease', async () => {

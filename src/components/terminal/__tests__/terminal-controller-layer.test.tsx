@@ -3,6 +3,7 @@ import { render, act, cleanup as cleanupReact } from '@testing-library/react';
 import {
   createAgentTerminalLeaseDisplayFilter,
   createAgentTerminalLeaseCoordinator,
+  TAKEOVER_CONFIRMATION_TIMEOUT_MS,
   TerminalControllerLayer,
 } from '../terminal-controller-layer';
 import { terminalRegistry } from '../registry/terminal-registry';
@@ -324,7 +325,7 @@ describe('TerminalControllerLayer', () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
-  it('takes over at most once and stays locked until the matching release', async () => {
+  it('takes over at most once and unlocks when the backend confirms release', async () => {
     const controller = seedController();
     act(() => {
       addSession('s1');
@@ -348,14 +349,76 @@ describe('TerminalControllerLayer', () => {
       agentSessionId: 'agent-1',
       operationId: 'operation-1',
     });
-    expect(release).not.toHaveBeenCalled();
-    expect(agentTerminalLeaseState.get('s1')?.takeoverRequested).toBe(true);
-
-    await coordinator.handle(leaseEvent('operation-old', 'released').payload);
-    expect(release).not.toHaveBeenCalled();
-    await coordinator.handle(leaseEvent('operation-1', 'released', { reason: 'takenOver' }).payload);
     expect(release).toHaveBeenCalledOnce();
+    expect(agentTerminalLeaseState.get('s1')).toBeUndefined();
     coordinator.dispose();
+  });
+
+  it('allows takeover to be retried after a rejected request', async () => {
+    vi.mocked(invokeTakeoverAgentTerminal)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const controller = seedController();
+    const release = vi.fn();
+    vi.spyOn(controller, 'suppressUserInput').mockReturnValue(release);
+    const coordinator = createAgentTerminalLeaseCoordinator();
+
+    await coordinator.handle(leaseEvent('operation-1').payload);
+    act(() => agentTerminalLeaseState.get('s1')?.requestTakeover());
+    await vi.waitFor(() => {
+      expect(agentTerminalLeaseState.get('s1')).toMatchObject({
+        takeoverRequested: false,
+        takeoverFailed: true,
+      });
+    });
+
+    act(() => agentTerminalLeaseState.get('s1')?.requestTakeover());
+    await vi.waitFor(() => expect(invokeTakeoverAgentTerminal).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
+    expect(agentTerminalLeaseState.get('s1')).toBeUndefined();
+    coordinator.dispose();
+  });
+
+  it('recovers from an unconfirmed takeover request and ignores its late response', async () => {
+    vi.useFakeTimers();
+    let resolveFirst!: (accepted: boolean) => void;
+    let resolveSecond!: (accepted: boolean) => void;
+    vi.mocked(invokeTakeoverAgentTerminal)
+      .mockReturnValueOnce(new Promise<boolean>((resolve) => {
+        resolveFirst = resolve;
+      }))
+      .mockReturnValueOnce(new Promise<boolean>((resolve) => {
+        resolveSecond = resolve;
+      }));
+    const controller = seedController();
+    const release = vi.fn();
+    vi.spyOn(controller, 'suppressUserInput').mockReturnValue(release);
+    const coordinator = createAgentTerminalLeaseCoordinator();
+
+    try {
+      await coordinator.handle(leaseEvent('operation-1').payload);
+      act(() => agentTerminalLeaseState.get('s1')?.requestTakeover());
+      await act(async () => vi.advanceTimersByTimeAsync(TAKEOVER_CONFIRMATION_TIMEOUT_MS));
+      expect(agentTerminalLeaseState.get('s1')).toMatchObject({
+        takeoverRequested: false,
+        takeoverFailed: true,
+      });
+
+      act(() => agentTerminalLeaseState.get('s1')?.requestTakeover());
+      resolveFirst(true);
+      await act(async () => Promise.resolve());
+      expect(agentTerminalLeaseState.get('s1')?.takeoverRequested).toBe(true);
+      expect(release).not.toHaveBeenCalled();
+
+      resolveSecond(true);
+      await act(async () => Promise.resolve());
+      expect(invokeTakeoverAgentTerminal).toHaveBeenCalledTimes(2);
+      expect(release).toHaveBeenCalledOnce();
+      expect(agentTerminalLeaseState.get('s1')).toBeUndefined();
+    } finally {
+      coordinator.dispose();
+      vi.useRealTimers();
+    }
   });
 
   it('replaces resources by operation and ignores duplicate acquire and stale release events', async () => {
