@@ -481,7 +481,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <Button
                     type="button"
                     variant="outline"
-                    size="xs"
+                    size="sm"
                     className="shrink-0"
                     disabled={customizedShortcutCount === 0}
                     onClick={resetShortcuts}
@@ -572,7 +572,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </Badge>
                     <Button
                       type="button"
-                      size="xs"
+                      size="sm"
                       variant="outline"
                       aria-describedby="petdex-privacy-description"
                       disabled={!petdexEnabled || testingPetdex || petdexConfiguring}
@@ -593,7 +593,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <div className="flex justify-end">
                     <Button
                       type="button"
-                      size="xs"
+                      size="sm"
                       variant="outline"
                       aria-describedby="petdex-feedback-description"
                       onClick={() => void openPetdexPhase3Feedback()}
@@ -641,7 +641,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </SettingRow>
                 <SettingRow label={t('settings.general.restoreWorkspace')} description={t('settings.general.restoreWorkspaceDescription')}>
                   <div className="flex items-center justify-end gap-2">
-                    <Button variant="outline" size="xs" onClick={handleClearWorkspace}>
+                    <Button variant="outline" size="sm" onClick={handleClearWorkspace}>
                       <Trash2Icon data-icon="inline-start" />
                       {t('settings.general.clearWorkspace')}
                     </Button>
@@ -935,7 +935,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         render={
                           <Button
                             variant="outline"
-                            size="xs"
+                            size="sm"
                             className="min-w-0 flex-1 justify-start"
                             onClick={() => {
                               void invokePickLocalFolder().then((folders) => {
@@ -953,7 +953,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     {sftpDownloadDirectory && (
                       <Button
                         variant="ghost"
-                        size="icon-xs"
+                        size="icon-sm"
                         className="shrink-0"
                         aria-label={t('settings.sftp.downloadDirectoryClear')}
                         onClick={() => setSftpDownloadDirectory('')}
@@ -1001,7 +1001,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           <div className="flex items-center gap-1">
                             <Button
                               variant="ghost"
-                              size="xs"
+                              size="sm"
                               className="min-w-20 justify-end px-1.5"
                               onClick={() => {
                                 setConflictAction(null);
@@ -1025,7 +1025,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                 render={
                                   <Button
                                     variant="ghost"
-                                    size="icon-xs"
+                                    size="icon-sm"
                                     disabled={binding === DEFAULT_SHORTCUTS[action]}
                                     aria-label={t('settings.shortcuts.resetOne', { action: shortcutLabels[action] })}
                                   />

@@ -345,7 +345,7 @@ describe('SettingsPanel', () => {
     );
   });
 
-  it('uses the extra-small button scale throughout every settings section', async () => {
+  it('uses the small button scale throughout every settings section', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
@@ -365,7 +365,7 @@ describe('SettingsPanel', () => {
       within(settingsDialog).getAllByRole('button')
         .filter((button) => button.getAttribute('data-slot') !== 'dialog-close')
         .forEach((button) => {
-          expect(button.className).toMatch(/(?:^|\s)(?:h-6|size-6)(?:\s|$)/);
+          expect(button.className).toMatch(/(?:^|\s)(?:h-8|size-8)(?:\s|$)/);
         });
     }
   });
