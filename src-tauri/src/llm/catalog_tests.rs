@@ -7,10 +7,35 @@ fn provider(model: &str) -> AiProviderConfig {
 
 #[test]
 fn ipc_fixtures_are_exact_rust_resolutions_without_credentials() {
+    let catalog: Value =
+        serde_json::from_str(include_str!("../../../protocol/llm/catalog.json")).unwrap();
     let fixtures: Vec<Value> = serde_json::from_str(include_str!(
         "../../../protocol/llm/fixtures/resolved-models.json"
     ))
     .unwrap();
+    let catalog_models = catalog["presets"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .flat_map(|(profile, preset)| {
+            preset["models"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(move |model| (profile.clone(), model.clone()))
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let fixture_models = fixtures
+        .iter()
+        .map(|fixture| {
+            (
+                fixture["provider"]["profile"].as_str().unwrap().to_owned(),
+                fixture["provider"]["model"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(fixture_models, catalog_models);
+
     for fixture in fixtures {
         let mut config: AiProviderConfig =
             serde_json::from_value(fixture["provider"].clone()).unwrap();
@@ -21,6 +46,38 @@ fn ipc_fixtures_are_exact_rust_resolutions_without_credentials() {
         assert!(actual.get("apiKey").is_none());
         assert!(actual.get("baseUrl").is_none());
     }
+}
+
+#[test]
+fn reasoning_wire_value_distinguishes_missing_null_and_provider_spelling() {
+    let missing: ReasoningOption =
+        serde_json::from_value(json!({"id":"low","displayName":"Low"})).unwrap();
+    let omitted: ReasoningOption =
+        serde_json::from_value(json!({"id":"off","displayName":"Off","wireValue":null})).unwrap();
+    let mapped: ReasoningOption =
+        serde_json::from_value(json!({"id":"max","displayName":"Max","wireValue":"high"})).unwrap();
+    assert_eq!(missing.wire_value, None);
+    assert_eq!(omitted.wire_value, Some(None));
+    assert_eq!(mapped.wire_value, Some(Some(Value::String("high".into()))));
+    assert_eq!(
+        serde_json::to_value(&omitted).unwrap()["wireValue"],
+        Value::Null
+    );
+
+    let mut p = provider("private-reasoning");
+    let mut definition = fixture_definition(p.kind, 32768);
+    definition.compat.reasoning_encoding = ReasoningEncoding::Effort;
+    definition.reasoning = vec![missing, omitted, mapped];
+    p.model_definition = Some(definition);
+    let model = resolve(&p).unwrap();
+
+    let mut body = json!({});
+    apply_reasoning(&mut body, &model, Some("off".into()));
+    assert!(body.get("reasoning_effort").is_none());
+    apply_reasoning(&mut body, &model, Some("max".into()));
+    assert_eq!(body["reasoning_effort"], "high");
+    apply_reasoning(&mut body, &model, Some("low".into()));
+    assert_eq!(body["reasoning_effort"], "low");
 }
 
 #[test]
@@ -42,22 +99,45 @@ fn exact_ids_unknown_models_and_user_overrides() {
     }
     let mut p = provider("Qwen/Private-Model:Case");
     let mut d = fixture_definition(p.kind, 32768);
+    d.display_name = Some("Private model".into());
     d.max_output_tokens = 16384;
     d.tool_calling = Support::Unknown;
     d.image_input = Support::Unknown;
     p.model_definition = Some(d);
     let model = resolve(&p).unwrap();
     assert_eq!(model.model_id, "Qwen/Private-Model:Case");
+    assert_eq!(model.display_name.as_deref(), Some("Private model"));
     assert_eq!(model.source, "userDeclaration");
     assert_eq!(model.max_output_tokens, 16384);
     assert_eq!(model.tool_calling, Support::Unknown);
     p.model = "qwen3-vl-plus".into();
     assert_eq!(resolve(&p).unwrap().image_input, Support::Unknown);
     assert!(resolve(&p).unwrap().vision.is_none());
+    p.model_definition.as_mut().unwrap().display_name = Some("   ".into());
+    assert!(resolve(&p).unwrap_err().contains("display name"));
 }
 
 #[test]
-fn custom_capacity_is_not_inferred_or_clamped_to_legacy_hint_bounds() {
+fn built_in_models_inherit_preset_compat_and_apply_local_differences() {
+    let inherited = resolve(&provider("qwen3-thinking-2507")).unwrap();
+    assert_eq!(inherited.compat.protocol, AiProviderKind::OpenAiCompatible);
+    assert_eq!(inherited.compat.reasoning_encoding, ReasoningEncoding::None);
+    assert!(inherited.compat.replay_reasoning_content);
+
+    let overridden = resolve(&provider("qwen3")).unwrap();
+    assert_eq!(overridden.compat.protocol, inherited.compat.protocol);
+    assert_eq!(
+        overridden.compat.reasoning_encoding,
+        ReasoningEncoding::EnableThinking
+    );
+    assert_eq!(
+        overridden.compat.replay_reasoning_content,
+        inherited.compat.replay_reasoning_content
+    );
+}
+
+#[test]
+fn custom_capacity_is_not_inferred_or_clamped_to_obsolete_hint_bounds() {
     let mut p = provider("custom-small");
     p.model_definition = Some(fixture_definition(p.kind, 4096));
     assert_eq!(resolve(&p).unwrap().context_window, 4096);
@@ -117,33 +197,6 @@ fn budgets_use_exact_same_output_context_and_per_model_image_estimate() {
     assert_eq!(budget.context_window, 128000);
     assert_eq!(budget.output_reserve_tokens, 64000);
     assert!(budget.message_tokens >= 1234 && budget.message_tokens < 1500);
-}
-
-#[test]
-fn v4_restoration_matches_existing_settings_exactly_and_rejects_missing_declarations() {
-    let p = provider("Private/CaseSensitive");
-    let declaration = fixture_definition(p.kind, 32768);
-    let saved = json!({"id":p.id,"kind":p.kind,"profile":p.profile,"baseUrl":p.base_url,"model":p.model,"modelDefinition":declaration});
-    let entries = vec![("ai.providers".into(), json!([saved]).to_string())];
-    let mut restored = p.clone();
-    restore_model_definition(&mut restored, &entries).unwrap();
-    assert_eq!(resolve(&restored).unwrap().source, "userDeclaration");
-    for field in ["id", "kind", "baseUrl", "model", "profile"] {
-        let mut different = saved.clone();
-        different[field] = json!("different");
-        let mut restored = p.clone();
-        restore_model_definition(
-            &mut restored,
-            &[("ai.providers".into(), json!([different]).to_string())],
-        )
-        .unwrap();
-        assert!(restored.model_definition.is_none(), "{field}");
-        assert!(resolve(&restored).unwrap_err().contains("UNKNOWN_MODEL"));
-    }
-    let mut explicit = p.clone();
-    explicit.model_definition = Some(fixture_definition(p.kind, 65536));
-    restore_model_definition(&mut explicit, &entries).unwrap();
-    assert_eq!(resolve(&explicit).unwrap().context_window, 65536);
 }
 
 #[tokio::test]

@@ -1,5 +1,4 @@
 //! Exact model facts. No URL, prefix, case folding or context-name inference here.
-//! Legacy host inference lives only in `legacy_profile`, the old-config conversion boundary.
 use super::config::{AiProviderConfig, AiProviderKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -45,13 +44,75 @@ pub(crate) struct Compat {
     pub default_thinking: bool,
 }
 
+/// Model-local differences from the preset wire contract. The adapter protocol
+/// is route-owned and therefore cannot be overridden by a model entry.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CompatOverride {
+    cumulative_stream: Option<bool>,
+    supports_stream_usage: Option<bool>,
+    native_reasoning: Option<bool>,
+    split_reasoning: Option<bool>,
+    replay_reasoning_content: Option<bool>,
+    think_tag_fallback: Option<bool>,
+    parallel_tool_calls: Option<bool>,
+    strict_schema: Option<bool>,
+    preserves_reasoning_across_turns: Option<bool>,
+    reasoning_encoding: Option<ReasoningEncoding>,
+    clear_thinking: Option<bool>,
+    default_thinking: Option<bool>,
+}
+
+impl Compat {
+    fn with_override(&self, value: &CompatOverride) -> Self {
+        Self {
+            protocol: self.protocol,
+            cumulative_stream: value.cumulative_stream.unwrap_or(self.cumulative_stream),
+            supports_stream_usage: value
+                .supports_stream_usage
+                .unwrap_or(self.supports_stream_usage),
+            native_reasoning: value.native_reasoning.unwrap_or(self.native_reasoning),
+            split_reasoning: value.split_reasoning.unwrap_or(self.split_reasoning),
+            replay_reasoning_content: value
+                .replay_reasoning_content
+                .unwrap_or(self.replay_reasoning_content),
+            think_tag_fallback: value.think_tag_fallback.unwrap_or(self.think_tag_fallback),
+            parallel_tool_calls: value
+                .parallel_tool_calls
+                .unwrap_or(self.parallel_tool_calls),
+            strict_schema: value.strict_schema.unwrap_or(self.strict_schema),
+            preserves_reasoning_across_turns: value
+                .preserves_reasoning_across_turns
+                .unwrap_or(self.preserves_reasoning_across_turns),
+            reasoning_encoding: value.reasoning_encoding.unwrap_or(self.reasoning_encoding),
+            clear_thinking: value.clear_thinking.unwrap_or(self.clear_thinking),
+            default_thinking: value.default_thinking.unwrap_or(self.default_thinking),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ReasoningOption {
     pub id: String,
     pub display_name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wire_value: Option<Value>,
+    /// Missing uses `id`, explicit null omits the provider reasoning field, and
+    /// a value supplies the provider's spelling for this selector value.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present_optional_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub wire_value: Option<Option<Value>>,
+}
+
+fn deserialize_present_optional_value<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<Value>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<Value>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -68,6 +129,8 @@ pub(crate) struct VisionBudget {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ModelDefinition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     pub context_window: u64,
     pub max_output_tokens: u64,
     pub tool_calling: Support,
@@ -79,13 +142,47 @@ pub(crate) struct ModelDefinition {
     pub vision: Option<VisionBudget>,
 }
 
+/// Built-in catalog entry. Model facts stay explicit while provider protocol
+/// behavior inherits from the preset and names only model-local differences.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CatalogModelDefinition {
+    #[serde(default)]
+    display_name: Option<String>,
+    context_window: u64,
+    max_output_tokens: u64,
+    tool_calling: Support,
+    text_input: Support,
+    image_input: Support,
+    reasoning: Vec<ReasoningOption>,
+    #[serde(default)]
+    compat: CompatOverride,
+    #[serde(default)]
+    vision: Option<VisionBudget>,
+}
+
+impl CatalogModelDefinition {
+    fn resolve(&self, preset: &Compat) -> ModelDefinition {
+        ModelDefinition {
+            display_name: self.display_name.clone(),
+            context_window: self.context_window,
+            max_output_tokens: self.max_output_tokens,
+            tool_calling: self.tool_calling,
+            text_input: self.text_input,
+            image_input: self.image_input,
+            reasoning: self.reasoning.clone(),
+            compat: preset.with_override(&self.compat),
+            vision: self.vision.clone(),
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Preset {
     kind: AiProviderKind,
-    legacy_hosts: Vec<String>,
     compat: Compat,
-    models: BTreeMap<String, ModelDefinition>,
+    models: BTreeMap<String, CatalogModelDefinition>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -102,7 +199,8 @@ static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
     for preset in value.presets.values() {
         assert_eq!(preset.kind, preset.compat.protocol);
         for (id, model) in &preset.models {
-            validate_definition(id, model, preset.kind).expect("valid catalog model");
+            validate_definition(id, &model.resolve(&preset.compat), preset.kind)
+                .expect("valid catalog model");
         }
     }
     value
@@ -131,40 +229,18 @@ impl std::ops::Deref for ResolvedModel {
     }
 }
 
-pub(crate) fn legacy_profile(provider: &AiProviderConfig) -> &str {
-    if let Some(profile) = provider.profile.as_deref() {
-        return profile;
+pub(crate) fn profile_id(provider: &AiProviderConfig) -> Result<&str, String> {
+    if provider.profile.is_empty() {
+        return Err("UNKNOWN_PROFILE: Provider profile is required".into());
     }
-    match provider.kind {
-        AiProviderKind::OpenAi => "openai",
-        AiProviderKind::Ollama => "ollama",
-        AiProviderKind::OpenAiCompatible => {
-            let host = reqwest::Url::parse(provider.base_url.trim())
-                .ok()
-                .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
-                .unwrap_or_default();
-            CATALOG
-                .presets
-                .iter()
-                .find(|(_, p)| {
-                    p.legacy_hosts.iter().any(|h| {
-                        if h.starts_with('.') {
-                            host.ends_with(h)
-                        } else {
-                            host == *h
-                        }
-                    })
-                })
-                .map_or("generic", |(id, _)| id)
-        }
-        AiProviderKind::AnthropicMessages => "anthropic",
-    }
+    Ok(&provider.profile)
 }
 
 pub(crate) fn validate_profile(provider: &AiProviderConfig) -> Result<(), String> {
+    let profile = profile_id(provider)?;
     let preset = CATALOG
         .presets
-        .get(legacy_profile(provider))
+        .get(profile)
         .ok_or("UNKNOWN_PROFILE: Unknown provider profile")?;
     if preset.kind != provider.kind {
         return Err("UNSUPPORTED_OPTION: Provider profile does not match protocol".into());
@@ -179,6 +255,12 @@ pub(crate) fn validate_definition(
 ) -> Result<(), String> {
     if id.is_empty() || id.trim() != id {
         return Err("UNKNOWN_MODEL: model ID must be nonempty and exact".into());
+    }
+    if d.display_name
+        .as_ref()
+        .is_some_and(|name| name.trim().is_empty())
+    {
+        return Err("UNSUPPORTED_OPTION: model display name must be nonempty".into());
     }
     // IPC token counts must remain exact JavaScript integers; this is an encoding limit,
     // not a provider capacity heuristic. Small/custom windows are otherwise valid.
@@ -288,18 +370,20 @@ pub(crate) fn validate_definition(
 
 pub(crate) fn resolve(provider: &AiProviderConfig) -> Result<ResolvedModel, String> {
     validate_profile(provider)?;
-    let profile = legacy_profile(provider);
-    let definition = provider
-        .model_definition
-        .as_ref()
-        .or_else(|| CATALOG.presets[profile].models.get(&provider.model))
-        .ok_or_else(|| {
-            format!(
-                "UNKNOWN_MODEL: declare capacities and capabilities for {profile}/{}",
-                provider.model
-            )
-        })?
-        .clone();
+    let profile = profile_id(provider)?;
+    let definition = match provider.model_definition.as_ref() {
+        Some(definition) => definition.clone(),
+        None => CATALOG.presets[profile]
+            .models
+            .get(&provider.model)
+            .map(|model| model.resolve(&CATALOG.presets[profile].compat))
+            .ok_or_else(|| {
+                format!(
+                    "UNKNOWN_MODEL: declare capacities and capabilities for {profile}/{}",
+                    provider.model
+                )
+            })?,
+    };
     validate_definition(&provider.model, &definition, provider.kind)?;
     if let Some(effort) = &provider.reasoning_effort {
         let id = serde_json::to_value(effort).expect("reasoning ID");
@@ -352,12 +436,16 @@ pub(crate) fn apply_reasoning(
     let Some(effort) = effort else {
         return;
     };
-    let effort = model
+    let wire_value = model
         .reasoning
         .iter()
         .find(|o| o.id == effort)
-        .and_then(|o| o.wire_value.clone())
-        .unwrap_or_else(|| Value::String(effort));
+        .and_then(|o| o.wire_value.clone());
+    let effort = match wire_value {
+        Some(std::option::Option::None) => return,
+        Some(Some(value)) => value,
+        std::option::Option::None => Value::String(effort),
+    };
     let enabled = effort != "off" && effort != "none";
     use ReasoningEncoding::*;
     match c.reasoning_encoding {
@@ -392,13 +480,14 @@ pub(crate) fn apply_reasoning(
 pub(crate) fn declaration_template(provider: &AiProviderConfig) -> Result<ModelDefinition, String> {
     validate_profile(provider)?;
     Ok(ModelDefinition {
+        display_name: None,
         context_window: 0,
         max_output_tokens: 0,
         tool_calling: Support::Unknown,
         text_input: Support::Supported,
         image_input: Support::Unknown,
         reasoning: vec![],
-        compat: CATALOG.presets[legacy_profile(provider)].compat.clone(),
+        compat: CATALOG.presets[profile_id(provider)?].compat.clone(),
         vision: None,
     })
 }
@@ -419,6 +508,7 @@ pub(crate) fn fixture_definition(kind: AiProviderKind, context: u64) -> ModelDef
         _ => ReasoningEncoding::Thinking,
     };
     ModelDefinition {
+        display_name: None,
         context_window: context,
         max_output_tokens: 4096.min(context / 4),
         tool_calling: Support::Supported,
@@ -442,5 +532,9 @@ pub(crate) fn preset_models(
     if preset.kind != kind {
         return Err("UNSUPPORTED_OPTION: preset protocol mismatch".into());
     }
-    Ok(preset.models.clone())
+    Ok(preset
+        .models
+        .iter()
+        .map(|(id, model)| (id.clone(), model.resolve(&preset.compat)))
+        .collect())
 }

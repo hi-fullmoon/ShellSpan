@@ -1,4 +1,4 @@
-//! Legacy provider DTO and compatibility helpers, retained until stages B/C.
+//! Provider request DTO and protocol helpers.
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -24,8 +24,7 @@ pub(crate) struct AiProviderConfig {
         deserialize_with = "crate::agent_runtime::RetryPolicy::deserialize_optional"
     )]
     pub(crate) retry_policy: Option<crate::agent_runtime::RetryPolicy>,
-    #[serde(default)]
-    pub(crate) profile: Option<String>,
+    pub(crate) profile: String,
     pub(crate) id: String,
     pub(crate) kind: AiProviderKind,
     pub(crate) base_url: String,
@@ -155,45 +154,4 @@ pub(crate) fn endpoint_url(provider: &AiProviderConfig, path: &str) -> Result<Ur
         path.trim_start_matches('/'),
     ));
     Ok(url)
-}
-
-/// Only the existing ai.providers setting is a declaration source during v4 recovery.
-#[cfg(test)]
-pub(crate) fn restore_model_definition(
-    provider: &mut AiProviderConfig,
-    preferences: &[(String, String)],
-) -> Result<(), String> {
-    if provider.model_definition.is_some() {
-        return Ok(());
-    }
-    let Some((_, raw)) = preferences.iter().find(|(key, _)| key == "ai.providers") else {
-        return Ok(());
-    };
-    let values: Vec<Value> =
-        serde_json::from_str(raw).map_err(|e| format!("invalid ai.providers: {e}"))?;
-    let matches: Vec<_> = values
-        .iter()
-        .filter(|value| {
-            value["id"] == provider.id
-                && value["kind"] == serde_json::to_value(provider.kind).unwrap()
-                && value["baseUrl"] == provider.base_url
-                && value["model"] == provider.model
-        })
-        .collect();
-    if matches.len() > 1 {
-        return Err("UNSUPPORTED_OPTION: ambiguous persisted model declaration".into());
-    }
-    if let Some(value) = matches.first() {
-        // A changed explicit profile changes compatibility identity too.
-        if value.get("profile").and_then(Value::as_str) != provider.profile.as_deref() {
-            return Ok(());
-        }
-        if let Some(definition) = value.get("modelDefinition").filter(|d| !d.is_null()) {
-            provider.model_definition = Some(
-                serde_json::from_value(definition.clone())
-                    .map_err(|e| format!("invalid model declaration: {e}"))?,
-            );
-        }
-    }
-    Ok(())
 }

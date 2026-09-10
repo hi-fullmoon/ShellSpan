@@ -38,6 +38,7 @@ pub(crate) trait ModelAdapter: Send + Sync {
     ) -> Result<ModelResponse, NormalizedModelError>;
 }
 
+#[cfg(test)]
 pub(crate) trait ModelAdapterFactory: Send + Sync {
     fn create(
         &self,
@@ -55,11 +56,13 @@ pub(crate) trait RequestImageResolver: Send + Sync {
         cancellation: &CancellationToken,
     ) -> Result<(), String>;
 }
+#[cfg(test)]
 pub(crate) struct ImageResolvingAdapter {
     pub(crate) inner: Arc<dyn ModelAdapter>,
     pub(crate) images: Arc<dyn RequestImageResolver>,
     pub(crate) provider: AiProviderConfig,
 }
+#[cfg(test)]
 #[async_trait]
 impl ModelAdapter for ImageResolvingAdapter {
     fn replay_codec(&self) -> &'static dyn ReplayCodec {

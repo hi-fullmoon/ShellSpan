@@ -125,10 +125,7 @@ impl ReplayCodec for AnthropicReplayCodec {
     ) -> Result<Value, NormalizedModelError> {
         let crate::llm::replay::ReplayEnvelopeV5::Prepared {
             response, blocks, ..
-        } = envelope
-        else {
-            return Ok(json!({}));
-        };
+        } = envelope;
         for (block, replay) in content.iter_mut().zip(blocks) {
             match block {
                 ModelContentBlock::Reasoning { provider_item, .. } => {
@@ -1100,7 +1097,7 @@ mod tests {
         crate::llm::config::AiProviderConfig {
             model_definition: None,
             retry_policy: None,
-            profile: Some("anthropic".into()),
+            profile: "anthropic".into(),
             id: "anthropic-route".into(),
             kind: crate::llm::config::AiProviderKind::AnthropicMessages,
             base_url,

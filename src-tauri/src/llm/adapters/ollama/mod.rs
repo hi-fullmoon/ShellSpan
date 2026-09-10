@@ -53,10 +53,7 @@ impl ReplayCodec for OllamaReplayCodec {
     ) -> Result<Value, NormalizedModelError> {
         let crate::llm::replay::ReplayEnvelopeV5::Prepared {
             response, blocks, ..
-        } = envelope
-        else {
-            return Ok(json!({}));
-        };
+        } = envelope;
         for (content, replay) in content.iter_mut().zip(blocks) {
             if let ModelContentBlock::ToolCall { call } = content {
                 call.provider_call_id = replay
