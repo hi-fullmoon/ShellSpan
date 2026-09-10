@@ -1,12 +1,9 @@
 {
   "version": 1,
-  "policy": "Migrated ShellSpan limits; conservative application budgets, not current advertised provider maxima. Exact IDs only; discovery does not declare capabilities.",
+  "policy": "Exact model capabilities with provider-owned protocol defaults and model-local compatibility overrides. Limits are conservative ShellSpan application budgets, not current advertised provider maxima; discovery does not declare capabilities.",
   "presets": {
     "anthropic": {
       "kind": "anthropicMessages",
-      "legacyHosts": [
-        "api.anthropic.com"
-      ],
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -51,21 +48,6 @@
               "displayName": "Max"
             }
           ],
-          "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "anthropicMessages",
-            "reasoningEncoding": "anthropicAdaptive",
-            "clearThinking": false,
-            "defaultThinking": false
-          },
           "vision": {
             "maxRequestImages": 20,
             "maxRequestImageBytes": 20971520,
@@ -101,21 +83,6 @@
               "displayName": "Max"
             }
           ],
-          "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "anthropicMessages",
-            "reasoningEncoding": "anthropicAdaptive",
-            "clearThinking": false,
-            "defaultThinking": false
-          },
           "vision": {
             "maxRequestImages": 20,
             "maxRequestImageBytes": 20971520,
@@ -151,21 +118,6 @@
               "displayName": "Max"
             }
           ],
-          "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "anthropicMessages",
-            "reasoningEncoding": "anthropicAdaptive",
-            "clearThinking": false,
-            "defaultThinking": false
-          },
           "vision": {
             "maxRequestImages": 20,
             "maxRequestImageBytes": 20971520,
@@ -177,9 +129,6 @@
     },
     "openai": {
       "kind": "openAi",
-      "legacyHosts": [
-        "api.openai.com"
-      ],
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -202,22 +151,7 @@
           "toolCalling": "supported",
           "textInput": "supported",
           "imageInput": "unsupported",
-          "reasoning": [],
-          "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "none",
-            "clearThinking": false,
-            "defaultThinking": false
-          }
+          "reasoning": []
         },
         "gpt-4.1-mini": {
           "contextWindow": 1047576,
@@ -225,22 +159,7 @@
           "toolCalling": "supported",
           "textInput": "supported",
           "imageInput": "unsupported",
-          "reasoning": [],
-          "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "none",
-            "clearThinking": false,
-            "defaultThinking": false
-          }
+          "reasoning": []
         },
         "gpt-4.1-nano": {
           "contextWindow": 1047576,
@@ -248,22 +167,7 @@
           "toolCalling": "supported",
           "textInput": "supported",
           "imageInput": "unsupported",
-          "reasoning": [],
-          "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "none",
-            "clearThinking": false,
-            "defaultThinking": false
-          }
+          "reasoning": []
         },
         "gpt-5": {
           "contextWindow": 400000,
@@ -290,19 +194,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5-mini": {
@@ -330,19 +222,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5-nano": {
@@ -370,19 +250,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5.1": {
@@ -410,19 +278,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5.2": {
@@ -454,19 +310,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5.2-codex": {
@@ -494,19 +338,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5.3-codex": {
@@ -534,19 +366,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5.3-codex-spark": {
@@ -574,19 +394,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5.4": {
@@ -618,19 +426,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5.4-mini": {
@@ -662,19 +458,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5.5": {
@@ -706,19 +490,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5.6": {
@@ -754,19 +526,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5.6-sol": {
@@ -802,19 +562,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5.6-terra": {
@@ -850,19 +598,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "gpt-5.6-luna": {
@@ -898,19 +634,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "o1": {
@@ -934,19 +658,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "o3": {
@@ -970,19 +682,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "o3-mini": {
@@ -1006,19 +706,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         },
         "o4-mini": {
@@ -1042,26 +730,13 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": false,
-            "parallelToolCalls": true,
-            "strictSchema": true,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAi",
-            "reasoningEncoding": "responses",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "responses"
           }
         }
       }
     },
     "ollama": {
       "kind": "ollama",
-      "legacyHosts": [],
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -1095,19 +770,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": true,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "ollama",
-            "reasoningEncoding": "ollama",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "ollama"
           }
         },
         "qwen3:8b": {
@@ -1127,19 +790,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": true,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "ollama",
-            "reasoningEncoding": "ollama",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "ollama"
           }
         },
         "qwen3:32b": {
@@ -1159,19 +810,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": true,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "ollama",
-            "reasoningEncoding": "ollama",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "ollama"
           }
         },
         "gpt-oss:20b": {
@@ -1195,19 +834,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": true,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "ollama",
-            "reasoningEncoding": "ollama",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "ollama"
           }
         },
         "gpt-oss:120b": {
@@ -1231,19 +858,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": true,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "ollama",
-            "reasoningEncoding": "ollama",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "ollama"
           }
         },
         "deepseek-r1": {
@@ -1263,19 +878,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": true,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "ollama",
-            "reasoningEncoding": "ollama",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "ollama"
           }
         },
         "deepseek-v3.1": {
@@ -1295,28 +898,13 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": false,
-            "thinkTagFallback": true,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "ollama",
-            "reasoningEncoding": "ollama",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "ollama"
           }
         }
       }
     },
     "deepseek": {
       "kind": "openAiCompatible",
-      "legacyHosts": [
-        "api.deepseek.com"
-      ],
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -1339,22 +927,7 @@
           "toolCalling": "supported",
           "textInput": "supported",
           "imageInput": "unsupported",
-          "reasoning": [],
-          "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "none",
-            "clearThinking": false,
-            "defaultThinking": false
-          }
+          "reasoning": []
         },
         "deepseek-reasoner": {
           "contextWindow": 65536,
@@ -1362,22 +935,7 @@
           "toolCalling": "supported",
           "textInput": "supported",
           "imageInput": "unsupported",
-          "reasoning": [],
-          "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "none",
-            "clearThinking": false,
-            "defaultThinking": false
-          }
+          "reasoning": []
         },
         "deepseek-v4-flash": {
           "contextWindow": 65536,
@@ -1404,19 +962,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "thinkingEffort",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "thinkingEffort"
           }
         },
         "deepseek-v4-pro": {
@@ -1444,29 +990,13 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "thinkingEffort",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "thinkingEffort"
           }
         }
       }
     },
     "minimax": {
       "kind": "openAiCompatible",
-      "legacyHosts": [
-        "api.minimax.io",
-        "api.minimaxi.com"
-      ],
       "compat": {
         "cumulativeStream": true,
         "supportsStreamUsage": true,
@@ -1489,22 +1019,7 @@
           "toolCalling": "supported",
           "textInput": "supported",
           "imageInput": "unsupported",
-          "reasoning": [],
-          "compat": {
-            "cumulativeStream": true,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": true,
-            "replayReasoningContent": true,
-            "thinkTagFallback": true,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "none",
-            "clearThinking": false,
-            "defaultThinking": false
-          }
+          "reasoning": []
         },
         "MiniMax-M2.1": {
           "contextWindow": 204800,
@@ -1512,22 +1027,7 @@
           "toolCalling": "supported",
           "textInput": "supported",
           "imageInput": "unsupported",
-          "reasoning": [],
-          "compat": {
-            "cumulativeStream": true,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": true,
-            "replayReasoningContent": true,
-            "thinkTagFallback": true,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "none",
-            "clearThinking": false,
-            "defaultThinking": false
-          }
+          "reasoning": []
         },
         "MiniMax-M2.5": {
           "contextWindow": 204800,
@@ -1535,22 +1035,7 @@
           "toolCalling": "supported",
           "textInput": "supported",
           "imageInput": "unsupported",
-          "reasoning": [],
-          "compat": {
-            "cumulativeStream": true,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": true,
-            "replayReasoningContent": true,
-            "thinkTagFallback": true,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "none",
-            "clearThinking": false,
-            "defaultThinking": false
-          }
+          "reasoning": []
         },
         "MiniMax-M2.7": {
           "contextWindow": 204800,
@@ -1558,22 +1043,7 @@
           "toolCalling": "supported",
           "textInput": "supported",
           "imageInput": "unsupported",
-          "reasoning": [],
-          "compat": {
-            "cumulativeStream": true,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": true,
-            "replayReasoningContent": true,
-            "thinkTagFallback": true,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "none",
-            "clearThinking": false,
-            "defaultThinking": false
-          }
+          "reasoning": []
         },
         "MiniMax-M3": {
           "contextWindow": 204800,
@@ -1592,30 +1062,13 @@
             }
           ],
           "compat": {
-            "cumulativeStream": true,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": true,
-            "replayReasoningContent": true,
-            "thinkTagFallback": true,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "adaptive",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "adaptive"
           }
         }
       }
     },
     "qwen": {
       "kind": "openAiCompatible",
-      "legacyHosts": [
-        "dashscope.aliyuncs.com",
-        "dashscope-intl.aliyuncs.com",
-        ".maas.aliyuncs.com"
-      ],
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -1649,19 +1102,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "enableThinking",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "enableThinking"
           }
         },
         "qwen3.8-max": {
@@ -1681,19 +1122,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "enableThinking",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "enableThinking"
           }
         },
         "qwen3-235b-a22b": {
@@ -1713,19 +1142,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "enableThinking",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "enableThinking"
           }
         },
         "qwen3-235b-a22b-thinking-2507": {
@@ -1734,22 +1151,7 @@
           "toolCalling": "supported",
           "textInput": "supported",
           "imageInput": "unsupported",
-          "reasoning": [],
-          "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "none",
-            "clearThinking": false,
-            "defaultThinking": false
-          }
+          "reasoning": []
         },
         "qwen3-thinking-2507": {
           "contextWindow": 65536,
@@ -1757,22 +1159,7 @@
           "toolCalling": "supported",
           "textInput": "supported",
           "imageInput": "unsupported",
-          "reasoning": [],
-          "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "none",
-            "clearThinking": false,
-            "defaultThinking": false
-          }
+          "reasoning": []
         },
         "qwen3-235b-a22b-instruct-2507": {
           "contextWindow": 65536,
@@ -1782,19 +1169,7 @@
           "imageInput": "unsupported",
           "reasoning": [],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": false,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "none",
-            "clearThinking": false,
-            "defaultThinking": false
+            "nativeReasoning": false
           }
         },
         "qwen3-vl-plus": {
@@ -1814,19 +1189,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "enableThinking",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "enableThinking"
           },
           "vision": {
             "maxRequestImages": 20,
@@ -1852,19 +1215,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": false,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "enableThinking",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "enableThinking"
           },
           "vision": {
             "maxRequestImages": 20,
@@ -1877,9 +1228,6 @@
     },
     "glm": {
       "kind": "openAiCompatible",
-      "legacyHosts": [
-        "open.bigmodel.cn"
-      ],
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -1913,16 +1261,6 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
             "reasoningEncoding": "thinking",
             "clearThinking": true,
             "defaultThinking": true
@@ -1945,16 +1283,6 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
             "reasoningEncoding": "thinking",
             "clearThinking": true,
             "defaultThinking": true
@@ -1977,16 +1305,6 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
             "reasoningEncoding": "thinking",
             "clearThinking": true,
             "defaultThinking": true
@@ -2009,16 +1327,6 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
             "reasoningEncoding": "thinking",
             "clearThinking": true,
             "defaultThinking": true
@@ -2041,16 +1349,6 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
             "reasoningEncoding": "thinking",
             "clearThinking": true,
             "defaultThinking": true
@@ -2093,16 +1391,6 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
             "reasoningEncoding": "thinkingEffort",
             "clearThinking": true,
             "defaultThinking": true
@@ -2112,9 +1400,6 @@
     },
     "kimi": {
       "kind": "openAiCompatible",
-      "legacyHosts": [
-        "api.kimi.com"
-      ],
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -2152,19 +1437,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "effort",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "effort"
           },
           "vision": {
             "maxRequestImages": 20,
@@ -2194,19 +1467,7 @@
             }
           ],
           "compat": {
-            "cumulativeStream": false,
-            "supportsStreamUsage": true,
-            "nativeReasoning": true,
-            "splitReasoning": false,
-            "replayReasoningContent": true,
-            "thinkTagFallback": false,
-            "parallelToolCalls": false,
-            "strictSchema": false,
-            "preservesReasoningAcrossTurns": true,
-            "protocol": "openAiCompatible",
-            "reasoningEncoding": "effort",
-            "clearThinking": false,
-            "defaultThinking": false
+            "reasoningEncoding": "effort"
           },
           "vision": {
             "maxRequestImages": 20,
@@ -2219,7 +1480,6 @@
     },
     "generic": {
       "kind": "openAiCompatible",
-      "legacyHosts": [],
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": false,

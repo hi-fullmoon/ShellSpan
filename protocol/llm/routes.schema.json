@@ -6,9 +6,7 @@
   "required": [
     "schemaVersion",
     "revision",
-    "routes",
-    "migrationComplete",
-    "migrationIssues"
+    "routes"
   ],
   "properties": {
     "schemaVersion": {
@@ -37,27 +35,6 @@
         "reasoningEffort": {
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{1,80}$"
-        }
-      }
-    },
-    "migrationComplete": {
-      "type": "boolean"
-    },
-    "migrationIssues": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "original",
-          "error"
-        ],
-        "properties": {
-          "original": {},
-          "error": {
-            "type": "string",
-            "minLength": 1
-          }
         }
       }
     },

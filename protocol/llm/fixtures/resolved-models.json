@@ -2,6 +2,210 @@
   {
     "provider": {
       "id": "fixture",
+      "profile": "anthropic",
+      "kind": "anthropicMessages",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "claude-fable-5-1",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "anthropic",
+      "kind": "anthropicMessages",
+      "modelId": "claude-fable-5-1",
+      "source": "builtinCatalog",
+      "capacityPolicy": "providerPublished2026-09-05",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "supported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "vision": {
+        "maxRequestImages": 20,
+        "maxRequestImageBytes": 20971520,
+        "reservedTokensPerImage": 4096,
+        "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after immutable normalization; not provider-reported usage. Image count and byte limits are ShellSpan safety limits."
+      },
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "anthropicMessages",
+        "reasoningEncoding": "anthropicAdaptive",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "anthropic",
+      "kind": "anthropicMessages",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "claude-opus-5",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "anthropic",
+      "kind": "anthropicMessages",
+      "modelId": "claude-opus-5",
+      "source": "builtinCatalog",
+      "capacityPolicy": "providerPublished2026-09-05",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "supported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "vision": {
+        "maxRequestImages": 20,
+        "maxRequestImageBytes": 20971520,
+        "reservedTokensPerImage": 4096,
+        "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after immutable normalization; not provider-reported usage. Image count and byte limits are ShellSpan safety limits."
+      },
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "anthropicMessages",
+        "reasoningEncoding": "anthropicAdaptive",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
+      "profile": "anthropic",
+      "kind": "anthropicMessages",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "claude-sonnet-5",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "anthropic",
+      "kind": "anthropicMessages",
+      "modelId": "claude-sonnet-5",
+      "source": "builtinCatalog",
+      "capacityPolicy": "providerPublished2026-09-05",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "supported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "Xhigh"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "vision": {
+        "maxRequestImages": 20,
+        "maxRequestImageBytes": 20971520,
+        "reservedTokensPerImage": 4096,
+        "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after immutable normalization; not provider-reported usage. Image count and byte limits are ShellSpan safety limits."
+      },
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": false,
+        "replayReasoningContent": false,
+        "thinkTagFallback": false,
+        "parallelToolCalls": true,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "anthropicMessages",
+        "reasoningEncoding": "anthropicAdaptive",
+        "clearThinking": false,
+        "defaultThinking": false
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
       "profile": "openai",
       "kind": "openAi",
       "baseUrl": "https://proxy.example/v1",
