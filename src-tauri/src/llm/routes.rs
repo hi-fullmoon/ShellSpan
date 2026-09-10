@@ -120,7 +120,9 @@ impl ProviderRoute {
             .ok_or("UNKNOWN_MODEL")?;
         let provider = AiProviderConfig {
             model_definition: Some(definition),
-            retry_policy: Some(self.retry_policy),
+            // Retry recovery is an application policy, not a route or model setting.
+            // Keep the route field wire-compatible, but always use the runtime default.
+            retry_policy: None,
             profile: Some(
                 match self.kind()? {
                     AiProviderKind::OpenAi => "openai",
@@ -673,6 +675,21 @@ mod tests {
             retry_policy: Default::default(),
             timeouts: Default::default(),
         }
+    }
+
+    #[test]
+    fn route_retry_overrides_do_not_escape_into_model_configuration() {
+        let mut route = keyed_route("route");
+        route.retry_policy = crate::agent_runtime::RetryPolicy {
+            max_attempts: 1,
+            initial_delay_ms: 0,
+            max_delay_ms: 0,
+            max_server_delay_ms: 0,
+            jitter_ratio: 0.0,
+        };
+
+        let provider = route.provider(route.defaults.as_ref().unwrap()).unwrap();
+        assert_eq!(provider.retry_policy, None);
     }
 
     #[test]
