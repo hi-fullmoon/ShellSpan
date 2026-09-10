@@ -3060,6 +3060,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invalid_update_plan_is_a_tool_error_and_the_model_retries_in_turn() {
+        let mut invalid_plan = response("");
+        invalid_plan.finish_reason = ModelFinishReason::ToolCalls;
+        set_tool_calls(
+            &mut invalid_plan,
+            vec![ModelToolCall {
+                call_id: "call-invalid-plan".into(),
+                provider_call_id: Some("provider-invalid-plan".into()),
+                name: "update_plan".into(),
+                arguments: json!({
+                    "planVersion": 1,
+                    "steps": [{
+                        "id": "inspect",
+                        "title": "Inspect the target",
+                        "status": "inProgress",
+                        "evidenceRefs": ["terminal pwd/ls/node -v"]
+                    }]
+                }),
+            }],
+        );
+        let mut corrected_plan = response("");
+        corrected_plan.finish_reason = ModelFinishReason::ToolCalls;
+        set_tool_calls(
+            &mut corrected_plan,
+            vec![ModelToolCall {
+                call_id: "call-corrected-plan".into(),
+                provider_call_id: Some("provider-corrected-plan".into()),
+                name: "update_plan".into(),
+                arguments: json!({
+                    "planVersion": 1,
+                    "steps": [{
+                        "id": "inspect",
+                        "title": "Inspect the target",
+                        "status": "inProgress",
+                        "evidenceRefs": ["terminal-check"]
+                    }]
+                }),
+            }],
+        );
+        let adapter = FakeAdapter::new(vec![
+            FakeScript::Reply {
+                chunks: Vec::new(),
+                response: invalid_plan,
+            },
+            FakeScript::Reply {
+                chunks: Vec::new(),
+                response: corrected_plan,
+            },
+            reply("The corrected plan is recorded.", &[]),
+        ]);
+        let (_root, runtime) = configured(adapter.clone());
+        create(&runtime, "session-invalid-plan");
+        runtime
+            .followup(
+                "session-invalid-plan",
+                "message-invalid-plan".into(),
+                "make a plan".into(),
+            )
+            .unwrap();
+        runtime
+            .start("session-invalid-plan", provider(), None)
+            .unwrap();
+        runtime.await_idle("session-invalid-plan").await.unwrap();
+
+        let events = all_events(&runtime, "session-invalid-plan");
+        assert_eq!(adapter.request_count(), 3);
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::ToolResult {
+                call_id,
+                status: AgentToolResultStatus::Failed,
+                summary,
+                ..
+            } if call_id == "call-invalid-plan"
+                && summary.contains("invalid update_plan arguments: evidenceId")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::TaskPlan { version: 1, steps }
+                if steps.len() == 1
+                    && steps[0].evidence_refs == ["terminal-check"]
+        )));
+        assert!(!events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::TaskState { recovery: Some(recovery), .. }
+                if recovery.summary.as_deref().is_some_and(|summary| {
+                    summary.starts_with("toolSchedulerFailure:")
+                })
+        )));
+        assert_eq!(
+            runtime.session("session-invalid-plan").unwrap().status,
+            AgentSessionStatus::Idle
+        );
+    }
+
+    #[tokio::test]
     async fn restart_restores_a_committed_tool_boundary_without_reissuing_the_model_request() {
         let mut tool_response = response("");
         tool_response.finish_reason = ModelFinishReason::ToolCalls;
