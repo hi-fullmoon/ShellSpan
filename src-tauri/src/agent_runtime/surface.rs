@@ -190,7 +190,7 @@ fn append_surface_events<'a>(
         match &event.payload {
             AgentSessionEventPayload::SessionResumed {}
             | AgentSessionEventPayload::TurnEnd { .. } => {
-                // A stopped legacy session may contain tool calls without outcomes.
+                // An interrupted session may contain tool calls without outcomes.
                 // Close their model protocol pairs without executing or asserting an outcome.
                 let mut pending = Vec::new();
                 for message in messages.iter() {

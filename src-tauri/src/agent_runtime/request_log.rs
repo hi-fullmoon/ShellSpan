@@ -58,7 +58,7 @@ pub(super) fn request_events(
         } else if provider_id != &provider.id
             || model != &provider.model
             || previous_effort != &reasoning_effort
-            || snapshot_digest.as_deref() != Some(&snapshot.digest())
+            || snapshot_digest != &snapshot.digest()
             || system_prompt != &request.system_prompt
             || tool_schemas != &request.tools
         {
@@ -74,14 +74,14 @@ pub(super) fn request_events(
         header_request_id.clone_from(&request.request_id);
         payloads.push(Payload::RequestHeader {
             request_id: request.request_id.clone(),
-            snapshot: Some(snapshot.clone()),
-            snapshot_digest: Some(snapshot.digest()),
+            snapshot: snapshot.clone(),
+            snapshot_digest: snapshot.digest(),
             provider_id: provider.id.clone(),
             model: provider.model.clone(),
             reasoning_effort: reasoning_effort.clone(),
             reason,
             series: series.clone(),
-            snapshot_reason: Some(snapshot_reason),
+            snapshot_reason,
             system_prompt: request.system_prompt.clone(),
             tool_schemas: request.tools.clone(),
             attempt,

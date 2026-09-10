@@ -361,12 +361,14 @@ pub(crate) fn parse_skill(
             _ => Err(format!("{name} must be a YAML boolean")),
         }
     };
-    for (legacy, canonical) in [
+    for (removed, canonical) in [
         ("userInvocable", "user-invocable"),
         ("disableModelInvocation", "disable-model-invocation"),
     ] {
-        if metadata.contains_key(key(legacy)) {
-            return Err(format!("use {canonical}, not legacy {legacy}"));
+        if metadata.contains_key(key(removed)) {
+            return Err(format!(
+                "unsupported metadata field {removed}; use {canonical}"
+            ));
         }
     }
     let name = string("name")?;
@@ -509,7 +511,7 @@ mod tests {
         assert!(d.entry.model_invocable && d.entry.user_invocable);
     }
     #[test]
-    fn skill_yaml_rejects_ambiguous_booleans_legacy_duplicates_and_invalid_types() {
+    fn skill_yaml_rejects_ambiguous_booleans_removed_aliases_and_invalid_types() {
         for field in ["disable-model-invocation", "user-invocable"] {
             for value in [
                 "\"false\"",

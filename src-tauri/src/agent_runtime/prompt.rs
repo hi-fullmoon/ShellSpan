@@ -249,7 +249,7 @@ mod tests {
                 local_root: Some("/workspace".into()),
             }),
             permission_mode: Some(AgentSessionPermissionMode::ScopedAutopilot),
-            execution_surface: Default::default(),
+            execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
             success_criteria: vec!["Report only observed facts.".into()],
             capability_scope: Some(AgentCapabilityScope {
                 tool_names: vec!["read_file".into(), "list_directory".into()],

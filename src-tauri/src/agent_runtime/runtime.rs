@@ -180,21 +180,6 @@ impl Default for AgentRuntimeBuilder {
 }
 
 impl AgentRuntime {
-    pub(crate) fn convert_v4_session(
-        &self,
-        root: &std::path::Path,
-        session_id: &str,
-    ) -> Result<crate::llm::migration::ConversionResult, String> {
-        if self.agents.get(session_id)?.is_some() {
-            return Err("MIGRATION_BUSY: Agent is running".into());
-        }
-        self.sessions.with_offline_session_lock(session_id, || {
-            crate::llm::migration::convert_v4_to_v5(
-                &root.join("sessions-v4").join(format!("{session_id}.jsonl")),
-                &root.join("sessions-v5").join(format!("{session_id}.jsonl")),
-            )
-        })
-    }
     pub(crate) async fn prepare_images(
         &self,
         uploads: Vec<super::images::ImageUpload>,
@@ -470,8 +455,7 @@ impl AgentRuntime {
                 .restore_selection(selected.as_ref().unwrap_or(&question.provider))?;
             crate::ai::validate_provider_config(&provider, true)?;
             // Production continuations resolve the exact versioned credential in
-            // LlmRuntime::prepare_model. The legacy key lookup is retained only
-            // for isolated runtime unit tests which do not install a RouteStore.
+            // LlmRuntime::prepare_model. Isolated unit tests install fixture keys.
             #[cfg(not(test))]
             let api_key = None;
             #[cfg(test)]
@@ -505,11 +489,11 @@ impl AgentRuntime {
     }
 
     #[cfg(test)]
-    pub(crate) fn configure_model_preferences(
+    pub(crate) fn configure_test_model(
         &self,
-        database: crate::db::Database,
+        provider: crate::ai::AiProviderConfig,
     ) -> Result<(), String> {
-        self.models.configure_preferences(database)
+        self.models.register_test_config(provider)
     }
     pub(crate) fn configure_credentials(
         &self,
@@ -2276,7 +2260,7 @@ mod tests {
                 AiProviderKind::Ollama,
                 32768,
             )),
-            profile: None,
+            profile: "ollama".into(),
             retry_policy: None,
             id: "fake".into(),
             kind: AiProviderKind::Ollama,
@@ -2311,19 +2295,12 @@ mod tests {
         configured_with_native(adapter, config, Arc::new(FakeNativeRuntime))
     }
 
-    fn configure_test_model_preferences(
+    fn register_test_model(
         runtime: &AgentRuntime,
-        root: &std::path::Path,
+        _root: &std::path::Path,
         config: &AiProviderConfig,
     ) {
-        let database = crate::db::Database::open(&root.join("test-ai-settings.db")).unwrap();
-        database.save_preferences(&[("ai.providers".into(), serde_json::json!([{
-            "id":config.id, "kind":config.kind, "baseUrl":config.base_url, "model":config.model,
-            "profile":config.profile, "modelDefinition":config.model_definition,
-            "reasoningEffort":config.reasoning_effort,
-            "requiresApiKey":config.requires_api_key,
-        }]).to_string())]).unwrap();
-        runtime.configure_model_preferences(database).unwrap();
+        runtime.configure_test_model(config.clone()).unwrap();
     }
 
     fn configured_with_native(
@@ -2338,7 +2315,7 @@ mod tests {
             .driver_config(config)
             .build();
         runtime.configure(root.path().to_path_buf()).unwrap();
-        configure_test_model_preferences(&runtime, root.path(), &provider());
+        register_test_model(&runtime, root.path(), &provider());
         (root, runtime)
     }
 
@@ -2363,7 +2340,7 @@ mod tests {
                     local_root: None,
                 }),
                 permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
-                execution_surface: Default::default(),
+                execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
                 success_criteria: vec!["command result is recorded".into()],
                 capability_scope: None,
                 subagent: None,
@@ -2430,6 +2407,14 @@ mod tests {
             checkpoint.request_id.as_deref(),
             Some(adapter.requests.lock().unwrap()[1].request_id.as_str())
         );
+        let request_snapshot = events
+            .iter()
+            .rev()
+            .find_map(|event| match &event.payload {
+                AgentSessionEventPayload::RequestHeader { snapshot, .. } => Some(snapshot.clone()),
+                _ => None,
+            })
+            .unwrap();
         let mut changed = adapter.requests.lock().unwrap()[1].clone();
         changed.system_prompt.push_str("\nNew guidance.");
         let changed_events = super::super::request_log::request_events(
@@ -2437,14 +2422,14 @@ mod tests {
             &entry,
             &entry.model().unwrap().provider,
             &changed,
-            &crate::llm::runtime::RequestSnapshot::LegacyUnknown,
+            &request_snapshot,
             AgentRequestReason::Initial,
             1,
         );
         assert!(matches!(
             changed_events[0],
             AgentSessionEventPayload::RequestHeader {
-                snapshot_reason: Some(AgentRequestSnapshotReason::Change),
+                snapshot_reason: AgentRequestSnapshotReason::Change,
                 ..
             }
         ));
@@ -2456,12 +2441,12 @@ mod tests {
                 &entry,
                 &entry.model().unwrap().provider,
                 &changed,
-                &crate::llm::runtime::RequestSnapshot::LegacyUnknown,
+                &request_snapshot,
                 AgentRequestReason::Initial,
                 1,
             )[0],
             AgentSessionEventPayload::RequestHeader {
-                snapshot_reason: Some(AgentRequestSnapshotReason::Change),
+                snapshot_reason: AgentRequestSnapshotReason::Change,
                 ..
             }
         ));
@@ -2473,12 +2458,12 @@ mod tests {
                 &entry,
                 &entry.model().unwrap().provider,
                 &changed,
-                &crate::llm::runtime::RequestSnapshot::LegacyUnknown,
+                &request_snapshot,
                 AgentRequestReason::Recovery,
                 2,
             )[0],
             AgentSessionEventPayload::RequestHeader {
-                snapshot_reason: Some(AgentRequestSnapshotReason::Series),
+                snapshot_reason: AgentRequestSnapshotReason::Series,
                 series: super::super::AgentRequestSeries {
                     request_index: 0,
                     starts_series: true,
@@ -2509,7 +2494,7 @@ mod tests {
             .filter_map(|event| match &event.payload {
                 AgentSessionEventPayload::RequestHeader {
                     snapshot_reason, ..
-                } => *snapshot_reason,
+                } => Some(*snapshot_reason),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -4678,7 +4663,7 @@ mod tests {
             let mut config = provider();
             config.model_definition = None;
             config.kind = AiProviderKind::OpenAiCompatible;
-            config.profile = Some("deepseek".into());
+            config.profile = "deepseek".into();
             config.model = "deepseek-v4-flash".into();
             config.reasoning_effort = None;
             config.base_url = url;
@@ -4841,7 +4826,7 @@ mod tests {
             create(&runtime, "parent-policy");
             let mut config = provider();
             config.retry_policy = Some(instant_policy(limit));
-            config.profile = Some("ollama".into());
+            config.profile = "ollama".into();
             runtime.start("parent-policy", config, None).unwrap();
             runtime.await_idle("parent-policy").await.unwrap();
             let child = runtime

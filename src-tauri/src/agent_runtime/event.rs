@@ -141,10 +141,9 @@ pub(crate) enum AgentSessionPermissionMode {
     Operator,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AgentExecutionSurface {
-    #[default]
     Direct,
     BoundTerminal,
 }
@@ -508,7 +507,6 @@ pub(crate) enum AgentSessionEventPayload {
         target: Option<AgentSessionTarget>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         permission_mode: Option<AgentSessionPermissionMode>,
-        #[serde(default)]
         execution_surface: AgentExecutionSurface,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         success_criteria: Vec<String>,
@@ -647,18 +645,15 @@ pub(crate) enum AgentSessionEventPayload {
     RequestHeader {
         request_id: String,
         /// Complete secret-free preparation record. D will validate replay envelopes against it.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        snapshot: Option<crate::llm::runtime::RequestSnapshot>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        snapshot_digest: Option<String>,
+        snapshot: crate::llm::runtime::RequestSnapshot,
+        snapshot_digest: String,
         provider_id: String,
         model: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reasoning_effort: Option<String>,
         reason: AgentRequestReason,
         series: AgentRequestSeries,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        snapshot_reason: Option<AgentRequestSnapshotReason>,
+        snapshot_reason: AgentRequestSnapshotReason,
         system_prompt: String,
         tool_schemas: Vec<AgentRequestToolSchema>,
         attempt: u32,
@@ -1041,18 +1036,28 @@ mod tests {
     }
 
     #[test]
-    fn cross_language_v5_fixture_round_trips_without_field_loss() {
-        let raw = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../src/test/fixtures/agent-session-v5.json"
-        ));
-        let expected = serde_json::from_str::<Value>(raw).unwrap();
-        let events = serde_json::from_str::<Vec<AgentSessionEvent>>(raw).unwrap();
-        assert_eq!(events.len(), 15);
-        assert!(events
-            .iter()
-            .all(|event| event.version == AGENT_SESSION_EVENT_VERSION));
-        assert_eq!(serde_json::to_value(events).unwrap(), expected);
+    fn decoder_rejects_removed_session_and_replay_shapes() {
+        let missing_surface = serde_json::json!({
+            "version": 5,
+            "sessionId": "session-1",
+            "seq": 0,
+            "timeUnixMs": 1000,
+            "type": "session/created",
+            "data": { "taskId": "task-1", "goal": "goal" }
+        });
+        assert!(serde_json::from_value::<AgentSessionEvent>(missing_surface).is_err());
+        assert!(
+            serde_json::from_value::<crate::llm::runtime::RequestSnapshot>(
+                serde_json::json!({ "status": "legacyUnknown" })
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<crate::llm::replay::ReplayEnvelopeV5>(
+                serde_json::json!({ "status": "legacyUnknown", "archivedProviderItems": true })
+            )
+            .is_err()
+        );
     }
 
     #[test]
