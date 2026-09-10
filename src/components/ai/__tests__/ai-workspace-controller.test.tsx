@@ -23,6 +23,7 @@ import * as visionContract from '@/lib/ai/vision-contract';
 const provider = {
   id: 'provider-test',
   preset: 'custom' as const,
+  profile: 'generic' as const,
   name: 'Provider test',
   kind: 'openAiCompatible' as const,
   baseUrl: 'https://example.invalid',
@@ -51,7 +52,7 @@ function setNativeRoute(routeId: string, modelId: string, routeRevision: number)
   const resolved = routeModel(routeId, modelId);
   useLlmRoutesStore.setState({
     snapshot: {
-      schemaVersion: 1, revision: 12, migrationComplete: true, migrationIssues: [],
+      schemaVersion: 1, revision: 12,
       defaultSelection: { routeId, modelId },
       routes: [{
         id: routeId, revision: routeRevision, displayName: 'RouteStore default',
@@ -319,7 +320,7 @@ it.each(['', ' \n\t '])('routes image-only text %j through image submission', as
   }
 });
 
-it('uses the RouteStore global selection when the legacy default id differs', () => {
+it('uses the RouteStore global selection regardless of browser fixture state', () => {
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
   setNativeRoute('route-default', 'route-model', 7);
   useAiSettingsStore.setState({ providers: [provider], defaultProviderId: provider.id });

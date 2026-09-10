@@ -17,8 +17,6 @@ import { useLlmRoutesStore } from '../llmRoutesStore';
 const snapshot = (revision: number): RouteSnapshot => ({
   schemaVersion: 1,
   revision,
-  migrationComplete: true,
-  migrationIssues: [],
   defaultSelection: { routeId: 'route-a', modelId: 'model-a' },
   routes: [{
     id: 'route-a', revision, displayName: 'Connection A', adapterId: 'chat-completions',

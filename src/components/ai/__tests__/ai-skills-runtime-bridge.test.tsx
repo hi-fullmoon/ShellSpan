@@ -28,7 +28,7 @@ describe.runIf(Boolean(transport.config))('controller to production Runtime and 
     const state = async (): Promise<BridgeState> => (await (await fetch(bridge.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: '__state', args: {} }) })).json()).value;
     useAppStore.setState({ locale: 'en-US' }); await initI18n('en-US');
     useAgentPermissionStore.getState().resetAll();
-    useAiSettingsStore.setState({ defaultProviderId: 'bridge', providers: [{ id: 'bridge', preset: 'custom', name: 'Test HTTP receiver', kind: 'openAiCompatible', baseUrl: bridge.modelUrl, model: 'test-model', requiresApiKey: false }] });
+    useAiSettingsStore.setState({ defaultProviderId: 'bridge', providers: [{ id: 'bridge', preset: 'custom', profile: 'generic', name: 'Test HTTP receiver', kind: 'openAiCompatible', baseUrl: bridge.modelUrl, model: 'test-model', requiresApiKey: false }] });
     for (const mode of ['menu', 'manual']) {
       useTerminalStore.setState({ activeSessionId: `local-${mode}`, sessions: [{ sessionId: `local-${mode}`, title: 'Local fixture', host: 'local', port: 0, username: 'fixture', status: 'connected' }] });
       const user = userEvent.setup(); render(<AiWorkspaceController scope="terminal" />);

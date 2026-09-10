@@ -198,7 +198,7 @@ it('vision uses exact backend DTOs and refuses unresolved or unknown models', as
 });
 
 it.each(['k3', 'k3-256k'])('accepts %s images through the resolved Kimi connection', async model => {
-  const provider = { id: 'kimi', kind: 'openAiCompatible' as const, baseUrl: 'https://api.kimi.com/coding', model, requiresApiKey: true };
+  const provider = { id: 'kimi', profile: 'kimi' as const, kind: 'openAiCompatible' as const, baseUrl: 'https://api.kimi.com/coding', model, requiresApiKey: true };
   await loadResolvedModel(provider);
   expect(() => requireVision(provider)).not.toThrow();
   expect(providerCapabilities(provider).contextWindow).toBe(262144);
