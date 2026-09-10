@@ -219,11 +219,8 @@ pub fn run() {
             }
             let home_dir = app.path().home_dir()?;
             let shellspan_dir = shellspan_data_dir(&home_dir);
-            let database = db::Database::open(&shellspan_dir.join("shellspan.db"))?;
+            let database = db::Database::open(&shellspan_dir.join("shellspan-v1.db"))?;
             let credentials = keychain::CredentialManager::new();
-            ai::migrate_inline_api_keys(&credentials, &database).map_err(|error| {
-                format!("failed to migrate inline AI API keys to the system keychain: {error}")
-            })?;
             app.manage(petdex::PetdexAdapter::new(home_dir));
             app.manage(credentials.clone());
             let routes = llm::routes::RouteStore::open(database.clone(), credentials.clone())
@@ -268,8 +265,6 @@ pub fn run() {
             ai::ai_save_routes,
             ai::ai_list_route_models,
             ai::ai_resolve_selection,
-            ai::ai_convert_session_v4_to_v5,
-            ai::ai_list_session_migrations,
             ai::ai_list_models,
             ai::ai_resolve_model,
             ai::ai_model_declaration_template,

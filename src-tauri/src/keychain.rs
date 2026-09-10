@@ -2,11 +2,9 @@ use log::debug;
 use std::sync::{Arc, OnceLock};
 
 #[cfg(any(target_os = "macos", test))]
-use log::warn;
+use std::collections::BTreeMap;
 #[cfg(test)]
 use std::collections::HashMap;
-#[cfg(any(target_os = "macos", test))]
-use std::collections::{BTreeMap, BTreeSet};
 #[cfg(any(target_os = "macos", test))]
 use std::sync::Mutex;
 
@@ -91,9 +89,9 @@ const CREDENTIAL_VAULT_SERVICE: &str = credential_service_for_mode(
 );
 #[cfg(any(target_os = "macos", test))]
 const CREDENTIAL_VAULT_ACCOUNT: &str =
-    credential_service_for_mode("shellspan-v1", "shellspan-dev-v1", cfg!(debug_assertions));
+    credential_service_for_mode("shellspan-v2", "shellspan-dev-v2", cfg!(debug_assertions));
 #[cfg(any(target_os = "macos", test))]
-const CREDENTIAL_VAULT_VERSION: u32 = 1;
+const CREDENTIAL_VAULT_VERSION: u32 = 2;
 
 /// Kinds of per-profile secrets other than the main login password.
 ///
@@ -145,8 +143,8 @@ struct NativeKeychainBackend;
 ///
 /// Windows keeps individual credentials because Credential Manager imposes a
 /// small per-item blob limit. Linux keeps the native Secret Service layout.
-/// The wrapper is also compiled for tests so its migration and isolation
-/// semantics can be exercised without touching the real Keychain.
+/// The wrapper is also compiled for tests so its isolation semantics can be
+/// exercised without touching the real Keychain.
 #[cfg(any(target_os = "macos", test))]
 struct VaultCredentialBackend {
     inner: Arc<dyn CredentialBackend>,
@@ -155,14 +153,10 @@ struct VaultCredentialBackend {
 
 #[cfg(any(target_os = "macos", test))]
 #[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CredentialVault {
     version: u32,
-    #[serde(default)]
     entries: BTreeMap<String, BTreeMap<String, String>>,
-    /// Prevents a deleted vault value from falling back to an older per-item
-    /// Keychain entry if best-effort legacy cleanup could not remove it.
-    #[serde(default)]
-    tombstones: BTreeMap<String, BTreeSet<String>>,
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -171,7 +165,6 @@ impl Default for CredentialVault {
         Self {
             version: CREDENTIAL_VAULT_VERSION,
             entries: BTreeMap::new(),
-            tombstones: BTreeMap::new(),
         }
     }
 }
@@ -185,23 +178,11 @@ impl CredentialVault {
             .map(String::as_str)
     }
 
-    fn is_tombstoned(&self, service: &str, key: &str) -> bool {
-        self.tombstones
-            .get(service)
-            .is_some_and(|keys| keys.contains(key))
-    }
-
     fn insert(&mut self, service: &str, key: &str, value: &str) {
         self.entries
             .entry(service.to_string())
             .or_default()
             .insert(key.to_string(), value.to_string());
-        if let Some(keys) = self.tombstones.get_mut(service) {
-            keys.remove(key);
-            if keys.is_empty() {
-                self.tombstones.remove(service);
-            }
-        }
     }
 
     fn remove(&mut self, service: &str, key: &str) {
@@ -211,10 +192,6 @@ impl CredentialVault {
                 self.entries.remove(service);
             }
         }
-        self.tombstones
-            .entry(service.to_string())
-            .or_default()
-            .insert(key.to_string());
     }
 }
 
@@ -285,28 +262,8 @@ impl CredentialBackend for VaultCredentialBackend {
     fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String> {
         Self::validate_logical_specifier(service, key)?;
         let _guard = self.lock_operations()?;
-        let mut vault = self.load_vault()?;
-        if let Some(value) = vault.get(service, key) {
-            return Ok(Some(value.to_string()));
-        }
-        if vault.is_tombstoned(service, key) {
-            return Ok(None);
-        }
-
-        // Lazily migrate an older one-item-per-secret entry. Accessing that
-        // legacy item may require its final authorization, but all subsequent
-        // reads use the shared vault item.
-        let Some(value) = self.inner.get_credential(service, key)? else {
-            return Ok(None);
-        };
-        vault.insert(service, key, &value);
-        self.save_vault(&vault)?;
-        if let Err(error) = self.inner.delete_credential(service, key) {
-            warn!(
-                "Could not remove migrated legacy credential service={service} key={key}: {error}"
-            );
-        }
-        Ok(Some(value))
+        let vault = self.load_vault()?;
+        Ok(vault.get(service, key).map(str::to_string))
     }
 
     fn delete_credential(&self, service: &str, key: &str) -> Result<(), String> {
@@ -314,12 +271,7 @@ impl CredentialBackend for VaultCredentialBackend {
         let _guard = self.lock_operations()?;
         let mut vault = self.load_vault()?;
         vault.remove(service, key);
-        self.save_vault(&vault)?;
-
-        // The tombstone already makes deletion effective inside ShellSpan. Try
-        // to remove a possible legacy item as well so no stale secret remains
-        // in Keychain after upgrading.
-        self.inner.delete_credential(service, key)
+        self.save_vault(&vault)
     }
 }
 
@@ -925,7 +877,7 @@ mod tests {
             CREDENTIAL_VAULT_SERVICE,
             "com.shellspan.dev.credential-vault"
         );
-        assert_eq!(CREDENTIAL_VAULT_ACCOUNT, "shellspan-dev-v1");
+        assert_eq!(CREDENTIAL_VAULT_ACCOUNT, "shellspan-dev-v2");
     }
 
     #[cfg(not(debug_assertions))]
@@ -940,7 +892,7 @@ mod tests {
         assert_eq!(AI_KEY_SERVICE, "com.shellspan.ai-provider");
         assert_eq!(MCP_CREDENTIAL_SERVICE, "com.shellspan.mcp");
         assert_eq!(CREDENTIAL_VAULT_SERVICE, "com.shellspan.credential-vault");
-        assert_eq!(CREDENTIAL_VAULT_ACCOUNT, "shellspan-v1");
+        assert_eq!(CREDENTIAL_VAULT_ACCOUNT, "shellspan-v2");
     }
 
     #[test]
@@ -987,47 +939,34 @@ mod tests {
     }
 
     #[test]
-    fn vault_backend_lazily_migrates_and_removes_legacy_items() {
+    fn vault_backend_does_not_read_per_item_credentials() {
         let backend = Arc::new(MockBackend::default());
         backend
-            .set_credential(PROFILE_PASSWORD_SERVICE, "profile-1", "legacy-password")
+            .set_credential(PROFILE_PASSWORD_SERVICE, "profile-1", "obsolete-password")
             .unwrap();
         let manager = CredentialManager::with_vault_backend(backend.clone());
 
         assert_eq!(
             manager
                 .get_credential(PROFILE_PASSWORD_SERVICE, "profile-1")
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            backend
+                .get_credential(PROFILE_PASSWORD_SERVICE, "profile-1")
                 .unwrap()
                 .as_deref(),
-            Some("legacy-password")
-        );
-
-        let credentials = backend.credentials.lock().unwrap();
-        assert!(credentials
-            .get(PROFILE_PASSWORD_SERVICE)
-            .is_none_or(HashMap::is_empty));
-        let payload = credentials
-            .get(CREDENTIAL_VAULT_SERVICE)
-            .and_then(|entries| entries.get(CREDENTIAL_VAULT_ACCOUNT))
-            .unwrap();
-        let vault: CredentialVault = serde_json::from_str(payload).unwrap();
-        assert_eq!(
-            vault.get(PROFILE_PASSWORD_SERVICE, "profile-1"),
-            Some("legacy-password")
+            Some("obsolete-password")
         );
     }
 
     #[test]
-    fn vault_delete_preserves_other_credentials_and_tombstones_legacy_fallback() {
+    fn vault_delete_preserves_other_credentials() {
         let backend = Arc::new(MockBackend::default());
         let manager = CredentialManager::with_vault_backend(backend.clone());
         manager.set_credential("service-a", "key-a", "a").unwrap();
         manager.set_credential("service-b", "key-b", "b").unwrap();
-
-        // Simulate a stale pre-vault item that must not reappear after delete.
-        backend
-            .set_credential("service-a", "key-a", "legacy-a")
-            .unwrap();
         manager.delete_credential("service-a", "key-a").unwrap();
 
         assert_eq!(manager.get_credential("service-a", "key-a").unwrap(), None);
@@ -1038,13 +977,6 @@ mod tests {
                 .as_deref(),
             Some("b")
         );
-        let credentials = backend.credentials.lock().unwrap();
-        let payload = credentials
-            .get(CREDENTIAL_VAULT_SERVICE)
-            .and_then(|entries| entries.get(CREDENTIAL_VAULT_ACCOUNT))
-            .unwrap();
-        let vault: CredentialVault = serde_json::from_str(payload).unwrap();
-        assert!(vault.is_tombstoned("service-a", "key-a"));
     }
 
     #[test]
