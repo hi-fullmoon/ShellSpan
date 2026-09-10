@@ -124,10 +124,7 @@ impl ReplayCodec for ResponsesReplayCodec {
     ) -> Result<Value, NormalizedModelError> {
         let crate::llm::replay::ReplayEnvelopeV5::Prepared {
             response, blocks, ..
-        } = envelope
-        else {
-            return Ok(json!({}));
-        };
+        } = envelope;
         for (content, replay) in content.iter_mut().zip(blocks) {
             match content {
                 ModelContentBlock::Reasoning { provider_item, .. } => {
