@@ -1,16 +1,17 @@
-//! Agent history projection and image-store ownership; protocol APIs are re-exported during migration.
+//! Agent history projection and image-store ownership.
 pub(crate) use super::model_tools::default_model_tools;
 use super::{
     AgentAssistantContentBlock, AgentRequestToolSchema, AgentSurfaceMessage, AgentSurfaceSnapshot,
     RecordedToolCall,
 };
 use crate::ai::AiProviderConfig;
-use crate::llm::{
-    adapter::{ImageResolvingAdapter, RequestImageResolver},
-    registry::HttpModelAdapterFactory,
-};
+#[cfg(test)]
+pub(crate) use crate::llm::adapter::ModelAdapterFactory;
+use crate::llm::adapter::RequestImageResolver;
+#[cfg(test)]
+use crate::llm::{adapter::ImageResolvingAdapter, registry::HttpModelAdapterFactory};
 pub(crate) use crate::llm::{
-    adapter::{ModelAdapter, ModelAdapterFactory, ModelStreamSink},
+    adapter::{ModelAdapter, ModelStreamSink},
     errors::*,
     types::*,
 };
@@ -97,24 +98,24 @@ impl ModelRequest {
 
 #[derive(Clone)]
 pub(crate) struct ModelRegistry {
+    #[cfg(test)]
     factory: Arc<dyn ModelAdapterFactory>,
     runtime: Arc<std::sync::Mutex<Option<crate::llm::runtime::LlmRuntime>>>,
-    legacy_configs:
-        Arc<std::sync::Mutex<std::collections::HashMap<(String, String), AiProviderConfig>>>,
     #[cfg(test)]
-    preferences: Arc<std::sync::Mutex<Option<crate::db::Database>>>,
+    test_configs:
+        Arc<std::sync::Mutex<std::collections::HashMap<(String, String), AiProviderConfig>>>,
     pub(crate) images: super::images::ImageStore,
 }
 
 impl Default for ModelRegistry {
     fn default() -> Self {
         Self {
+            #[cfg(test)]
             factory: Arc::new(HttpModelAdapterFactory),
             images: Default::default(),
             runtime: Default::default(),
-            legacy_configs: Default::default(),
             #[cfg(test)]
-            preferences: Default::default(),
+            test_configs: Default::default(),
         }
     }
 }
@@ -150,12 +151,15 @@ impl ModelRegistry {
                 Arc::new(self.images.clone()),
             );
         }
-        Ok(crate::llm::runtime::PreparedModel {
+        #[cfg(test)]
+        return Ok(crate::llm::runtime::PreparedModel {
             provider: selected.provider.clone(),
             adapter: selected.adapter.clone(),
-            route: None,
+            route: crate::llm::runtime::fixture_route(&selected.provider),
             images: Some(Arc::new(self.images.clone())),
-        })
+        });
+        #[cfg(not(test))]
+        Err("LLM_RUNTIME_UNAVAILABLE".into())
     }
 
     #[cfg(test)]
@@ -164,21 +168,16 @@ impl ModelRegistry {
             factory,
             images: Default::default(),
             runtime: Default::default(),
-            legacy_configs: Default::default(),
-            #[cfg(test)]
-            preferences: Default::default(),
+            test_configs: Default::default(),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn configure_preferences(
-        &self,
-        database: crate::db::Database,
-    ) -> Result<(), String> {
-        *self
-            .preferences
+    pub(crate) fn register_test_config(&self, provider: AiProviderConfig) -> Result<(), String> {
+        self.test_configs
             .lock()
-            .map_err(|_| "model preferences unavailable")? = Some(database);
+            .map_err(|_| "MODEL_CONFIG_UNAVAILABLE".to_string())?
+            .insert((provider.id.clone(), provider.model.clone()), provider);
         Ok(())
     }
 
@@ -186,66 +185,40 @@ impl ModelRegistry {
         &self,
         selected: &super::AgentSubagentModel,
     ) -> Result<AiProviderConfig, String> {
-        let Some(runtime) = self
+        let runtime = self
             .runtime
             .lock()
             .map_err(|_| "LLM_RUNTIME_UNAVAILABLE")?
-            .clone()
-        else {
-            #[cfg(test)]
-            if let Some(database) = self
-                .preferences
-                .lock()
-                .map_err(|_| "model preferences unavailable")?
-                .as_ref()
-            {
-                if let Some((_, encoded)) = database
-                    .load_preferences()?
-                    .into_iter()
-                    .find(|(key, _)| key == "ai.providers")
-                {
-                    let providers: Vec<AiProviderConfig> =
-                        serde_json::from_str(&encoded).map_err(|error| error.to_string())?;
-                    if let Some(provider) = providers.into_iter().find(|provider| {
-                        provider.id == selected.route_id && provider.model == selected.model_id
-                    }) {
-                        return Ok(AiProviderConfig {
-                            reasoning_effort: selected.reasoning_effort.clone(),
-                            ..provider
-                        });
-                    }
-                }
-            }
+            .clone();
+        if let Some(runtime) = runtime {
+            let snapshot = runtime.routes.snapshot()?;
+            return snapshot.route(&selected.route_id)?.provider(
+                &crate::llm::routes::ModelSelection {
+                    route_id: selected.route_id.clone(),
+                    model_id: selected.model_id.clone(),
+                    reasoning_effort: selected.reasoning_effort.clone(),
+                },
+            );
+        }
+        #[cfg(test)]
+        {
             return self
-                .legacy_configs
+                .test_configs
                 .lock()
                 .map_err(|_| "MODEL_CONFIG_UNAVAILABLE")?
                 .get(&(selected.route_id.clone(), selected.model_id.clone()))
                 .cloned()
                 .ok_or("UNKNOWN_ROUTE".into());
-        };
-        let snapshot = runtime.routes.snapshot()?;
-        snapshot
-            .route(&selected.route_id)?
-            .provider(&crate::llm::routes::ModelSelection {
-                route_id: selected.route_id.clone(),
-                model_id: selected.model_id.clone(),
-                reasoning_effort: selected.reasoning_effort.clone(),
-            })
+        }
+        #[cfg(not(test))]
+        Err("LLM_RUNTIME_UNAVAILABLE".into())
     }
 
     pub(crate) fn resolve(
         &self,
         provider: AiProviderConfig,
-        api_key: Option<String>,
+        _api_key: Option<String>,
     ) -> Result<Arc<dyn ModelAdapter>, String> {
-        self.legacy_configs
-            .lock()
-            .map_err(|_| "MODEL_CONFIG_UNAVAILABLE")?
-            .insert(
-                (provider.id.clone(), provider.model.clone()),
-                provider.clone(),
-            );
         if let Some(runtime) = self
             .runtime
             .lock()
@@ -263,14 +236,27 @@ impl ModelRegistry {
                 )?
                 .adapter);
         }
-        if let Some(policy) = provider.retry_policy {
-            policy.validate()?;
+        #[cfg(test)]
+        self.test_configs
+            .lock()
+            .map_err(|_| "MODEL_CONFIG_UNAVAILABLE")?
+            .insert(
+                (provider.id.clone(), provider.model.clone()),
+                provider.clone(),
+            );
+        #[cfg(not(test))]
+        return Err("LLM_RUNTIME_UNAVAILABLE".into());
+        #[cfg(test)]
+        {
+            if let Some(policy) = provider.retry_policy {
+                policy.validate()?;
+            }
+            Ok(Arc::new(ImageResolvingAdapter {
+                inner: self.factory.create(provider.clone(), _api_key)?,
+                images: Arc::new(self.images.clone()),
+                provider,
+            }))
         }
-        Ok(Arc::new(ImageResolvingAdapter {
-            inner: self.factory.create(provider.clone(), api_key)?,
-            images: Arc::new(self.images.clone()),
-            provider,
-        }))
     }
 }
 

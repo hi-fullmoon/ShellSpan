@@ -165,7 +165,7 @@ pub(super) fn vision_provider() -> AiProviderConfig {
     let mut value = provider();
     value.model_definition = None;
     value.kind = crate::ai::AiProviderKind::OpenAiCompatible;
-    value.profile = Some("qwen".into());
+    value.profile = "qwen".into();
     value.model = "qwen3-vl-plus".into();
     value.reasoning_effort = None;
     value

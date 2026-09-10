@@ -12,7 +12,6 @@ use tokio_util::sync::CancellationToken;
     deny_unknown_fields
 )]
 pub(crate) enum RequestSnapshot {
-    LegacyUnknown,
     Prepared {
         route_id: String,
         route_revision: u64,
@@ -53,7 +52,7 @@ pub(crate) fn try_digest(bytes: &[u8]) -> Result<String, super::errors::Normaliz
 pub(crate) struct PreparedModel {
     pub provider: AiProviderConfig,
     pub adapter: Arc<dyn ModelAdapter>,
-    pub route: Option<ProviderRoute>,
+    pub route: ProviderRoute,
     pub images: Option<Arc<dyn RequestImageResolver>>,
 }
 impl PreparedModel {
@@ -63,10 +62,7 @@ impl PreparedModel {
         purpose: &str,
         cancellation: &CancellationToken,
     ) -> Result<PreparedCall, String> {
-        let replay_domain_id = self
-            .route
-            .as_ref()
-            .map_or("unversioned", |route| route.replay_domain_id.as_str());
+        let replay_domain_id = self.route.replay_domain_id.as_str();
         super::replay::project_history(
             self.adapter.replay_codec(),
             &mut request.messages,
@@ -96,24 +92,17 @@ impl PreparedModel {
             .collect();
         let snapshot = RequestSnapshot::Prepared {
             route_id: self.provider.id.clone(),
-            route_revision: self.route.as_ref().map_or(0, |r| r.revision),
+            route_revision: self.route.revision,
             adapter_id: adapter_id(self.provider.kind).into(),
             model_id: self.provider.model.clone(),
             catalog_version: model.catalog_version,
             capabilities: model.definition.clone(),
             endpoint_identity: model.endpoint.to_string(),
-            replay_domain_id: self
-                .route
-                .as_ref()
-                .map_or_else(|| "unversioned".into(), |r| r.replay_domain_id.clone()),
+            replay_domain_id: self.route.replay_domain_id.clone(),
             reasoning_effort: self.provider.reasoning_effort.clone(),
             output_tokens: model.max_output_tokens,
             retry_policy: self.provider.retry_policy.unwrap_or_default(),
-            timeouts: self
-                .route
-                .as_ref()
-                .map(|r| r.timeouts.clone())
-                .unwrap_or_default(),
+            timeouts: self.route.timeouts.clone(),
             purpose: purpose.into(),
             preparation_version: 1,
             projection_policy: "immutable-png-v1-strict".into(),
@@ -266,7 +255,7 @@ impl LlmRuntime {
             return Ok(PreparedModel {
                 provider,
                 adapter,
-                route: Some(route),
+                route,
                 images: Some(images),
             });
         }
@@ -320,7 +309,7 @@ mod tests {
             requires_api_key: true,
             api_key: None,
             reasoning_effort: None,
-            profile: Some("generic".into()),
+            profile: "generic".into(),
             model_definition: Some(catalog::fixture_definition(
                 super::super::config::AiProviderKind::OpenAiCompatible,
                 8192,
@@ -328,10 +317,11 @@ mod tests {
             retry_policy: None,
         };
         let resolver = Arc::new(CountingResolver(AtomicUsize::new(0)));
+        let route = fixture_route(&provider);
         let model = PreparedModel {
             provider,
             adapter: Arc::new(NoopAdapter),
-            route: None,
+            route,
             images: Some(resolver.clone()),
         };
         let request = ModelRequest {
@@ -404,5 +394,37 @@ mod tests {
         assert_ne!(ids(&first), ids(&second));
         assert_ne!(ids(&first)[0], ids(&first)[1]);
         assert!(ids(&second).iter().all(|id| id.len() <= 128));
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_route(provider: &AiProviderConfig) -> ProviderRoute {
+    let selection = ModelSelection {
+        route_id: provider.id.clone(),
+        model_id: provider.model.clone(),
+        reasoning_effort: provider.reasoning_effort.clone(),
+    };
+    ProviderRoute {
+        id: provider.id.clone(),
+        revision: 1,
+        display_name: provider.id.clone(),
+        adapter_id: adapter_id(provider.kind).into(),
+        base_url: provider.base_url.clone(),
+        auth: if provider.requires_api_key {
+            RouteAuth::Keychain {
+                reference: "fixture".into(),
+            }
+        } else {
+            RouteAuth::None
+        },
+        replay_domain_id: format!("fixture-domain-{}", provider.id),
+        preset_id: Some(provider.profile.clone()),
+        models: provider.model_definition.clone().map(|definition| {
+            std::collections::BTreeMap::from([(provider.model.clone(), definition)])
+        }),
+        model_overrides: None,
+        defaults: Some(selection),
+        retry_policy: provider.retry_policy.unwrap_or_default(),
+        timeouts: RouteTimeouts::default(),
     }
 }
