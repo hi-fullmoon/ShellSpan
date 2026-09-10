@@ -181,7 +181,7 @@ pub struct AgentSessionHeader {
 }
 ```
 
-兼容策略：历史 Session 缺少该字段时按 `Direct` 读取，避免升级后改变既有执行行为。
+严格策略：Session 缺少该字段时拒绝读取，不推断执行方式。
 
 ### 8.2 TerminalLeaseManager
 
@@ -502,7 +502,7 @@ Phase 3 不应成为 Phase 1 发布条件。
 - 用户可在一个明确动作内中断并接管；
 - 所有终止路径均释放 lease；
 - 可视模式不绕过权限审批；
-- direct 模式保持兼容；
+- direct 模式行为保持稳定；
 - 本地 POSIX、远程 POSIX、Windows ConPTY 均通过端到端测试；
 - 敏感输出不会未经脱敏进入模型请求或持久 Session event。
 

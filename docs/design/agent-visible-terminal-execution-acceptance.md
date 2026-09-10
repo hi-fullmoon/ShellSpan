@@ -29,7 +29,7 @@
 | 一次动作中断并接管 | takeover 单次提交、Ctrl-C、operation owner 与状态条/Escape 测试 | 执行有界 `sleep` 后按 Esc，确认输入恢复且 Agent 不重试 | 自动化通过，人工待 RC |
 | 所有终止路径释放 lease | cancel、timeout、takeover、terminal close/disconnect、shutdown、重复清理、Runtime restart 内存失效；主窗口 `Destroyed` 清理 | 强制断网、关闭 terminal、销毁主窗口、重启应用各一次 | 自动化覆盖状态机；系统级人工待 RC |
 | 可视模式不绕过权限审批 | Runtime 测试断言 durable approved event 早于 dispatched，拒绝/取消时 native execution 为 0 | requestApproval 下拒绝一条有副作用命令 | 自动化通过，人工待 RC |
-| `direct` 模式兼容 | native adapter 仍把默认/历史 Session 路由到 `direct`；前端 direct terminal 无 lease UI/filter | 默认模式执行一条命令并确认绑定 terminal 无合成行 | 自动化通过，人工待 RC |
+| `direct` 模式稳定 | native adapter 按 Session 中显式记录的 `direct` 执行；前端 direct terminal 无 lease UI/filter | direct 模式执行一条命令并确认绑定 terminal 无合成行 | 自动化通过，人工待 RC |
 | 本地 POSIX、远程 POSIX、Windows ConPTY 端到端 | `local_posix_pty_visible_command_protocol_is_end_to_end`（POSIX runner）；`remote_ssh_posix_visible_command_protocol_is_end_to_end`（Docker）；`windows_conpty_visible_command_protocol_is_end_to_end` | macOS 与 Linux RC 各跑一次完整桌面流程 | Windows 与 SSH 已实跑；本地 POSIX 未在本机执行 |
 | 敏感输出不会未经脱敏进入模型或持久事件 | Rust `bound_terminal_result_is_redacted_before_model_context_and_session_persistence` 同时检查下一次模型 request、内存事件与 JSONL；command display 预发布脱敏测试 | 用 fixture secret 检查导出日志与模型调试视图 | 自动化通过，人工待 RC |
 
