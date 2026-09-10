@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 7;
+const CURRENT_SCHEMA_VERSION: i32 = 1;
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
@@ -16,9 +16,7 @@ fn validate_terminal_workspace(workspace_json: &str) -> Result<(), String> {
     let object = workspace
         .as_object()
         .ok_or_else(|| "terminal workspace must be an object".to_string())?;
-    if object
-        .get("version")
-        .is_some_and(|version| version.as_u64() != Some(TERMINAL_WORKSPACE_VERSION))
+    if object.get("version").and_then(serde_json::Value::as_u64) != Some(TERMINAL_WORKSPACE_VERSION)
     {
         return Err("terminal workspace version is unsupported".to_string());
     }
@@ -32,7 +30,7 @@ fn validate_terminal_workspace(workspace_json: &str) -> Result<(), String> {
     Ok(())
 }
 
-const SCHEMA_V1: &str = "
+const CURRENT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -47,6 +45,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     auth_method TEXT NOT NULL CHECK(auth_method IN ('password', 'key')),
     keychain_key_id TEXT,
     jump_host_config TEXT,
+    organization_json TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -80,6 +79,12 @@ CREATE TABLE IF NOT EXISTS terminal_workspace (
     updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS sftp_workspace (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    workspace_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS key_credentials (
     id TEXT PRIMARY KEY,
     label TEXT NOT NULL,
@@ -90,127 +95,7 @@ CREATE TABLE IF NOT EXISTS key_credentials (
     certificate TEXT,
     service TEXT NOT NULL DEFAULT 'com.shellspan.key'
 );
-";
-
-const SCHEMA_V2: &str = "
-PRAGMA secure_delete=ON;
-BEGIN IMMEDIATE;
-DROP TABLE IF EXISTS key_credentials_v2;
-CREATE TABLE key_credentials_v2 (
-    id TEXT PRIMARY KEY,
-    label TEXT NOT NULL,
-    updated_at INTEGER NOT NULL,
-    key_type TEXT DEFAULT 'unknown',
-    kind TEXT NOT NULL DEFAULT 'keyFile',
-    public_key TEXT,
-    certificate TEXT,
-    service TEXT NOT NULL DEFAULT 'com.shellspan.key'
-);
-INSERT INTO key_credentials_v2 (
-    id, label, updated_at, key_type, kind, public_key, certificate, service
-)
-SELECT id, label, updated_at, key_type, kind, public_key, certificate, service
-FROM key_credentials;
-DROP TABLE key_credentials;
-ALTER TABLE key_credentials_v2 RENAME TO key_credentials;
-UPDATE profiles
-SET jump_host_config = CASE
-    WHEN json_valid(jump_host_config)
-        THEN json_remove(
-            jump_host_config,
-            '$.password',
-            '$.passphrase',
-            '$.privateKeyData'
-        )
-    ELSE NULL
-END
-WHERE jump_host_config IS NOT NULL;
-INSERT INTO schema_version (version) VALUES (2);
-COMMIT;
-PRAGMA wal_checkpoint(TRUNCATE);
-VACUUM;
-";
-
-const SCHEMA_V3: &str = "
-BEGIN IMMEDIATE;
-CREATE TABLE IF NOT EXISTS sftp_workspace (
-    id INTEGER PRIMARY KEY CHECK(id = 1),
-    workspace_json TEXT NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-INSERT INTO schema_version (version) VALUES (3);
-COMMIT;
-";
-
-const SCHEMA_V4: &str = "
-BEGIN IMMEDIATE;
-ALTER TABLE profiles ADD COLUMN organization_json TEXT;
-INSERT INTO schema_version (version) VALUES (4);
-COMMIT;
-";
-
-const SCHEMA_V5: &str = "
-BEGIN IMMEDIATE;
-CREATE TABLE IF NOT EXISTS operation_history_events (
-    event_id TEXT PRIMARY KEY,
-    task_id TEXT NOT NULL,
-    operation_id TEXT NOT NULL,
-    parent_operation_id TEXT,
-    occurred_at INTEGER NOT NULL,
-    category TEXT NOT NULL,
-    action TEXT NOT NULL,
-    event_kind TEXT NOT NULL,
-    status TEXT NOT NULL,
-    risk TEXT,
-    subject_id TEXT,
-    primary_profile_id TEXT,
-    targets_json TEXT NOT NULL,
-    command_preview TEXT,
-    evidence_json TEXT NOT NULL,
-    error_category TEXT,
-    retry_of_operation_id TEXT,
-    item_count INTEGER,
-    byte_count INTEGER,
-    exit_code INTEGER,
-    batch_index INTEGER,
-    batch_total INTEGER,
-    concurrency_limit INTEGER,
-    created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_operation_history_task_time
-    ON operation_history_events(task_id, occurred_at);
-CREATE INDEX IF NOT EXISTS idx_operation_history_time
-    ON operation_history_events(occurred_at DESC);
-CREATE INDEX IF NOT EXISTS idx_operation_history_category_status
-    ON operation_history_events(category, status, occurred_at DESC);
-CREATE INDEX IF NOT EXISTS idx_operation_history_profile_time
-    ON operation_history_events(primary_profile_id, occurred_at DESC);
-INSERT INTO schema_version (version) VALUES (5);
-COMMIT;
-";
-
-const SCHEMA_V6: &str = "
-BEGIN IMMEDIATE;
-ALTER TABLE operation_history_events
-    ADD COLUMN permission_mode TEXT
-    CHECK(permission_mode IS NULL OR permission_mode IN (
-        'requestApproval', 'autoApproveReadOnly', 'fullAccess'
-    ));
-ALTER TABLE operation_history_events
-    ADD COLUMN human_approved INTEGER
-    CHECK(human_approved IS NULL OR human_approved IN (0, 1));
-CREATE INDEX IF NOT EXISTS idx_operation_history_action_task
-    ON operation_history_events(action, task_id, occurred_at);
-INSERT INTO schema_version (version) VALUES (6);
-COMMIT;
-";
-
-const SCHEMA_V7: &str = "
-BEGIN IMMEDIATE;
-DROP TABLE IF EXISTS operation_history_events;
-DELETE FROM preferences WHERE key = 'operationHistoryRetentionDays';
-INSERT INTO schema_version (version) VALUES (7);
-COMMIT;
+INSERT INTO schema_version (version) VALUES (1);
 ";
 
 #[derive(Clone)]
@@ -219,12 +104,11 @@ pub(crate) struct Database {
 }
 
 impl Database {
-    /// Dedicated LLM document commit. CAS and the one-time legacy backup share SQLite's transaction.
+    /// Dedicated LLM document commit with compare-and-swap revision control.
     pub(crate) fn commit_llm_routes(
         &self,
         expected: Option<u64>,
         document: &str,
-        backup: Option<&str>,
     ) -> Result<(), String> {
         let mut conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
         let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -243,13 +127,6 @@ impl Database {
             .and_then(|v| v["revision"].as_u64());
         if revision != expected {
             return Err("REVISION_CONFLICT".into());
-        }
-        if let Some(backup) = backup {
-            tx.execute(
-                "INSERT OR IGNORE INTO preferences (key,value) VALUES ('llm.legacyBackup.v1',?1)",
-                [backup],
-            )
-            .map_err(|e| e.to_string())?;
         }
         tx.execute("INSERT INTO preferences (key,value) VALUES ('llm.routes.v1',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [document]).map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())
@@ -278,67 +155,50 @@ impl Database {
         let db = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
-        db.migrate()?;
+        db.initialize_or_validate_schema()?;
         Ok(db)
     }
 
-    fn migrate(&self) -> Result<(), String> {
+    fn initialize_or_validate_schema(&self) -> Result<(), String> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
 
+        let has_schema_table: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("failed to inspect database schema: {e}"))?;
+        if !has_schema_table {
+            let user_table_count: i32 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| format!("failed to inspect database tables: {e}"))?;
+            if user_table_count != 0 {
+                return Err("unsupported unversioned database schema".into());
+            }
+            conn.execute_batch(CURRENT_SCHEMA)
+                .map_err(|e| format!("failed to initialize database schema: {e}"))?;
+            return Ok(());
+        }
         let current: i32 = conn
             .query_row(
                 "SELECT COALESCE(MAX(version), 0) FROM schema_version",
                 [],
                 |row| row.get(0),
             )
-            .unwrap_or(0);
-
-        if current > CURRENT_SCHEMA_VERSION {
+            .map_err(|e| format!("failed to read database schema version: {e}"))?;
+        if current != CURRENT_SCHEMA_VERSION {
             return Err(format!(
-                "database schema version {current} is newer than this build ({CURRENT_SCHEMA_VERSION})"
+                "unsupported database schema version {current}; expected {CURRENT_SCHEMA_VERSION}"
             ));
         }
-
-        if current < 1 {
-            conn.execute_batch(SCHEMA_V1)
-                .map_err(|e| format!("migration v1 failed: {e}"))?;
-            conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
-                .map_err(|e| format!("migration v1 version insert failed: {e}"))?;
-        }
-
-        if current < 2 {
-            conn.execute_batch(SCHEMA_V2)
-                .map_err(|e| format!("migration v2 failed: {e}"))?;
-        }
-
-        if current < 3 {
-            conn.execute_batch(SCHEMA_V3)
-                .map_err(|e| format!("migration v3 failed: {e}"))?;
-        }
-
-        if current < 4 {
-            conn.execute_batch(SCHEMA_V4)
-                .map_err(|e| format!("migration v4 failed: {e}"))?;
-        }
-
-        if current < 5 {
-            conn.execute_batch(SCHEMA_V5)
-                .map_err(|e| format!("migration v5 failed: {e}"))?;
-        }
-
-        if current < 6 {
-            conn.execute_batch(SCHEMA_V6)
-                .map_err(|e| format!("migration v6 failed: {e}"))?;
-        }
-
-        if current < 7 {
-            conn.execute_batch(SCHEMA_V7)
-                .map_err(|e| format!("migration v7 failed: {e}"))?;
-        }
-
         Ok(())
     }
 
@@ -991,7 +851,7 @@ mod tests {
         let db = Database {
             conn: Arc::new(Mutex::new(conn)),
         };
-        db.migrate().unwrap();
+        db.initialize_or_validate_schema().unwrap();
         db
     }
 
@@ -1012,7 +872,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_creates_current_schema_without_legacy_operation_history() {
+    fn initializes_only_the_current_schema() {
         let db = test_db();
         let conn = db.conn.lock().unwrap();
         let version: i32 = conn
@@ -1022,7 +882,7 @@ mod tests {
             .unwrap();
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
 
-        // Verify the current tables exist and the retired table does not.
+        // Verify the exact current table set.
         conn.execute("SELECT 1 FROM profiles LIMIT 0", []).unwrap();
         conn.execute("SELECT 1 FROM preferences LIMIT 0", [])
             .unwrap();
@@ -1062,197 +922,18 @@ mod tests {
     }
 
     #[test]
-    fn migration_v2_purges_database_secret_values_and_preserves_metadata() {
+    fn rejects_every_non_current_database_schema() {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA_V1).unwrap();
-        conn.execute("ALTER TABLE key_credentials ADD COLUMN value TEXT", [])
-            .unwrap();
-        conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
-            .unwrap();
-        conn.execute(
-            "INSERT INTO key_credentials \
-             (id, label, updated_at, key_type, kind, public_key, certificate, service, value) \
-             VALUES ('key-1', 'Server key', 42, 'rsa', 'keyFile', 'ssh-rsa AAA', NULL, \
-                     'com.shellspan.key', 'plaintext-private-key')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO profiles \
-             (id, name, host, port, username, auth_method, jump_host_config, created_at, updated_at) \
-             VALUES ('profile-1', 'Jump profile', 'internal.example.com', 22, 'alice', 'password', \
-                     ?1, 1, 1)",
-            params![serde_json::json!({
-                "host": "jump.example.com",
-                "port": 22,
-                "username": "jump-user",
-                "authMethod": "password",
-                "password": "plaintext-password",
-                "passphrase": "plaintext-passphrase",
-                "privateKeyData": "plaintext-private-key"
-            })
-            .to_string()],
-        )
-        .unwrap();
+        conn.execute_batch("CREATE TABLE schema_version (version INTEGER PRIMARY KEY); INSERT INTO schema_version (version) VALUES (7);").unwrap();
         let db = Database {
             conn: Arc::new(Mutex::new(conn)),
         };
 
-        db.migrate().unwrap();
-
-        let conn = db.conn.lock().unwrap();
-        let columns = conn
-            .prepare("PRAGMA table_info(key_credentials)")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(1))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert!(!columns.iter().any(|column| column == "value"));
-        let jump_host_config: String = conn
-            .query_row(
-                "SELECT jump_host_config FROM profiles WHERE id='profile-1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let jump_host: serde_json::Value = serde_json::from_str(&jump_host_config).unwrap();
-        assert_eq!(jump_host["host"], "jump.example.com");
-        assert!(jump_host.get("password").is_none());
-        assert!(jump_host.get("passphrase").is_none());
-        assert!(jump_host.get("privateKeyData").is_none());
-        let metadata: (String, String, i64) = conn
-            .query_row(
-                "SELECT label, key_type, updated_at FROM key_credentials WHERE id='key-1'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(metadata, ("Server key".to_string(), "rsa".to_string(), 42));
-        let organization_json: Option<String> = conn
-            .query_row(
-                "SELECT organization_json FROM profiles WHERE id='profile-1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(organization_json, None);
-    }
-
-    #[test]
-    fn migration_v7_removes_legacy_history_and_preference_and_is_idempotent() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA_V1).unwrap();
-        conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
-            .unwrap();
-        conn.execute_batch(SCHEMA_V2).unwrap();
-        conn.execute_batch(SCHEMA_V3).unwrap();
-        conn.execute_batch(SCHEMA_V4).unwrap();
-        conn.execute_batch(SCHEMA_V5).unwrap();
-        conn.execute_batch(SCHEMA_V6).unwrap();
-        conn.execute(
-            "INSERT INTO operation_history_events (
-                event_id, task_id, operation_id, occurred_at, category, action,
-                event_kind, status, targets_json, evidence_json, created_at
-             ) VALUES (
-                'event-v6', 'task-v6', 'operation-v6', 1, 'terminal',
-                'closeSession', 'completed', 'succeeded', '[]', '[]', 1
-             )",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO preferences (key, value) VALUES
-             ('operationHistoryRetentionDays', '0'),
-             ('theme', '\"dark\"')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO profiles (
-                id, name, host, port, username, auth_method, created_at, updated_at
-             ) VALUES (
-                'profile-kept', 'Kept profile', 'example.com', 22, 'alice',
-                'password', 1, 1
-             )",
-            [],
-        )
-        .unwrap();
-        let db = Database {
-            conn: Arc::new(Mutex::new(conn)),
-        };
-
-        db.migrate().unwrap();
-        db.migrate().unwrap();
-
-        let conn = db.conn.lock().unwrap();
-        let operation_history_table_count: i32 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master
-                 WHERE type='table' AND name='operation_history_events'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(operation_history_table_count, 0);
-        let retention_preference_count: i32 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM preferences
-                 WHERE key='operationHistoryRetentionDays'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(retention_preference_count, 0);
-        let theme: String = conn
-            .query_row(
-                "SELECT value FROM preferences WHERE key='theme'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(theme, "\"dark\"");
-        let profile_name: String = conn
-            .query_row(
-                "SELECT name FROM profiles WHERE id='profile-kept'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(profile_name, "Kept profile");
-        let version: i32 = conn
-            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(version, CURRENT_SCHEMA_VERSION);
-        let version_row_count: i32 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM schema_version WHERE version=7",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(version_row_count, 1);
-    }
-
-    #[test]
-    fn migration_rejects_newer_database_without_modifying_it() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA_V1).unwrap();
-        conn.execute("INSERT INTO schema_version (version) VALUES (99)", [])
-            .unwrap();
-        let db = Database {
-            conn: Arc::new(Mutex::new(conn)),
-        };
-
-        let error = db.migrate().unwrap_err();
+        let error = db.initialize_or_validate_schema().unwrap_err();
 
         assert_eq!(
             error,
-            format!(
-                "database schema version 99 is newer than this build ({CURRENT_SCHEMA_VERSION})"
-            )
+            format!("unsupported database schema version 7; expected {CURRENT_SCHEMA_VERSION}")
         );
         let conn = db.conn.lock().unwrap();
         let workspace_table_count: i32 = conn
@@ -1262,7 +943,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(workspace_table_count, 1);
+        assert_eq!(workspace_table_count, 0);
     }
 
     #[test]
