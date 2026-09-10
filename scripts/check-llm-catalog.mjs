@@ -11,6 +11,9 @@ for (const preset of Object.values(catalog.presets)) {
     assert(model.maxOutputTokens <= model.contextWindow);
     assert(!model.vision || model.vision.reservedTokensPerImage <= model.contextWindow);
     assert.equal(new Set(model.reasoning.map(o => o.id)).size, model.reasoning.length);
+    for (const [field, value] of Object.entries(model.compat ?? {})) {
+      assert.notDeepEqual(value, preset.compat[field], `redundant model compat override: ${field}`);
+    }
   }
 }
 for (const mutate of [

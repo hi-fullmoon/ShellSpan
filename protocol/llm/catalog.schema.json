@@ -135,6 +135,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
         "contextWindow": {
           "type": "integer",
           "minimum": 1,
@@ -189,6 +193,12 @@
               "displayName": {
                 "type": "string",
                 "minLength": 1
+              },
+              "wireValue": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -198,7 +208,7 @@
           }
         },
         "compat": {
-          "$ref": "#/$defs/compat"
+          "$ref": "#/$defs/compatOverride"
         },
         "vision": {
           "$ref": "#/$defs/vision"
@@ -210,8 +220,7 @@
         "toolCalling",
         "textInput",
         "imageInput",
-        "reasoning",
-        "compat"
+        "reasoning"
       ],
       "allOf": [
         {
@@ -249,12 +258,6 @@
             "anthropicMessages"
           ]
         },
-        "legacyHosts": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
         "compat": {
           "$ref": "#/$defs/compat"
         },
@@ -270,7 +273,6 @@
       },
       "required": [
         "kind",
-        "legacyHosts",
         "compat",
         "models"
       ],
@@ -303,9 +305,6 @@
                   "properties": {
                     "compat": {
                       "properties": {
-                        "protocol": {
-                          "const": "openAi"
-                        },
                         "reasoningEncoding": {
                           "enum": [
                             "none",
@@ -348,9 +347,6 @@
                   "properties": {
                     "compat": {
                       "properties": {
-                        "protocol": {
-                          "const": "ollama"
-                        },
                         "reasoningEncoding": {
                           "enum": [
                             "none",
@@ -397,9 +393,6 @@
                   "properties": {
                     "compat": {
                       "properties": {
-                        "protocol": {
-                          "const": "openAiCompatible"
-                        },
                         "reasoningEncoding": {
                           "enum": [
                             "none",
@@ -446,9 +439,6 @@
                   "properties": {
                     "compat": {
                       "properties": {
-                        "protocol": {
-                          "const": "anthropicMessages"
-                        },
                         "reasoningEncoding": {
                           "enum": [
                             "none",
@@ -464,6 +454,58 @@
           }
         }
       ]
+    },
+    "compatOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cumulativeStream": {
+          "type": "boolean"
+        },
+        "supportsStreamUsage": {
+          "type": "boolean"
+        },
+        "nativeReasoning": {
+          "type": "boolean"
+        },
+        "splitReasoning": {
+          "type": "boolean"
+        },
+        "replayReasoningContent": {
+          "type": "boolean"
+        },
+        "thinkTagFallback": {
+          "type": "boolean"
+        },
+        "parallelToolCalls": {
+          "type": "boolean"
+        },
+        "strictSchema": {
+          "type": "boolean"
+        },
+        "preservesReasoningAcrossTurns": {
+          "type": "boolean"
+        },
+        "clearThinking": {
+          "type": "boolean"
+        },
+        "defaultThinking": {
+          "type": "boolean"
+        },
+        "reasoningEncoding": {
+          "enum": [
+            "none",
+            "responses",
+            "enableThinking",
+            "thinking",
+            "adaptive",
+            "thinkingEffort",
+            "effort",
+            "ollama",
+            "anthropicAdaptive"
+          ]
+        }
+      }
     }
   }
 }
