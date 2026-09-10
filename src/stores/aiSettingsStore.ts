@@ -22,6 +22,7 @@ const logger = createLogger('aiSettingsStore');
 
 export interface AiProviderPresetDefinition {
   preset: AiProviderPreset;
+  profile: import('@/lib/ai/provider-contract').ProviderProfileId;
   name: string;
   kind: AiProviderKind;
   baseUrl: string;
@@ -32,6 +33,7 @@ export interface AiProviderPresetDefinition {
 export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
   {
     preset: 'ollama',
+    profile: 'ollama',
     name: 'Ollama',
     kind: 'ollama',
     baseUrl: 'http://127.0.0.1:11434',
@@ -40,6 +42,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
   },
   {
     preset: 'openai',
+    profile: 'openai',
     name: 'OpenAI',
     kind: 'openAi',
     baseUrl: 'https://api.openai.com',
@@ -48,6 +51,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
   },
   {
     preset: 'anthropic',
+    profile: 'anthropic',
     name: 'Anthropic',
     kind: 'anthropicMessages',
     baseUrl: 'https://api.anthropic.com',
@@ -56,6 +60,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
   },
   {
     preset: 'deepseek',
+    profile: 'deepseek',
     name: 'DeepSeek',
     kind: 'openAiCompatible',
     baseUrl: 'https://api.deepseek.com',
@@ -64,6 +69,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
   },
   {
     preset: 'minimax',
+    profile: 'minimax',
     name: 'MiniMax',
     kind: 'openAiCompatible',
     baseUrl: 'https://api.minimaxi.com',
@@ -72,16 +78,18 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
   },
   {
     preset: 'kimi',
+    profile: 'kimi',
     name: 'Kimi Code',
     kind: 'openAiCompatible',
     baseUrl: 'https://api.kimi.com/coding',
     model: 'k3',
     requiresApiKey: true,
   },
-  { preset: 'qwen', name: 'Qwen', kind: 'openAiCompatible', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3', requiresApiKey: true },
-  { preset: 'glm', name: 'GLM', kind: 'openAiCompatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5', requiresApiKey: true },
+  { preset: 'qwen', profile: 'qwen', name: 'Qwen', kind: 'openAiCompatible', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3', requiresApiKey: true },
+  { preset: 'glm', profile: 'glm', name: 'GLM', kind: 'openAiCompatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5', requiresApiKey: true },
   {
     preset: 'custom',
+    profile: 'generic',
     name: 'Custom Provider',
     kind: 'openAiCompatible',
     baseUrl: '',
@@ -126,7 +134,7 @@ function createProviderProfile(
   const id = existing.some((provider) => provider.id === baseId)
     ? `${baseId}-${generateId()}`
     : baseId;
-  return { id, ...definition, ...(preset !== 'custom' ? { profile: preset } : {}) };
+  return { id, ...definition };
 }
 
 const initialProviders = [
@@ -140,110 +148,28 @@ const defaults: AiPreferences = {
   contextLines: 200,
 };
 
-// RouteStore owns production connection/default state. These legacy fields are
-// hydrated only as an idempotent migration cache and are never written again.
+// RouteStore owns provider connections and model selection. This store persists
+// only the independent terminal-context preference.
 const PREFERENCE_KEYS = ['contextLines'] as const;
 
 function storageKey(key: keyof AiPreferences): string {
   return `ai.${key}`;
 }
 
-function isProviderKind(value: unknown): value is AiProviderKind {
-  return value === 'ollama' || value === 'openAi' || value === 'openAiCompatible' || value === 'anthropicMessages';
-}
-
-function isProviderPreset(value: unknown): value is AiProviderPreset {
-  return ['ollama', 'openai', 'anthropic', 'deepseek', 'minimax', 'kimi', 'qwen', 'glm', 'custom'].includes(String(value));
-}
-
-function sanitizeProviders(value: unknown): AiProviderProfile[] {
-  if (!Array.isArray(value)) return [];
-  const providers: AiProviderProfile[] = [];
-  for (const candidate of value) {
-    if (!candidate || typeof candidate !== 'object') continue;
-    const provider = candidate as Record<string, unknown>;
-    const id = typeof provider.id === 'string' ? provider.id.trim() : '';
-    const preset = isProviderPreset(provider.preset) ? provider.preset : 'custom';
-    const name = typeof provider.name === 'string' && provider.name.trim()
-      ? provider.name.trim()
-      : presetDefinition(preset).name;
-    if (
-      !id
-      || !/^[A-Za-z0-9._-]{1,80}$/.test(id)
-      || providers.some((item) => item.id === id)
-      || !isProviderKind(provider.kind)
-    ) continue;
-    providers.push({
-      // Preserve invalid persisted values so request validation fails visibly.
-      ...(provider.modelDefinition !== undefined ? { modelDefinition: provider.modelDefinition as AiProviderConfig['modelDefinition'] } : {}),
-      id,
-      name,
-      kind: provider.kind,
-      preset,
-      ...(provider.profile !== undefined ? { profile: provider.profile as AiProviderConfig['profile'] } : {}),
-      baseUrl: typeof provider.baseUrl === 'string' ? provider.baseUrl : '',
-      model: typeof provider.model === 'string' ? provider.model : '',
-      ...(provider.reasoningEffort !== undefined
-        ? { reasoningEffort: provider.reasoningEffort as AiProviderConfig['reasoningEffort'] }
-        : {}),
-      requiresApiKey: typeof provider.requiresApiKey === 'boolean'
-        ? provider.requiresApiKey
-        : provider.kind !== 'ollama',
-    });
-  }
-  return providers.map(provider => ({ ...provider, profile: resolveProviderProfile(provider) }));
-}
-
-function parseRawEntries(entries: [string, string][]): Record<string, unknown> {
-  const parsed: Record<string, unknown> = {};
-  for (const [key, value] of entries) {
-    if (!key.startsWith('ai.')) continue;
+export function parseAiPreferences(entries: [string, string][]): AiPreferences {
+  const raw = entries.find(([key]) => key === storageKey('contextLines'))?.[1];
+  let contextLines = defaults.contextLines;
+  if (raw !== undefined) {
     try {
-      parsed[key.slice(3)] = JSON.parse(value);
+      const value: unknown = JSON.parse(raw);
+      if (typeof value === 'number') contextLines = value;
     } catch {
-      parsed[key.slice(3)] = value;
+      // Invalid current preferences use the current default.
     }
   }
-  return parsed;
-}
-
-export function parseAiPreferences(entries: [string, string][]): AiPreferences {
-  const parsed = parseRawEntries(entries);
-  const storedProviders = sanitizeProviders(parsed.providers);
-  if (storedProviders.length > 0) {
-    const defaultProviderId = typeof parsed.defaultProviderId === 'string'
-      && storedProviders.some((provider) => provider.id === parsed.defaultProviderId)
-      ? parsed.defaultProviderId
-      : storedProviders[0].id;
-    return {
-      providers: storedProviders,
-      defaultProviderId,
-      contextLines: typeof parsed.contextLines === 'number' ? parsed.contextLines : defaults.contextLines,
-    };
-  }
-
-  const ollama = {
-    ...createProviderProfile('ollama', []),
-    baseUrl: typeof parsed.ollamaBaseUrl === 'string'
-      ? parsed.ollamaBaseUrl
-      : presetDefinition('ollama').baseUrl,
-    model: typeof parsed.ollamaModel === 'string'
-      ? parsed.ollamaModel
-      : presetDefinition('ollama').model,
-  };
-  const openai = {
-    ...createProviderProfile('openai', [ollama], 'openai'),
-    baseUrl: typeof parsed.openAiBaseUrl === 'string'
-      ? parsed.openAiBaseUrl
-      : presetDefinition('openai').baseUrl,
-    model: typeof parsed.openAiModel === 'string'
-      ? parsed.openAiModel
-      : presetDefinition('openai').model,
-  };
   return {
-    providers: [ollama, openai],
-    defaultProviderId: parsed.providerKind === 'openAi' ? openai.id : ollama.id,
-    contextLines: typeof parsed.contextLines === 'number' ? parsed.contextLines : defaults.contextLines,
+    ...defaults,
+    contextLines,
   };
 }
 
@@ -367,7 +293,7 @@ export const useAiSettingsStore = create<AiSettingsState>()(
       const provider = state.providers.find((item) => item.id === (id ?? state.defaultProviderId))
         ?? state.providers[0];
       if (!provider) throw new Error('No AI provider is configured');
-      if (provider.profile !== undefined && !isProviderProfile(provider.profile)) throw new Error('UNKNOWN_PROFILE');
+      if (!isProviderProfile(provider.profile)) throw new Error('UNKNOWN_PROFILE');
       if (provider.reasoningEffort !== undefined && !isAiReasoningOption(provider.reasoningEffort)) throw new Error('UNSUPPORTED_REASONING_EFFORT');
       const reasoningEffort = provider.reasoningEffort;
       const config: AiProviderConfig = {

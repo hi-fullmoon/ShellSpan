@@ -19,10 +19,17 @@ export interface VisionBudget {
   imageTokenBudgetPolicy: string;
 }
 export interface ModelDefinition {
+  displayName?: string;
   contextWindow: number; maxOutputTokens: number;
   toolCalling: Support; textInput: Support; imageInput: Support;
-  reasoning: { id: string; displayName: string }[];
+  reasoning: { id: string; displayName: string; wireValue?: unknown }[];
   compat: ModelCompat; vision?: VisionBudget;
+}
+export interface DiscoveredModel {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
 }
 export interface ResolvedModel extends ModelDefinition {
   catalogVersion: number; routeId: string; providerId: string; profile: ProviderProfileId;
@@ -32,9 +39,8 @@ type Provider = Pick<AiProviderConfig, 'kind' | 'model' | 'baseUrl' | 'profile' 
 export function isProviderProfile(value: unknown): value is ProviderProfileId {
   return typeof value === 'string' && PROVIDER_PROFILE_IDS.includes(value as ProviderProfileId);
 }
-// No domain inference. Missing legacy profile is retained for the backend conversion boundary.
-export function resolveProviderProfile(provider: Provider): ProviderProfileId | undefined {
-  return provider.profile ?? (provider.preset && provider.preset !== 'custom' ? provider.preset : undefined);
+export function resolveProviderProfile(provider: Provider): ProviderProfileId {
+  return provider.profile;
 }
 export function profileProtocol(profile: ProviderProfileId): AiProviderKind {
   return profile === 'openai' ? 'openAi' : profile === 'anthropic' ? 'anthropicMessages' : profile === 'ollama' ? 'ollama' : 'openAiCompatible';

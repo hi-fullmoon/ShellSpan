@@ -18,8 +18,6 @@ import type { LocaleKey } from '@/locales';
 import {
   invokeArchiveAgentRuntimeSession,
   invokeCancelAgentRuntime,
-  invokeConvertAiSessionV4,
-  invokeListAiSessionMigrations,
   invokeListAgentRuntimeSessions,
   isTauriRuntime,
 } from '@/lib/ipc/tauri';
@@ -28,11 +26,14 @@ import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import type { AiProviderPreset } from '@/types/ai';
 import {
+  AnthropicBrandIcon,
   DeepSeekBrandIcon,
+  GlmBrandIcon,
   KimiBrandIcon,
   MiniMaxBrandIcon,
   OllamaBrandIcon,
   OpenAiBrandIcon,
+  QwenBrandIcon,
 } from './provider-brand-icons';
 import { ProviderSetupDialog } from './provider-setup-dialog';
 import { SettingRow, SettingsGroup } from '@/components/workbench/settings-layout';
@@ -52,12 +53,12 @@ const PRESET_DESCRIPTION_KEYS: Record<AiProviderPreset, LocaleKey> = {
 const PRESET_ICONS: Record<AiProviderPreset, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
   ollama: OllamaBrandIcon,
   openai: OpenAiBrandIcon,
-  anthropic: ServerIcon,
+  anthropic: AnthropicBrandIcon,
   deepseek: DeepSeekBrandIcon,
   minimax: MiniMaxBrandIcon,
   kimi: KimiBrandIcon,
-  qwen: ServerIcon,
-  glm: ServerIcon,
+  qwen: QwenBrandIcon,
+  glm: GlmBrandIcon,
   custom: ServerIcon,
 };
 
@@ -65,34 +66,16 @@ interface AiSettingsSectionProps {
   embedded?: boolean;
 }
 
-type SessionMigration = {
-  sessionId: string;
-  status: string;
-  error?: string;
-};
-
-const MIGRATION_STATUS_KEYS = {
-  pending: 'settings.ai.migration.pending',
-  converted: 'settings.ai.migration.converted',
-  failed: 'settings.ai.migration.failed',
-} satisfies Record<string, LocaleKey>;
-
 function normalizeProviderPreset(presetId: string | undefined): AiProviderPreset {
   return presetId && Object.prototype.hasOwnProperty.call(PRESET_DESCRIPTION_KEYS, presetId)
     ? presetId as AiProviderPreset
     : 'custom';
 }
 
-function migrationStatusKey(status: string): LocaleKey {
-  return Object.prototype.hasOwnProperty.call(MIGRATION_STATUS_KEYS, status)
-    ? MIGRATION_STATUS_KEYS[status as keyof typeof MIGRATION_STATUS_KEYS]
-    : 'settings.ai.migration.failed';
-}
-
 export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded = false }) => {
   const { t } = useI18n();
   const { error: showError, success: showSuccess } = useToast();
-  const legacyProviders = useAiSettingsStore((state) => state.providers);
+  const browserProviders = useAiSettingsStore((state) => state.providers);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
   const removeProvider = useAiSettingsStore((state) => state.removeProvider);
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
@@ -104,9 +87,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [agentActionBusy, setAgentActionBusy] = useState(false);
   const [clearAgentOpen, setClearAgentOpen] = useState(false);
-  const [migrations,setMigrations]=useState<SessionMigration[]>([]);
-  const [migrationLoadError, setMigrationLoadError] = useState<string>();
-  useEffect(()=>{ if(isTauriRuntime()) void invokeListAiSessionMigrations().then(setMigrations).catch(error=>setMigrationLoadError(String(error))); },[]);
   const routeSnapshot=useLlmRoutesStore(state=>state.snapshot);
   const modelsByRoute=useLlmRoutesStore(state=>state.modelsByRoute);
   const hydrateRoutes=useLlmRoutesStore(state=>state.hydrate);
@@ -118,9 +98,9 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
     return { id:route.id,name:route.displayName,preset:normalizeProviderPreset(route.presetId),
       kind:(route.adapterId==='responses'?'openAi':route.adapterId==='ollama'?'ollama':route.adapterId==='anthropic-messages'?'anthropicMessages':'openAiCompatible') as 'openAi'|'ollama'|'anthropicMessages'|'openAiCompatible',
       profile:resolved?.profile,baseUrl:route.baseUrl,model:resolved?.modelId ?? route.defaults?.modelId ?? '',reasoningEffort:route.defaults?.reasoningEffort,
-      modelDefinition:resolved ? {contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision}:undefined,
+      modelDefinition:resolved ? {displayName:resolved.displayName,contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision}:undefined,
       requiresApiKey:route.auth.kind==='keychain' };
-  }) : nativeRouteMode ? [] : legacyProviders, [routeSnapshot,modelsByRoute,legacyProviders,nativeRouteMode]);
+  }) : nativeRouteMode ? [] : browserProviders, [routeSnapshot,modelsByRoute,browserProviders,nativeRouteMode]);
 
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId) ?? providers[0],
@@ -226,15 +206,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                     <div className="flex flex-wrap gap-1" aria-label={t('settings.ai.modelsLabel', { name: provider.name })}>
                       {(modelsByRoute[provider.id] ?? []).map(model=>(
                         <Badge key={model.modelId} variant="secondary">
-                          {model.modelId}
-                          {Boolean(routeSnapshot.routes.find(route=>route.id===provider.id)?.models) && (modelsByRoute[provider.id]?.length ?? 0)>1 && <Button variant="ghost" size="icon-xs" aria-label={t('settings.ai.removeModel', { model: model.modelId })} onClick={()=>{
-                            const route=routeSnapshot.routes.find(item=>item.id===provider.id)!;
-                            const models={...(route.models ?? {})}; delete models[model.modelId];
-                            const fallback=Object.keys(models)[0];
-                            const updated={...route,models,defaults:route.defaults?.modelId===model.modelId&&fallback?{routeId:route.id,modelId:fallback}:route.defaults};
-                            const defaultSelection=routeSnapshot.defaultSelection?.routeId===route.id&&routeSnapshot.defaultSelection.modelId===model.modelId&&fallback?{routeId:route.id,modelId:fallback}:routeSnapshot.defaultSelection;
-                            void saveRoutes(routeSnapshot.routes.map(item=>item.id===route.id?updated:item),defaultSelection).catch(error=>showError(String(error)));
-                          }}><Trash2Icon /></Button>}
+                          {model.displayName ? `${model.displayName} (${model.modelId})` : model.modelId}
                         </Badge>
                       ))}
                     </div>
@@ -310,15 +282,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           </Button>
         </SettingRow>
       </SettingsGroup>
-
-      {(migrations.length>0 || migrationLoadError) && <SettingsGroup title={t('settings.ai.migration.title')} titleId="ai-log-migration-heading">
-        {migrationLoadError && <SettingRow label={t('settings.ai.migration.loadFailed')} description={migrationLoadError} />}
-        {migrations.map(migration=><SettingRow key={migration.sessionId} label={migration.sessionId} description={migration.error
-          ? t('settings.ai.migration.failedWithReason', { reason: migration.error })
-          : t(migrationStatusKey(migration.status))}>
-          {migration.status==='pending' && <Button size="xs" variant="outline" onClick={()=>void invokeConvertAiSessionV4(migration.sessionId).then(()=>setMigrations(items=>items.map(item=>item.sessionId===migration.sessionId?{...item,status:'converted'}:item))).catch(error=>setMigrations(items=>items.map(item=>item.sessionId===migration.sessionId?{...item,status:'failed',error:String(error)}:item)))}>{t('settings.ai.migration.convert')}</Button>}
-        </SettingRow>)}
-      </SettingsGroup>}
 
       <ProviderSetupDialog
         open={addOpen}

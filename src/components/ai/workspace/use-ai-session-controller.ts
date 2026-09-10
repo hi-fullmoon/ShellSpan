@@ -197,12 +197,12 @@ export function useAiSessionController({
   const canRestoreWorkbench = providedAdapter !== undefined || isTauriRuntime();
   const terminalSessions = useTerminalStore((state) => state.sessions);
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
-  const legacyProviders = useAiSettingsStore((state) => state.providers);
+  const browserProviders = useAiSettingsStore((state) => state.providers);
   const routeSnapshot = useLlmRoutesStore((state) => state.snapshot);
   const routeModels = useLlmRoutesStore((state) => state.modelsByRoute);
   const hydrateRoutes = useLlmRoutesStore((state) => state.hydrate);
   useEffect(()=>{if(isTauriRuntime()&&!routeSnapshot)void hydrateRoutes();},[routeSnapshot,hydrateRoutes]);
-  const providers = useMemo(()=>routeSnapshot ? routeProviderConfigs(routeSnapshot,routeModels) : isTauriRuntime() ? [] : legacyProviders,[routeSnapshot,routeModels,legacyProviders]);
+  const providers = useMemo(()=>routeSnapshot ? routeProviderConfigs(routeSnapshot,routeModels) : isTauriRuntime() ? [] : browserProviders,[routeSnapshot,routeModels,browserProviders]);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
   const provider = useMemo(() => {
     if (routeSnapshot) {
@@ -1098,7 +1098,7 @@ export function useAiSessionController({
     },
     providerLabel: routeSnapshot?.routes.find((route) => route.id === (
       visibleView?.snapshot.value.header.modelSelection?.routeId ?? provider?.id
-    ))?.displayName ?? legacyProviders.find((item) => item.id === (
+    ))?.displayName ?? browserProviders.find((item) => item.id === (
       visibleView?.snapshot.value.header.modelSelection?.routeId ?? provider?.id
     ))?.name ?? '',
     modelLabel: visibleView?.snapshot.value.header.modelSelection?.modelId ?? provider?.model ?? '',

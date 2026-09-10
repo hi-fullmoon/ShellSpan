@@ -224,8 +224,8 @@ export async function invokeCloseSession(sessionId: string): Promise<void> {
   return invokeLogged('close_session', { sessionId });
 }
 
-export async function invokeListAiModels(provider: AiProviderConnectionConfig): Promise<string[]> {
-  return invokeLogged<string[]>('ai_list_models', { provider });
+export async function invokeListAiModels(provider: AiProviderConnectionConfig): Promise<import('@/lib/ai/provider-contract').DiscoveredModel[]> {
+  return invokeLogged<import('@/lib/ai/provider-contract').DiscoveredModel[]>('ai_list_models', { provider });
 }
 
 export function invokeListAiRoutes(): Promise<import('@/types/ai').RouteSnapshot> {
@@ -240,11 +240,6 @@ export function invokeListAiRouteModels(routeId: string): Promise<{revision:numb
 export function invokeResolveAiSelection(selection: import('@/types/ai').ModelSelection, expectedRevision: number): Promise<import('@/lib/ai/provider-contract').ResolvedModel> {
   return invokeLogged('ai_resolve_selection', { input: { selection, expectedRevision } });
 }
-export function invokeConvertAiSessionV4(sessionId: string): Promise<{source:string;destination:string;events:number;status:string}> {
-  return invokeLogged('ai_convert_session_v4_to_v5', { input: { sessionId } });
-}
-export function invokeListAiSessionMigrations(): Promise<{sessionId:string;status:'pending'|'converted'|'failed'}[]> { return invokeLogged('ai_list_session_migrations'); }
-
 export async function invokeCreateAgentRuntimeSession(
   request: CreateAgentSessionRequest,
 ): Promise<AgentSessionSnapshot> {

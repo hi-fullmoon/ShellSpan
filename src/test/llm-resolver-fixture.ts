@@ -7,7 +7,7 @@ export async function fixtureResolve(command: string, args?: Record<string, unkn
   if (command !== 'ai_resolve_model') return undefined;
   const provider = args?.provider as AiProviderConfig;
   const fixture = fixtures.find(f => f.provider.model === provider.model && f.provider.kind === provider.kind
-    && (!provider.profile || f.provider.profile === provider.profile));
+    && f.provider.profile === provider.profile);
   if (!fixture && !provider.modelDefinition) throw new Error('UNKNOWN_MODEL: explicit declaration required');
   const model = { ...(fixture?.resolved ?? {}), ...provider.modelDefinition,
     kind: provider.kind, routeId: provider.id, providerId: provider.id, modelId: provider.model,

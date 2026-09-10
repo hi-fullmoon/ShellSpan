@@ -13,7 +13,7 @@ export function routeProviderConfigs(snapshot: RouteSnapshot, modelsByRoute: Rec
         : route.adapterId === 'anthropic-messages' ? 'anthropicMessages' as const
           : 'openAiCompatible' as const,
     profile: resolved.profile, baseUrl: route.baseUrl, model: resolved.modelId,
-    modelDefinition: { contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision },
+    modelDefinition: { displayName:resolved.displayName,contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision },
     reasoningEffort: route.defaults?.modelId === resolved.modelId ? route.defaults.reasoningEffort : undefined,
     requiresApiKey: route.auth.kind === 'keychain',
   })));
