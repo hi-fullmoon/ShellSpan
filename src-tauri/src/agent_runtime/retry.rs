@@ -178,12 +178,15 @@ mod tests {
 
     #[test]
     fn provider_wire_omission_keeps_defaults_but_explicit_invalid_policy_is_rejected() {
-        let base = serde_json::json!({"id":"p","kind":"ollama","baseUrl":"http://localhost:11434","model":"qwen3","requiresApiKey":false});
-        let legacy: crate::ai::AiProviderConfig = serde_json::from_value(base.clone()).unwrap();
+        let base = serde_json::json!({"id":"p","profile":"ollama","kind":"ollama","baseUrl":"http://localhost:11434","model":"qwen3","requiresApiKey":false});
+        let provider: crate::ai::AiProviderConfig = serde_json::from_value(base.clone()).unwrap();
         assert_eq!(
-            legacy.retry_policy.unwrap_or_default(),
+            provider.retry_policy.unwrap_or_default(),
             RetryPolicy::default()
         );
+        let mut missing_profile = base.clone();
+        missing_profile.as_object_mut().unwrap().remove("profile");
+        assert!(serde_json::from_value::<crate::ai::AiProviderConfig>(missing_profile).is_err());
         for invalid in [
             serde_json::Value::Null,
             serde_json::json!({}),

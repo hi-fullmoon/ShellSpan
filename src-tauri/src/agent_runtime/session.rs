@@ -52,7 +52,6 @@ pub(crate) struct AgentSessionHeader {
     pub(crate) target: Option<AgentSessionTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) permission_mode: Option<AgentSessionPermissionMode>,
-    #[serde(default)]
     pub(crate) execution_surface: AgentExecutionSurface,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) success_criteria: Vec<String>,
@@ -75,7 +74,6 @@ pub(crate) struct CreateAgentSessionRequest {
     pub(crate) target: Option<AgentSessionTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) permission_mode: Option<AgentSessionPermissionMode>,
-    #[serde(default)]
     pub(crate) execution_surface: AgentExecutionSurface,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) success_criteria: Vec<String>,
@@ -346,6 +344,7 @@ impl AgentSessionRecord {
 
 /// Validate a complete decoded log through the same replay path used by the
 /// production Session store, without publishing, repairing, or executing it.
+#[cfg(test)]
 pub(crate) fn validate_session_events(events: Vec<AgentSessionEvent>) -> Result<(), String> {
     AgentSessionRecord::from_events(events).map(|_| ())
 }
@@ -367,20 +366,6 @@ pub(crate) struct AgentSessionStore {
 }
 
 impl AgentSessionStore {
-    pub(crate) fn with_offline_session_lock<T>(
-        &self,
-        session_id: &str,
-        operation: impl FnOnce() -> Result<T, String>,
-    ) -> Result<T, String> {
-        let inner = self
-            .inner
-            .lock()
-            .map_err(|_| "Agent session store is unavailable")?;
-        if inner.sessions.contains_key(session_id) {
-            return Err("MIGRATION_BUSY: session is loaded".into());
-        }
-        operation()
-    }
     #[cfg(test)]
     pub(crate) fn fail_appends_matching(&self, predicate: fn(&AgentSessionEventPayload) -> bool) {
         self.inner.lock().unwrap().append_failure = Some(predicate);
@@ -388,7 +373,7 @@ impl AgentSessionStore {
 
     pub(crate) fn configure(&self, app_data_root: PathBuf) -> Result<(), String> {
         let runtime_root = app_data_root.join("agent-runtime");
-        // Earlier namespaces remain untouched. v4 logs are never migrated or dual-written.
+        // Conversation logs use only the current event namespace.
         let root = runtime_root.join("sessions-v5");
         let archive_root = runtime_root.join("archives-v5");
         let mut inner = self
@@ -2435,12 +2420,7 @@ fn validate_event_transition(
                 }
             });
             let Some((request_id, header_request_id)) = start else {
-                return match replay {
-                    None | Some(crate::llm::replay::ReplayEnvelopeV5::LegacyUnknown { .. }) => {
-                        Ok(())
-                    }
-                    Some(_) => Err("prepared replay requires a committed request/start".into()),
-                };
+                return Err("assistant message requires a committed request/start".into());
             };
             let header = record
                 .events
@@ -2453,11 +2433,11 @@ fn validate_event_transition(
                         snapshot_digest,
                         ..
                     } if request_id == header_request_id => {
-                        Some((snapshot.as_ref(), snapshot_digest.as_deref()))
+                        Some((snapshot, snapshot_digest.as_str()))
                     }
                     _ => None,
                 });
-            let Some((Some(snapshot), Some(snapshot_digest))) = header else {
+            let Some((snapshot, snapshot_digest)) = header else {
                 return Err(
                     "assistant replay requires its committed request/header snapshot".into(),
                 );
@@ -2465,24 +2445,15 @@ fn validate_event_transition(
             if snapshot.digest() != snapshot_digest {
                 return Err("assistant replay request snapshot digest mismatch".into());
             }
-            match (snapshot, replay) {
-                (
-                    crate::llm::runtime::RequestSnapshot::Prepared { .. },
-                    Some(envelope @ crate::llm::replay::ReplayEnvelopeV5::Prepared { .. }),
-                ) => crate::llm::replay::validate_agent_envelope(
-                    envelope, content, snapshot, request_id,
-                )
-                .map_err(crate::llm::replay::replay_error_string),
-                (
-                    crate::llm::runtime::RequestSnapshot::LegacyUnknown,
-                    Some(crate::llm::replay::ReplayEnvelopeV5::LegacyUnknown { .. }),
-                ) => Ok(()),
-                (crate::llm::runtime::RequestSnapshot::Prepared { .. }, _) => Err(
+            match replay {
+                Some(envelope @ crate::llm::replay::ReplayEnvelopeV5::Prepared { .. }) => {
+                    crate::llm::replay::validate_agent_envelope(
+                        envelope, content, snapshot, request_id,
+                    )
+                    .map_err(crate::llm::replay::replay_error_string)
+                }
+                None => Err(
                     "REPLAY_CAPTURE_MISSING: prepared response requires a prepared replay envelope"
-                        .into(),
-                ),
-                (crate::llm::runtime::RequestSnapshot::LegacyUnknown, _) => Err(
-                    "REPLAY_LEGACY_UNKNOWN: legacy response requires an explicit legacy envelope"
                         .into(),
                 ),
             }
@@ -3151,13 +3122,7 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             ..
         } => {
             require_scope(event, true, true)?;
-            let snapshot = snapshot
-                .as_ref()
-                .ok_or("v5 request header requires a request snapshot")?;
-            let digest = snapshot_digest
-                .as_deref()
-                .ok_or("v5 request header requires a snapshot digest")?;
-            if snapshot.digest() != digest {
+            if snapshot.digest() != *snapshot_digest {
                 return Err("request snapshot digest mismatch".into());
             }
             validate_identifier(request_id, "requestId")?;
@@ -3534,7 +3499,9 @@ fn validate_mutation_event_identity(
     client_operation_id: &str,
 ) -> Result<(), String> {
     if event.version != AGENT_SESSION_EVENT_VERSION {
-        return Err("Agent Runtime mutation events require the v4 event contract".into());
+        return Err(format!(
+            "Agent Runtime mutation events require the v{AGENT_SESSION_EVENT_VERSION} event contract"
+        ));
     }
     if previous_revision != event.seq {
         return Err("Agent Runtime mutation previous revision does not match its sequence".into());
@@ -4313,7 +4280,7 @@ mod tests {
                 parent_session_id: None,
                 target: None,
                 permission_mode: None,
-                execution_surface: Default::default(),
+                execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
                 success_criteria: Vec::new(),
                 capability_scope: None,
                 subagent: None,
@@ -4379,35 +4346,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_session_created_without_execution_surface_defaults_to_direct() {
-        let (root, store) = configured();
-        create(&store);
-        drop(store);
-
-        let path = log_path(&root);
-        let raw = fs::read_to_string(&path).unwrap();
-        let mut lines = raw.lines().map(str::to_owned).collect::<Vec<_>>();
-        let mut legacy_created: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
-        legacy_created["data"]
-            .as_object_mut()
-            .unwrap()
-            .remove("executionSurface");
-        lines[0] = serde_json::to_string(&legacy_created).unwrap();
-        fs::write(&path, format!("{}\n", lines.join("\n"))).unwrap();
-
-        let restarted = AgentSessionStore::default();
-        restarted.configure(root.path().to_path_buf()).unwrap();
-        assert_eq!(
-            restarted
-                .snapshot("session-1")
-                .unwrap()
-                .header
-                .execution_surface,
-            AgentExecutionSurface::Direct
-        );
-    }
-
-    #[test]
     fn ui_pages_hide_private_replay_while_restart_keeps_same_domain_authority() {
         let (root, store) = configured();
         create(&store);
@@ -4463,16 +4401,15 @@ mod tests {
                         step_id: Some("step-1".into()),
                         payload: AgentSessionEventPayload::RequestHeader {
                             request_id: "request-1".into(),
-                            snapshot: Some(snapshot.clone()),
-                            snapshot_digest: Some(snapshot.digest()),
+                            snapshot: snapshot.clone(),
+                            snapshot_digest: snapshot.digest(),
                             provider_id: "route-a".into(),
                             model: "model-a".into(),
                             reasoning_effort: None,
                             reason: crate::agent_runtime::AgentRequestReason::Initial,
                             series: series.clone(),
-                            snapshot_reason: Some(
+                            snapshot_reason:
                                 crate::agent_runtime::AgentRequestSnapshotReason::Initial,
-                            ),
                             system_prompt: "system".into(),
                             tool_schemas: Vec::new(),
                             attempt: 1,
@@ -4655,7 +4592,28 @@ mod tests {
         header["data"]["systemPrompt"] = "".into();
         header["data"]["toolSchemas"] = serde_json::json!([]);
         header["data"]["snapshotReason"] = "initial".into();
-        let snapshot = crate::llm::runtime::RequestSnapshot::LegacyUnknown;
+        let snapshot = crate::llm::runtime::RequestSnapshot::Prepared {
+            route_id: "fake".into(),
+            route_revision: 1,
+            adapter_id: "chat-completions".into(),
+            model_id: "fake".into(),
+            catalog_version: 1,
+            capabilities: crate::llm::catalog::fixture_definition(
+                crate::llm::config::AiProviderKind::OpenAiCompatible,
+                8192,
+            ),
+            endpoint_identity: "https://example.test/v1/chat/completions".into(),
+            replay_domain_id: "domain".into(),
+            reasoning_effort: None,
+            output_tokens: 2048,
+            retry_policy: Default::default(),
+            timeouts: Default::default(),
+            purpose: "step".into(),
+            preparation_version: 1,
+            projection_policy: "immutable-png-v1-strict".into(),
+            content_hash: crate::llm::runtime::digest(b"request"),
+            images: Vec::new(),
+        };
         header["data"]["snapshot"] = serde_json::to_value(&snapshot).unwrap();
         header["data"]["snapshotDigest"] = snapshot.digest().into();
         append(header).unwrap();
@@ -4737,7 +4695,7 @@ mod tests {
                 parent_session_id: Some("session-1".into()),
                 target: Some(target()),
                 permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
-                execution_surface: Default::default(),
+                execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
                 success_criteria: Vec::new(),
                 capability_scope: Some(scope.clone()),
                 subagent: Some(metadata),
@@ -4769,7 +4727,7 @@ mod tests {
                 parent_session_id: None,
                 target: Some(target()),
                 permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
-                execution_surface: Default::default(),
+                execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
                 success_criteria: Vec::new(),
                 capability_scope: None,
                 subagent: None,
@@ -4923,12 +4881,12 @@ mod tests {
     }
 
     #[test]
-    fn previous_namespaces_remain_byte_for_byte_isolated() {
+    fn v4_logs_are_ignored_without_migration_or_compatibility_reads() {
         let root = tempfile::tempdir().unwrap();
-        let previous_root = root.path().join("agent-runtime/sessions-v2");
+        let previous_root = root.path().join("agent-runtime/sessions-v4");
         fs::create_dir_all(&previous_root).unwrap();
         let previous_path = previous_root.join("session-previous.jsonl");
-        let sentinel = b"{\"version\":3,\"sessionId\":\"session-previous\"}\n";
+        let sentinel = b"{\"version\":4,\"sessionId\":\"session-previous\"}\n";
         fs::write(&previous_path, sentinel).unwrap();
 
         let store = AgentSessionStore::default();
@@ -5248,7 +5206,7 @@ mod tests {
                 parent_session_id: None,
                 target: None,
                 permission_mode: None,
-                execution_surface: Default::default(),
+                execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
                 success_criteria: Vec::new(),
                 capability_scope: None,
                 subagent: None,
@@ -5535,7 +5493,7 @@ mod tests {
                     parent_session_id: None,
                     target: None,
                     permission_mode: None,
-                    execution_surface: Default::default(),
+                    execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
                     success_criteria: Vec::new(),
                     capability_scope: None,
                     subagent: None,

@@ -96,12 +96,15 @@ impl AgentEntry {
         {
             return registry.prepare(&model);
         }
-        Ok(crate::llm::runtime::PreparedModel {
+        #[cfg(test)]
+        return Ok(crate::llm::runtime::PreparedModel {
+            route: crate::llm::runtime::fixture_route(&model.provider),
             provider: model.provider,
             adapter: model.adapter,
-            route: None,
             images: None,
-        })
+        });
+        #[cfg(not(test))]
+        Err("MODEL_REGISTRY_UNAVAILABLE".into())
     }
 
     pub(crate) fn model(&self) -> Result<AgentModelSelection, String> {
@@ -439,7 +442,7 @@ mod tests {
                 parent_session_id: None,
                 target: None,
                 permission_mode: None,
-                execution_surface: Default::default(),
+                execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
                 success_criteria: Vec::new(),
                 capability_scope: None,
                 subagent: None,
@@ -454,7 +457,7 @@ mod tests {
                 AiProviderKind::Ollama,
                 32768,
             )),
-            profile: None,
+            profile: "ollama".into(),
             retry_policy: None,
             id: "fake".into(),
             kind: AiProviderKind::Ollama,

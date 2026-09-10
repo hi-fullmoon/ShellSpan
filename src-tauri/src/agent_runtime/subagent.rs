@@ -845,10 +845,7 @@ impl SubAgentManager {
         let child_task_id = format!("task-{}", Uuid::new_v4().simple());
         let parent_model = parent_entry.model()?;
         let mut provider = provider_descriptor(&parent_model.provider);
-        provider.route_revision = parent_entry
-            .prepare_model()?
-            .route
-            .map(|route| route.revision);
+        provider.route_revision = parent_entry.prepare_model()?.route.revision.into();
         let metadata = AgentSubagentSession {
             descriptor_id: descriptor_id.clone(),
             parent_task_id: parent.header.task_id.clone(),

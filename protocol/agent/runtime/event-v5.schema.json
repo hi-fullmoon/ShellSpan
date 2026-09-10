@@ -118,6 +118,7 @@
               "requestId",
               "snapshot",
               "snapshotDigest",
+              "snapshotReason",
               "providerId",
               "model",
               "reason",
@@ -133,18 +134,6 @@
               },
               "snapshot": {
                 "oneOf": [
-                  {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "status"
-                    ],
-                    "properties": {
-                      "status": {
-                        "const": "legacyUnknown"
-                      }
-                    }
-                  },
                   {
                     "type": "object",
                     "additionalProperties": false,
@@ -721,22 +710,6 @@
                     "additionalProperties": false,
                     "required": [
                       "status",
-                      "archivedProviderItems"
-                    ],
-                    "properties": {
-                      "status": {
-                        "const": "legacyUnknown"
-                      },
-                      "archivedProviderItems": {
-                        "type": "boolean"
-                      }
-                    }
-                  },
-                  {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "status",
                       "version",
                       "adapterId",
                       "replayFormatVersion",
@@ -1046,18 +1019,6 @@
     },
     "requestSnapshot": {
       "oneOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "status"
-          ],
-          "properties": {
-            "status": {
-              "const": "legacyUnknown"
-            }
-          }
-        },
         {
           "type": "object",
           "additionalProperties": false,
@@ -1420,22 +1381,6 @@
     },
     "replayEnvelope": {
       "oneOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "status",
-            "archivedProviderItems"
-          ],
-          "properties": {
-            "status": {
-              "const": "legacyUnknown"
-            },
-            "archivedProviderItems": {
-              "type": "boolean"
-            }
-          }
-        },
         {
           "type": "object",
           "additionalProperties": false,
