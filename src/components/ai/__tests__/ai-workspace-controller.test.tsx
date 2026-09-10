@@ -138,6 +138,41 @@ it('allows changing model and permissions in a running conversation without chan
   expect(useAgentPermissionStore.getState().getMode('terminal-1')).toBe('autoApproveReadOnly');
 });
 
+it('allows changing model before retrying a failed conversation', async () => {
+  connectedTerminal();
+  const user = userEvent.setup();
+  const base = runningAgentView();
+  const failed: AiSessionView = {
+    ...base,
+    status: 'failed',
+    summary: { ...base.summary, status: 'failed' },
+    snapshot: {
+      kind: 'agent',
+      value: { ...base.snapshot.value, status: 'failed', ended: true },
+    },
+  };
+  const second = { ...provider, id: 'second', model: 'second-model' };
+  useAiSettingsStore.setState({ providers: [provider, second], defaultProviderId: provider.id });
+  const agent = adapter({
+    list: vi.fn(async () => ({ sessions: [failed.summary] })),
+    open: vi.fn(async () => failed),
+    selectModel: vi.fn(async () => undefined),
+  });
+
+  render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+  await waitFor(() => expect(agent.open).toHaveBeenCalledWith(failed.summary.id));
+
+  const model = await screen.findByRole('button', { name: /Model selection: model-test/ });
+  expect(model).toBeEnabled();
+  await user.click(model);
+  await user.click(await screen.findByRole('menuitem', { name: /Model.*model-test/ }));
+  await user.click(screen.getByRole('menuitemradio', { name: 'second-model' }));
+  await waitFor(() => expect(agent.selectModel).toHaveBeenCalledWith(
+    failed.summary.id,
+    expect.objectContaining({ id: second.id }),
+  ));
+});
+
 it('keeps the current session selection when a model change fails', async () => {
   connectedTerminal();
   const view = runningAgentView();

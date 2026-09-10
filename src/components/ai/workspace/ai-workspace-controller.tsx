@@ -25,8 +25,9 @@ export function AiWorkspaceController({
   const controller = useAiSessionController({ scope, adapter });
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
   const session = controller.view?.snapshot.value;
-  const settingsLocked = controller.settingsBusy || !controller.canStartAgent
-    || Boolean(session?.ended || session?.archived || session?.header.subagent)
+  const modelSettingsLocked = controller.settingsBusy || !controller.canStartAgent
+    || Boolean(session?.archived || session?.header.subagent);
+  const runtimeSettingsLocked = modelSettingsLocked || Boolean(session?.ended)
     || ['completed', 'cancelled', 'failed'].includes(controller.view?.status ?? 'idle');
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
   return (
@@ -66,7 +67,7 @@ export function AiWorkspaceController({
       modelLabel={controller.modelLabel}
       modelControl={(
         <AiComposerModelSelector
-          disabled={settingsLocked}
+          disabled={modelSettingsLocked}
           selection={controller.selectedProvider}
           onSelect={controller.view ? controller.selectModel : undefined}
         />
@@ -76,7 +77,7 @@ export function AiWorkspaceController({
             <AgentPermissionSelector
               sessionId={activeTerminalId}
               variant="composer"
-              disabled={settingsLocked}
+              disabled={runtimeSettingsLocked}
               mode={controller.selectedPermission}
               onModeChange={controller.view ? controller.selectPermission : undefined}
             />
@@ -84,9 +85,9 @@ export function AiWorkspaceController({
         : undefined}
       executionSurfaceControl={scope === 'terminal' && activeTerminalId
         ? (
-            <AgentExecutionSurfaceSelector
+          <AgentExecutionSurfaceSelector
               surface={controller.selectedExecutionSurface}
-              disabled={settingsLocked || Boolean(controller.composer.sessionId || controller.view)}
+              disabled={runtimeSettingsLocked || Boolean(controller.composer.sessionId || controller.view)}
               onSurfaceChange={controller.selectExecutionSurface}
             />
           )
