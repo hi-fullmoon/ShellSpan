@@ -1058,6 +1058,8 @@ impl AgentToolPipeline {
                 {
                     return Err("update_plan explanation is outside bounds".into());
                 }
+                super::session::validate_task_plan(arguments.plan_version, &arguments.steps)
+                    .map_err(|error| format!("invalid update_plan arguments: {error}"))?;
                 Ok(arguments)
             });
         let mut payloads = vec![

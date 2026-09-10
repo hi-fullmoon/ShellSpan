@@ -117,7 +117,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "update_plan".into(),
-            description: "Replace the primary Session task plan with the next monotonic version. This records a Session event and never enters the native execution kernel.".into(),
+            description: "Replace the primary Session task plan with the next monotonic version. This records a Session event and never enters the native execution kernel. evidenceRefs may contain only exact IDs of already committed task evidence; omit them for evidence that does not exist yet.".into(),
             input_schema: object_schema(
                 &["planVersion", "steps"],
                 json!({
@@ -129,11 +129,11 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
                         "items": object_schema(
                             &["id", "title", "status"],
                             json!({
-                                "id": bounded_string(128),
+                                "id": identifier_schema(),
                                 "title": bounded_string(256),
                                 "status": { "type": "string", "enum": ["pending", "inProgress", "completed", "blocked", "failed"] },
                                 "detail": bounded_string(131072),
-                                "evidenceRefs": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": bounded_string(128) }
+                                "evidenceRefs": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": evidence_reference_schema() }
                             }),
                         )
                     }
@@ -258,6 +258,25 @@ fn bounded_string(max_length: usize) -> Value {
     json!({ "type": "string", "minLength": 1, "maxLength": max_length })
 }
 
+fn identifier_schema() -> Value {
+    json!({
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+    })
+}
+
+fn evidence_reference_schema() -> Value {
+    json!({
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "description": "Exact ID of already committed task evidence; never a description or placeholder."
+    })
+}
+
 fn object_schema(required: &[&str], properties: Value) -> Value {
     json!({
         "type": "object",
@@ -265,4 +284,20 @@ fn object_schema(required: &[&str], properties: Value) -> Value {
         "required": required,
         "properties": properties
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_plan_schema_exposes_durable_identifier_constraints() {
+        let tool = default_model_tools()
+            .into_iter()
+            .find(|tool| tool.name == "update_plan")
+            .expect("update_plan tool");
+        let step = &tool.input_schema["properties"]["steps"]["items"]["properties"];
+        assert_eq!(step["id"]["pattern"], "^[A-Za-z0-9_-]+$");
+        assert_eq!(step["evidenceRefs"]["items"]["pattern"], "^[A-Za-z0-9_-]+$");
+    }
 }

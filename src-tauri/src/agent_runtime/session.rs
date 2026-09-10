@@ -3408,24 +3408,7 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
                 validate_text(goal, "task goal", false, MAX_AGENT_MESSAGE_BYTES)?;
             }
         }
-        Payload::TaskPlan { version, steps } => {
-            if *version == 0 {
-                return Err("task plan version must be positive".into());
-            }
-            validate_collection_allow_empty(steps, "plan steps")?;
-            let mut ids = HashSet::new();
-            for step in steps {
-                validate_identifier(&step.id, "plan step id")?;
-                if !ids.insert(step.id.as_str()) {
-                    return Err("task plan contains duplicate step ids".into());
-                }
-                validate_text(&step.title, "plan step title", false, MAX_LABEL_BYTES)?;
-                validate_optional_text(step.detail.as_deref(), "plan step detail")?;
-                for evidence in &step.evidence_refs {
-                    validate_identifier(evidence, "evidenceId")?;
-                }
-            }
-        }
+        Payload::TaskPlan { version, steps } => validate_task_plan(*version, steps)?,
         Payload::TaskState {
             status,
             phase,
@@ -4088,6 +4071,32 @@ pub(super) fn validate_identifier(value: &str, label: &str) -> Result<(), String
         return Err(format!(
             "{label} must be 1-{MAX_IDENTIFIER_BYTES} ASCII letters, digits, '-' or '_'"
         ));
+    }
+    Ok(())
+}
+
+/// Validate the complete task-plan payload before it reaches durable event storage.
+/// Model-facing session tools use the same validator so bad model arguments can
+/// settle as an ordinary failed tool result instead of becoming a scheduler fault.
+pub(super) fn validate_task_plan(
+    version: u64,
+    steps: &[super::AgentPlanStep],
+) -> Result<(), String> {
+    if version == 0 {
+        return Err("task plan version must be positive".into());
+    }
+    validate_collection_allow_empty(steps, "plan steps")?;
+    let mut ids = HashSet::new();
+    for step in steps {
+        validate_identifier(&step.id, "plan step id")?;
+        if !ids.insert(step.id.as_str()) {
+            return Err("task plan contains duplicate step ids".into());
+        }
+        validate_text(&step.title, "plan step title", false, MAX_LABEL_BYTES)?;
+        validate_optional_text(step.detail.as_deref(), "plan step detail")?;
+        for evidence in &step.evidence_refs {
+            validate_identifier(evidence, "evidenceId")?;
+        }
     }
     Ok(())
 }
