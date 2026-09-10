@@ -81,6 +81,7 @@ function setAgentLease(overrides: Partial<Parameters<typeof agentTerminalLeaseSt
     acquiredAtUnixMs: 1_000,
     state: 'acquired',
     commandDisplay: '[Agent] $ echo [REDACTED]',
+    terminalOwned: true,
     inputBlocked: false,
     takeoverRequested: false,
     takeoverFailed: false,
@@ -159,9 +160,10 @@ describe('TerminalPane', () => {
     expect(screen.queryByRole('button', { name: 'terminal.tab.search' })).not.toBeInTheDocument();
     expect(container.querySelector('div.h-full.w-full.p-0')).toBeInTheDocument();
     expect(screen.queryByTestId('agent-terminal-lease-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('agent-visible-terminal-aura')).not.toBeInTheDocument();
   });
 
-  it('shows a non-overlaying Agent lease bar with identity, Rust display text, and runtime', () => {
+  it('shows a non-overlaying Agent lease bar with identity and runtime', () => {
     vi.useFakeTimers();
     vi.setSystemTime(3_000);
     try {
@@ -171,14 +173,27 @@ describe('TerminalPane', () => {
       const bar = screen.getByTestId('agent-terminal-lease-bar');
       expect(bar).toHaveAttribute('data-operation-id', 'operation-1');
       expect(bar).toHaveTextContent('terminal.agentLease.agentIdentity');
-      expect(bar).toHaveTextContent('[Agent] $ echo [REDACTED]');
       expect(bar).toHaveTextContent('2s');
       expect(bar).not.toHaveClass('absolute');
       expect(bar).toHaveClass('border-app-border/40');
+      expect(screen.getByTestId('agent-visible-terminal-aura'))
+        .toHaveClass('pointer-events-none', 'absolute', 'inset-0');
+      const identity = screen.getByTestId('agent-terminal-lease-identity');
+      expect(identity).toHaveClass('h-5', 'text-xs');
+      expect(identity).not.toHaveAttribute('title');
+      expect(bar).not.toHaveTextContent('[Agent] $ echo [REDACTED]');
+      const separator = screen.getByTestId('agent-terminal-lease-separator');
+      expect(separator).toHaveClass('relative', 'h-5');
+      expect(separator.querySelector('[data-slot="separator"]'))
+        .toHaveClass('absolute', 'top-1/2', 'h-3.5', '-translate-y-1/2');
       expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"] > span'))
-        .toHaveClass('w-[6ch]', 'font-mono', 'tabular-nums');
+        .toHaveClass('whitespace-nowrap', 'text-right', 'font-mono', 'tabular-nums');
+      expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"] > span'))
+        .not.toHaveClass('w-[6ch]', 'min-w-[7ch]');
       expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
         .toHaveAttribute('data-slot', 'button');
+      expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
+        .toHaveClass('gap-1');
       expect(container.querySelector('.min-h-0.flex-1')).toContainElement(
         container.querySelector('div.h-full.w-full.p-0'),
       );
@@ -238,6 +253,22 @@ describe('TerminalPane', () => {
     const bar = screen.getByRole('status');
     expect(bar).toHaveAttribute('aria-live', 'polite');
     expect(bar).toHaveTextContent('terminal.agentLease.inputBlockedAccessibleHint');
+  });
+
+  it('keeps cancellation available between commands without locking terminal input', async () => {
+    const requestTakeover = setAgentLease({ terminalOwned: false });
+    const terminal = makeMockTerminal();
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    expect(screen.getByTestId('agent-terminal-lease-bar'))
+      .toHaveTextContent('terminal.agentLease.turnRunning');
+    expect(screen.getByTestId('agent-visible-terminal-aura')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }));
+    expect(requestTakeover).toHaveBeenCalledOnce();
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    expect(terminal.getCustomKeyEventHandlers()[0](escape)).toBe(false);
+    expect(escape.defaultPrevented).toBe(true);
+    expect(requestTakeover).toHaveBeenCalledTimes(2);
   });
 
   it('reports takeover failure once through a toast without replacing the lease hint', () => {

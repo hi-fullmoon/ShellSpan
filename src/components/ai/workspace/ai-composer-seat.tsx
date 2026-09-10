@@ -449,7 +449,7 @@ export function AiComposerSeat({
                     onClick={onOpenModel}
                     aria-label={t('ai.workspace.model.trigger', { selection: modelLabel })}
                   >
-                    <span className="truncate">{modelLabel}</span>
+                    <span className="ai-model-trigger-name">{modelLabel}</span>
                     <ChevronDownIcon data-icon="inline-end" />
                   </Button>
                 ))}

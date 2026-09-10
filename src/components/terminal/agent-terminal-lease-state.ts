@@ -2,6 +2,8 @@ import type { AgentTerminalLeaseEvent } from '@/types/agent-session';
 
 export interface AgentTerminalLeaseView extends AgentTerminalLeaseEvent {
   readonly state: 'acquired';
+  /** False while the same Agent turn continues between terminal commands. */
+  readonly terminalOwned: boolean;
   readonly inputBlocked: boolean;
   readonly takeoverRequested: boolean;
   readonly takeoverFailed: boolean;

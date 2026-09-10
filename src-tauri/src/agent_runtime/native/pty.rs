@@ -15,6 +15,7 @@ use super::{
 
 const RECORD_SEPARATOR: char = '\u{001e}';
 const UNIT_SEPARATOR: char = '\u{001f}';
+const REPLACE_CURRENT_TERMINAL_LINE: &str = "\r\u{001b}[2K";
 const PTY_CAPTURE_LIMIT_BYTES: usize = 1024 * 1024;
 const PTY_PROTOCOL_BUFFER_LIMIT_BYTES: usize = 2 * 1024 * 1024;
 #[cfg(not(test))]
@@ -319,8 +320,12 @@ impl PtyOperationNative {
             .changed
             .wait_timeout_while(state, timeout, |state| !state.lifecycle.is_terminal())
             .map_err(|_| "PTY operation state is unavailable".to_string())?;
-        if timed.timed_out() && !state.lifecycle.is_terminal() {
-            drop(state);
+        let timed_out = timed.timed_out() && !state.lifecycle.is_terminal();
+        // `snapshot` acquires the same mutex. Always release the guard returned
+        // by the condvar before calling it, including the normal completion
+        // path; otherwise the worker self-deadlocks as soon as END is observed.
+        drop(state);
+        if timed_out {
             self.finish(PtyLifecycleNative::TimedOut, "PTY command timed out");
         }
         self.snapshot()
@@ -481,16 +486,20 @@ impl PtyRegistryNative {
         command: &str,
         shell_kind: Option<PtyShellKindNative>,
     ) -> Result<Arc<PtyOperationNative>, String> {
-        let command_display = format!(
-            "\r\n[Agent] $ {}\r\n",
+        let safe_command_display = format!(
+            "[Agent] $ {}",
             crate::redaction::redact_sensitive_text(command)
         );
+        // The interactive shell prompt is still visible on the current line
+        // while the authenticated wrapper runs behind the display filter.
+        // Replace that prompt instead of moving down and leaving an empty line.
+        let command_display = format!("{REPLACE_CURRENT_TERMINAL_LINE}{safe_command_display}\r\n");
         self.leases.acquire(
             session_id,
             agent_session_id,
             task_id,
             operation_id,
-            Some(command_display.trim().to_string()),
+            Some(safe_command_display),
         )?;
         let marker = format!(
             "shellspan_native_{}{}",
@@ -1112,7 +1121,7 @@ mod tests {
         let operation = PtyOperationNative::new(
             marker.into(),
             Some(shell_kind),
-            "\r\n[Agent] $ safe fixture command\r\n".into(),
+            "\r\u{1b}[2K[Agent] $ safe fixture command\r\n".into(),
         );
         let mut display = String::new();
         let characters = raw.chars().collect::<Vec<_>>();
@@ -1136,7 +1145,7 @@ mod tests {
         let operation = PtyOperationNative::new(
             "marker-1".into(),
             Some(PtyShellKindNative::Posix),
-            "\r\n[Agent] $ test\r\n".into(),
+            "\r\u{1b}[2K[Agent] $ test\r\n".into(),
         );
         let capability = "a".repeat(64);
         let commitment = commitment(&capability);
@@ -1162,6 +1171,32 @@ mod tests {
         assert!(snapshot.combined_output.starts_with("hello world"));
     }
 
+    #[cfg(any(unix, target_os = "windows"))]
+    #[test]
+    fn wait_returns_after_observed_completion_without_self_deadlocking() {
+        let marker = "marker-wait";
+        let capability = "d".repeat(64);
+        let operation = PtyOperationNative::new(
+            marker.into(),
+            Some(PtyShellKindNative::Posix),
+            "\r\u{1b}[2K[Agent] $ test\r\n".into(),
+        );
+        let waiter_operation = Arc::clone(&operation);
+        let (result_tx, result_rx) = mpsc::channel();
+        let waiter = thread::spawn(move || {
+            let _ = result_tx.send(waiter_operation.wait(Duration::from_secs(5)));
+        });
+
+        operation.observe(&protocol(marker, &capability, "done\r\n", 0, "$ "));
+        let snapshot = result_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("completed PTY wait must release its condvar mutex")
+            .expect("completed PTY wait must return a snapshot");
+        assert_eq!(snapshot.state, PtyLifecycleNative::Exited);
+        assert_eq!(snapshot.exit_code, Some(0));
+        waiter.join().expect("join PTY waiter");
+    }
+
     #[test]
     fn parser_chunk_matrix_hides_wrapper_and_markers_and_preserves_prompt() {
         let marker = "marker-matrix";
@@ -1177,7 +1212,7 @@ mod tests {
             let operation = PtyOperationNative::new(
                 marker.into(),
                 Some(PtyShellKindNative::Posix),
-                "\r\n[Agent] $ printf safe\r\n".into(),
+                "\r\u{1b}[2K[Agent] $ printf safe\r\n".into(),
             );
             let mut display = String::new();
             let mut offset = 0;
@@ -1198,7 +1233,8 @@ mod tests {
                 "chunk={chunk_size}"
             );
             assert_eq!(
-                display, "\r\n[Agent] $ printf safe\r\nfirst\r\nsecond\r\n\u{1b}[32m$ \u{1b}[0m",
+                display,
+                "\r\u{1b}[2K[Agent] $ printf safe\r\nfirst\r\nsecond\r\n\u{1b}[32m$ \u{1b}[0m",
                 "chunk={chunk_size}"
             );
             assert!(!display.contains(marker), "chunk={chunk_size}");
@@ -1213,7 +1249,7 @@ mod tests {
         let operation = PtyOperationNative::new(
             marker.into(),
             Some(PtyShellKindNative::Posix),
-            "\r\n[Agent] $ test\r\n".into(),
+            "\r\u{1b}[2K[Agent] $ test\r\n".into(),
         );
         let begin = format!("\u{1e}{marker}:BEGIN:{}\u{1f}", commitment(&capability));
         let forged = format!("before\u{1e}{marker}:END:{}:0\u{1f}after", "e".repeat(64));
@@ -1223,7 +1259,7 @@ mod tests {
             operation.snapshot().unwrap().state,
             PtyLifecycleNative::Running
         );
-        assert_eq!(display, "\r\n[Agent] $ test\r\nbeforeafter");
+        assert_eq!(display, "\r\u{1b}[2K[Agent] $ test\r\nbeforeafter");
         assert!(!display.contains(marker));
         display.push_str(
             &operation.observe(&format!("\u{1e}{marker}:END:{capability}:4\u{1f}prompt")),
@@ -1239,7 +1275,7 @@ mod tests {
         let operation = PtyOperationNative::new(
             marker.into(),
             Some(PtyShellKindNative::Posix),
-            "\r\n[Agent] $ large\r\n".into(),
+            "\r\u{1b}[2K[Agent] $ large\r\n".into(),
         );
         operation.observe(&format!(
             "\u{1e}{marker}:BEGIN:{}\u{1f}",
@@ -1360,7 +1396,7 @@ mod tests {
             .unwrap();
         let registry = PtyRegistryNative::new(leases);
         let (sessions, _receiver) = sessions("terminal-1");
-        registry
+        let operation = registry
             .start(
                 &sessions,
                 "terminal-1",
@@ -1371,6 +1407,10 @@ mod tests {
                 Some(PtyShellKindNative::Posix),
             )
             .unwrap();
+        assert_eq!(
+            operation.command_display,
+            "\r\u{1b}[2K[Agent] $ [REDACTED]\r\n"
+        );
         let display = command_display.lock().unwrap().clone().unwrap();
         assert_eq!(display, "[Agent] $ [REDACTED]");
         assert!(!display.contains("extremely-sensitive-value"));
