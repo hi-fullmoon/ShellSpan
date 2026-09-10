@@ -2560,7 +2560,7 @@
 }
 
 .ai-composer-tools {
-  flex: 0 1 auto;
+  flex: none;
   gap: 4px;
 }
 
@@ -2596,7 +2596,7 @@
 }
 
 .ai-composer-trailing {
-  flex: 1 1 auto;
+  flex: 1 0 auto;
   justify-content: flex-end;
   gap: 6px;
 }
@@ -2655,17 +2655,22 @@
 }
 
 .ai-model-trigger {
-  max-width: min(360px, 48cqi);
+  max-width: none;
+  flex: none;
   gap: 4px;
   padding-inline: 8px 6px;
 }
 
-.ai-model-trigger-name,
-.ai-model-trigger-reasoning,
 .ai-busy-preference-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-model-trigger-name,
+.ai-model-trigger-reasoning {
+  flex: none;
   white-space: nowrap;
 }
 
@@ -3263,17 +3268,29 @@
   }
 }
 
+@container ai-workspace (max-width: 639px) {
+  .ai-busy-preference-label,
+  .ai-busy-preference-trigger [data-icon='inline-end'] {
+    display: none;
+  }
+
+  .ai-busy-preference-trigger {
+    width: 28px;
+    min-width: 28px;
+    flex: none;
+    padding: 0;
+  }
+}
+
 @container ai-workspace (max-width: 479px) {
   .ai-permission-trigger-label,
   .ai-execution-surface-label,
-  .ai-busy-preference-label,
-  :is(.ai-permission-trigger, .ai-execution-surface-trigger, .ai-busy-preference-trigger) [data-icon='inline-end'] {
+  :is(.ai-permission-trigger, .ai-execution-surface-trigger) [data-icon='inline-end'] {
     display: none;
   }
 
   .ai-permission-trigger,
-  .ai-execution-surface-trigger,
-  .ai-busy-preference-trigger {
+  .ai-execution-surface-trigger {
     width: 28px;
     min-width: 28px;
     flex: none;
@@ -3285,14 +3302,6 @@
   .ai-empty-hero [data-slot='empty-state-title'] {
     font-size: 22px;
     line-height: 28px;
-  }
-
-  .ai-model-trigger-reasoning {
-    display: none;
-  }
-
-  .ai-model-trigger {
-    max-width: 48cqi;
   }
 
   .ai-composer-toolbar {

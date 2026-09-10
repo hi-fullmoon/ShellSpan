@@ -88,7 +88,7 @@ export function AiComposerModelSelector({
   const nativeRouteMode = isTauriRuntime();
   const routeProviders = useMemo(() => (routeSnapshot?.routes.flatMap(route =>
     (modelsByRoute[route.id] ?? []).map(resolved => ({
-      model: resolved.modelId, modelDefinition: { contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision },
+      model: resolved.modelId, modelDefinition: { displayName:resolved.displayName,contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision },
       id: route.id, routeRevision: route.revision, name: route.displayName, preset: (route.presetId ?? 'custom') as AiProviderPreset,
       kind: route.adapterId === 'responses' ? 'openAi' as const : route.adapterId === 'ollama' ? 'ollama' as const : 'openAiCompatible' as const,
       profile: resolved.profile, baseUrl: route.baseUrl,
@@ -104,7 +104,7 @@ export function AiComposerModelSelector({
   const current: AiProviderProfile | undefined = selection
     ? { name: selection.id, preset: 'custom' as const, ...availableProviders.find((item) => item.id === selection.id && item.model === selection.model), ...selection }
     : defaultProvider;
-  const legacyResolution=useResolvedModel(!routeSnapshot ? current : undefined);
+  const browserResolution=useResolvedModel(!routeSnapshot ? current : undefined);
   const [validatedModel,setValidatedModel]=useState<import('@/lib/ai/provider-contract').ResolvedModel>();
   const [selectionError,setSelectionError]=useState<string>();
   useEffect(()=>{
@@ -115,11 +115,13 @@ export function AiComposerModelSelector({
       .catch(error=>{if(!cancelled)setSelectionError(`INVALID_MODEL_SELECTION: ${String(error)}`);});
     return()=>{cancelled=true;};
   },[routeSnapshot,current?.id,current?.model,current?.reasoningEffort,current?.routeRevision]);
-  const resolved = routeSnapshot ? validatedModel : legacyResolution.status==='ready'?legacyResolution.model:undefined;
+  const resolved = routeSnapshot ? validatedModel : browserResolution.status==='ready'?browserResolution.model:undefined;
   const reasoningOptions = routeSnapshot ? (resolved?.reasoning.map(option=>option.id) ?? []) : (current ? reasoningEffortOptions(current) : []);
   const candidateReasoning=!routeSnapshot&&current ? effectiveReasoningEffort(current) : undefined;
   const reasoning = current?.reasoningEffort ? (reasoningOptions.includes(current.reasoningEffort) ? current.reasoningEffort : undefined) : candidateReasoning;
-  const modelLabel = current?.model.trim() || t('ai.modelMissing');
+  const modelLabel = current?.modelDefinition?.displayName?.trim()
+    || current?.model.trim()
+    || t('ai.modelMissing');
   const reasoningLabel = reasoning
     ? resolved?.reasoning.find(o => o.id === reasoning)?.displayName ?? (REASONING_LABEL_KEYS[reasoning] ? t(REASONING_LABEL_KEYS[reasoning]) : reasoning)
     : t('ai.reasoningEffort.default');
@@ -222,7 +224,9 @@ export function AiComposerModelSelector({
                   closeOnClick
                   className="ai-model-menu-option"
                 >
-                  <span className="truncate">{provider.model}</span>
+                  <span className="truncate">
+                    {provider.modelDefinition?.displayName ?? provider.model}
+                  </span>
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>

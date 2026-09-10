@@ -14,7 +14,7 @@ export interface AiProviderConfig {
   kind: AiProviderKind;
   baseUrl: string;
   model: string;
-  profile?: ProviderProfileId;
+  profile: ProviderProfileId;
   reasoningEffort?: AiReasoningOption;
   requiresApiKey: boolean;
 }
@@ -42,5 +42,4 @@ export interface ProviderRoute {
 }
 export interface RouteSnapshot {
   schemaVersion: 1; revision: number; routes: ProviderRoute[]; defaultSelection?: ModelSelection;
-  migrationComplete: boolean; migrationIssues: { original: unknown; error: string }[];
 }

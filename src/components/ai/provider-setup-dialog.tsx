@@ -7,15 +7,9 @@ import {
   EyeIcon,
   EyeOffIcon,
   InfoIcon,
-  RefreshCwIcon,
   ServerIcon,
   Settings2Icon,
 } from 'lucide-react';
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { DEFAULT_RETRY_POLICY } from '@/lib/ai/retry-policy';
 import { Button } from '@/components/ui/button';
@@ -75,40 +69,25 @@ import type {
   AiProviderProfile,
 } from '@/types/ai';
 import {
+  AnthropicBrandIcon,
   DeepSeekBrandIcon,
+  GlmBrandIcon,
   KimiBrandIcon,
   MiniMaxBrandIcon,
   OllamaBrandIcon,
   OpenAiBrandIcon,
+  QwenBrandIcon,
 } from './provider-brand-icons';
 
-import { PROVIDER_PROFILE_IDS, resolveProviderProfile, useResolvedModel, profileProtocol, type ModelDefinition, type Support } from '@/lib/ai/provider-contract';
+import { PROVIDER_PROFILE_IDS, resolveProviderProfile, useResolvedModel, profileProtocol, type DiscoveredModel, type ModelDefinition, type ProviderProfileId } from '@/lib/ai/provider-contract';
+import {
+  ProviderModelCatalogEditor,
+  type ProviderModelDraft,
+  validateProviderModels,
+} from './provider-model-catalog-editor';
 
 type ProviderDraft = Omit<AiProviderProfile, 'id'> & { apiKey?: string };
-
-function modelDefinitionValid(definition: ModelDefinition | undefined): boolean {
-  if (!definition
-    || !Number.isSafeInteger(definition.contextWindow)
-    || definition.contextWindow <= 0
-    || !Number.isSafeInteger(definition.maxOutputTokens)
-    || definition.maxOutputTokens <= 0
-    || definition.maxOutputTokens > definition.contextWindow
-    || (definition.imageInput === 'supported') !== Boolean(definition.vision)) return false;
-  if (!definition.vision) return true;
-  return Number.isSafeInteger(definition.vision.maxRequestImages)
-    && definition.vision.maxRequestImages > 0
-    && definition.vision.maxRequestImages <= 20
-    && Number.isSafeInteger(definition.vision.maxRequestImageBytes)
-    && definition.vision.maxRequestImageBytes > 0
-    && definition.vision.maxRequestImageBytes <= 20_971_520
-    && Number.isSafeInteger(definition.vision.reservedTokensPerImage)
-    && definition.vision.reservedTokensPerImage > 0
-    && definition.vision.reservedTokensPerImage <= definition.contextWindow;
-}
-
-function isUnknownModelError(error: string): boolean {
-  return error.includes('UNKNOWN_MODEL');
-}
+type ModelCatalogMode = 'inherited' | 'overrides' | 'explicit';
 
 interface ProviderSetupDialogProps {
   open: boolean;
@@ -125,24 +104,32 @@ type Feedback = {
 };
 
 const PRESET_OPTIONS = [...AI_PROVIDER_PRESETS];
-const SUPPORT_OPTIONS = ['unknown', 'unsupported', 'supported'] as const satisfies readonly Support[];
-
-const SUPPORT_LABEL_KEYS: Record<Support, LocaleKey> = {
-  unknown: 'settings.ai.support.unknown',
-  unsupported: 'settings.ai.support.unsupported',
-  supported: 'settings.ai.support.supported',
-};
 
 const PRESET_ICONS: Record<AiProviderPreset, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
   ollama: OllamaBrandIcon,
   openai: OpenAiBrandIcon,
-  anthropic: ServerIcon,
+  anthropic: AnthropicBrandIcon,
   deepseek: DeepSeekBrandIcon,
   minimax: MiniMaxBrandIcon,
   kimi: KimiBrandIcon,
-  qwen: ServerIcon,
-  glm: ServerIcon,
+  qwen: QwenBrandIcon,
+  glm: GlmBrandIcon,
   custom: ServerIcon,
+};
+
+const PROFILE_ICONS: Record<
+  (typeof PROVIDER_PROFILE_IDS)[number],
+  React.ComponentType<React.SVGProps<SVGSVGElement>>
+> = {
+  openai: OpenAiBrandIcon,
+  anthropic: AnthropicBrandIcon,
+  ollama: OllamaBrandIcon,
+  deepseek: DeepSeekBrandIcon,
+  minimax: MiniMaxBrandIcon,
+  qwen: QwenBrandIcon,
+  glm: GlmBrandIcon,
+  kimi: KimiBrandIcon,
+  generic: ServerIcon,
 };
 
 const PROTOCOL_LABEL_KEYS: Record<AiProviderKind, LocaleKey> = {
@@ -231,6 +218,35 @@ function draftConfig(
   };
 }
 
+function modelDefinitionOf(model: ModelDefinition): ModelDefinition {
+  return {
+    ...(model.displayName ? { displayName: model.displayName } : {}),
+    contextWindow: model.contextWindow,
+    maxOutputTokens: model.maxOutputTokens,
+    toolCalling: model.toolCalling,
+    textInput: model.textInput,
+    imageInput: model.imageInput,
+    reasoning: model.reasoning,
+    compat: model.compat,
+    ...(model.vision ? { vision: model.vision } : {}),
+  };
+}
+
+function modelDefinitionForSave(
+  model: ProviderModelDraft,
+  definition: ModelDefinition,
+): ModelDefinition {
+  const displayName = model.displayName === undefined
+    ? definition.displayName
+    : model.displayName.trim() || undefined;
+  return {
+    ...definition,
+    ...(displayName ? { displayName } : { displayName: undefined }),
+    ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+    ...(model.maxOutputTokens === undefined ? {} : { maxOutputTokens: model.maxOutputTokens }),
+  };
+}
+
 export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   open,
   provider,
@@ -243,11 +259,14 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const updateProvider = useAiSettingsStore((state) => state.updateProvider);
   const [draft, setDraft] = useState<ProviderDraft>();
   const resolution = useResolvedModel(draft ? { ...draft, id: provider?.id ?? 'draft' } : undefined);
-  const [models, setModels] = useState<string[]>([]);
+  const [providerModels, setProviderModels] = useState<ProviderModelDraft[]>([]);
+  const [modelCatalogMode, setModelCatalogMode] = useState<ModelCatalogMode>('explicit');
   const [hasStoredApiKey, setHasStoredApiKey] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [modelBusy, setModelBusy] = useState(false);
+  const [modelDiscoveryError, setModelDiscoveryError] = useState<string>();
   const [feedback, setFeedback] = useState<Feedback>();
   const routeSnapshot = useLlmRoutesStore((state) => state.snapshot);
   const hydrateRoutes = useLlmRoutesStore((state) => state.hydrate);
@@ -255,11 +274,14 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const routeModels = useLlmRoutesStore((state) => state.modelsByRoute);
   const nativeRouteMode = isTauriRuntime();
   const modelRequestGeneration = useRef(0);
+  const declarationRequestGeneration = useRef(0);
   useEffect(() => { if (open && !routeSnapshot) void hydrateRoutes(); }, [open, routeSnapshot, hydrateRoutes]);
 
   const invalidateModelRequest = (): void => {
     modelRequestGeneration.current += 1;
+    declarationRequestGeneration.current += 1;
     setBusy(false);
+    setModelBusy(false);
   };
 
   useEffect(() => {
@@ -269,13 +291,38 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
       return;
     }
     setDraft(provider ? { ...provider } : undefined);
-    setModels([]);
+    const route = provider ? routeSnapshot?.routes.find((item) => item.id === provider.id) : undefined;
+    const resolvedModels = provider ? routeModels[provider.id] ?? [] : [];
+    setProviderModels(resolvedModels.length > 0
+      ? resolvedModels.map((model) => ({
+          id: model.modelId,
+          ...(model.displayName ? { displayName: model.displayName } : {}),
+          definition: modelDefinitionOf(model),
+        }))
+      : provider?.model
+        ? [{
+            id: provider.model,
+            ...(provider.modelDefinition?.displayName
+              ? { displayName: provider.modelDefinition.displayName }
+              : {}),
+            ...(provider.modelDefinition ? { definition: provider.modelDefinition } : {}),
+          }]
+        : []);
+    setModelCatalogMode(route?.models
+      ? 'explicit'
+      : route?.modelOverrides
+        ? 'overrides'
+        : route
+          ? 'inherited'
+          : 'explicit');
     setHasStoredApiKey(false);
     setShowApiKey(false);
     setAdvancedOpen(false);
     setBusy(false);
+    setModelBusy(false);
+    setModelDiscoveryError(undefined);
     setFeedback(undefined);
-  }, [open, provider]);
+  }, [open, provider, routeSnapshot, routeModels]);
 
   useEffect(() => {
     if (!open || !provider?.requiresApiKey) return;
@@ -292,23 +339,28 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const requestEndpointLabel = requestEndpoint
     ? t('settings.ai.requestEndpoint', { endpoint: requestEndpoint })
     : undefined;
+  const profileCapabilityLabel = resolution.status === 'ready'
+    ? `${t('settings.ai.profileLimits', {
+      context: resolution.model.contextWindow,
+      output: resolution.model.maxOutputTokens,
+    })} · ${t(resolution.model.source === 'builtinCatalog'
+      ? 'settings.ai.builtinSource'
+      : 'settings.ai.userSource')}`
+    : undefined;
   const canTest = Boolean(
     draft
     && requestEndpoint
     && (!draft.requiresApiKey || draft.apiKey?.trim() || (provider && hasStoredApiKey)),
   );
-  const needsModelDeclaration = resolution.status === 'error'
-    && isUnknownModelError(resolution.error)
-    && !draft?.modelDefinition;
-  const hasInvalidModelDeclaration = Boolean(
-    draft?.modelDefinition && !modelDefinitionValid(draft.modelDefinition),
+  const modelFailure = validateProviderModels(providerModels);
+  const defaultModelExists = Boolean(
+    draft?.model && providerModels.some((model) => model.id.trim() === draft.model),
   );
   const canSave = Boolean(
     canTest
     && draft?.name.trim()
-    && draft.model.trim()
-    && !needsModelDeclaration
-    && !hasInvalidModelDeclaration
+    && modelFailure === undefined
+    && defaultModelExists
     && (!nativeRouteMode || routeSnapshot),
   );
 
@@ -321,35 +373,9 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
         .some(key => key in changes && changes[key] !== current[key])) delete next.modelDefinition;
       return next;
     });
+    setModelDiscoveryError(undefined);
     setFeedback(undefined);
   };
-
-  const updateDefinition = (changes: Partial<ModelDefinition>): void => {
-    if (!draft?.modelDefinition) return;
-    updateDraft({ modelDefinition: { ...draft.modelDefinition, ...changes } });
-  };
-
-  const enableModelDeclaration = async (): Promise<void> => {
-    if (!draft) return;
-    const identity = draft;
-    setBusy(true);
-    setFeedback(undefined);
-    try {
-      const { apiKey: _apiKey, ...providerConfig } = draftConfig(draft, provider?.id);
-      const definition = await invoke<ModelDefinition>('ai_model_declaration_template', { provider: providerConfig });
-      setAdvancedOpen(true);
-      setDraft((current) => current === identity ? { ...current, modelDefinition: definition } : current);
-    } catch (reason) {
-      setFeedback({
-        kind: 'error',
-        labelKey: 'settings.ai.saveFailed',
-        message: reason instanceof Error ? reason.message : String(reason),
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-
 
   const handlePresetChange = (preset: AiProviderPresetDefinition | null): void => {
     invalidateModelRequest();
@@ -357,42 +383,143 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     if (!preset) {
       setDraft(undefined);
       setAdvancedOpen(false);
-      setModels([]);
+      setProviderModels([]);
+      setModelCatalogMode('explicit');
       setFeedback(undefined);
       return;
     }
     setDraft({ ...preset });
     setAdvancedOpen(preset.preset === 'custom');
-    setModels([]);
+    setProviderModels(preset.model ? [{ id: preset.model }] : []);
+    setModelCatalogMode(preset.preset === 'custom' ? 'explicit' : 'inherited');
+    setModelDiscoveryError(undefined);
     setFeedback(undefined);
   };
 
-  const handleLoadModels = async (): Promise<void> => {
-    if (!draft || !canTest) return;
+  const handleLoadModels = async (): Promise<DiscoveredModel[] | undefined> => {
+    if (!draft || !canTest) return undefined;
     const requestGeneration = modelRequestGeneration.current + 1;
     modelRequestGeneration.current = requestGeneration;
-    setBusy(true);
+    setModelBusy(true);
+    setModelDiscoveryError(undefined);
     setFeedback(undefined);
     try {
       const found = await invokeListAiModels(draftConfig(draft, provider?.id));
-      if (modelRequestGeneration.current !== requestGeneration) return;
-      setModels(found);
-      if (!draft.model.trim() && found[0]) {
-        setDraft((current) => current ? { ...current, model: found[0] } : current);
-      }
+      if (modelRequestGeneration.current !== requestGeneration) return undefined;
       setFeedback({
         kind: 'success',
         message: t('settings.ai.connectionSuccess', { count: found.length }),
       });
+      return found;
     } catch (reason) {
-      if (modelRequestGeneration.current !== requestGeneration) return;
+      const message = reason instanceof Error ? reason.message : String(reason);
+      if (modelRequestGeneration.current === requestGeneration) {
+        setModelDiscoveryError(message);
+        setFeedback({ kind: 'error', message });
+      }
+      throw reason;
+    } finally {
+      if (modelRequestGeneration.current === requestGeneration) setModelBusy(false);
+    }
+  };
+
+  const handleModelsChange = (models: ProviderModelDraft[]): void => {
+    declarationRequestGeneration.current += 1;
+    setModelCatalogMode('explicit');
+    setProviderModels(models);
+    setModelDiscoveryError(undefined);
+    setDraft((current) => {
+      if (!current) return current;
+      const ids = models.map((model) => model.id.trim()).filter(Boolean);
+      return ids.includes(current.model)
+        ? current
+        : {
+            ...current,
+            model: ids[0] ?? '',
+            modelDefinition: undefined,
+            reasoningEffort: undefined,
+          };
+    });
+  };
+
+  const handleProfileChange = (profile: ProviderProfileId): void => {
+    invalidateModelRequest();
+    const kind = profileProtocol(profile);
+    const preset = PRESET_OPTIONS.find((item) => resolveProviderProfile(item) === profile);
+    if (modelCatalogMode === 'inherited') {
+      const model = preset?.model ?? '';
+      setProviderModels(model ? [{ id: model }] : []);
+      setDraft((current) => current ? {
+        ...current,
+        profile,
+        kind,
+        model,
+        modelDefinition: undefined,
+        reasoningEffort: undefined,
+      } : current);
+    } else {
+      setModelCatalogMode('explicit');
+      setProviderModels((models) => models.map((model) => {
+        const contextWindow = model.contextWindow ?? model.definition?.contextWindow;
+        const maxOutputTokens = model.maxOutputTokens ?? model.definition?.maxOutputTokens;
+        return {
+          id: model.id,
+          ...(model.displayName ? { displayName: model.displayName } : {}),
+          ...(contextWindow === undefined ? {} : { contextWindow }),
+          ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+        };
+      }));
+      setDraft((current) => current ? {
+        ...current,
+        profile,
+        kind,
+        modelDefinition: undefined,
+        reasoningEffort: undefined,
+      } : current);
+    }
+    setModelDiscoveryError(undefined);
+    setFeedback(undefined);
+  };
+
+  const handleDeclareModel = async (index: number): Promise<void> => {
+    const model = providerModels[index];
+    if (!draft || !model?.id.trim()) return;
+    const requestGeneration = declarationRequestGeneration.current + 1;
+    declarationRequestGeneration.current = requestGeneration;
+    const modelIdentity = model;
+    setModelBusy(true);
+    setFeedback(undefined);
+    try {
+      const config = draftConfig({ ...draft, model: model.id.trim(), modelDefinition: undefined }, provider?.id);
+      const { apiKey: _apiKey, ...providerConfig } = config;
+      const definition = await invoke<ModelDefinition>('ai_model_declaration_template', { provider: providerConfig });
+      if (declarationRequestGeneration.current !== requestGeneration) return;
+      setModelCatalogMode('explicit');
+      setProviderModels((current) => current.map((item) => (
+        item === modelIdentity ? { ...item, definition } : item
+      )));
+    } catch (reason) {
       setFeedback({
         kind: 'error',
+        labelKey: 'settings.ai.saveFailed',
         message: reason instanceof Error ? reason.message : String(reason),
       });
     } finally {
-      if (modelRequestGeneration.current === requestGeneration) setBusy(false);
+      if (declarationRequestGeneration.current === requestGeneration) setModelBusy(false);
     }
+  };
+
+  const handleResetModels = (): void => {
+    if (!draft) return;
+    const profile = resolveProviderProfile(draft);
+    const definition = PRESET_OPTIONS.find((item) => resolveProviderProfile(item) === profile);
+    if (!definition) return;
+    const defaultModel = definition?.model ?? '';
+    declarationRequestGeneration.current += 1;
+    setModelCatalogMode('inherited');
+    setProviderModels(defaultModel ? [{ id: defaultModel }] : []);
+    setDraft((current) => current ? { ...current, model: defaultModel, modelDefinition: undefined } : current);
+    setFeedback(undefined);
   };
 
   const handleOpenChange = (nextOpen: boolean): void => {
@@ -405,20 +532,43 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     const saveGeneration = ++modelRequestGeneration.current;
     setBusy(true);
     setFeedback(undefined);
-    const changes = {
-      modelDefinition: draft.modelDefinition,
-      name: draft.name.trim(),
-      kind: draft.kind,
-      profile: resolveProviderProfile(draft),
-      baseUrl: draft.baseUrl.trim(),
-      model: draft.model,
-      ...(draft.reasoningEffort ? { reasoningEffort: draft.reasoningEffort } : {}),
-      requiresApiKey: draft.requiresApiKey,
-    };
     let providerId = provider?.id;
     try {
-      const { apiKey: _apiKey, ...modelConfig } = draftConfig(draft, provider?.id);
-      const resolved = await invoke<ModelDefinition & { modelId: string }>('ai_resolve_model', { provider: modelConfig });
+      const inheritedResolved = modelCatalogMode === 'inherited'
+        ? await (async () => {
+            const { apiKey: _apiKey, ...modelConfig } = draftConfig(
+              { ...draft, modelDefinition: undefined },
+              provider?.id,
+            );
+            return invoke<ModelDefinition & { modelId: string }>('ai_resolve_model', { provider: modelConfig });
+          })()
+        : undefined;
+      const resolvedEntries = modelCatalogMode !== 'explicit'
+        ? []
+        : await Promise.all(providerModels.map(async (model) => {
+            if (model.definition) {
+              return [model.id.trim(), modelDefinitionForSave(model, model.definition)] as const;
+            }
+            const config = draftConfig({ ...draft, model: model.id.trim(), modelDefinition: undefined }, provider?.id);
+            const { apiKey: _apiKey, ...modelConfig } = config;
+            const resolved = await invoke<ModelDefinition & { modelId: string }>('ai_resolve_model', { provider: modelConfig });
+            return [model.id.trim(), modelDefinitionForSave(model, modelDefinitionOf(resolved))] as const;
+          }));
+      const selectedDefinition = modelCatalogMode === 'inherited'
+        ? inheritedResolved && modelDefinitionOf(inheritedResolved)
+        : modelCatalogMode === 'explicit'
+          ? resolvedEntries.find(([modelId]) => modelId === draft.model)?.[1]
+          : providerModels.find((model) => model.id.trim() === draft.model)?.definition;
+      const changes = {
+        modelDefinition: selectedDefinition,
+        name: draft.name.trim(),
+        kind: draft.kind,
+        profile: resolveProviderProfile(draft),
+        baseUrl: draft.baseUrl.trim(),
+        model: draft.model,
+        ...(draft.reasoningEffort ? { reasoningEffort: draft.reasoningEffort } : {}),
+        requiresApiKey: draft.requiresApiKey,
+      };
       if (modelRequestGeneration.current !== saveGeneration) return;
       if (routeSnapshot) {
         providerId ??= `route-${crypto.randomUUID()}`;
@@ -431,20 +581,20 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
       if (!providerId) throw new Error(t('settings.ai.providerSaveFailed'));
       if (routeSnapshot) {
         const existing=routeSnapshot.routes.find(route=>route.id===providerId);
-        const existingModels=existing?.models ?? Object.fromEntries((routeModels[providerId] ?? []).map(model=>[
-          model.modelId,
-          {contextWindow:model.contextWindow,maxOutputTokens:model.maxOutputTokens,toolCalling:model.toolCalling,textInput:model.textInput,imageInput:model.imageInput,reasoning:model.reasoning,compat:model.compat,vision:model.vision},
-        ]));
         const route={
           ...(existing ?? { id:providerId, revision:routeSnapshot.revision, replayDomainId:'pending', auth:draft.requiresApiKey?{kind:'keychain' as const,reference:'pending'}:{kind:'none' as const}, timeouts:{requestHeadersMs:30000,firstByteMs:30000,streamIdleMs:300000} }),
           auth:draft.requiresApiKey?(existing?.auth.kind==='keychain'?existing.auth:{kind:'keychain' as const,reference:'pending'}):{kind:'none' as const},
           displayName:draft.name.trim(), adapterId:(draft.kind==='openAi'?'responses':draft.kind==='ollama'?'ollama':draft.kind==='anthropicMessages'?'anthropic-messages':'chat-completions') as 'responses'|'ollama'|'anthropic-messages'|'chat-completions',
           baseUrl:draft.baseUrl.trim(), presetId:resolveProviderProfile(draft), retryPolicy:{...DEFAULT_RETRY_POLICY},
-          models:{...existingModels,[draft.model]:{contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision}},
-          modelOverrides:undefined,
+          models:modelCatalogMode==='explicit'?Object.fromEntries(resolvedEntries):undefined,
+          modelOverrides:modelCatalogMode==='overrides'?existing?.modelOverrides:undefined,
           defaults:{routeId:providerId,modelId:draft.model,...(draft.reasoningEffort?{reasoningEffort:draft.reasoningEffort}:{})},
         };
-        await saveRoutes([...routeSnapshot.routes.filter(item=>item.id!==providerId),route],routeSnapshot.defaultSelection ?? route.defaults,draft.apiKey?.trim()?{[providerId]:draft.apiKey.trim()}:{});
+        const defaultSelection = routeSnapshot.defaultSelection?.routeId === providerId
+          && !providerModels.some((model) => model.id.trim() === routeSnapshot.defaultSelection?.modelId)
+          ? route.defaults
+          : routeSnapshot.defaultSelection ?? route.defaults;
+        await saveRoutes([...routeSnapshot.routes.filter(item=>item.id!==providerId),route],defaultSelection,draft.apiKey?.trim()?{[providerId]:draft.apiKey.trim()}:{});
       }
       onSaved(providerId);
       handleOpenChange(false);
@@ -527,6 +677,19 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 </Combobox>
               </Field>}
 
+              {draft && (
+                <Field>
+                  <FieldLabel htmlFor="ai-new-provider-name">{t('settings.ai.providerName')}</FieldLabel>
+                  <Input
+                    id="ai-new-provider-name"
+                    className={SYSTEM_INPUT_CLASS}
+                    value={draft.name}
+                    placeholder={t('settings.ai.providerNamePlaceholder')}
+                    onChange={(event) => updateDraft({ name: event.target.value })}
+                  />
+                </Field>
+              )}
+
               {draft?.requiresApiKey && (
                 <Field>
                   <div className="flex items-center justify-between gap-2">
@@ -564,70 +727,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 </Field>
               )}
 
-              <Field data-disabled={!draft || undefined}>
-                <div className="flex items-center justify-between gap-2">
-                  <FieldLabel htmlFor="ai-new-provider-model">{t('settings.ai.model')}</FieldLabel>
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="xs"
-                    disabled={!canTest || busy}
-                    onClick={() => void handleLoadModels()}
-                  >
-                    {busy ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
-                    {t('settings.ai.loadModels')}
-                  </Button>
-                </div>
-                <Combobox
-                  items={models}
-                  value={draft?.model ?? ''}
-                  inputValue={draft?.model ?? ''}
-                  onValueChange={(model) => {
-                    if (model) updateDraft({ model });
-                  }}
-                  onInputValueChange={(model) => updateDraft({ model })}
-                >
-                  <ComboboxInput
-                    id="ai-new-provider-model"
-                    className={SYSTEM_INPUT_GROUP_CLASS}
-                    placeholder={draft
-                      ? t('settings.ai.modelPlaceholder')
-                      : t('settings.ai.chooseProviderFirst')}
-                    disabled={!draft}
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                  />
-                  <ComboboxContent>
-                    <ComboboxEmpty>{t('settings.ai.modelNoResults')}</ComboboxEmpty>
-                    <ComboboxList>
-                      {(model) => (
-                        <ComboboxItem key={model} value={model}>
-                          {model}
-                        </ComboboxItem>
-                      )}
-                    </ComboboxList>
-                  </ComboboxContent>
-                </Combobox>
-              </Field>
             </FieldGroup>
-            {needsModelDeclaration && (
-              <Alert variant="warning">
-                <CircleAlertIcon aria-hidden />
-                <AlertTitle>{t('settings.ai.unknownModelTitle')}</AlertTitle>
-                <AlertDescription className="flex flex-col items-start gap-2">
-                  <span>{t('settings.ai.unknownModelDescription')}</span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    disabled={busy}
-                    onClick={() => void enableModelDeclaration()}
-                  >
-                    {t('settings.ai.declareModel')}
-                  </Button>
-                </AlertDescription>
-              </Alert>
-            )}
 
             <Collapsible
               open={advancedOpen}
@@ -663,41 +763,64 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 <Separator />
                 <FieldGroup className="gap-3 p-3 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
                   <Field data-disabled={!draft || undefined}>
-                    <FieldLabel htmlFor="ai-new-provider-name">{t('settings.ai.providerName')}</FieldLabel>
-                    <Input
-                      id="ai-new-provider-name"
-                      className={SYSTEM_INPUT_CLASS}
-                      value={draft?.name ?? ''}
-                      placeholder={t('settings.ai.providerNamePlaceholder')}
-                      disabled={!draft}
-                      onChange={(event) => updateDraft({ name: event.target.value })}
-                    />
-                  </Field>
-
-                  <Field data-disabled={!draft || undefined}>
-                    <FieldLabel htmlFor="ai-provider-profile">{t('settings.ai.profile')}</FieldLabel>
+                    <div className="flex items-center gap-1">
+                      <FieldLabel htmlFor="ai-provider-profile">{t('settings.ai.profile')}</FieldLabel>
+                      {profileCapabilityLabel && (
+                        <TooltipProvider delay={100}>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={(
+                                <Button
+                                  type="button"
+                                  variant="plain"
+                                  size="xs"
+                                  className="relative size-4 p-0 after:absolute after:-inset-1"
+                                  aria-label={profileCapabilityLabel}
+                                />
+                              )}
+                            >
+                              <InfoIcon />
+                            </TooltipTrigger>
+                            <TooltipContent align="start" className="max-w-sm break-words">
+                              {profileCapabilityLabel}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                    </div>
                     <Combobox
                       items={PROVIDER_PROFILE_IDS}
                       value={draft ? resolveProviderProfile(draft) : null}
                       onValueChange={(profile) => {
                         if (!profile || !draft) return;
-                        const kind = profileProtocol(profile);
-                        updateDraft({ profile, kind, reasoningEffort: undefined });
+                        handleProfileChange(profile);
                       }}
                     >
                       <ComboboxInput id="ai-provider-profile" className={SYSTEM_INPUT_GROUP_CLASS} disabled={!draft} />
                       <ComboboxContent>
                         <ComboboxEmpty>{t('settings.ai.providerNoResults')}</ComboboxEmpty>
                         <ComboboxList>
-                          {(profile) => <ComboboxItem key={profile} value={profile}>{profile}</ComboboxItem>}
+                          {(profile: (typeof PROVIDER_PROFILE_IDS)[number]) => {
+                            const ProfileIcon = PROFILE_ICONS[profile];
+                            return (
+                              <ComboboxItem
+                                key={profile}
+                                value={profile}
+                                className="[&>svg]:size-4!"
+                              >
+                                <ProfileIcon aria-hidden />
+                                <span>{profile}</span>
+                              </ComboboxItem>
+                            );
+                          }}
                         </ComboboxList>
                       </ComboboxContent>
                     </Combobox>
-                    {draft && (
+                    {draft && resolution.status !== 'ready' && (
                       <FieldDescription aria-live="polite">
-                        {resolution.status === 'ready'
-                          ? `${t('settings.ai.profileLimits', { context: resolution.model.contextWindow, output: resolution.model.maxOutputTokens })} · ${t(resolution.model.source === 'builtinCatalog' ? 'settings.ai.builtinSource' : 'settings.ai.userSource')}`
-                          : resolution.status === 'error' ? resolution.error : t('settings.ai.capabilitiesLoading')}
+                        {resolution.status === 'error'
+                          ? resolution.error
+                          : t('settings.ai.capabilitiesLoading')}
                       </FieldDescription>
                     )}
                   </Field>
@@ -714,7 +837,11 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                     />
                   </Field>
 
-                  <Field data-disabled={!draft || undefined} data-invalid={Boolean(draft && !requestEndpoint) || undefined}>
+                  <Field
+                    className="@min-[30rem]:col-span-2"
+                    data-disabled={!draft || undefined}
+                    data-invalid={Boolean(draft && !requestEndpoint) || undefined}
+                  >
                     <div className="flex items-center gap-1">
                       <FieldLabel htmlFor="ai-new-provider-url">{t('settings.ai.baseUrl')}</FieldLabel>
                       {requestEndpointLabel && (
@@ -751,137 +878,29 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                     />
                   </Field>
 
-                  {draft?.modelDefinition && (
-                  <>
-                    <Separator className="@min-[30rem]:col-span-2" />
-                    <Field className="@min-[30rem]:col-span-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex min-w-0 flex-col gap-0.5">
-                          <FieldLabel>{t('settings.ai.modelCapabilities')}</FieldLabel>
-                          <FieldDescription>{t('settings.ai.declaredHint')}</FieldDescription>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="xs"
-                          onClick={() => updateDraft({ modelDefinition: undefined })}
-                        >
-                          {t('settings.ai.useCatalog')}
-                        </Button>
-                      </div>
-                    </Field>
-                    <Field data-invalid={draft.modelDefinition.contextWindow <= 0 || undefined}>
-                      <FieldLabel htmlFor="model-context">{t('settings.ai.contextWindow')}</FieldLabel>
-                      <Input
-                        id="model-context"
-                        className={SYSTEM_INPUT_CLASS}
-                        type="number"
-                        min={1}
-                        step={1}
-                        value={draft.modelDefinition.contextWindow || ''}
-                        aria-invalid={draft.modelDefinition.contextWindow <= 0 || undefined}
-                        onChange={(event) => updateDefinition({ contextWindow: Number(event.target.value) })}
-                      />
-                    </Field>
-                    <Field data-invalid={(
-                      draft.modelDefinition.maxOutputTokens <= 0
-                      || draft.modelDefinition.maxOutputTokens > draft.modelDefinition.contextWindow
-                    ) || undefined}>
-                      <FieldLabel htmlFor="model-output">{t('settings.ai.maxOutput')}</FieldLabel>
-                      <Input
-                        id="model-output"
-                        className={SYSTEM_INPUT_CLASS}
-                        type="number"
-                        min={1}
-                        max={draft.modelDefinition.contextWindow || undefined}
-                        step={1}
-                        value={draft.modelDefinition.maxOutputTokens || ''}
-                        aria-invalid={(
-                          draft.modelDefinition.maxOutputTokens <= 0
-                          || draft.modelDefinition.maxOutputTokens > draft.modelDefinition.contextWindow
-                        ) || undefined}
-                        onChange={(event) => updateDefinition({ maxOutputTokens: Number(event.target.value) })}
-                      />
-                    </Field>
-                    {(['toolCalling', 'imageInput'] as const).map((field) => (
-                      <Field key={field}>
-                        <FieldLabel htmlFor={`model-${field}`}>
-                          {t(field === 'toolCalling' ? 'settings.ai.toolSupport' : 'settings.ai.imageSupport')}
-                        </FieldLabel>
-                        <Combobox
-                          items={SUPPORT_OPTIONS}
-                          value={draft.modelDefinition![field]}
-                          itemToStringLabel={(value) => t(SUPPORT_LABEL_KEYS[value])}
-                          onValueChange={(value) => {
-                            if (!value) return;
-                            updateDefinition({
-                              [field]: value,
-                              ...(field === 'imageInput'
-                                ? {
-                                    vision: value === 'supported'
-                                      ? draft.modelDefinition!.vision ?? {
-                                          maxRequestImages: 20,
-                                          maxRequestImageBytes: 20_971_520,
-                                          reservedTokensPerImage: 4096,
-                                          imageTokenBudgetPolicy: 'User-declared application admission estimate for normalized PNG; not provider usage.',
-                                        }
-                                      : undefined,
-                                  }
-                                : {}),
-                            });
-                          }}
-                        >
-                          <ComboboxInput id={`model-${field}`} className={SYSTEM_INPUT_GROUP_CLASS} />
-                          <ComboboxContent>
-                            <ComboboxList>
-                              {(value: Support) => (
-                                <ComboboxItem key={value} value={value}>
-                                  {t(SUPPORT_LABEL_KEYS[value])}
-                                </ComboboxItem>
-                              )}
-                            </ComboboxList>
-                          </ComboboxContent>
-                        </Combobox>
-                      </Field>
-                    ))}
-                    {draft.modelDefinition.vision && (['maxRequestImages', 'maxRequestImageBytes', 'reservedTokensPerImage'] as const).map((field) => (
-                      <Field key={field} data-invalid={draft.modelDefinition!.vision![field] <= 0 || undefined}>
-                        <FieldLabel htmlFor={`model-${field}`}>
-                          {t(field === 'maxRequestImages'
-                            ? 'settings.ai.imageCount'
-                            : field === 'maxRequestImageBytes'
-                              ? 'settings.ai.imageBytes'
-                              : 'settings.ai.imageTokens')}
-                        </FieldLabel>
-                        <Input
-                          id={`model-${field}`}
-                          className={SYSTEM_INPUT_CLASS}
-                          type="number"
-                          min={1}
-                          max={field === 'maxRequestImages'
-                            ? 20
-                            : field === 'maxRequestImageBytes'
-                              ? 20_971_520
-                              : draft.modelDefinition!.contextWindow}
-                          step={1}
-                          value={draft.modelDefinition!.vision![field]}
-                          aria-invalid={draft.modelDefinition!.vision![field] <= 0 || undefined}
-                          onChange={(event) => updateDefinition({
-                            vision: {
-                              ...draft.modelDefinition!.vision!,
-                              [field]: Number(event.target.value),
-                            },
-                          })}
-                        />
-                      </Field>
-                    ))}
-                    {hasInvalidModelDeclaration && (
-                      <FieldDescription role="alert" className="@min-[30rem]:col-span-2">
-                        {t('settings.ai.declarationInvalid')}
-                      </FieldDescription>
-                    )}
-                  </>
-                )}
+                  <Separator className="@min-[30rem]:col-span-2" />
+                  <div className="@min-[30rem]:col-span-2">
+                    <ProviderModelCatalogEditor
+                      models={providerModels}
+                      defaultModelId={draft?.model ?? ''}
+                      inherited={modelCatalogMode === 'inherited'}
+                      canReset={Boolean(
+                        draft
+                        && PRESET_OPTIONS.some((item) => (
+                          resolveProviderProfile(item) === resolveProviderProfile(draft)
+                        ))
+                        && modelCatalogMode !== 'inherited'
+                      )}
+                      disabled={!draft || busy || modelBusy}
+                      discovering={modelBusy}
+                      discoveryError={modelDiscoveryError}
+                      onChange={handleModelsChange}
+                      onDefaultChange={(model) => updateDraft({ model, reasoningEffort: undefined })}
+                      onDiscover={handleLoadModels}
+                      onDeclare={handleDeclareModel}
+                      onReset={handleResetModels}
+                    />
+                  </div>
                 </FieldGroup>
               </CollapsibleContent>
             </Collapsible>
