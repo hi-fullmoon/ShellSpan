@@ -175,12 +175,6 @@ function getDefaultPreferences(): AppPreferences {
 
 const defaults = getDefaultPreferences();
 
-// Bindings whose default changed across versions. A stored value equal to the
-// old default is treated as uncustomized and upgraded to the new default.
-const LEGACY_DEFAULT_SHORTCUTS: Partial<Record<ShortcutAction, string>> = {
-  newTerminalTab: 'mod+t',
-};
-
 export function mergeShortcutBindings(value: unknown): ShortcutBindings {
   const stored = value && typeof value === 'object'
     ? value as Partial<Record<ShortcutAction, unknown>>
@@ -189,9 +183,7 @@ export function mergeShortcutBindings(value: unknown): ShortcutBindings {
     (Object.entries(DEFAULT_SHORTCUTS) as Array<[ShortcutAction, string]>).map(
       ([action, fallback]) => {
         const candidate = stored[action];
-        const usable = typeof candidate === 'string'
-          && candidate.length > 0
-          && candidate !== LEGACY_DEFAULT_SHORTCUTS[action];
+        const usable = typeof candidate === 'string' && candidate.length > 0;
         return [action, usable ? candidate : fallback];
       },
     ),

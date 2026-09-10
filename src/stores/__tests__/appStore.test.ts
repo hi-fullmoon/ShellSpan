@@ -233,10 +233,11 @@ describe('appStore', () => {
     );
   });
 
-  it('upgrades a stored legacy default to the new default', () => {
-    // mod+t was the old newTerminalTab default; treat it as uncustomized.
-    expect(mergeShortcutBindings({ newTerminalTab: 'mod+t' })).toEqual(DEFAULT_SHORTCUTS);
-    // A genuinely customized binding is kept.
+  it('keeps every valid customized binding', () => {
+    expect(mergeShortcutBindings({ newTerminalTab: 'mod+t' })).toEqual({
+      ...DEFAULT_SHORTCUTS,
+      newTerminalTab: 'mod+t',
+    });
     expect(mergeShortcutBindings({ newTerminalTab: 'mod+shift+n' })).toEqual({
       ...DEFAULT_SHORTCUTS,
       newTerminalTab: 'mod+shift+n',

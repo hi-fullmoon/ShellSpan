@@ -175,7 +175,7 @@ describe('ShellSpan connection export', () => {
 
   it('drops a jump host object if it contains a secret-bearing field', () => {
     const imported = parseConnectionExport(JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 3,
       profiles: [{
         name: 'API', host: 'api.test', port: 22, username: 'deploy', authMethod: 'password',
         jumpHost: {
@@ -189,7 +189,7 @@ describe('ShellSpan connection export', () => {
 
   it('drops a forwarding rule if it contains an unexpected secret-bearing field', () => {
     const imported = parseConnectionExport(JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       profiles: [{
         name: 'API',
         host: 'api.test',
@@ -232,5 +232,11 @@ describe('ShellSpan connection export', () => {
     }));
 
     expect(imported[0]?.quickActions).toEqual([]);
+  });
+
+  it('rejects exports from older schemas', () => {
+    for (const schemaVersion of [1, 2]) {
+      expect(parseConnectionExport(JSON.stringify({ schemaVersion, profiles: [] }))).toEqual([]);
+    }
   });
 });

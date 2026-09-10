@@ -103,6 +103,7 @@ describe('terminal workspace serialization', () => {
   it('ignores corrupt and invalid workspace entries', () => {
     expect(parseTerminalWorkspace('not-json')).toEqual({ sessions: [], layout: null });
     expect(parseTerminalWorkspace(JSON.stringify({
+      version: 1,
       sessions: [
         { title: 'Missing profile', host: 'example.com', port: 22, username: 'alice' },
         {
@@ -130,6 +131,7 @@ describe('terminal workspace serialization', () => {
 
   it('rejects malformed layout nodes', () => {
     const raw = JSON.stringify({
+      version: 1,
       sessions: [{
         sessionId: 's1',
         title: 'Valid',
@@ -152,6 +154,7 @@ describe('terminal workspace serialization', () => {
 
   it('rejects an invalid persisted split ratio', () => {
     const parsed = parseTerminalWorkspace(JSON.stringify({
+      version: 1,
       sessions: [],
       layout: {
         kind: 'split',
@@ -165,16 +168,16 @@ describe('terminal workspace serialization', () => {
     expect(parsed.layout).toBeNull();
   });
 
-  it('loads the legacy unversioned shape but rejects unknown versions', () => {
-    const legacy = JSON.stringify({
+  it('rejects missing and unknown versions', () => {
+    const unversioned = JSON.stringify({
       sessions: [{
-        sessionId: 's1', title: 'Legacy', host: 'example.com', port: 22,
+        sessionId: 's1', title: 'Unversioned', host: 'example.com', port: 22,
         username: 'alice', profileId: 'profile-1',
       }],
       layout: null,
     });
 
-    expect(parseTerminalWorkspace(legacy).sessions).toHaveLength(1);
+    expect(parseTerminalWorkspace(unversioned)).toEqual({ sessions: [], layout: null });
     expect(parseTerminalWorkspace(JSON.stringify({ version: 2, sessions: [], layout: null })))
       .toEqual({ sessions: [], layout: null });
   });
