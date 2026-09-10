@@ -64,7 +64,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     name: 'DeepSeek',
     kind: 'openAiCompatible',
     baseUrl: 'https://api.deepseek.com',
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-flash',
     requiresApiKey: true,
   },
   {
@@ -87,6 +87,15 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
   },
   { preset: 'qwen', profile: 'qwen', name: 'Qwen', kind: 'openAiCompatible', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3', requiresApiKey: true },
   { preset: 'glm', profile: 'glm', name: 'GLM', kind: 'openAiCompatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5', requiresApiKey: true },
+  {
+    preset: 'openrouter',
+    profile: 'openrouter',
+    name: 'OpenRouter',
+    kind: 'openAiCompatible',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    model: '',
+    requiresApiKey: true,
+  },
   {
     preset: 'custom',
     profile: 'generic',

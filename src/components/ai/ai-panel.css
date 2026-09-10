@@ -2596,7 +2596,7 @@
 }
 
 .ai-composer-trailing {
-  flex: 1 0 auto;
+  flex: 1 1 0;
   justify-content: flex-end;
   gap: 6px;
 }
@@ -2655,8 +2655,9 @@
 }
 
 .ai-model-trigger {
-  max-width: none;
-  flex: none;
+  max-width: 100%;
+  flex: 0 1 auto;
+  overflow: hidden;
   gap: 4px;
   padding-inline: 8px 6px;
 }
@@ -2670,15 +2671,20 @@
 
 .ai-model-trigger-name,
 .ai-model-trigger-reasoning {
-  flex: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .ai-model-trigger-name {
+  flex: 0 1 auto;
+  max-width: 240px;
   color: var(--dsw-alias-label-primary);
 }
 
 .ai-model-trigger-reasoning {
+  flex: none;
   color: var(--dsw-alias-label-tertiary);
 }
 

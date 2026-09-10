@@ -188,7 +188,7 @@ it('vision uses exact backend DTOs and refuses unresolved or unknown models', as
   await loadResolvedModel(provider);
   expect(() => requireVision(provider)).not.toThrow();
   expect(providerCapabilities(provider).contextWindow).toBe(128000);
-  for (const model of ['qwen3-vl-plus-unknown', 'qwen-plus', 'deepseek-chat', 'MiniMax-M2.7']) {
+  for (const model of ['qwen3-vl-plus-unknown', 'qwen-plus', 'retired-model', 'MiniMax-M2.7']) {
     expect(() => requireVision({ ...provider, model })).toThrow('MODEL_RESOLUTION_PENDING');
     await expect(loadResolvedModel({ ...provider, model })).rejects.toThrow('UNKNOWN_MODEL');
     expect(() => requireVision({ ...provider, model })).toThrow('UNKNOWN_MODEL');

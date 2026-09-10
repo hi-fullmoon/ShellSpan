@@ -74,7 +74,7 @@ describe('approval identity across repeated tool calls', () => {
       })}
       onOpenTool={onOpenTool}
     />);
-    await user.click(screen.getByRole('button', { name: 'View full parameters' }));
+    await user.click(screen.getByRole('button', { name: 'View technical details' }));
     expect(onOpenTool).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       kind: 'tool', sessionId: 'session-fixture', turnId: 'turn-1', stepId: 'step-2',
       callId: 'call-health', input: { command: 'systemctl restart nginx' }, effect: 'stateChange',

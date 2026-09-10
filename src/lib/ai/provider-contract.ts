@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { AiProviderConfig, AiProviderPreset, AiProviderKind, AiReasoningOption } from '@/types/ai';
 
 // Presentation identities only. All model facts come from ai_resolve_model.
-export const PROVIDER_PROFILE_IDS = ['openai', 'anthropic', 'ollama', 'deepseek', 'minimax', 'qwen', 'glm', 'kimi', 'generic'] as const;
+export const PROVIDER_PROFILE_IDS = ['openai', 'anthropic', 'ollama', 'deepseek', 'minimax', 'qwen', 'glm', 'kimi', 'openrouter', 'generic'] as const;
 export type ProviderProfileId = typeof PROVIDER_PROFILE_IDS[number];
 export type Support = 'supported' | 'unsupported' | 'unknown';
 export interface ModelCompat {
@@ -30,6 +30,7 @@ export interface DiscoveredModel {
   name?: string;
   contextWindow?: number;
   maxOutputTokens?: number;
+  definition?: ModelDefinition;
 }
 export interface ResolvedModel extends ModelDefinition {
   catalogVersion: number; routeId: string; providerId: string; profile: ProviderProfileId;

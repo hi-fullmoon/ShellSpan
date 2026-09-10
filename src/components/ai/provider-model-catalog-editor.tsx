@@ -46,6 +46,8 @@ import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import type { DiscoveredModel, ModelDefinition } from '@/lib/ai/provider-contract';
 
+const MAX_DISCOVERY_SELECTION = 50;
+
 export interface ProviderModelDraft {
   id: string;
   displayName?: string;
@@ -150,8 +152,10 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
     return (candidates ?? []).filter((model) => model.id.toLowerCase().includes(normalized)
       || model.name?.toLowerCase().includes(normalized) === true);
   }, [candidates, query]);
-  const allVisibleSelected = visibleCandidates.length > 0
-    && visibleCandidates.every((model) => selected.has(model.id));
+  const knownIds = useMemo(() => new Set(models.map((model) => model.id)), [models]);
+  const selectableVisible = visibleCandidates.filter((model) => !knownIds.has(model.id));
+  const allVisibleSelected = selectableVisible.length > 0
+    && selectableVisible.every((model) => selected.has(model.id));
 
   const patchModel = (index: number, patch: Partial<ProviderModelDraft>): void => {
     onChange(models.map((model, at) => at === index ? { ...model, ...patch } : model));
@@ -179,9 +183,8 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
         setPickerError(t('settings.ai.modelsDiscoveryEmpty'));
         return;
       }
-      const known = new Set(models.map((model) => model.id));
       setCandidates(unique);
-      setSelected(new Set(unique.filter((model) => !known.has(model.id)).map((model) => model.id)));
+      setSelected(new Set());
       setQuery('');
     } catch (error) {
       setPickerError(error instanceof Error ? error.message : String(error));
@@ -203,6 +206,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
         ...(candidate.name ? { displayName: candidate.name } : {}),
         ...(candidate.contextWindow ? { contextWindow: candidate.contextWindow } : {}),
         ...(candidate.maxOutputTokens ? { maxOutputTokens: candidate.maxOutputTokens } : {}),
+        ...(candidate.definition ? { definition: candidate.definition } : {}),
       });
     }
     onChange([...byId.values()]);
@@ -211,9 +215,15 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
 
   const toggleVisible = (): void => {
     setSelected((current) => {
-      if (visibleCandidates.every((model) => current.has(model.id))) return new Set();
       const next = new Set(current);
-      for (const model of visibleCandidates) next.add(model.id);
+      if (selectableVisible.every((model) => current.has(model.id))) {
+        for (const model of selectableVisible) next.delete(model.id);
+        return next;
+      }
+      for (const model of selectableVisible) {
+        if (next.size >= MAX_DISCOVERY_SELECTION) break;
+        next.add(model.id);
+      }
       return next;
     });
   };
@@ -254,7 +264,12 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
       <Field>
         <FieldLabel htmlFor="ai-provider-default-model">{t('settings.ai.defaultModel')}</FieldLabel>
         <Select value={defaultModelId || null} onValueChange={(value) => value && onDefaultChange(value)}>
-          <SelectTrigger id="ai-provider-default-model" size="sm" disabled={disabled || models.length === 0}>
+          <SelectTrigger
+            id="ai-provider-default-model"
+            size="sm"
+            className="h-8!"
+            disabled={disabled || models.length === 0}
+          >
             <SelectValue placeholder={t('settings.ai.chooseDefaultModel')} />
           </SelectTrigger>
           <SelectContent>
@@ -430,16 +445,23 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                   onChange={(event) => setQuery(event.target.value)}
                 />
               </InputGroup>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={visibleCandidates.length === 0}
-                onClick={toggleVisible}
-              >
-                {t(allVisibleSelected ? 'settings.ai.deselectAll' : 'settings.ai.selectAll')}
-              </Button>
+              {visibleCandidates.length <= MAX_DISCOVERY_SELECTION && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={selectableVisible.length === 0}
+                  onClick={toggleVisible}
+                >
+                  {t(allVisibleSelected ? 'settings.ai.deselectAll' : 'settings.ai.selectAll')}
+                </Button>
+              )}
             </div>
+            {(candidates?.length ?? 0) > MAX_DISCOVERY_SELECTION && (
+              <FieldDescription>
+                {t('settings.ai.modelSelectionLimit', { count: MAX_DISCOVERY_SELECTION })}
+              </FieldDescription>
+            )}
             {visibleCandidates.length === 0 ? (
               <p role="status" className="py-6 text-center text-xs text-muted-foreground">
                 {t('settings.ai.modelNoResults')}
@@ -454,6 +476,8 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                     <Checkbox
                       id={`ai-model-candidate-${model.id}`}
                       checked={selected.has(model.id)}
+                      disabled={knownIds.has(model.id)
+                        || (!selected.has(model.id) && selected.size >= MAX_DISCOVERY_SELECTION)}
                       onCheckedChange={() => setSelected((current) => {
                         const next = new Set(current);
                         if (!next.delete(model.id)) next.add(model.id);
@@ -476,7 +500,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
             <Button type="button" variant="outline" size="sm" onClick={closePicker}>
               {t('common.cancel')}
             </Button>
-            <Button type="button" size="sm" onClick={adoptSelected}>
+            <Button type="button" size="sm" disabled={selected.size === 0} onClick={adoptSelected}>
               {t('settings.ai.addSelectedModels')}
             </Button>
           </CompactDialogFooter>
