@@ -16,7 +16,14 @@ import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutBindings } from '@/types';
 import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import { Spinner as ButtonSpinner } from '@/components/ui/spinner';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import {
   agentTerminalLeaseState,
   type AgentTerminalLeaseView,
@@ -70,9 +77,11 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
   const agentId = lease.agentSessionId.length > 16
     ? `${lease.agentSessionId.slice(0, 12)}…`
     : lease.agentSessionId;
-  const interactionHint = lease.inputBlocked
-    ? t('terminal.agentLease.inputBlockedAccessibleHint')
-    : t('terminal.agentLease.inputLocked');
+  const interactionHint = !lease.terminalOwned
+    ? t('terminal.agentLease.turnRunning')
+    : lease.inputBlocked
+      ? t('terminal.agentLease.inputBlockedAccessibleHint')
+      : t('terminal.agentLease.inputLocked');
 
   return (
     <div
@@ -83,16 +92,35 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
       data-testid="agent-terminal-lease-bar"
       data-operation-id={lease.operationId}
     >
-      <Badge size="sm" variant="secondary" title={lease.agentSessionId}>
-        <BotIcon data-icon="inline-start" />
-        {t('terminal.agentLease.agentIdentity', { id: agentId })}
-      </Badge>
-      <span className="min-w-0 flex-1 truncate font-mono text-xs" title={lease.commandDisplay}>
-        {lease.commandDisplay ?? t('terminal.agentLease.commandPending')}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger
+            render={(
+              <Badge
+                variant="outline"
+                data-testid="agent-terminal-lease-identity"
+              />
+            )}
+          >
+            <BotIcon data-icon="inline-start" />
+            {t('terminal.agentLease.agentIdentity', { id: agentId })}
+          </TooltipTrigger>
+          <TooltipContent>{lease.agentSessionId}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <span
+        className="relative h-5 w-px shrink-0"
+        aria-hidden="true"
+        data-testid="agent-terminal-lease-separator"
+      >
+        <Separator
+          orientation="vertical"
+          className="absolute inset-x-0 top-1/2 h-3.5 -translate-y-1/2"
+        />
       </span>
       <span className="sr-only">{interactionHint}</span>
       <span
-        className="hidden min-w-0 truncate text-xs text-muted-foreground lg:inline"
+        className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground lg:inline"
         aria-hidden="true"
       >
         {interactionHint}
@@ -102,7 +130,10 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
         aria-label={t('terminal.agentLease.runtime', { duration })}
       >
         <ClockIcon className="size-3.5" aria-hidden="true" />
-        <span className="w-[6ch] text-right font-mono tabular-nums" aria-hidden="true">
+        <span
+          className="whitespace-nowrap text-right font-mono tabular-nums"
+          aria-hidden="true"
+        >
           {duration}
         </span>
       </span>
@@ -110,7 +141,7 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
         type="button"
         variant="secondary"
         size="xs"
-        className="shrink-0"
+        className="shrink-0 gap-1"
         disabled={lease.takeoverRequested}
         aria-busy={lease.takeoverRequested || undefined}
         aria-label={t(lease.takeoverRequested
@@ -429,6 +460,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">
       {activeLease && <AgentTerminalLeaseBar lease={activeLease} />}
       <div className="relative min-h-0 flex-1">
+        {activeLease && (
+          <div
+            className="agent-visible-terminal-aura pointer-events-none absolute inset-0 z-10"
+            data-testid="agent-visible-terminal-aura"
+            aria-hidden="true"
+          />
+        )}
         {searchOpen && (
           <div className="absolute right-0 top-0 z-20 flex h-10 w-96 items-center gap-1.5 rounded-bl-sm border border-t-0 border-app-border bg-app-surface p-1.5 shadow-md">
           <Input

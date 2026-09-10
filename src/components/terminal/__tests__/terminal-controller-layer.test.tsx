@@ -10,14 +10,20 @@ import { terminalRegistry } from '../registry/terminal-registry';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { Event } from '@tauri-apps/api/event';
-import type { AgentTerminalLeaseEvent } from '@/types/agent-session';
+import type {
+  AgentSessionEvent,
+  AgentSessionSnapshot,
+  AgentTerminalLeaseEvent,
+} from '@/types/agent-session';
 import {
   invokeAgentTerminalLeaseReady,
-  invokeTakeoverAgentTerminal,
+  invokeInterruptAgentRuntime,
+  listenToAgentRuntimeSession,
   listenToAgentTerminalLease,
 } from '@/lib/ipc/tauri';
 
 let leaseListener: ((event: Event<AgentTerminalLeaseEvent>) => void) | undefined;
+let sessionListener: ((event: Event<AgentSessionEvent>) => void) | undefined;
 
 class RO {
   observe() {}
@@ -40,7 +46,13 @@ vi.mock('@/lib/ipc/tauri', () => ({
   listenToSshStatus: vi.fn().mockResolvedValue(() => {}),
   listenToSshClosed: vi.fn().mockResolvedValue(() => {}),
   invokeAgentTerminalLeaseReady: vi.fn().mockResolvedValue(true),
-  invokeTakeoverAgentTerminal: vi.fn().mockResolvedValue(true),
+  invokeInterruptAgentRuntime: vi.fn().mockResolvedValue(undefined),
+  listenToAgentRuntimeSession: vi.fn().mockImplementation(async (listener) => {
+    sessionListener = listener;
+    return () => {
+      if (sessionListener === listener) sessionListener = undefined;
+    };
+  }),
   listenToAgentTerminalLease: vi.fn().mockImplementation(async (listener) => {
     leaseListener = listener;
     return () => {
@@ -90,13 +102,31 @@ function leaseEvent(
   } as Event<AgentTerminalLeaseEvent>;
 }
 
+function turnEvent(type: 'turn/start' | 'turn/end', turnId = 'turn-1'): AgentSessionEvent {
+  return {
+    version: 5,
+    sessionId: 'agent-1',
+    seq: type === 'turn/start' ? 1 : 2,
+    timeUnixMs: 1,
+    turnId,
+    type,
+    ...(type === 'turn/end' ? { data: { reason: 'completed' } } : {}),
+  } as AgentSessionEvent;
+}
+
 describe('TerminalControllerLayer', () => {
   beforeEach(() => {
     cleanupReact();
     terminalRegistry.disposeAll();
     vi.clearAllMocks();
     vi.mocked(invokeAgentTerminalLeaseReady).mockResolvedValue(true);
-    vi.mocked(invokeTakeoverAgentTerminal).mockResolvedValue(true);
+    vi.mocked(invokeInterruptAgentRuntime).mockResolvedValue({} as AgentSessionSnapshot);
+    vi.mocked(listenToAgentRuntimeSession).mockImplementation(async (listener) => {
+      sessionListener = listener;
+      return () => {
+        if (sessionListener === listener) sessionListener = undefined;
+      };
+    });
     vi.mocked(listenToAgentTerminalLease).mockImplementation(async (listener) => {
       leaseListener = listener;
       return () => {
@@ -325,7 +355,7 @@ describe('TerminalControllerLayer', () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
-  it('takes over at most once and unlocks when the backend confirms release', async () => {
+  it('cancels the Agent turn at most once and unlocks when the backend confirms', async () => {
     const controller = seedController();
     act(() => {
       addSession('s1');
@@ -343,21 +373,17 @@ describe('TerminalControllerLayer', () => {
       agentTerminalLeaseState.get('s1')?.requestTakeover();
       agentTerminalLeaseState.get('s1')?.requestTakeover();
     });
-    await vi.waitFor(() => expect(invokeTakeoverAgentTerminal).toHaveBeenCalledOnce());
-    expect(invokeTakeoverAgentTerminal).toHaveBeenCalledWith({
-      sessionId: 's1',
-      agentSessionId: 'agent-1',
-      operationId: 'operation-1',
-    });
+    await vi.waitFor(() => expect(invokeInterruptAgentRuntime).toHaveBeenCalledOnce());
+    expect(invokeInterruptAgentRuntime).toHaveBeenCalledWith({ sessionId: 'agent-1' });
     expect(release).toHaveBeenCalledOnce();
     expect(agentTerminalLeaseState.get('s1')).toBeUndefined();
     coordinator.dispose();
   });
 
-  it('allows takeover to be retried after a rejected request', async () => {
-    vi.mocked(invokeTakeoverAgentTerminal)
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+  it('allows turn cancellation to be retried after a rejected request', async () => {
+    vi.mocked(invokeInterruptAgentRuntime)
+      .mockRejectedValueOnce(new Error('cancel rejected'))
+      .mockResolvedValueOnce({} as AgentSessionSnapshot);
     const controller = seedController();
     const release = vi.fn();
     vi.spyOn(controller, 'suppressUserInput').mockReturnValue(release);
@@ -373,22 +399,22 @@ describe('TerminalControllerLayer', () => {
     });
 
     act(() => agentTerminalLeaseState.get('s1')?.requestTakeover());
-    await vi.waitFor(() => expect(invokeTakeoverAgentTerminal).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(invokeInterruptAgentRuntime).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
     expect(agentTerminalLeaseState.get('s1')).toBeUndefined();
     coordinator.dispose();
   });
 
-  it('recovers from an unconfirmed takeover request and ignores its late response', async () => {
+  it('recovers from an unconfirmed turn cancellation and ignores its late response', async () => {
     vi.useFakeTimers();
-    let resolveFirst!: (accepted: boolean) => void;
-    let resolveSecond!: (accepted: boolean) => void;
-    vi.mocked(invokeTakeoverAgentTerminal)
-      .mockReturnValueOnce(new Promise<boolean>((resolve) => {
-        resolveFirst = resolve;
+    let resolveFirst!: () => void;
+    let resolveSecond!: () => void;
+    vi.mocked(invokeInterruptAgentRuntime)
+      .mockReturnValueOnce(new Promise<AgentSessionSnapshot>((resolve) => {
+        resolveFirst = () => resolve({} as AgentSessionSnapshot);
       }))
-      .mockReturnValueOnce(new Promise<boolean>((resolve) => {
-        resolveSecond = resolve;
+      .mockReturnValueOnce(new Promise<AgentSessionSnapshot>((resolve) => {
+        resolveSecond = () => resolve({} as AgentSessionSnapshot);
       }));
     const controller = seedController();
     const release = vi.fn();
@@ -405,14 +431,14 @@ describe('TerminalControllerLayer', () => {
       });
 
       act(() => agentTerminalLeaseState.get('s1')?.requestTakeover());
-      resolveFirst(true);
+      resolveFirst();
       await act(async () => Promise.resolve());
       expect(agentTerminalLeaseState.get('s1')?.takeoverRequested).toBe(true);
       expect(release).not.toHaveBeenCalled();
 
-      resolveSecond(true);
+      resolveSecond();
       await act(async () => Promise.resolve());
-      expect(invokeTakeoverAgentTerminal).toHaveBeenCalledTimes(2);
+      expect(invokeInterruptAgentRuntime).toHaveBeenCalledTimes(2);
       expect(release).toHaveBeenCalledOnce();
       expect(agentTerminalLeaseState.get('s1')).toBeUndefined();
     } finally {
@@ -442,6 +468,7 @@ describe('TerminalControllerLayer', () => {
       .mockReturnValueOnce(removeSecondFilter);
     const coordinator = createAgentTerminalLeaseCoordinator();
 
+    coordinator.handleSession(turnEvent('turn/start'));
     await coordinator.handle(leaseEvent('operation-1').payload);
     await coordinator.handle(leaseEvent('operation-1').payload);
     expect(suppress).toHaveBeenCalledOnce();
@@ -465,6 +492,12 @@ describe('TerminalControllerLayer', () => {
     await coordinator.handle(leaseEvent('operation-2', 'released').payload);
     expect(releaseSecond).toHaveBeenCalledOnce();
     expect(removeSecondFilter).toHaveBeenCalledOnce();
+    expect(agentTerminalLeaseState.get('s1')).toMatchObject({
+      operationId: 'operation-2',
+      terminalOwned: false,
+      inputBlocked: false,
+    });
+    coordinator.handleSession(turnEvent('turn/end'));
     expect(agentTerminalLeaseState.get('s1')).toBeUndefined();
     coordinator.dispose();
   });
