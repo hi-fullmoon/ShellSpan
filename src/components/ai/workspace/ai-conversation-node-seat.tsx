@@ -447,7 +447,10 @@ function turnProcessSummary(
   t: ReturnType<typeof useI18n>['t'],
 ): string {
   const counts = new Map<AiConversationNodeOf<'turnProcess'>['children'][number]['kind'], number>();
-  for (const child of node.children) counts.set(child.kind, (counts.get(child.kind) ?? 0) + 1);
+  for (const child of node.children) {
+    const kind = child.kind === 'question' ? 'tool' : child.kind;
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
   const parts = [
     ['tool', 'ai.workspace.turnProcess.toolCount'],
     ['retry', 'ai.workspace.turnProcess.retryCount'],

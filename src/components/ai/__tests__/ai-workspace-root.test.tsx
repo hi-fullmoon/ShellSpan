@@ -190,7 +190,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(screen.getByTestId('ai-workspace-composer').textContent).toBe('ordinary unsent draft');
     expect(screen.getByTestId('ai-workspace-composer')).toHaveAttribute('contenteditable', 'true');
     fireEvent.change(within(panel as HTMLElement).getByRole('textbox'), { target: { value: 'Continue' } });
-    await userEvent.click(screen.getByRole('button', { name: 'Submit answers' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Submit' }));
     expect(onAnswerQuestion).toHaveBeenCalledOnce();
     expect(onSubmit).not.toHaveBeenCalled();
     rerender(<AiWorkspaceRoot {...props} view={{ ...base, pendingQuestion: null }} />);
