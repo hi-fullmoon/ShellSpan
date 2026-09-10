@@ -10,7 +10,7 @@
 
 全局完成条件：
 
-- `direct` 为历史 Session 和新 Session 的兼容默认值；
+- 新 Session 必须显式记录 `direct` 或 `boundTerminal`；
 - `boundTerminal` 命令在冻结的绑定终端实时显示，并返回正确、有界、脱敏的工具结果；
 - 后端强制隔离用户输入和 Agent 输入；
 - wrapper、BEGIN/END marker 不进入屏幕、AI context buffer 或 Session 日志；
@@ -21,16 +21,16 @@
 
 ### 阶段 1：Session 契约与执行方式选择
 
-目标：建立向后兼容、可持久化且在 Session 创建后冻结的 `executionSurface`，暂不改变命令执行通道。
+目标：建立严格、可持久化且在 Session 创建后冻结的 `executionSurface`，暂不改变命令执行通道。
 
 实施范围：
 
 - Rust/TypeScript 增加 `direct | boundTerminal` 类型；
 - Session Header、`session/created` 事件、创建请求、投影、IPC 与 fixture 串通字段；
-- 历史日志缺字段时反序列化为 `direct`；
+- 缺少 `executionSurface` 的日志直接拒绝；
 - Agent composer 在目标/权限区域提供“后台执行 / 可视终端”选择；
 - 恢复历史 Session 时使用 Header 值，不受当前 composer 选择影响；
-- 增加中英文文案与契约、迁移、前端控制器测试。
+- 增加中英文文案与契约、前端控制器测试。
 
 退出门禁：相关 Rust 单测、前端定向测试、TypeScript build 通过；既有 `direct` 行为未改变。
 
@@ -112,7 +112,7 @@
 - 每个阶段只实现自身范围，不提前实现 Phase 2 的 `wait_terminal`、`write_terminal_input` 或 TUI/REPL；
 - 阶段任务结束时报告改动文件、测试命令、未覆盖平台/风险以及下一阶段需要继承的约束；
 - 若前一阶段未通过退出门禁，下一阶段不启动；
-- 发现设计与代码基线冲突时，先以安全边界和向后兼容为准，并在阶段交付中记录决策。
+- 发现设计与代码基线冲突时，以安全边界和当前严格契约为准，并在阶段交付中记录决策。
 
 ## 4. 后续里程碑（不在本轮执行）
 
