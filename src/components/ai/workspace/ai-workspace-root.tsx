@@ -40,10 +40,11 @@ function askConversationNodes(nodes: readonly AiConversationNode[]): readonly Ai
       || node.kind === 'turnTail'
     ) return [node];
     if (node.kind !== 'turnProcess') return [];
+    const questions = node.children.filter((child) => child.kind === 'question');
     const reasoning = node.children.filter((child) => child.kind === 'reasoning');
     const first = reasoning[0];
-    if (!first) return [];
-    return [{
+    const visible: AiConversationNode[] = [...questions];
+    if (first) visible.push({
       ...first,
       key: `ask-reasoning:${node.key}`,
       stepId: null,
@@ -58,7 +59,8 @@ function askConversationNodes(nodes: readonly AiConversationNode[]): readonly Ai
           : reasoning.some((child) => child.state === 'settled')
             ? 'settled'
             : 'completed',
-    }];
+    });
+    return visible.sort((left, right) => left.firstSeq - right.firstSeq);
   });
 }
 

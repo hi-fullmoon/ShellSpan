@@ -23,6 +23,7 @@ import type {
   AiDurableSessionStats,
   AiDurableTurnStats,
   AiErrorNode,
+  AiQuestionNode,
   AiReasoningNode,
   AiRetryNode,
   AiSystemPromptNode,
@@ -80,8 +81,9 @@ const PROCESS_CHILD_ORDER = {
   assistantMessage: 2,
   retry: 3,
   tool: 4,
-  approvalMarker: 5,
-  error: 6,
+  question: 5,
+  approvalMarker: 6,
+  error: 7,
 } satisfies Record<AiTurnProcessChildNode['kind'], number>;
 
 function eventTurnId(event: RuntimeEventLike): string | null {
@@ -1055,6 +1057,14 @@ export function projectAgentChatNodes(
         : [Math.max(0, request.firstResponseAt - request.startedAt)]
     ));
     const toolChildren = [...turn.children.values()].filter((child) => child.kind === 'tool');
+    const toolCallIds = new Set(toolChildren.map((child) => child.callId));
+    const questionCallIds = new Set(
+      [...turn.children.values()].flatMap((child) =>
+        child.kind === 'question' ? [child.question.identity.callId] : [],
+      ),
+    );
+    const toolCount = toolChildren.length
+      + [...questionCallIds].filter((callId) => !toolCallIds.has(callId)).length;
     const toolDurations = toolChildren.flatMap((child) => (
       child.durationMs === null ? [] : [child.durationMs]
     ));
@@ -1084,9 +1094,9 @@ export function projectAgentChatNodes(
       turnCount: 1,
       stepCount: turn.steps.size,
       requestCount: turnRequests.length,
-      toolCount: toolChildren.length,
+      toolCount,
       modelDurationMs,
-      toolDurationMs: toolDurations.length === 0 || toolDurations.length !== toolChildren.length
+      toolDurationMs: toolDurations.length === 0 || toolDurations.length !== toolCount
         ? null
         : toolDurations.reduce((sum, duration) => sum + duration, 0),
       timeToFirstTokenMs,
@@ -1143,6 +1153,17 @@ export function projectAgentChatNodes(
     scopedArtifacts.set(node.turnId, values);
   }
 
+  const questionNodes = projectQuestions(events).map((question): AiQuestionNode => ({
+    kind: 'question', key: `question:${questionKey(question.identity)}`, sourceKind: 'agent',
+    sessionId: question.identity.sessionId, turnId: question.identity.turnId, stepId: question.identity.stepId,
+    firstSeq: question.firstSeq, lastSeq: question.lastSeq, timestamp: question.timestamp, question,
+  }));
+  for (const question of questionNodes) {
+    const turn = question.turnId === null ? undefined : turns.get(question.turnId);
+    if (turn) turn.children.set(question.key, question);
+    else unscopedNodes.set(question.key, question);
+  }
+
   const nodes: AiConversationNode[] = [...unscopedNodes.values()].sort(topLevelSort);
   const orderedTurns = [...turns.values()].sort((left, right) => (
     left.firstSeq - right.firstSeq || left.id.localeCompare(right.id)
@@ -1159,7 +1180,14 @@ export function projectAgentChatNodes(
     for (const assistant of assistants) {
       if (assistant.key !== closing?.key) turn.children.set(assistant.key, assistant);
     }
-    const children = [...turn.children.values()].sort(processChildSort);
+    const questionCallIds = new Set(
+      [...turn.children.values()].flatMap((child) =>
+        child.kind === 'question' ? [child.question.identity.callId] : [],
+      ),
+    );
+    const children = [...turn.children.values()]
+      .filter((child) => child.kind !== 'tool' || !questionCallIds.has(child.callId))
+      .sort(processChildSort);
     const status: AiTurnProcessStatus = turn.startSeq === undefined
       ? 'partial'
       : turn.status ?? (turn.endSeq === undefined ? 'running' : 'completed');
@@ -1224,16 +1252,5 @@ export function projectAgentChatNodes(
     }
   }
 
-  const questionNodes = projectQuestions(events).map((question): import('./conversation-node').AiQuestionNode => ({
-    kind: 'question', key: `question:${questionKey(question.identity)}`, sourceKind: 'agent',
-    sessionId: question.identity.sessionId, turnId: question.identity.turnId, stepId: question.identity.stepId,
-    firstSeq: question.firstSeq, lastSeq: question.lastSeq, timestamp: question.timestamp, question,
-  }));
-  for (const question of questionNodes) {
-    const followingAnswer = nodes.findIndex((node) => node.turnId === question.turnId
-      && (node.kind === 'assistantMessage' || node.kind === 'turnTail') && node.firstSeq > question.firstSeq);
-    const afterTurn = nodes.reduce((end, node, index) => node.turnId === question.turnId ? index + 1 : end, 0);
-    nodes.splice(followingAnswer >= 0 ? followingAnswer : afterTurn || nodes.length, 0, question);
-  }
   return nodes;
 }

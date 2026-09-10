@@ -12,14 +12,29 @@ import type { AnswerQuestionInput } from '@/types/agent-question';
 
 const identity = {
   sessionId: 'session-fixture',
-  turnId: 'turn-01',
-  stepId: 'step-01',
-  requestId: 'request-01',
+  turnId: 'turn-1',
+  stepId: 'step-1',
+  requestId: 'request-1',
   callId: 'question-call',
   questionRequestId: 'question-id',
 };
 const base = agentSessionEventFixture.slice(0, 10);
-const requested = sessionEvent(base.length, {
+const questionCall = sessionEvent(base.length, {
+  type: 'tool/call',
+  turnId: identity.turnId,
+  stepId: identity.stepId,
+  data: {
+    call: {
+      callId: identity.callId,
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'choice', question: 'Choose?', multi_select: false }],
+      },
+      effect: 'readOnly',
+    },
+  },
+});
+const requested = sessionEvent(base.length + 1, {
   type: 'question/requested',
   turnId: identity.turnId,
   stepId: identity.stepId,
@@ -39,7 +54,7 @@ const input: AnswerQuestionInput = {
   clientOperationId: 'operation',
   answers: [{ id: 'choice', selected: [], custom: 'answer' }],
 };
-const answered = sessionEvent(base.length + 1, {
+const answered = sessionEvent(base.length + 2, {
   type: 'question/answered',
   turnId: identity.turnId,
   stepId: identity.stepId,
@@ -47,18 +62,23 @@ const answered = sessionEvent(base.length + 1, {
 });
 
 describe('Stage 6A committed question projections and IPC', () => {
-  it('keeps one stable top-level chat question outside the process and one Activity identity on replay', () => {
-    const events = [...base, requested, answered];
+  it('keeps one stable chat question inside the process and one Activity identity on replay', () => {
+    const events = [...base, questionCall, requested, answered];
     const chat = projectAgentChatNodes(events);
-    const pending = projectAgentChatNodes([...base, requested]).find(
-      (n) => n.kind === 'question',
-    );
-    const question = chat.find((n) => n.kind === 'question');
+    const pending = projectAgentChatNodes([...base, questionCall, requested])
+      .find((node) => node.kind === 'turnProcess')
+      ?.children.find((node) => node.kind === 'question');
+    const process = chat.find((node) => node.kind === 'turnProcess');
+    const question = process?.children.find((node) => node.kind === 'question');
     expect(question?.key).toBe(pending?.key);
     expect(question).toMatchObject({
       question: { status: 'answered', answers: input.answers },
     });
-    expect(chat.filter((n) => n.kind === 'question')).toHaveLength(1);
+    expect(chat.filter((node) => node.kind === 'question')).toHaveLength(0);
+    expect(process?.children.filter((node) => node.kind === 'question')).toHaveLength(1);
+    expect(process?.children.some((node) =>
+      node.kind === 'tool' && node.callId === identity.callId,
+    )).toBe(false);
     expect(projectAgentChatNodes(events)).toEqual(chat);
     const activity = projectAgentActivity(events).nodes.filter(
       (n) => n.kind === 'question',

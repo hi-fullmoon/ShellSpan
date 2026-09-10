@@ -208,6 +208,7 @@ export type AiTurnProcessChildNode =
   | AiContextInjectionNode
   | AiReasoningNode
   | AiToolNode
+  | AiQuestionNode
   | AiApprovalMarkerNode
   | AiRetryNode
   | AiErrorNode;
