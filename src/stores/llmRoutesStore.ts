@@ -15,7 +15,7 @@ export function routeProviderConfigs(snapshot: RouteSnapshot, modelsByRoute: Rec
     profile: resolved.profile, baseUrl: route.baseUrl, model: resolved.modelId,
     modelDefinition: { contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision },
     reasoningEffort: route.defaults?.modelId === resolved.modelId ? route.defaults.reasoningEffort : undefined,
-    requiresApiKey: route.auth.kind === 'keychain', retryPolicy: route.retryPolicy,
+    requiresApiKey: route.auth.kind === 'keychain',
   })));
 }
 
