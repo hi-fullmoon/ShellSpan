@@ -133,7 +133,7 @@ describe('AI Phase 3 chat projection', () => {
       kind: 'systemPrompt',
       requestIds: ['request-01'],
       providerId: 'deepseek',
-      model: 'deepseek-reasoner',
+      model: 'deepseek-flash',
     });
     const process = turnProcess(nodes);
     expect(process).toMatchObject({

@@ -25,7 +25,7 @@ async function provider(overrides: Partial<AiProviderProfile> = {}): Promise<AiP
 }
 
 describe('AI reasoning capabilities', async () => {
-  it('exposes only the effort levels supported by Kimi K3 and DeepSeek V4', async () => {
+  it('exposes only the effort levels supported by Kimi K3 and DeepSeek Flash', async () => {
     expect(reasoningEffortOptions(await provider({
       preset: 'kimi',
       profile: 'kimi',
@@ -37,7 +37,7 @@ describe('AI reasoning capabilities', async () => {
       preset: 'deepseek',
       profile: 'deepseek',
       baseUrl: 'https://api.deepseek.com',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
     }))).toEqual(['off', 'low', 'high', 'max']);
   });
 
