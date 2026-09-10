@@ -15,7 +15,7 @@ import * as vision from '@/lib/ai/vision-contract';
 
 const storage = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn() }));
 vi.mock('@/lib/ai/image-drafts', () => ({ readImageDraft: storage.read, writeImageDraft: storage.write }));
-const providerA = { id: 'provider-a', preset: 'custom' as const, name: 'Provider A', kind: 'openAiCompatible' as const, baseUrl: 'https://a.invalid', model: 'model-a', requiresApiKey: false };
+const providerA = { id: 'provider-a', preset: 'custom' as const, profile: 'generic' as const, name: 'Provider A', kind: 'openAiCompatible' as const, baseUrl: 'https://a.invalid', model: 'model-a', requiresApiKey: false };
 const providerB = { ...providerA, id: 'provider-b', name: 'Provider B', baseUrl: 'https://b.invalid', model: 'model-b' };
 function view(id = 'session-a'): AiSessionView {
   return {
@@ -193,7 +193,7 @@ it.each(['model', 'permission'] as const)('ignores late %s failures after leavin
   act(() => result.current.newSession());
   act(() => result.current.openSession(current.summary));
   await waitFor(() => expect(result.current.view).not.toBeNull());
-  await act(async () => { reject(Error('old settings error')); await changing; });
+  await act(async () => { reject(Error('earlier settings error')); await changing; });
   expect(result.current.composer.lastError).toBeNull();
   expect(result.current.settingsBusy).toBe(false);
 });

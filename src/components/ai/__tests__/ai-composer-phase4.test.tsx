@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiComposerSeat } from '@/components/ai/workspace/ai-composer-seat';
 import { AiComposerModelSelector } from '@/components/ai/workspace/ai-composer-model-selector';
+import '@/components/ai/ai-panel.css';
 import { createAiComposerState, type AiComposerState } from '@/lib/ai/composer-machine';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
@@ -198,12 +199,12 @@ describe('AiComposerSeat Phase 4 behavior', () => {
   it('selects persisted provider profiles and supported reasoning effort', async () => {
     const user = userEvent.setup();
     const deepseek = {
-      id: 'deepseek-profile', preset: 'deepseek' as const, name: 'DeepSeek',
+      id: 'deepseek-profile', preset: 'deepseek' as const, profile: 'deepseek' as const, name: 'DeepSeek',
       kind: 'openAiCompatible' as const, baseUrl: 'https://api.deepseek.com',
       model: 'deepseek-v4', requiresApiKey: true,
     };
     const openai = {
-      id: 'openai-profile', preset: 'openai' as const, name: 'OpenAI',
+      id: 'openai-profile', preset: 'openai' as const, profile: 'openai' as const, name: 'OpenAI',
       kind: 'openAi' as const, baseUrl: 'https://api.openai.com',
       model: 'gpt-5.6', requiresApiKey: true,
     };
@@ -227,7 +228,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
   it('offers MiniMax M3 thinking as an on/off control', async () => {
     const user = userEvent.setup();
     const minimax = {
-      id: 'minimax-profile', preset: 'minimax' as const, name: 'MiniMax',
+      id: 'minimax-profile', preset: 'minimax' as const, profile: 'minimax' as const, name: 'MiniMax',
       kind: 'openAiCompatible' as const, baseUrl: 'https://api.minimaxi.com',
       model: 'MiniMax-M3', requiresApiKey: true,
     };
@@ -240,6 +241,24 @@ describe('AiComposerSeat Phase 4 behavior', () => {
 
     expect(useAiSettingsStore.getState().providers[0])
       .toMatchObject({ reasoningEffort: 'on' });
+  });
+
+  it('keeps the model selection text from shrinking or eliding in the composer toolbar', async () => {
+    const minimax = {
+      id: 'minimax-profile', preset: 'minimax' as const, profile: 'minimax' as const, name: 'MiniMax',
+      kind: 'openAiCompatible' as const, baseUrl: 'https://api.minimaxi.com',
+      model: 'MiniMax-M3', requiresApiKey: true,
+    };
+    useAiSettingsStore.setState({ providers: [minimax], defaultProviderId: minimax.id });
+    render(<AiComposerModelSelector />);
+
+    await screen.findByText('Default');
+    const trigger = screen.getByRole('button', { name: /Model selection: MiniMax-M3/ });
+    const modelName = screen.getByText('MiniMax-M3');
+    expect(getComputedStyle(trigger).maxWidth).toBe('none');
+    expect(getComputedStyle(trigger).flexShrink).toBe('0');
+    expect(getComputedStyle(modelName).overflow).not.toBe('hidden');
+    expect(getComputedStyle(modelName).whiteSpace).toBe('nowrap');
   });
 
   it('shows the Runtime-backed context ring after model selection with an honest breakdown', async () => {

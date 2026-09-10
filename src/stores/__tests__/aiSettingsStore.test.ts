@@ -47,103 +47,14 @@ describe('aiSettingsStore', () => {
     expect(tauri.invokeSavePreferences).not.toHaveBeenCalled();
   });
 
-  it('drops legacy stored retry policies while loading preferences', () => {
-    const provider = initialState.providers[0];
-    const restored = parseAiPreferences([preference('providers', [{
-      ...provider,
-      retryPolicy: { maxAttempts: 999 },
-    }])]);
-    useAiSettingsStore.setState(restored);
-    expect(useAiSettingsStore.getState().providers[0]).not.toHaveProperty('retryPolicy');
-    expect(useAiSettingsStore.getState().getProviderConfig(provider.id)).not.toHaveProperty('retryPolicy');
-  });
-
-  it('preserves malformed persisted capability choices and rejects them before request creation', () => {
-    const provider = initialState.providers[0];
-    for (const invalid of [{ profile: 'unknown-preset' }]) {
-      const restored = parseAiPreferences([preference('providers', [{ ...provider, ...invalid }])]);
-      useAiSettingsStore.setState(restored);
-      expect(useAiSettingsStore.getState().providers[0]).toMatchObject(invalid);
-      expect(() => useAiSettingsStore.getState().getProviderConfig(provider.id)).toThrow(/UNKNOWN_PROFILE|UNSUPPORTED_REASONING_EFFORT/);
-    }
-    const custom = parseAiPreferences([preference('providers', [{ ...provider, reasoningEffort: 'ultra' }])]);
-    useAiSettingsStore.setState(custom);
-    expect(useAiSettingsStore.getState().getProviderConfig(provider.id).reasoningEffort).toBe('ultra');
-  });
-
-  it('migrates the legacy single-provider preferences without losing values', () => {
+  it('loads only the current context preference', () => {
     const preferences = parseAiPreferences([
-      preference('providerKind', 'openAi'),
-      preference('ollamaBaseUrl', 'http://localhost:11434'),
-      preference('ollamaModel', 'qwen2.5'),
-      preference('openAiBaseUrl', 'https://gateway.example.com/v1'),
-      preference('openAiModel', 'gpt-custom'),
       preference('contextLines', 500),
+      preference('providers', [{ id: 'ignored-old-provider' }]),
     ]);
-
-    expect(preferences.defaultProviderId).toBe('openai');
     expect(preferences.contextLines).toBe(500);
-    expect(preferences.providers).toEqual([
-      expect.objectContaining({
-        id: 'ollama',
-        baseUrl: 'http://localhost:11434',
-        model: 'qwen2.5',
-      }),
-      expect.objectContaining({
-        id: 'openai',
-        baseUrl: 'https://gateway.example.com/v1',
-        model: 'gpt-custom',
-      }),
-    ]);
-  });
-
-  it('loads multiple providers and repairs an invalid default', () => {
-    const providers = [
-      {
-        id: 'deepseek-primary',
-        name: 'DeepSeek Primary',
-        preset: 'deepseek',
-        kind: 'openAiCompatible',
-        baseUrl: 'https://api.deepseek.com',
-        model: 'deepseek-v4-flash',
-        requiresApiKey: true,
-      },
-      {
-        id: 'local',
-        name: 'Local Ollama',
-        preset: 'ollama',
-        kind: 'ollama',
-        baseUrl: 'http://127.0.0.1:11434',
-        model: 'qwen3',
-        requiresApiKey: false,
-      },
-    ];
-    const preferences = parseAiPreferences([
-      preference('providers', providers),
-      preference('defaultProviderId', 'missing'),
-    ]);
-
-    expect(preferences.providers).toHaveLength(2);
-    expect(preferences.defaultProviderId).toBe('deepseek-primary');
-  });
-
-  it.each([false, true])('ignores the removed Agent enable preference (%s) in legacy and current settings', async (enabled) => {
-    const legacyEntries = [preference('agentEnabled', enabled)];
-    const currentEntries = [preference('providers', initialState.providers), ...legacyEntries];
-    expect(parseAiPreferences([])).not.toHaveProperty('agentEnabled');
-    expect(parseAiPreferences(legacyEntries)).toEqual(parseAiPreferences([]));
-    expect(parseAiPreferences(currentEntries))
-      .toEqual(parseAiPreferences([preference('providers', initialState.providers)]));
-
-    tauri.invokeLoadPreferences.mockResolvedValue(currentEntries);
-    await useAiSettingsStore.getState().hydrateFromDb();
-
-    expect(useAiSettingsStore.getState()).not.toHaveProperty('agentEnabled');
-    useAiSettingsStore.getState().setContextLines(500);
-    await flushAiSettingsPreferences();
-    const entries = tauri.invokeSavePreferences.mock.lastCall![0] as [string, string][];
-    expect(entries.map(([key]) => key))
-      .toEqual(['ai.contextLines']);
+    expect(preferences.providers).toEqual(initialState.providers);
+    expect(preferences.defaultProviderId).toBe(initialState.defaultProviderId);
   });
 
   it('adds a preset and exposes it as the selected request config', () => {
@@ -221,50 +132,6 @@ describe('aiSettingsStore', () => {
     useAiSettingsStore.getState().updateProvider(minimaxId, { model: 'MiniMax-M2.7' });
     expect(useAiSettingsStore.getState().getProviderConfig(minimaxId))
       .toHaveProperty('reasoningEffort', 'on');
-  });
-
-  it('drops legacy inline API keys from provider state and request configs', () => {
-    const provider = {
-      id: 'minimax',
-      name: 'MiniMax',
-      preset: 'minimax',
-      kind: 'openAiCompatible',
-      baseUrl: 'https://api.minimaxi.com',
-      model: 'MiniMax-M3',
-      requiresApiKey: true,
-      apiKey: '  database-key  ',
-    };
-    const preferences = parseAiPreferences([
-      preference('providers', [provider]),
-      preference('defaultProviderId', provider.id),
-    ]);
-    useAiSettingsStore.setState({ ...preferences, initialized: false });
-
-    expect(preferences.providers[0]).not.toHaveProperty('apiKey');
-    expect(useAiSettingsStore.getState().getProviderConfig()).toEqual({
-      id: 'minimax',
-      profile: 'minimax',
-      kind: 'openAiCompatible',
-      baseUrl: 'https://api.minimaxi.com',
-      model: 'MiniMax-M3',
-      requiresApiKey: true,
-    });
-  });
-
-  it('never serializes a legacy runtime API key back to preferences', async () => {
-    vi.useFakeTimers();
-    const provider = {
-      ...initialState.providers[1],
-      apiKey: 'must-not-be-persisted',
-    } as typeof initialState.providers[number];
-
-    useAiSettingsStore.setState({
-      providers: [initialState.providers[0], provider],
-      initialized: true,
-    });
-    await vi.advanceTimersByTimeAsync(400);
-
-    expect(tauri.invokeSavePreferences).not.toHaveBeenCalled();
   });
 
   it('moves the default when deleting a provider and always retains one provider', () => {

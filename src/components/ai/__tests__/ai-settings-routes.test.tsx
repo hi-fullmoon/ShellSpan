@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ResolvedModel } from '@/lib/ai/provider-contract';
@@ -11,8 +11,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/ipc/tauri', () => ({
   isTauriRuntime: () => true,
-  invokeListAiSessionMigrations: vi.fn().mockResolvedValue([]),
-  invokeConvertAiSessionV4: vi.fn(),
   invokeListAgentRuntimeSessions: vi.fn().mockResolvedValue({ sessions: [] }),
   invokeCancelAgentRuntime: vi.fn(),
   invokeArchiveAgentRuntimeSession: vi.fn(),
@@ -93,8 +91,6 @@ describe('route-backed AI settings', () => {
       snapshot: {
         schemaVersion: 1,
         revision: 8,
-        migrationComplete: true,
-        migrationIssues: [],
         defaultSelection: { routeId: 'route-a', modelId: 'model-b' },
         routes: [{
           id: 'route-a',
@@ -121,15 +117,12 @@ describe('route-backed AI settings', () => {
     });
   });
 
-  it('deletes one explicit model and moves both route defaults to a valid fallback', async () => {
+  it('shows every configured route model and keeps model edits in the provider editor', async () => {
     render(<AiSettingsSection />);
-    expect(screen.queryByRole('button', { name: 'settings.ai.addModel' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'settings.ai.removeModel:model-b' }));
-
-    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
-    const [routes, defaultSelection] = mocks.save.mock.calls[0];
-    expect(Object.keys(routes[0].models)).toEqual(['model-a']);
-    expect(routes[0].defaults).toEqual({ routeId: 'route-a', modelId: 'model-a' });
-    expect(defaultSelection).toEqual({ routeId: 'route-a', modelId: 'model-a' });
+    expect(screen.getByText('model-a')).toBeVisible();
+    expect(screen.getByText('model-b')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'settings.ai.removeModel:model-b' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'settings.ai.editProvider' }));
+    expect(mocks.save).not.toHaveBeenCalled();
   });
 });

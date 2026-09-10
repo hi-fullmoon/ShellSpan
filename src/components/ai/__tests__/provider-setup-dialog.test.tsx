@@ -87,12 +87,47 @@ describe('ProviderSetupDialog', () => {
   });
 
   it('keeps advanced model capability overrides out of the provider editor', async () => {
+    const user = userEvent.setup();
     const provider = useAiSettingsStore.getState().providers[0];
     render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
-    await userEvent.setup().click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
-    await screen.findByText(/settings.ai.profileLimits/);
+    expect(screen.getByLabelText('settings.ai.providerName')).toHaveValue(provider.name);
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
+    const capabilityButton = await screen.findByRole('button', { name: /settings.ai.profileLimits/ });
+    expect(screen.queryByText(/settings.ai.profileLimits/)).not.toBeInTheDocument();
+    await user.hover(capabilityButton);
+    expect(await screen.findByText(/settings.ai.profileLimits/)).toHaveAttribute('data-slot', 'tooltip-content');
     expect(screen.queryByRole('button', { name: 'settings.ai.declareModel' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('settings.ai.maxOutput')).not.toBeInTheDocument();
+  });
+
+  it('shows an icon for every provider capability profile', async () => {
+    const user = userEvent.setup();
+    const provider = useAiSettingsStore.getState().providers[0];
+    render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
+    await user.click(screen.getByRole('combobox', { name: 'settings.ai.profile' }));
+    const options = await screen.findAllByRole('option');
+
+    expect(options.map(option => option.textContent)).toEqual([
+      'openai',
+      'anthropic',
+      'ollama',
+      'deepseek',
+      'minimax',
+      'qwen',
+      'glm',
+      'kimi',
+      'generic',
+    ]);
+    options.forEach((option) => {
+      expect(option.querySelector('svg')).toBeInTheDocument();
+    });
+    for (const profile of ['anthropic', 'qwen', 'glm']) {
+      const option = options.find(candidate => candidate.textContent === profile);
+      expect(option?.querySelector('svg')).not.toHaveAttribute('data-lucide', 'server');
+      expect(option?.querySelector('svg path')).toHaveAttribute('d');
+    }
   });
 
   it('rejects an unsupported saved reasoning selection before writing credentials or preferences', async () => {
@@ -144,7 +179,7 @@ describe('ProviderSetupDialog', () => {
       'has-[[data-slot=input-group-control]:focus-visible]:border-ring',
       'has-[[data-slot=input-group-control]:focus-visible]:ring-3',
     );
-    expect(inputGroups).toHaveLength(2);
+    expect(inputGroups).toHaveLength(1);
     inputGroups.forEach((inputGroup) => {
       expect(inputGroup).toHaveClass(
         'h-9',
@@ -192,13 +227,17 @@ describe('ProviderSetupDialog', () => {
     expect(useAiSettingsStore.getState().providers).toHaveLength(originalCount);
     expect(providerInput).toHaveValue('DeepSeek');
     const apiKeyInput = screen.getByLabelText(/settings\.ai\.apiKey/);
-    const modelInput = screen.getByLabelText('settings.ai.model');
-    expect(apiKeyInput.compareDocumentPosition(modelInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.queryByLabelText('settings.ai.providerName')).not.toBeInTheDocument();
+    const providerNameInput = screen.getByLabelText('settings.ai.providerName');
+    expect(providerNameInput).toHaveValue('DeepSeek');
     expect(screen.queryByLabelText('settings.ai.baseUrl')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
-    expect(screen.getByLabelText('settings.ai.providerName')).toHaveValue('DeepSeek');
-    expect(screen.getByLabelText('settings.ai.baseUrl')).toHaveValue('https://api.deepseek.com');
+    expect(providerNameInput).toHaveValue('DeepSeek');
+    const modelInput = screen.getByLabelText('settings.ai.modelIdNumber:1');
+    expect(apiKeyInput.compareDocumentPosition(modelInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(providerNameInput.compareDocumentPosition(modelInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const baseUrlInput = screen.getByLabelText('settings.ai.baseUrl');
+    expect(baseUrlInput).toHaveValue('https://api.deepseek.com');
+    expect(baseUrlInput.closest('[data-slot="field"]')).toHaveClass('@min-[30rem]:col-span-2');
     expect(modelInput).toHaveValue('deepseek-v4-flash');
     const endpointLabel = 'settings.ai.requestEndpoint:https://api.deepseek.com/chat/completions';
     const endpointButton = screen.getByRole('button', { name: endpointLabel });
@@ -292,7 +331,7 @@ describe('ProviderSetupDialog', () => {
   it('loads models from the draft without creating a provider', async () => {
     const user = userEvent.setup();
     const originalCount = useAiSettingsStore.getState().providers.length;
-    mocks.invokeListAiModels.mockResolvedValue(['llama3.3', 'qwen3']);
+    mocks.invokeListAiModels.mockResolvedValue([{ id: 'llama3.3' }, { id: 'qwen3' }]);
     render(
       <ProviderSetupDialog open onOpenChange={vi.fn()} onSaved={vi.fn()} />,
     );
@@ -301,6 +340,7 @@ describe('ProviderSetupDialog', () => {
     await user.click(providerInput);
     await user.type(providerInput, 'Ollama');
     await user.click(await screen.findByRole('option', { name: /Ollama/ }));
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
 
     await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledWith({
@@ -312,8 +352,9 @@ describe('ProviderSetupDialog', () => {
       requiresApiKey: false,
     }));
     expect(useAiSettingsStore.getState().providers).toHaveLength(originalCount);
+    await user.click(screen.getByRole('button', { name: 'settings.ai.addSelectedModels' }));
     const feedback = await screen.findByRole('status');
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('dialog', { name: 'settings.ai.addProviderTitle' });
     const footer = dialog.querySelector<HTMLElement>('[data-slot="dialog-footer"]');
     const scrollArea = dialog.querySelector<HTMLElement>('[data-slot="provider-dialog-scroll-area"]');
     expect(feedback).toHaveTextContent('settings.ai.ready');
@@ -322,7 +363,7 @@ describe('ProviderSetupDialog', () => {
     expect(footer).toContainElement(feedback);
     expect(scrollArea).not.toContainElement(feedback);
 
-    const detailsButton = within(feedback).getByRole('button', {
+    const detailsButton = within(feedback as HTMLElement).getByRole('button', {
       name: /settings\.ai\.ready: settings\.ai\.connectionSuccess:2/,
     });
     expect(detailsButton).toHaveClass('size-4', 'shrink-0', 'p-0');
@@ -344,25 +385,26 @@ describe('ProviderSetupDialog', () => {
     await user.click(providerInput);
     await user.type(providerInput, 'Ollama');
     await user.click(await screen.findByRole('option', { name: /Ollama/ }));
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
 
-    const feedback = await screen.findByRole('alert');
+    const feedback = (await screen.findByText('settings.ai.connectionFailed')).closest('[role="alert"]');
+    expect(feedback).not.toBeNull();
     expect(feedback).toHaveTextContent('settings.ai.connectionFailed');
     expect(feedback).not.toHaveTextContent('provider rejected API key');
 
-    const detailsButton = within(feedback).getByRole('button', {
+    const detailsButton = within(feedback as HTMLElement).getByRole('button', {
       name: 'settings.ai.connectionFailed: provider rejected API key',
     });
     await user.hover(detailsButton);
-    expect(await screen.findByText('provider rejected API key')).toHaveAttribute(
-      'data-slot',
-      'tooltip-content',
-    );
+    await waitFor(() => expect(screen.getAllByText('provider rejected API key').some(
+      (message) => message.getAttribute('data-slot') === 'tooltip-content',
+    )).toBe(true));
   });
 
   it('ignores a model response after switching presets', async () => {
     const user = userEvent.setup();
-    const pendingModels = deferred<string[]>();
+    const pendingModels = deferred<import('@/lib/ai/provider-contract').DiscoveredModel[]>();
     mocks.invokeListAiModels.mockReturnValueOnce(pendingModels.promise);
     render(
       <ProviderSetupDialog open onOpenChange={vi.fn()} onSaved={vi.fn()} />,
@@ -372,6 +414,7 @@ describe('ProviderSetupDialog', () => {
     await user.click(providerInput);
     await user.type(providerInput, 'Ollama');
     await user.click(await screen.findByRole('option', { name: /Ollama/ }));
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
     await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledTimes(1));
 
@@ -380,19 +423,19 @@ describe('ProviderSetupDialog', () => {
     await user.type(providerInput, 'DeepSeek');
     await user.click(await screen.findByRole('option', { name: /DeepSeek/ }));
     await act(async () => {
-      pendingModels.resolve(['stale-ollama-model']);
+      pendingModels.resolve([{ id: 'stale-ollama-model' }]);
       await pendingModels.promise;
     });
 
-    expect(screen.getByLabelText('settings.ai.model')).toHaveValue('deepseek-v4-flash');
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
+    expect(screen.getByLabelText('settings.ai.modelIdNumber:1')).toHaveValue('deepseek-v4-flash');
     expect(screen.queryByText('settings.ai.connectionSuccess:1')).not.toBeInTheDocument();
-    await user.click(screen.getByLabelText('settings.ai.model'));
     expect(screen.queryByRole('option', { name: 'stale-ollama-model' })).not.toBeInTheDocument();
   });
 
   it('ignores a model response from before the dialog was closed and reopened', async () => {
     const user = userEvent.setup();
-    const pendingModels = deferred<string[]>();
+    const pendingModels = deferred<import('@/lib/ai/provider-contract').DiscoveredModel[]>();
     mocks.invokeListAiModels.mockReturnValueOnce(pendingModels.promise);
     const provider = { ...useAiSettingsStore.getState().providers[0], model: '' };
     const onOpenChange = vi.fn();
@@ -406,6 +449,7 @@ describe('ProviderSetupDialog', () => {
       />,
     );
 
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
     await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledTimes(1));
     rerender(
@@ -425,17 +469,18 @@ describe('ProviderSetupDialog', () => {
       />,
     );
     await act(async () => {
-      pendingModels.resolve(['stale-model']);
+      pendingModels.resolve([{ id: 'stale-model' }]);
       await pendingModels.promise;
     });
 
-    expect(screen.getByLabelText('settings.ai.model')).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
+    expect(screen.queryByLabelText('settings.ai.modelIdNumber:1')).not.toBeInTheDocument();
     expect(screen.queryByText('settings.ai.connectionSuccess:1')).not.toBeInTheDocument();
   });
 
   it('ignores a model response after changing the provider being edited', async () => {
     const user = userEvent.setup();
-    const pendingModels = deferred<string[]>();
+    const pendingModels = deferred<import('@/lib/ai/provider-contract').DiscoveredModel[]>();
     mocks.invokeListAiModels.mockReturnValueOnce(pendingModels.promise);
     const [firstProvider, secondProvider] = useAiSettingsStore.getState().providers;
     const providerA = { ...firstProvider, model: '' };
@@ -451,6 +496,7 @@ describe('ProviderSetupDialog', () => {
       />,
     );
 
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
     await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledTimes(1));
     rerender(
@@ -462,14 +508,14 @@ describe('ProviderSetupDialog', () => {
       />,
     );
     await act(async () => {
-      pendingModels.resolve(['provider-a-model']);
+      pendingModels.resolve([{ id: 'provider-a-model' }]);
       await pendingModels.promise;
     });
 
     await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     expect(screen.getByLabelText('settings.ai.providerName')).toHaveValue(providerB.name);
     expect(screen.getByLabelText('settings.ai.baseUrl')).toHaveValue(providerB.baseUrl);
-    expect(screen.getByLabelText('settings.ai.model')).toHaveValue('');
+    expect(screen.queryByLabelText('settings.ai.modelIdNumber:1')).not.toBeInTheDocument();
     expect(screen.queryByText('settings.ai.connectionSuccess:1')).not.toBeInTheDocument();
   });
 
@@ -507,9 +553,8 @@ describe('ProviderSetupDialog', () => {
     await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.clear(screen.getByLabelText('settings.ai.providerName'));
     await user.type(screen.getByLabelText('settings.ai.providerName'), 'Renamed provider');
-    await user.clear(screen.getByLabelText('settings.ai.model'));
-    await user.type(screen.getByLabelText('settings.ai.model'), 'qwen3:8b');
-    await user.keyboard('{Escape}');
+    await user.clear(screen.getByLabelText('settings.ai.modelIdNumber:1'));
+    await user.type(screen.getByLabelText('settings.ai.modelIdNumber:1'), 'qwen3:8b');
     await user.click(screen.getByRole('button', { name: 'common.save' }));
 
     await waitFor(() => expect(useAiSettingsStore.getState().providers).toHaveLength(1));
@@ -521,6 +566,270 @@ describe('ProviderSetupDialog', () => {
     expect(onSaved).toHaveBeenCalledWith(provider.id);
   });
 
+  it('persists a model display name and edited capacities', async () => {
+    const user = userEvent.setup();
+    const provider = useAiSettingsStore.getState().providers[0];
+    useAiSettingsStore.setState({ providers: [provider], defaultProviderId: provider.id });
+    render(
+      <ProviderSetupDialog
+        open
+        provider={provider}
+        onOpenChange={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
+    await user.type(screen.getByLabelText('settings.ai.modelNameNumber:1'), 'Local Qwen');
+    await user.click(screen.getByRole('button', { name: 'settings.ai.modelAdvancedNumber:1' }));
+    await user.type(screen.getByLabelText('settings.ai.contextWindow'), '64000');
+    await user.type(screen.getByLabelText('settings.ai.maxOutput'), '8000');
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(useAiSettingsStore.getState().providers[0]?.modelDefinition)
+      .toEqual(expect.objectContaining({
+        displayName: 'Local Qwen',
+        contextWindow: 64_000,
+        maxOutputTokens: 8_000,
+      })));
+  });
+
+  it('removes a model in the draft and saves the remaining model as the route default', async () => {
+    mocks.native = true;
+    const baseProvider = useAiSettingsStore.getState().providers[0];
+    const first = await (await import('@/test/llm-resolver-fixture')).fixtureResolve(
+      'ai_resolve_model',
+      { provider: baseProvider },
+    ) as import('@/lib/ai/provider-contract').ResolvedModel;
+    const second = { ...first, modelId: 'qwen3:8b' };
+    const provider = {
+      ...baseProvider,
+      model: second.modelId,
+      reasoningEffort: 'high',
+      modelDefinition: {
+        contextWindow: second.contextWindow,
+        maxOutputTokens: second.maxOutputTokens,
+        toolCalling: second.toolCalling,
+        textInput: second.textInput,
+        imageInput: second.imageInput,
+        reasoning: second.reasoning,
+        compat: second.compat,
+        vision: second.vision,
+      },
+    };
+    const routeSave = vi.fn().mockResolvedValue(undefined);
+    useLlmRoutesStore.setState({
+      ...initialRoutesState,
+      snapshot: {
+        schemaVersion: 1,
+        revision: 3,
+        defaultSelection: { routeId: provider.id, modelId: second.modelId },
+        routes: [{
+          id: provider.id,
+          revision: 2,
+          displayName: provider.name,
+          adapterId: 'ollama',
+          baseUrl: provider.baseUrl,
+          auth: { kind: 'none' },
+          replayDomainId: 'domain',
+          presetId: provider.preset,
+          models: {
+            [first.modelId]: {
+              contextWindow: first.contextWindow,
+              maxOutputTokens: first.maxOutputTokens,
+              toolCalling: first.toolCalling,
+              textInput: first.textInput,
+              imageInput: first.imageInput,
+              reasoning: first.reasoning,
+              compat: first.compat,
+              vision: first.vision,
+            },
+            [second.modelId]: provider.modelDefinition!,
+          },
+          defaults: { routeId: provider.id, modelId: second.modelId },
+          retryPolicy: { ...DEFAULT_RETRY_POLICY },
+          timeouts: { requestHeadersMs: 30_000, firstByteMs: 30_000, streamIdleMs: 300_000 },
+        }],
+      },
+      modelsByRoute: { [provider.id]: [first, second] },
+      status: 'ready',
+      save: routeSave,
+    }, true);
+
+    const user = userEvent.setup();
+    render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
+    await user.click(screen.getByRole('button', { name: 'settings.ai.removeModelNumber:2' }));
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(routeSave).toHaveBeenCalledTimes(1));
+    const [routes, defaultSelection] = routeSave.mock.calls[0];
+    expect(Object.keys(routes[0].models)).toEqual([first.modelId]);
+    expect(routes[0].defaults).toEqual({ routeId: provider.id, modelId: first.modelId });
+    expect(defaultSelection).toEqual({ routeId: provider.id, modelId: first.modelId });
+  });
+
+  it('preserves modelOverrides when saving provider fields without editing the catalog', async () => {
+    mocks.native = true;
+    const provider = useAiSettingsStore.getState().providers[0];
+    const resolved = await (await import('@/test/llm-resolver-fixture')).fixtureResolve(
+      'ai_resolve_model',
+      { provider },
+    ) as import('@/lib/ai/provider-contract').ResolvedModel;
+    const override = {
+      displayName: 'Local Qwen',
+      contextWindow: resolved.contextWindow / 2,
+      maxOutputTokens: resolved.maxOutputTokens,
+      toolCalling: resolved.toolCalling,
+      textInput: resolved.textInput,
+      imageInput: resolved.imageInput,
+      reasoning: resolved.reasoning,
+      compat: resolved.compat,
+      vision: resolved.vision,
+    };
+    const routeSave = vi.fn().mockResolvedValue(undefined);
+    useLlmRoutesStore.setState({
+      ...initialRoutesState,
+      snapshot: {
+        schemaVersion: 1,
+        revision: 3,
+        defaultSelection: { routeId: provider.id, modelId: provider.model },
+        routes: [{
+          id: provider.id,
+          revision: 2,
+          displayName: provider.name,
+          adapterId: 'ollama',
+          baseUrl: provider.baseUrl,
+          auth: { kind: 'none' },
+          replayDomainId: 'domain',
+          presetId: provider.preset,
+          modelOverrides: { [provider.model]: override },
+          defaults: { routeId: provider.id, modelId: provider.model },
+          retryPolicy: { ...DEFAULT_RETRY_POLICY },
+          timeouts: { requestHeadersMs: 30_000, firstByteMs: 30_000, streamIdleMs: 300_000 },
+        }],
+      },
+      modelsByRoute: { [provider.id]: [{ ...resolved, ...override }] },
+      status: 'ready',
+      save: routeSave,
+    }, true);
+
+    const user = userEvent.setup();
+    render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+    await user.clear(screen.getByLabelText('settings.ai.providerName'));
+    await user.type(screen.getByLabelText('settings.ai.providerName'), 'Renamed Ollama');
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(routeSave).toHaveBeenCalledTimes(1));
+    expect(routeSave.mock.calls[0][0][0]).toEqual(expect.objectContaining({
+      displayName: 'Renamed Ollama',
+      models: undefined,
+      modelOverrides: { [provider.model]: override },
+    }));
+  });
+
+  it('re-resolves explicit model definitions after changing the provider profile', async () => {
+    mocks.native = true;
+    const provider = useAiSettingsStore.getState().providers[0];
+    const resolved = await (await import('@/test/llm-resolver-fixture')).fixtureResolve(
+      'ai_resolve_model',
+      { provider },
+    ) as import('@/lib/ai/provider-contract').ResolvedModel;
+    const routeSave = vi.fn().mockResolvedValue(undefined);
+    useLlmRoutesStore.setState({
+      ...initialRoutesState,
+      snapshot: {
+        schemaVersion: 1,
+        revision: 3,
+        defaultSelection: { routeId: provider.id, modelId: provider.model },
+        routes: [{
+          id: provider.id,
+          revision: 2,
+          displayName: provider.name,
+          adapterId: 'ollama',
+          baseUrl: provider.baseUrl,
+          auth: { kind: 'none' },
+          replayDomainId: 'domain',
+          presetId: provider.preset,
+          models: { [provider.model]: provider.modelDefinition ?? resolved },
+          defaults: { routeId: provider.id, modelId: provider.model },
+          retryPolicy: { ...DEFAULT_RETRY_POLICY },
+          timeouts: { requestHeadersMs: 30_000, firstByteMs: 30_000, streamIdleMs: 300_000 },
+        }],
+      },
+      modelsByRoute: { [provider.id]: [resolved] },
+      status: 'ready',
+      save: routeSave,
+    }, true);
+
+    const user = userEvent.setup();
+    render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
+    await user.click(screen.getByRole('combobox', { name: 'settings.ai.profile' }));
+    await user.click(await screen.findByRole('option', { name: 'qwen' }));
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(routeSave).toHaveBeenCalledTimes(1));
+    const saved = routeSave.mock.calls[0][0][0];
+    expect(saved.adapterId).toBe('chat-completions');
+    expect(saved.models[provider.model].compat.protocol).toBe('openAiCompatible');
+    expect(saved.models[provider.model].compat.protocol).not.toBe(resolved.compat.protocol);
+  });
+
+  it('ignores a declaration result after the edited provider changes', async () => {
+    const pendingDeclaration = deferred<import('@/lib/ai/provider-contract').ModelDefinition>();
+    mocks.resolveModel.mockImplementation(async (command, args) => {
+      if (command === 'ai_model_declaration_template') return pendingDeclaration.promise;
+      return (await import('@/test/llm-resolver-fixture')).fixtureResolve(command, args);
+    });
+    const [providerA, providerB] = useAiSettingsStore.getState().providers;
+    const onOpenChange = vi.fn();
+    const onSaved = vi.fn();
+    const { rerender } = render(
+      <ProviderSetupDialog
+        open
+        provider={providerA}
+        onOpenChange={onOpenChange}
+        onSaved={onSaved}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
+    await user.click(screen.getByRole('button', { name: 'settings.ai.modelAdvancedNumber:1' }));
+    await user.click(screen.getByRole('button', { name: 'settings.ai.declareModel' }));
+    expect(screen.getByRole('button', { name: 'settings.ai.removeModelNumber:1' })).toBeDisabled();
+
+    rerender(
+      <ProviderSetupDialog
+        open
+        provider={providerB}
+        onOpenChange={onOpenChange}
+        onSaved={onSaved}
+      />,
+    );
+    const resolved = await (await import('@/test/llm-resolver-fixture')).fixtureResolve(
+      'ai_resolve_model',
+      { provider: providerA },
+    ) as import('@/lib/ai/provider-contract').ResolvedModel;
+    pendingDeclaration.resolve({
+      displayName: 'Stale declaration',
+      contextWindow: 1,
+      maxOutputTokens: 1,
+      toolCalling: resolved.toolCalling,
+      textInput: resolved.textInput,
+      imageInput: resolved.imageInput,
+      reasoning: resolved.reasoning,
+      compat: resolved.compat,
+      vision: resolved.vision,
+    });
+    await pendingDeclaration.promise;
+
+    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
+    await user.click(screen.getByRole('button', { name: 'settings.ai.modelAdvancedNumber:1' }));
+    expect(screen.getByLabelText('settings.ai.modelNameNumber:1')).toHaveValue('');
+    expect(screen.getByLabelText('settings.ai.contextWindow')).toHaveValue(null);
+  });
+
   it('keeps RouteStore as the sole persisted state when a native save fails', async () => {
     mocks.native=true;
     const provider=useAiSettingsStore.getState().providers[0];
@@ -528,7 +837,7 @@ describe('ProviderSetupDialog', () => {
     const routeSave=vi.fn().mockRejectedValue(new Error('REVISION_CONFLICT'));
     useLlmRoutesStore.setState({
       ...initialRoutesState,
-      snapshot:{schemaVersion:1,revision:3,migrationComplete:true,migrationIssues:[],defaultSelection:{routeId:provider.id,modelId:provider.model},routes:[{
+      snapshot:{schemaVersion:1,revision:3,defaultSelection:{routeId:provider.id,modelId:provider.model},routes:[{
         id:provider.id,revision:2,displayName:provider.name,adapterId:provider.kind==='ollama'?'ollama':'chat-completions',baseUrl:provider.baseUrl,auth:{kind:'none'},replayDomainId:'domain',presetId:provider.preset,
         models:{[provider.model]:{contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision}},
         defaults:{routeId:provider.id,modelId:provider.model},retryPolicy:provider.retryPolicy!,timeouts:{requestHeadersMs:30000,firstByteMs:30000,streamIdleMs:300000},

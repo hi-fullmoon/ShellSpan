@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_RETRY_POLICY, parseRetryPolicy } from '../retry-policy';
 
 describe('Provider retry policy validation', () => {
-  it('keeps legacy defaults and returns a separate snapshot', () => {
+  it('uses current defaults and returns a separate snapshot', () => {
     expect(parseRetryPolicy(undefined)).toEqual({ maxAttempts: 3, initialDelayMs: 250, maxDelayMs: 4000, maxServerDelayMs: 30000, jitterRatio: 0.2 });
     const snapshot = parseRetryPolicy(DEFAULT_RETRY_POLICY);
     snapshot.maxAttempts = 1;
