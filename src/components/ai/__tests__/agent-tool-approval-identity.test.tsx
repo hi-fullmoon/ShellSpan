@@ -37,7 +37,7 @@ function waitingView(secondTurn = false) {
   return agentSessionView({
     events, lastCommittedSeq: events.length - 1, hasTerminalEvent: false,
     snapshot: {
-      header: { sessionId: 'session-fixture', taskId: 'task-fixture', goal: 'Check nginx', createdAtUnixMs: 1_000 },
+      header: { sessionId: 'session-fixture', taskId: 'task-fixture', goal: 'Check nginx', executionSurface: 'direct', createdAtUnixMs: 1_000 },
       status: 'waiting', ended: false, archived: false, eventCount: events.length,
       surface: { generation: 0, messages: [] }, inbox: { nextTurn: [], nextStep: [] }, task: { evidence: [] },
       recovery: { kind: 'waitingApproval', status: 'none', summary: 'Waiting', lastCommittedSeq: events.length - 1 },

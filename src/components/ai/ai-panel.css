@@ -2564,6 +2564,15 @@
   gap: 4px;
 }
 
+.ai-execution-surface-selector,
+.ai-execution-surface-option {
+  min-width: 0;
+}
+
+.ai-execution-surface-label {
+  max-width: 96px;
+}
+
 .ai-composer-mode-note {
   display: flex;
   min-width: 0;
@@ -3256,6 +3265,7 @@
   }
 
   .ai-permission-trigger-label,
+  .ai-execution-surface-label,
   .ai-busy-preference-label,
   .ai-model-trigger-reasoning {
     display: none;

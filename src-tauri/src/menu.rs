@@ -41,6 +41,9 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
     #[cfg(not(target_os = "macos"))]
     {
         builder = builder.on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                cleanup_agent_runtime_after_window_destroy(window.app_handle(), window.label());
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
@@ -55,6 +58,9 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
     #[cfg(target_os = "macos")]
     {
         builder = builder.on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                cleanup_agent_runtime_after_window_destroy(window.app_handle(), window.label());
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
@@ -67,6 +73,27 @@ pub(crate) fn configure_builder(builder: Builder<tauri::Wry>) -> Builder<tauri::
     }
 
     builder
+}
+
+fn cleanup_agent_runtime_after_window_destroy(app: &AppHandle, window_label: &str) {
+    if window_label != "main" {
+        return;
+    }
+    let (Some(runtime), Some(sessions)) = (
+        app.try_state::<crate::agent_runtime::AgentRuntime>(),
+        app.try_state::<crate::models::SessionManager>(),
+    ) else {
+        return;
+    };
+    match runtime.prepare_for_shutdown(&sessions) {
+        Ok(count) if count > 0 => {
+            info!("Cancelled {count} Agent native operation(s) after the main window was destroyed")
+        }
+        Ok(_) => {}
+        Err(error) => error!(
+            "failed to clean Agent native operations after the main window was destroyed: {error}"
+        ),
+    }
 }
 
 // Called from the single `setup` closure in lib.rs. Tauri's `Builder::setup`

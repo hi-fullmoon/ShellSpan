@@ -519,13 +519,27 @@ describe('ProviderSetupDialog', () => {
     expect(onSaved).toHaveBeenCalledWith(provider.id);
   });
 
-  it('adds a model to an existing native route without writing legacy settings', async () => {
+  it('declares and adds an uncatalogued model to an existing native route without writing legacy settings', async () => {
     mocks.native = true;
     const user = userEvent.setup();
     const provider = useAiSettingsStore.getState().providers[0];
     const resolved = await (await import('@/test/llm-resolver-fixture')).fixtureResolve(
       'ai_resolve_model', { provider },
     ) as import('@/lib/ai/provider-contract').ResolvedModel;
+    mocks.resolveModel.mockImplementation(async (command, args) => {
+      if (command === 'ai_model_declaration_template') {
+        return {
+          contextWindow: 0,
+          maxOutputTokens: 0,
+          toolCalling: 'unknown',
+          textInput: 'supported',
+          imageInput: 'unknown',
+          reasoning: [],
+          compat: resolved.compat,
+        };
+      }
+      return (await import('@/test/llm-resolver-fixture')).fixtureResolve(command, args);
+    });
     const routeSave = vi.fn().mockResolvedValue(undefined);
     const route = {
       id: provider.id,
@@ -571,14 +585,20 @@ describe('ProviderSetupDialog', () => {
     render(<ProviderSetupDialog open provider={provider} addingModel onOpenChange={vi.fn()} onSaved={vi.fn()} />);
     expect(screen.getByText('settings.ai.addModelTitle')).toBeInTheDocument();
     const model = screen.getByLabelText('settings.ai.model');
-    await user.type(model, 'qwen3:8b');
+    await user.type(model, 'private-model-v1');
     await user.keyboard('{Escape}');
+    const declare = await screen.findByRole('button', { name: 'settings.ai.declareModel' });
+    expect(screen.getByRole('button', { name: 'common.save' })).toBeDisabled();
+    expect(screen.getByText('settings.ai.unknownModelDescription')).toBeInTheDocument();
+    await user.click(declare);
+    await user.type(await screen.findByLabelText('settings.ai.contextWindow'), '32768');
+    await user.type(screen.getByLabelText('settings.ai.maxOutput'), '4096');
     await user.click(screen.getByRole('button', { name: 'common.save' }));
 
     await waitFor(() => expect(routeSave).toHaveBeenCalledTimes(1));
     const [routes] = routeSave.mock.calls[0];
-    expect(Object.keys(routes[0].models)).toEqual([provider.model, 'qwen3:8b']);
-    expect(routes[0].defaults).toEqual({ routeId: provider.id, modelId: 'qwen3:8b' });
+    expect(Object.keys(routes[0].models)).toEqual([provider.model, 'private-model-v1']);
+    expect(routes[0].defaults).toEqual({ routeId: provider.id, modelId: 'private-model-v1' });
     expect(useAiSettingsStore.getState().providers).toEqual(legacyBefore);
     expect(mocks.invokeSavePreferences).not.toHaveBeenCalled();
   });
@@ -604,6 +624,7 @@ describe('ProviderSetupDialog', () => {
     expect(useAiSettingsStore.getState().providers).toEqual(before);
     expect(mocks.invokeSavePreferences).not.toHaveBeenCalled();
     const feedback=await screen.findByRole('alert');
+    expect(feedback).toHaveTextContent('settings.ai.saveFailed');
     expect(within(feedback).getByRole('button',{name:/REVISION_CONFLICT/})).toBeVisible();
   });
 });

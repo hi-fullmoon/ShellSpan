@@ -179,6 +179,7 @@ function openTurn(
       goal: prompt,
       target: TARGET,
       permissionMode: AGENT_BASELINE_PERMISSION,
+      executionSurface: 'direct',
       successCriteria: ['Return a deterministic fixture answer.'],
     },
   });

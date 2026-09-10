@@ -2,6 +2,7 @@ import type { AppSection } from '@/types';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { AgentPermissionSelector } from '../agent-permission-selector';
+import { AgentExecutionSurfaceSelector } from '../agent-execution-surface-selector';
 import { AiComposerModelSelector } from './ai-composer-model-selector';
 import { AiWorkspaceRoot } from './ai-workspace-root';
 import { AiImageDraftControls } from './ai-image-attachments';
@@ -78,6 +79,15 @@ export function AiWorkspaceController({
               disabled={settingsLocked}
               mode={controller.selectedPermission}
               onModeChange={controller.view ? controller.selectPermission : undefined}
+            />
+        )
+        : undefined}
+      executionSurfaceControl={scope === 'terminal' && activeTerminalId
+        ? (
+            <AgentExecutionSurfaceSelector
+              surface={controller.selectedExecutionSurface}
+              disabled={settingsLocked || Boolean(controller.composer.sessionId || controller.view)}
+              onSurfaceChange={controller.selectExecutionSurface}
             />
           )
         : undefined}

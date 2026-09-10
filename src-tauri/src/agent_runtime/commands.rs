@@ -17,6 +17,59 @@ use super::{
 
 pub(crate) const AGENT_RUNTIME_SESSION_EVENT: &str = "agent-runtime-session-event";
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentTerminalLeaseControlInput {
+    session_id: String,
+    agent_session_id: String,
+    operation_id: String,
+    #[serde(default)]
+    terminal_connected: bool,
+    #[serde(default)]
+    output_listener_ready: bool,
+    #[serde(default)]
+    has_pending_user_input: bool,
+    #[serde(default)]
+    has_unverified_user_submission: bool,
+    #[serde(default)]
+    has_credential_prompt: bool,
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_terminal_lease_ready(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentTerminalLeaseControlInput,
+) -> Result<bool, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.acknowledge_terminal_lease_ready(
+        &input.session_id,
+        &input.agent_session_id,
+        &input.operation_id,
+        input.terminal_connected,
+        input.output_listener_ready,
+        input.has_pending_user_input,
+        input.has_unverified_user_submission,
+        input.has_credential_prompt,
+    )
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_takeover_terminal(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    sessions: State<'_, crate::models::SessionManager>,
+    input: AgentTerminalLeaseControlInput,
+) -> Result<bool, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.takeover_terminal(
+        &sessions,
+        &input.session_id,
+        &input.agent_session_id,
+        &input.operation_id,
+    )
+}
+
 #[tauri::command]
 pub(crate) async fn agent_runtime_prepare_images(
     app: AppHandle,

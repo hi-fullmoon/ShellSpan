@@ -15,7 +15,20 @@ import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutBindings } from '@/types';
-import { ChevronUpIcon, ChevronDownIcon, XIcon } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Spinner as ButtonSpinner } from '@/components/ui/spinner';
+import {
+  agentTerminalLeaseState,
+  type AgentTerminalLeaseView,
+} from '@/components/terminal/agent-terminal-lease-state';
+import {
+  BotIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  ClockIcon,
+  SquareIcon,
+  XIcon,
+} from 'lucide-react';
 
 const effectiveShortcuts = (): ShortcutBindings => ({
   ...DEFAULT_SHORTCUTS,
@@ -25,6 +38,82 @@ const effectiveShortcuts = (): ShortcutBindings => ({
 // Keep the connecting overlay up for at least this long so fast connections
 // don't make it flash.
 const MIN_CONNECTING_OVERLAY_MS = 600;
+
+function formatLeaseDuration(elapsedMs: number): string {
+  const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
+}
+
+const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ lease }) => {
+  const { t } = useI18n();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [lease.operationId]);
+  const duration = formatLeaseDuration(now - lease.acquiredAtUnixMs);
+  const agentId = lease.agentSessionId.length > 16
+    ? `${lease.agentSessionId.slice(0, 12)}…`
+    : lease.agentSessionId;
+  const interactionHint = lease.takeoverFailed
+    ? t('terminal.agentLease.takeoverFailed')
+    : lease.inputBlocked
+      ? t('terminal.agentLease.inputBlockedAccessibleHint')
+      : t('terminal.agentLease.inputLocked');
+
+  return (
+    <div
+      className="flex min-h-9 shrink-0 items-center gap-2 border-b border-border bg-muted/50 px-2"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      data-testid="agent-terminal-lease-bar"
+      data-operation-id={lease.operationId}
+    >
+      <Badge variant="secondary" title={lease.agentSessionId}>
+        <BotIcon data-icon="inline-start" />
+        {t('terminal.agentLease.agentIdentity', { id: agentId })}
+      </Badge>
+      <span className="min-w-0 flex-1 truncate font-mono text-xs" title={lease.commandDisplay}>
+        {lease.commandDisplay ?? t('terminal.agentLease.commandPending')}
+      </span>
+      <span className="sr-only">{interactionHint}</span>
+      <span
+        className="hidden min-w-0 truncate text-xs text-muted-foreground lg:inline"
+        aria-hidden="true"
+      >
+        {interactionHint}
+      </span>
+      <span
+        className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+        aria-label={t('terminal.agentLease.runtime', { duration })}
+      >
+        <ClockIcon aria-hidden="true" />
+        <span aria-hidden="true">{duration}</span>
+      </span>
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        className="shrink-0"
+        disabled={lease.takeoverRequested}
+        onClick={lease.requestTakeover}
+      >
+        {lease.takeoverRequested ? (
+          <ButtonSpinner data-icon="inline-start" aria-hidden="true" />
+        ) : (
+          <SquareIcon data-icon="inline-start" />
+        )}
+        {t(lease.takeoverRequested
+          ? 'terminal.agentLease.takingOver'
+          : 'terminal.agentLease.takeover')}
+      </Button>
+    </div>
+  );
+};
 
 // Wait for the selection to stop changing before copying it, so a real drag
 // that moves the pointer across cells doesn't write every intermediate state
@@ -91,6 +180,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId),
   );
   const terminal = controller?.terminal ?? null;
+  const activeLease = useSyncExternalStore(
+    agentTerminalLeaseState.subscribe,
+    () => agentTerminalLeaseState.get(activeSessionId),
+  );
 
   const connecting = activeSession?.status === 'connecting' && !activeSession.reconnecting;
   // Once the overlay appears, hold it for MIN_CONNECTING_OVERLAY_MS even if
@@ -218,6 +311,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       }
 
       if (event.key === 'Escape') {
+        if (activeLease) {
+          event.preventDefault();
+          event.stopPropagation();
+          activeLease.requestTakeover();
+          return false;
+        }
         if (searchOpen) {
           event.preventDefault();
           handleCloseSearch();
@@ -303,7 +402,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       // Reset key handler to avoid stale closures when session changes.
       terminal.attachCustomKeyEventHandler(() => true);
     };
-  }, [activeSession?.status, activeSessionId, terminal, searchOpen, handleOpenSearch, handleCloseSearch, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning, rightClickBehavior, trimTrailingWhitespace]);
+  }, [activeLease, activeSession?.status, activeSessionId, terminal, searchOpen, handleOpenSearch, handleCloseSearch, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning, rightClickBehavior, trimTrailingWhitespace]);
 
   // useActiveController opens xterm in a layout effect only when visible.
   // Install after that effect, including the first hidden -> visible transition.
@@ -314,8 +413,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">
-      {searchOpen && (
-        <div className="absolute right-0 top-0 z-20 flex h-10 w-96 items-center gap-1.5 rounded-bl-sm border border-t-0 border-app-border bg-app-surface p-1.5 shadow-md">
+      {activeLease && <AgentTerminalLeaseBar lease={activeLease} />}
+      <div className="relative min-h-0 flex-1">
+        {searchOpen && (
+          <div className="absolute right-0 top-0 z-20 flex h-10 w-96 items-center gap-1.5 rounded-bl-sm border border-t-0 border-app-border bg-app-surface p-1.5 shadow-md">
           <Input
             value={query}
             onChange={(e) => {
@@ -363,18 +464,19 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleCloseSearch} aria-label={t('terminal.search.close')}>
             <XIcon className="h-4 w-4" />
           </Button>
-        </div>
-      )}
-      {showConnectingOverlay && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface">
-          <Spinner />
-          <span className="text-xs text-app-text-soft">{t('terminal.status.connecting')}...</span>
-        </div>
-      )}
-      {activeSession?.reconnecting && (
-        <ReconnectingIndicator label={t('terminal.notice.reconnectingLabel')} />
-      )}
-      <div ref={paneRef} className="h-full w-full p-0" />
+          </div>
+        )}
+        {showConnectingOverlay && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface">
+            <Spinner />
+            <span className="text-xs text-app-text-soft">{t('terminal.status.connecting')}...</span>
+          </div>
+        )}
+        {activeSession?.reconnecting && (
+          <ReconnectingIndicator label={t('terminal.notice.reconnectingLabel')} />
+        )}
+        <div ref={paneRef} className="h-full w-full p-0" />
+      </div>
       <ConfirmationDialog
         open={Boolean(pendingPaste)}
         onOpenChange={(open) => { if (!open) setPendingPaste(null); }}

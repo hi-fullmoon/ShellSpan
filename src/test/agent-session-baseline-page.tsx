@@ -38,6 +38,7 @@ export function agentSessionBaselineView(scenario: AgentSessionBaselineScenario)
           goal: scenario.title,
           target: scenario.events.find((event) => event.type === 'session/created')?.data.target,
           permissionMode: scenario.modelInput.permission,
+          executionSurface: scenario.events.find((event) => event.type === 'session/created')?.data.executionSurface ?? 'direct',
           createdAtUnixMs: first?.timeUnixMs ?? 0,
         },
         status: scenario.status,

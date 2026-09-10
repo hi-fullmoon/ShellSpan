@@ -648,10 +648,11 @@ pub(crate) fn create_local_session(
 #[tauri::command]
 pub(crate) fn write_session(
     state: State<'_, SessionManager>,
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     session_id: String,
     data: String,
 ) -> Result<(), String> {
-    let result = state.write_user_session(&session_id, data);
+    let result = agent_runtime.write_user_terminal_input(&state, &session_id, data);
     if let Err(error) = &result {
         warn!("Failed to write SSH session input session_id={session_id}: {error}");
     }
@@ -703,9 +704,13 @@ pub(crate) fn resize_session(
 #[tauri::command]
 pub(crate) fn close_session(
     state: State<'_, SessionManager>,
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     session_id: String,
 ) -> Result<(), String> {
     info!("Closing SSH session session_id={session_id}");
+    if let Err(error) = agent_runtime.terminal_closed(&session_id) {
+        warn!("Failed to clean Agent terminal lease session_id={session_id}: {error}");
+    }
     let result = state.close(&session_id);
     if let Err(error) = &result {
         warn!("Failed to close SSH session session_id={session_id}: {error}");

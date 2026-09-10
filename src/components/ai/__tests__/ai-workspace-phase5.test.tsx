@@ -105,7 +105,7 @@ function agentView(approval: AiPendingApproval | null = null): AiSessionView {
     snapshot: {
       kind: 'agent',
       value: {
-        header: { sessionId: 'agent-phase5', taskId: 'task-1', goal: 'Deploy safely', createdAtUnixMs: 1 },
+        header: { sessionId: 'agent-phase5', taskId: 'task-1', goal: 'Deploy safely', executionSurface: 'direct', createdAtUnixMs: 1 },
         status: approval ? 'waiting' : 'running',
         ended: false,
         archived: false,

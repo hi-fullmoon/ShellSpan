@@ -8,6 +8,8 @@
     "dev": "vite --host 0.0.0.0 --port 1420",
     "build": "tsc && vite build",
     "test": "vitest run",
+    "test:agent-visible-terminal": "node scripts/verify-agent-visible-terminal.mjs",
+    "test:agent-visible-terminal:ssh": "node scripts/verify-agent-visible-terminal.mjs --ssh-fixture",
     "review:frontend": "pnpm test && pnpm build",
     "preview": "vite preview",
     "tauri:dev": "tauri dev",

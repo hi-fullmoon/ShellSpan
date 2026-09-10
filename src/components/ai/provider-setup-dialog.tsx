@@ -69,12 +69,36 @@ import {
   OpenAiBrandIcon,
 } from './provider-brand-icons';
 
-import { PROVIDER_PROFILE_IDS, resolveProviderProfile, useResolvedModel, profileProtocol, type ModelDefinition } from '@/lib/ai/provider-contract';
+import { PROVIDER_PROFILE_IDS, resolveProviderProfile, useResolvedModel, profileProtocol, type ModelDefinition, type Support } from '@/lib/ai/provider-contract';
 
 type ProviderDraft = Omit<AiProviderProfile, 'id'> & { apiKey?: string };
 
 function retryPolicyValid(value: unknown): boolean {
   try { parseRetryPolicy(value); return true; } catch { return false; }
+}
+
+function modelDefinitionValid(definition: ModelDefinition | undefined): boolean {
+  if (!definition
+    || !Number.isSafeInteger(definition.contextWindow)
+    || definition.contextWindow <= 0
+    || !Number.isSafeInteger(definition.maxOutputTokens)
+    || definition.maxOutputTokens <= 0
+    || definition.maxOutputTokens > definition.contextWindow
+    || (definition.imageInput === 'supported') !== Boolean(definition.vision)) return false;
+  if (!definition.vision) return true;
+  return Number.isSafeInteger(definition.vision.maxRequestImages)
+    && definition.vision.maxRequestImages > 0
+    && definition.vision.maxRequestImages <= 20
+    && Number.isSafeInteger(definition.vision.maxRequestImageBytes)
+    && definition.vision.maxRequestImageBytes > 0
+    && definition.vision.maxRequestImageBytes <= 20_971_520
+    && Number.isSafeInteger(definition.vision.reservedTokensPerImage)
+    && definition.vision.reservedTokensPerImage > 0
+    && definition.vision.reservedTokensPerImage <= definition.contextWindow;
+}
+
+function isUnknownModelError(error: string): boolean {
+  return error.includes('UNKNOWN_MODEL');
 }
 
 interface ProviderSetupDialogProps {
@@ -89,9 +113,17 @@ interface ProviderSetupDialogProps {
 type Feedback = {
   kind: 'error' | 'success';
   message: string;
+  labelKey?: LocaleKey;
 };
 
 const PRESET_OPTIONS = [...AI_PROVIDER_PRESETS];
+const SUPPORT_OPTIONS = ['unknown', 'unsupported', 'supported'] as const satisfies readonly Support[];
+
+const SUPPORT_LABEL_KEYS: Record<Support, LocaleKey> = {
+  unknown: 'settings.ai.support.unknown',
+  unsupported: 'settings.ai.support.unsupported',
+  supported: 'settings.ai.support.supported',
+};
 
 const PRESET_ICONS: Record<AiProviderPreset, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
   ollama: OllamaBrandIcon,
@@ -262,10 +294,19 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     && requestEndpoint
     && (!draft.requiresApiKey || draft.apiKey?.trim() || (provider && hasStoredApiKey)),
   );
+  const needsModelDeclaration = resolution.status === 'error'
+    && isUnknownModelError(resolution.error)
+    && !draft?.modelDefinition;
+  const hasInvalidModelDeclaration = Boolean(
+    draft?.modelDefinition && !modelDefinitionValid(draft.modelDefinition),
+  );
   const canSave = Boolean(
     canTest
     && draft?.name.trim()
     && draft.model.trim()
+    && !needsModelDeclaration
+    && !hasInvalidModelDeclaration
+    && (!addingModel || resolution.status === 'ready' || modelDefinitionValid(draft.modelDefinition))
     && (!nativeRouteMode || routeSnapshot),
   );
 
@@ -279,6 +320,31 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
       return next;
     });
     setFeedback(undefined);
+  };
+
+  const updateDefinition = (changes: Partial<ModelDefinition>): void => {
+    if (!draft?.modelDefinition) return;
+    updateDraft({ modelDefinition: { ...draft.modelDefinition, ...changes } });
+  };
+
+  const enableModelDeclaration = async (): Promise<void> => {
+    if (!draft) return;
+    const identity = draft;
+    setBusy(true);
+    setFeedback(undefined);
+    try {
+      const { apiKey: _apiKey, ...providerConfig } = draftConfig(draft, provider?.id);
+      const definition = await invoke<ModelDefinition>('ai_model_declaration_template', { provider: providerConfig });
+      setDraft((current) => current === identity ? { ...current, modelDefinition: definition } : current);
+    } catch (reason) {
+      setFeedback({
+        kind: 'error',
+        labelKey: 'settings.ai.saveFailed',
+        message: reason instanceof Error ? reason.message : String(reason),
+      });
+    } finally {
+      setBusy(false);
+    }
   };
 
 
@@ -382,6 +448,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
       if (modelRequestGeneration.current !== saveGeneration) return;
       setFeedback({
         kind: 'error',
+        labelKey: 'settings.ai.saveFailed',
         message: reason instanceof Error ? reason.message : String(reason),
       });
     } finally {
@@ -582,6 +649,142 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 </Combobox>
               </Field>
             </FieldGroup>
+            {draft && (needsModelDeclaration || draft.modelDefinition) && (
+              <FieldGroup className="gap-2.5 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
+                <Field className="@min-[30rem]:col-span-2">
+                  <FieldDescription>
+                    {needsModelDeclaration
+                      ? t('settings.ai.unknownModelDescription')
+                      : t('settings.ai.declaredHint')}
+                  </FieldDescription>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => draft.modelDefinition
+                      ? updateDraft({ modelDefinition: undefined })
+                      : void enableModelDeclaration()}
+                  >
+                    {t(draft.modelDefinition ? 'settings.ai.useCatalog' : 'settings.ai.declareModel')}
+                  </Button>
+                </Field>
+                {draft.modelDefinition && (
+                  <>
+                    <Field data-invalid={draft.modelDefinition.contextWindow <= 0 || undefined}>
+                      <FieldLabel htmlFor="model-context">{t('settings.ai.contextWindow')}</FieldLabel>
+                      <Input
+                        id="model-context"
+                        className={SYSTEM_INPUT_CLASS}
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={draft.modelDefinition.contextWindow || ''}
+                        aria-invalid={draft.modelDefinition.contextWindow <= 0 || undefined}
+                        onChange={(event) => updateDefinition({ contextWindow: Number(event.target.value) })}
+                      />
+                    </Field>
+                    <Field data-invalid={(
+                      draft.modelDefinition.maxOutputTokens <= 0
+                      || draft.modelDefinition.maxOutputTokens > draft.modelDefinition.contextWindow
+                    ) || undefined}>
+                      <FieldLabel htmlFor="model-output">{t('settings.ai.maxOutput')}</FieldLabel>
+                      <Input
+                        id="model-output"
+                        className={SYSTEM_INPUT_CLASS}
+                        type="number"
+                        min={1}
+                        max={draft.modelDefinition.contextWindow || undefined}
+                        step={1}
+                        value={draft.modelDefinition.maxOutputTokens || ''}
+                        aria-invalid={(
+                          draft.modelDefinition.maxOutputTokens <= 0
+                          || draft.modelDefinition.maxOutputTokens > draft.modelDefinition.contextWindow
+                        ) || undefined}
+                        onChange={(event) => updateDefinition({ maxOutputTokens: Number(event.target.value) })}
+                      />
+                    </Field>
+                    {(['toolCalling', 'imageInput'] as const).map((field) => (
+                      <Field key={field}>
+                        <FieldLabel htmlFor={`model-${field}`}>
+                          {t(field === 'toolCalling' ? 'settings.ai.toolSupport' : 'settings.ai.imageSupport')}
+                        </FieldLabel>
+                        <Combobox
+                          items={SUPPORT_OPTIONS}
+                          value={draft.modelDefinition![field]}
+                          itemToStringLabel={(value) => t(SUPPORT_LABEL_KEYS[value])}
+                          onValueChange={(value) => {
+                            if (!value) return;
+                            updateDefinition({
+                              [field]: value,
+                              ...(field === 'imageInput'
+                                ? {
+                                    vision: value === 'supported'
+                                      ? draft.modelDefinition!.vision ?? {
+                                          maxRequestImages: 20,
+                                          maxRequestImageBytes: 20_971_520,
+                                          reservedTokensPerImage: 4096,
+                                          imageTokenBudgetPolicy: 'User-declared application admission estimate for normalized PNG; not provider usage.',
+                                        }
+                                      : undefined,
+                                  }
+                                : {}),
+                            });
+                          }}
+                        >
+                          <ComboboxInput id={`model-${field}`} className={SYSTEM_INPUT_GROUP_CLASS} />
+                          <ComboboxContent>
+                            <ComboboxList>
+                              {(value: Support) => (
+                                <ComboboxItem key={value} value={value}>
+                                  {t(SUPPORT_LABEL_KEYS[value])}
+                                </ComboboxItem>
+                              )}
+                            </ComboboxList>
+                          </ComboboxContent>
+                        </Combobox>
+                      </Field>
+                    ))}
+                    {draft.modelDefinition.vision && (['maxRequestImages', 'maxRequestImageBytes', 'reservedTokensPerImage'] as const).map((field) => (
+                      <Field key={field} data-invalid={draft.modelDefinition!.vision![field] <= 0 || undefined}>
+                        <FieldLabel htmlFor={`model-${field}`}>
+                          {t(field === 'maxRequestImages'
+                            ? 'settings.ai.imageCount'
+                            : field === 'maxRequestImageBytes'
+                              ? 'settings.ai.imageBytes'
+                              : 'settings.ai.imageTokens')}
+                        </FieldLabel>
+                        <Input
+                          id={`model-${field}`}
+                          className={SYSTEM_INPUT_CLASS}
+                          type="number"
+                          min={1}
+                          max={field === 'maxRequestImages'
+                            ? 20
+                            : field === 'maxRequestImageBytes'
+                              ? 20_971_520
+                              : draft.modelDefinition!.contextWindow}
+                          step={1}
+                          value={draft.modelDefinition!.vision![field]}
+                          aria-invalid={draft.modelDefinition!.vision![field] <= 0 || undefined}
+                          onChange={(event) => updateDefinition({
+                            vision: {
+                              ...draft.modelDefinition!.vision!,
+                              [field]: Number(event.target.value),
+                            },
+                          })}
+                        />
+                      </Field>
+                    ))}
+                    {hasInvalidModelDeclaration && (
+                      <FieldDescription role="alert" className="@min-[30rem]:col-span-2">
+                        {t('settings.ai.declarationInvalid')}
+                      </FieldDescription>
+                    )}
+                  </>
+                )}
+              </FieldGroup>
+            )}
             {draft && <FieldGroup className="gap-2.5 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
               <FieldDescription className="@min-[30rem]:col-span-2">{t('settings.ai.retryDescription')}</FieldDescription>
               {(Object.keys(DEFAULT_RETRY_POLICY) as (keyof typeof DEFAULT_RETRY_POLICY)[]).map(key => (
@@ -674,7 +877,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                   )}
                 >
                   <span className="truncate">
-                    {t(feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready')}
+                    {t(feedback.labelKey ?? (feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready'))}
                   </span>
                   <TooltipProvider delay={250}>
                     <Tooltip>
@@ -685,7 +888,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                             variant="plain"
                             size="xs"
                             className="size-4 shrink-0 p-0"
-                            aria-label={`${t(feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready')}: ${feedback.message}`}
+                            aria-label={`${t(feedback.labelKey ?? (feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready'))}: ${feedback.message}`}
                           />
                         }
                       >

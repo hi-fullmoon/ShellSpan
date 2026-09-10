@@ -34,6 +34,7 @@ function snapshot(ended = false): AgentSessionSnapshot {
       sessionId: 'session-fixture',
       taskId: 'task-fixture',
       goal: 'Check nginx and report evidence.',
+      executionSurface: 'direct',
       createdAtUnixMs: 1_000,
     },
     status: ended ? 'completed' : 'running',
@@ -121,6 +122,21 @@ function agentDependencies(
 }
 
 describe('AgentSessionAdapter', () => {
+  it('passes the selected execution surface through Session creation', async () => {
+    const dependencies = agentDependencies(agentSessionEventFixture);
+    const adapter = createAgentSessionAdapter(dependencies);
+    const request = {
+      sessionId: 'session-fixture',
+      taskId: 'task-fixture',
+      goal: 'Show command execution',
+      executionSurface: 'boundTerminal' as const,
+    };
+
+    await adapter.create({ kind: 'agent', request });
+
+    expect(dependencies.createSession).toHaveBeenCalledWith(request);
+  });
+
   it.each(['cancelled', 'failed', 'completed'] as const)('resumes an ended %s session before starting and submitting', async status => {
     const base = agentSessionEventFixture[0]!;
     const events: AgentSessionEvent[] = [base, { ...base, seq: 1, type: 'session/ended', data: { status } }];

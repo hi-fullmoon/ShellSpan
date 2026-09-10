@@ -141,6 +141,14 @@ pub(crate) enum AgentSessionPermissionMode {
     Operator,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AgentExecutionSurface {
+    #[default]
+    Direct,
+    BoundTerminal,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentSessionTarget {
@@ -500,6 +508,8 @@ pub(crate) enum AgentSessionEventPayload {
         target: Option<AgentSessionTarget>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         permission_mode: Option<AgentSessionPermissionMode>,
+        #[serde(default)]
+        execution_surface: AgentExecutionSurface,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         success_criteria: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

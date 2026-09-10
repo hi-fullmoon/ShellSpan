@@ -166,6 +166,7 @@ function runningAgentView(sessionId = 'agent-session-1', terminalId = 'terminal-
       value: {
         header: {
           sessionId, taskId: 'task-1', goal: 'Run checks',
+          executionSurface: 'direct',
           createdAtUnixMs: 1,
           target: { kind: 'remote', targetId: `terminal-${terminalId}`, sessionId: terminalId },
         },
@@ -781,7 +782,10 @@ describe('AiWorkspaceController', () => {
       mode: 'start',
       create: expect.objectContaining({
         kind: 'agent',
-        request: expect.objectContaining({ permissionMode: 'scopedAutopilot' }),
+        request: expect.objectContaining({
+          permissionMode: 'scopedAutopilot',
+          executionSurface: 'direct',
+        }),
       }),
     })));
 
@@ -811,6 +815,52 @@ describe('AiWorkspaceController', () => {
         request: expect.objectContaining({ permissionMode: 'operator' }),
       }),
     })));
+  });
+
+  it('freezes the selected visible-terminal surface into a new Session request', async () => {
+    connectedTerminal();
+    const agent = adapter({
+      submit: vi.fn(async (_sessionId, input) => ({
+        sessionId: 'agent-visible',
+        clientOperationId: input.clientOperationId,
+        mode: input.mode,
+      })),
+    });
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Visible terminal' }));
+    await userEvent.setup().type(screen.getByRole('textbox'), 'Show this command');
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+
+    await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({
+      create: expect.objectContaining({
+        request: expect.objectContaining({ executionSurface: 'boundTerminal' }),
+      }),
+    })));
+  });
+
+  it('renders a historical Session execution surface from its frozen Header', async () => {
+    connectedTerminal();
+    const base = runningAgentView();
+    const view: AiSessionView = {
+      ...base,
+      snapshot: {
+        kind: 'agent',
+        value: {
+          ...base.snapshot.value,
+          header: { ...base.snapshot.value.header, executionSurface: 'boundTerminal' },
+        },
+      },
+    };
+    const agent = adapter({
+      list: vi.fn(async () => ({ sessions: [view.summary] })),
+      open: vi.fn(async () => view),
+    });
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+
+    await waitFor(() => expect(agent.open).toHaveBeenCalledWith(view.summary.id));
+    expect(await screen.findByRole('button', { name: 'Visible terminal' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Background' })).toBeDisabled();
   });
 
   it('routes Agent Enter, accelerated Enter, and Stop to distinct adapter intentions', async () => {

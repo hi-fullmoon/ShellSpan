@@ -15,6 +15,7 @@
         "cwd": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpxAnB0L"
       },
       "permissionMode": "requestApproval",
+      "executionSurface": "direct",
       "successCriteria": [
         "Skills reach model"
       ]

@@ -99,6 +99,7 @@ pub(crate) struct NativeToolRequest {
     pub(crate) model_call: ModelToolCall,
     pub(crate) target: AgentSessionTarget,
     pub(crate) permission_mode: super::AgentSessionPermissionMode,
+    pub(crate) execution_surface: super::AgentExecutionSurface,
 }
 
 #[derive(Debug, Clone)]
@@ -538,6 +539,7 @@ impl AgentToolPipeline {
             model_call,
             target: target.clone(),
             permission_mode,
+            execution_surface: snapshot.header.execution_surface,
         };
         let limit = self
             .parallel_limit
@@ -974,6 +976,7 @@ impl AgentToolPipeline {
             permission_mode: header
                 .permission_mode
                 .unwrap_or(super::AgentSessionPermissionMode::RequestApproval),
+            execution_surface: header.execution_surface,
         };
         let preparation = NativeToolPreparation {
             token: String::new(),
@@ -2240,6 +2243,7 @@ impl AgentToolPipeline {
                     .header
                     .permission_mode
                     .ok_or_else(|| "recovered tool call has no Rust permission mode".to_string())?,
+                execution_surface: snapshot.header.execution_surface,
             };
             let mut preparation = self.native.prepare(request.clone())?;
             let lease = Arc::new(PreparedLease::new(self.native.clone(), &preparation.token));

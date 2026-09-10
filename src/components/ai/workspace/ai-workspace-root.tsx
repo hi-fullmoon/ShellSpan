@@ -93,6 +93,7 @@ export interface AiWorkspaceRootProps {
   readonly modelLabel?: string;
   readonly modelControl?: React.ReactNode;
   readonly permissionControl?: React.ReactNode;
+  readonly executionSurfaceControl?: React.ReactNode;
   readonly composerState?: AiComposerState;
   readonly pendingNodes?: readonly AiConversationNode[];
   readonly announcement?: string | null;
@@ -162,6 +163,7 @@ export function AiWorkspaceRoot({
   modelLabel,
   modelControl,
   permissionControl,
+  executionSurfaceControl,
   composerState,
   pendingNodes = [],
   announcement,
@@ -385,6 +387,7 @@ export function AiWorkspaceRoot({
           modelControl={modelControl}
           contextUsage={surfaceMode === 'agent' ? view?.contextUsage : undefined}
           permissionControl={surfaceMode === 'agent' ? permissionControl : undefined}
+          executionSurfaceControl={surfaceMode === 'agent' ? executionSurfaceControl : undefined}
           composerState={composerState}
           inbox={surfaceMode === 'agent' ? view?.inbox : undefined}
           taskSteps={surfaceMode === 'agent' ? taskSteps : undefined}

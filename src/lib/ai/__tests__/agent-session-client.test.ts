@@ -16,6 +16,7 @@ function snapshot(ended = false): AgentSessionSnapshot {
       sessionId: 'session-fixture',
       taskId: 'task-fixture',
       goal: 'test reconnect',
+      executionSurface: 'direct',
       createdAtUnixMs: 1,
     },
     status: ended ? 'completed' : 'running',

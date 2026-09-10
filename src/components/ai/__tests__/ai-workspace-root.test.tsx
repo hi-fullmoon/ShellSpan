@@ -46,6 +46,7 @@ function agentView(status: AiSessionView['status'] = 'completed'): AiSessionView
           sessionId: 'session-fixture',
           taskId: 'task-fixture',
           goal: 'Check nginx and report evidence.',
+          executionSurface: 'direct',
           createdAtUnixMs: 1_000,
         },
         status,
