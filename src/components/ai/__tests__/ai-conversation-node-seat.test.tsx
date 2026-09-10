@@ -155,6 +155,7 @@ describe('AiConversationNodeList', () => {
             { ...user },
             {
               ...assistant,
+              lastSeq: assistant.lastSeq + revision,
               blocks: [{ type: 'text', text }],
             },
           ]}

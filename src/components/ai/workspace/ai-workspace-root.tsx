@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { MessageCircleQuestionIcon, SquareTerminalIcon } from 'lucide-react';
 
 import { useI18n } from '@/hooks/useI18n';
@@ -243,11 +243,13 @@ export function AiWorkspaceRoot({
     ? t('agent.emptyDescription')
     : t('ai.workbench.empty');
   const surfaceMode = mode ?? 'agent';
-  const conversationNodes = surfaceMode === 'ask'
-    ? askConversationNodes(visibleNodes)
-    : view?.snapshot.kind === 'agent' && view.snapshot.value.header.permissionMode === 'operator'
-      ? omitApprovedMarkers(visibleNodes)
-      : visibleNodes;
+  const conversationNodes = useMemo(() => (
+    surfaceMode === 'ask'
+      ? askConversationNodes(visibleNodes)
+      : view?.snapshot.kind === 'agent' && view.snapshot.value.header.permissionMode === 'operator'
+        ? omitApprovedMarkers(visibleNodes)
+        : visibleNodes
+  ), [surfaceMode, view?.snapshot, visibleNodes]);
   const sessionLedgerKey = view ? sessionRouteKey(view.summary.kind, view.summary.id) : null;
   const scrollAnchor = sessionLedgerKey
     ? navigation.scrollAnchorBySession[sessionLedgerKey]
