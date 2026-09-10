@@ -9,7 +9,7 @@ import {
 export const AGENT_BASELINE_FIXTURE_VERSION = 1 as const;
 export const AGENT_BASELINE_TIME_UNIX_MS = Date.parse('2026-09-03T00:00:00.000Z');
 export const AGENT_BASELINE_PROVIDER = 'deepseek' as const;
-export const AGENT_BASELINE_MODEL = 'deepseek-reasoner' as const;
+export const AGENT_BASELINE_MODEL = 'deepseek-flash' as const;
 export const AGENT_BASELINE_REASONING_LEVEL = 'medium' as const;
 export const AGENT_BASELINE_PERMISSION: AgentSessionPermissionMode = 'requestApproval';
 
