@@ -61,11 +61,7 @@ async fn question_single_answer_entry_reattaches_original_turn_and_next_request(
         .model_factory(Arc::new(FakeFactory(model.clone())))
         .build();
     restored.configure(root.path().to_path_buf()).unwrap();
-    restored
-        .configure_model_preferences(
-            crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap(),
-        )
-        .unwrap();
+    restored.configure_test_model(provider()).unwrap();
     restored.answer_question(input.clone(), None).unwrap();
     idle(&restored, "questions").await;
     restored.answer_question(input.clone(), None).unwrap();
@@ -197,7 +193,7 @@ async fn question_every_jsonl_prefix_repairs_answer_result_and_step_once() {
             .model_factory(Arc::new(FakeFactory(model.clone())))
             .build();
         restored.configure(root.path().to_path_buf()).unwrap();
-        configure_test_model_preferences(&restored, root.path(), &provider());
+        register_test_model(&restored, root.path(), &provider());
         if end == first {
             restored.start("prefix", provider(), None).unwrap();
             idle(&restored, "prefix").await;
@@ -277,11 +273,7 @@ async fn question_chain_every_prefix_preserves_unexecuted_queue_and_never_replay
             .native_tool_runtime(native.clone())
             .build();
         restored.configure(root.path().to_path_buf()).unwrap();
-        restored
-            .configure_model_preferences(
-                crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap(),
-            )
-            .unwrap();
+        restored.configure_test_model(provider()).unwrap();
         restored
             .start("prefix-chain", provider(), None)
             .unwrap_or_else(|e| panic!("prefix {end}: {e}"));
@@ -435,11 +427,7 @@ async fn question_sensitive_answer_retry_uses_raw_fingerprint_not_redacted_conte
     drop(runtime);
     let restored = AgentRuntimeBuilder::new().build();
     restored.configure(root.path().to_path_buf()).unwrap();
-    restored
-        .configure_model_preferences(
-            crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap(),
-        )
-        .unwrap();
+    restored.configure_test_model(provider()).unwrap();
     restored.answer_question(input, None).unwrap();
     assert_eq!(model.request_count(), 2);
 }
@@ -516,14 +504,40 @@ async fn question_real_http_resume_uses_current_credentials_and_original_tool_hi
         ..provider()
     };
     let database = crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap();
-    database.save_preferences(&[("ai.providers".into(), serde_json::json!([{
-        "id":provider.id, "name":"Question route", "kind":provider.kind,
-        "baseUrl":provider.base_url, "model":provider.model, "profile":provider.profile,
-        "modelDefinition":provider.model_definition, "requiresApiKey":true,
-    }]).to_string())]).unwrap();
     let credentials = crate::keychain::CredentialManager::in_memory_for_tests();
-    credentials.set_credential(crate::keychain::AI_KEY_SERVICE, &provider.id, "initial-fixture-key").unwrap();
     let routes = crate::llm::routes::RouteStore::open(database.clone(), credentials.clone()).unwrap();
+    let selection = crate::llm::routes::ModelSelection {
+        route_id: provider.id.clone(),
+        model_id: provider.model.clone(),
+        reasoning_effort: provider.reasoning_effort.clone(),
+    };
+    let route = crate::llm::routes::ProviderRoute {
+        id: provider.id.clone(),
+        revision: 1,
+        display_name: "Question route".into(),
+        adapter_id: "chat-completions".into(),
+        base_url: provider.base_url.clone(),
+        auth: crate::llm::routes::RouteAuth::Keychain { reference: "pending".into() },
+        replay_domain_id: "pending".into(),
+        preset_id: None,
+        models: Some(std::collections::BTreeMap::from([(
+            provider.model.clone(),
+            provider.model_definition.clone().unwrap(),
+        )])),
+        model_overrides: None,
+        defaults: Some(selection.clone()),
+        retry_policy: Default::default(),
+        timeouts: Default::default(),
+    };
+    routes.save(
+        vec![route],
+        Some(selection),
+        1,
+        std::collections::BTreeMap::from([(
+            provider.id.clone(),
+            "initial-fixture-key".into(),
+        )]),
+    ).unwrap();
     runtime.configure_llm(crate::llm::runtime::LlmRuntime { routes: routes.clone() }).unwrap();
     runtime
         .start("wire", provider.clone(), Some("initial-fixture-key".into()))
@@ -779,11 +793,7 @@ async fn question_historical_child_can_resume_as_new_live_root() {
         .model_factory(Arc::new(FakeFactory(model.clone())))
         .build();
     restored.configure(root.path().to_path_buf()).unwrap();
-    restored
-        .configure_model_preferences(
-            crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap(),
-        )
-        .unwrap();
+    restored.configure_test_model(provider()).unwrap();
     restored
         .start(&child.header.session_id, provider(), None)
         .unwrap();
@@ -876,11 +886,7 @@ async fn question_cancelled_jsonl_prefix_recovery_finishes_cancellation_without_
             .model_factory(Arc::new(FakeFactory(model.clone())))
             .build();
         restored.configure(root.path().to_path_buf()).unwrap();
-        restored
-            .configure_model_preferences(
-                crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap(),
-            )
-            .unwrap();
+        restored.configure_test_model(provider()).unwrap();
         assert!(restored.answer_question(input.clone(), None).is_err());
         restored.start("cancel-prefix", provider(), None).unwrap();
         idle(&restored, "cancel-prefix").await;
@@ -992,11 +998,7 @@ async fn question_request_storage_failure_never_installs_or_publishes_pending() 
     .unwrap();
     let restored = AgentRuntimeBuilder::new().build();
     restored.configure(root.path().to_path_buf()).unwrap();
-    restored
-        .configure_model_preferences(
-            crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap(),
-        )
-        .unwrap();
+    restored.configure_test_model(provider()).unwrap();
     let handle = restored
         .agents
         .attach(

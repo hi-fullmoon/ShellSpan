@@ -107,51 +107,51 @@ async fn interruption_pauses_queued_input_across_restart_and_allows_a_new_messag
 }
 
 #[tokio::test]
-async fn legacy_cancelled_conversation_resumes_with_its_history_and_a_fresh_entry() {
+async fn cancelled_conversation_resumes_with_its_history_and_a_fresh_entry() {
     let adapter = FakeAdapter::new(vec![
         FakeScript::Wait { response: None },
         reply("continued", &[]),
     ]);
     let (root, runtime) = configured(adapter.clone());
-    create(&runtime, "legacy");
+    create(&runtime, "cancelled");
     runtime
-        .followup("legacy", "first".into(), "original context".into())
+        .followup("cancelled", "first".into(), "original context".into())
         .unwrap();
-    runtime.start("legacy", provider(), None).unwrap();
+    runtime.start("cancelled", provider(), None).unwrap();
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         adapter.started.notified(),
     )
     .await
     .expect("model started");
-    runtime.cancel("legacy").await.unwrap();
-    let before = all_events(&runtime, "legacy");
-    let snapshot = runtime.resume("legacy").await.unwrap();
+    runtime.cancel("cancelled").await.unwrap();
+    let before = all_events(&runtime, "cancelled");
+    let snapshot = runtime.resume("cancelled").await.unwrap();
     assert_eq!(snapshot.status, AgentSessionStatus::Idle);
     assert!(!snapshot.ended);
-    let resumed = all_events(&runtime, "legacy");
+    let resumed = all_events(&runtime, "cancelled");
     assert_eq!(&resumed[..before.len()], before.as_slice());
     assert_eq!(snapshot.recovery.kind, AgentRecoveryCheckpointKind::Idle);
-    runtime.start("legacy", provider(), None).unwrap();
+    runtime.start("cancelled", provider(), None).unwrap();
     runtime
-        .followup("legacy", "second".into(), "continue".into())
+        .followup("cancelled", "second".into(), "continue".into())
         .unwrap();
-    runtime.await_idle("legacy").await.unwrap();
+    runtime.await_idle("cancelled").await.unwrap();
     assert_eq!(adapter.request_count(), 2);
     assert!(
-        serde_json::to_string(&runtime.session("legacy").unwrap().surface)
+        serde_json::to_string(&runtime.session("cancelled").unwrap().surface)
             .unwrap()
             .contains("original context")
     );
     let store = AgentSessionStore::default();
     store.configure(root.path().to_path_buf()).unwrap();
     assert!(
-        !store.snapshot("legacy").unwrap().ended,
+        !store.snapshot("cancelled").unwrap().ended,
         "resumption must survive replay"
     );
-    runtime.archive_session("legacy").unwrap();
+    runtime.archive_session("cancelled").unwrap();
     assert!(
-        runtime.resume("legacy").await.is_err(),
+        runtime.resume("cancelled").await.is_err(),
         "archived conversations remain immutable"
     );
 }
