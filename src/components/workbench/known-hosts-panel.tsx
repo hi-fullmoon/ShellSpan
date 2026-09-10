@@ -133,7 +133,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
           <ResponsiveCardGrid
             columns={1}
             minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH}
-            gap="0.375rem"
+            gap="0.75rem"
           >
             {filteredHosts.map((host) => (
               <ManagementCard key={`${host.host}:${host.port}`}>

@@ -221,7 +221,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 icon={<SearchXIcon className="size-5" />}
               />
             ) : (
-              <ResponsiveCardGrid columns={1} breakpoints={CONNECTION_CARD_BREAKPOINTS} gap="0.375rem">
+              <ResponsiveCardGrid columns={1} breakpoints={CONNECTION_CARD_BREAKPOINTS} gap="0.75rem">
                 {filteredProfiles.map((profile) => (
                   <ConnectionCard
                     key={profile.id}

@@ -218,7 +218,7 @@ export const KeychainPanel: React.FC = () => {
               />
             )}
             {filteredKeys.length > 0 && (
-              <ResponsiveCardGrid columns={1} minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH} gap="0.375rem">
+              <ResponsiveCardGrid columns={1} minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH} gap="0.75rem">
                 {filteredKeys.map((key) => {
                   const isProfilePassword = key.service === 'com.shellspan.profile-password';
                   return (
