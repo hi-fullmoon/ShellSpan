@@ -26,7 +26,6 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   ClockIcon,
-  SquareIcon,
   XIcon,
 } from 'lucide-react';
 
@@ -48,32 +47,43 @@ function formatLeaseDuration(elapsedMs: number): string {
 
 const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ lease }) => {
   const { t } = useI18n();
+  const { error: showError } = useToast();
+  const shownFailureOperationRef = useRef<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [lease.operationId]);
+  useEffect(() => {
+    if (!lease.takeoverFailed) {
+      if (shownFailureOperationRef.current === lease.operationId) {
+        shownFailureOperationRef.current = null;
+      }
+      return;
+    }
+    if (shownFailureOperationRef.current === lease.operationId) return;
+    shownFailureOperationRef.current = lease.operationId;
+    showError(t('terminal.agentLease.takeoverFailed'));
+  }, [lease.operationId, lease.takeoverFailed, showError, t]);
   const duration = formatLeaseDuration(now - lease.acquiredAtUnixMs);
   const agentId = lease.agentSessionId.length > 16
     ? `${lease.agentSessionId.slice(0, 12)}…`
     : lease.agentSessionId;
-  const interactionHint = lease.takeoverFailed
-    ? t('terminal.agentLease.takeoverFailed')
-    : lease.inputBlocked
-      ? t('terminal.agentLease.inputBlockedAccessibleHint')
-      : t('terminal.agentLease.inputLocked');
+  const interactionHint = lease.inputBlocked
+    ? t('terminal.agentLease.inputBlockedAccessibleHint')
+    : t('terminal.agentLease.inputLocked');
 
   return (
     <div
-      className="flex min-h-9 shrink-0 items-center gap-2 border-b border-border bg-muted/50 px-2"
+      className="flex min-h-8 shrink-0 items-center gap-1.5 border-b border-app-border/40 bg-muted/40 px-2"
       role="status"
       aria-live="polite"
       aria-atomic="true"
       data-testid="agent-terminal-lease-bar"
       data-operation-id={lease.operationId}
     >
-      <Badge variant="secondary" title={lease.agentSessionId}>
+      <Badge size="sm" variant="secondary" title={lease.agentSessionId}>
         <BotIcon data-icon="inline-start" />
         {t('terminal.agentLease.agentIdentity', { id: agentId })}
       </Badge>
@@ -91,25 +101,29 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
         className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
         aria-label={t('terminal.agentLease.runtime', { duration })}
       >
-        <ClockIcon aria-hidden="true" />
-        <span aria-hidden="true">{duration}</span>
+        <ClockIcon className="size-3.5" aria-hidden="true" />
+        <span className="w-[6ch] text-right font-mono tabular-nums" aria-hidden="true">
+          {duration}
+        </span>
       </span>
       <Button
         type="button"
-        variant="outline"
+        variant="secondary"
         size="xs"
         className="shrink-0"
         disabled={lease.takeoverRequested}
+        aria-busy={lease.takeoverRequested || undefined}
+        aria-label={t(lease.takeoverRequested
+          ? 'terminal.agentLease.takingOver'
+          : 'terminal.agentLease.takeover')}
         onClick={lease.requestTakeover}
       >
         {lease.takeoverRequested ? (
           <ButtonSpinner data-icon="inline-start" aria-hidden="true" />
         ) : (
-          <SquareIcon data-icon="inline-start" />
+          <XIcon data-icon="inline-start" />
         )}
-        {t(lease.takeoverRequested
-          ? 'terminal.agentLease.takingOver'
-          : 'terminal.agentLease.takeover')}
+        {t('terminal.agentLease.takeover')}
       </Button>
     </div>
   );
