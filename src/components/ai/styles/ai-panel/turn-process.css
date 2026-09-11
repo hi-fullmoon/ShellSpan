@@ -1,0 +1,179 @@
+.ai-disclosure-row,
+.ai-tool-row {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.ai-semantic-note-separator[data-slot='separator'] {
+  display: none;
+}
+
+.ai-semantic-note-body {
+  border-radius: 8px;
+  background: var(--dsw-alias-markdown-code-block);
+  color: var(--dsw-alias-label-tertiary);
+  font: 400 11px/16px var(--ds-font-family-code);
+}
+
+.ai-disclosure-row[data-reasoning-header] {
+  cursor: default;
+}
+
+.ai-turn-process-body {
+  border-left: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.ai-disclosure-leading {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.ai-disclosure-leading > svg,
+.ai-block-banner > svg,
+.ai-produced-files-label > svg,
+.ai-transcript-notice > svg,
+.ai-turn-error > svg,
+.ai-artifact-summary > svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Match the optical center of the transcript's CJK and Latin text. */
+.ai-disclosure-leading,
+.ai-disclosure-separator,
+.ai-transcript-notice > svg {
+  translate: 0 1px;
+}
+
+.ai-disclosure-title {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 24px;
+}
+
+.ai-disclosure-separator {
+  border-radius: 1px;
+  background: var(--dsw-alias-label-caption);
+}
+
+.ai-disclosure-summary {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 24px;
+}
+
+.ai-disclosure-summary[data-error] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.ai-disclosure-leading > * {
+  position: absolute;
+  inset: 1px;
+  margin: auto;
+}
+
+.ai-disclosure-leading > .ai-disclosure-chevron {
+  position: absolute;
+  inset: 1px;
+  width: 14px;
+  height: 14px;
+  margin: auto;
+  opacity: 0;
+  transform: rotate(0deg);
+  transition: transform var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.ai-turn-process-trigger > .ai-disclosure-leading > .ai-disclosure-chevron {
+  opacity: 1;
+}
+
+.ai-turn-process-trigger[aria-expanded='false'] > .ai-disclosure-leading > .ai-disclosure-chevron {
+  transform: rotate(-90deg);
+}
+
+.ai-disclosure-row[aria-expanded]:is([aria-expanded='true'], :hover, :focus-visible) > .ai-disclosure-leading > :not(.ai-disclosure-chevron),
+.ai-tool-row[aria-expanded]:is([aria-expanded='true'], :hover, :focus-visible) > .ai-disclosure-leading > :not(.ai-disclosure-chevron) {
+  opacity: 0;
+}
+
+.ai-disclosure-row[aria-expanded]:is([aria-expanded='true'], :hover, :focus-visible) > .ai-disclosure-leading > .ai-disclosure-chevron,
+.ai-tool-row[aria-expanded]:is([aria-expanded='true'], :hover, :focus-visible) > .ai-disclosure-leading > .ai-disclosure-chevron {
+  opacity: 1;
+}
+
+.ai-reasoning-body {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+:is(
+  .ai-semantic-note,
+  .ai-reasoning-row,
+  .ai-turn-process,
+  .ai-tool-row-root,
+  .ai-question-history
+) > [data-slot='collapsible-content'] {
+  height: var(--collapsible-panel-height);
+  overflow: hidden;
+  opacity: 1;
+  transition-property: height, opacity;
+  transition-duration: var(--ds-transition-duration), var(--ds-transition-duration-fast);
+  transition-timing-function: var(--ds-ease-in-out);
+  will-change: height, opacity;
+}
+
+:is(
+    .ai-semantic-note,
+    .ai-reasoning-row,
+    .ai-turn-process,
+    .ai-tool-row-root,
+    .ai-question-history
+  )
+  > [data-slot='collapsible-content']:is([data-starting-style], [data-ending-style]) {
+  height: 0;
+  opacity: 0;
+}
+
+.ai-turn-process > [data-slot='collapsible-content'] {
+  transition-duration: var(--ds-transition-duration-slow), var(--ds-transition-duration);
+}
+
+.ai-tool-duration {
+  color: var(--dsw-alias-label-caption);
+  font-size: 11px;
+  line-height: 20px;
+}
+
+.ai-tool-inspect {
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ai-state-dot {
+  border: 1.5px solid var(--dsw-alias-label-tertiary);
+  border-radius: 50%;
+}
+
+.ai-state-dot[data-state='succeeded'],
+.ai-state-dot[data-state='completed'] {
+  border-color: var(--dsw-alias-state-success-primary);
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.ai-state-dot[data-state='failed'],
+.ai-state-dot[data-state='rejected'] {
+  border-color: var(--dsw-alias-state-error-primary);
+  background: var(--dsw-alias-state-error-primary);
+}
+
+.ai-state-dot[data-state='approval'] {
+  border-color: var(--dsw-alias-state-warn-primary);
+}
