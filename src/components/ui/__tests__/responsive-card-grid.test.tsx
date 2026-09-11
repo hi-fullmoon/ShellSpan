@@ -75,7 +75,7 @@ describe('ResponsiveCardGrid', () => {
 
     resizeContainerTo(1200);
     expect(grid).toHaveStyle({
-      gap: '0.5rem',
+      gap: '2rem',
       gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
     });
   });
