@@ -98,13 +98,11 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
     setPositionReady(true);
   }, [cancelRestore, followEndKey, scrollToEnd]);
 
-  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const handlePointerDown = useCallback(() => {
     interruptRestore();
-    if (!(event.target instanceof Element)
-      || !event.target.closest('[data-slot="scroll-area-scrollbar"]')) return;
-    // The custom scrollbar sits outside the viewport. Notify the primitive's
-    // existing wheel-intent handler with zero movement so dragging releases
-    // auto-follow even during its programmatic-scroll grace period.
+    // Any direct interaction with the transcript signals reading intent.
+    // Reuse the primitive's wheel-intent path so selecting text, opening a
+    // link, or dragging the native scrollbar all release auto-follow.
     viewportRef.current?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 0 }));
   }, [interruptRestore]);
 

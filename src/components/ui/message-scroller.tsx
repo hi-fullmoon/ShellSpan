@@ -8,7 +8,6 @@ import {
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { ArrowDownIcon } from "lucide-react"
 
 function MessageScrollerProvider(
@@ -35,26 +34,19 @@ function MessageScroller({
 
 function MessageScrollerViewport({
   className,
-  children,
   ...props
 }: React.ComponentProps<typeof MessageScrollerPrimitive.Viewport>) {
   return (
-    <ScrollArea
-      className="size-full min-h-0 min-w-0 flex-1"
-      viewportRender={
-        <MessageScrollerPrimitive.Viewport
-          data-message-scroller-viewport=""
-          role="region"
-          className={cn(
-            "size-full min-h-0 min-w-0 scroll-fade-b overscroll-contain contain-content",
-            className
-          )}
-          {...props}
-        />
-      }
-    >
-      {children}
-    </ScrollArea>
+    <MessageScrollerPrimitive.Viewport
+      data-slot="message-scroller-viewport"
+      data-message-scroller-viewport=""
+      role="region"
+      className={cn(
+        "native-scrollbar-default size-full min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scroll-fade-b overscroll-contain rounded-[inherit] [scrollbar-gutter:stable] contain-content outline-none transition-[color,box-shadow] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1",
+        className
+      )}
+      {...props}
+    />
   )
 }
 
