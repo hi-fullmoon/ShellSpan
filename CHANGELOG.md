@@ -2,6 +2,95 @@
 
 All notable changes to ShellSpan are documented in this file.
 
+
+## [v2.0.57](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.57) - 2026-09-11
+
+
+### Bug Fixes
+
+- **ai:** align session browser dropdown to start
+- **terminal:** handle wrapped ConPTY protocol records
+
+### Chore
+
+- remove obsolete docs and scripts
+- **i18n:** update en-US and zh-CN locale strings
+
+### Documentation
+
+- add design doc for agent visible terminal execution
+- **agent:** tighten executionSurface contract to strict mode
+
+### Features
+
+- **ai:** add Ask reasoning conversation node renderer
+- **ai-panel:** add check:ai-styles validation script
+- **llm:** add curated model discovery protocol and backend
+- **i18n:** add new string to en-US and zh-CN bundles
+- **ui:** add shared Alert component
+- **agent:** add visible terminal execution
+- **ai:** allow model change on ended/failed sessions
+- **ai:** auto-open conversation seats and follow streaming turns
+- **ai:** control AiPanel visibility via visible prop with mounted drawer
+- **agent-runtime:** delete archived agent sessions
+- **ai:** delete archived sessions from workspace
+- **ai:** pin streaming reasoning preview to newest line
+- **terminal:** probe interactive shell for current directory
+- **ai:** probe shell project root before explicit binding
+- **ai:** refine question answer experience
+- **ai:** rename reasoning disclosure to Process complete
+- **ai:** settle streaming reasoning on turn commit
+- **ai:** split workbench ask and terminal agent into distinct surfaces
+- **ai:** support curated model discovery and unknown models
+- **src-tauri:** update AI module and add IPC module
+
+### Refactoring
+
+- **test:** align agent runtime tests with profile model
+- **ai-panel:** align components with modular CSS
+- **test:** align provider fixtures with profile model
+- **terminal:** async takeover command and terminal layer updates
+- **agent:** centralize update_plan validation and tighten evidence schema
+- **ai:** coalesce live streams and memoize conversation nodes
+- **ai:** drop ScrollArea wrapper from message scroller
+- **agent:** drop legacy schema and migration paths
+- **agent:** drop legacy schema and migration paths
+- drop legacy schema and shortcut migration paths
+- drop legacy schema and shortcut migration paths
+- **llm:** gate runtime behind tests and drop v4→v5 migration
+- **app:** load SettingsPanel eagerly instead of via React.lazy
+- **llm:** migrate provider/model state to llmRoutesStore
+- **ai:** normalize unknown preset and migration status values
+- **ai:** pass variables through settings i18n
+- **llm:** profile_id resolution and model-local compat overrides
+- **llm:** provider defaults with model-local compat overrides
+- **ai:** provider setup and workspace session state
+- **ai:** rename turnProcess running and completed locale keys
+- **ai:** replace marker spinner with shimmer content
+- **agent:** replace takeover with per-turn cancellation
+- **ai:** rewrite approval panel with Card and Alert primitives
+- **ai-panel:** split styles into modular CSS files
+- **ai:** update AI settings, provider setup, and related components
+- **llm:** update LLM routes and store
+- **ui:** update confirmation dialog, alert dialog, and card grid
+- **workbench:** update settings panel and tests
+
+### Style
+
+- adjust card frame gradient fade distances
+- **ai-panel:** change accent color from violet to teal
+- **workbench:** minor formatting in connection, keychain, and known-hosts panels
+- **ai:** restyle composer retry button as compact secondary
+- **ai:** shorten compact session browser filter button to h-7
+- **ai-panel:** switch font stack to Inter and reformat shadows
+- **ai:** unify copy and usage button appearance
+- widen horizontal padding from 4px to 8px
+
+### Testing
+
+- **ai:** cover streaming-driven seat open state and followEndKey
+- **ai:** update reasoning and projection tests with baseline
+- **agent-composer:** use AiComposerModelSelector in page helper
 ## [v2.0.56](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.56) - 2026-09-07
 
 ### Bug Fixes
