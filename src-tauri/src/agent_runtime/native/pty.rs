@@ -190,27 +190,34 @@ impl PtyOperationNative {
 
     fn consume_begin(&self, state: &mut PtyStateNative) -> bool {
         loop {
-            let Some(index) = state.protocol_buffer.find(&self.begin_prefix) else {
-                let keep = suffix_prefix_len(&state.protocol_buffer, &self.begin_prefix);
-                let start = floor_char_boundary(
-                    &state.protocol_buffer,
-                    state.protocol_buffer.len().saturating_sub(keep),
-                );
+            let view = protocol_view(
+                &state.protocol_buffer,
+                state.shell_kind == Some(PtyShellKindNative::PowerShell),
+            );
+            let Some(index) = view.text.find(&self.begin_prefix) else {
+                let keep = suffix_prefix_len(&view.text, &self.begin_prefix);
+                let normalized_start = view.text.len().saturating_sub(keep);
+                let start = view.raw_start(normalized_start);
                 state.protocol_buffer.drain(..start);
                 return false;
             };
             let commitment_start = index + self.begin_prefix.len();
-            let Some(relative_end) =
-                state.protocol_buffer[commitment_start..].find(&self.record_terminator)
+            let Some(relative_end) = view.text[commitment_start..].find(&self.record_terminator)
             else {
                 if index > 0 {
-                    state.protocol_buffer.drain(..index);
+                    state.protocol_buffer.drain(..view.raw_start(index));
                 }
                 return false;
             };
             let commitment_end = commitment_start + relative_end;
-            let commitment = state.protocol_buffer[commitment_start..commitment_end].to_string();
-            let through = commitment_end + self.record_terminator.len();
+            let commitment = if state.shell_kind == Some(PtyShellKindNative::PowerShell) {
+                view.text[commitment_start..commitment_end]
+                    .trim_end_matches(' ')
+                    .to_string()
+            } else {
+                view.text[commitment_start..commitment_end].to_string()
+            };
+            let through = view.raw_end(commitment_end + self.record_terminator.len());
             state.protocol_buffer.drain(..through);
             if commitment.len() != 64 || !commitment.bytes().all(|byte| byte.is_ascii_hexdigit()) {
                 continue;
@@ -223,10 +230,14 @@ impl PtyOperationNative {
 
     fn consume_output_and_end(&self, state: &mut PtyStateNative, display: &mut String) {
         loop {
-            let Some(index) = state.protocol_buffer.find(&self.end_prefix) else {
-                let keep = suffix_prefix_len(&state.protocol_buffer, &self.end_prefix);
-                let flush = state.protocol_buffer.len().saturating_sub(keep);
-                let split = floor_char_boundary(&state.protocol_buffer, flush);
+            let view = protocol_view(
+                &state.protocol_buffer,
+                state.shell_kind == Some(PtyShellKindNative::PowerShell),
+            );
+            let Some(index) = view.text.find(&self.end_prefix) else {
+                let keep = suffix_prefix_len(&view.text, &self.end_prefix);
+                let normalized_split = view.text.len().saturating_sub(keep);
+                let split = view.raw_start(normalized_split);
                 if split > 0 {
                     let output = state.protocol_buffer[..split].to_string();
                     state.protocol_buffer.drain(..split);
@@ -236,19 +247,24 @@ impl PtyOperationNative {
                 return;
             };
             let record_start = index + self.end_prefix.len();
-            let Some(relative_end) =
-                state.protocol_buffer[record_start..].find(&self.record_terminator)
-            else {
+            let Some(relative_end) = view.text[record_start..].find(&self.record_terminator) else {
                 if index > 0 {
-                    let output = state.protocol_buffer[..index].to_string();
-                    state.protocol_buffer.drain(..index);
+                    let raw_index = view.raw_start(index);
+                    let output = state.protocol_buffer[..raw_index].to_string();
+                    state.protocol_buffer.drain(..raw_index);
                     append_capture(state, &output);
                     display.push_str(&output);
                 }
                 return;
             };
             let record_end = record_start + relative_end;
-            let record = state.protocol_buffer[record_start..record_end].to_string();
+            let record = if state.shell_kind == Some(PtyShellKindNative::PowerShell) {
+                view.text[record_start..record_end]
+                    .trim_end_matches(' ')
+                    .to_string()
+            } else {
+                view.text[record_start..record_end].to_string()
+            };
             let authenticated = record.split_once(':').and_then(|(capability, exit)| {
                 if capability.len() != 64
                     || !capability.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -264,13 +280,15 @@ impl PtyOperationNative {
                     .flatten()
             });
             if index > 0 {
-                let output = state.protocol_buffer[..index].to_string();
-                state.protocol_buffer.drain(..index);
+                let raw_index = view.raw_start(index);
+                let output = state.protocol_buffer[..raw_index].to_string();
+                state.protocol_buffer.drain(..raw_index);
                 append_capture(state, &output);
                 display.push_str(&output);
             }
+            let through =
+                view.raw_end(record_end + self.record_terminator.len()) - view.raw_start(index);
             if let Some(code) = authenticated {
-                let through = self.end_prefix.len() + record.len() + self.record_terminator.len();
                 state.protocol_buffer.drain(..through);
                 display.push_str(&state.protocol_buffer);
                 state.protocol_buffer.clear();
@@ -281,7 +299,6 @@ impl PtyOperationNative {
             // A record using our unpredictable marker but failing commitment
             // authentication is protocol-shaped forgery. Drop it from both
             // display and model capture, and keep waiting for the real END.
-            let through = self.end_prefix.len() + record.len() + self.record_terminator.len();
             state.protocol_buffer.drain(..through);
         }
     }
@@ -395,6 +412,137 @@ fn suffix_prefix_len(value: &str, prefix: &str) -> usize {
             value.is_char_boundary(start) && prefix.starts_with(&value[start..])
         })
         .unwrap_or(0)
+}
+
+/// Windows ConPTY represents a physical line wrap in its VT output as a CRLF
+/// followed by an absolute cursor-position sequence. PowerShell protocol
+/// records are deliberately long and can therefore contain those display-only
+/// bytes at ordinary terminal widths. Keep a normalized search view together
+/// with offsets into the untouched stream so protocol bytes can be recognized
+/// without changing real command output or ANSI styling.
+struct ProtocolView {
+    text: String,
+    raw_starts: Vec<usize>,
+    raw_ends: Vec<usize>,
+    raw_boundary: usize,
+}
+
+impl ProtocolView {
+    fn raw_start(&self, normalized_index: usize) -> usize {
+        self.raw_starts
+            .get(normalized_index)
+            .copied()
+            .unwrap_or(self.raw_boundary)
+    }
+
+    fn raw_end(&self, normalized_end: usize) -> usize {
+        normalized_end
+            .checked_sub(1)
+            .and_then(|index| self.raw_ends.get(index).copied())
+            .unwrap_or(0)
+    }
+}
+
+fn protocol_view(value: &str, normalize_conpty_wraps: bool) -> ProtocolView {
+    if !normalize_conpty_wraps {
+        return ProtocolView {
+            text: value.to_string(),
+            raw_starts: (0..value.len()).collect(),
+            raw_ends: (1..=value.len()).collect(),
+            raw_boundary: value.len(),
+        };
+    }
+
+    let bytes = value.as_bytes();
+    let mut text = Vec::with_capacity(bytes.len());
+    let mut raw_starts = Vec::with_capacity(bytes.len());
+    let mut raw_ends = Vec::with_capacity(bytes.len());
+    let mut raw_index = 0;
+    let mut raw_boundary = bytes.len();
+    while raw_index < bytes.len() {
+        if let Some(length) = conpty_wrap_sequence_len(&bytes[raw_index..]) {
+            // ConPTY positions the cursor on the last cell of the previous
+            // physical row and redraws that cell before continuing. Wait for
+            // the redraw byte when chunks split at the CSI boundary, then
+            // remove it only when it is the duplicated boundary character.
+            if raw_index + length == bytes.len() {
+                raw_boundary = raw_index;
+                break;
+            }
+            raw_index += length;
+            if text.last() == bytes.get(raw_index) {
+                raw_index += 1;
+            }
+            continue;
+        }
+        if is_partial_conpty_wrap_sequence(&bytes[raw_index..]) {
+            raw_boundary = raw_index;
+            break;
+        }
+        text.push(bytes[raw_index]);
+        raw_starts.push(raw_index);
+        raw_ends.push(raw_index + 1);
+        raw_index += 1;
+    }
+    ProtocolView {
+        // Removing ASCII control sequences from valid UTF-8 cannot invalidate
+        // the remaining byte stream.
+        text: String::from_utf8(text).expect("ConPTY protocol view remains UTF-8"),
+        raw_starts,
+        raw_ends,
+        raw_boundary,
+    }
+}
+
+fn conpty_wrap_sequence_len(value: &[u8]) -> Option<usize> {
+    if !value.starts_with(b"\r\n\x1b[") {
+        return None;
+    }
+    let mut index = 4;
+    let row_start = index;
+    while value.get(index).is_some_and(u8::is_ascii_digit) {
+        index += 1;
+    }
+    if index == row_start || value.get(index) != Some(&b';') {
+        return None;
+    }
+    index += 1;
+    let column_start = index;
+    while value.get(index).is_some_and(u8::is_ascii_digit) {
+        index += 1;
+    }
+    if index == column_start || value.get(index) != Some(&b'H') {
+        return None;
+    }
+    Some(index + 1)
+}
+
+fn is_partial_conpty_wrap_sequence(value: &[u8]) -> bool {
+    const PREFIX: &[u8] = b"\r\n\x1b[";
+    if value.len() < PREFIX.len() {
+        return PREFIX.starts_with(value);
+    }
+    if !value.starts_with(PREFIX) {
+        return false;
+    }
+    let mut index = PREFIX.len();
+    while value.get(index).is_some_and(u8::is_ascii_digit) {
+        index += 1;
+    }
+    if index == value.len() {
+        return true;
+    }
+    if index == PREFIX.len() || value[index] != b';' {
+        return false;
+    }
+    index += 1;
+    while value.get(index).is_some_and(u8::is_ascii_digit) {
+        index += 1;
+    }
+    if index == value.len() {
+        return true;
+    }
+    value.get(index) == Some(&b'H') && index + 1 == value.len()
 }
 
 fn classify_shell_probe(value: &str) -> Option<PtyShellKindNative> {
@@ -1042,11 +1190,11 @@ mod tests {
     }
 
     #[cfg(any(unix, target_os = "windows"))]
-    fn run_local_shell_protocol(wrapper: &str) -> String {
+    fn run_local_shell_protocol(wrapper: &str, cols: u16) -> String {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 24,
-                cols: 240,
+                cols,
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -1118,6 +1266,13 @@ mod tests {
         shell_kind: PtyShellKindNative,
         expected_output: &str,
     ) {
+        let single_chunk = PtyOperationNative::new(marker.into(), Some(shell_kind), String::new());
+        single_chunk.observe(raw);
+        assert_eq!(
+            single_chunk.snapshot().unwrap().state,
+            PtyLifecycleNative::Exited,
+            "single chunk raw={raw:?}"
+        );
         let operation = PtyOperationNative::new(
             marker.into(),
             Some(shell_kind),
@@ -1129,7 +1284,11 @@ mod tests {
             display.push_str(&operation.observe(&chunk.iter().collect::<String>()));
         }
         let snapshot = operation.snapshot().unwrap();
-        assert_eq!(snapshot.state, PtyLifecycleNative::Exited, "raw={raw:?}");
+        assert_eq!(
+            snapshot.state,
+            PtyLifecycleNative::Exited,
+            "snapshot={snapshot:?} raw={raw:?}"
+        );
         assert_eq!(snapshot.exit_code, Some(7), "raw={raw:?}");
         assert!(snapshot.combined_output.contains(expected_output));
         assert!(display.contains(expected_output));
@@ -1235,6 +1394,64 @@ mod tests {
             assert_eq!(
                 display,
                 "\r\u{1b}[2K[Agent] $ printf safe\r\nfirst\r\nsecond\r\n\u{1b}[32m$ \u{1b}[0m",
+                "chunk={chunk_size}"
+            );
+            assert!(!display.contains(marker), "chunk={chunk_size}");
+            assert!(!display.contains("wrapper echo"), "chunk={chunk_size}");
+        }
+    }
+
+    #[test]
+    fn powershell_parser_hides_conpty_wrapped_protocol_for_every_chunk_boundary() {
+        fn wrapped_record(record: &str) -> String {
+            let mut wrapped = String::new();
+            let mut previous = None;
+            for segment in record.as_bytes().chunks(31) {
+                if let Some(boundary) = previous {
+                    wrapped.push_str("\r\n\u{1b}[23;40H");
+                    wrapped.push(boundary as char);
+                }
+                wrapped.push_str(std::str::from_utf8(segment).unwrap());
+                previous = segment.last().copied();
+            }
+            wrapped.push_str("        \r\n");
+            wrapped
+        }
+
+        let marker =
+            "shellspan_native_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let capability = "a".repeat(64);
+        let raw = format!(
+            "wrapper echo\r\n{}visible\r\n{}PS C:\\> ",
+            wrapped_record(&format!("{marker}:BEGIN:{}", commitment(&capability))),
+            wrapped_record(&format!("{marker}:END:{capability}:7")),
+        );
+        for chunk_size in 1..=raw.len() {
+            let operation = PtyOperationNative::new(
+                marker.into(),
+                Some(PtyShellKindNative::PowerShell),
+                "\r\u{1b}[2K[Agent] $ fixture\r\n".into(),
+            );
+            let mut display = String::new();
+            let mut offset = 0;
+            while offset < raw.len() {
+                let end = floor_char_boundary(&raw, (offset + chunk_size).min(raw.len()));
+                display.push_str(&operation.observe(&raw[offset..end]));
+                offset = end;
+            }
+            let snapshot = operation.snapshot().unwrap();
+            assert_eq!(
+                snapshot.state,
+                PtyLifecycleNative::Exited,
+                "chunk={chunk_size}"
+            );
+            assert_eq!(snapshot.exit_code, Some(7), "chunk={chunk_size}");
+            assert_eq!(
+                snapshot.combined_output, "visible\r\n",
+                "chunk={chunk_size}"
+            );
+            assert_eq!(
+                display, "\r\u{1b}[2K[Agent] $ fixture\r\nvisible\r\nPS C:\\> ",
                 "chunk={chunk_size}"
             );
             assert!(!display.contains(marker), "chunk={chunk_size}");
@@ -1445,16 +1662,19 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn windows_conpty_visible_command_protocol_is_end_to_end() {
-        let marker = "marker-windows-conpty-e2e";
+        let marker =
+            "shellspan_native_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let wrapper =
             build_powershell_wrapper("Write-Output 'visible-conpty-output'; exit 7", marker);
-        let raw = run_local_shell_protocol(&wrapper);
-        assert_real_protocol_stream(
-            &raw,
-            marker,
-            PtyShellKindNative::PowerShell,
-            "visible-conpty-output",
-        );
+        for cols in [40, 80, 120, 240] {
+            let raw = run_local_shell_protocol(&wrapper, cols);
+            assert_real_protocol_stream(
+                &raw,
+                marker,
+                PtyShellKindNative::PowerShell,
+                "visible-conpty-output",
+            );
+        }
     }
 
     #[cfg(unix)]
@@ -1478,7 +1698,7 @@ mod tests {
     fn local_posix_pty_visible_command_protocol_is_end_to_end() {
         let marker = "marker-local-posix-e2e";
         let wrapper = build_posix_wrapper("printf visible-posix-output; exit 7", marker);
-        let raw = run_local_shell_protocol(&wrapper);
+        let raw = run_local_shell_protocol(&wrapper, 240);
         assert_real_protocol_stream(
             &raw,
             marker,
