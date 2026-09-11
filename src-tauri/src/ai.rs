@@ -26,6 +26,19 @@ pub(crate) fn ai_list_routes(
     Ok(runtime.routes.snapshot()?.as_ref().clone())
 }
 
+#[tauri::command]
+pub(crate) fn ai_get_route_api_key(
+    runtime: State<'_, crate::llm::runtime::LlmRuntime>,
+    route_id: String,
+) -> Result<String, String> {
+    let snapshot = runtime.routes.snapshot()?;
+    let route = snapshot.route(&route_id)?;
+    runtime
+        .routes
+        .credential(route)?
+        .ok_or_else(|| "MISSING_CREDENTIAL".to_string())
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SaveRouteDocumentInput {

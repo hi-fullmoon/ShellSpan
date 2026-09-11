@@ -20,6 +20,7 @@ import {
   buildRemoteConnectionRequest,
   buildSessionCreateRequest,
   invokeCreateAgentRuntimeSession,
+  invokeGetAiRouteApiKey,
   invokeAgentTerminalLeaseReady,
   invokeTakeoverAgentTerminal,
   invokeCancelRemoteFileRead,
@@ -36,6 +37,18 @@ import type { ConnectionProfile } from '@/types';
 beforeEach(() => {
   invokeMock.mockReset();
   loggerErrorMock.mockReset();
+});
+
+describe('AI route credentials', () => {
+  it('requests a saved API key by route id', async () => {
+    invokeMock.mockResolvedValue('stored-secret');
+
+    await expect(invokeGetAiRouteApiKey('route-kimi')).resolves.toBe('stored-secret');
+
+    expect(invokeMock).toHaveBeenCalledWith('ai_get_route_api_key', {
+      routeId: 'route-kimi',
+    });
+  });
 });
 
 describe('remote directory supersession', () => {
