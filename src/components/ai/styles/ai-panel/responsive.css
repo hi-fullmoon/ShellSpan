@@ -1,0 +1,73 @@
+@supports not selector(::-webkit-scrollbar) {
+  .ai-panel-shell,
+  .ai-panel-shell * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--app-scrollbar-thumb) transparent;
+  }
+}
+
+.ai-panel-shell::-webkit-scrollbar,
+.ai-panel-shell *::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.ai-panel-shell::-webkit-scrollbar-track,
+.ai-panel-shell *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ai-panel-shell::-webkit-scrollbar-thumb,
+.ai-panel-shell *::-webkit-scrollbar-thumb {
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 4px;
+  background: var(--app-scrollbar-thumb);
+}
+
+.ai-panel-shell::-webkit-scrollbar-thumb:hover,
+.ai-panel-shell *::-webkit-scrollbar-thumb:hover {
+  background: var(--app-scrollbar-thumb-hover);
+}
+
+.ai-panel-drawer {
+  --shadow-dialog: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
+}
+
+@container ai-workspace (min-width: 400px) {
+  .ai-workspace-root {
+    --ai-shell-clearance: 16px;
+  }
+}
+
+@container ai-workspace (min-width: 560px) {
+  .ai-workspace-root {
+    --ai-shell-clearance: 20px;
+  }
+}
+
+@container ai-workspace (max-width: 399px) {
+  .ai-empty-hero [data-slot='empty-state-title'] {
+    font-size: 22px;
+    line-height: 28px;
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-disclosure-leading > * {
+    transition: none !important;
+  }
+
+  .ai-task-strip-status [data-status='inProgress'] {
+    animation: none;
+  }
+
+  /* Base UI must see no animation when reduced motion is requested; the
+     global tiny durations otherwise imply competing panel animation types. */
+  [data-slot='ai-workspace-root'] [data-slot='collapsible-content'] {
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+  }
+}
