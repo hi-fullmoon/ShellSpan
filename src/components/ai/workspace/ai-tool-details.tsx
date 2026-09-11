@@ -31,8 +31,8 @@ function DetailSection({
   readonly children: React.ReactNode;
 }) {
   return (
-    <section className="ai-detail-section">
-      <div className="ai-detail-section-header">
+    <section className="ai-detail-section min-w-0 overflow-hidden">
+      <div className="ai-detail-section-header flex min-h-10 items-center justify-between gap-3 px-3 py-2">
         <h3>{title}</h3>
         {actions}
       </div>
@@ -49,7 +49,7 @@ function DetailCode({ value, label }: { readonly value: unknown; readonly label:
       title={label}
       actions={<AiToolCopyButton text={text} label={t('ai.workspace.details.copy', { section: label })} />}
     >
-      <pre className="ai-detail-code"><code>{text}</code></pre>
+      <pre className="ai-detail-code m-0 max-h-[360px] min-w-0 max-w-full overflow-auto px-3.5 py-3 whitespace-pre-wrap break-words"><code>{text}</code></pre>
     </DetailSection>
   );
 }
@@ -65,7 +65,7 @@ export function AiToolDetails({
 }): React.ReactNode {
   const { t } = useI18n();
   return (
-    <div className="ai-details-root" data-slot="ai-tool-details">
+    <div className="ai-details-root flex size-full min-h-0 min-w-0 flex-col" data-slot="ai-tool-details">
       <AiRouteHeader
         title={node?.name ?? t('ai.workspace.details.toolTitle')}
         description={t('ai.workspace.details.toolDescription')}
@@ -74,29 +74,29 @@ export function AiToolDetails({
       />
       <ScrollArea className="min-h-0 min-w-0 flex-1" aria-label={t('ai.workspace.details.toolTitle')}>
         {/* Override Base UI's inline fit-content minimum so long payloads stay inside the viewport. */}
-        <ScrollAreaContent className="ai-details-body" style={{ minWidth: 0 }}>
+        <ScrollAreaContent className="ai-details-body flex min-w-0 flex-col gap-2 p-3" style={{ minWidth: 0 }}>
           {!node ? (
-            <p className="ai-details-empty">{t('ai.workspace.details.notInWindow')}</p>
+            <p className="ai-details-empty m-0 py-2 [overflow-wrap:anywhere]">{t('ai.workspace.details.notInWindow')}</p>
           ) : (
             <>
-              <div className="ai-detail-summary" data-state={node.state}>
-                <div className="ai-detail-summary-meta">
+              <div className="ai-detail-summary mb-1 flex min-w-0 flex-col items-stretch gap-2.5" data-state={node.state}>
+                <div className="ai-detail-summary-meta flex min-w-0 items-center justify-between gap-3">
                   <Badge variant={node.state === 'failed' || node.state === 'rejected' ? 'destructive' : 'secondary'}>
                     <ToolStateIcon node={node} />
                     {t(`ai.workspace.tool.${node.state}`)}
                   </Badge>
                   {node.durationMs !== null && (
-                    <small className="ai-detail-duration"><Clock3Icon aria-hidden="true" />{node.durationMs} ms</small>
+                    <small className="ai-detail-duration inline-flex shrink-0 items-center gap-[5px]"><Clock3Icon aria-hidden="true" />{node.durationMs} ms</small>
                   )}
                 </div>
-                <p>{node.summary || node.name}</p>
+                <p className="m-0 [overflow-wrap:anywhere]">{node.summary || node.name}</p>
               </div>
               <DetailCode value={node.input} label={t('ai.workspace.details.input')} />
               <DetailSection title={t('ai.workspace.details.output')}>
                 {node.output === null && node.state !== 'running'
-                  ? <p className="ai-details-empty">{t('ai.workspace.details.noOutput')}</p>
+                  ? <p className="ai-details-empty m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{t('ai.workspace.details.noOutput')}</p>
                   : <AiToolExpandedContent node={node} />}
-                {node.error && <p className="ai-detail-error">{node.error}</p>}
+                {node.error && <p className="ai-detail-error m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{node.error}</p>}
               </DetailSection>
               <DetailCode
                 value={{

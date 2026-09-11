@@ -36,6 +36,13 @@ import { cn } from '@/lib/utils';
 import { AiToolRow } from './ai-tool-presentation';
 import { AiTurnFooter } from './ai-turn-footer';
 import { AiQuestionHistory } from './ai-question-panel';
+import {
+  AI_DISCLOSURE_LEADING_CLASS,
+  AI_DISCLOSURE_ROW_CLASS,
+  AI_DISCLOSURE_SEPARATOR_CLASS,
+  AI_DISCLOSURE_SUMMARY_CLASS,
+  AI_DISCLOSURE_TITLE_CLASS,
+} from './ai-style-classes';
 
 type AiConversationNodeRendererProps<Kind extends AiConversationNode['kind']> = {
   readonly node: AiConversationNodeOf<Kind>;
@@ -69,30 +76,30 @@ function SemanticNoteDisclosure({
   const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <div className="ai-semantic-note" data-expanded={open || undefined}>
-        <MarkerPrimitive className="ai-semantic-note-marker">
+      <div className="ai-semantic-note min-w-0 max-w-full" data-expanded={open || undefined}>
+        <MarkerPrimitive className="ai-semantic-note-marker min-w-0">
           <CollapsibleTrigger
             render={(
               <Button
                 type="button"
                 variant="plain"
                 size="sm"
-                className="ai-disclosure-row"
+                className={`${AI_DISCLOSURE_ROW_CLASS} flex-1`}
                 aria-label={label}
                 aria-expanded={open}
               />
             )}
           >
-            <MarkerIcon className="ai-disclosure-leading">
+            <MarkerIcon className={AI_DISCLOSURE_LEADING_CLASS}>
               {icon}
               <ChevronDownIcon className="ai-disclosure-chevron" />
             </MarkerIcon>
-            <MarkerContent className="ai-semantic-note-heading">
-              <span className="ai-disclosure-title">{label}</span>
+            <MarkerContent className="ai-semantic-note-heading flex min-w-0 flex-1 items-center">
+              <span className={AI_DISCLOSURE_TITLE_CLASS}>{label}</span>
               {summary && (
                 <>
-                  <span className="ai-disclosure-separator" aria-hidden="true" />
-                  <span className="ai-disclosure-summary">{summary}</span>
+                  <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
+                  <span className={AI_DISCLOSURE_SUMMARY_CLASS}>{summary}</span>
                 </>
               )}
             </MarkerContent>
@@ -100,7 +107,7 @@ function SemanticNoteDisclosure({
         </MarkerPrimitive>
         <CollapsibleContent>
           <Separator className="ai-semantic-note-separator" />
-          <div className="ai-semantic-note-body">{body}</div>
+          <div className="ai-semantic-note-body mt-1 ml-[22px] box-border max-h-[141px] w-[calc(100%-22px)] overflow-auto pt-2.5 pr-4 pb-3 pl-3 whitespace-pre-wrap [overflow-wrap:anywhere]">{body}</div>
         </CollapsibleContent>
       </div>
     </Collapsible>
@@ -160,7 +167,7 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
         <Bubble role="user">
           <span className="ai-user-message-text">{node.content}</span>
           {node.delivery !== 'committed' && (
-            <span className="ai-user-delivery" data-state={node.delivery}>
+            <span className="ai-user-delivery mt-0.5 block" data-state={node.delivery}>
               {node.delivery === 'failed'
                 ? t('ai.workspace.messageNotSent')
                 : t('ai.workspace.messagePending')}
@@ -185,7 +192,7 @@ function AssistantMessageNodeView({
       <Bubble role="assistant">
         <AssistantMessageContent blocks={node.blocks} streaming={node.state === 'streaming'} />
         {(node.state === 'interrupted' || node.state === 'failed' || node.state === 'cancelled') && (
-          <span className="ai-assistant-stopped" data-state={node.state}>
+          <span className="ai-assistant-stopped self-start px-1.5" data-state={node.state}>
             {node.state === 'failed'
               ? t('ai.message.failed')
               : node.state === 'cancelled'
@@ -199,7 +206,7 @@ function AssistantMessageNodeView({
           text={text}
           timestamp={node.timestamp}
           align="start"
-          className="ai-assistant-actions"
+          className="ai-assistant-actions -ml-1.5 mt-2.5"
         />
       )}
     </Message>
@@ -231,7 +238,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
-        className="ai-reasoning-row"
+        className="ai-reasoning-row flex min-w-0 flex-col"
         data-state={isStreaming ? 'running' : node.state === 'interrupted' ? 'interrupted' : 'ok'}
         data-expanded={open || undefined}
         role={isStreaming ? 'status' : undefined}
@@ -242,26 +249,26 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
               type="button"
               variant="plain"
               size="sm"
-              className="ai-disclosure-row"
+              className={AI_DISCLOSURE_ROW_CLASS}
               aria-label={summary ? `${title} ${summary}` : title}
               aria-expanded={open}
             />
           )}
         >
-          <span className="ai-disclosure-leading" aria-hidden="true">
+          <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
             <AtomIcon />
             <ChevronDownIcon className="ai-disclosure-chevron" />
           </span>
-          <span className={cn('ai-disclosure-title', isStreaming && 'shimmer')}>{title}</span>
+          <span className={cn(AI_DISCLOSURE_TITLE_CLASS, isStreaming && 'shimmer')}>{title}</span>
           {summary && (
             <>
-              <span className="ai-disclosure-separator" aria-hidden="true" />
-              <span ref={summaryRef} className="ai-disclosure-summary">{summary}</span>
+              <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
+              <span ref={summaryRef} className={AI_DISCLOSURE_SUMMARY_CLASS}>{summary}</span>
             </>
           )}
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="ai-reasoning-body">{node.content || node.summary}</div>
+          <div className="ai-reasoning-body py-1 pl-[22px] whitespace-pre-wrap [overflow-wrap:anywhere]">{node.content || node.summary}</div>
         </CollapsibleContent>
       </div>
     </Collapsible>
@@ -292,7 +299,7 @@ function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'r
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
-        className="ai-reasoning-row ai-ask-reasoning-row"
+        className="ai-reasoning-row ai-ask-reasoning-row flex min-w-0 flex-col"
         data-state={isStreaming ? 'running' : node.state === 'interrupted' ? 'interrupted' : 'ok'}
         data-expanded={open || undefined}
         role={isStreaming ? 'status' : undefined}
@@ -303,20 +310,20 @@ function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'r
               type="button"
               variant="plain"
               size="sm"
-              className="ai-disclosure-row"
+              className={AI_DISCLOSURE_ROW_CLASS}
               aria-label={title}
               aria-expanded={open}
             />
           )}
         >
-          <span className="ai-disclosure-leading" aria-hidden="true">
+          <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
             <AtomIcon />
             <ChevronDownIcon className="ai-disclosure-chevron" />
           </span>
-          <span className={cn('ai-disclosure-title', isStreaming && 'shimmer')}>{title}</span>
+          <span className={cn(AI_DISCLOSURE_TITLE_CLASS, isStreaming && 'shimmer')}>{title}</span>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="ai-reasoning-body">{node.content || node.summary}</div>
+          <div className="ai-reasoning-body py-1 pl-[22px] whitespace-pre-wrap [overflow-wrap:anywhere]">{node.content || node.summary}</div>
         </CollapsibleContent>
       </div>
     </Collapsible>
@@ -344,20 +351,20 @@ function ArtifactNodeView({
 }) {
   const { t } = useI18n();
   return (
-    <div className="ai-produced-files">
-      <span className="ai-produced-files-label">
+    <div className="ai-produced-files grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-center gap-2">
+      <span className="ai-produced-files-label inline-flex items-center gap-1.5 whitespace-nowrap">
         <FileOutputIcon aria-hidden="true" />
         {t('ai.workspace.artifact.produced')}
       </span>
       <button
         type="button"
-        className="ai-produced-file"
+        className="ai-produced-file m-0 flex min-w-0 max-w-full cursor-pointer items-center justify-self-start gap-2 overflow-hidden px-2 py-0"
         data-ai-node-action=""
         aria-label={t('ai.workspace.details.openArtifact', { artifact: node.title })}
         onClick={() => onOpenArtifact?.(node)}
       >
-        <span>{node.title}</span>
-        {node.sizeBytes !== null && <small>{node.sizeBytes} B</small>}
+        <span className="min-w-0 truncate">{node.title}</span>
+        {node.sizeBytes !== null && <small className="shrink-0">{node.sizeBytes} B</small>}
       </button>
     </div>
   );
@@ -368,10 +375,10 @@ function ApprovalMarkerNodeView({
 }: { readonly node: AiConversationNodeOf<'approvalMarker'> }) {
   const { t } = useI18n();
   return (
-    <div className="ai-transcript-notice" data-variant="approval" data-state={node.status}>
+    <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_max-content_minmax(0,1fr)] items-center gap-1.5 py-0.5" data-variant="approval" data-state={node.status}>
       <ShieldAlertIcon aria-hidden="true" />
       <span>{t(`ai.workspace.approval.${node.status}` as LocaleKey)}</span>
-      {node.prompt && <span className="ai-transcript-notice-detail">{node.prompt}</span>}
+      {node.prompt && <span className="ai-transcript-notice-detail min-w-0 truncate">{node.prompt}</span>}
     </div>
   );
 }
@@ -379,10 +386,10 @@ function ApprovalMarkerNodeView({
 function RetryNodeView({ node }: { readonly node: AiConversationNodeOf<'retry'> }) {
   const { t } = useI18n();
   return (
-    <div className="ai-transcript-notice" data-variant="retry">
+    <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_max-content_minmax(0,1fr)] items-center gap-1.5 py-0.5" data-variant="retry">
       <RefreshCwIcon aria-hidden="true" />
       <span>{t('ai.workspace.retry', { attempt: node.attempt })}</span>
-      <span className="ai-transcript-notice-detail">{node.reason}</span>
+      <span className="ai-transcript-notice-detail min-w-0 truncate">{node.reason}</span>
     </div>
   );
 }
@@ -393,10 +400,10 @@ function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> 
     return <div className="flex items-center gap-2 py-2 text-muted-foreground" role="status"><SquareIcon aria-hidden="true" /><span>{t('ai.workspace.stoppedContinue')}</span></div>;
   }
   return (
-    <div className="ai-turn-error" role="alert">
+    <div className="ai-turn-error grid min-w-0 grid-cols-[14px_minmax(0,1fr)_auto] items-start gap-2 py-0.5" role="alert">
       <CircleAlertIcon aria-hidden="true" />
-      <div className="ai-turn-error-copy">
-        <strong>{t('ai.requestFailed')}</strong>
+      <div className="ai-turn-error-copy block min-w-0 [overflow-wrap:anywhere]">
+        <strong className="mr-1.5">{t('ai.requestFailed')}</strong>
         <span>{node.message}</span>
       </div>
       {node.code && <code>{node.code}</code>}
@@ -492,7 +499,7 @@ function TurnProcessDisclosure({
   return (
     <Collapsible open={open} onOpenChange={updateOpen}>
       <div
-        className="ai-turn-process"
+        className="ai-turn-process min-w-0 max-w-full"
         data-expanded={open || undefined}
         data-status={node.status}
         data-answer-generation={node.answerGeneration}
@@ -503,29 +510,29 @@ function TurnProcessDisclosure({
               type="button"
               variant="plain"
               size="sm"
-              className="ai-disclosure-row ai-turn-process-trigger"
+              className={cn(AI_DISCLOSURE_ROW_CLASS, 'ai-turn-process-trigger')}
               aria-label={label}
               aria-expanded={open}
             />
           )}
         >
-          <span className="ai-disclosure-leading" aria-hidden="true">
+          <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
             <ChevronDownIcon className="ai-disclosure-chevron" />
           </span>
-          <span className="ai-disclosure-title">{label}</span>
+          <span className={AI_DISCLOSURE_TITLE_CLASS}>{label}</span>
           {summary && (
             <>
-              <span className="ai-disclosure-separator" aria-hidden="true" />
-              <span className="ai-disclosure-summary">{summary}</span>
+              <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
+              <span className={AI_DISCLOSURE_SUMMARY_CLASS}>{summary}</span>
             </>
           )}
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="ai-turn-process-body">
+          <div className="ai-turn-process-body ml-[7px] flex w-[calc(100%-7px)] min-w-0 max-w-full flex-col gap-1.5 box-border pt-1.5 pr-0 pb-0.5 pl-[15px]">
             {node.children.map((child) => (
               <div
                 key={child.key}
-                className="ai-turn-process-child"
+                className="ai-turn-process-child min-w-0 max-w-full empty:hidden"
                 data-ai-process-child={child.kind}
                 data-ai-process-child-key={child.key}
               >
@@ -647,7 +654,7 @@ export const AiConversationNodeSeat = React.memo(function AiConversationNodeSeat
 }) {
   return (
     <div
-      className="ai-transcript-flow-item min-w-0"
+      className="ai-transcript-flow-item min-w-0 max-w-full"
       data-ai-node-key={node.key}
       data-ai-node-kind={node.kind}
       data-ai-turn-id={node.turnId ?? undefined}

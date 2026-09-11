@@ -105,14 +105,14 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
       : [];
 
   return (
-    <span ref={rootRef} className="ai-context-meter">
+    <span ref={rootRef} className="ai-context-meter relative inline-flex shrink-0">
       <Tooltip>
         <TooltipTrigger
           render={(
             <button
               ref={triggerRef}
               type="button"
-              className="ai-context-meter-trigger"
+              className="ai-context-meter-trigger grid size-7 shrink-0 cursor-pointer place-items-center p-0"
               aria-label={ariaLabel}
               aria-haspopup="dialog"
               aria-expanded={open}
@@ -142,36 +142,37 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
           aria-label={t('ai.workspace.contextUsage.title')}
           style={placement}
         >
-          <div className="ai-context-meter-header">
+          <div className="ai-context-meter-header flex min-w-0 items-center gap-1.5 whitespace-nowrap">
             <span>{t('ai.workspace.contextUsage.used')}</span>
             <strong>{percent}%</strong>
-            <span className="ai-context-meter-figures">
+            <span className="ai-context-meter-figures ml-auto min-w-0 truncate">
               ~{formatTokens(usage.usedTokens)} / {formatTokens(usage.contextWindow)}
             </span>
           </div>
-          <div className="ai-context-meter-bar" aria-hidden="true">
+          <div className="ai-context-meter-bar mt-2 mb-2.5 flex h-1 gap-px overflow-hidden" aria-hidden="true">
             {segments.map((segment) => (
               <span
                 key={segment.key}
                 data-color={segment.color}
+                className="h-full min-w-0.5 shrink-0"
                 style={{ width: `${segment.width}%` }}
               />
             ))}
           </div>
           {usage.breakdown && (
-            <dl className="ai-context-meter-rows">
+            <dl className="ai-context-meter-rows mt-1 mb-0">
               {BREAKDOWN_ROWS.map((row) => (
-                <div key={row.key}>
-                  <dt>
-                    <span data-color={row.color} aria-hidden="true" />
+                <div className="flex items-center justify-between gap-3 py-0.5" key={row.key}>
+                  <dt className="min-w-0">
+                    <span className="mr-1.5 inline-block size-2 align-baseline" data-color={row.color} aria-hidden="true" />
                     {t(row.label)}
                   </dt>
-                  <dd>~{formatTokens(usage.breakdown![row.key])}</dd>
+                  <dd className="m-0">~{formatTokens(usage.breakdown![row.key])}</dd>
                 </div>
               ))}
             </dl>
           )}
-          <p className="ai-context-meter-note">
+          <p className="ai-context-meter-note mt-1.5 mb-0 pt-1.5">
             {t(usage.source === 'reported'
               ? 'ai.workspace.contextUsage.reportedNote'
               : 'ai.workspace.contextUsage.estimatedNote')}

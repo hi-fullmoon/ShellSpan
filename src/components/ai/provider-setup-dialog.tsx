@@ -52,6 +52,7 @@ import {
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import {
+  invokeGetAiRouteApiKey,
   invokeListAiModels,
   isTauriRuntime,
 } from '@/lib/ipc/tauri';
@@ -273,6 +274,8 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const [modelCatalogMode, setModelCatalogMode] = useState<ModelCatalogMode>('explicit');
   const [hasStoredApiKey, setHasStoredApiKey] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [revealedApiKey, setRevealedApiKey] = useState<string>();
+  const [apiKeyBusy, setApiKeyBusy] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [modelBusy, setModelBusy] = useState(false);
@@ -285,6 +288,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const nativeRouteMode = isTauriRuntime();
   const modelRequestGeneration = useRef(0);
   const declarationRequestGeneration = useRef(0);
+  const apiKeyRequestGeneration = useRef(0);
   useEffect(() => { if (open && !routeSnapshot) void hydrateRoutes(); }, [open, routeSnapshot, hydrateRoutes]);
 
   const invalidateModelRequest = (): void => {
@@ -296,8 +300,10 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
 
   useEffect(() => {
     modelRequestGeneration.current += 1;
+    apiKeyRequestGeneration.current += 1;
     if (!open) {
       setBusy(false);
+      setApiKeyBusy(false);
       return;
     }
     setDraft(provider ? { ...provider } : undefined);
@@ -327,6 +333,8 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
           : 'explicit');
     setHasStoredApiKey(false);
     setShowApiKey(false);
+    setRevealedApiKey(undefined);
+    setApiKeyBusy(false);
     setAdvancedOpen(false);
     setBusy(false);
     setModelBusy(false);
@@ -387,8 +395,49 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     setFeedback(undefined);
   };
 
+  const handleApiKeyChange = (apiKey: string): void => {
+    apiKeyRequestGeneration.current += 1;
+    setApiKeyBusy(false);
+    setRevealedApiKey(undefined);
+    updateDraft({ apiKey });
+  };
+
+  const handleApiKeyVisibility = async (): Promise<void> => {
+    if (showApiKey) {
+      setShowApiKey(false);
+      return;
+    }
+    if (draft?.apiKey !== undefined || revealedApiKey !== undefined || !provider || !hasStoredApiKey) {
+      setShowApiKey(true);
+      return;
+    }
+
+    const requestGeneration = apiKeyRequestGeneration.current + 1;
+    apiKeyRequestGeneration.current = requestGeneration;
+    setApiKeyBusy(true);
+    setFeedback(undefined);
+    try {
+      const apiKey = await invokeGetAiRouteApiKey(provider.id);
+      if (apiKeyRequestGeneration.current !== requestGeneration) return;
+      setRevealedApiKey(apiKey);
+      setShowApiKey(true);
+    } catch (reason) {
+      if (apiKeyRequestGeneration.current !== requestGeneration) return;
+      setFeedback({
+        kind: 'error',
+        labelKey: 'settings.ai.keyLoadFailed',
+        message: reason instanceof Error ? reason.message : String(reason),
+      });
+    } finally {
+      if (apiKeyRequestGeneration.current === requestGeneration) setApiKeyBusy(false);
+    }
+  };
+
   const handlePresetChange = (preset: AiProviderPresetDefinition | null): void => {
     invalidateModelRequest();
+    apiKeyRequestGeneration.current += 1;
+    setApiKeyBusy(false);
+    setRevealedApiKey(undefined);
     setShowApiKey(false);
     if (!preset) {
       setDraft(undefined);
@@ -533,7 +582,10 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   };
 
   const handleOpenChange = (nextOpen: boolean): void => {
-    if (!nextOpen) invalidateModelRequest();
+    if (!nextOpen) {
+      invalidateModelRequest();
+      apiKeyRequestGeneration.current += 1;
+    }
     onOpenChange(nextOpen);
   };
 
@@ -645,7 +697,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
         >
           <CompactDialogBody
             data-slot="provider-dialog-scroll-area"
-            className="@container gap-4"
+            className="native-scrollbar-default @container gap-4"
           >
             <FieldGroup className="gap-4">
               {!provider && <Field>
@@ -723,9 +775,9 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                     <InputGroupInput
                       id="ai-new-provider-key"
                       type={showApiKey ? 'text' : 'password'}
-                      value={draft.apiKey ?? ''}
+                      value={draft.apiKey ?? (showApiKey ? revealedApiKey ?? '' : '')}
                       placeholder={hasStoredApiKey ? '••••••••' : 'sk-...'}
-                      onChange={(event) => updateDraft({ apiKey: event.target.value })}
+                      onChange={(event) => handleApiKeyChange(event.target.value)}
                       autoComplete="off"
                       autoCapitalize="none"
                       autoCorrect="off"
@@ -734,9 +786,11 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                     <InputGroupAddon align="inline-end">
                       <InputGroupButton
                         aria-label={t(showApiKey ? 'settings.ai.hideApiKey' : 'settings.ai.showApiKey')}
-                        onClick={() => setShowApiKey((visible) => !visible)}
+                        aria-pressed={showApiKey}
+                        disabled={apiKeyBusy}
+                        onClick={() => void handleApiKeyVisibility()}
                       >
-                        {showApiKey ? <EyeOffIcon /> : <EyeIcon />}
+                        {apiKeyBusy ? <Spinner /> : showApiKey ? <EyeOffIcon /> : <EyeIcon />}
                       </InputGroupButton>
                     </InputGroupAddon>
                   </InputGroup>

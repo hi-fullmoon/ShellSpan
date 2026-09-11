@@ -50,6 +50,7 @@ import type { AiSessionSummary } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
 import { AiRouteHeader } from './ai-route-header';
 import { AiHeaderIconButton } from './ai-header-icon-button';
+import { AiErrorNotice } from './ai-error-notice';
 
 type SessionFilter = 'all' | 'running' | 'archived';
 
@@ -84,9 +85,9 @@ function relativeTimeLabel(timestamp: string, locale: string): string {
 
 function SessionBrowserLoading({ label }: { readonly label: string }): React.ReactNode {
   return (
-    <div className="ai-session-browser-loading" role="status" aria-label={label}>
+    <div className="ai-session-browser-loading flex flex-col gap-0.5" role="status" aria-label={label}>
       {[0, 1, 2, 3, 4].map((index) => (
-        <div className="ai-session-browser-skeleton" key={index}>
+        <div className="ai-session-browser-skeleton flex h-[34px] items-center gap-2.5 px-2.5" key={index}>
           <Skeleton className="size-3 rounded-full" />
           <Skeleton className="h-4 min-w-0 flex-1" />
           <Skeleton className="h-3 w-10" />
@@ -158,7 +159,7 @@ function SessionRow({
 
   return (
     <div
-      className="ai-session-row"
+      className="ai-session-row flex h-[34px] min-w-0 items-center"
       data-selected={selected || undefined}
       data-menu-busy={busy || undefined}
       data-status={summary.status}
@@ -167,13 +168,13 @@ function SessionRow({
     >
       <button
         type="button"
-        className="ai-session-row-main"
+        className="ai-session-row-main flex h-[34px] min-w-0 flex-1 cursor-pointer items-center gap-0 overflow-hidden px-2"
         onClick={onOpen}
         aria-current={selected ? 'page' : undefined}
       >
-        <span className="ai-session-row-status" data-state={summary.status} aria-hidden="true" />
-        <span className="ai-session-row-title">{summary.title}</span>
-        <span className="ai-session-row-time">{relativeTimeLabel(summary.updatedAt, locale)}</span>
+        <span className="ai-session-row-status mr-2 ml-0.5 size-[7px] shrink-0" data-state={summary.status} aria-hidden="true" />
+        <span className="ai-session-row-title min-w-0 flex-1 truncate">{summary.title}</span>
+        <span className="ai-session-row-time ml-2 shrink-0 whitespace-nowrap">{relativeTimeLabel(summary.updatedAt, locale)}</span>
         <span className="sr-only">{status} · {summary.scopeKey}</span>
       </button>
       {hasActions && (
@@ -185,7 +186,7 @@ function SessionRow({
                   render={(
                     <button
                       type="button"
-                      className="ai-session-row-menu"
+                      className="ai-session-row-menu mr-[3px] size-7 shrink-0 cursor-pointer items-center justify-center p-0"
                       aria-label={t('ai.workspace.sessions.actions', { title: summary.title })}
                       disabled={busy}
                     />
@@ -300,7 +301,7 @@ export function AiSessionBrowser({
   }, [renameTarget, renamingId, sessions, submittedTitle]);
 
   return (
-    <div className="ai-session-browser" data-slot="ai-session-browser" data-compact={compact || undefined}>
+    <div className="ai-session-browser flex size-full min-h-0 min-w-0 flex-col overflow-hidden" data-slot="ai-session-browser" data-compact={compact || undefined}>
       {!compact && (
         <AiRouteHeader
           title={t('ai.workspace.sessions.title')}
@@ -317,12 +318,13 @@ export function AiSessionBrowser({
         />
       )}
 
-      <div className="ai-session-browser-toolbar">
-        <InputGroup className="ai-session-search">
-          <InputGroupAddon>
+      <div className="ai-session-browser-toolbar flex min-w-0 shrink-0 items-center gap-0.5 px-[var(--ai-shell-clearance)] pt-2 pb-1.5">
+        <InputGroup className="ai-session-search h-[30px] flex-1">
+          <InputGroupAddon className="pl-2">
             <SearchIcon aria-hidden="true" />
           </InputGroupAddon>
           <InputGroupInput
+            className="h-7 min-w-0 pr-2 pl-1"
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -394,17 +396,22 @@ export function AiSessionBrowser({
       </div>
 
       {error && (
-        <div className="ai-session-browser-error" role="alert">
-          <span>{error}</span>
-          <Button variant="ghost" size="sm" onClick={onRefresh} disabled={loading}>
-            <RefreshCwIcon data-icon="inline-start" />
-            {t('common.retry')}
-          </Button>
-        </div>
+        <AiErrorNotice
+          title={t('ai.workspace.recovery.title')}
+          className="mx-[var(--ai-shell-clearance)] mb-1.5 w-auto"
+          action={(
+            <Button variant="ghost" size="xs" onClick={onRefresh} disabled={loading}>
+              <RefreshCwIcon data-icon="inline-start" />
+              {t('common.retry')}
+            </Button>
+          )}
+        >
+          {error}
+        </AiErrorNotice>
       )}
 
-      <ScrollArea className="ai-session-browser-scroll" aria-label={t('ai.workspace.sessions.title')}>
-        <ScrollAreaContent className="ai-session-browser-list">
+      <ScrollArea className="ai-session-browser-scroll min-h-0 min-w-0 flex-1" aria-label={t('ai.workspace.sessions.title')}>
+        <ScrollAreaContent className="ai-session-browser-list min-h-full px-[calc(var(--ai-shell-clearance)-4px)] pt-0 pb-4">
           {loading && sessions.length === 0 && <SessionBrowserLoading label={t('common.loading')} />}
           {!loading && !error && visible.length === 0 && (
             <PanelEmptyState
@@ -414,7 +421,7 @@ export function AiSessionBrowser({
             />
           )}
           {visible.length > 0 && (
-            <div role="tree" aria-label={t('ai.workspace.sessions.title')}>
+            <div className="flex min-w-0 flex-col gap-0.5" role="tree" aria-label={t('ai.workspace.sessions.title')}>
               {visible.map((summary) => (
                 <SessionRow
                   key={`${summary.kind}:${summary.id}`}

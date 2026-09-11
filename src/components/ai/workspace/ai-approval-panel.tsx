@@ -18,6 +18,7 @@ import { useI18n } from '@/hooks/useI18n';
 import type { AiPendingApproval } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
 import type { AgentSessionEffect } from '@/types/agent-session';
+import { AiErrorNotice } from './ai-error-notice';
 
 export interface AiApprovalPanelProps {
   readonly approval: AiPendingApproval;
@@ -188,9 +189,9 @@ export function AiApprovalPanel({
         </Button>
 
         {error && (
-          <p className="text-sm text-destructive" role="alert">
+          <AiErrorNotice title={t('ai.workspace.recovery.title')}>
             {error}
-          </p>
+          </AiErrorNotice>
         )}
       </CardContent>
 

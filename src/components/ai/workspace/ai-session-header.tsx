@@ -48,22 +48,22 @@ export function AiSessionHeader({
     <header
       data-slot="ai-workspace-header"
       data-session-status={status}
-      className="ai-session-header"
+      className="ai-session-header relative flex h-10 min-h-10 min-w-0 shrink-0 items-center gap-2 px-[var(--ai-shell-clearance)]"
       data-ai-mode={mode}
     >
-      <div className="ai-session-title-cluster">
-        <span className="ai-session-mode-icon" aria-hidden="true">
+      <div className="ai-session-title-cluster flex min-w-0 flex-1 items-center gap-2">
+        <span className="ai-session-mode-icon relative grid size-7 shrink-0 place-items-center" aria-hidden="true">
           {mode === 'ask' ? <MessageCircleQuestionIcon /> : <SquareTerminalIcon />}
-          <span className="ai-session-status-dot" data-state={status} />
+          <span className="ai-session-status-dot absolute -right-0.5 -bottom-0.5 size-[7px] shrink-0" data-state={status} />
         </span>
-        <span className="ai-session-heading">
-          <h2 className="ai-session-title">{title}</h2>
-          <span className="ai-session-context">{context}</span>
+        <span className="ai-session-heading flex min-w-0 flex-1 flex-col">
+          <h2 className="ai-session-title min-w-0 truncate">{title}</h2>
+          <span className="ai-session-context truncate">{context}</span>
         </span>
         <span className="sr-only">{statusLabel}</span>
       </div>
 
-      <div className="ai-session-actions">
+      <div className="ai-session-actions flex min-w-0 shrink-0 items-center gap-1 @min-[400px]/ai-workspace:gap-2">
         {(onHistory || historyOpen) && (
           <Popover
             open={historyOpen}

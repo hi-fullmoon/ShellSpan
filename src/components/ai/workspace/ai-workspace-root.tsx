@@ -282,7 +282,7 @@ export function AiWorkspaceRoot({
       data-phase={hero ? 'hero' : 'active'}
       data-session-kind={sessionKind}
       data-ai-mode={surfaceMode}
-      className="ai-workspace-root"
+      className="ai-workspace-root @container/ai-workspace flex size-full min-h-0 min-w-0 flex-col overflow-x-hidden"
       aria-label={t('ai.workspace')}
     >
       {route.kind === 'toolDetails' ? (
@@ -339,11 +339,11 @@ export function AiWorkspaceRoot({
 
       <div
         data-slot="ai-workspace-body"
-        className="ai-workspace-body"
+        className="ai-workspace-body relative flex min-h-0 min-w-0 flex-1 flex-col"
       >
         <div
           data-slot="ai-workspace-content"
-          className="ai-workspace-content"
+          className="ai-workspace-content flex min-h-0 min-w-0 flex-1 flex-col"
           aria-busy={sessionLoading || undefined}
         >
           {sessionLoading ? null : hero ? (

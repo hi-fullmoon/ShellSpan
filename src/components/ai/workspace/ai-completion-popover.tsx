@@ -29,7 +29,7 @@ export function AiCompletionPopover({ anchor, children, onDismiss }: {
         initialFocus={false}
         finalFocus={false}
         role="presentation"
-        className="ai-completion-popup p-0 data-open:animate-none data-closed:animate-none"
+        className="ai-completion-popup max-h-[min(360px,var(--available-height))] w-[var(--anchor-width)] max-w-[var(--available-width)] overflow-y-auto p-0 data-open:animate-none data-closed:animate-none"
       >
         {children}
       </PopoverContent>

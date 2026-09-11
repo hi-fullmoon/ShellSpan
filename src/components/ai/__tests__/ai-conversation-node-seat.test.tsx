@@ -237,13 +237,10 @@ describe('AiConversationNodeList', () => {
     const userArticle = screen.getByRole('article', { name: 'Your message' });
     const assistantArticle = screen.getByRole('article', { name: 'AI assistant message' });
     const userCopyButton = within(userArticle).getByRole('button', { name: 'Copy' });
-    expect(getComputedStyle(userCopyButton).display).toBe('grid');
-    expect(getComputedStyle(userCopyButton).placeItems).toBe('center');
-    expect(getComputedStyle(userCopyButton).paddingLeft).toBe('0px');
-    expect(getComputedStyle(userCopyButton).paddingRight).toBe('0px');
+    expect(userCopyButton).toHaveClass('grid', 'place-items-center', 'p-0');
     expect(userArticle.querySelector('.ai-message-bubble-user')).toBeInTheDocument();
     expect(assistantArticle.querySelector('.ai-message-bubble-assistant')).toBeInTheDocument();
-    expect(assistantArticle.querySelector('.ai-message-bubble-content')).toHaveStyle({ padding: '0px' });
+    expect(assistantArticle.querySelector('.ai-message-bubble-content')).toHaveClass('p-0');
     expect(within(assistantArticle).getByRole('heading', { name: 'Safe result' })).toBeVisible();
 
     await user.click(within(assistantArticle).getByRole('button', { name: 'Copy' }));
@@ -418,10 +415,9 @@ describe('AiConversationNodeList', () => {
     const flow = container.querySelector('[data-ai-node-key="tool:narrow"]') as HTMLElement;
     const card = flow.querySelector('.ai-io-card') as HTMLElement;
     const payload = flow.querySelector('.ai-io-text') as HTMLElement;
-    expect(getComputedStyle(flow).minWidth).toBe('0px');
-    expect(getComputedStyle(card).maxWidth).toBe('calc(100% - 4px)');
-    expect(getComputedStyle(card).overflow).toBe('hidden');
-    expect(getComputedStyle(payload).overflowWrap).toBe('anywhere');
+    expect(flow).toHaveClass('min-w-0');
+    expect(card).toHaveClass('max-w-[calc(100%-4px)]', 'overflow-hidden');
+    expect(payload).toHaveClass('[overflow-wrap:anywhere]');
 
     const footer = screen.getByLabelText('Turn statistics');
     expect(within(footer).queryByRole('button', { name: /^Usage/ })).not.toBeInTheDocument();
@@ -433,9 +429,7 @@ describe('AiConversationNodeList', () => {
       expect(details.querySelector(`[data-stat="${missing}"]`)).not.toBeInTheDocument();
     }
     const statsRow = footer.querySelector('.ai-turn-stats') as HTMLElement;
-    expect(getComputedStyle(statsRow).display).toBe('flex');
-    expect(getComputedStyle(statsRow).flexWrap).toBe('wrap');
-    expect(getComputedStyle(statsRow).overflow).toBe('visible');
+    expect(statsRow).toHaveClass('flex', 'flex-wrap', 'overflow-visible');
     await waitFor(() => expect(payload).toHaveTextContent('/very-long-segment'));
   });
 });

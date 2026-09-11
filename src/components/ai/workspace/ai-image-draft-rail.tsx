@@ -17,13 +17,13 @@ function PendingImage({ file }: { file: File }) {
     setSource(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
-  return <AiImagePreview source={source} name={file.name}><Attachment orientation="vertical" className="ai-image-thumbnail" state="processing" aria-busy="true">
-    <AttachmentMedia variant="image" className="ai-image-thumbnail-media">
+  return <AiImagePreview source={source} name={file.name}><Attachment orientation="vertical" className="ai-image-thumbnail isolate size-16 min-w-16 p-0" state="processing" aria-busy="true">
+    <AttachmentMedia variant="image" className="ai-image-thumbnail-media size-full">
       <Skeleton className="absolute inset-0 size-full motion-reduce:animate-none" />
-      {source && <img className="relative" src={source} alt={file.name} />}
+      {source && <img className="relative h-full" src={source} alt={file.name} />}
     </AttachmentMedia>
-    {source && <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open" aria-label={`${t('ai.workspace.images.preview')} ${file.name}`} />} />}
-    <span className="ai-image-thumbnail-loading" aria-hidden="true"><Spinner className="motion-reduce:animate-none" /></span>
+    {source && <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open cursor-zoom-in" aria-label={`${t('ai.workspace.images.preview')} ${file.name}`} />} />}
+    <span className="ai-image-thumbnail-loading absolute right-1.25 bottom-1.25 grid size-5 place-items-center" aria-hidden="true"><Spinner className="motion-reduce:animate-none" /></span>
   </Attachment></AiImagePreview>;
 }
 
@@ -67,26 +67,26 @@ export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, erro
     behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
   });
 
-  return <div className="ai-image-rail">
-    <AttachmentGroup ref={rail} className="ai-image-rail-viewport" role="group" aria-label={t('ai.workspace.images.attachments')} onScroll={updateEdges}
+  return <div className="ai-image-rail relative min-w-0 flex-1">
+    <AttachmentGroup ref={rail} className="ai-image-rail-viewport gap-2.5 overflow-y-hidden p-0" role="group" aria-label={t('ai.workspace.images.attachments')} onScroll={updateEdges}
       onFocusCapture={event => event.target.closest('.ai-image-thumbnail')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })}>
       {images.map((image, index) => {
         const source = `data:${image.mediaType};base64,${image.data}`;
         return <AiImagePreview key={`${index}:${image.name}`} source={source} name={image.name}>
-          <Attachment orientation="vertical" className="ai-image-thumbnail" state={error ? 'error' : 'done'}>
-            <AttachmentMedia variant="image" className="ai-image-thumbnail-media">
-              <img src={source} alt={image.name} />
+          <Attachment orientation="vertical" className="ai-image-thumbnail isolate size-16 min-w-16 p-0" state={error ? 'error' : 'done'}>
+            <AttachmentMedia variant="image" className="ai-image-thumbnail-media size-full">
+              <img className="h-full" src={source} alt={image.name} />
             </AttachmentMedia>
-            <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open" aria-label={`${t('ai.workspace.images.preview')} ${image.name}`} />} />
-            <AttachmentActions className="ai-image-thumbnail-actions">
-              <AttachmentAction variant="secondary" className="ai-image-thumbnail-remove" aria-label={`${t('ai.workspace.images.remove')} ${image.name}`} disabled={busy || locked} onClick={() => onRemove(index)}><XIcon /></AttachmentAction>
+            <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open cursor-zoom-in" aria-label={`${t('ai.workspace.images.preview')} ${image.name}`} />} />
+            <AttachmentActions className="ai-image-thumbnail-actions top-0.75 right-0.75">
+              <AttachmentAction variant="secondary" className="ai-image-thumbnail-remove size-5" aria-label={`${t('ai.workspace.images.remove')} ${image.name}`} disabled={busy || locked} onClick={() => onRemove(index)}><XIcon /></AttachmentAction>
             </AttachmentActions>
           </Attachment>
         </AiImagePreview>;
       })}
       {pendingFiles.map((file, index) => <PendingImage key={`pending:${index}:${file.name}`} file={file} />)}
     </AttachmentGroup>
-    {edges.left && <Button variant="secondary" size="icon-xs" className="ai-image-rail-arrow ai-image-rail-previous" aria-label={t('ai.workspace.images.previous')} onClick={() => page(-1)}><ChevronLeftIcon /></Button>}
-    {edges.right && <Button variant="secondary" size="icon-xs" className="ai-image-rail-arrow ai-image-rail-next" aria-label={t('ai.workspace.images.next')} onClick={() => page(1)}><ChevronRightIcon /></Button>}
+    {edges.left && <Button variant="secondary" size="icon-xs" className="ai-image-rail-arrow ai-image-rail-previous absolute top-1/2 left-1 -translate-y-1/2" aria-label={t('ai.workspace.images.previous')} onClick={() => page(-1)}><ChevronLeftIcon /></Button>}
+    {edges.right && <Button variant="secondary" size="icon-xs" className="ai-image-rail-arrow ai-image-rail-next absolute top-1/2 right-1 -translate-y-1/2" aria-label={t('ai.workspace.images.next')} onClick={() => page(1)}><ChevronRightIcon /></Button>}
   </div>;
 }

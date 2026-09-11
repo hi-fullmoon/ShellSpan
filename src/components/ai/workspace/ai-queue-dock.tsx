@@ -12,7 +12,6 @@ import {
   XIcon,
 } from 'lucide-react';
 
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -29,6 +28,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/hooks/useI18n';
 import type { AiInboxItem } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
+import { AiErrorNotice } from './ai-error-notice';
 import type { AiQueueMutationState } from './use-ai-session-controller';
 
 export interface AiQueueDockProps {
@@ -148,13 +148,13 @@ export function AiQueueDock({
     <section
       data-slot="ai-queue-dock"
       aria-label={t('ai.workspace.queue.title')}
-      className="ai-queue-dock"
+      className="ai-queue-dock relative mx-auto mb-[calc(0px-var(--ai-composer-stack-gap)-3px)] w-[calc(100%-32px)] min-w-0 max-w-[calc(var(--ai-composer-card-max-width)-32px)] overflow-hidden box-border py-0.5 @max-[400px]/ai-workspace:w-[calc(100%-20px)]"
     >
       {items.length > 1 && (
         <Button
           type="button"
           variant="plain"
-          className="ai-queue-header"
+          className="ai-queue-header flex h-9 w-full min-w-0 items-center gap-2.5 px-3 py-1 [&>:last-child]:ml-auto"
           aria-expanded={expanded}
           disabled={editingId !== null}
           onClick={() => setCollapsed((value) => !value)}
@@ -165,7 +165,7 @@ export function AiQueueDock({
           {expanded ? <ChevronDownIcon aria-hidden="true" /> : <ChevronUpIcon aria-hidden="true" />}
         </Button>
       )}
-      {expanded && <ul className="ai-queue-list">
+      {expanded && <ul className="ai-queue-list m-0 max-h-[180px] list-none overflow-y-auto p-0">
         {items.map((item) => {
           const laneItems = items.filter((candidate) => (
             candidate.lane === item.lane && candidate.state === 'queued'
@@ -175,11 +175,11 @@ export function AiQueueDock({
           const steering = pending && mutation.intent.type === 'steer' && mutation.intent.itemId === item.id;
           const editing = editingId === item.id;
           return (
-            <li key={item.id} className="ai-queue-row" data-state={item.state}>
+            <li key={item.id} className="ai-queue-row flex h-9 w-full min-w-0 items-center gap-2.5 box-border py-1 pr-[5px] pl-3" data-state={item.state}>
               {items.length === 1 && <ListEndIcon aria-hidden="true" />}
               {editing ? (
                 <form
-                  className="ai-queue-editor"
+                  className="ai-queue-editor flex w-full min-w-0 items-center gap-2.5"
                   onSubmit={(event) => {
                     event.preventDefault();
                     const content = editValue.trim();
@@ -227,7 +227,7 @@ export function AiQueueDock({
                   </IconAction>
                 </form>
               ) : (
-                <div className="ai-queue-row-content">
+                <div className="ai-queue-row-content flex w-full min-w-0 items-center gap-2.5">
                   <span className="min-w-0 flex-1 truncate">{item.content}</span>
                   {item.paused && <Badge variant="secondary">{t('ai.workspace.queue.paused')}</Badge>}
                   {item.lane === 'nextStep' && <Badge variant="secondary">{t('ai.workspace.queue.lane.nextStep')}</Badge>}
@@ -240,7 +240,7 @@ export function AiQueueDock({
                   </span>
                   {!editable && mutable && item.paused && onResume && <IconAction label={t('ai.workspace.queue.resume')} disabled={pending} onClick={() => onResume(item)}><ArrowUpIcon data-icon="inline-start" /></IconAction>}
                   {editable && (
-                    <div className="ai-queue-actions">
+                    <div className="ai-queue-actions flex shrink-0 items-center gap-1">
                       {laneItems.length > 1 && onReorder && <DropdownMenu>
                         <DropdownMenuTrigger render={(
                           <Button type="button" variant="ghost" size="icon-xs" className="shrink-0"
@@ -302,22 +302,20 @@ export function AiQueueDock({
         })}
       </ul>}
       {mutation?.status === 'failed' && (
-        <Alert variant="destructive" size="sm">
-          <AlertTitle>
-            {mutation.conflict
-              ? t('ai.workspace.queue.conflict')
-              : t('ai.workspace.queue.failure')}
-          </AlertTitle>
-          <AlertDescription className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1 break-words">{mutation.error}</span>
-            {onRetry && (
-              <Button variant="outline" size="sm" onClick={onRetry}>
-                <RotateCcwIcon data-icon="inline-start" />
-                {t('ai.workspace.queue.retry')}
-              </Button>
-            )}
-          </AlertDescription>
-        </Alert>
+        <AiErrorNotice
+          title={t('ai.workspace.recovery.title')}
+          label={mutation.conflict
+            ? t('ai.workspace.queue.conflict')
+            : t('ai.workspace.queue.failure')}
+          action={onRetry && (
+            <Button variant="ghost" size="xs" onClick={onRetry}>
+              <RotateCcwIcon data-icon="inline-start" />
+              {t('ai.workspace.queue.retry')}
+            </Button>
+          )}
+        >
+          {mutation.error}
+        </AiErrorNotice>
       )}
     </section>
   );

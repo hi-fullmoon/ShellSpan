@@ -35,7 +35,10 @@ function StatDetail({ stat, label, value }: {
   readonly value: ReactNode;
 }) {
   if (value === null || value === undefined) return null;
-  return <div data-stat={stat}><dt>{label}</dt><dd>{value}</dd></div>;
+  return <div className="flex items-baseline justify-between gap-3" data-stat={stat}>
+    <dt className="shrink-0">{label}</dt>
+    <dd className="m-0 min-w-0 text-right [overflow-wrap:anywhere] [&_span]:block">{value}</dd>
+  </div>;
 }
 
 function StatPopover({ icon, label, title, total, children }: {
@@ -48,18 +51,18 @@ function StatPopover({ icon, label, title, total, children }: {
   return (
     <Popover.Root>
       <Popover.Trigger
-        render={<Button type="button" variant="plain" size="sm" className="ai-turn-stat-trigger" />}
+        render={<Button type="button" variant="plain" size="sm" className="ai-turn-stat-trigger h-7 gap-[5px] px-[7px]" />}
       >
         {icon}<span>{label}</span>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner side="top" align="start" sideOffset={8} collisionPadding={8} className="z-50">
-          <Popover.Popup className="ai-turn-stat-panel" initialFocus={false}>
-            <div className="ai-turn-stat-heading">
-              <Popover.Title>{icon}<span>{title}</span></Popover.Title>
-              {total && <strong>{total}</strong>}
+          <Popover.Popup className="ai-turn-stat-panel max-h-[var(--available-height)] w-[300px] max-w-[calc(100vw-16px)] overflow-auto px-[15px] py-3" initialFocus={false}>
+            <div className="ai-turn-stat-heading mb-2.5 flex items-center justify-between gap-3">
+              <Popover.Title className="m-0 flex items-center gap-1.5">{icon}<span>{title}</span></Popover.Title>
+              {total && <strong className="whitespace-nowrap">{total}</strong>}
             </div>
-            <Separator />
+            <Separator className="-mx-1 w-[calc(100%+8px)]" />
             {children}
           </Popover.Popup>
         </Popover.Positioner>
@@ -89,16 +92,18 @@ export function AiTurnFooter({ node }: { readonly node: AiConversationNodeOf<'tu
     stats.averageTimeToFirstTokenMs, stats.tokensPerSecond].some((value) => value != null);
 
   return (
-    <div className="ai-turn-tail" data-status={node.status} data-stop-reason={node.stopReason ?? undefined}
+    <div className="ai-turn-tail min-w-0 max-w-full" data-status={node.status} data-stop-reason={node.stopReason ?? undefined}
       aria-label={t('ai.workspace.stats.label')}>
       <MessageActions text={node.summaryText ?? ''} timestamp={node.timestamp} align="start"
-        reveal="always" className="ai-turn-stats" actionClassName="ai-turn-stat-trigger">
+        reveal="always"
+        className="ai-turn-stats h-auto min-h-7 w-full min-w-0 max-w-full flex-wrap gap-x-1.5 gap-y-0.5 overflow-visible [&_time]:ml-0.5"
+        actionClassName="ai-turn-stat-trigger h-7 gap-[5px] overflow-hidden px-[7px]">
         {hasUsage && (
           <StatPopover icon={<DatabaseIcon aria-hidden="true" />} title={label('usageTitle')}
             label={t('ai.workspace.turnFooter.usage', {
               count: stats.totalTokens === null ? '—' : `${compactTokens(stats.totalTokens)} tok`,
             })} total={tokens(stats.totalTokens) ?? undefined}>
-            <dl className="ai-turn-stat-details">
+            <dl className="ai-turn-stat-details mt-2.5 mb-0.5 grid gap-[7px]">
               {!!node.models?.length && <StatDetail stat="models" label={label('models')}
                 value={node.models.map(({ providerId, model }) => (
                   <span key={JSON.stringify([providerId, model])}>{providerId}/{model}</span>
@@ -110,21 +115,21 @@ export function AiTurnFooter({ node }: { readonly node: AiConversationNodeOf<'tu
               <StatDetail stat="outputTokens" label={label('output')} value={tokens(stats.outputTokens)} />
               {!!stats.reasoningTokens && <StatDetail stat="reasoningTokens" label={label('reasoning')} value={tokens(stats.reasoningTokens)} />}
             </dl>
-            {!stats.usageComplete && <p className="ai-turn-stat-note">{label('partialUsage')}</p>}
+            {!stats.usageComplete && <p className="ai-turn-stat-note mt-2.5 mb-0">{label('partialUsage')}</p>}
           </StatPopover>
         )}
         {hasTiming && (
           <StatPopover icon={<Clock3Icon aria-hidden="true" />} title={label('timingTitle')}
             label={t('ai.workspace.turnFooter.elapsed', { duration: totalTime ?? '—' })}>
-            <dl className="ai-turn-stat-details">
+            <dl className="ai-turn-stat-details mt-2.5 mb-0.5 grid gap-[7px]">
               <StatDetail stat="duration" label={label('totalTime')} value={totalTime} />
               <StatDetail stat="rate" label={label('rate')} value={stats.tokensPerSecond === null
                 ? null : `${Number(stats.tokensPerSecond.toFixed(1))} tok/s`} />
               <StatDetail stat="ttft" label={label(stats.timeToFirstTokenCount > 1 ? 'ttftAverage' : 'ttft')}
                 value={time(stats.averageTimeToFirstTokenMs)} />
             </dl>
-            <Separator />
-            <dl className="ai-turn-stat-details ai-turn-stat-secondary">
+            <Separator className="-mx-1 mt-2.5 w-[calc(100%+8px)]" />
+            <dl className="ai-turn-stat-details ai-turn-stat-secondary mt-2.5 mb-0.5 grid gap-[7px]">
               <StatDetail stat="model" label={label('modelTime')} value={time(stats.modelDurationMs)} />
               <StatDetail stat="tools" label={label('toolTime')} value={time(stats.toolDurationMs)} />
               <StatDetail stat="steps" label={label('steps')} value={stats.stepCount.toLocaleString(locale)} />
