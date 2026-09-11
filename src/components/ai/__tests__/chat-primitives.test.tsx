@@ -82,28 +82,27 @@ describe('MessageScroller', () => {
     await waitFor(() => expect(scrollTop).toBe(200));
   });
 
-  it('composes ScrollArea with the message scroller viewport as the sole scroll owner', async () => {
+  it('uses the native message scroller viewport as the sole scroll owner', async () => {
     const { container } = render(
       <MessageScroller followKey="1" contentClassName="gap-2 px-3 py-3" ariaLabel="Conversation">
         <Message role="assistant">Response</Message>
       </MessageScroller>,
     );
 
-    const scrollArea = container.querySelector('[data-slot="scroll-area"]');
-    const viewport = scrollArea?.querySelector(
-      '[data-slot="scroll-area-viewport"][data-message-scroller-viewport]',
-    );
+    const viewport = container.querySelector('[data-message-scroller-viewport]');
 
     await waitFor(() => {
-      expect(scrollArea).toBeInTheDocument();
       expect(viewport).toBeInTheDocument();
+      expect(viewport).toHaveAttribute('data-slot', 'message-scroller-viewport');
       expect(viewport).toHaveAttribute('role', 'region');
+      expect(viewport).toHaveAttribute('tabindex', '0');
       const content = viewport?.querySelector('[data-slot="message-scroller-content"]');
       expect(content).toBeInTheDocument();
       expect(content).toHaveClass('gap-2', 'px-3', 'py-3');
       expect(content).not.toHaveClass('gap-5', 'px-4', 'py-5');
-      expect(viewport).toHaveStyle({ overflow: 'scroll' });
-      expect(viewport).not.toHaveClass('overflow-y-auto');
+      expect(viewport).toHaveClass('overflow-y-auto', 'overflow-x-hidden', 'native-scrollbar-default');
+      expect(viewport).toHaveClass('focus-visible:ring-[3px]', 'focus-visible:ring-ring/50');
+      expect(container.querySelector('[data-slot="scroll-area"]')).not.toBeInTheDocument();
       expect(container.querySelector('[data-slot="message-scroller-button"]'))
         .toHaveClass('rounded-full');
     });
@@ -127,9 +126,11 @@ describe('MessageScroller', () => {
 
   it.each([
     { input: 'wheel', restored: false },
-    { input: 'scrollbar', restored: false },
+    { input: 'native scrollbar', restored: false },
+    { input: 'content pointer', restored: false },
     { input: 'wheel', restored: true },
-    { input: 'scrollbar', restored: true },
+    { input: 'native scrollbar', restored: true },
+    { input: 'content pointer', restored: true },
   ])('follows at the live edge, detaches on $input input, and jumps back to latest (restored: $restored)', async ({ input, restored }) => {
     let itemCount = 3;
     const thread = () => (
@@ -208,13 +209,12 @@ describe('MessageScroller', () => {
     installItemRects();
     scrollTo.mockClear();
     scrollTop = 100;
-    if (input === 'scrollbar') {
-      // jsdom has no overflow layout, so Base UI does not mount its scrollbar.
-      const scrollbar = document.createElement('div');
-      scrollbar.dataset.slot = 'scroll-area-scrollbar';
-      container.querySelector('[data-slot="scroll-area"]')!.appendChild(scrollbar);
-      fireEvent.pointerDown(scrollbar);
-      scrollbar.remove();
+    if (input === 'native scrollbar') {
+      // Native scrollbar gestures target the overflow viewport rather than a
+      // separately mounted scrollbar element.
+      fireEvent.pointerDown(viewport);
+    } else if (input === 'content pointer') {
+      fireEvent.pointerDown(viewport.querySelector('[data-slot="message-scroller-content"]')!);
     } else {
       fireEvent.wheel(viewport, { deltaY: -100 });
     }
