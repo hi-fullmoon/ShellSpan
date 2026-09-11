@@ -262,6 +262,7 @@ pub fn run() {
         .manage(health::HealthState::default())
         .invoke_handler(tauri::generate_handler![
             ai::ai_list_routes,
+            ai::ai_get_route_api_key,
             ai::ai_save_routes,
             ai::ai_list_route_models,
             ai::ai_resolve_selection,

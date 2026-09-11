@@ -231,6 +231,9 @@ export async function invokeListAiModels(provider: AiProviderConnectionConfig): 
 export function invokeListAiRoutes(): Promise<import('@/types/ai').RouteSnapshot> {
   return invokeLogged('ai_list_routes');
 }
+export function invokeGetAiRouteApiKey(routeId: string): Promise<string> {
+  return invokeLogged('ai_get_route_api_key', { routeId });
+}
 export function invokeSaveAiRoutes(input: { routes: import('@/types/ai').ProviderRoute[]; defaultSelection?: import('@/types/ai').ModelSelection; expectedRevision: number; secrets?: Record<string,string> }): Promise<import('@/types/ai').RouteSnapshot> {
   return invokeLogged('ai_save_routes', { input });
 }
