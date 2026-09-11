@@ -1,0 +1,19 @@
+.ai-composer-placeholder {
+  color: var(--dsw-alias-label-caption);
+  font-size: 14px;
+  line-height: 24px;
+}
+
+.ai-composer-command {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
+  color: var(--dsw-alias-state-business-primary);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.ai-composer-seat [data-composer-editor][aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

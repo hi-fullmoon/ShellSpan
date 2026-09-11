@@ -1,0 +1,133 @@
+.ai-image-rail-viewport {
+  scrollbar-width: none;
+}
+
+.ai-image-rail-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.ai-image-thumbnail {
+  border-radius: 14px;
+}
+
+.ai-image-thumbnail-media {
+  border-radius: inherit;
+}
+
+.ai-image-thumbnail-loading {
+  border-radius: 50%;
+  background: var(--popover);
+  color: var(--muted-foreground);
+  box-shadow: var(--dsw-elevation-panel);
+}
+
+.ai-image-thumbnail-loading [data-slot='spinner'] {
+  width: 12px;
+  height: 12px;
+}
+
+.ai-image-thumbnail-open {
+  border-radius: inherit;
+}
+
+.ai-image-thumbnail-remove {
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.ai-image-thumbnail:hover .ai-image-thumbnail-remove,
+.ai-image-thumbnail:focus-within .ai-image-thumbnail-remove {
+  opacity: 1;
+}
+
+.ai-image-rail-arrow {
+  border-radius: 50%;
+  box-shadow: var(--dsw-elevation-panel);
+}
+
+@media (pointer: coarse) {
+  .ai-image-thumbnail-remove {
+    opacity: 1;
+  }
+}
+
+.ai-composer-mode-note {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.ai-composer-mode-note svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.ai-composer-seat[data-ai-mode='ask'] .ai-composer-input-anchor > [data-slot='input-group'] {
+  border-radius: 18px;
+  box-shadow:
+    0 0 0 0.5px var(--dsw-alias-border-l2),
+    0 8px 28px rgba(13, 88, 82, 0.08);
+}
+
+.ai-composer-primary {
+  border-radius: 999px;
+  background: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+
+.ai-composer-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 88%, black);
+}
+
+.ai-composer-primary:disabled {
+  background: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  opacity: 0.4;
+}
+
+.ai-composer-stop {
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.ai-composer-stop:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.ai-permission-trigger,
+.ai-execution-surface-trigger,
+.ai-model-trigger,
+.ai-busy-preference-trigger {
+  border-radius: 999px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ai-permission-trigger [data-icon='inline-start'],
+.ai-execution-surface-trigger [data-icon='inline-start'] {
+  width: 16px;
+  height: 16px;
+}
+
+.ai-model-trigger-name {
+  color: var(--dsw-alias-label-primary);
+}
+
+.ai-model-trigger-reasoning {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.ai-model-trigger [data-icon='inline-end'][data-open] {
+  transform: rotate(180deg);
+}
+
+/* Composer controls already inherit the shadcn Button focus ring. Suppress the
+ * AI shell's second outline so keyboard focus stays visible without a double halo. */
+.ai-panel-shell :is(.ai-permission-trigger, .ai-execution-surface-trigger, .ai-model-trigger, .ai-busy-preference-trigger, .ai-composer-primary):focus-visible {
+  outline: none;
+  outline-offset: 0;
+}

@@ -17,6 +17,7 @@
     "version": "node scripts/bump-version.mjs",
     "changelog": "git-cliff -o CHANGELOG.md",
     "check:rust:includes": "node scripts/check-rust-includes.mjs",
+    "check:ai-styles": "node scripts/check-ai-panel-styles.mjs",
     "check:llm:catalog": "node scripts/check-llm-catalog.mjs"
   },
   "dependencies": {
