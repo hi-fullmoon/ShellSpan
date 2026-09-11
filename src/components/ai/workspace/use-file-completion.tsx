@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { AtSignIcon, ChevronRightIcon, CornerDownLeftIcon, FileIcon, FolderIcon, FolderOpenIcon, InfoIcon, ServerIcon, XIcon } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -12,6 +11,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { activeFileToken, insertFileMention } from '@/lib/ai/file-reference-grammar';
 import type { FileCandidate, FileReferenceList, ListFileReferences } from '@/types/agent-file-reference';
 import type { ComposerEditorHandle } from './ai-composer-editor';
+import { AiErrorNotice } from './ai-error-notice';
 import { AiProjectDirectoryInput } from './ai-project-directory-input';
 
 export function useFileCompletion({ text, update, query, scopeKey, needsRoot, targetLabel, disabled }: {
@@ -140,7 +140,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
         </Button>}
         <div aria-live="polite" role="status" className="shrink-0 px-2 py-2 text-xs leading-5 text-muted-foreground empty:hidden">
           {loading && <span className="flex items-center gap-2"><Spinner />{t('ai.workspace.files.loading')}</span>}
-          {error && <Alert><AlertDescription>{errorText(error)}</AlertDescription></Alert>}
+          {error && <AiErrorNotice title={t('ai.workspace.recovery.title')}>{errorText(error)}</AiErrorNotice>}
           {result?.status === 'truncated' && <p>{t('ai.workspace.files.truncated')}</p>}
           {Boolean(result?.excluded) && <p>{t('ai.workspace.files.excluded')}</p>}
           {result?.status === 'ready' && result.entries.length === 0 && <EmptyState title={t('ai.workspace.files.empty')} />}
@@ -182,7 +182,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
         <DialogTitle>{t('ai.workspace.files.chooseRoot')}</DialogTitle>
         <DialogDescription className="break-all">{targetLabel}</DialogDescription>
         <AiProjectDirectoryInput value={root} onChange={setRoot} onConfirm={() => void confirmRoot()} loading={binding} actionLabel={t('ai.workspace.files.bind')} />
-        {error && <Alert><AlertDescription>{errorText(error)}</AlertDescription></Alert>}
+        {error && <AiErrorNotice title={t('ai.workspace.recovery.title')}>{errorText(error)}</AiErrorNotice>}
       </DialogContent>
     </Dialog>;
   return { panel, dialog, open, editor,

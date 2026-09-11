@@ -52,17 +52,17 @@ export function AiTaskStrip({ steps }: AiTaskStripProps): React.ReactNode {
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="ai-task-strip"
+      className="ai-task-strip mx-auto w-[calc(100%-32px)] min-w-0 max-w-[calc(var(--ai-composer-card-max-width)-32px)] shrink-0 overflow-hidden box-border @max-[400px]/ai-workspace:w-[calc(100%-20px)]"
       data-slot="ai-task-strip"
     >
       <CollapsibleTrigger
-        className="ai-task-strip-trigger"
+        className="ai-task-strip-trigger flex h-8 w-full min-w-0 cursor-pointer items-center gap-2.5 px-3 py-1 [&>:last-child]:ml-auto"
         aria-label={t('ai.workspace.tasks.toggle', { count: steps.length })}
         aria-describedby={progressId}
       >
         <ListTodoIcon aria-hidden="true" data-icon="inline-start" />
-        <span className="ai-task-strip-title">{t('ai.workspace.tasks.title')}</span>
-        <span id={progressId} className="ai-task-strip-progress truncate">
+        <span className="ai-task-strip-title shrink-0">{t('ai.workspace.tasks.title')}</span>
+        <span id={progressId} className="ai-task-strip-progress min-w-0 flex-auto truncate">
           {progress}
         </span>
         {open
@@ -70,10 +70,10 @@ export function AiTaskStrip({ steps }: AiTaskStripProps): React.ReactNode {
           : <ChevronUpIcon aria-hidden="true" data-icon="inline-end" />}
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <ul className="ai-task-strip-list">
+        <ul className="ai-task-strip-list m-0 flex max-h-[180px] list-none flex-col gap-2 overflow-y-auto px-3 pt-0.5 pb-1.5">
           {steps.map((step) => (
-            <li key={step.id} data-status={step.status}>
-              <span className="ai-task-strip-status" aria-hidden="true">
+            <li className="flex min-h-5 min-w-0 shrink-0 items-center gap-2.5" key={step.id} data-status={step.status}>
+              <span className="ai-task-strip-status grid size-4 shrink-0 place-items-center" aria-hidden="true">
                 <TaskStatusIcon status={step.status} />
               </span>
               <span className="sr-only">{t(`ai.workspace.tasks.status.${step.status}`)}: </span>

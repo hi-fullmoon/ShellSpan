@@ -76,7 +76,7 @@ export function AiConversation({
   return (
     <MessageScroller
       className="min-h-0 flex-1"
-      contentClassName="ai-conversation-content"
+      contentClassName="ai-conversation-content mx-auto min-w-0 w-[min(calc(100%-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)),var(--ai-chat-content-max-width))] gap-4 px-0 pt-5 pb-7"
       followKey={followKey(nodes, throughSeq)}
       followEndKey={followUserSubmissions ? latestUserKey : undefined}
       ariaLabel={t('ai.conversation')}
@@ -84,7 +84,7 @@ export function AiConversation({
       onAnchorChange={onAnchorChange}
     >
       {canLoadOlder && (
-        <div className="ai-load-older">
+        <div className="ai-load-older flex justify-center">
           <Button variant="ghost" size="sm" disabled={loadingOlder} onClick={onLoadOlder}>
             {loadingOlder ? t('common.loading') : t('ai.workspace.loadOlder')}
           </Button>
@@ -102,7 +102,7 @@ export function AiConversation({
       ))}
       {showAskThinking && (
         <Marker
-          className="ai-turn-status w-fit"
+          className="ai-turn-status inline-flex min-h-6.5 w-fit self-start items-center gap-2 whitespace-nowrap"
           role="status"
           aria-live="polite"
           data-ai-thinking-indicator=""
@@ -115,7 +115,7 @@ export function AiConversation({
       )}
       {running && runningIndicator === 'agent' && (
         <Marker
-          className="ai-turn-status w-fit"
+          className="ai-turn-status inline-flex min-h-6.5 w-fit self-start items-center gap-2 whitespace-nowrap"
           role="status"
           aria-live="polite"
           data-ai-running-indicator=""

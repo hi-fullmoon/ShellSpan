@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/input-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
+import { cn } from '@/lib/utils';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import { getPlatform } from '@/lib/platform';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
@@ -45,6 +46,7 @@ import { questionKey } from '@/types/agent-question';
 import { AiContextMeter } from './ai-context-meter';
 import { AiQueueDock } from './ai-queue-dock';
 import { AiTaskStrip } from './ai-task-strip';
+import { AiErrorNotice } from './ai-error-notice';
 import type { AiQueueMutationState } from './use-ai-session-controller';
 
 export interface AiComposerSeatProps {
@@ -233,10 +235,10 @@ export function AiComposerSeat({
       data-composer-seat=""
       data-phase={phase}
       data-ai-mode={mode}
-      className="ai-composer-seat"
+      className="ai-composer-seat relative mx-auto flex w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] shrink-0 flex-col gap-[var(--ai-composer-stack-gap)] px-[var(--ai-shell-clearance)] py-2"
     >
       {mode === 'agent' && <AiTaskStrip steps={taskSteps} />}
-      <div className="ai-composer-notices">
+      <div className="ai-composer-notices flex min-w-0 flex-col gap-1.5 empty:hidden">
         {status === 'failed' && onRetryTurn && !terminal && (
           <Button
             type="button"
@@ -257,39 +259,41 @@ export function AiComposerSeat({
           </Alert>
         )}
         {composerState?.lastError && (
-          <Alert variant="destructive" size="sm">
-            <AlertTitle>{t('ai.workspace.recovery.title')}</AlertTitle>
-            <AlertDescription className="flex min-w-0 items-center gap-2">
-              <span className="min-w-0 flex-1 break-words">{composerState.lastError.message}</span>
-              {onDismissError && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t('ai.workspace.recovery.dismiss')}
-                  onClick={onDismissError}
-                >
-                  <XIcon />
-                </Button>
-              )}
-            </AlertDescription>
-          </Alert>
+          <AiErrorNotice
+            title={t('ai.workspace.recovery.title')}
+            action={onDismissError && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t('ai.workspace.recovery.dismiss')}
+                onClick={onDismissError}
+              >
+                <XIcon />
+              </Button>
+            )}
+          >
+            {composerState.lastError.message}
+          </AiErrorNotice>
         )}
         {composerState?.failedDrafts.map((failed) => (
-          <Alert key={failed.id} variant="destructive" size="sm">
-            <AlertTitle>{t('ai.workspace.failedDraft')}</AlertTitle>
-            <AlertDescription className="flex min-w-0 items-center gap-2">
-              <span className="min-w-0 flex-1 truncate">{failed.content}</span>
+          <AiErrorNotice
+            key={failed.id}
+            title={t('ai.workspace.recovery.title')}
+            label={t('ai.workspace.failedDraft')}
+            action={(
               <Button
-                variant="outline"
-                size="sm"
+                variant="ghost"
+                size="xs"
                 disabled={submitting || !failed.error.retryable}
                 onClick={() => onRetryFailedDraft?.(failed.id)}
               >
                 <RotateCcwIcon data-icon="inline-start" />
                 {t('common.retry')}
               </Button>
-            </AlertDescription>
-          </Alert>
+            )}
+          >
+            {failed.content}
+          </AiErrorNotice>
         ))}
       </div>
       {stopping && <Alert size="sm" variant="subtle" role="status"><AlertDescription>{t('ai.workspace.stopping')}</AlertDescription></Alert>}
@@ -319,8 +323,8 @@ export function AiComposerSeat({
         />
       )}
       {
-        <div ref={completionAnchor} className="ai-composer-input-anchor">
-          <InputGroup data-composer-card="" onClick={event => {
+        <div ref={completionAnchor} className="ai-composer-input-anchor relative min-w-0">
+          <InputGroup className="h-auto flex-col items-stretch gap-3 overflow-hidden pt-2.5" data-composer-card="" onClick={event => {
             if (event.target === event.currentTarget) completion.editor.current?.focus();
           }}>
             <AiComposerEditor
@@ -335,6 +339,10 @@ export function AiComposerSeat({
               onFocus={() => { completion.editorProps.onFocus(); skillCompletion.editorProps.onFocus(); }}
               onBlur={() => { completion.editorProps.onBlur(); skillCompletion.editorProps.onBlur(); }}
               data-testid="ai-workspace-composer"
+              className={cn(
+                'mr-1 w-[calc(100%-4px)] shrink-0 resize-none overflow-y-auto pt-1 pr-2 pb-0 pl-4 [field-sizing:content] max-h-[min(336px,42vh)]',
+                phase === 'hero' ? 'min-h-13' : 'min-h-7',
+              )}
               aria-describedby={unavailableReason ? availabilityHintId : undefined}
               value={draft}
               historyKey={JSON.stringify([composerState?.sessionId, skillsScopeKey])}
@@ -382,13 +390,13 @@ export function AiComposerSeat({
                 ? t('ai.workbench.composerPlaceholder')
                 : t('ai.workspace.composerPlaceholder', { pasteShortcut: getPlatform() === 'macos' ? '⌘V' : 'Ctrl+V' })}
             />
-            {imageControls && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0">{imageControls}</InputGroupAddon>}
-            <InputGroupAddon align="block-end" className="ai-composer-toolbar" onClick={event => {
+            {imageControls && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0 px-3">{imageControls}</InputGroupAddon>}
+            <InputGroupAddon align="block-end" className="ai-composer-toolbar min-h-10.5 min-w-0 justify-between gap-3 px-2 pt-0.5 pb-1.5 @max-[400px]/ai-workspace:gap-1 @max-[400px]/ai-workspace:px-[7px]" onClick={event => {
               if (!(event.target as HTMLElement).closest('button, [role="button"]')) completion.editor.current?.focus();
             }}>
-              <div className="ai-composer-tools">
+              <div className="ai-composer-tools flex min-w-0 shrink-0 items-center gap-1">
                 {mode === 'ask' ? (
-                  <span className="ai-composer-mode-note">
+                  <span className="ai-composer-mode-note flex min-w-0 items-center gap-[5px] overflow-hidden text-ellipsis whitespace-nowrap">
                     <ShieldCheckIcon aria-hidden="true" />
                     {t('ai.workbench.capabilityNote')}
                   </span>
@@ -404,7 +412,7 @@ export function AiComposerSeat({
                               <Button
                                 variant="ghost"
                                 size="xs"
-                                className="ai-busy-preference-trigger"
+                                className="ai-busy-preference-trigger h-7 min-w-0 @max-[640px]/ai-workspace:size-7 @max-[640px]/ai-workspace:shrink-0 @max-[640px]/ai-workspace:p-0 @max-[640px]/ai-workspace:[&_[data-icon=inline-end]]:hidden"
                                 aria-label={t('ai.workspace.busyPreference')}
                               />
                             )}
@@ -414,7 +422,7 @@ export function AiComposerSeat({
                         {busyPreference === 'queue'
                           ? <ListPlusIcon data-icon="inline-start" />
                           : <CornerUpLeftIcon data-icon="inline-start" />}
-                        <span className="ai-busy-preference-label">
+                        <span className="ai-busy-preference-label min-w-0 truncate @max-[640px]/ai-workspace:hidden">
                           {busyPreference === 'queue'
                             ? t('ai.workspace.queue.action')
                             : t('ai.workspace.steer.action')}
@@ -427,20 +435,20 @@ export function AiComposerSeat({
                           : t('ai.workspace.steer.tooltip')}
                       </TooltipContent>
                     </Tooltip>
-                    <DropdownMenuContent className="ai-busy-preference-menu" side="top" sideOffset={8} align="start">
+                    <DropdownMenuContent className="ai-busy-preference-menu w-max min-w-[200px] max-w-[calc(100vw-16px)] p-[3px]" side="top" sideOffset={8} align="start">
                       <DropdownMenuGroup>
-                        <DropdownMenuLabel className="px-2.5 py-2">{t('ai.workspace.busyPreference')}</DropdownMenuLabel>
+                        <DropdownMenuLabel className="px-2 py-[5px]">{t('ai.workspace.busyPreference')}</DropdownMenuLabel>
                         <DropdownMenuRadioGroup
                           value={busyPreference}
                           onValueChange={(value) => {
                             if (value === 'queue' || value === 'steer') onBusyPreferenceChange?.(value);
                           }}
                         >
-                          <DropdownMenuRadioItem className="min-h-10 gap-2 py-2 pl-2.5 whitespace-nowrap" value="queue">
+                          <DropdownMenuRadioItem className="min-h-[34px] gap-1.5 py-[5px] pl-2 whitespace-nowrap" value="queue">
                             <ListPlusIcon />
                             {t('ai.workspace.queue.action')}
                           </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem className="min-h-10 gap-2 py-2 pl-2.5 whitespace-nowrap" value="steer">
+                          <DropdownMenuRadioItem className="min-h-[34px] gap-1.5 py-[5px] pl-2 whitespace-nowrap" value="steer">
                             <CornerUpLeftIcon />
                             {t('ai.workspace.steer.action')}
                           </DropdownMenuRadioItem>
@@ -451,17 +459,17 @@ export function AiComposerSeat({
                 )}
               </div>
 
-              <div className="ai-composer-trailing">
+              <div className="ai-composer-trailing flex min-w-0 flex-1 basis-0 items-center justify-end gap-1.5 @max-[400px]/ai-workspace:gap-[3px]">
                 {modelControl ?? (modelLabel && (
                   <Button
                     variant="ghost"
                     size="xs"
-                    className="ai-model-trigger"
+                    className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] gap-1 overflow-hidden pr-1.5 pl-2"
                     disabled={!onOpenModel}
                     onClick={onOpenModel}
                     aria-label={t('ai.workspace.model.trigger', { selection: modelLabel })}
                   >
-                    <span className="ai-model-trigger-name">{modelLabel}</span>
+                    <span className="ai-model-trigger-name min-w-0 max-w-60 flex-[0_1_auto] truncate">{modelLabel}</span>
                     <ChevronDownIcon data-icon="inline-end" />
                   </Button>
                 ))}
@@ -473,7 +481,7 @@ export function AiComposerSeat({
                         <InputGroupButton
                           variant="ghost"
                           size="icon-sm"
-                          className="ai-composer-primary ai-composer-stop"
+                          className="ai-composer-primary ai-composer-stop size-8 shrink-0"
                           onClick={onStop}
                           aria-label={t('ai.workspace.stop')}
                         />
@@ -490,7 +498,7 @@ export function AiComposerSeat({
                       <InputGroupButton
                         variant="default"
                         size="icon-sm"
-                        className="ai-composer-primary"
+                        className="ai-composer-primary size-8 shrink-0"
                         onClick={() => submit('primary')}
                         disabled={submitDisabled}
                         aria-label={primaryLabel}

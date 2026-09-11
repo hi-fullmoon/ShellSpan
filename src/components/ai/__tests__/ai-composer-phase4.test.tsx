@@ -104,6 +104,21 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(retryTurn).toHaveBeenCalledOnce();
   });
 
+  it('presents action errors as a compact inline notice', async () => {
+    const user = userEvent.setup();
+    const error = { kind: 'unknown' as const, message: 'Model selection requires an active root session', retryable: false };
+    render(<Harness initial={createAiComposerState({ lastError: error })} />);
+
+    const notice = screen.getByRole('alert');
+    expect(notice).toHaveAttribute('data-size', 'xs');
+    expect(notice).toHaveClass('bg-destructive/5', 'items-center');
+    expect(screen.getByText('Action failed')).toHaveClass('sr-only');
+    expect(screen.getByText(error.message)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Dismiss error' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('adds pasted images once without submitting the message', () => {
     const onPasteImages = vi.fn();
     const onSubmit = vi.fn();
@@ -266,13 +281,8 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     await screen.findByText('Default');
     const trigger = screen.getByRole('button', { name: /Model selection: MiniMax-M3/ });
     const modelName = screen.getByText('MiniMax-M3');
-    expect(getComputedStyle(trigger).maxWidth).toBe('100%');
-    expect(getComputedStyle(trigger).flexShrink).toBe('1');
-    expect(getComputedStyle(trigger).overflow).toBe('hidden');
-    expect(getComputedStyle(modelName).overflow).toBe('hidden');
-    expect(getComputedStyle(modelName).maxWidth).toBe('240px');
-    expect(getComputedStyle(modelName).textOverflow).toBe('ellipsis');
-    expect(getComputedStyle(modelName).whiteSpace).toBe('nowrap');
+    expect(trigger).toHaveClass('max-w-full', 'flex-[0_1_auto]', 'overflow-hidden');
+    expect(modelName).toHaveClass('max-w-60', 'flex-[0_1_auto]', 'truncate');
   });
 
   it('shows the Runtime-backed context ring after model selection with an honest breakdown', async () => {

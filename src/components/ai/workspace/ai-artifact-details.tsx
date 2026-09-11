@@ -39,7 +39,7 @@ function ArtifactCopy({ text }: { readonly text: string }) {
             type="button"
             variant="plain"
             size="icon"
-            className="ai-detail-copy"
+            className="ai-detail-copy absolute top-1.5 right-1.5 size-7"
             aria-label={copied ? t('common.copied') : t('common.copy')}
             onClick={() => {
               if (!navigator.clipboard || copied) return;
@@ -64,8 +64,9 @@ function ArtifactBody({ artifact }: { readonly artifact: AgentArtifactResponse }
   const image = artifact.metadata.mediaType.toLowerCase().startsWith('image/');
   if (image) {
     return (
-      <div className="ai-artifact-image-surface">
+      <div className="ai-artifact-image-surface grid max-w-full place-items-center overflow-hidden p-3">
         <img
+          className="block max-h-[440px] max-w-full object-contain"
           src={`data:${artifact.metadata.mediaType};base64,${artifact.bodyBase64}`}
           alt={artifact.metadata.title}
         />
@@ -73,8 +74,8 @@ function ArtifactBody({ artifact }: { readonly artifact: AgentArtifactResponse }
     );
   }
   return (
-    <div className="ai-detail-code-wrap">
-      <pre className="ai-detail-code">{text || t('ai.workspace.details.emptyArtifact')}</pre>
+    <div className="ai-detail-code-wrap relative min-w-0 max-w-full">
+      <pre className="ai-detail-code m-0 min-w-0 max-w-full overflow-x-auto p-4 whitespace-pre-wrap break-words">{text || t('ai.workspace.details.emptyArtifact')}</pre>
       {text && <ArtifactCopy text={text} />}
     </div>
   );
@@ -124,7 +125,7 @@ export function AiArtifactDetails({
   }, [load, artifactId, artifactSha256, sessionId, t]);
 
   return (
-    <div className="ai-details-root" data-slot="ai-artifact-details">
+    <div className="ai-details-root flex size-full min-h-0 min-w-0 flex-col" data-slot="ai-artifact-details">
       <AiRouteHeader
         title={node?.title ?? t('ai.workspace.details.artifactTitle')}
         description={t('ai.workspace.details.artifactDescription')}
@@ -133,29 +134,29 @@ export function AiArtifactDetails({
       />
       <ScrollArea className="min-h-0 min-w-0 flex-1" aria-label={t('ai.workspace.details.artifactTitle')}>
         {/* Override Base UI's inline fit-content minimum so long payloads stay inside the viewport. */}
-        <ScrollAreaContent className="ai-details-body" style={{ minWidth: 0 }}>
+        <ScrollAreaContent className="ai-details-body flex min-w-0 flex-col p-3" style={{ minWidth: 0 }}>
           {state.kind === 'loading' && (
-            <div className="ai-artifact-loading" role="status" aria-label={t('common.loading')}>
+            <div className="ai-artifact-loading flex flex-col gap-2" role="status" aria-label={t('common.loading')}>
               <Skeleton className="h-5 w-2/3" />
               <Skeleton className="h-32 w-full" />
             </div>
           )}
-          {state.kind === 'error' && <p className="ai-detail-error" role="alert">{state.message}</p>}
+          {state.kind === 'error' && <p className="ai-detail-error m-0 py-2 [overflow-wrap:anywhere]" role="alert">{state.message}</p>}
           {state.kind === 'loaded' && (
             <>
-              <div className="ai-artifact-summary">
+              <div className="ai-artifact-summary mb-4 flex min-w-0 items-center gap-2">
                 <FileOutputIcon aria-hidden="true" />
-                <span>{state.artifact.metadata.kind}</span>
-                <small>{state.artifact.metadata.mediaType}</small>
-                <small>{state.artifact.metadata.sizeBytes} B</small>
-                {state.artifact.truncated && <small>{t('ai.workspace.details.truncated')}</small>}
+                <span className="min-w-0 truncate">{state.artifact.metadata.kind}</span>
+                <small className="shrink-0">{state.artifact.metadata.mediaType}</small>
+                <small className="shrink-0">{state.artifact.metadata.sizeBytes} B</small>
+                {state.artifact.truncated && <small className="shrink-0">{t('ai.workspace.details.truncated')}</small>}
               </div>
               <ArtifactBody artifact={state.artifact} />
-              <dl className="ai-artifact-metadata">
+              <dl className="ai-artifact-metadata mt-4 grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1">
                 <dt>SHA-256</dt>
-                <dd>{state.artifact.metadata.sha256}</dd>
+                <dd className="m-0 min-w-0 [overflow-wrap:anywhere]">{state.artifact.metadata.sha256}</dd>
                 <dt>{t('ai.workspace.details.sensitivity')}</dt>
-                <dd>{state.artifact.metadata.sensitivity}</dd>
+                <dd className="m-0 min-w-0 [overflow-wrap:anywhere]">{state.artifact.metadata.sensitivity}</dd>
               </dl>
             </>
           )}

@@ -13,6 +13,7 @@ import { DEFAULT_RETRY_POLICY } from '@/lib/ai/retry-policy';
 const mocks = vi.hoisted(() => ({
   native: false,
   resolveModel: vi.fn(),
+  invokeGetAiRouteApiKey: vi.fn(),
   invokeDeleteAiApiKey: vi.fn(),
   invokeHasAiApiKey: vi.fn(),
   invokeListAiModels: vi.fn(),
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/ipc/tauri', () => ({
   isTauriRuntime: () => mocks.native,
+  invokeGetAiRouteApiKey: mocks.invokeGetAiRouteApiKey,
   invokeDeleteAiApiKey: mocks.invokeDeleteAiApiKey,
   invokeHasAiApiKey: mocks.invokeHasAiApiKey,
   invokeListAiModels: mocks.invokeListAiModels,
@@ -57,6 +59,7 @@ describe('ProviderSetupDialog', () => {
     mocks.native=false;
     vi.clearAllMocks();
     mocks.resolveModel.mockImplementation(async (command, args) => (await import('@/test/llm-resolver-fixture')).fixtureResolve(command, args));
+    mocks.invokeGetAiRouteApiKey.mockResolvedValue('stored-secret');
     mocks.invokeDeleteAiApiKey.mockResolvedValue(undefined);
     mocks.invokeHasAiApiKey.mockResolvedValue(false);
     mocks.invokeListAiModels.mockResolvedValue([]);
@@ -158,7 +161,13 @@ describe('ProviderSetupDialog', () => {
     const inputGroups = dialog.querySelectorAll('[data-slot="input-group"]');
     const fieldGroups = scrollArea?.querySelectorAll('[data-slot="field-group"]');
     expect(dialog).toHaveClass('max-w-xl', 'gap-0', 'p-0');
-    expect(scrollArea).toHaveClass('overflow-y-auto', 'px-4', 'py-3', 'gap-4');
+    expect(scrollArea).toHaveClass(
+      'overflow-y-auto',
+      'px-4',
+      'py-3',
+      'gap-4',
+      'native-scrollbar-default',
+    );
     expect(scrollArea).not.toHaveClass('pr-1');
     expect(fieldGroups).toHaveLength(1);
     expect(screen.queryByText('settings.ai.provider', { exact: true })).not.toBeInTheDocument();
@@ -363,6 +372,59 @@ describe('ProviderSetupDialog', () => {
     expect(mocks.invokeHasAiApiKey).not.toHaveBeenCalled();
     expect(mocks.invokeStoreAiApiKey).not.toHaveBeenCalled();
     expect(useAiSettingsStore.getState().providers[1]).not.toHaveProperty('apiKey');
+  });
+
+  it('reveals a stored route API key on demand and hides it from the input again', async () => {
+    mocks.native = true;
+    mocks.invokeGetAiRouteApiKey.mockResolvedValueOnce('sk-stored-secret');
+    const provider = useAiSettingsStore.getState().providers[1];
+    useLlmRoutesStore.setState({
+      ...initialRoutesState,
+      snapshot: {
+        schemaVersion: 1,
+        revision: 3,
+        defaultSelection: { routeId: provider.id, modelId: provider.model },
+        routes: [{
+          id: provider.id,
+          revision: 2,
+          displayName: provider.name,
+          adapterId: 'responses',
+          baseUrl: provider.baseUrl,
+          auth: { kind: 'keychain', reference: 'llm-versioned-secret' },
+          replayDomainId: 'domain',
+          presetId: provider.profile,
+          defaults: { routeId: provider.id, modelId: provider.model },
+          retryPolicy: { ...DEFAULT_RETRY_POLICY },
+          timeouts: { requestHeadersMs: 30_000, firstByteMs: 30_000, streamIdleMs: 300_000 },
+        }],
+      },
+      modelsByRoute: { [provider.id]: [] },
+      status: 'ready',
+    }, true);
+
+    const user = userEvent.setup();
+    render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+    const apiKeyInput = screen.getByLabelText(/settings\.ai\.apiKey/);
+    expect(apiKeyInput).toHaveAttribute('type', 'password');
+    expect(apiKeyInput).toHaveValue('');
+    expect(apiKeyInput).toHaveAttribute('placeholder', '••••••••');
+    expect(mocks.invokeGetAiRouteApiKey).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'settings.ai.showApiKey' }));
+
+    await waitFor(() => expect(apiKeyInput).toHaveAttribute('type', 'text'));
+    expect(apiKeyInput).toHaveValue('sk-stored-secret');
+    expect(mocks.invokeGetAiRouteApiKey).toHaveBeenCalledOnce();
+    expect(mocks.invokeGetAiRouteApiKey).toHaveBeenCalledWith(provider.id);
+
+    await user.click(screen.getByRole('button', { name: 'settings.ai.hideApiKey' }));
+    expect(apiKeyInput).toHaveAttribute('type', 'password');
+    expect(apiKeyInput).toHaveValue('');
+
+    await user.click(screen.getByRole('button', { name: 'settings.ai.showApiKey' }));
+    expect(apiKeyInput).toHaveAttribute('type', 'text');
+    expect(apiKeyInput).toHaveValue('sk-stored-secret');
+    expect(mocks.invokeGetAiRouteApiKey).toHaveBeenCalledOnce();
   });
 
   it('loads models from the draft without creating a provider', async () => {

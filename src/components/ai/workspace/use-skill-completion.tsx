@@ -10,6 +10,7 @@ import type { ComposerEditorHandle } from './ai-composer-editor';
 import { builtinSkills } from '@/lib/ai/builtin-skills';
 import { activeSkillToken, insertSkill } from '@/lib/ai/skill-completion';
 import type { SkillEntry, SkillUserList } from '@/types/agent-skill';
+import { AiErrorNotice } from './ai-error-notice';
 
 export function useSkillCompletion({ text, update, query, scopeKey, disabled, editor }: {
   text: string; update: (value: string) => void; query?: () => Promise<SkillUserList>;
@@ -79,7 +80,7 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
     <CardContent className="flex min-h-0 min-w-0 flex-col gap-1 overflow-hidden px-0">
       <div role="status" aria-live="polite" className="shrink-0 px-2 empty:hidden">
         {loading && <span className="flex items-center gap-2"><Spinner />{t('ai.workspace.skills.loading')}</span>}
-        {(error || result?.status === 'unavailable') && <Alert><AlertDescription>{t('ai.workspace.skills.unavailable')}</AlertDescription></Alert>}
+        {(error || result?.status === 'unavailable') && <AiErrorNotice title={t('ai.workspace.recovery.title')}>{t('ai.workspace.skills.unavailable')}</AiErrorNotice>}
         {result?.status === 'stale' && <Alert><AlertDescription>{t('ai.workspace.skills.stale')}</AlertDescription></Alert>}
         {result && !loading && result.status !== 'unavailable' && entries.length === 0 && <EmptyState title={t('ai.workspace.skills.noMatch')} />}
       </div>

@@ -108,8 +108,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
       'var(--ds-transition-duration-slow), var(--ds-transition-duration)',
     );
     const processBody = container.querySelector<HTMLElement>('.ai-turn-process-body');
-    expect(getComputedStyle(processBody!).marginLeft).toBe('7px');
-    expect(getComputedStyle(processBody!).paddingLeft).toBe('15px');
+    expect(processBody).toHaveClass('ml-[7px]', 'pl-[15px]');
     expect(getComputedStyle(process.querySelector('.ai-disclosure-leading')!).translate).toBe('0 1px');
     expect(container.querySelector('.ai-turn-process-separator')).toBeNull();
     const reasoning = screen.getByRole('button', {
@@ -438,7 +437,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(copyButton).toHaveClass('hover:bg-accent');
     expect(getComputedStyle(copyButton).borderRadius)
       .toBe(getComputedStyle(usageButton).borderRadius);
-    expect(getComputedStyle(copyButton).overflow).toBe('hidden');
+    expect(copyButton).toHaveClass('overflow-hidden');
     expect(getComputedStyle(copyButton.querySelector('svg')!).width)
       .toBe(getComputedStyle(usageButton.querySelector('svg')!).width);
 

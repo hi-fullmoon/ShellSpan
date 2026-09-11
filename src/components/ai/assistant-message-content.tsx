@@ -59,13 +59,13 @@ function MarkdownCodeBlock({
   }, [code, copied]);
 
   return (
-    <div className="ai-code-block" data-language={language || undefined}>
-      <div className="ai-code-block-banner">
-        <span className="ai-code-block-language">{language}</span>
+    <div className="ai-code-block relative my-4 min-w-0 max-w-full overflow-hidden" data-language={language || undefined}>
+      <div className="ai-code-block-banner flex min-w-0 items-center justify-between gap-3 px-3.5 py-[9px]">
+        <span className="ai-code-block-language min-w-0 truncate">{language}</span>
         {showActions && (
           <button
             type="button"
-            className="ai-code-block-copy"
+            className="ai-code-block-copy m-0 shrink-0 cursor-pointer p-0"
             aria-label={copied ? copiedLabel : copyLabel}
             onClick={copy}
           >
@@ -73,7 +73,7 @@ function MarkdownCodeBlock({
           </button>
         )}
       </div>
-      <pre className="ai-code-block-pre">{children}</pre>
+      <pre className="ai-code-block-pre m-0 max-w-full overflow-x-auto p-4 whitespace-pre-wrap break-all">{children}</pre>
     </div>
   );
 }
@@ -90,7 +90,7 @@ const MarkdownContent = React.memo(function MarkdownContent({
   showCodeBlockActions: boolean;
 }): React.JSX.Element {
   return (
-    <div className="ai-assistant-markdown">
+    <div className="ai-assistant-markdown min-w-0 max-w-full [overflow-wrap:anywhere]">
       <Markdown
         remarkPlugins={[remarkGfm]}
         skipHtml
@@ -120,7 +120,7 @@ const MarkdownContent = React.memo(function MarkdownContent({
             </MarkdownCodeBlock>
           ),
           table: ({ children: tableChildren }) => (
-            <div className="ai-markdown-table-scroll" tabIndex={0}>
+            <div className="ai-markdown-table-scroll my-4 max-w-full overflow-x-auto overscroll-x-contain" tabIndex={0}>
               <table>{tableChildren}</table>
             </div>
           ),
@@ -149,13 +149,13 @@ const AssistantMessageContentComponent: React.FC<{
 
   if (!renderedAnswer) {
     return streaming
-      ? <span className="ai-turn-status shimmer" role="status">{t('ai.thinking.inProgress')}</span>
+      ? <span className="ai-turn-status shimmer inline-flex min-h-6.5 self-start items-center gap-2 whitespace-nowrap" role="status">{t('ai.thinking.inProgress')}</span>
       : null;
   }
 
   return (
-    <div className="ai-assistant-content" data-streaming={streaming || undefined}>
-      <div className="ai-assistant-answer">
+    <div className="ai-assistant-content flex min-w-0 max-w-full flex-col gap-4" data-streaming={streaming || undefined}>
+      <div className="ai-assistant-answer flex min-w-0 max-w-full flex-col gap-4">
         {answerChunks.map((chunk, index) => (
           <MarkdownContent
             key={index}

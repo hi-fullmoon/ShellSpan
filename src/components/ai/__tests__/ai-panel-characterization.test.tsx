@@ -88,14 +88,11 @@ describe('AI panel production path and immutable shell', () => {
       .getPropertyValue('--dsw-alias-bg-base').trim()).toBe('');
     expect(workspace).toHaveAttribute('data-phase', 'hero');
     expect(workspace).toHaveClass('ai-workspace-root');
-    expect(getComputedStyle(workspace as Element).overflowX).toBe('hidden');
+    expect(workspace).toHaveClass('overflow-x-hidden');
     expect(panel.querySelector('[data-slot="ai-empty-hero"]')).toHaveClass('ai-empty-hero');
     expect(panel.querySelector('[data-slot="empty-state-title"]')).toHaveTextContent('ai.workbench.emptyTitle');
     const header = panel.querySelector('[data-slot="ai-workspace-header"]');
-    expect(getComputedStyle(header as Element).height).toBe('calc(var(--spacing) * 10)');
-    expect(getComputedStyle(header as Element).alignItems).toBe('center');
-    expect(getComputedStyle(header as Element).paddingBlockStart).toMatch(/^0(?:px)?$/);
-    expect(getComputedStyle(header as Element).paddingBlockEnd).toMatch(/^0(?:px)?$/);
+    expect(header).toHaveClass('h-10', 'items-center', 'px-[var(--ai-shell-clearance)]');
     expect(within(panel).getByRole('textbox'))
       .toHaveAttribute('aria-label', 'ai.workbench.composerPlaceholder');
     expect(panel.querySelector('[data-slot="panel-empty-state"]')).toBeNull();

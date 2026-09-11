@@ -104,7 +104,7 @@ export function AgentPermissionSelector({
             <Button
               variant={composer ? 'ghost' : 'outline'}
               size={composer ? 'xs' : 'sm'}
-              className={cn(composer && 'ai-permission-trigger')}
+              className={cn(composer && 'ai-permission-trigger h-7 min-w-0 max-w-[154px] px-[7px] @max-[480px]/ai-workspace:size-7 @max-[480px]/ai-workspace:shrink-0 @max-[480px]/ai-workspace:p-0 @max-[480px]/ai-workspace:[&_[data-icon=inline-end]]:hidden')}
               disabled={disabled || !connected}
               aria-label={composer
                 ? t('agent.permission.composerAria', { mode: t(triggerLabel) })
@@ -125,7 +125,7 @@ export function AgentPermissionSelector({
               strokeWidth={1.75}
               className={cn(visibleMode === 'fullAccess' && 'text-app-warning')}
             />
-            <span className={cn('leading-none', composer && 'ai-permission-trigger-label truncate')}>
+            <span className={cn('leading-none', composer && 'ai-permission-trigger-label truncate @max-[480px]/ai-workspace:hidden')}>
               {t(triggerLabel)}
             </span>
             <ChevronDownIcon data-icon="inline-end" />
@@ -137,7 +137,7 @@ export function AgentPermissionSelector({
           align="start"
           className={cn(
             composer
-              ? 'ai-permission-menu'
+              ? 'ai-permission-menu w-[200px] max-w-[calc(100vw-16px)] p-[3px]'
               : 'w-96 max-w-[calc(100vw-1rem)]',
           )}
         >
@@ -155,7 +155,7 @@ export function AgentPermissionSelector({
                     closeOnClick
                     className={cn(
                       composer
-                        ? 'ai-permission-menu-option'
+                        ? 'ai-permission-menu-option min-h-[34px] gap-1.5 py-[5px] pl-2'
                         : 'items-start gap-2.5 py-2 text-[13px]',
                     )}
                   >

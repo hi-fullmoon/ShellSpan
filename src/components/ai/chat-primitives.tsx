@@ -242,11 +242,11 @@ export const Message: React.FC<{
   return (
     <MessagePrimitive
       align={role === 'user' ? 'end' : 'start'}
-      className={cn('ai-message', `ai-message-${role}`)}
+      className={cn('ai-message flex w-full min-w-0 max-w-full', `ai-message-${role}`)}
       role="article"
       aria-label={role === 'user' ? t('ai.message.user') : t('ai.message.assistant')}
     >
-      <MessageContent className="ai-message-content">
+      <MessageContent className={cn('ai-message-content min-w-0 max-w-full gap-1.5', role === 'user' && 'items-end')}>
         {children}
       </MessageContent>
     </MessagePrimitive>
@@ -261,19 +261,19 @@ export const Bubble: React.FC<{
     align={role === 'user' ? 'end' : 'start'}
     variant={role === 'user' ? 'secondary' : 'ghost'}
     className={cn(
-      'ai-message-bubble',
+        'ai-message-bubble min-w-0 max-w-full',
       `ai-message-bubble-${role}`,
       role === 'user'
-        ? 'max-w-[84%] @max-[400px]/ai-workspace:max-w-[88%] @min-[560px]/ai-workspace:max-w-[80%]'
+        ? 'max-w-[82%]'
         : 'w-full max-w-full',
     )}
   >
     <BubbleContent
       className={cn(
-        'ai-message-bubble-content',
+        'ai-message-bubble-content min-w-0 max-w-full',
         role === 'user'
-          ? 'whitespace-pre-wrap'
-          : 'w-full',
+          ? 'max-w-full overflow-visible px-4 py-2.5 whitespace-pre-wrap [overflow-wrap:anywhere]'
+          : 'block w-full overflow-visible p-0',
       )}
     >
       {children}
@@ -286,7 +286,7 @@ export const Marker: React.FC<{
   variant?: React.ComponentProps<typeof MarkerPrimitive>['variant'];
 }> = ({ children, variant = 'default' }) => (
   <MarkerPrimitive variant={variant}>
-    <MarkerContent className={cn('ai-flow-marker', variant === 'default' && 'w-full')}>
+    <MarkerContent className={cn('ai-flow-marker min-w-0 [overflow-wrap:anywhere]', variant === 'default' && 'w-full')}>
       {children}
     </MarkerContent>
   </MarkerPrimitive>
@@ -325,11 +325,15 @@ export const MessageActions: React.FC<{
 
   return (
     <div
-      className={cn('ai-message-actions', className)}
+      className={cn(
+        'ai-message-actions isolate flex h-7 items-center gap-2',
+        align === 'end' && 'justify-end',
+        className,
+      )}
       data-align={align}
       data-actions-reveal={reveal}
     >
-      {align === 'end' && time && <time dateTime={timestamp}>{time}</time>}
+      {align === 'end' && time && <time className="whitespace-nowrap px-0.5" dateTime={timestamp}>{time}</time>}
       {text && <Tooltip>
         <TooltipTrigger
           render={(
@@ -337,7 +341,7 @@ export const MessageActions: React.FC<{
               type="button"
               variant="ghost"
               size="icon-sm"
-              className={cn('ai-message-action', actionClassName)}
+              className={cn('ai-message-action grid size-7 place-items-center p-0', actionClassName)}
               aria-label={copied ? t('common.copied') : t('common.copy')}
               onClick={copy}
             />
@@ -348,7 +352,7 @@ export const MessageActions: React.FC<{
         <TooltipContent>{copied ? t('common.copied') : t('common.copy')}</TooltipContent>
       </Tooltip>}
       {children}
-      {align === 'start' && time && <time dateTime={timestamp}>{time}</time>}
+      {align === 'start' && time && <time className="whitespace-nowrap px-0.5" dateTime={timestamp}>{time}</time>}
       <span className="sr-only" aria-live="polite">
         {copied ? t('common.copied') : ''}
       </span>

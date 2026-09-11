@@ -214,14 +214,9 @@ describe('Stage 6A question form', () => {
     const historyContent = historyCard?.querySelector<HTMLElement>(
       '[data-slot="card-content"]',
     );
-    expect(getComputedStyle(historyCard!).marginLeft).toBe('22px');
-    expect(getComputedStyle(historyCard!).paddingBlock).toBe('6px');
-    expect(getComputedStyle(historyContent!).paddingInline).toBe('10px');
-    expect(
-      getComputedStyle(
-        historyCard!.querySelector<HTMLElement>('[data-slot="field-set"]')!,
-      ).gap,
-    ).toBe('4px');
+    expect(historyCard).toHaveClass('ml-[22px]', 'py-1.5');
+    expect(historyContent).toHaveClass('px-2.5');
+    expect(historyCard!.querySelector<HTMLElement>('[data-slot="field-set"]')).toHaveClass('gap-1');
     const panel = document.querySelector<HTMLElement>(
       '.ai-question-history > [data-slot="collapsible-content"]',
     );

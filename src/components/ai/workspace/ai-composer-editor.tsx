@@ -8,6 +8,8 @@ import {
   type EditorConfig, type NodeKey, type SerializedTextNode, type LexicalNode,
 } from 'lexical';
 
+import { cn } from '@/lib/utils';
+
 /** Plain-text offsets shared by the editor and completion menus. */
 export interface ComposerEditorHandle {
   readonly value: string;
@@ -91,7 +93,7 @@ interface Props extends Omit<HTMLAttributes<HTMLDivElement>, 'onChange' | 'onSel
 }
 
 /** Lexical owns editing, history and token selection; persisted drafts remain plain text. */
-export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder, commandNames, onChange, onSelectionChange, onKeyDown, onPaste, ...props }: Props) {
+export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder, commandNames, onChange, onSelectionChange, onKeyDown, onPaste, className, ...props }: Props) {
   const element = useRef<HTMLDivElement>(null);
   const latest = useRef({ onChange, onSelectionChange, onKeyDown, commandNames });
   latest.current = { onChange, onSelectionChange, onKeyDown, commandNames };
@@ -165,10 +167,11 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
     history.current = { editor, editorState: editor.getEditorState() };
     return registerHistory(editor, history, 300);
   }, [editor, historyKey]);
-  return <div className="ai-composer-editor-wrap" onClick={event => { if (event.target === event.currentTarget && !disabled) editor.focus(); }}>
+  return <div className="ai-composer-editor-wrap relative grid min-w-0 cursor-text" onClick={event => { if (event.target === event.currentTarget && !disabled) editor.focus(); }}>
     <div {...props} onPasteCapture={event => { onPaste?.(event); if (event.defaultPrevented) event.stopPropagation(); }} ref={element} contentEditable={!disabled} suppressContentEditableWarning
       role="textbox" aria-multiline="true" aria-label={placeholder} aria-disabled={disabled || undefined}
+      className={cn('col-start-1 row-start-1 whitespace-pre-wrap [overflow-wrap:anywhere] outline-none [&_p]:m-0', className)}
       data-slot="input-group-control" data-composer-editor="" />
-    {empty && <div className="ai-composer-placeholder" aria-hidden="true">{placeholder}</div>}
+    {empty && <div className="ai-composer-placeholder pointer-events-none col-start-1 row-start-1 mt-1 mr-3 ml-4" aria-hidden="true">{placeholder}</div>}
   </div>;
 }

@@ -827,7 +827,8 @@ describe('AiWorkspaceController', () => {
 
     await user.type(textbox, 'newer draft');
     rejectSubmit?.(new Error('Network disconnected'));
-    await waitFor(() => expect(screen.getByText('Action failed')).toBeVisible());
+    await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(2));
+    expect(screen.getByText('Network disconnected')).toBeVisible();
     expect(textbox.textContent).toBe('newer draft');
     expect(screen.getAllByText('first input')).toHaveLength(2);
   });

@@ -25,6 +25,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import type { LocaleKey } from '@/locales';
+import {
+  AI_DISCLOSURE_LEADING_CLASS,
+  AI_DISCLOSURE_SEPARATOR_CLASS,
+  AI_DISCLOSURE_SUMMARY_CLASS,
+  AI_DISCLOSURE_TITLE_CLASS,
+  AI_STATE_DOT_CLASS,
+  AI_TOOL_ROW_CLASS,
+} from './ai-style-classes';
 
 export type AiToolVariant =
   | 'terminal'
@@ -144,9 +152,9 @@ function CappedText({ text, maxLines = 8 }: { text: string; maxLines?: number })
   if (expanded || lines.length <= maxLines) {
     return (
       <>
-        {lines.map((line, index) => <div key={index} className="ai-block-line">{line || '\u00a0'}</div>)}
+        {lines.map((line, index) => <div key={index} className="ai-block-line min-h-[18px] whitespace-pre">{line || '\u00a0'}</div>)}
         {lines.length > maxLines && (
-          <button type="button" className="ai-block-fold" onClick={() => setExpanded(false)}>
+          <button type="button" className="ai-block-fold block w-full cursor-pointer p-0 text-left" onClick={() => setExpanded(false)}>
             {t('ai.workspace.tool.collapse')}
           </button>
         )}
@@ -159,13 +167,13 @@ function CappedText({ text, maxLines = 8 }: { text: string; maxLines?: number })
   return (
     <>
       {lines.slice(0, head).map((line, index) => (
-        <div key={`head-${index}`} className="ai-block-line">{line || '\u00a0'}</div>
+        <div key={`head-${index}`} className="ai-block-line min-h-[18px] whitespace-pre">{line || '\u00a0'}</div>
       ))}
-      <button type="button" className="ai-block-fold" onClick={() => setExpanded(true)}>
+      <button type="button" className="ai-block-fold block w-full cursor-pointer p-0 text-left" onClick={() => setExpanded(true)}>
         {t('ai.workspace.tool.expand', { count: hidden })}
       </button>
       {lines.slice(-tail).map((line, index) => (
-        <div key={`tail-${index}`} className="ai-block-line">{line || '\u00a0'}</div>
+        <div key={`tail-${index}`} className="ai-block-line min-h-[18px] whitespace-pre">{line || '\u00a0'}</div>
       ))}
     </>
   );
@@ -212,16 +220,16 @@ function TerminalSurface({ node, compact }: { node: ToolNode; compact: boolean }
     ?? node.target?.label
     ?? '$';
   return (
-    <div className="ai-terminal-block" data-ai-tool-view="terminal" data-running={node.state === 'running' || undefined}>
-      <div className="ai-terminal-header">
-        <span className="ai-state-dot" data-state={node.state} aria-hidden="true" />
-        <span className="ai-terminal-cwd">{cwd}</span>
-        <span className="ai-terminal-command">{command || node.name}</span>
-        {exitCode !== null && exitCode !== 0 && <span className="ai-terminal-exit">exit {exitCode}</span>}
+    <div className="ai-terminal-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="terminal" data-running={node.state === 'running' || undefined}>
+      <div className="ai-terminal-header flex min-w-0 items-center gap-2 px-3.5 py-[9px]">
+        <span className={AI_STATE_DOT_CLASS} data-state={node.state} aria-hidden="true" />
+        <span className="ai-terminal-cwd shrink-0">{cwd}</span>
+        <span className="ai-terminal-command min-w-0 flex-1 truncate">{command || node.name}</span>
+        {exitCode !== null && exitCode !== 0 && <span className="ai-terminal-exit shrink-0">exit {exitCode}</span>}
         {output && <AiToolCopyButton text={output} />}
       </div>
       {node.state !== 'running' && (
-        <div className="ai-terminal-output">
+        <div className="ai-terminal-output m-0 max-h-65 max-w-full overflow-auto px-3.5 py-3 whitespace-pre">
           {output ? <CappedText text={output} maxLines={compact ? 8 : Number.POSITIVE_INFINITY} /> : t('ai.workspace.tool.noOutput')}
         </div>
       )}
@@ -237,11 +245,11 @@ function ReadSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
     ? [...lines.slice(0, 4), `… ${lines.length - 8} lines …`, ...lines.slice(-4)]
     : lines;
   return (
-    <div className="ai-read-block" data-ai-tool-view="read">
-      <div className="ai-block-banner">{label}</div>
-      <pre className="ai-read-lines">
+    <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="read">
+      <div className="ai-block-banner flex min-w-0 items-center gap-2 truncate px-3.5 py-[9px]">{label}</div>
+      <pre className="ai-read-lines m-0 max-h-65 max-w-full overflow-auto px-3.5 py-3 whitespace-pre">
         {shown.map((line, index) => (
-          <span key={index} className="ai-read-line">
+          <span key={index} className="ai-read-line grid min-h-[18px] grid-cols-[34px_minmax(max-content,1fr)]">
             <span className="ai-read-line-number" aria-hidden="true">{index + 1}</span>
             <span>{line || '\u00a0'}</span>
           </span>
@@ -259,10 +267,10 @@ function SearchSurface({ node, compact }: { node: ToolNode; compact: boolean }) 
     ? [...lines.slice(0, 4), `… ${lines.length - 8} results …`, ...lines.slice(-4)]
     : lines;
   return (
-    <div className="ai-search-block" data-ai-tool-view="search">
-      <div className="ai-block-banner"><SearchIcon aria-hidden="true" />{query}</div>
-      <div className="ai-search-results">
-        {shown.map((line, index) => <div key={index} className="ai-search-result">{line}</div>)}
+    <div className="ai-search-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="search">
+      <div className="ai-block-banner flex min-w-0 items-center gap-2 truncate px-3.5 py-[9px]"><SearchIcon aria-hidden="true" />{query}</div>
+      <div className="ai-search-results m-0 flex max-h-65 max-w-full flex-col gap-1 overflow-auto px-3.5 py-3">
+        {shown.map((line, index) => <div key={index} className="ai-search-result min-w-0 [overflow-wrap:anywhere]">{line}</div>)}
       </div>
     </div>
   );
@@ -295,20 +303,20 @@ function WebSurface({ node }: { node: ToolNode }) {
   const url = firstString(input, ['url']);
   const answer = firstString(asRecord(node.output), ['answer', 'summary']);
   return (
-    <div className="ai-web-block" data-ai-tool-view="web">
-      <div className="ai-block-banner"><GlobeIcon aria-hidden="true" />{url ?? node.summary ?? node.name}</div>
-      {answer && <p className="ai-web-answer">{answer}</p>}
+    <div className="ai-web-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="web">
+      <div className="ai-block-banner flex min-w-0 items-center gap-2 truncate px-3.5 py-[9px]"><GlobeIcon aria-hidden="true" />{url ?? node.summary ?? node.name}</div>
+      {answer && <p className="ai-web-answer m-0 px-3.5 pt-3 pb-1">{answer}</p>}
       {sources.length > 0 ? (
-        <div className="ai-web-sources">
+        <div className="ai-web-sources flex min-w-0 flex-col p-2">
           {sources.map((source, index) => (
-            <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noreferrer" className="ai-web-source">
-              <span>{source.title}</span>
-              {source.snippet && <small>{source.snippet}</small>}
+            <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noreferrer" className="ai-web-source flex min-w-0 flex-col p-1.5">
+              <span className="min-w-0 truncate">{source.title}</span>
+              {source.snippet && <small className="min-w-0 truncate">{source.snippet}</small>}
             </a>
           ))}
         </div>
       ) : (
-        <pre className="ai-detail-code">{bounded(outputText(node))}</pre>
+        <pre className="ai-detail-code m-0 min-w-0 max-w-full overflow-x-auto p-4 whitespace-pre-wrap break-words">{bounded(outputText(node))}</pre>
       )}
     </div>
   );
@@ -347,11 +355,11 @@ function DiffSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
   const hunks = diffHunks(node);
   if (hunks.length === 0) return <IoSurface node={node} compact={compact} />;
   return (
-    <div className="ai-diff-block" data-ai-tool-view="diff">
+    <div className="ai-diff-block my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-px overflow-hidden" data-ai-tool-view="diff">
       {hunks.map((hunk, index) => (
         <section key={`${hunk.path}:${index}`}>
-          <div className="ai-block-banner">{hunk.path}</div>
-          <pre className="ai-diff-body">
+          <div className="ai-block-banner flex min-w-0 items-center gap-2 truncate px-3.5 py-[9px]">{hunk.path}</div>
+          <pre className="ai-diff-body m-0 flex max-h-65 max-w-full flex-col overflow-auto px-3.5 py-3 whitespace-pre">
             {hunk.oldText?.split('\n').slice(0, compact ? 8 : undefined).map((line, lineIndex) => (
               <span key={`old-${lineIndex}`} data-diff="removed">- {line}</span>
             ))}
@@ -370,16 +378,16 @@ function CodeSurface({ node }: { node: ToolNode }) {
   const code = firstString(input, ['code', 'program', 'script']) ?? formatToolValue(node.input);
   const language = firstString(input, ['language', 'lang']) ?? 'code';
   return (
-    <div className="ai-code-block ai-tool-code-block" data-ai-tool-view="code">
-      <div className="ai-code-block-banner">
-        <span className="ai-code-block-language">{language}</span>
+    <div className="ai-code-block ai-tool-code-block relative my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="code">
+      <div className="ai-code-block-banner flex min-w-0 items-center justify-between gap-3 px-3.5 py-[9px]">
+        <span className="ai-code-block-language min-w-0 truncate">{language}</span>
         <AiToolCopyButton text={code} />
       </div>
-      <pre className="ai-code-block-pre"><code>{bounded(code)}</code></pre>
+      <pre className="ai-code-block-pre m-0 max-w-full overflow-x-auto p-4 whitespace-pre-wrap break-all"><code>{bounded(code)}</code></pre>
       {node.output !== null && (
-        <div className="ai-io-section">
+        <div className="ai-io-section grid max-h-[150px] grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-3.5 overflow-auto px-4 py-3">
           <span className="ai-io-label">OUT</span>
-          <pre className="ai-io-text">{bounded(outputText(node))}</pre>
+          <pre className="ai-io-text m-0 min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]">{bounded(outputText(node))}</pre>
         </div>
       )}
     </div>
@@ -390,18 +398,18 @@ function IoSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
   const input = bounded(formatToolValue(node.input));
   const output = bounded(outputText(node));
   return (
-    <div className="ai-io-card" data-ai-tool-view="generic">
+    <div className="ai-io-card my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col overflow-hidden" data-ai-tool-view="generic">
       {input && (
-        <div className="ai-io-section">
+        <div className="ai-io-section grid max-h-[150px] grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-3.5 overflow-auto px-4 py-3">
           <span className="ai-io-label">IN</span>
-          <pre className="ai-io-text">{compact ? input.slice(0, 8_192) : input}</pre>
+          <pre className="ai-io-text m-0 min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]">{compact ? input.slice(0, 8_192) : input}</pre>
         </div>
       )}
       {input && output && <span className="ai-io-divider" aria-hidden="true" />}
       {output && (
-        <div className="ai-io-section">
+        <div className="ai-io-section grid max-h-[150px] grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-3.5 overflow-auto px-4 py-3">
           <span className="ai-io-label">OUT</span>
-          <pre className="ai-io-text" data-error={node.state === 'failed' || undefined}>
+          <pre className="ai-io-text m-0 min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]" data-error={node.state === 'failed' || undefined}>
             {compact ? output.slice(0, 8_192) : output}
           </pre>
         </div>
@@ -446,7 +454,7 @@ export function AiToolRow({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
-        className="ai-tool-row-root"
+        className="ai-tool-row-root flex min-w-0 flex-col"
         data-tool-state={node.state}
         data-tool-variant={variant}
         data-tool-fallback={variant === 'generic' || undefined}
@@ -456,31 +464,31 @@ export function AiToolRow({
           render={(
             <button
               type="button"
-              className="ai-tool-row"
+              className={AI_TOOL_ROW_CLASS}
               data-ai-node-action=""
               aria-label={`${t(titleKey(variant))}: ${summary}`}
             />
           )}
         >
-          <span className="ai-disclosure-leading" aria-hidden="true">
+          <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
             {node.state === 'failed' || node.state === 'rejected'
-              ? <span className="ai-state-dot" data-state="failed" />
+              ? <span className={AI_STATE_DOT_CLASS} data-state="failed" />
               : node.state === 'approval'
                 ? <ShieldAlertIcon />
                 : <Icon />}
             <ChevronDownIcon className="ai-disclosure-chevron" />
           </span>
-          <span className="ai-disclosure-title">{t(titleKey(variant))}</span>
-          <span className="ai-disclosure-separator" aria-hidden="true" />
-          <span className="ai-disclosure-summary" data-error={node.state === 'failed' || undefined}>
+          <span className={AI_DISCLOSURE_TITLE_CLASS}>{t(titleKey(variant))}</span>
+          <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
+          <span className={AI_DISCLOSURE_SUMMARY_CLASS} data-error={node.state === 'failed' || undefined}>
             {summary}
           </span>
           {node.durationMs !== null && (
-            <span className="ai-tool-duration">{t('ai.workspace.durationMs', { duration: node.durationMs })}</span>
+            <span className="ai-tool-duration ml-2 shrink-0 whitespace-nowrap">{t('ai.workspace.durationMs', { duration: node.durationMs })}</span>
           )}
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="ai-tool-body">
+          <div className="ai-tool-body flex min-w-0 max-w-full flex-col">
             <AiToolExpandedContent node={node} compact />
             {onInspect && (
               <Tooltip>
@@ -490,7 +498,7 @@ export function AiToolRow({
                       type="button"
                       variant="outline"
                       size="xs"
-                      className="ai-tool-inspect"
+                      className="ai-tool-inspect mt-1 mr-1 mb-0.5 w-fit min-h-5 self-start px-2 py-0.5"
                       onClick={() => onInspect(node)}
                       aria-label={t('ai.workspace.details.openTool', { tool: node.name })}
                     />
@@ -512,7 +520,7 @@ export function ToolStateIcon({ node }: { readonly node: ToolNode }) {
   if (node.state === 'succeeded') return <CheckIcon aria-hidden="true" />;
   if (node.state === 'approval') return <ShieldAlertIcon aria-hidden="true" />;
   if (node.state === 'failed' || node.state === 'rejected') {
-    return <span className="ai-state-dot" data-state="failed" aria-hidden="true" />;
+    return <span className={AI_STATE_DOT_CLASS} data-state="failed" aria-hidden="true" />;
   }
   return <BracesIcon aria-hidden="true" />;
 }
