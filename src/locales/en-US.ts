@@ -1148,6 +1148,7 @@ export default {
   'settings.ai.keyStored': 'Stored',
   'settings.ai.keyMissing': 'Missing',
   'settings.ai.keySaving': 'Saving',
+  'settings.ai.keyLoadFailed': 'Could not load API key',
   'settings.ai.keySaveFailed': 'Save failed',
   'settings.ai.keyDeleteFailed': 'Could not delete API key',
   'settings.ai.keySaveFailedHint': 'Could not save to the system keychain. Edit the key again to retry.',

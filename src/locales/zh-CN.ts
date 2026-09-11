@@ -1146,6 +1146,7 @@ export default {
   'settings.ai.keyStored': '已保存',
   'settings.ai.keyMissing': '未保存',
   'settings.ai.keySaving': '保存中',
+  'settings.ai.keyLoadFailed': '无法读取 API Key',
   'settings.ai.keySaveFailed': '保存失败',
   'settings.ai.keyDeleteFailed': '无法删除 API Key',
   'settings.ai.keySaveFailedHint': '未能保存到系统钥匙串，请再次编辑 Key 以重试。',
