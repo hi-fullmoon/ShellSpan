@@ -1707,6 +1707,9 @@ mod tests {
     mod inbox_steer_tests {
         include!("runtime_inbox_steer_tests.rs");
     }
+    mod loop_guard_tests {
+        include!("runtime_loop_guard_tests.rs");
+    }
     mod image_tests {
         include!("image_tests.rs");
     }
@@ -4017,7 +4020,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recovery_reconciliation_uses_the_checkpoint_step_when_call_ids_repeat() {
+    async fn recovery_reconciliation_uses_the_checkpoint_step_when_provider_call_ids_repeat() {
         use super::super::AgentRecoveryReconcileOutcome::{ConfirmedApplied, ConfirmedNotApplied};
 
         for outcome in [ConfirmedApplied, ConfirmedNotApplied] {
@@ -4040,7 +4043,8 @@ mod tests {
             first.await_idle(session_id).await.unwrap();
             assert_eq!(native.executions.load(Ordering::Acquire), 1);
             let decision = pending_approval(&first, session_id);
-            assert_eq!(previous.call_id, decision.call_id);
+            // The provider repeats call-1, but durable call ids are unique across requests.
+            assert_ne!(previous.call_id, decision.call_id);
             assert_ne!(previous.step_id, decision.step_id);
             let previous_result = all_events(&first, session_id)
                 .into_iter()

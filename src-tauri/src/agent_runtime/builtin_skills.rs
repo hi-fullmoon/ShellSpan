@@ -25,6 +25,8 @@ pub(crate) fn definitions() -> Vec<SkillDefinition> {
                     "network-diagnosis" => include_str!("../../skills/network-diagnosis.md"),
                     "disk-cleanup" => include_str!("../../skills/disk-cleanup.md"),
                     "docker-diagnosis" => include_str!("../../skills/docker-diagnosis.md"),
+                    "log-triage" => include_str!("../../skills/log-triage.md"),
+                    "incident-triage" => include_str!("../../skills/incident-triage.md"),
                     _ => panic!("bundled skill has no instructions"),
                 };
                 SkillDefinition {

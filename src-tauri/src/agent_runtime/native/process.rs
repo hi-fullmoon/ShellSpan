@@ -6,7 +6,9 @@ use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use libssh2_sys::LIBSSH2_ERROR_EAGAIN;
 use serde::Serialize;
+use ssh2::ErrorCode;
 use uuid::Uuid;
 
 use crate::agent_runtime::{AgentExecutionChannelNative, ProcessSignalNative};
@@ -19,6 +21,7 @@ const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const STDOUT_CAPTURE_BYTES: usize = 768 * 1024;
 const STDERR_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_TRACKED_PROCESSES: usize = 256;
+const REMOTE_READS_PER_POLL: usize = 8;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -792,7 +795,8 @@ fn read_remote_stream(
     stdout: bool,
 ) -> Result<(), String> {
     let mut buffer = [0_u8; 8192];
-    loop {
+    // A busy remote stream must yield to cancellation and the task deadline.
+    for _ in 0..REMOTE_READS_PER_POLL {
         match reader.read(&mut buffer) {
             Ok(0) => return Ok(()),
             Ok(count) => process.push_output(if stdout {
@@ -803,6 +807,29 @@ fn read_remote_stream(
             Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),
             Err(error) => return Err(format!("failed to read remote process output: {error}")),
         }
+    }
+    Ok(())
+}
+
+struct RemoteBlockingModeGuard<'a> {
+    session: &'a ssh2::Session,
+    was_blocking: bool,
+}
+
+impl<'a> RemoteBlockingModeGuard<'a> {
+    fn nonblocking(session: &'a ssh2::Session) -> Self {
+        let was_blocking = session.is_blocking();
+        session.set_blocking(false);
+        Self {
+            session,
+            was_blocking,
+        }
+    }
+}
+
+impl Drop for RemoteBlockingModeGuard<'_> {
+    fn drop(&mut self) {
+        self.session.set_blocking(self.was_blocking);
     }
 }
 
@@ -824,8 +851,7 @@ fn run_remote_worker(
             return;
         }
     };
-    if Instant::now() >= deadline {
-        process.finish(ProcessLifecycleNative::TimedOut, None, false, None);
+    if remote_start_interrupted(&process, &controls, deadline) {
         return;
     }
     let mut channel = match session.target.channel_session() {
@@ -840,6 +866,9 @@ fn run_remote_worker(
             return;
         }
     };
+    if remote_start_interrupted(&process, &controls, deadline) {
+        return;
+    }
     if let Err(error) = crate::execution::start_ssh_exec_channel(&mut channel, &start.command) {
         process.finish(
             ProcessLifecycleNative::Failed,
@@ -849,7 +878,8 @@ fn run_remote_worker(
         );
         return;
     }
-    session.target.set_blocking(false);
+    // Restore blocking mode before the channel is freed on every exit path.
+    let _blocking_mode = RemoteBlockingModeGuard::nonblocking(&session.target);
     loop {
         while let Ok(control) = controls.try_recv() {
             match control {
@@ -869,6 +899,11 @@ fn run_remote_worker(
                 }
             }
         }
+        if Instant::now() >= deadline {
+            let _ = channel.close();
+            process.finish(ProcessLifecycleNative::TimedOut, None, false, None);
+            return;
+        }
         if let Err(error) = read_remote_stream(&mut channel, &process, true) {
             process.finish(ProcessLifecycleNative::Failed, None, false, Some(error));
             return;
@@ -878,22 +913,7 @@ fn run_remote_worker(
             return;
         }
         if channel.eof() {
-            session.target.set_blocking(true);
-            let close = channel.wait_close();
-            let exit = channel.exit_status();
-            match (close, exit) {
-                (Ok(()), Ok(code)) => {
-                    process.finish(ProcessLifecycleNative::Exited, Some(code), true, None)
-                }
-                (close, exit) => process.finish(
-                    ProcessLifecycleNative::Failed,
-                    None,
-                    false,
-                    Some(format!(
-                        "failed to finalize remote process: close={close:?} exit={exit:?}"
-                    )),
-                ),
-            }
+            finish_remote_channel(&process, &mut channel, &controls, deadline);
             return;
         }
         if Instant::now() >= deadline {
@@ -903,6 +923,108 @@ fn run_remote_worker(
         }
         thread::sleep(PROCESS_POLL_INTERVAL);
     }
+}
+
+fn remote_start_interrupted(
+    process: &ManagedProcessNative,
+    controls: &mpsc::Receiver<ProcessControlNative>,
+    deadline: Instant,
+) -> bool {
+    while let Ok(control) = controls.try_recv() {
+        match control {
+            ProcessControlNative::Kill { .. } => {
+                process.finish(ProcessLifecycleNative::Cancelled, None, false, None);
+                return true;
+            }
+            ProcessControlNative::Write { response, .. } => {
+                let _ = response.send(Err("remote process has not started".into()));
+            }
+        }
+    }
+    if Instant::now() >= deadline {
+        process.finish(ProcessLifecycleNative::TimedOut, None, false, None);
+        return true;
+    }
+    false
+}
+
+fn finish_remote_channel(
+    process: &ManagedProcessNative,
+    channel: &mut ssh2::Channel,
+    controls: &mpsc::Receiver<ProcessControlNative>,
+    deadline: Instant,
+) {
+    loop {
+        if remote_finalization_interrupted(process, channel, controls, deadline) {
+            return;
+        }
+        match channel.wait_close() {
+            Ok(()) => break,
+            Err(error) if error.code() == ErrorCode::Session(LIBSSH2_ERROR_EAGAIN) => {
+                thread::sleep(PROCESS_POLL_INTERVAL);
+            }
+            Err(error) => {
+                process.finish(
+                    ProcessLifecycleNative::Failed,
+                    None,
+                    false,
+                    Some(format!("failed to close remote process channel: {error}")),
+                );
+                return;
+            }
+        }
+    }
+    loop {
+        if remote_finalization_interrupted(process, channel, controls, deadline) {
+            return;
+        }
+        match channel.exit_status() {
+            Ok(code) => {
+                process.finish(ProcessLifecycleNative::Exited, Some(code), true, None);
+                return;
+            }
+            Err(error) if error.code() == ErrorCode::Session(LIBSSH2_ERROR_EAGAIN) => {
+                thread::sleep(PROCESS_POLL_INTERVAL);
+            }
+            Err(error) => {
+                process.finish(
+                    ProcessLifecycleNative::Failed,
+                    None,
+                    false,
+                    Some(format!(
+                        "failed to read remote process exit status: {error}"
+                    )),
+                );
+                return;
+            }
+        }
+    }
+}
+
+fn remote_finalization_interrupted(
+    process: &ManagedProcessNative,
+    channel: &mut ssh2::Channel,
+    controls: &mpsc::Receiver<ProcessControlNative>,
+    deadline: Instant,
+) -> bool {
+    while let Ok(control) = controls.try_recv() {
+        match control {
+            ProcessControlNative::Kill { .. } => {
+                let _ = channel.close();
+                process.finish(ProcessLifecycleNative::Cancelled, None, false, None);
+                return true;
+            }
+            ProcessControlNative::Write { response, .. } => {
+                let _ = response.send(Err("remote process stdin is closed".into()));
+            }
+        }
+    }
+    if Instant::now() >= deadline {
+        let _ = channel.close();
+        process.finish(ProcessLifecycleNative::TimedOut, None, false, None);
+        return true;
+    }
+    false
 }
 
 fn write_remote_input(
@@ -951,6 +1073,73 @@ fn current_unix_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_stream_read_yields_after_a_bounded_batch() {
+        let (controls, _) = mpsc::channel();
+        let process = ManagedProcessNative::new(
+            "task-stream".into(),
+            "req-stream".into(),
+            "remote-1".into(),
+            AgentExecutionChannelNative::Direct,
+            Vec::new(),
+            controls,
+        );
+        let mut reader = std::io::repeat(b'x');
+        read_remote_stream(&mut reader, &process, true).unwrap();
+        let snapshot = process.snapshot().unwrap();
+        assert_eq!(
+            snapshot.stdout_bytes_read,
+            (REMOTE_READS_PER_POLL * 8192) as u64
+        );
+        assert_eq!(snapshot.state, ProcessLifecycleNative::Running);
+    }
+
+    #[test]
+    fn remote_start_does_not_dispatch_after_cancel_or_deadline() {
+        let (controls, receiver) = mpsc::channel();
+        let process = ManagedProcessNative::new(
+            "task-cancel".into(),
+            "req-cancel".into(),
+            "remote-1".into(),
+            AgentExecutionChannelNative::Direct,
+            Vec::new(),
+            controls.clone(),
+        );
+        controls
+            .send(ProcessControlNative::Kill {
+                signal: ProcessSignalNative::Kill,
+            })
+            .unwrap();
+        assert!(remote_start_interrupted(
+            &process,
+            &receiver,
+            Instant::now() + Duration::from_secs(1)
+        ));
+        assert_eq!(
+            process.snapshot().unwrap().state,
+            ProcessLifecycleNative::Cancelled
+        );
+
+        let (controls, receiver) = mpsc::channel();
+        let process = ManagedProcessNative::new(
+            "task-deadline".into(),
+            "req-deadline".into(),
+            "remote-1".into(),
+            AgentExecutionChannelNative::Direct,
+            Vec::new(),
+            controls,
+        );
+        assert!(remote_start_interrupted(
+            &process,
+            &receiver,
+            Instant::now() - Duration::from_millis(1)
+        ));
+        assert_eq!(
+            process.snapshot().unwrap().state,
+            ProcessLifecycleNative::TimedOut
+        );
+    }
 
     fn local_command(stdout: &str, stderr: &str, exit_code: i32) -> String {
         if cfg!(target_os = "windows") {

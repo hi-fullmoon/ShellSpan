@@ -108,22 +108,17 @@ fn classify_command_effect(command: &str) -> AgentEffectKindNative {
         "git",
         "docker",
     ];
-    const SENSITIVE_READ: [&str; 13] = [
+    const SENSITIVE_READ: [&str; 8] = [
         "cat",
         "type",
         "get-content",
         "more",
         "less",
-        "env",
-        "set",
         "printenv",
         "whoami",
         "id",
-        "hostname",
-        "ipconfig",
-        "ifconfig",
     ];
-    const READ_ONLY: [&str; 18] = [
+    const READ_ONLY: [&str; 15] = [
         "pwd",
         "cd",
         "ls",
@@ -137,11 +132,8 @@ fn classify_command_effect(command: &str) -> AgentEffectKindNative {
         "du",
         "free",
         "uptime",
-        "date",
         "echo",
         "printf",
-        "systemctl",
-        "service",
     ];
 
     let command_words = normalized
@@ -167,19 +159,20 @@ fn classify_command_effect(command: &str) -> AgentEffectKindNative {
         || normalized.contains(" /s /q")
     {
         AgentEffectKindNative::Destructive
+    } else if is_bounded_journal_command(&normalized) {
+        AgentEffectKindNative::SensitiveRead
+    } else if is_bounded_diagnostic_command(&normalized) {
+        AgentEffectKindNative::ReadOnly
     } else if EXTERNAL.contains(&executable)
         || command_words.iter().any(|word| EXTERNAL.contains(word))
         || normalized.contains("http://")
         || normalized.contains("https://")
     {
         AgentEffectKindNative::ExternalSideEffect
-    } else if SENSITIVE_READ.contains(&executable) {
+    } else if SENSITIVE_READ.contains(&executable) && is_simple_shell_command(&normalized) {
         AgentEffectKindNative::SensitiveRead
     } else if READ_ONLY.contains(&executable)
-        && !normalized
-            .chars()
-            .any(|character| matches!(character, ';' | '|' | '&' | '`' | '>' | '<' | '\n' | '\r'))
-        && !normalized.contains("$(")
+        && is_simple_shell_command(&normalized)
         && !normalized.contains("restart")
         && !normalized.contains(" start ")
         && !normalized.contains(" stop ")
@@ -192,6 +185,86 @@ fn classify_command_effect(command: &str) -> AgentEffectKindNative {
         // explicitly cover their state-changing effect before dispatch.
         AgentEffectKindNative::StateChange
     }
+}
+
+fn is_bounded_diagnostic_command(command: &str) -> bool {
+    if !is_plain_diagnostic_command(command) {
+        return false;
+    }
+    let words = command.split_ascii_whitespace().collect::<Vec<_>>();
+    match words.as_slice() {
+        ["systemctl", "status", "--no-pager", unit]
+        | ["systemctl", "status", unit, "--no-pager"] => safe_diagnostic_argument(unit),
+        ["systemctl", "is-active" | "is-failed", unit] => safe_diagnostic_argument(unit),
+        ["ip", "address" | "addr" | "route"] => true,
+        ["ss", flags] => matches!(*flags, "-ltn" | "-ltnp" | "-lntu" | "-lntup"),
+        _ => false,
+    }
+}
+
+fn is_bounded_journal_command(command: &str) -> bool {
+    if !is_plain_diagnostic_command(command) {
+        return false;
+    }
+    let mut words = command.split_ascii_whitespace();
+    if words.next() != Some("journalctl") {
+        return false;
+    }
+    let (mut unit, mut lines, mut no_pager) = (false, false, false);
+    while let Some(word) = words.next() {
+        match word {
+            "-u" | "--unit" if !unit => {
+                unit = words.next().is_some_and(safe_diagnostic_argument);
+                if !unit {
+                    return false;
+                }
+            }
+            "-n" | "--lines" if !lines => {
+                lines = words
+                    .next()
+                    .and_then(|value| value.parse::<u16>().ok())
+                    .is_some_and(|value| (1..=1_000).contains(&value));
+                if !lines {
+                    return false;
+                }
+            }
+            "--no-pager" if !no_pager => no_pager = true,
+            _ => return false,
+        }
+    }
+    unit && lines && no_pager
+}
+
+fn is_plain_diagnostic_command(command: &str) -> bool {
+    is_simple_shell_command(command)
+        && !command
+            .chars()
+            .any(|character| matches!(character, '$' | '\\' | '*' | '?' | '[' | ']'))
+}
+
+fn safe_diagnostic_argument(argument: &str) -> bool {
+    let unquoted = argument
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+        .or_else(|| {
+            argument
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+        })
+        .unwrap_or(argument);
+    !unquoted.is_empty()
+        && unquoted
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'@'))
+}
+
+fn is_simple_shell_command(command: &str) -> bool {
+    !command.chars().any(|character| {
+        matches!(
+            character,
+            ';' | '|' | '&' | '`' | '>' | '<' | '(' | ')' | '{' | '}' | '\n' | '\r'
+        )
+    })
 }
 
 #[cfg(test)]
@@ -232,5 +305,82 @@ mod tests {
             classify_command_effect("echo $(touch /tmp/changed)"),
             AgentEffectKindNative::StateChange
         );
+        for command in [
+            "cat /tmp/input > /tmp/output",
+            "Get-Content (Set-Content ./file value)",
+            "service nginx reload",
+            "systemctl mask nginx",
+            "date --set tomorrow",
+            "env custom-maintenance-tool",
+            "hostname changed-name",
+            "ipconfig /release",
+            "ifconfig eth0 down",
+        ] {
+            assert_eq!(
+                classify_command_effect(command),
+                AgentEffectKindNative::StateChange,
+                "{command} must require state-change authorization"
+            );
+        }
+    }
+
+    #[test]
+    fn bounded_service_and_socket_diagnostics_remain_read_only() {
+        for command in [
+            "systemctl status --no-pager nginx.service",
+            "systemctl status 'nginx.service' --no-pager",
+            "systemctl is-active nginx.service",
+            "systemctl is-failed nginx.service",
+            "systemctl status --no-pager docker",
+            "ip address",
+            "ip route",
+            "ss -ltnp",
+        ] {
+            assert_eq!(
+                classify_command_effect(command),
+                AgentEffectKindNative::ReadOnly,
+                "{command} should be available as a read-only diagnostic"
+            );
+        }
+        for command in [
+            "systemctl restart nginx.service",
+            "systemctl status --no-pager nginx.service; touch /tmp/changed",
+            "systemctl status --no-pager $(touch /tmp/changed)",
+            "systemctl status -H remote nginx.service",
+            "ip route delete default",
+            "ss --kill dst 127.0.0.1",
+        ] {
+            assert_eq!(
+                classify_command_effect(command),
+                AgentEffectKindNative::StateChange,
+                "{command} must still require state-change authorization"
+            );
+        }
+    }
+
+    #[test]
+    fn bounded_journal_reads_are_sensitive_and_unbounded_forms_need_approval() {
+        for command in [
+            "journalctl -u nginx.service --no-pager -n 100",
+            "journalctl --no-pager -n 20 -u 'nginx.service'",
+            "journalctl -u ssh --no-pager -n 100",
+        ] {
+            assert_eq!(
+                classify_command_effect(command),
+                AgentEffectKindNative::SensitiveRead
+            );
+        }
+        for command in [
+            "journalctl -u nginx.service",
+            "journalctl -u nginx.service --no-pager -n 1001",
+            "journalctl -u nginx.service --vacuum-time=1d",
+            "journalctl -u $(touch /tmp/changed) --no-pager -n 100",
+        ] {
+            assert_eq!(
+                classify_command_effect(command),
+                AgentEffectKindNative::StateChange,
+                "{command} must not be classified as a bounded log read"
+            );
+        }
     }
 }

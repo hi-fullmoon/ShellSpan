@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -272,6 +273,9 @@ fn discover_and_invoke_stdio_tool(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    command
+        .env_clear()
+        .envs(mcp_child_environment(std::env::vars_os()));
     for reference in &config.credential_refs {
         let value = credentials
             .get_credential(MCP_CREDENTIAL_SERVICE, &reference.credential_id)?
@@ -328,6 +332,63 @@ fn discover_and_invoke_stdio_tool(
     let _ = child.kill();
     let _ = child.wait();
     result
+}
+
+fn mcp_child_environment(
+    inherited: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Vec<(OsString, OsString)> {
+    inherited
+        .into_iter()
+        .filter(|(name, _)| is_mcp_runtime_environment_name(name))
+        .collect()
+}
+
+fn is_mcp_runtime_environment_name(name: &OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    let name = name.to_ascii_uppercase();
+    matches!(
+        name.as_str(),
+        "PATH"
+            | "HOME"
+            | "USER"
+            | "LOGNAME"
+            | "SHELL"
+            | "TMPDIR"
+            | "TMP"
+            | "TEMP"
+            | "LANG"
+            | "LC_ALL"
+            | "LC_CTYPE"
+            | "LC_MESSAGES"
+            | "LC_COLLATE"
+            | "LC_NUMERIC"
+            | "LC_TIME"
+            | "LC_MONETARY"
+            | "LC_PAPER"
+            | "LC_NAME"
+            | "LC_ADDRESS"
+            | "LC_TELEPHONE"
+            | "LC_MEASUREMENT"
+            | "LC_IDENTIFICATION"
+            | "TZ"
+            | "XDG_CACHE_HOME"
+            | "XDG_CONFIG_HOME"
+            | "XDG_DATA_HOME"
+            | "SYSTEMROOT"
+            | "WINDIR"
+            | "COMSPEC"
+            | "PATHEXT"
+            | "USERPROFILE"
+            | "HOMEDRIVE"
+            | "HOMEPATH"
+            | "APPDATA"
+            | "LOCALAPPDATA"
+            | "PROGRAMDATA"
+            | "PROGRAMFILES"
+            | "PROGRAMFILES(X86)"
+    )
 }
 
 fn send_json(stdin: &mut ChildStdin, value: &Value) -> Result<(), String> {
@@ -616,6 +677,29 @@ fn validate_identifier(value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_child_inherits_only_runtime_environment() {
+        let inherited = [
+            ("PATH", "/usr/bin"),
+            ("HOME", "/home/user"),
+            ("LC_ALL", "en_US.UTF-8"),
+            ("DEEPSEEK_API_KEY", "secret"),
+            ("GITHUB_TOKEN", "secret"),
+            ("SHELLSPAN_INTERNAL", "secret"),
+        ]
+        .into_iter()
+        .map(|(name, value)| (OsString::from(name), OsString::from(value)));
+        let child = mcp_child_environment(inherited);
+        assert_eq!(
+            child,
+            vec![
+                (OsString::from("PATH"), OsString::from("/usr/bin")),
+                (OsString::from("HOME"), OsString::from("/home/user")),
+                (OsString::from("LC_ALL"), OsString::from("en_US.UTF-8")),
+            ]
+        );
+    }
 
     #[test]
     fn configuration_load_does_not_spawn_the_stdio_command() {

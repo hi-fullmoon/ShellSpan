@@ -3,5 +3,7 @@
   { "name": "service-diagnosis", "description": "Diagnose service status, startup failures and logs", "descriptionZh": "服务排查：运行状态、启动失败和日志" },
   { "name": "network-diagnosis", "description": "Diagnose DNS, ports, routing and connectivity", "descriptionZh": "网络排查：DNS、端口、路由和连通性" },
   { "name": "disk-cleanup", "description": "Analyze disk usage and propose a cleanup plan", "descriptionZh": "磁盘清理分析：定位占用并提出清理方案" },
-  { "name": "docker-diagnosis", "description": "Inspect containers, logs and resource usage", "descriptionZh": "Docker 排查：容器状态、日志和资源占用" }
+  { "name": "docker-diagnosis", "description": "Inspect containers, logs and resource usage", "descriptionZh": "Docker 排查：容器状态、日志和资源占用" },
+  { "name": "log-triage", "description": "Correlate bounded application and system logs", "descriptionZh": "日志排查：限定范围并关联错误时间线" },
+  { "name": "incident-triage", "description": "Triage an outage and organize read-only evidence", "descriptionZh": "故障分诊：评估影响并组织只读证据" }
 ]

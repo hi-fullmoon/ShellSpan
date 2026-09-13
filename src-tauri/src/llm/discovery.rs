@@ -192,12 +192,12 @@ async fn list_endpoint_models(
     let client = build_client()?;
     let response = match provider.kind {
         AiProviderKind::Ollama => client
-            .get(endpoint_url(&provider, "api/tags")?)
+            .get(endpoint_url(provider, "api/tags")?)
             .send()
             .await
             .map_err(format_transport_error)?,
         AiProviderKind::OpenAi | AiProviderKind::OpenAiCompatible => {
-            let request = client.get(endpoint_url(&provider, "models")?);
+            let request = client.get(endpoint_url(provider, "models")?);
             let request = if let Some(api_key) = api_key {
                 request.bearer_auth(api_key)
             } else {

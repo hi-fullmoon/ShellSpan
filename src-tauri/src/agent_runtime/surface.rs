@@ -28,7 +28,7 @@ pub(crate) enum AgentSurfaceMessage {
         content: Vec<AgentAssistantContentBlock>,
         interrupted: bool,
         #[serde(skip)]
-        replay: Option<crate::llm::replay::ReplayEnvelopeV5>,
+        replay: Option<Box<crate::llm::replay::ReplayEnvelopeV5>>,
     },
     Tool {
         call_id: String,
@@ -186,29 +186,14 @@ fn append_surface_events<'a>(
     messages: &mut Vec<AgentSurfaceMessage>,
 ) {
     let mut synthetic_results = std::collections::HashMap::<String, usize>::new();
+    let mut pending_calls: Vec<(String, String)> = Vec::new();
     for event in events {
         match &event.payload {
             AgentSessionEventPayload::SessionResumed {}
             | AgentSessionEventPayload::TurnEnd { .. } => {
                 // An interrupted session may contain tool calls without outcomes.
                 // Close their model protocol pairs without executing or asserting an outcome.
-                let mut pending = Vec::new();
-                for message in messages.iter() {
-                    match message {
-                        AgentSurfaceMessage::Assistant { content, .. } => {
-                            for block in content {
-                                if let AgentAssistantContentBlock::ToolCall { call } = block {
-                                    pending.push((call.call_id.clone(), call.name.clone()));
-                                }
-                            }
-                        }
-                        AgentSurfaceMessage::Tool { call_id, .. } => {
-                            pending.retain(|(id, _)| id != call_id)
-                        }
-                        _ => {}
-                    }
-                }
-                for (call_id, name) in pending {
+                for (call_id, name) in pending_calls.drain(..) {
                     synthetic_results.insert(call_id.clone(), messages.len());
                     messages.push(AgentSurfaceMessage::Tool {
                         call_id, name, status: AgentToolResultStatus::Cancelled,
@@ -291,6 +276,13 @@ fn append_surface_events<'a>(
                 replay,
                 ..
             } => {
+                pending_calls.extend(content.iter().filter_map(|block| {
+                    if let AgentAssistantContentBlock::ToolCall { call } = block {
+                        Some((call.call_id.clone(), call.name.clone()))
+                    } else {
+                        None
+                    }
+                }));
                 let mut content = content.clone();
                 for block in &mut content {
                     match block {
@@ -307,7 +299,7 @@ fn append_surface_events<'a>(
                     message_id: message_id.clone(),
                     content,
                     interrupted: *interrupted,
-                    replay: replay.clone(),
+                    replay: replay.clone().map(Box::new),
                 });
             }
             AgentSessionEventPayload::ToolResult {
@@ -318,6 +310,7 @@ fn append_surface_events<'a>(
                 data,
                 ..
             } => {
+                pending_calls.retain(|(id, _)| id != call_id);
                 let result = AgentSurfaceMessage::Tool {
                     call_id: call_id.clone(),
                     name: name.clone(),
