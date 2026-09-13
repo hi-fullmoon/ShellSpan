@@ -18,7 +18,9 @@ describe('slash skill menu', () => {
     expect(screen.queryByRole('button', { name: 'Skills' })).toBeNull();
     const editor = screen.getByRole('textbox');
     await user.type(editor, '/');
-    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(5));
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(builtinSkillPreview.entries.length));
+    expect(screen.getByRole('option', { name: /log-triage/ })).toBeVisible();
+    expect(screen.getByRole('option', { name: /incident-triage/ })).toBeVisible();
     expect(screen.queryByRole('dialog')).toBeNull(); expect(query).toHaveBeenCalledWith();
     await user.type(editor, 'net');
     expect(screen.getAllByRole('option')).toHaveLength(1); expect(query).toHaveBeenCalledTimes(1);

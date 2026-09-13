@@ -401,12 +401,14 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
   it('renders Agent sessions through the conversation-only surface', () => {
     const view = agentView();
+    expect(view.nodes.some((node) => node.kind === 'systemPrompt')).toBe(true);
     render(
       <AiWorkspaceRoot view={view} scope="terminal" />,
     );
 
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.getByRole('log', { name: 'AI conversation' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'System prompt' })).toBeNull();
     expect(screen.getAllByText('Check nginx and report evidence.')).not.toHaveLength(0);
 
   });

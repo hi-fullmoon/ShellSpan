@@ -501,7 +501,7 @@ pub(crate) fn project_history(
                         ModelContentBlock::Text { .. } => {}
                     }
                 }
-                let same_domain = match replay.as_ref() {
+                let same_domain = match replay.as_deref() {
                     Some(ReplayEnvelopeV5::Prepared {
                         adapter_id,
                         replay_format_version,
@@ -733,7 +733,7 @@ mod tests {
             let mut messages = vec![
                 ModelMessage::Assistant {
                     content: projected,
-                    replay: Some(envelope.clone()),
+                    replay: Some(Box::new(envelope.clone())),
                     native_replay: None,
                 },
                 ModelMessage::Tool {

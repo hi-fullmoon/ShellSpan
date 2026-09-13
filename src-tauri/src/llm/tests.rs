@@ -773,10 +773,7 @@ fn structured_assistant_and_tool_history_replays_in_committed_order() {
 
 #[tokio::test]
 async fn cross_domain_responses_wire_never_contains_old_native_state() {
-    let sse = concat!(
-        "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_new\",\"model\":\"model-a\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"READY\"}]}]}}\n\n"
-    )
-    .to_string();
+    let sse = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_new\",\"model\":\"model-a\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"READY\"}]}]}}\n\n".to_string();
     let (base_url, body_receiver, server) = serve_recording_sse(sse);
     let definition = crate::llm::catalog::fixture_definition(AiProviderKind::OpenAi, 8192);
     let source_snapshot = crate::llm::runtime::RequestSnapshot::Prepared {
@@ -880,7 +877,7 @@ async fn cross_domain_responses_wire_never_contains_old_native_state() {
                 messages: vec![
                     ModelMessage::Assistant {
                         content: untrusted_content,
-                        replay: Some(envelope),
+                        replay: Some(Box::new(envelope)),
                         native_replay: None,
                     },
                     ModelMessage::Tool {

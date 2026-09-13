@@ -2104,7 +2104,8 @@ fn append_payloads_locked(
     }
     derive_surface(&candidate.events)?;
     validate_record_final(&candidate)?;
-    let appended_bytes = encoded_events(&appended)?.len() as u64;
+    let encoded = encoded_events(&appended)?;
+    let appended_bytes = encoded.len() as u64;
     if total_log_bytes(&root)?
         .saturating_add(total_log_bytes(&archive_root)?)
         .saturating_add(appended_bytes)
@@ -2112,7 +2113,7 @@ fn append_payloads_locked(
     {
         return Err("Agent active and archived logs exceed the storage boundary".into());
     }
-    append_log_batch(&root, session_id, &appended)?;
+    append_log_batch(&root, session_id, &encoded)?;
     inner.sessions.insert(session_id.to_string(), candidate);
     Ok((appended, inner.publisher.clone()))
 }
@@ -3934,12 +3935,7 @@ fn write_new_log(
     result
 }
 
-fn append_log_batch(
-    root: &Path,
-    session_id: &str,
-    events: &[AgentSessionEvent],
-) -> Result<(), String> {
-    let encoded = encoded_events(events)?;
+fn append_log_batch(root: &Path, session_id: &str, encoded: &[u8]) -> Result<(), String> {
     let path = session_path(root, session_id);
     let metadata = fs::symlink_metadata(&path)
         .map_err(|error| format!("failed to inspect Agent session log: {error}"))?;
@@ -3947,9 +3943,7 @@ fn append_log_batch(
         return Err("Agent session log is not a regular file".into());
     }
     let original_len = metadata.len();
-    if original_len.saturating_add(encoded.len() as u64) > MAX_SESSION_LOG_BYTES
-        || total_log_bytes(root)?.saturating_add(encoded.len() as u64) > MAX_TOTAL_SESSION_LOG_BYTES
-    {
+    if original_len.saturating_add(encoded.len() as u64) > MAX_SESSION_LOG_BYTES {
         return Err("Agent session store exceeds its storage boundary".into());
     }
     let mut file = OpenOptions::new()
@@ -3957,7 +3951,7 @@ fn append_log_batch(
         .open(&path)
         .map_err(|error| format!("failed to open Agent session log: {error}"))?;
     restrict_open_file(&file)?;
-    if let Err(error) = file.write_all(&encoded).and_then(|()| file.sync_data()) {
+    if let Err(error) = file.write_all(encoded).and_then(|()| file.sync_data()) {
         let rollback = file.set_len(original_len).and_then(|()| file.sync_all());
         return match rollback {
             Ok(()) => Err(format!("failed to persist Agent session event: {error}")),

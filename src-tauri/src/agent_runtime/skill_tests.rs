@@ -95,7 +95,15 @@ async fn skill_builtin_rootless_local_remote_slash_model_permissions_and_replay(
         runtime.create_session(request.clone()).unwrap();
         let list = runtime.list_skills("builtin").await.unwrap();
         assert_eq!(list.status, "fresh");
-        assert_eq!(list.entries.len(), 5);
+        assert_eq!(
+            list.entries.len(),
+            crate::agent_runtime::builtin_skills::definitions().len()
+        );
+        assert!(list.entries.iter().any(|entry| entry.name == "log-triage"));
+        assert!(list
+            .entries
+            .iter()
+            .any(|entry| entry.name == "incident-triage"));
         assert_eq!(model.request_count(), 0);
         assert!(
             all_events(&runtime, "builtin")
@@ -126,18 +134,19 @@ async fn skill_builtin_rootless_local_remote_slash_model_permissions_and_replay(
             .unwrap();
         runtime.start("builtin", provider(), None).unwrap();
         idle_skill(&runtime, "builtin").await;
-        let requests = model.requests.lock().unwrap();
-        assert_eq!(requests.len(), 2);
-        let first = serde_json::to_string(&requests[0]).unwrap();
-        let second = serde_json::to_string(&requests[1]).unwrap();
-        assert!(first.contains("# System status"));
-        assert!(
-            !first.contains("# Docker diagnosis"),
-            "only invoked bodies enter the prompt"
-        );
-        assert!(second.contains("# Network diagnosis"));
-        assert!(second.contains(crate::agent_runtime::builtin_skills::PROVIDER));
-        drop(requests);
+        {
+            let requests = model.requests.lock().unwrap();
+            assert_eq!(requests.len(), 2);
+            let first = serde_json::to_string(&requests[0]).unwrap();
+            let second = serde_json::to_string(&requests[1]).unwrap();
+            assert!(first.contains("# System status"));
+            assert!(
+                !first.contains("# Docker diagnosis"),
+                "only invoked bodies enter the prompt"
+            );
+            assert!(second.contains("# Network diagnosis"));
+            assert!(second.contains(crate::agent_runtime::builtin_skills::PROVIDER));
+        }
         let events = all_events(&runtime, "builtin");
         assert!(events.iter().any(|e| matches!(&e.payload, AgentSessionEventPayload::ToolResult { name, status: AgentToolResultStatus::Completed, .. } if name == SKILL_TOOL)));
         assert_eq!(

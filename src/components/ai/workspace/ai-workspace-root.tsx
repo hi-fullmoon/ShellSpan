@@ -79,6 +79,10 @@ function omitApprovedMarkers(nodes: readonly AiConversationNode[]): readonly AiC
   });
 }
 
+function omitSystemPrompts(nodes: readonly AiConversationNode[]): readonly AiConversationNode[] {
+  return nodes.filter((node) => node.kind !== 'systemPrompt');
+}
+
 export interface AiWorkspaceRootProps {
   readonly mode?: 'ask' | 'agent';
   readonly imageControls?: React.ReactNode;
@@ -234,7 +238,6 @@ export function AiWorkspaceRoot({
   const taskSteps = view?.snapshot.kind === 'agent'
     ? view.snapshot.value.task.plan?.steps ?? []
     : [];
-  const hero = !sessionLoading && visibleNodes.length === 0 && status === 'idle' && composerState?.phase !== 'submitting';
   const resolvedTitle = title ?? view?.summary.title
     ?? sessions.find((summary) => summary.id === selectedSessionId)?.title
     ?? t(scope === 'workbench' ? 'ai.workbench.conversationTitle' : 'ai.newConversation');
@@ -248,10 +251,14 @@ export function AiWorkspaceRoot({
   const conversationNodes = useMemo(() => (
     surfaceMode === 'ask'
       ? askConversationNodes(visibleNodes)
-      : view?.snapshot.kind === 'agent' && view.snapshot.value.header.permissionMode === 'operator'
-        ? omitApprovedMarkers(visibleNodes)
-        : visibleNodes
+      : omitSystemPrompts(
+        view?.snapshot.kind === 'agent' && view.snapshot.value.header.permissionMode === 'operator'
+          ? omitApprovedMarkers(visibleNodes)
+          : visibleNodes,
+      )
   ), [surfaceMode, view?.snapshot, visibleNodes]);
+  const hero = !sessionLoading && conversationNodes.length === 0
+    && status === 'idle' && composerState?.phase !== 'submitting';
   const sessionLedgerKey = view ? sessionRouteKey(view.summary.kind, view.summary.id) : null;
   const scrollAnchor = sessionLedgerKey
     ? navigation.scrollAnchorBySession[sessionLedgerKey]

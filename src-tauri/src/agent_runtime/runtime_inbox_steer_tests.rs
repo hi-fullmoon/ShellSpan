@@ -13,6 +13,69 @@ fn queued_steer(runtime: &AgentRuntime, session_id: &str) -> AgentInboxMutationI
 }
 
 #[tokio::test]
+async fn turn_limit_does_not_count_a_steered_step_after_approval_as_a_new_turn() {
+    let mut command = response("");
+    command.finish_reason = ModelFinishReason::ToolCalls;
+    set_tool_calls(&mut command, vec![native_call("read", "list_directory")]);
+    let model = FakeAdapter::new(vec![
+        FakeScript::Wait {
+            response: Some(command),
+        },
+        reply("tool and steered instruction handled", &[]),
+    ]);
+    let native = RecordingNativeRuntime::new(true);
+    let (_root, runtime) = configured_with_native(
+        model.clone(),
+        AgentDriverConfig {
+            max_turns_per_session: 1,
+            ..AgentDriverConfig::default()
+        },
+        native,
+    );
+    let id = "steer-at-turn-limit";
+    create(&runtime, id);
+    runtime
+        .followup(id, "initial".into(), "inspect".into())
+        .unwrap();
+    runtime.start(id, provider(), None).unwrap();
+    model.started.notified().await;
+    runtime
+        .followup(id, "queued-steer".into(), "check one more thing".into())
+        .unwrap();
+    runtime.mutate_inbox(queued_steer(&runtime, id)).unwrap();
+    model.release.notify_one();
+    runtime.await_idle(id).await.unwrap();
+    runtime
+        .approve_tool(pending_approval(&runtime, id))
+        .await
+        .unwrap();
+    runtime.await_idle(id).await.unwrap();
+
+    let snapshot = runtime.session(id).unwrap();
+    assert_eq!(snapshot.status, AgentSessionStatus::Idle);
+    assert!(!snapshot.ended);
+    assert_eq!(model.request_count(), 2);
+    assert!(model.requests.lock().unwrap()[1].messages.iter().any(
+        |message| matches!(message, ModelMessage::User { content } if content == "check one more thing")
+    ));
+    let events = all_events(&runtime, id);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.payload, AgentSessionEventPayload::TurnStart))
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.payload, AgentSessionEventPayload::StepStart))
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
 async fn inbox_steer_uses_same_turn_next_step_without_cancelling_model_and_retry_does_not_wake() {
     let model = FakeAdapter::new(vec![
         FakeScript::Wait {

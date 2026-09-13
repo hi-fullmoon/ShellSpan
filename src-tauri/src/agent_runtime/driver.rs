@@ -23,6 +23,9 @@ pub(crate) struct AgentDriverConfig {
     /// No default step cap; explicit budgets may bound a turn.
     pub(crate) max_steps_per_turn: Option<usize>,
     pub(crate) max_turns_per_session: usize,
+    pub(crate) max_identical_tool_steps: usize,
+    pub(crate) max_model_tokens_per_session: u64,
+    pub(crate) max_active_duration_ms: u64,
     pub(crate) retry_policy: RetryPolicy,
 }
 
@@ -31,6 +34,9 @@ impl Default for AgentDriverConfig {
         Self {
             max_steps_per_turn: None,
             max_turns_per_session: 64,
+            max_identical_tool_steps: 6,
+            max_model_tokens_per_session: 2_000_000,
+            max_active_duration_ms: 60 * 60 * 1_000,
             retry_policy: RetryPolicy::default(),
         }
     }
@@ -92,6 +98,9 @@ async fn drive_agent_inner(
             max_turns_per_session: config
                 .max_turns_per_session
                 .min(subagent.budget.max_turns as usize),
+            max_identical_tool_steps: config.max_identical_tool_steps,
+            max_model_tokens_per_session: config.max_model_tokens_per_session,
+            max_active_duration_ms: config.max_active_duration_ms,
             retry_policy: config.retry_policy,
         }
     } else {
@@ -126,7 +135,7 @@ async fn drive_agent_inner(
             entry.set_phase(AgentLifecyclePhase::Stopping)?;
             return Ok(AgentDriverSettlement::Failed);
         }
-        let completed_turns = all_events
+        let started_turns = all_events
             .iter()
             .rev()
             .take_while(|event| {
@@ -135,7 +144,34 @@ async fn drive_agent_inner(
             .filter(|event| matches!(event.payload, AgentSessionEventPayload::TurnStart))
             .count();
         let snapshot = sessions.snapshot(&entry.session_id)?;
-        if completed_turns >= config.max_turns_per_session
+        let existing_scope = entry.scope()?;
+        if let Some(scope) = &existing_scope {
+            if scope.step_id.is_none()
+                && !snapshot
+                    .inbox
+                    .next_step
+                    .iter()
+                    .any(|message| message.source.kind == super::AgentMessageSourceKind::User)
+                && config.max_identical_tool_steps > 0
+                && identical_tool_step_streak(&all_events, &scope.turn_id)
+                    >= config.max_identical_tool_steps
+            {
+                let reason = format!(
+                    "noProgress: {} identical tool steps produced no new evidence",
+                    config.max_identical_tool_steps
+                );
+                close_open_scope(sessions, entry, &reason)?;
+                if !snapshot.inbox.next_turn.is_empty() {
+                    continue;
+                }
+                sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
+                entry.set_phase(AgentLifecyclePhase::Stopping)?;
+                return Ok(AgentDriverSettlement::Failed);
+            }
+        }
+        // A waiting tool/question can resume inside the already admitted Turn.
+        if existing_scope.is_none()
+            && started_turns >= config.max_turns_per_session
             && (!snapshot.inbox.next_turn.is_empty() || !snapshot.inbox.next_step.is_empty())
         {
             let reason = format!(
@@ -147,7 +183,6 @@ async fn drive_agent_inner(
             return Ok(AgentDriverSettlement::Failed);
         }
 
-        let existing_scope = entry.scope()?;
         // Descendant cancellation may still be joining. Never claim another
         // queued turn after the user has requested a stop.
         if existing_scope.is_none() && !entry.is_admitting() {
@@ -291,6 +326,34 @@ async fn drive_agent_inner(
             if entry.cancellation().is_cancelled() {
                 close_open_scope(sessions, entry, "cancelled")?;
                 return Ok(AgentDriverSettlement::Cancelled);
+            }
+            if continue_after_tools
+                && config.max_identical_tool_steps > 0
+                && !sessions
+                    .snapshot(&entry.session_id)?
+                    .inbox
+                    .next_step
+                    .iter()
+                    .any(|message| message.source.kind == super::AgentMessageSourceKind::User)
+                && identical_tool_step_streak(&sessions.all_events(&entry.session_id)?, &turn_id)
+                    >= config.max_identical_tool_steps
+            {
+                let reason = format!(
+                    "noProgress: {} identical tool steps produced no new evidence",
+                    config.max_identical_tool_steps
+                );
+                close_open_scope(sessions, entry, &reason)?;
+                if !sessions
+                    .snapshot(&entry.session_id)?
+                    .inbox
+                    .next_turn
+                    .is_empty()
+                {
+                    break;
+                }
+                sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
+                entry.set_phase(AgentLifecyclePhase::Stopping)?;
+                return Ok(AgentDriverSettlement::Failed);
             }
             if !continue_after_tools
                 && sessions.end_turn_if_no_step_input(&entry.session_id, &turn_id)?
@@ -535,6 +598,10 @@ async fn run_step(
         if entry.cancellation().is_cancelled() {
             return Ok(StepSettlement::Cancelled);
         }
+        let task_events = sessions.all_events(&entry.session_id)?;
+        if let Some(reason) = task_budget_failure(&task_events, config)? {
+            return Ok(StepSettlement::Failed(reason));
+        }
         let request_id = format!("request-{}", Uuid::new_v4().simple());
         if let Some(pending) = pending_retry.take() {
             cumulative_delay_ms = cumulative_delay_ms.saturating_add(pending.plan.delay_ms);
@@ -643,6 +710,15 @@ async fn run_step(
                     "complete Skill input exceeds model budget".into(),
                 ));
             }
+        }
+        let projected_tokens = consumed_model_tokens(&sessions.all_events(&entry.session_id)?)
+            .saturating_add(budget.estimated_input_tokens)
+            .saturating_add(budget.output_reserve_tokens);
+        if projected_tokens > config.max_model_tokens_per_session {
+            return Ok(StepSettlement::Failed(format!(
+                "taskTokenBudgetExceeded: maximum {} estimated model tokens",
+                config.max_model_tokens_per_session
+            )));
         }
         if prepared_call.is_none() {
             prepared_call = Some(model.prepare_request(request, "step", &entry.cancellation())?);
@@ -944,6 +1020,180 @@ fn model_tools_for(entry: &AgentEntry) -> Vec<super::ModelToolDefinition> {
                 || scope.tool_names.iter().any(|name| name == &tool.name)
         })
         .collect()
+}
+
+fn current_unix_ms() -> Result<u64, String> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "system clock is before the Unix epoch".to_string())?
+        .as_millis() as u64)
+}
+
+fn current_task_events(events: &[super::AgentSessionEvent]) -> &[super::AgentSessionEvent] {
+    let start = events
+        .iter()
+        .rposition(|event| matches!(event.payload, AgentSessionEventPayload::SessionResumed {}))
+        .map_or(0, |index| index + 1);
+    &events[start..]
+}
+
+fn consumed_model_tokens(events: &[super::AgentSessionEvent]) -> u64 {
+    current_task_events(events)
+        .iter()
+        .filter_map(|event| match &event.payload {
+            AgentSessionEventPayload::RequestContext { input_tokens, .. } => *input_tokens,
+            AgentSessionEventPayload::RequestUsage { usage, .. } => usage.output_tokens,
+            _ => None,
+        })
+        .fold(0_u64, u64::saturating_add)
+}
+
+fn active_duration_ms(events: &[super::AgentSessionEvent], now: u64) -> u64 {
+    let mut running_since = None;
+    let mut total = 0_u64;
+    for event in current_task_events(events) {
+        if let AgentSessionEventPayload::AgentStatus { status, .. } = event.payload {
+            if status == AgentSessionStatus::Running {
+                running_since.get_or_insert(event.time_unix_ms);
+            } else if let Some(start) = running_since.take() {
+                total = total.saturating_add(event.time_unix_ms.saturating_sub(start));
+            }
+        }
+    }
+    if let Some(start) = running_since {
+        total = total.saturating_add(now.saturating_sub(start));
+    }
+    total
+}
+
+fn task_budget_failure(
+    events: &[super::AgentSessionEvent],
+    config: AgentDriverConfig,
+) -> Result<Option<String>, String> {
+    if consumed_model_tokens(events) >= config.max_model_tokens_per_session {
+        return Ok(Some(format!(
+            "taskTokenBudgetExceeded: maximum {} estimated model tokens",
+            config.max_model_tokens_per_session
+        )));
+    }
+    if active_duration_ms(events, current_unix_ms()?) >= config.max_active_duration_ms {
+        return Ok(Some(format!(
+            "taskActiveTimeExceeded: maximum {} active ms",
+            config.max_active_duration_ms
+        )));
+    }
+    Ok(None)
+}
+
+fn identical_tool_step_streak(events: &[super::AgentSessionEvent], turn_id: &str) -> usize {
+    let mut expected = None;
+    let mut streak = 0;
+    let mut newer_had_user_or_plan = false;
+    for event in events.iter().rev() {
+        if event.turn_id.as_deref() != Some(turn_id) {
+            continue;
+        }
+        let AgentSessionEventPayload::StepEnd { reason } = &event.payload else {
+            continue;
+        };
+        if reason != "toolsCompleted" || (streak > 0 && newer_had_user_or_plan) {
+            break;
+        }
+        let Some(step_id) = event.step_id.as_deref() else {
+            break;
+        };
+        let Some((signature, had_user_or_plan)) = tool_step_signature(events, step_id) else {
+            break;
+        };
+        if expected
+            .as_ref()
+            .is_some_and(|previous| previous != &signature)
+        {
+            break;
+        }
+        expected = Some(signature);
+        newer_had_user_or_plan = had_user_or_plan;
+        streak += 1;
+    }
+    streak
+}
+
+fn tool_step_signature(
+    events: &[super::AgentSessionEvent],
+    step_id: &str,
+) -> Option<(Vec<serde_json::Value>, bool)> {
+    let step_events = events
+        .iter()
+        .filter(|event| event.step_id.as_deref() == Some(step_id))
+        .collect::<Vec<_>>();
+    let had_user_or_plan = step_events.iter().any(|event| match &event.payload {
+        AgentSessionEventPayload::UserMessage { message } => {
+            message.source.kind == super::AgentMessageSourceKind::User
+        }
+        AgentSessionEventPayload::TaskPlan { .. }
+        | AgentSessionEventPayload::TaskEvidence { .. } => true,
+        AgentSessionEventPayload::ToolApproval {
+            status: super::AgentToolApprovalStatus::Approved,
+            approval_id: Some(_),
+            ..
+        }
+        | AgentSessionEventPayload::QuestionAnswered { .. } => true,
+        _ => false,
+    });
+    let mut signature = Vec::new();
+    for event in &step_events {
+        let AgentSessionEventPayload::ToolCall { call } = &event.payload else {
+            continue;
+        };
+        let result = step_events
+            .iter()
+            .find_map(|candidate| match &candidate.payload {
+                AgentSessionEventPayload::ToolResult {
+                    call_id,
+                    name,
+                    status,
+                    summary,
+                    data,
+                    ..
+                } if call_id == &call.call_id => Some((name, status, summary, data)),
+                _ => None,
+            })?;
+        signature.push(serde_json::json!([
+            call.name,
+            call.arguments,
+            call.target.as_ref().map(|target| &target.target_id),
+            result.0,
+            result.1,
+            result.2,
+            result.3.as_ref().map(normalize_tool_data),
+        ]));
+    }
+    (!signature.is_empty()).then_some((signature, had_user_or_plan))
+}
+
+fn normalize_tool_data(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(fields) => serde_json::Value::Object(
+            fields
+                .iter()
+                .filter(|(key, _)| {
+                    !matches!(
+                        key.as_str(),
+                        "callId"
+                            | "processHandle"
+                            | "durationMs"
+                            | "startedAtUnixMs"
+                            | "completedAtUnixMs"
+                    )
+                })
+                .map(|(key, value)| (key.clone(), normalize_tool_data(value)))
+                .collect(),
+        ),
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(normalize_tool_data).collect())
+        }
+        _ => value.clone(),
+    }
 }
 
 fn subagent_budget_failure(
@@ -1566,6 +1816,158 @@ pub(crate) fn recover_open_scope(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn event(
+        time_unix_ms: u64,
+        payload: AgentSessionEventPayload,
+    ) -> super::super::AgentSessionEvent {
+        super::super::AgentSessionEvent {
+            version: super::super::AGENT_SESSION_EVENT_VERSION,
+            session_id: "budget-test".into(),
+            seq: time_unix_ms,
+            time_unix_ms,
+            turn_id: None,
+            step_id: None,
+            payload,
+        }
+    }
+
+    #[test]
+    fn task_budget_excludes_waiting_and_idle_time_and_resets_on_explicit_resume() {
+        let events = vec![
+            event(
+                100,
+                AgentSessionEventPayload::AgentStatus {
+                    status: AgentSessionStatus::Running,
+                    reason: None,
+                },
+            ),
+            event(
+                200,
+                AgentSessionEventPayload::AgentStatus {
+                    status: AgentSessionStatus::Waiting,
+                    reason: None,
+                },
+            ),
+            event(
+                1_000,
+                AgentSessionEventPayload::AgentStatus {
+                    status: AgentSessionStatus::Running,
+                    reason: None,
+                },
+            ),
+            event(
+                1_200,
+                AgentSessionEventPayload::AgentStatus {
+                    status: AgentSessionStatus::Idle,
+                    reason: None,
+                },
+            ),
+            event(
+                1_300,
+                AgentSessionEventPayload::RequestContext {
+                    request_id: "request-1".into(),
+                    input_tokens: Some(40),
+                    context_window: None,
+                    system_tokens: None,
+                    tool_schema_tokens: None,
+                    message_tokens: None,
+                    surface_generation: 0,
+                    limited: None,
+                    omitted_messages: None,
+                },
+            ),
+            event(
+                1_400,
+                AgentSessionEventPayload::RequestUsage {
+                    request_id: "request-1".into(),
+                    usage: AgentTokenUsage {
+                        output_tokens: Some(10),
+                        ..AgentTokenUsage::default()
+                    },
+                    finish_reason: AgentStopReason::Stop,
+                },
+            ),
+        ];
+        assert_eq!(active_duration_ms(&events, 10_000), 300);
+        assert_eq!(consumed_model_tokens(&events), 50);
+        let mut resumed = events;
+        resumed.push(event(10_100, AgentSessionEventPayload::SessionResumed {}));
+        assert_eq!(active_duration_ms(&resumed, 10_200), 0);
+        assert_eq!(consumed_model_tokens(&resumed), 0);
+    }
+
+    fn repeated_step(
+        step_id: &str,
+        call_id: &str,
+        output: &str,
+        user_input: bool,
+        at: u64,
+    ) -> Vec<super::super::AgentSessionEvent> {
+        let mut payloads = Vec::new();
+        if user_input {
+            payloads.push(AgentSessionEventPayload::UserMessage {
+                message: AgentInboxMessage {
+                    images: Vec::new(),
+                    message_id: format!("message-{step_id}"),
+                    client_submission_id: None,
+                    content: "check again".into(),
+                    source: AgentMessageSource::user(),
+                },
+            });
+        }
+        payloads.extend([
+            AgentSessionEventPayload::ToolCall {
+                call: super::super::RecordedToolCall {
+                    call_id: call_id.into(),
+                    provider_call_id: None,
+                    name: "run_terminal_command".into(),
+                    native_name: Some("exec_command".into()),
+                    arguments: serde_json::json!({"command": "df -h"}),
+                    title: None,
+                    effect: None,
+                    target: None,
+                },
+            },
+            AgentSessionEventPayload::ToolResult {
+                call_id: call_id.into(),
+                name: "run_terminal_command".into(),
+                status: super::super::AgentToolResultStatus::Completed,
+                summary: "command completed".into(),
+                data: Some(serde_json::json!({
+                    "stdout": output,
+                    "callId": call_id,
+                    "processHandle": format!("process-{call_id}"),
+                })),
+                duration_ms: Some(10),
+                evidence_refs: vec![format!("evidence-{call_id}")],
+            },
+            AgentSessionEventPayload::StepEnd {
+                reason: "toolsCompleted".into(),
+            },
+        ]);
+        payloads
+            .into_iter()
+            .enumerate()
+            .map(|(index, payload)| {
+                let mut event = event(at + index as u64, payload);
+                event.turn_id = Some("turn-1".into());
+                event.step_id = Some(step_id.into());
+                event
+            })
+            .collect()
+    }
+
+    #[test]
+    fn repeated_tool_streak_resets_on_new_observation_or_user_input() {
+        let mut events = repeated_step("step-1", "call-1", "80%", false, 10);
+        events.extend(repeated_step("step-2", "call-2", "80%", false, 20));
+        assert_eq!(identical_tool_step_streak(&events, "turn-1"), 2);
+        events.extend(repeated_step("step-3", "call-3", "81%", false, 30));
+        assert_eq!(identical_tool_step_streak(&events, "turn-1"), 1);
+        events.extend(repeated_step("step-4", "call-4", "81%", true, 40));
+        assert_eq!(identical_tool_step_streak(&events, "turn-1"), 1);
+    }
 
     #[test]
     fn model_error_reasons_preserve_typed_terminal_classes() {

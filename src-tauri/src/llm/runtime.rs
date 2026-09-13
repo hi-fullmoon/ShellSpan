@@ -263,6 +263,38 @@ impl LlmRuntime {
 }
 
 #[cfg(test)]
+pub(crate) fn fixture_route(provider: &AiProviderConfig) -> ProviderRoute {
+    let selection = ModelSelection {
+        route_id: provider.id.clone(),
+        model_id: provider.model.clone(),
+        reasoning_effort: provider.reasoning_effort.clone(),
+    };
+    ProviderRoute {
+        id: provider.id.clone(),
+        revision: 1,
+        display_name: provider.id.clone(),
+        adapter_id: adapter_id(provider.kind).into(),
+        base_url: provider.base_url.clone(),
+        auth: if provider.requires_api_key {
+            RouteAuth::Keychain {
+                reference: "fixture".into(),
+            }
+        } else {
+            RouteAuth::None
+        },
+        replay_domain_id: format!("fixture-domain-{}", provider.id),
+        preset_id: provider.profile.clone(),
+        models: provider.model_definition.clone().map(|definition| {
+            std::collections::BTreeMap::from([(provider.model.clone(), definition)])
+        }),
+        model_overrides: None,
+        defaults: Some(selection),
+        retry_policy: provider.retry_policy.unwrap_or_default(),
+        timeouts: RouteTimeouts::default(),
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -394,37 +426,5 @@ mod tests {
         assert_ne!(ids(&first), ids(&second));
         assert_ne!(ids(&first)[0], ids(&first)[1]);
         assert!(ids(&second).iter().all(|id| id.len() <= 128));
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn fixture_route(provider: &AiProviderConfig) -> ProviderRoute {
-    let selection = ModelSelection {
-        route_id: provider.id.clone(),
-        model_id: provider.model.clone(),
-        reasoning_effort: provider.reasoning_effort.clone(),
-    };
-    ProviderRoute {
-        id: provider.id.clone(),
-        revision: 1,
-        display_name: provider.id.clone(),
-        adapter_id: adapter_id(provider.kind).into(),
-        base_url: provider.base_url.clone(),
-        auth: if provider.requires_api_key {
-            RouteAuth::Keychain {
-                reference: "fixture".into(),
-            }
-        } else {
-            RouteAuth::None
-        },
-        replay_domain_id: format!("fixture-domain-{}", provider.id),
-        preset_id: provider.profile.clone(),
-        models: provider.model_definition.clone().map(|definition| {
-            std::collections::BTreeMap::from([(provider.model.clone(), definition)])
-        }),
-        model_overrides: None,
-        defaults: Some(selection),
-        retry_policy: provider.retry_policy.unwrap_or_default(),
-        timeouts: RouteTimeouts::default(),
     }
 }

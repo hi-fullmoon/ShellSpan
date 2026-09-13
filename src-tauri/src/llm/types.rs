@@ -57,7 +57,7 @@ pub(crate) enum ModelMessage {
     Assistant {
         content: Vec<ModelContentBlock>,
         #[serde(skip)]
-        replay: Option<super::replay::ReplayEnvelopeV5>,
+        replay: Option<Box<super::replay::ReplayEnvelopeV5>>,
         #[serde(skip)]
         native_replay: Option<Value>,
     },

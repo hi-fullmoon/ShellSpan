@@ -505,7 +505,8 @@ async fn question_real_http_resume_uses_current_credentials_and_original_tool_hi
     };
     let database = crate::db::Database::open(&root.path().join("test-ai-settings.db")).unwrap();
     let credentials = crate::keychain::CredentialManager::in_memory_for_tests();
-    let routes = crate::llm::routes::RouteStore::open(database.clone(), credentials.clone()).unwrap();
+    let routes =
+        crate::llm::routes::RouteStore::open(database.clone(), credentials.clone()).unwrap();
     let selection = crate::llm::routes::ModelSelection {
         route_id: provider.id.clone(),
         model_id: provider.model.clone(),
@@ -517,7 +518,9 @@ async fn question_real_http_resume_uses_current_credentials_and_original_tool_hi
         display_name: "Question route".into(),
         adapter_id: "chat-completions".into(),
         base_url: provider.base_url.clone(),
-        auth: crate::llm::routes::RouteAuth::Keychain { reference: "pending".into() },
+        auth: crate::llm::routes::RouteAuth::Keychain {
+            reference: "pending".into(),
+        },
         replay_domain_id: "pending".into(),
         preset_id: "generic".into(),
         models: Some(std::collections::BTreeMap::from([(
@@ -529,16 +532,19 @@ async fn question_real_http_resume_uses_current_credentials_and_original_tool_hi
         retry_policy: Default::default(),
         timeouts: Default::default(),
     };
-    routes.save(
-        vec![route],
-        Some(selection),
-        1,
-        std::collections::BTreeMap::from([(
-            provider.id.clone(),
-            "initial-fixture-key".into(),
-        )]),
-    ).unwrap();
-    runtime.configure_llm(crate::llm::runtime::LlmRuntime { routes: routes.clone() }).unwrap();
+    routes
+        .save(
+            vec![route],
+            Some(selection),
+            1,
+            std::collections::BTreeMap::from([(provider.id.clone(), "initial-fixture-key".into())]),
+        )
+        .unwrap();
+    runtime
+        .configure_llm(crate::llm::runtime::LlmRuntime {
+            routes: routes.clone(),
+        })
+        .unwrap();
     runtime
         .start("wire", provider.clone(), Some("initial-fixture-key".into()))
         .unwrap();
@@ -546,12 +552,20 @@ async fn question_real_http_resume_uses_current_credentials_and_original_tool_hi
     let input = answer(&runtime, "wire");
     drop(runtime);
     let first = routes.snapshot().unwrap();
-    routes.save(first.routes.clone(), first.default_selection.clone(), first.revision,
-        std::collections::BTreeMap::from([(provider.id.clone(), "rotated-fixture-key".into())])).unwrap();
+    routes
+        .save(
+            first.routes.clone(),
+            first.default_selection.clone(),
+            first.revision,
+            std::collections::BTreeMap::from([(provider.id.clone(), "rotated-fixture-key".into())]),
+        )
+        .unwrap();
     let restored = AgentRuntimeBuilder::new().build();
     restored.configure(root.path().to_path_buf()).unwrap();
     let reopened = crate::llm::routes::RouteStore::open(database, credentials).unwrap();
-    restored.configure_llm(crate::llm::runtime::LlmRuntime { routes: reopened }).unwrap();
+    restored
+        .configure_llm(crate::llm::runtime::LlmRuntime { routes: reopened })
+        .unwrap();
     restored.answer_question(input.clone(), None).unwrap();
     idle(&restored, "wire").await;
     let bodies = tokio::time::timeout(std::time::Duration::from_secs(5), server)

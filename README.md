@@ -14,6 +14,12 @@ ShellSpan 是一款面向远程运维的桌面 SSH 客户端，将终端、SFTP 
 - **运维工作台**：本机与远程监控、日志筛选与导出、设置中心和自动更新
 - **终端 Agent**：在当前终端会话中通过结构化工具调用执行任务，并提供分级审批、停止和敏感信息脱敏
 
+内置运维 Skill 覆盖系统巡检、服务排查、网络排查、磁盘清理分析、Docker 排查，以及应用日志排查（`/log-triage`）和故障首轮分诊（`/incident-triage`）。Skill 只提供排查流程，不扩大工具权限。
+
+Agent 调用工作区配置的 MCP stdio 服务时，仅传入 PATH、HOME、临时目录等运行所需环境变量。服务需要的密钥应通过 `.shellspan/mcp.json` 的 `credentialRefs` 显式引用系统钥匙串，不能依赖 ShellSpan 进程继承的密钥环境变量。
+
+Agent 在同一轮中连续 6 个工具步骤的调用和结果相同时，会在下一步前停止自动续步并标记无进展。每次显式恢复之间，模型请求累计预算为 200 万估算 token、活跃运行时间为 60 分钟；审批等待和空闲时间不计入活跃时间。达到预算后会在下一次模型请求前记录具体原因，用户可检查结果后再恢复会话。
+
 ## 技术栈
 
 React 19、TypeScript、Vite、Tailwind CSS 4、xterm.js、Zustand、Tauri 2 和 Rust。

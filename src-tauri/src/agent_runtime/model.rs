@@ -97,6 +97,7 @@ impl ModelRequest {
 }
 
 #[derive(Clone)]
+#[cfg_attr(not(test), derive(Default))]
 pub(crate) struct ModelRegistry {
     #[cfg(test)]
     factory: Arc<dyn ModelAdapterFactory>,
@@ -107,6 +108,7 @@ pub(crate) struct ModelRegistry {
     pub(crate) images: super::images::ImageStore,
 }
 
+#[cfg(test)]
 impl Default for ModelRegistry {
     fn default() -> Self {
         Self {
