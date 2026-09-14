@@ -9,6 +9,8 @@ import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import type { LocaleKey } from '@/locales';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 
 type Translate = ReturnType<typeof useI18n>['t'];
 type FooterLabel = Extract<LocaleKey, `ai.workspace.turnFooter.${string}`> extends
@@ -74,7 +76,13 @@ function StatPopover({ icon, label, title, total, children }: {
 
 export function AiTurnFooter({ node }: { readonly node: AiConversationNodeOf<'turnTail'> }) {
   const { t, locale } = useI18n();
+  const routes = useLlmRoutesStore((state) => state.snapshot?.routes);
+  const providers = useAiSettingsStore((state) => state.providers);
   const { stats } = node;
+  const providerName = (providerId: string): string => routes?.find((route) => route.id === providerId)
+    ?.displayName.trim()
+    || providers.find((provider) => provider.id === providerId)?.name.trim()
+    || providerId;
   const label = (key: FooterLabel): string => (
     t(`ai.workspace.turnFooter.${key}`)
   );
@@ -110,7 +118,7 @@ export function AiTurnFooter({ node }: { readonly node: AiConversationNodeOf<'tu
             <dl className="ai-turn-stat-details mt-2.5 mb-0.5 grid gap-[7px]">
               {!!node.models?.length && <StatDetail stat="models" label={label('models')}
                 value={node.models.map(({ providerId, model }) => (
-                  <span key={JSON.stringify([providerId, model])}>{providerId}/{model}</span>
+                  <span key={JSON.stringify([providerId, model])}>{providerName(providerId)}/{model}</span>
                 ))} />}
               <StatDetail stat="cacheHit" label={label('cacheHit')} value={cacheHit} />
               <StatDetail stat="uncachedInput" label={label('uncachedInput')} value={tokens(stats.uncachedInputTokens)} />

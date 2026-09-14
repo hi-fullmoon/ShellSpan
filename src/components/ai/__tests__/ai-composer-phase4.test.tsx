@@ -104,6 +104,13 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(retryTurn).toHaveBeenCalledOnce();
   });
 
+  it('aligns the unavailable icon and copy with a compact gap', () => {
+    render(<AiComposerSeat phase="active" status="idle" unavailableReason="Connect a terminal" />);
+    const notice = screen.getByRole('status', { name: 'Agent is unavailable' });
+    expect(notice).toHaveClass('flex', 'items-center', 'gap-x-1');
+    expect(notice.querySelector('svg')).toHaveClass('shrink-0');
+  });
+
   it('offers a separate new-terminal continuation when a safe replacement is available', async () => {
     const user = userEvent.setup();
     const continueTask = vi.fn();

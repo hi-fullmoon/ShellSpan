@@ -26,9 +26,18 @@ export function AiWorkspaceController({
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
   const session = controller.view?.snapshot.value;
   const modelSettingsLocked = controller.settingsBusy || !controller.canStartAgent
-    || Boolean(session?.archived || session?.header.subagent);
+    || controller.readOnlySession || Boolean(session?.archived || session?.header.subagent);
   const runtimeSettingsLocked = modelSettingsLocked || Boolean(session?.ended)
     || ['completed', 'cancelled', 'failed'].includes(controller.view?.status ?? 'idle');
+  const executionSurfaceLocked = modelSettingsLocked
+    || controller.composer.phase === 'submitting'
+    || controller.composer.phase === 'stopping'
+    || (controller.view
+      ? controller.view.status === 'running'
+        || controller.view.status === 'waiting'
+        || Boolean(controller.view.snapshot.value.uncertainNativeEffects)
+        || Boolean(controller.view.pendingApproval || controller.view.pendingQuestion)
+      : Boolean(controller.composer.sessionId));
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
   return (
     <AiWorkspaceRoot
@@ -63,6 +72,8 @@ export function AiWorkspaceController({
       renameError={controller.renameError}
       canStartAgent={controller.canStartAgent}
       agentUnavailableReason={controller.agentUnavailableReason}
+      historyScopeLabel={controller.historyScopeLabel}
+      readOnlySession={controller.readOnlySession}
       providerLabel={controller.providerLabel}
       modelLabel={controller.modelLabel}
       modelControl={(
@@ -87,7 +98,7 @@ export function AiWorkspaceController({
         ? (
           <AgentExecutionSurfaceSelector
               surface={controller.selectedExecutionSurface}
-              disabled={runtimeSettingsLocked || Boolean(controller.composer.sessionId || controller.view)}
+              disabled={executionSurfaceLocked}
               onSurfaceChange={controller.selectExecutionSurface}
             />
           )
@@ -97,6 +108,9 @@ export function AiWorkspaceController({
       onStop={controller.stop}
       onRetryTurn={controller.retryTurn}
       onContinueOnReconnectedTerminal={controller.continueOnReconnectedTerminal ?? undefined}
+      onContinueHistoricalSession={controller.continueHistoricalSession ?? undefined}
+      historicalContinuationBusy={controller.historicalContinuationBusy}
+      historicalContinuationError={controller.historicalContinuationError}
       onBusyPreferenceChange={controller.setBusyPreference}
       onRetryFailedDraft={controller.retryFailedDraft}
       onDismissError={controller.dismissError}

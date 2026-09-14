@@ -190,7 +190,7 @@ export function AiQuestionPanel({
                       {currentQuestion.options.map((option, optionIndex) => (
                         <ToggleGroupItem
                           key={option.label}
-                          className="ai-question-option relative h-auto min-h-8 w-full max-w-full shrink justify-start gap-[7px] px-[5px] py-[3px] text-left whitespace-normal"
+                          className="ai-question-option relative h-auto min-h-8 w-full max-w-full shrink items-start justify-start gap-[7px] px-[5px] py-[3px] text-left whitespace-normal"
                           value={option.label}
                           disabled={pending}
                           aria-label={option.label}
@@ -202,17 +202,19 @@ export function AiQuestionPanel({
                           >
                             {optionIndex + 1}
                           </Badge>
-                          <span className="ai-question-option-copy flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 max-[421px]:flex-wrap">
-                            <span className="ai-question-option-heading shrink-0">
-                              {option.label.replace(recommendedSuffix, '')}
+                          <span className="ai-question-option-copy flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                            <span className="flex min-w-0 max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                              <span className="ai-question-option-heading">
+                                {option.label.replace(recommendedSuffix, '')}
+                              </span>
+                              {recommendedSuffix.test(option.label) && (
+                                <Badge variant="secondary" size="sm">
+                                  {t('ai.workspace.question.recommended')}
+                                </Badge>
+                              )}
                             </span>
-                            {recommendedSuffix.test(option.label) && (
-                              <Badge variant="secondary" size="sm">
-                                {t('ai.workspace.question.recommended')}
-                              </Badge>
-                            )}
                             {option.description && (
-                              <span className="ai-question-option-description min-w-0 max-[421px]:basis-full">
+                              <span className="ai-question-option-description min-w-0 w-full">
                                 {option.description}
                               </span>
                             )}

@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   PlusIcon,
   ServerIcon,
-  Trash2Icon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,7 +9,6 @@ import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Field } from '@/components/ui/field';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
@@ -18,9 +16,9 @@ import type { LocaleKey } from '@/locales';
 import {
   invokeArchiveAgentRuntimeSession,
   invokeCancelAgentRuntime,
-  invokeListAgentRuntimeSessions,
   isTauriRuntime,
 } from '@/lib/ipc/tauri';
+import { listAllAgentSessionRecords } from '@/lib/ai/session-records';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
@@ -37,6 +35,7 @@ import {
   QwenBrandIcon,
 } from './provider-brand-icons';
 import { ProviderSetupDialog } from './provider-setup-dialog';
+import { AiSessionRecordsDialog } from './ai-session-records-dialog';
 import { SettingRow, SettingsGroup } from '@/components/workbench/settings-layout';
 
 const PRESET_DESCRIPTION_KEYS: Record<AiProviderPreset, LocaleKey> = {
@@ -90,6 +89,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [agentActionBusy, setAgentActionBusy] = useState(false);
   const [clearAgentOpen, setClearAgentOpen] = useState(false);
+  const [recordsOpen, setRecordsOpen] = useState(false);
   const routeSnapshot=useLlmRoutesStore(state=>state.snapshot);
   const modelsByRoute=useLlmRoutesStore(state=>state.modelsByRoute);
   const hydrateRoutes=useLlmRoutesStore(state=>state.hydrate);
@@ -141,7 +141,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
     setClearAgentOpen(false);
     try {
       const sessions = isTauriRuntime()
-        ? (await invokeListAgentRuntimeSessions({ limit: 512 })).sessions
+        ? await listAllAgentSessionRecords()
         : [];
       for (const session of sessions.filter((item) => !item.archived)) {
         if (!session.ended) {
@@ -266,9 +266,22 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       </SettingsGroup>
 
       <SettingsGroup
-        title={t('settings.ai.agent.title')}
-        titleId="terminal-agent-heading"
+        title={t('settings.ai.records.title')}
+        titleId="ai-conversation-records-heading"
       >
+        <SettingRow
+          label={t('settings.ai.records.localData')}
+          description={t('settings.ai.records.description')}
+        >
+          <Button
+            className="w-full @min-[32rem]:w-auto"
+            variant="outline"
+            size="sm"
+            onClick={() => setRecordsOpen(true)}
+          >
+            {t('settings.ai.records.manage')}
+          </Button>
+        </SettingRow>
         <SettingRow
           label={t('settings.ai.agent.localData')}
           description={t('settings.ai.agent.localDataDescription')}
@@ -280,11 +293,12 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
             disabled={agentActionBusy}
             onClick={() => setClearAgentOpen(true)}
           >
-            {agentActionBusy ? <Spinner data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
             {t('settings.ai.agent.clearSessions')}
           </Button>
         </SettingRow>
       </SettingsGroup>
+
+      {recordsOpen && <AiSessionRecordsDialog onOpenChange={setRecordsOpen} />}
 
       <ProviderSetupDialog
         open={addOpen}

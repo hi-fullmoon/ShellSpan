@@ -113,4 +113,15 @@ describe('AiSessionHeader', () => {
 
     expect(screen.getByRole('button', { name: 'Filter sessions' })).toHaveClass('h-7');
   });
+
+  it('identifies the current login above terminal history', () => {
+    render(
+      <AiSessionBrowser compact scopeLabel="root@175.178.66.45:22"
+        sessions={[]} loading={false} error={null} archivingId={null}
+        onBack={vi.fn()} onNew={vi.fn()} onOpen={vi.fn()} onArchive={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText('Current login: root@175.178.66.45:22'))
+      .toHaveTextContent('root@175.178.66.45:22');
+  });
 });

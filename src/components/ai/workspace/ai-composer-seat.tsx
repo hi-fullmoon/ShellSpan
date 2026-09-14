@@ -401,6 +401,8 @@ export function AiComposerSeat({
             />
             {imageControls && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0 px-3">{imageControls}</InputGroupAddon>}
             <InputGroupAddon align="block-end" className="ai-composer-toolbar min-h-10.5 min-w-0 justify-between gap-3 px-2 pt-0.5 pb-1.5 @max-[400px]/ai-workspace:gap-1 @max-[400px]/ai-workspace:px-[7px]" onClick={event => {
+              // Portal menu clicks bubble through React without occurring inside the toolbar.
+              if (!event.currentTarget.contains(event.target as Node)) return;
               if (!(event.target as HTMLElement).closest('button, [role="button"]')) completion.editor.current?.focus();
             }}>
               <div className="ai-composer-tools flex min-w-0 shrink-0 items-center gap-1">
@@ -547,9 +549,9 @@ export function AiComposerSeat({
           size="sm"
           role="status"
           aria-label={t('agent.availability.title')}
-          className="mx-2 w-auto"
+          className="mx-2 flex w-auto items-center gap-x-1"
         >
-          <InfoIcon aria-hidden="true" />
+          <InfoIcon aria-hidden="true" className="shrink-0" />
           <AlertDescription className="min-w-0 break-words">{unavailableReason}</AlertDescription>
         </Alert>
       )}

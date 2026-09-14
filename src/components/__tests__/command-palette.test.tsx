@@ -224,6 +224,16 @@ describe('CommandPalette', () => {
     document.removeEventListener('shellspan:connect-profile', connectListener);
   });
 
+  it('aligns the list scrollbar with the dialog edge and shared scrollbar width', () => {
+    render(<CommandPalette />);
+
+    act(() => document.dispatchEvent(new Event('shellspan:open-command-palette')));
+
+    const dialog = screen.getByRole('dialog');
+    const list = dialog.querySelector('.native-scrollbar-default');
+    expect(list).toHaveClass('-mr-4', 'pr-4', 'overflow-y-auto');
+  });
+
   it('loads and searches saved bookmarks across profiles when opened', async () => {
     invokeListSftpBookmarks.mockResolvedValueOnce([{
       id: 'bookmark-1',

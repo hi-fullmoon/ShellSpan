@@ -7,7 +7,9 @@ import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
+import type { RouteSnapshot } from '@/types/ai';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import '@/components/ai/ai-panel.css';
 
@@ -77,6 +79,7 @@ beforeEach(async () => {
   cleanup();
   useAppStore.setState({ locale: 'en-US' });
   await initI18n('en-US');
+  useLlmRoutesStore.setState({ snapshot: undefined, status: 'idle', modelsByRoute: {} });
 });
 
 afterEach(() => cleanup());
@@ -433,6 +436,26 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(usage.querySelector('[data-stat="cacheWrite"]')).not.toBeInTheDocument();
     await user.click(usageTrigger);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('shows the configured route name instead of its internal ID in usage details', async () => {
+    const providerId = 'route-9330f901-d693-48e5-8b2c-b9178515e9f0';
+    useLlmRoutesStore.setState({
+      snapshot: { routes: [{ id: providerId, displayName: 'MiniMax' }] } as unknown as RouteSnapshot,
+      status: 'ready',
+    });
+    const user = userEvent.setup();
+    const tail = projectAgentChatNodes(agentSessionBaselineScenarios.hello.events)
+      .find((node): node is AiConversationNodeOf<'turnTail'> => node.kind === 'turnTail')!;
+    render(<AiConversationNodeList nodes={[{
+      ...tail,
+      models: [{ providerId, model: 'MiniMax-M3' }],
+    }]} />);
+
+    await user.click(screen.getByRole('button', { name: 'Usage 144 tok' }));
+    const usage = await screen.findByRole('dialog', { name: 'Turn usage' });
+    expect(within(usage).getByText('MiniMax/MiniMax-M3')).toBeVisible();
+    expect(usage).not.toHaveTextContent(providerId);
   });
 
   it('keeps the footer compact and reveals only recorded metrics in accessible popovers', async () => {
