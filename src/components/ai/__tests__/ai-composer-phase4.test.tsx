@@ -104,6 +104,15 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(retryTurn).toHaveBeenCalledOnce();
   });
 
+  it('offers a separate new-terminal continuation when a safe replacement is available', async () => {
+    const user = userEvent.setup();
+    const continueTask = vi.fn();
+    render(<AiComposerSeat phase="active" status="failed"
+      onContinueOnReconnectedTerminal={continueTask} />);
+    await user.click(screen.getByRole('button', { name: 'Continue in reconnected terminal' }));
+    expect(continueTask).toHaveBeenCalledOnce();
+  });
+
   it('presents action errors as a compact inline notice', async () => {
     const user = userEvent.setup();
     const error = { kind: 'unknown' as const, message: 'Model selection requires an active root session', retryable: false };

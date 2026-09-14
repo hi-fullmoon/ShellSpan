@@ -525,7 +525,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           </div>
         )}
         {activeSession?.reconnecting && (
-          <ReconnectingIndicator label={t('terminal.notice.reconnectingLabel')} />
+          <ReconnectingIndicator label={activeSession.status === 'connecting' && activeSession.statusMessage
+            ? activeSession.statusMessage : t('terminal.notice.reconnectingLabel')} />
         )}
         <div ref={paneRef} className="h-full w-full p-0" />
       </div>

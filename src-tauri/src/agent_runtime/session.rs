@@ -140,6 +140,8 @@ pub(crate) struct AgentSessionSnapshot {
     pub(crate) inbox: AgentInboxProjection,
     pub(crate) task: AgentTaskProjection,
     pub(crate) recovery: AgentRecoveryCheckpoint,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) uncertain_native_effects: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -326,6 +328,7 @@ impl AgentSessionRecord {
             },
             task: derive_task(&self.events),
             recovery: super::derive_recovery_checkpoint(&self.events),
+            uncertain_native_effects: has_uncertain_tool_executions(&self.events),
         })
     }
 
@@ -340,6 +343,22 @@ impl AgentSessionRecord {
             pending_step_messages: self.inbox.next_step().len(),
         }
     }
+}
+
+fn has_uncertain_tool_executions(events: &[AgentSessionEvent]) -> bool {
+    let mut dispatched = HashSet::new();
+    for event in events {
+        match &event.payload {
+            AgentSessionEventPayload::ToolExecution { call_id, .. } => {
+                dispatched.insert((event.step_id.as_deref(), call_id.as_str()));
+            }
+            AgentSessionEventPayload::ToolResult { call_id, .. } => {
+                dispatched.remove(&(event.step_id.as_deref(), call_id.as_str()));
+            }
+            _ => {}
+        }
+    }
+    !dispatched.is_empty()
 }
 
 /// Validate a complete decoded log through the same replay path used by the
@@ -1006,6 +1025,7 @@ impl AgentSessionStore {
         &self,
         session_id: &str,
         turn_id: &str,
+        reason: &str,
     ) -> Result<bool, String> {
         let mut inner = self.lock_configured()?;
         let record = inner
@@ -1022,7 +1042,7 @@ impl AgentSessionStore {
                 Some(turn_id.to_string()),
                 None,
                 AgentSessionEventPayload::TurnEnd {
-                    reason: "completed".into(),
+                    reason: reason.into(),
                 },
             )],
         )?;
@@ -1036,6 +1056,7 @@ impl AgentSessionStore {
         session_id: &str,
         turn_id: String,
         step_id: String,
+        end_reason: &str,
     ) -> Result<Option<AgentClaimedStep>, String> {
         let mut inner = self.lock_configured()?;
         let messages = inner
@@ -1052,7 +1073,7 @@ impl AgentSessionStore {
                     Some(turn_id),
                     None,
                     AgentSessionEventPayload::TurnEnd {
-                        reason: "completed".into(),
+                        reason: end_reason.into(),
                     },
                 )],
             )?;
@@ -4284,6 +4305,52 @@ fn sync_parent(path: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     include!("session_inbox_steer_tests.rs");
+
+    #[test]
+    fn snapshot_uncertainty_tracks_dispatched_tools_until_their_exact_result() {
+        let event = |seq, step: &str, payload| {
+            AgentSessionEvent::new(
+                "session".into(),
+                seq,
+                1_000 + seq,
+                Some("turn".into()),
+                Some(step.into()),
+                payload,
+            )
+        };
+        let dispatched = event(
+            0,
+            "step-1",
+            AgentSessionEventPayload::ToolExecution {
+                call_id: "call-1".into(),
+                status: super::super::AgentToolExecutionStatus::Dispatched,
+                idempotency: "no".into(),
+            },
+        );
+        let result = event(
+            1,
+            "step-1",
+            AgentSessionEventPayload::ToolResult {
+                call_id: "call-1".into(),
+                name: "exec_command".into(),
+                status: super::super::AgentToolResultStatus::Completed,
+                summary: "done".into(),
+                data: None,
+                duration_ms: None,
+                evidence_refs: Vec::new(),
+            },
+        );
+        assert!(has_uncertain_tool_executions(&[dispatched.clone()]));
+        assert!(!has_uncertain_tool_executions(&[
+            dispatched.clone(),
+            result.clone()
+        ]));
+        let wrong_step = AgentSessionEvent {
+            step_id: Some("step-2".into()),
+            ..result
+        };
+        assert!(has_uncertain_tool_executions(&[dispatched, wrong_step]));
+    }
 
     #[test]
     fn stream_delta_validation_accepts_provider_whitespace_but_rejects_oversized_chunks() {

@@ -415,8 +415,12 @@ impl NativeToolRuntime for NativeToolAdapter {
                         artifacts: Vec::new(),
                     });
                 }
-                let result =
-                    runtime.execute_mcp_call(&prepared, grant.capability_id, &credentials)?;
+                let result = runtime.execute_mcp_call(
+                    &prepared,
+                    grant.capability_id,
+                    &credentials,
+                    &cancellation,
+                )?;
                 Ok(NativeToolResult {
                     call_id: stored.public_call_id,
                     native_name: result.tool_name,

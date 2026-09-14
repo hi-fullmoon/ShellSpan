@@ -88,6 +88,7 @@ export interface AiComposerSeatProps {
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
   readonly onRetryTurn?: () => void;
+  readonly onContinueOnReconnectedTerminal?: () => void;
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onUpdateQueueItem?: (item: AiInboxItem, content: string) => void;
   readonly onRemoveQueueItem?: (item: AiInboxItem) => void;
@@ -138,6 +139,7 @@ export function AiComposerSeat({
   onSubmitGesture,
   onStop,
   onRetryTurn,
+  onContinueOnReconnectedTerminal,
   onBusyPreferenceChange,
   onUpdateQueueItem,
   onRemoveQueueItem,
@@ -239,6 +241,13 @@ export function AiComposerSeat({
     >
       {mode === 'agent' && <AiTaskStrip steps={taskSteps} />}
       <div className="ai-composer-notices flex min-w-0 flex-col gap-1.5 empty:hidden">
+        {status === 'failed' && onContinueOnReconnectedTerminal && (
+          <Button type="button" variant="secondary" size="sm" className="self-center rounded-full"
+            disabled={stopping || submitting || unavailable} onClick={onContinueOnReconnectedTerminal}>
+            <RotateCcwIcon data-icon="inline-start" />
+            {t('ai.workspace.continueOnReconnectedTerminal')}
+          </Button>
+        )}
         {status === 'failed' && onRetryTurn && !terminal && (
           <Button
             type="button"

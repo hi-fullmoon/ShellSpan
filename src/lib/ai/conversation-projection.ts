@@ -97,6 +97,7 @@ function eventStepId(event: RuntimeEventLike): string | null {
 function terminalStatusFromReason(
   reason: string,
 ): Exclude<AiTurnProcessStatus, 'running' | 'partial'> {
+  if (reason === 'incomplete') return 'incomplete';
   if (/waiting/i.test(reason)) return 'waiting';
   if (/cancel|stop|interrupt/i.test(reason)) return 'cancelled';
   if (/fail|error|limit|max.?token/i.test(reason)) return 'failed';

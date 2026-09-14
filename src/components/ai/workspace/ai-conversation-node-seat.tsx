@@ -435,7 +435,7 @@ function storeTurnProcessDisclosure(
 }
 
 function isSettledTurnProcess(status: AiTurnProcessStatus): boolean {
-  return status === 'completed' || status === 'failed' || status === 'cancelled';
+  return status === 'completed' || status === 'incomplete' || status === 'failed' || status === 'cancelled';
 }
 
 function turnProcessLabelKey(status: AiTurnProcessStatus): LocaleKey {
@@ -443,6 +443,7 @@ function turnProcessLabelKey(status: AiTurnProcessStatus): LocaleKey {
     case 'running': return 'ai.workspace.turnProcess.running';
     case 'waiting': return 'ai.workspace.turnProcess.waiting';
     case 'completed': return 'ai.workspace.turnProcess.completed';
+    case 'incomplete': return 'ai.workspace.turnProcess.incomplete';
     case 'failed': return 'ai.workspace.turnProcess.failed';
     case 'cancelled': return 'ai.workspace.turnProcess.cancelled';
     case 'partial': return 'ai.workspace.turnProcess.partial';
