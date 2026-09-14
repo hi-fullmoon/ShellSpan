@@ -116,6 +116,7 @@ async fn skill_controller_bridge() {
                         input["messageId"].as_str().unwrap().into(),
                         input["clientSubmissionId"].as_str().unwrap().into(),
                         input["content"].as_str().unwrap().into(),
+                        None,
                     )
                     .unwrap();
                 runtime.await_idle(session).await.unwrap();

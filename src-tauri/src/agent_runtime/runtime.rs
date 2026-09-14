@@ -211,6 +211,8 @@ impl AgentRuntime {
         if input.content.len() > super::MAX_AGENT_MESSAGE_BYTES {
             return Err("IMAGE_TEXT_LIMIT".into());
         }
+        let terminal_context =
+            self.prepare_terminal_context(&input.session_id, input.terminal_context.clone())?;
         let operation = ImageOperation {
             session_id: input.session_id.clone(),
             client_operation_id: input.client_operation_id.clone(),
@@ -314,6 +316,11 @@ impl AgentRuntime {
                 });
             }
         }
+        if let Some(context) = &terminal_context {
+            request.messages.push(super::ModelMessage::User {
+                content: context.model_content(),
+            });
+        }
         request.messages.push(super::ModelMessage::UserImages {
             content: input.content.clone(),
             images: images.clone(),
@@ -350,6 +357,7 @@ impl AgentRuntime {
                 client_submission_id: Some(input.client_operation_id),
                 content: crate::redaction::redact_sensitive_text(&input.content),
                 source,
+                terminal_context,
             },
         )?;
         drop(gate);
@@ -762,13 +770,62 @@ impl AgentRuntime {
         self.sessions.snapshot(session_id)
     }
 
+    fn prepare_terminal_context(
+        &self,
+        session_id: &str,
+        context: Option<super::AgentTerminalContextSnapshot>,
+    ) -> Result<Option<super::AgentTerminalContextSnapshot>, String> {
+        let Some(mut context) = context else {
+            return Ok(None);
+        };
+        let snapshot = self.sessions.snapshot(session_id)?;
+        let bound_session_id = snapshot
+            .header
+            .target
+            .as_ref()
+            .map(|target| target.session_id.as_str());
+        if bound_session_id != Some(context.session_id.as_str()) {
+            return Err("TERMINAL_CONTEXT_TARGET_MISMATCH".into());
+        }
+        if context.version == 0
+            || context.version > 9_007_199_254_740_991
+            || context.max_lines == 0
+            || context.max_lines > 10_000
+            || context.max_bytes == 0
+            || context.max_bytes as usize > super::MAX_TERMINAL_CONTEXT_BYTES
+            || context.content.len() > context.max_bytes as usize
+        {
+            return Err("TERMINAL_CONTEXT_LIMIT".into());
+        }
+        let plain = super::strip_ansi(&context.content);
+        context.content = plain
+            .lines()
+            .map(|line| {
+                let clean = line
+                    .chars()
+                    .filter(|ch| !ch.is_control() || *ch == '\t')
+                    .collect::<String>();
+                crate::redaction::redact_sensitive_text(&clean)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if context.content.trim().is_empty()
+            || crate::redaction::redact_sensitive_text(&context.content) != context.content
+        {
+            return Err("TERMINAL_CONTEXT_UNSAFE".into());
+        }
+        Ok(Some(context))
+    }
+
     pub(crate) fn followup_submission(
         &self,
         session_id: &str,
         message_id: String,
         client_submission_id: String,
         content: String,
+        terminal_context: Option<super::AgentTerminalContextSnapshot>,
     ) -> Result<AgentSessionSnapshot, String> {
+        let terminal_context = self.prepare_terminal_context(session_id, terminal_context)?;
         let snapshot = self.sessions.enqueue(
             session_id,
             AgentInboxLane::NextTurn,
@@ -778,6 +835,7 @@ impl AgentRuntime {
                 client_submission_id: Some(client_submission_id),
                 content,
                 source: AgentMessageSource::user(),
+                terminal_context,
             },
         )?;
         self.wake(session_id)?;
@@ -792,7 +850,7 @@ impl AgentRuntime {
         content: String,
     ) -> Result<AgentSessionSnapshot, String> {
         let client_submission_id = message_id.clone();
-        self.followup_submission(session_id, message_id, client_submission_id, content)
+        self.followup_submission(session_id, message_id, client_submission_id, content, None)
     }
 
     pub(crate) fn steer_submission(
@@ -801,7 +859,9 @@ impl AgentRuntime {
         message_id: String,
         client_submission_id: String,
         content: String,
+        terminal_context: Option<super::AgentTerminalContextSnapshot>,
     ) -> Result<AgentSessionSnapshot, String> {
+        let terminal_context = self.prepare_terminal_context(session_id, terminal_context)?;
         let snapshot = self.sessions.enqueue(
             session_id,
             AgentInboxLane::NextStep,
@@ -811,6 +871,7 @@ impl AgentRuntime {
                 client_submission_id: Some(client_submission_id),
                 content,
                 source: AgentMessageSource::user(),
+                terminal_context,
             },
         )?;
         self.wake(session_id)?;
@@ -825,7 +886,7 @@ impl AgentRuntime {
         content: String,
     ) -> Result<AgentSessionSnapshot, String> {
         let client_submission_id = message_id.clone();
-        self.steer_submission(session_id, message_id, client_submission_id, content)
+        self.steer_submission(session_id, message_id, client_submission_id, content, None)
     }
 
     pub(crate) fn inject(
@@ -844,6 +905,7 @@ impl AgentRuntime {
                 client_submission_id: None,
                 content,
                 source: AgentMessageSource::runtime(label),
+                terminal_context: None,
             },
         )
     }
@@ -1747,12 +1809,12 @@ mod tests {
         AgentFleetControlRequest, AgentFleetPlanRequest, AgentFleetTargetRequest,
         AgentPreStepContext, AgentPreStepDecision, AgentRecoveryStatus, AgentSessionEffect,
         AgentSessionPermissionMode, AgentSessionStatus, AgentSessionTarget, AgentSubagentRole,
-        AgentSubagentSpawnRequest, AgentToolApprovalStatus, AgentToolFailedHook,
-        AgentToolResultStatus, ModelAdapter, ModelContentBlock, ModelFinishReason, ModelMessage,
-        ModelRequest, ModelResponse, ModelStreamSink, ModelToolCall, ModelUsage,
-        NativeToolArtifact, NativeToolIdempotency, NativeToolPreparation, NativeToolRequest,
-        NativeToolResult, NativeToolRuntime, NormalizedModelError, NormalizedModelErrorKind,
-        RecordedToolCall, StreamDelta,
+        AgentSubagentSpawnRequest, AgentSurfaceMessage, AgentTerminalContextSnapshot,
+        AgentToolApprovalStatus, AgentToolFailedHook, AgentToolResultStatus, ModelAdapter,
+        ModelContentBlock, ModelFinishReason, ModelMessage, ModelRequest, ModelResponse,
+        ModelStreamSink, ModelToolCall, ModelUsage, NativeToolArtifact, NativeToolIdempotency,
+        NativeToolPreparation, NativeToolRequest, NativeToolResult, NativeToolRuntime,
+        NormalizedModelError, NormalizedModelErrorKind, RecordedToolCall, StreamDelta,
     };
     use crate::agent_runtime::{AgentStopReason, RetryPolicy};
 
@@ -2349,6 +2411,120 @@ mod tests {
                 subagent: None,
             })
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn bound_terminal_snapshot_reaches_the_first_model_request_with_its_user_turn() {
+        let adapter = FakeAdapter::new(vec![reply("The server welcomed you.", &[])]);
+        let (_root, runtime) = configured(adapter.clone());
+        create(&runtime, "terminal-snapshot");
+        let first = AgentTerminalContextSnapshot {
+            session_id: "terminal-local".into(),
+            version: 1,
+            max_lines: 200,
+            max_bytes: 32 * 1024,
+            content: "Welcome to the server\npassword=hunter2\n$ ".into(),
+        };
+        let accepted = runtime
+            .followup_submission(
+                "terminal-snapshot",
+                "question".into(),
+                "question".into(),
+                "What did the server say?".into(),
+                Some(first),
+            )
+            .unwrap();
+        let retry = runtime
+            .followup_submission(
+                "terminal-snapshot",
+                "question".into(),
+                "question".into(),
+                "What did the server say?".into(),
+                Some(AgentTerminalContextSnapshot {
+                    session_id: "terminal-local".into(),
+                    version: 2,
+                    max_lines: 200,
+                    max_bytes: 32 * 1024,
+                    content: "newer output".into(),
+                }),
+            )
+            .unwrap();
+        assert_eq!(accepted.event_count, retry.event_count);
+
+        runtime
+            .start("terminal-snapshot", provider(), None)
+            .unwrap();
+        runtime.await_idle("terminal-snapshot").await.unwrap();
+        let requests = adapter.requests.lock().unwrap();
+        let first_request = &requests[0];
+        let user_text = first_request
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                ModelMessage::User { content } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let welcome_index = user_text
+            .iter()
+            .position(|text| text.contains("Welcome to the server"))
+            .expect("the first request includes terminal output");
+        let question_index = user_text
+            .iter()
+            .position(|text| text == &"What did the server say?")
+            .expect("the first request includes the user question");
+        assert!(welcome_index < question_index);
+        assert!(!user_text
+            .iter()
+            .any(|text| text.contains("hunter2") || text.contains("newer output")));
+        drop(requests);
+        let surface = runtime.session("terminal-snapshot").unwrap().surface;
+        assert!(surface.messages.iter().any(|message| matches!(message,
+            AgentSurfaceMessage::User { source, content, .. }
+                if source.producer_id == "shellspan.terminal-output.v1"
+                    && content.contains("Welcome to the server")
+                    && !content.contains("hunter2")
+        )));
+    }
+
+    #[test]
+    fn terminal_snapshot_must_match_the_frozen_target_before_inbox_commit() {
+        let (_root, runtime) = configured(FakeAdapter::new(vec![]));
+        create(&runtime, "terminal-snapshot-mismatch");
+        let error = runtime.followup_submission(
+            "terminal-snapshot-mismatch",
+            "question".into(),
+            "question".into(),
+            "Read the banner".into(),
+            Some(AgentTerminalContextSnapshot {
+                session_id: "other-terminal".into(),
+                version: 1,
+                max_lines: 200,
+                max_bytes: 32 * 1024,
+                content: "wrong server".into(),
+            }),
+        );
+        assert_eq!(error.unwrap_err(), "TERMINAL_CONTEXT_TARGET_MISMATCH");
+        let oversized = runtime.followup_submission(
+            "terminal-snapshot-mismatch",
+            "question".into(),
+            "question".into(),
+            "Read the banner".into(),
+            Some(AgentTerminalContextSnapshot {
+                session_id: "terminal-local".into(),
+                version: 1,
+                max_lines: 200,
+                max_bytes: 32 * 1024,
+                content: "x".repeat(32 * 1024 + 1),
+            }),
+        );
+        assert_eq!(oversized.unwrap_err(), "TERMINAL_CONTEXT_LIMIT");
+        assert!(runtime
+            .session("terminal-snapshot-mismatch")
+            .unwrap()
+            .inbox
+            .next_turn
+            .is_empty());
     }
 
     #[tokio::test]

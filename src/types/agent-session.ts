@@ -120,6 +120,15 @@ export interface AgentSessionInboxMessage {
   readonly clientSubmissionId?: string;
   readonly content: string;
   readonly source: AgentSessionMessageSource;
+  readonly terminalContext?: AgentTerminalContextSnapshot;
+}
+
+export interface AgentTerminalContextSnapshot {
+  readonly sessionId: string;
+  readonly version: number;
+  readonly maxLines: number;
+  readonly maxBytes: number;
+  readonly content: string;
 }
 
 export interface AgentSessionTarget {
@@ -771,6 +780,7 @@ export interface AgentSessionMessageInput {
   readonly messageId: string;
   readonly clientSubmissionId?: string;
   readonly content: string;
+  readonly terminalContext?: AgentTerminalContextSnapshot;
 }
 
 export type AgentInboxMutation =

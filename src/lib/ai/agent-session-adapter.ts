@@ -565,11 +565,13 @@ export function createAgentSessionAdapter(
         messageId: input.clientOperationId,
         clientSubmissionId: input.clientOperationId,
         content,
+        ...(input.terminalContext ? { terminalContext: input.terminalContext } : {}),
       };
       if (hasImages) {
         if (!dependencies.submitImages) throw new Error('Image transport is unavailable');
         await dependencies.submitImages({ sessionId: resolvedSessionId, clientOperationId: input.clientOperationId,
-          content, images: input.images!, lane: input.mode === 'nextStep' ? 'nextStep' : 'nextTurn' });
+          content, images: input.images!, lane: input.mode === 'nextStep' ? 'nextStep' : 'nextTurn',
+          ...(input.terminalContext ? { terminalContext: input.terminalContext } : {}) });
         // Backfill lost events before the durable draft can be acknowledged and removed.
         const state = await ensureEntry(resolvedSessionId).client.reconnect();
         if (!state.events.some(e => e.type === 'agent/inbox/spliced' && e.data.operation === 'enqueued'

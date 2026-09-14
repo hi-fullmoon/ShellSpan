@@ -6,6 +6,29 @@ use std::io::Cursor;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
+async fn image_submission_keeps_bound_terminal_output_with_the_image_turn() {
+    let (_storage, runtime, model) = setup();
+    runtime.start("images", vision_provider(), None).unwrap();
+    let mut submission = input("image-with-terminal");
+    submission.terminal_context = Some(crate::agent_runtime::AgentTerminalContextSnapshot {
+        session_id: "terminal".into(),
+        version: 1,
+        max_lines: 200,
+        max_bytes: 8192,
+        content: "Welcome to the image server".into(),
+    });
+    runtime.submit_images(submission).await.unwrap();
+    runtime.await_idle("images").await.unwrap();
+    let requests = model.requests.lock().unwrap();
+    assert!(requests[0].messages.iter().any(|message| matches!(message,
+        ModelMessage::User { content } if content.contains("Welcome to the image server")
+    )));
+    assert!(requests[0].messages.iter().any(|message| matches!(message,
+        ModelMessage::UserImages { .. }
+    )));
+}
+
+#[tokio::test]
 async fn image_compaction_keeps_pixels_and_recovery_resolves_them_again() {
     let (storage, runtime, _) = setup();
     runtime.start("images", vision_provider(), None).unwrap();
@@ -177,6 +200,7 @@ fn input(id: &str) -> ImageSubmission {
         content: "看图 /inspect".into(),
         lane: AgentInboxLane::NextTurn,
         images: vec![upload(ImageFormat::Png)],
+        terminal_context: None,
     }
 }
 fn setup() -> (tempfile::TempDir, AgentRuntime, Arc<FakeAdapter>) {

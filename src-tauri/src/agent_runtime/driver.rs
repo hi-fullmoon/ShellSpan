@@ -465,8 +465,17 @@ async fn apply_pre_step_hooks(
     };
     request
         .messages
-        .extend(pending.into_iter().map(|message| ModelMessage::User {
-            content: message.content,
+        .extend(pending.into_iter().flat_map(|message| {
+            let mut messages = Vec::with_capacity(2);
+            if let Some(context) = message.terminal_context {
+                messages.push(ModelMessage::User {
+                    content: context.model_content(),
+                });
+            }
+            messages.push(ModelMessage::User {
+                content: message.content,
+            });
+            messages
         }));
     let budget = estimate_model_surface_budget(&model.provider, &request)?;
     let context = AgentPreStepContext {
@@ -502,6 +511,7 @@ async fn apply_pre_step_hooks(
                         client_submission_id: None,
                         content,
                         source: AgentMessageSource::runtime(label),
+                        terminal_context: None,
                     },
                 )?;
             }
@@ -1913,6 +1923,7 @@ mod tests {
                     client_submission_id: None,
                     content: "check again".into(),
                     source: AgentMessageSource::user(),
+                    terminal_context: None,
                 },
             });
         }

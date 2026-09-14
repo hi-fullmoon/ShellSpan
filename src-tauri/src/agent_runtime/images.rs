@@ -118,6 +118,8 @@ pub(crate) struct ImageSubmission {
     pub content: String,
     pub lane: super::AgentInboxLane,
     pub images: Vec<ImageUpload>,
+    #[serde(default)]
+    pub terminal_context: Option<super::AgentTerminalContextSnapshot>,
 }
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

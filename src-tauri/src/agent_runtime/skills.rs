@@ -569,6 +569,7 @@ mod tests {
             content: "/first text\u{2003}/second /first /not. path/a /absolute/path 1/2 /third"
                 .into(),
             source: super::super::AgentMessageSource::user(),
+            terminal_context: None,
         };
         assert_eq!(
             slash_candidates(&[m.clone()])

@@ -142,6 +142,8 @@ pub(crate) struct AgentSessionInput {
     #[serde(default)]
     client_submission_id: Option<String>,
     content: String,
+    #[serde(default)]
+    terminal_context: Option<super::AgentTerminalContextSnapshot>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -372,6 +374,7 @@ pub(crate) fn agent_runtime_followup(
         input.message_id,
         client_submission_id,
         input.content,
+        input.terminal_context,
     )
 }
 
@@ -390,6 +393,7 @@ pub(crate) fn agent_runtime_steer(
         input.message_id,
         client_submission_id,
         input.content,
+        input.terminal_context,
     )
 }
 

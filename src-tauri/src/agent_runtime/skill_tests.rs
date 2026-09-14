@@ -612,6 +612,7 @@ async fn skill_retry_preparation_unknown_name_is_not_reloaded_and_form_is_ignore
                     producer_id: "form".into(),
                     metadata: Default::default(),
                 },
+                terminal_context: None,
             },
         )
         .unwrap();

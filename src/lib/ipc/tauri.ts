@@ -336,7 +336,7 @@ export async function invokeAgentRuntimeFollowup(
 export async function invokePrepareAgentImages(images: readonly import('@/types/agent-image').AgentImageUpload[]) {
   return invoke<import('@/types/agent-image').AgentImageUpload[]>('agent_runtime_prepare_images', { images });
 }
-export async function invokeSubmitAgentImages(input: { sessionId: string; clientOperationId: string; content: string; lane: 'nextTurn' | 'nextStep'; images: readonly import('@/types/agent-image').AgentImageUpload[] }) {
+export async function invokeSubmitAgentImages(input: { sessionId: string; clientOperationId: string; content: string; lane: 'nextTurn' | 'nextStep'; images: readonly import('@/types/agent-image').AgentImageUpload[]; terminalContext?: import('@/types/agent-session').AgentTerminalContextSnapshot }) {
   return invoke<AgentSessionSnapshot>('agent_runtime_submit_images', { input });
 }
 export async function invokeCancelAgentImageSubmission(input: { sessionId: string; clientOperationId: string }) {

@@ -16,6 +16,7 @@ import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAppStore } from '@/stores/appStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { appendTerminalOutput, clearTerminalOutput } from '@/lib/terminal/terminal-output-buffer';
 import type { ResolvedModel } from '@/lib/ai/provider-contract';
 import * as imageDraftModule from '@/components/ai/workspace/use-image-draft';
 import * as visionContract from '@/lib/ai/vision-contract';
@@ -232,6 +233,7 @@ beforeEach(async () => {
   useAiSettingsStore.setState({
     providers: [provider],
     defaultProviderId: provider.id,
+    contextLines: 200,
   });
   useTerminalStore.setState({ sessions: [], activeSessionId: null });
   useLlmRoutesStore.setState({ snapshot: undefined, status: 'idle', error: undefined, modelsByRoute: {} });
@@ -876,6 +878,74 @@ describe('AiWorkspaceController', () => {
         request: expect.objectContaining({ executionSurface: 'boundTerminal' }),
       }),
     })));
+  });
+
+  it('submits the active SSH welcome output as a bounded, redacted terminal snapshot', async () => {
+    const first = { sessionId: 'terminal-first', title: 'First', host: 'first.test', port: 22, username: 'tester', status: 'connected' as const };
+    const second = { sessionId: 'terminal-second', title: 'Second', host: 'second.test', port: 22, username: 'tester', status: 'connected' as const };
+    appendTerminalOutput(first.sessionId, 'Welcome to FIRST\r\n');
+    appendTerminalOutput(second.sessionId, `${'old status '.padEnd(100, '.')}\r\n`.repeat(200));
+    appendTerminalOutput(second.sessionId, '\u001b[32mWelcome to SECOND\u001b[0m\r\npassword=hunter2\r\n$ ');
+    useAiSettingsStore.setState({ contextLines: 500 });
+    useTerminalStore.setState({ sessions: [first, second], activeSessionId: second.sessionId });
+    const agent = adapter({
+      submit: vi.fn(async (_sessionId, input) => ({
+        sessionId: 'agent-second', clientOperationId: input.clientOperationId, mode: input.mode,
+      })),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    act(() => result.current.setDraft('What did the server say after login?'));
+    act(() => result.current.submit('primary'));
+
+    await waitFor(() => expect(agent.submit).toHaveBeenCalledTimes(1));
+    const input = vi.mocked(agent.submit).mock.calls[0]![1];
+    expect(input.create?.request.target?.sessionId).toBe(second.sessionId);
+    expect(input.terminalContext).toMatchObject({ sessionId: second.sessionId, version: 2, maxLines: 500, maxBytes: 8192 });
+    expect(input.terminalContext?.content).toContain('[... earlier terminal content omitted ...]');
+    expect(input.terminalContext?.content).toContain('Welcome to SECOND');
+    expect(input.terminalContext?.content).not.toContain('Welcome to FIRST');
+    expect(input.terminalContext?.content).not.toContain('hunter2');
+    expect(new TextEncoder().encode(input.terminalContext?.content).length)
+      .toBeLessThanOrEqual(input.terminalContext!.maxBytes);
+    clearTerminalOutput(first.sessionId);
+    clearTerminalOutput(second.sessionId);
+  });
+
+  it('does not resend an unchanged terminal snapshot already in the Agent surface', async () => {
+    connectedTerminal();
+    appendTerminalOutput('terminal-1', 'Welcome back\r\n');
+    const base = runningAgentView();
+    const view: AiSessionView = {
+      ...base,
+      snapshot: {
+        kind: 'agent',
+        value: {
+          ...base.snapshot.value,
+          surface: { generation: 0, messages: [{
+            role: 'user', messageId: 'prior-terminal-context', content: 'Welcome back',
+            source: {
+              kind: 'runtime', label: 'Bound terminal output',
+              producerId: 'shellspan.terminal-output.v1',
+              metadata: { sessionId: 'terminal-1', version: 1, maxLines: 200, maxBytes: 8192 },
+            },
+          }] },
+        },
+      },
+    };
+    const agent = adapter({
+      list: vi.fn(async () => ({ sessions: [view.summary] })),
+      open: vi.fn(async () => view),
+      submit: vi.fn(async (_sessionId, input) => ({
+        sessionId: view.summary.id, clientOperationId: input.clientOperationId, mode: input.mode,
+      })),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
+    act(() => result.current.setDraft('Continue the task'));
+    act(() => result.current.submit('primary'));
+    await waitFor(() => expect(agent.submit).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(agent.submit).mock.calls[0]![1].terminalContext).toBeUndefined();
+    clearTerminalOutput('terminal-1');
   });
 
   it('renders a historical Session execution surface from its frozen Header', async () => {

@@ -294,6 +294,7 @@ mod tests {
             client_submission_id: Some(id.into()),
             content: id.into(),
             source: AgentMessageSource::user(),
+            terminal_context: None,
         }
     }
 
