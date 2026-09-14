@@ -353,7 +353,7 @@ export const TerminalControllerLayer: React.FC = () => {
           (currentSessionId) =>
             useTerminalStore.getState().sessions.find((s) => s.sessionId === currentSessionId,
             )?.status ?? 'connecting',
-          (currentSessionId) => reconnectSession(currentSessionId),
+          (currentSessionId, automatic) => reconnectSession(currentSessionId, automatic),
         );
         // Restored workspace sessions start disconnected and have no backend
         // process, so the closed-event hint never fires for them; show it up

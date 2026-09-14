@@ -3,9 +3,10 @@ use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{ChildStdin, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use tokio_util::sync::CancellationToken;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -20,6 +21,7 @@ const MAX_SCHEMA_BYTES: usize = 128 * 1024;
 const MAX_ARGUMENT_BYTES: usize = 64 * 1024;
 const MAX_RESULT_BYTES: usize = 256 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(15);
+const WAIT_POLL: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -137,6 +139,7 @@ pub(super) fn execute_mcp_tool_native(
     credentials: &CredentialManager,
     tool_name: &str,
     arguments: &Value,
+    cancellation: &CancellationToken,
 ) -> Result<(Value, bool), String> {
     if !arguments.is_object()
         || serde_json::to_vec(arguments)
@@ -146,7 +149,15 @@ pub(super) fn execute_mcp_tool_native(
     {
         return Err("MCP arguments must be a bounded object".into());
     }
-    let result = discover_and_invoke_stdio_tool(server, root, credentials, tool_name, arguments)?;
+    let result = discover_and_invoke_stdio_tool(
+        server,
+        root,
+        credentials,
+        tool_name,
+        arguments,
+        cancellation,
+        TIMEOUT,
+    )?;
     let encoded = serde_json::to_vec(&result)
         .map_err(|error| format!("failed to encode MCP result: {error}"))?;
     if encoded.len() > MAX_RESULT_BYTES {
@@ -265,7 +276,12 @@ fn discover_and_invoke_stdio_tool(
     credentials: &CredentialManager,
     tool_name: &str,
     arguments: &Value,
+    cancellation: &CancellationToken,
+    timeout: Duration,
 ) -> Result<Value, String> {
+    if cancellation.is_cancelled() {
+        return Err("MCP stdio request cancelled".into());
+    }
     let mut command = Command::new(resolve_executable(config, root)?);
     command
         .args(&config.args)
@@ -285,11 +301,27 @@ fn discover_and_invoke_stdio_tool(
     let mut child = command
         .spawn()
         .map_err(|error| format!("failed to start MCP stdio server: {error}"))?;
+    let deadline = Instant::now() + timeout;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "MCP server stdin is unavailable".to_string())?;
+    let (writer_tx, writer_rx) = mpsc::channel::<(Vec<u8>, mpsc::SyncSender<Result<(), String>>)>();
+    let writer = std::thread::spawn(move || {
+        let mut stdin = stdin;
+        for (bytes, reply) in writer_rx {
+            let outcome = stdin
+                .write_all(&bytes)
+                .and_then(|()| stdin.flush())
+                .map_err(|error| format!("failed to write MCP stdio request: {error}"));
+            let failed = outcome.is_err();
+            let _ = reply.send(outcome);
+            if failed {
+                break;
+            }
+        }
+    });
     let result = (|| {
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "MCP server stdin is unavailable".to_string())?;
         let stdout = child
             .stdout
             .take()
@@ -301,36 +333,49 @@ fn discover_and_invoke_stdio_tool(
             }
         });
         send_json(
-            &mut stdin,
+            &writer_tx,
             &json!({
                 "jsonrpc":"2.0", "id":1, "method":"initialize",
                 "params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ShellSpan","version":"2.1.0"}}
             }),
+            deadline,
+            cancellation,
         )?;
-        let deadline = Instant::now() + TIMEOUT;
-        wait_for_response(&receiver, 1, deadline)?;
+        wait_for_response(&receiver, 1, deadline, cancellation)?;
         send_json(
-            &mut stdin,
+            &writer_tx,
             &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+            deadline,
+            cancellation,
         )?;
         send_json(
-            &mut stdin,
+            &writer_tx,
             &json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
+            deadline,
+            cancellation,
         )?;
-        let discovered = wait_for_response(&receiver, 2, deadline)?;
+        let discovered = wait_for_response(&receiver, 2, deadline, cancellation)?;
         let tool = parse_discovered_tools(&discovered)?
             .into_iter()
             .find(|tool| tool.name == tool_name)
             .ok_or_else(|| "MCP server did not advertise the approved tool".to_string())?;
         validate_json_shape(arguments, &tool.input_schema)?;
         send_json(
-            &mut stdin,
+            &writer_tx,
             &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":tool_name,"arguments":arguments}}),
+            deadline,
+            cancellation,
         )?;
-        wait_for_response(&receiver, 3, deadline)
+        wait_for_response(&receiver, 3, deadline, cancellation)
     })();
+    drop(writer_tx);
     let _ = child.kill();
     let _ = child.wait();
+    // A server child may leave another process holding the pipe open. Do not
+    // turn a timed-out MCP call into an unbounded Agent cancellation wait.
+    if writer.is_finished() {
+        let _ = writer.join();
+    }
     result
 }
 
@@ -391,38 +436,63 @@ fn is_mcp_runtime_environment_name(name: &OsStr) -> bool {
     )
 }
 
-fn send_json(stdin: &mut ChildStdin, value: &Value) -> Result<(), String> {
-    let encoded = serde_json::to_vec(value)
+fn send_json(
+    writer: &mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<(), String>>)>,
+    value: &Value,
+    deadline: Instant,
+    cancellation: &CancellationToken,
+) -> Result<(), String> {
+    let mut encoded = serde_json::to_vec(value)
         .map_err(|error| format!("failed to encode MCP request: {error}"))?;
     if encoded.len() > MAX_ARGUMENT_BYTES {
         return Err("MCP request exceeded the native bound".into());
     }
-    stdin
-        .write_all(&encoded)
-        .and_then(|()| stdin.write_all(b"\n"))
-        .and_then(|()| stdin.flush())
-        .map_err(|error| format!("failed to write MCP stdio request: {error}"))
+    encoded.push(b'\n');
+    let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+    writer
+        .send((encoded, reply_tx))
+        .map_err(|_| "MCP stdio writer is unavailable".to_string())?;
+    loop {
+        if cancellation.is_cancelled() {
+            return Err("MCP stdio request cancelled".into());
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("MCP stdio request timed out".into());
+        }
+        match reply_rx.recv_timeout(remaining.min(WAIT_POLL)) {
+            Ok(result) => return result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("MCP stdio writer stopped before completing the request".into())
+            }
+        }
+    }
 }
 
 fn wait_for_response(
     receiver: &mpsc::Receiver<Result<String, std::io::Error>>,
     id: u64,
     deadline: Instant,
+    cancellation: &CancellationToken,
 ) -> Result<Value, String> {
     loop {
+        if cancellation.is_cancelled() {
+            return Err("MCP stdio request cancelled".into());
+        }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err("MCP stdio request timed out".into());
         }
-        let line = receiver
-            .recv_timeout(remaining)
-            .map_err(|error| match error {
-                mpsc::RecvTimeoutError::Timeout => "MCP stdio request timed out".to_string(),
-                mpsc::RecvTimeoutError::Disconnected => {
-                    "MCP stdio server closed before responding".to_string()
-                }
-            })?
-            .map_err(|error| format!("failed to read MCP stdio response: {error}"))?;
+        let line = match receiver.recv_timeout(remaining.min(WAIT_POLL)) {
+            Ok(line) => {
+                line.map_err(|error| format!("failed to read MCP stdio response: {error}"))?
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("MCP stdio server closed before responding".into())
+            }
+        };
         if line.len() > MAX_RESULT_BYTES {
             return Err("MCP stdio response line exceeded the native bound".into());
         }
@@ -677,6 +747,70 @@ fn validate_identifier(value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn stalled_stdio_server() -> McpServerConfigNative {
+        McpServerConfigNative {
+            id: "stalled".into(),
+            transport: McpTransportNative::Stdio,
+            command: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                r#"read -r line
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{}}'
+read -r line
+read -r line
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read","inputSchema":{"type":"object","properties":{"blob":{"type":"string"}},"required":["blob"]}}]}}'
+exec sleep 10"#
+                    .into(),
+            ],
+            cwd: None,
+            enabled: true,
+            credential_refs: Vec::new(),
+            tool_policies: HashMap::new(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stalled_mcp_stdin_write_respects_the_shared_deadline_and_cancellation() {
+        let root = tempfile::tempdir().unwrap();
+        let credentials = CredentialManager::in_memory_for_tests();
+        let arguments = json!({ "blob": "x".repeat(60_000) });
+        let server = stalled_stdio_server();
+        let started = Instant::now();
+        let timed_out = discover_and_invoke_stdio_tool(
+            &server,
+            root.path(),
+            &credentials,
+            "read",
+            &arguments,
+            &CancellationToken::new(),
+            Duration::from_millis(250),
+        );
+        assert!(timed_out.unwrap_err().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+
+        let cancellation = CancellationToken::new();
+        let canceller = cancellation.clone();
+        let started = Instant::now();
+        let wake = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            canceller.cancel();
+        });
+        let cancelled = discover_and_invoke_stdio_tool(
+            &server,
+            root.path(),
+            &credentials,
+            "read",
+            &arguments,
+            &cancellation,
+            Duration::from_secs(5),
+        );
+        wake.join().unwrap();
+        assert!(cancelled.unwrap_err().contains("cancelled"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 
     #[test]
     fn mcp_child_inherits_only_runtime_environment() {

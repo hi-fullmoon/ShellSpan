@@ -429,6 +429,7 @@ impl NativeToolEngine {
         prepared: &PreparedMcpAuthorizationNative,
         capability_id: String,
         credentials: &CredentialManager,
+        cancellation: &tokio_util::sync::CancellationToken,
     ) -> Result<AgentToolResultNative, String> {
         let mut call = prepared.call.clone();
         call.capability_id = capability_id;
@@ -456,6 +457,7 @@ impl NativeToolEngine {
             credentials,
             &prepared.tool_name,
             &call.arguments,
+            cancellation,
         )?;
         let failed = data.get("isError").and_then(Value::as_bool) == Some(true);
         Ok(AgentToolResultNative {

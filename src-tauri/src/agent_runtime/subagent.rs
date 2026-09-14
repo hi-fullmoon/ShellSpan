@@ -693,10 +693,20 @@ impl SubAgentManager {
             .await_settlement(child_session_id, cancellation)
             .await?;
         if snapshot.status == AgentSessionStatus::Idle {
+            let incomplete = last_turn_incomplete(&self.sessions.all_events(child_session_id)?);
             snapshot = self.sessions.terminate(
                 child_session_id,
-                AgentSessionStatus::Completed,
-                "fleetRoleTurnCompleted".into(),
+                if incomplete {
+                    AgentSessionStatus::Failed
+                } else {
+                    AgentSessionStatus::Completed
+                },
+                if incomplete {
+                    "fleetRolePlanIncomplete"
+                } else {
+                    "fleetRoleTurnCompleted"
+                }
+                .into(),
             )?;
         }
         let subagent = snapshot
@@ -1282,17 +1292,28 @@ impl SubAgentManager {
                 })
             }
         };
+        let incomplete = last_turn_incomplete(&self.sessions.all_events(child_session_id)?);
         if !continuable && snapshot.status == AgentSessionStatus::Idle {
             snapshot = self.sessions.terminate(
                 child_session_id,
-                AgentSessionStatus::Completed,
-                "oneShotTurnCompleted".into(),
+                if incomplete {
+                    AgentSessionStatus::Failed
+                } else {
+                    AgentSessionStatus::Completed
+                },
+                if incomplete {
+                    "oneShotPlanIncomplete"
+                } else {
+                    "oneShotTurnCompleted"
+                }
+                .into(),
             )?;
         }
         let events = self.sessions.all_events(child_session_id)?;
         let summary = assistant_summary(&events)
             .unwrap_or_else(|| format!("Child Agent settled with status {:?}", snapshot.status));
         let tool_status = match snapshot.status {
+            AgentSessionStatus::Idle if incomplete => AgentToolResultStatus::Failed,
             AgentSessionStatus::Idle | AgentSessionStatus::Completed => {
                 AgentToolResultStatus::Completed
             }
@@ -1553,6 +1574,7 @@ fn delegated_scope(
                 "list_directory",
                 "search_text",
                 "inspect_child_agent",
+                "update_plan",
             ],
             &[
                 AgentSessionEffect::None,
@@ -1569,6 +1591,7 @@ fn delegated_scope(
                 "apply_patch",
                 "transfer_file",
                 "inspect_child_agent",
+                "update_plan",
             ],
             &[
                 AgentSessionEffect::None,
@@ -1640,6 +1663,17 @@ fn assistant_summary(events: &[super::AgentSessionEvent]) -> Option<String> {
         } => Some(reason.clone()),
         _ => None,
     })
+}
+
+fn last_turn_incomplete(events: &[super::AgentSessionEvent]) -> bool {
+    events
+        .iter()
+        .rev()
+        .find_map(|event| match &event.payload {
+            AgentSessionEventPayload::TurnEnd { reason } => Some(reason == "incomplete"),
+            _ => None,
+        })
+        .unwrap_or(false)
 }
 
 fn ensure_fleet_owner(fleet: &FleetRuntime, parent_session_id: &str) -> Result<(), String> {

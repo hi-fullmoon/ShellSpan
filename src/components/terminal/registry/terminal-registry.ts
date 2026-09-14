@@ -38,7 +38,7 @@ const logger = createLogger('terminal');
 export type StatusCallback = (sessionId: string, payload: StatusEvent) => void;
 export type ClosedCallback = (sessionId: string, payload: ClosedEvent) => void;
 export type GetStatusCallback = (sessionId: string) => SessionStatus;
-export type RequestReconnectCallback = (sessionId: string) => void;
+export type RequestReconnectCallback = (sessionId: string, automatic?: boolean) => void;
 export type TerminalOutputCallback = (chunk: string) => void;
 export interface TerminalOutputFilter {
   push(chunk: string): string;
@@ -662,7 +662,7 @@ class TerminalControllerImpl implements TerminalController {
         window.setTimeout(() => {
           if (this.disposed || this.sessionId !== reconnectSessionId) return;
           this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.reconnectingLabel'), t('terminal.notice.reconnectingMessage'), '36'));
-          Promise.resolve(this.requestReconnect(reconnectSessionId)).finally(() => {
+          Promise.resolve(this.requestReconnect(reconnectSessionId, true)).finally(() => {
             if (this.disposed || this.sessionId !== reconnectSessionId) return;
             this.reconnectRequestedRef = false;
           });

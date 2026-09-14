@@ -22,6 +22,7 @@ import {
   type AiOptimisticSubmission,
 } from '@/lib/ai/optimistic-submission';
 import { normalizeAiSessionError, sessionArchiveErrorMessage } from '@/lib/ai/session-error';
+import { canContinueOnReconnectedTerminal, isDirectReconnectedTerminal } from '@/lib/ai/reconnected-terminal';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import {
@@ -113,6 +114,7 @@ export interface AiSessionController {
   readonly submit: (gesture: 'keyboard' | 'primary', accelerated?: boolean) => void;
   readonly stop: () => void;
   readonly retryTurn: () => void;
+  readonly continueOnReconnectedTerminal: (() => void) | null;
   readonly retryFailedDraft: (failedDraftId: string) => void;
   readonly dismissError: () => void;
   readonly openSessions: () => void;
@@ -644,6 +646,14 @@ export function useAiSessionController({
   }, [ownedAdapter, saveCurrentDraft]);
 
   useEffect(() => {
+    const previous = viewRef.current;
+    if (scope === 'terminal' && previous?.snapshot.kind === 'agent'
+      && isDirectReconnectedTerminal(previous.snapshot.value, activeTerminal)) {
+      appliedWorkspaceRef.current = workspaceScopeKey;
+      claimWorkspace();
+      setSkillNavigation((generation) => generation + 1);
+      return;
+    }
     resetComposer();
     setNewExecutionSurface('direct');
     appliedWorkspaceRef.current = workspaceScopeKey;
@@ -654,7 +664,7 @@ export function useAiSessionController({
     queueOperationRef.current = null;
     viewRef.current = null;
     setNavigation(createAiWorkspaceNavigationState());
-  }, [claimWorkspace, resetComposer, workspaceScopeKey]);
+  }, [activeTerminal?.sessionId, claimWorkspace, resetComposer, scope, workspaceScopeKey]);
 
   useEffect(() => {
     // Wait for the old workspace's state to clear before choosing its successor.
@@ -1093,6 +1103,10 @@ export function useAiSessionController({
     adapter.loadArtifact(sessionId, artifactId, maxBytes)
   ), [adapter]);
 
+  const reconnectedSnapshot = scope === 'terminal' && visibleView?.snapshot.kind === 'agent'
+    && canContinueOnReconnectedTerminal(visibleView.snapshot.value, activeTerminal) && hasProvider
+    ? visibleView.snapshot.value : null;
+
   return {
     imageDraft: {
       ...imageDraft,
@@ -1227,6 +1241,17 @@ export function useAiSessionController({
         content: t('ai.workspace.retryTurnPrompt'), clientOperationId: operationId(),
         now: Date.now(), hasProvider, canCreateSession: canStartAgent });
     },
+    continueOnReconnectedTerminal: reconnectedSnapshot ? () => {
+      const current = viewRef.current;
+      if (current?.snapshot.kind !== 'agent'
+        || !canContinueOnReconnectedTerminal(current.snapshot.value, activeTerminal)) return;
+      const content = t('ai.workspace.reconnectContinuePrompt', {
+        goal: reconnectedSnapshot.header.goal,
+      });
+      newSession();
+      dispatch({ type: 'submit.requested', gesture: 'primary', accelerated: false,
+        content, clientOperationId: operationId(), now: now(), hasProvider, canCreateSession: canStartAgent });
+    } : null,
     retryFailedDraft: (failedDraftId) => {
       if (!canStartAgent) {
         setAnnouncement('sessionUnavailable');

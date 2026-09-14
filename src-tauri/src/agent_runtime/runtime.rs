@@ -2789,6 +2789,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn one_shot_child_with_unfinished_plan_is_not_reported_as_completed() {
+        let adapter = FakeAdapter::new(vec![
+            tool_response(vec![ModelToolCall {
+                call_id: "spawn-child".into(),
+                provider_call_id: Some("provider-spawn-child".into()),
+                name: "spawn_one_shot_agent".into(),
+                arguments: json!({
+                    "goal": "verify the target",
+                    "role": "general",
+                    "inheritanceMode": "blank",
+                    "targetIds": ["target-local"]
+                }),
+            }]),
+            tool_response(vec![ModelToolCall {
+                call_id: "child-plan".into(),
+                provider_call_id: Some("provider-child-plan".into()),
+                name: "update_plan".into(),
+                arguments: json!({
+                    "planVersion": 1,
+                    "steps": [{ "id": "verify", "title": "Verify the target", "status": "inProgress" }]
+                }),
+            }]),
+            reply("The target is verified.", &[]),
+            reply("Verification is still pending.", &[]),
+            reply("The child did not finish verification.", &[]),
+        ]);
+        let (_root, runtime) = configured(adapter);
+        create(&runtime, "parent-incomplete-child");
+        runtime
+            .followup("parent-incomplete-child", "initial".into(), "verify".into())
+            .unwrap();
+        runtime
+            .start("parent-incomplete-child", provider(), None)
+            .unwrap();
+        runtime.await_idle("parent-incomplete-child").await.unwrap();
+        let events = all_events(&runtime, "parent-incomplete-child");
+        let child_id = events
+            .iter()
+            .find_map(|event| match &event.payload {
+                AgentSessionEventPayload::SubagentDescriptor {
+                    child_session_id, ..
+                } => Some(child_session_id.clone()),
+                _ => None,
+            })
+            .expect("one-shot child descriptor");
+        assert_eq!(
+            runtime.session(&child_id).unwrap().status,
+            AgentSessionStatus::Failed
+        );
+        assert!(all_events(&runtime, &child_id).iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
+                if reason == "oneShotPlanIncomplete"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::ToolResult { call_id, status: AgentToolResultStatus::Failed, .. }
+                if call_id == "spawn-child"
+        )));
+    }
+
+    #[tokio::test]
     async fn fleet_uses_distinct_role_children_and_persists_target_evidence() {
         let adapter = FakeAdapter::new(vec![
             reply("explorer evidence", &[]),
@@ -3162,7 +3224,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_plan_commits_in_primary_session_pipeline_and_continues_the_turn() {
+    async fn update_plan_commits_in_primary_session_pipeline_and_checks_unfinished_work() {
         let mut plan_response = response("");
         plan_response.finish_reason = ModelFinishReason::ToolCalls;
         set_tool_calls(
@@ -3188,6 +3250,7 @@ mod tests {
                 response: plan_response,
             },
             reply("The plan is recorded.", &[]),
+            reply("Target inspection remains pending.", &[]),
         ]);
         let (_root, runtime) = configured(adapter.clone());
         create(&runtime, "session-plan");
@@ -3198,7 +3261,7 @@ mod tests {
         runtime.await_idle("session-plan").await.unwrap();
 
         let events = all_events(&runtime, "session-plan");
-        assert_eq!(adapter.request_count(), 2);
+        assert_eq!(adapter.request_count(), 3);
         assert_eq!(
             events
                 .iter()
@@ -3207,7 +3270,7 @@ mod tests {
                     AgentSessionEventPayload::RequestHeader { .. }
                 ))
                 .count(),
-            2
+            3
         );
         assert_eq!(
             events
@@ -3217,7 +3280,7 @@ mod tests {
                     AgentSessionEventPayload::RequestStart { .. }
                 ))
                 .count(),
-            2
+            3
         );
         assert!(events.iter().any(|event| matches!(
             &event.payload,
@@ -3236,6 +3299,10 @@ mod tests {
                 .count(),
             1
         );
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::TurnEnd { reason } if reason == "incomplete"
+        )));
     }
 
     #[tokio::test]
@@ -3288,6 +3355,7 @@ mod tests {
                 response: corrected_plan,
             },
             reply("The corrected plan is recorded.", &[]),
+            reply("Target inspection remains pending.", &[]),
         ]);
         let (_root, runtime) = configured(adapter.clone());
         create(&runtime, "session-invalid-plan");
@@ -3304,7 +3372,7 @@ mod tests {
         runtime.await_idle("session-invalid-plan").await.unwrap();
 
         let events = all_events(&runtime, "session-invalid-plan");
-        assert_eq!(adapter.request_count(), 3);
+        assert_eq!(adapter.request_count(), 4);
         assert!(events.iter().any(|event| matches!(
             &event.payload,
             AgentSessionEventPayload::ToolResult {

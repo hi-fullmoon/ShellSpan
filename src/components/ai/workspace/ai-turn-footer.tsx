@@ -3,6 +3,7 @@ import { Popover } from '@base-ui/react/popover';
 import { Clock3Icon, DatabaseIcon } from 'lucide-react';
 
 import { MessageActions } from '@/components/ai/chat-primitives';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
@@ -94,6 +95,9 @@ export function AiTurnFooter({ node }: { readonly node: AiConversationNodeOf<'tu
   return (
     <div className="ai-turn-tail min-w-0 max-w-full" data-status={node.status} data-stop-reason={node.stopReason ?? undefined}
       aria-label={t('ai.workspace.stats.label')}>
+      {node.status === 'incomplete' && (
+        <Badge variant="secondary" className="mb-1">{t('ai.workspace.turnProcess.incomplete')}</Badge>
+      )}
       <MessageActions text={node.summaryText ?? ''} timestamp={node.timestamp} align="start"
         reveal="always"
         className="ai-turn-stats h-auto min-h-7 w-full min-w-0 max-w-full flex-wrap gap-x-1.5 gap-y-0.5 overflow-visible [&_time]:ml-0.5"

@@ -199,6 +199,7 @@ export type AiTurnProcessStatus =
   | 'running'
   | 'waiting'
   | 'completed'
+  | 'incomplete'
   | 'failed'
   | 'cancelled'
   | 'partial';

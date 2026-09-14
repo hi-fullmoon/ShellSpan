@@ -96,6 +96,7 @@ export function AiWorkspaceController({
       onSubmitGesture={controller.submit}
       onStop={controller.stop}
       onRetryTurn={controller.retryTurn}
+      onContinueOnReconnectedTerminal={controller.continueOnReconnectedTerminal ?? undefined}
       onBusyPreferenceChange={controller.setBusyPreference}
       onRetryFailedDraft={controller.retryFailedDraft}
       onDismissError={controller.dismissError}

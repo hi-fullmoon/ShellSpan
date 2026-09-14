@@ -227,11 +227,11 @@ fn inbox_steer_and_turn_close_share_one_atomic_boundary() {
         .mutate_inbox(steer_input(&store, "before-close"))
         .unwrap();
     assert!(!store
-        .end_turn_if_no_step_input("session-1", "turn-1")
+        .end_turn_if_no_step_input("session-1", "turn-1", "completed")
         .unwrap());
     let (_root, store) = running_steer_store();
     assert!(store
-        .end_turn_if_no_step_input("session-1", "turn-1")
+        .end_turn_if_no_step_input("session-1", "turn-1", "completed")
         .unwrap());
     assert!(store
         .mutate_inbox(steer_input(&store, "after-close"))
@@ -248,7 +248,7 @@ fn inbox_steer_and_turn_close_share_one_atomic_boundary() {
             });
             let close = scope.spawn(|| {
                 barrier.wait();
-                store.end_turn_if_no_step_input("session-1", "turn-1")
+                store.end_turn_if_no_step_input("session-1", "turn-1", "completed")
             });
             let accepted = steer.join().unwrap().is_ok();
             let closed = close.join().unwrap().unwrap();
@@ -337,7 +337,7 @@ fn inbox_steer_removed_during_step_preparation_closes_turn_without_an_empty_mode
         .mutate_inbox(steer_input(&store, "steer-before-hook"))
         .unwrap();
     assert!(!store
-        .end_turn_if_no_step_input("session-1", "turn-1")
+        .end_turn_if_no_step_input("session-1", "turn-1", "completed")
         .unwrap());
     let revision = store.snapshot("session-1").unwrap().event_count;
     store
@@ -351,7 +351,7 @@ fn inbox_steer_removed_during_step_preparation_closes_turn_without_an_empty_mode
         })
         .unwrap();
     assert!(store
-        .begin_step_or_end_turn("session-1", "turn-1".into(), "unused-step".into())
+        .begin_step_or_end_turn("session-1", "turn-1".into(), "unused-step".into(), "completed")
         .unwrap()
         .is_none());
     let events = store.all_events("session-1").unwrap();

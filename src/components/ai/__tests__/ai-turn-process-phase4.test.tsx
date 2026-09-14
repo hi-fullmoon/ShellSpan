@@ -367,6 +367,19 @@ describe('AI Phase 4 Turn Process renderer', () => {
     if (!hasAnswer) expect(await screen.findByText(answer)).toBeVisible();
   });
 
+  it('shows an unfinished plan as incomplete instead of completed', () => {
+    const events: AgentSessionEvent[] = agentSessionBaselineScenarios.hello.events.map((event) => (
+      event.type === 'turn/end'
+        ? { ...event, data: { reason: 'incomplete' } }
+        : event
+    ));
+    const nodes = projectAgentChatNodes(events);
+    const { container } = render(<AiConversationNodeList nodes={nodes} />);
+    expect(screen.getByRole('button', { name: 'Task still incomplete' })).toBeInTheDocument();
+    expect(container.querySelector('[data-ai-node-kind="turnTail"] .ai-turn-tail')).toHaveAttribute('data-status', 'incomplete');
+    expect(screen.getAllByText('Task still incomplete')).toHaveLength(2);
+  });
+
   it.each([
     ['Usage 144 tok', 'Turn usage'],
     ['Time 1.1s', 'Turn timing and speed'],

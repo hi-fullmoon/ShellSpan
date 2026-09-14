@@ -9,6 +9,7 @@ import {
 import { terminalRegistry } from '../registry/terminal-registry';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { t } from '@/locales';
 import type { Event } from '@tauri-apps/api/event';
 import type {
   AgentSessionEvent,
@@ -234,7 +235,7 @@ describe('TerminalControllerLayer', () => {
       { length: buffer.length },
       (_, index) => buffer.getLine(index)?.translateToString(true) ?? '',
     ).join('\n');
-    expect(content).toContain('terminal.notice.disconnectedHint');
+    expect(content).toContain(t('terminal.notice.disconnectedHint'));
   });
 
   it('does not write a disconnected hint for fresh connecting sessions', () => {

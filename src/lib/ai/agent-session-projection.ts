@@ -22,6 +22,7 @@ function toolEventKey(stepId: string | undefined, callId: string): string {
 }
 
 function terminalStatusFromReason(reason: string): AgentSessionRuntimeStatus {
+  if (reason === 'incomplete') return 'idle';
   if (/waiting/i.test(reason)) return 'waiting';
   if (/cancel|stop|interrupt/i.test(reason)) return 'cancelled';
   if (/fail|error|limit|max.?token/i.test(reason)) return 'failed';

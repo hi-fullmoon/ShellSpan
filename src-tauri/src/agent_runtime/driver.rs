@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use uuid::Uuid;
 
@@ -20,23 +20,32 @@ use super::{AgentInboxLane, AgentInboxMessage, AgentMessageSource};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AgentDriverConfig {
-    /// No default step cap; explicit budgets may bound a turn.
     pub(crate) max_steps_per_turn: Option<usize>,
     pub(crate) max_turns_per_session: usize,
     pub(crate) max_identical_tool_steps: usize,
     pub(crate) max_model_tokens_per_session: u64,
     pub(crate) max_active_duration_ms: u64,
+    pub(crate) max_model_stream_duration_ms: u64,
+    pub(crate) network_recovery_window_ms: u64,
+    pub(crate) network_recovery_max_attempts: u32,
+    pub(crate) network_recovery_initial_delay_ms: u64,
+    pub(crate) network_recovery_max_delay_ms: u64,
     pub(crate) retry_policy: RetryPolicy,
 }
 
 impl Default for AgentDriverConfig {
     fn default() -> Self {
         Self {
-            max_steps_per_turn: None,
+            max_steps_per_turn: Some(64),
             max_turns_per_session: 64,
             max_identical_tool_steps: 6,
             max_model_tokens_per_session: 2_000_000,
             max_active_duration_ms: 60 * 60 * 1_000,
+            max_model_stream_duration_ms: 15 * 60 * 1_000,
+            network_recovery_window_ms: 2 * 60 * 1_000,
+            network_recovery_max_attempts: 8,
+            network_recovery_initial_delay_ms: 3_000,
+            network_recovery_max_delay_ms: 30_000,
             retry_policy: RetryPolicy::default(),
         }
     }
@@ -101,6 +110,11 @@ async fn drive_agent_inner(
             max_identical_tool_steps: config.max_identical_tool_steps,
             max_model_tokens_per_session: config.max_model_tokens_per_session,
             max_active_duration_ms: config.max_active_duration_ms,
+            max_model_stream_duration_ms: config.max_model_stream_duration_ms,
+            network_recovery_window_ms: config.network_recovery_window_ms,
+            network_recovery_max_attempts: config.network_recovery_max_attempts,
+            network_recovery_initial_delay_ms: config.network_recovery_initial_delay_ms,
+            network_recovery_max_delay_ms: config.network_recovery_max_delay_ms,
             retry_policy: config.retry_policy,
         }
     } else {
@@ -153,11 +167,11 @@ async fn drive_agent_inner(
                     .iter()
                     .any(|message| message.source.kind == super::AgentMessageSourceKind::User)
                 && config.max_identical_tool_steps > 0
-                && identical_tool_step_streak(&all_events, &scope.turn_id)
+                && repeated_tool_step_streak(&all_events, &scope.turn_id)
                     >= config.max_identical_tool_steps
             {
                 let reason = format!(
-                    "noProgress: {} identical tool steps produced no new evidence",
+                    "noProgress: {} repeated tool steps produced no new evidence",
                     config.max_identical_tool_steps
                 );
                 close_open_scope(sessions, entry, &reason)?;
@@ -227,6 +241,15 @@ async fn drive_agent_inner(
             {
                 let reason = format!("stepLimitExceeded: maximum {} Steps per Turn", limit);
                 close_open_scope(sessions, entry, &reason)?;
+                if entry.subagent.is_none()
+                    && !sessions
+                        .snapshot(&entry.session_id)?
+                        .inbox
+                        .next_turn
+                        .is_empty()
+                {
+                    continue;
+                }
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
                 return Ok(AgentDriverSettlement::Failed);
@@ -295,7 +318,7 @@ async fn drive_agent_inner(
 
         let mut current_step_id = step_id;
         loop {
-            let continue_after_tools = match run_step(
+            let (continue_after_tools, turn_end_reason) = match run_step(
                 sessions,
                 entry,
                 tools,
@@ -308,8 +331,9 @@ async fn drive_agent_inner(
             )
             .await?
             {
-                StepSettlement::Completed => false,
-                StepSettlement::ToolsCompleted => true,
+                StepSettlement::Completed => (false, "completed"),
+                StepSettlement::Incomplete => (false, "incomplete"),
+                StepSettlement::ToolsCompleted => (true, "completed"),
                 StepSettlement::Waiting => return Ok(AgentDriverSettlement::Waiting),
                 StepSettlement::Cancelled => {
                     close_open_scope(sessions, entry, "cancelled")?;
@@ -335,11 +359,11 @@ async fn drive_agent_inner(
                     .next_step
                     .iter()
                     .any(|message| message.source.kind == super::AgentMessageSourceKind::User)
-                && identical_tool_step_streak(&sessions.all_events(&entry.session_id)?, &turn_id)
+                && repeated_tool_step_streak(&sessions.all_events(&entry.session_id)?, &turn_id)
                     >= config.max_identical_tool_steps
             {
                 let reason = format!(
-                    "noProgress: {} identical tool steps produced no new evidence",
+                    "noProgress: {} repeated tool steps produced no new evidence",
                     config.max_identical_tool_steps
                 );
                 close_open_scope(sessions, entry, &reason)?;
@@ -356,7 +380,11 @@ async fn drive_agent_inner(
                 return Ok(AgentDriverSettlement::Failed);
             }
             if !continue_after_tools
-                && sessions.end_turn_if_no_step_input(&entry.session_id, &turn_id)?
+                && sessions.end_turn_if_no_step_input(
+                    &entry.session_id,
+                    &turn_id,
+                    turn_end_reason,
+                )?
             {
                 entry.set_scope(None)?;
                 break;
@@ -367,6 +395,15 @@ async fn drive_agent_inner(
             {
                 let reason = format!("stepLimitExceeded: maximum {} Steps per Turn", limit);
                 close_open_scope(sessions, entry, &reason)?;
+                if entry.subagent.is_none()
+                    && !sessions
+                        .snapshot(&entry.session_id)?
+                        .inbox
+                        .next_turn
+                        .is_empty()
+                {
+                    break;
+                }
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
                 return Ok(AgentDriverSettlement::Failed);
@@ -403,6 +440,7 @@ async fn drive_agent_inner(
                     &entry.session_id,
                     turn_id.clone(),
                     current_step_id.clone(),
+                    turn_end_reason,
                 )?
                 .is_none()
             {
@@ -538,6 +576,7 @@ async fn apply_pre_step_hooks(
 
 enum StepSettlement {
     Completed,
+    Incomplete,
     ToolsCompleted,
     Waiting,
     Cancelled,
@@ -549,6 +588,25 @@ struct PendingRetry {
     reason: String,
     plan: RetryPlan,
     error: Option<NormalizedModelError>,
+    wait_for_network: bool,
+}
+
+fn network_transport_failure(error: &NormalizedModelError) -> bool {
+    matches!(
+        error.kind,
+        NormalizedModelErrorKind::Transport | NormalizedModelErrorKind::Timeout
+    ) && matches!(
+        error.code.as_deref(),
+        Some(
+            "CONNECT"
+                | "STREAM_READ"
+                | "STREAM_DECODE"
+                | "TRANSPORT_TIMEOUT"
+                | "REQUEST_HEADERS_TIMEOUT"
+                | "FIRST_BYTE_TIMEOUT"
+                | "STREAM_IDLE_TIMEOUT"
+        )
+    )
 }
 
 fn retry_random_sample() -> f64 {
@@ -604,6 +662,8 @@ async fn run_step(
     let mut pending_retry: Option<PendingRetry> = None;
     let mut cumulative_delay_ms = 0_u64;
     let mut prepared_call: Option<crate::llm::runtime::PreparedCall> = None;
+    let mut network_recovery_started_at: Option<Instant> = None;
+    let mut network_recovery_round = 0_u32;
     loop {
         if entry.cancellation().is_cancelled() {
             return Ok(StepSettlement::Cancelled);
@@ -614,6 +674,14 @@ async fn run_step(
         }
         let request_id = format!("request-{}", Uuid::new_v4().simple());
         if let Some(pending) = pending_retry.take() {
+            if pending.wait_for_network {
+                append_status(
+                    sessions,
+                    entry,
+                    AgentSessionStatus::Waiting,
+                    Some("waitingForNetwork".into()),
+                )?;
+            }
             cumulative_delay_ms = cumulative_delay_ms.saturating_add(pending.plan.delay_ms);
             let error_kind = pending
                 .error
@@ -641,6 +709,14 @@ async fn run_step(
             )?;
             if !super::cancellable_retry_delay(pending.plan.delay_ms, &entry.cancellation()).await {
                 return Ok(StepSettlement::Cancelled);
+            }
+            if pending.wait_for_network {
+                append_status(
+                    sessions,
+                    entry,
+                    AgentSessionStatus::Running,
+                    Some("networkRetry".into()),
+                )?;
             }
         }
         let mut request = if let Some(call) = &prepared_call {
@@ -782,9 +858,52 @@ async fn run_step(
             collected: Arc::clone(&collected),
             cancellation: cancellation.clone(),
         });
-        let response = call
-            .stream(request_id.clone(), cancellation.clone(), sink)
-            .await;
+        let remaining_active_ms = config
+            .max_active_duration_ms
+            .saturating_sub(active_duration_ms(
+                &sessions.all_events(&entry.session_id)?,
+                current_unix_ms()?,
+            ));
+        let remaining_network_ms = network_recovery_started_at.map_or(u64::MAX, |started| {
+            config
+                .network_recovery_window_ms
+                .saturating_sub(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX))
+        });
+        let stream_limit_ms = remaining_active_ms
+            .min(config.max_model_stream_duration_ms)
+            .min(remaining_network_ms);
+        let deadline_code = if remaining_network_ms <= remaining_active_ms
+            && remaining_network_ms <= config.max_model_stream_duration_ms
+        {
+            "NETWORK_RECOVERY_TIMEOUT"
+        } else if remaining_active_ms <= config.max_model_stream_duration_ms {
+            "TASK_ACTIVE_TIME_EXCEEDED"
+        } else {
+            "MODEL_STREAM_TOTAL_TIMEOUT"
+        };
+        let deadline_error = || {
+            let mut error = NormalizedModelError::new(
+                NormalizedModelErrorKind::Timeout,
+                format!("model stream exceeded its {stream_limit_ms} ms total deadline"),
+            );
+            error.code = Some(deadline_code.into());
+            error
+        };
+        let response = if stream_limit_ms == 0 {
+            Err(deadline_error())
+        } else {
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => Err(NormalizedModelError::cancelled()),
+                result = tokio::time::timeout(
+                    std::time::Duration::from_millis(stream_limit_ms),
+                    call.stream(request_id.clone(), cancellation.clone(), sink),
+                ) => match result {
+                    Ok(response) => response,
+                    Err(_) => Err(deadline_error()),
+                },
+            }
+        };
         let response = match response {
             _ if cancellation.is_cancelled() => Err(NormalizedModelError::cancelled()),
             Ok(response) if !model_response_has_output(&response) => {
@@ -825,6 +944,55 @@ async fn run_step(
                 return Ok(StepSettlement::Cancelled);
             }
             Err(error)
+                if matches!(
+                    error.code.as_deref(),
+                    Some(
+                        "TASK_ACTIVE_TIME_EXCEEDED"
+                            | "MODEL_STREAM_TOTAL_TIMEOUT"
+                            | "NETWORK_RECOVERY_TIMEOUT"
+                    )
+                ) =>
+            {
+                let (had_output, partial) = {
+                    let collected = collected
+                        .lock()
+                        .map_err(|_| "model stream accumulator is unavailable".to_string())?;
+                    (!collected.is_empty(), collected.content())
+                };
+                if had_output {
+                    append_interrupted_message(
+                        sessions,
+                        entry,
+                        turn_id,
+                        step_id,
+                        partial,
+                        AgentStopReason::Other,
+                    )?;
+                }
+                sessions.append(
+                    &entry.session_id,
+                    Some(turn_id.to_string()),
+                    Some(step_id.to_string()),
+                    request_failure_payload(
+                        &request_id,
+                        &error,
+                        attempt,
+                        config.retry_policy.max_attempts().max(attempt),
+                        cumulative_delay_ms,
+                        had_output,
+                    ),
+                )?;
+                return Ok(StepSettlement::Failed(format!(
+                    "{}: {}",
+                    match error.code.as_deref() {
+                        Some("TASK_ACTIVE_TIME_EXCEEDED") => "taskActiveTimeExceeded",
+                        Some("NETWORK_RECOVERY_TIMEOUT") => "networkRecoveryTimeout",
+                        _ => "modelStreamTotalTimeout",
+                    },
+                    error.message
+                )));
+            }
+            Err(error)
                 if error.kind == NormalizedModelErrorKind::ContextTooLarge
                     && attempt < config.retry_policy.max_attempts()
                     && collected
@@ -842,7 +1010,7 @@ async fn run_step(
                         &request_id,
                         &error,
                         attempt,
-                        config.retry_policy.max_attempts(),
+                        config.retry_policy.max_attempts().max(attempt),
                         cumulative_delay_ms,
                         false,
                     ),
@@ -886,11 +1054,24 @@ async fn run_step(
                         server_hint_capped: false,
                     },
                     error: Some(error),
+                    wait_for_network: false,
                 });
                 attempt += 1;
                 request_reason = AgentRequestReason::Recovery;
             }
             Err(error) if error.retryable() => {
+                let network_failure = network_transport_failure(&error);
+                if network_failure && network_recovery_started_at.is_none() {
+                    network_recovery_started_at = Some(Instant::now());
+                }
+                let max_attempts = if network_failure {
+                    config
+                        .network_recovery_max_attempts
+                        .max(config.retry_policy.max_attempts())
+                } else {
+                    config.retry_policy.max_attempts()
+                }
+                .max(attempt);
                 let partial_is_empty = collected
                     .lock()
                     .map_err(|_| "model stream accumulator is unavailable".to_string())?
@@ -903,27 +1084,59 @@ async fn run_step(
                         &request_id,
                         &error,
                         attempt,
-                        config.retry_policy.max_attempts(),
+                        max_attempts,
                         cumulative_delay_ms,
                         !partial_is_empty,
                     ),
                 )?;
                 if !cancellation.is_cancelled() {
-                    if let Some(plan) =
-                        config
-                            .retry_policy
-                            .plan(&error, attempt, retry_random_sample())
-                    {
+                    let ordinary = config
+                        .retry_policy
+                        .plan(&error, attempt, retry_random_sample());
+                    let recovery =
+                        if ordinary.is_none() && network_failure && attempt < max_attempts {
+                            network_recovery_started_at.and_then(|started| {
+                                let remaining = config.network_recovery_window_ms.saturating_sub(
+                                    u64::try_from(started.elapsed().as_millis())
+                                        .unwrap_or(u64::MAX),
+                                );
+                                if remaining == 0 {
+                                    return None;
+                                }
+                                let delay_ms = config
+                                    .network_recovery_initial_delay_ms
+                                    .saturating_mul(1_u64 << network_recovery_round.min(20))
+                                    .min(config.network_recovery_max_delay_ms)
+                                    .min(remaining);
+                                Some(RetryPlan {
+                                    delay_ms,
+                                    server_retry_after_ms: None,
+                                    server_hint_capped: false,
+                                })
+                            })
+                        } else {
+                            None
+                        };
+                    let wait_for_network = recovery.is_some();
+                    if let Some(plan) = ordinary.or(recovery) {
                         pending_retry = Some(PendingRetry {
                             previous_request_id: request_id,
-                            reason: format!(
-                                "retryable model failure: kind={:?} code={}",
-                                error.kind,
-                                error.code.as_deref().unwrap_or("unspecified")
-                            ),
+                            reason: if wait_for_network {
+                                "network recovery after model transport failure".into()
+                            } else {
+                                format!(
+                                    "retryable model failure: kind={:?} code={}",
+                                    error.kind,
+                                    error.code.as_deref().unwrap_or("unspecified")
+                                )
+                            },
                             plan,
                             error: Some(error),
+                            wait_for_network,
                         });
+                        if wait_for_network {
+                            network_recovery_round = network_recovery_round.saturating_add(1);
+                        }
                         attempt += 1;
                         request_reason = AgentRequestReason::Retry;
                         continue;
@@ -935,7 +1148,7 @@ async fn run_step(
                 return Ok(StepSettlement::Failed(model_error_reason(
                     &error,
                     attempt,
-                    config.retry_policy.max_attempts(),
+                    max_attempts,
                     cumulative_delay_ms,
                 )));
             }
@@ -954,7 +1167,7 @@ async fn run_step(
                         &request_id,
                         &error,
                         attempt,
-                        config.retry_policy.max_attempts(),
+                        config.retry_policy.max_attempts().max(attempt),
                         cumulative_delay_ms,
                         had_output,
                     ),
@@ -962,7 +1175,7 @@ async fn run_step(
                 return Ok(StepSettlement::Failed(model_error_reason(
                     &error,
                     attempt,
-                    config.retry_policy.max_attempts(),
+                    config.retry_policy.max_attempts().max(attempt),
                     cumulative_delay_ms,
                 )));
             }
@@ -1095,10 +1308,8 @@ fn task_budget_failure(
     Ok(None)
 }
 
-fn identical_tool_step_streak(events: &[super::AgentSessionEvent], turn_id: &str) -> usize {
-    let mut expected = None;
-    let mut streak = 0;
-    let mut newer_had_user_or_plan = false;
+fn repeated_tool_step_streak(events: &[super::AgentSessionEvent], turn_id: &str) -> usize {
+    let mut signatures = Vec::new();
     for event in events.iter().rev() {
         if event.turn_id.as_deref() != Some(turn_id) {
             continue;
@@ -1106,7 +1317,7 @@ fn identical_tool_step_streak(events: &[super::AgentSessionEvent], turn_id: &str
         let AgentSessionEventPayload::StepEnd { reason } = &event.payload else {
             continue;
         };
-        if reason != "toolsCompleted" || (streak > 0 && newer_had_user_or_plan) {
+        if reason != "toolsCompleted" {
             break;
         }
         let Some(step_id) = event.step_id.as_deref() else {
@@ -1115,17 +1326,23 @@ fn identical_tool_step_streak(events: &[super::AgentSessionEvent], turn_id: &str
         let Some((signature, had_user_or_plan)) = tool_step_signature(events, step_id) else {
             break;
         };
-        if expected
-            .as_ref()
-            .is_some_and(|previous| previous != &signature)
-        {
+        signatures.push(signature);
+        if had_user_or_plan {
             break;
         }
-        expected = Some(signature);
-        newer_had_user_or_plan = had_user_or_plan;
-        streak += 1;
     }
-    streak
+    let mut longest = 0;
+    for period in 1..=3.min(signatures.len() / 2) {
+        let count = signatures
+            .iter()
+            .enumerate()
+            .take_while(|(index, signature)| *signature == &signatures[index % period])
+            .count();
+        if count >= 2 * period {
+            longest = longest.max(count);
+        }
+    }
+    longest.max(signatures.len().min(1))
 }
 
 fn tool_step_signature(
@@ -1347,11 +1564,42 @@ async fn commit_response(
         return Ok(StepSettlement::Cancelled);
     }
     if tool_calls.is_empty() {
+        let events = sessions.all_events(&entry.session_id)?;
+        let incomplete = incomplete_plan_for_turn(&events, turn_id);
+        let checked = events.iter().any(|event| {
+            event.turn_id.as_deref() == Some(turn_id)
+                && matches!(&event.payload, AgentSessionEventPayload::StepEnd { reason } if reason == "completionCheck")
+        });
+        if incomplete && !checked {
+            payloads.push(AgentScopedPayload {
+                turn_id: Some(turn_id.to_string()),
+                step_id: Some(step_id.to_string()),
+                payload: AgentSessionEventPayload::UserMessage {
+                    message: super::AgentInboxMessage {
+                        images: Vec::new(),
+                        message_id: format!("message-{}", Uuid::new_v4().simple()),
+                        client_submission_id: None,
+                        content: "The recorded task plan still has unfinished steps. Continue the task with the available tools, update the plan when work is done, or clearly explain what blocks completion. Do not claim the task is complete while plan steps remain open.".into(),
+                        source: super::AgentMessageSource::runtime("completion-check".into()),
+                        terminal_context: None,
+                    },
+                },
+            });
+        }
         payloads.push(AgentScopedPayload {
             turn_id: Some(turn_id.to_string()),
             step_id: Some(step_id.to_string()),
             payload: AgentSessionEventPayload::StepEnd {
-                reason: "completed".into(),
+                reason: if incomplete {
+                    if checked {
+                        "incomplete"
+                    } else {
+                        "completionCheck"
+                    }
+                } else {
+                    "completed"
+                }
+                .into(),
             },
         });
         sessions.append_batch(&entry.session_id, payloads)?;
@@ -1359,7 +1607,15 @@ async fn commit_response(
             turn_id: turn_id.to_string(),
             step_id: None,
         }))?;
-        return Ok(StepSettlement::Completed);
+        return Ok(if incomplete {
+            if checked {
+                StepSettlement::Incomplete
+            } else {
+                StepSettlement::ToolsCompleted
+            }
+        } else {
+            StepSettlement::Completed
+        });
     }
 
     sessions.append_batch(&entry.session_id, payloads)?;
@@ -1371,6 +1627,25 @@ async fn commit_response(
         ToolPipelineSettlement::Waiting => Ok(StepSettlement::Waiting),
         ToolPipelineSettlement::Cancelled => Ok(StepSettlement::Cancelled),
     }
+}
+
+pub(super) fn incomplete_plan_for_turn(events: &[super::AgentSessionEvent], turn_id: &str) -> bool {
+    events
+        .iter()
+        .rev()
+        .find_map(|event| match &event.payload {
+            AgentSessionEventPayload::TaskPlan { steps, .. }
+                if event.turn_id.as_deref() == Some(turn_id) =>
+            {
+                Some(
+                    steps
+                        .iter()
+                        .any(|step| step.status != super::AgentPlanStepStatus::Completed),
+                )
+            }
+            _ => None,
+        })
+        .unwrap_or(false)
 }
 
 fn append_interrupted_message(
@@ -1973,11 +2248,11 @@ mod tests {
     fn repeated_tool_streak_resets_on_new_observation_or_user_input() {
         let mut events = repeated_step("step-1", "call-1", "80%", false, 10);
         events.extend(repeated_step("step-2", "call-2", "80%", false, 20));
-        assert_eq!(identical_tool_step_streak(&events, "turn-1"), 2);
+        assert_eq!(repeated_tool_step_streak(&events, "turn-1"), 2);
         events.extend(repeated_step("step-3", "call-3", "81%", false, 30));
-        assert_eq!(identical_tool_step_streak(&events, "turn-1"), 1);
+        assert_eq!(repeated_tool_step_streak(&events, "turn-1"), 1);
         events.extend(repeated_step("step-4", "call-4", "81%", true, 40));
-        assert_eq!(identical_tool_step_streak(&events, "turn-1"), 1);
+        assert_eq!(repeated_tool_step_streak(&events, "turn-1"), 1);
     }
 
     #[test]

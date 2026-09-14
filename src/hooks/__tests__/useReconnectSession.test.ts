@@ -1,10 +1,11 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { useReconnectSession } from '../useReconnectSession';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { usePortForwardStore } from '@/stores/portForwardStore';
+import { useAppStore } from '@/stores/appStore';
 
 vi.mock('@/lib/ipc/tauri', () => ({
   invokeGetSessionStatus: vi.fn().mockResolvedValue({
@@ -63,6 +64,7 @@ import {
 const initialTerminal = useTerminalStore.getState();
 const initialProfile = useProfileStore.getState();
 const initialPortForward = usePortForwardStore.getState();
+const initialApp = useAppStore.getState();
 
 describe('useReconnectSession', () => {
   beforeEach(() => {
@@ -70,6 +72,7 @@ describe('useReconnectSession', () => {
     useTerminalStore.setState(initialTerminal, true);
     useProfileStore.setState(initialProfile, true);
     usePortForwardStore.setState(initialPortForward, true);
+    useAppStore.setState(initialApp, true);
     terminalRegistry.disposeAll();
     vi.mocked(promptForMissingPassword).mockReset();
     vi.mocked(promptForMissingPassword).mockImplementation((profile) =>
@@ -88,6 +91,8 @@ describe('useReconnectSession', () => {
     useTerminalStore.setState(initialTerminal, true);
     useProfileStore.setState(initialProfile, true);
     usePortForwardStore.setState(initialPortForward, true);
+    useAppStore.setState(initialApp, true);
+    vi.useRealTimers();
   });
 
   it('recreates a local session when the session has no profileId', async () => {
@@ -317,6 +322,33 @@ describe('useReconnectSession', () => {
       keychainKeyId: 'old-key',
     }), 'main');
     expect(invokeCreateSession).toHaveBeenCalledTimes(2);
+    expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s2');
+  });
+
+  it('retries an automatic network reconnect with bounded backoff', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    useAppStore.setState({ terminalAutoReconnect: true });
+    useProfileStore.setState({ profiles: [{
+      id: 'p1', name: 'Alpha', host: 'h', port: 22, username: 'u',
+      authMethod: 'password', createdAt: 0, updatedAt: 0,
+    }] });
+    useTerminalStore.getState().addSession(
+      { sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' }, 'p1',
+    );
+    const { invokeCreateSession } = await import('@/lib/ipc/tauri');
+    vi.mocked(invokeCreateSession)
+      .mockRejectedValueOnce(new Error('Connection reset'))
+      .mockRejectedValueOnce(new Error('Network unreachable'))
+      .mockResolvedValueOnce({ sessionId: 's2', title: 'New', host: 'h', port: 22, username: 'u' });
+    const { result } = renderHook(() => useReconnectSession());
+    let reconnect!: Promise<void>;
+    await act(async () => { reconnect = result.current('s1', true); await Promise.resolve(); });
+    expect(invokeCreateSession).toHaveBeenCalledTimes(1);
+    expect(useTerminalStore.getState().sessions[0]?.statusMessage).toContain('3');
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(invokeCreateSession).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); await reconnect; });
+    expect(invokeCreateSession).toHaveBeenCalledTimes(3);
     expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s2');
   });
 });

@@ -128,6 +128,7 @@ export interface AiWorkspaceRootProps {
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
   readonly onRetryTurn?: () => void;
+  readonly onContinueOnReconnectedTerminal?: () => void;
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onRetryFailedDraft?: (failedDraftId: string) => void;
   readonly onDismissError?: () => void;
@@ -198,6 +199,7 @@ export function AiWorkspaceRoot({
   onSubmitGesture,
   onStop,
   onRetryTurn,
+  onContinueOnReconnectedTerminal,
   onBusyPreferenceChange,
   onRetryFailedDraft,
   onDismissError,
@@ -421,6 +423,7 @@ export function AiWorkspaceRoot({
           onSubmitGesture={onSubmitGesture}
           onStop={onStop}
           onRetryTurn={onRetryTurn}
+          onContinueOnReconnectedTerminal={onContinueOnReconnectedTerminal}
           onBusyPreferenceChange={surfaceMode === 'agent' ? onBusyPreferenceChange : undefined}
           onUpdateQueueItem={surfaceMode === 'agent' ? onUpdateQueueItem : undefined}
           onRemoveQueueItem={surfaceMode === 'agent' ? onRemoveQueueItem : undefined}

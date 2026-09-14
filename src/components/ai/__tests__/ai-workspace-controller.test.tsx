@@ -1140,6 +1140,56 @@ it('keeps a new target directory when an old cold Session creation fails late', 
   expect(agent.listSkills).toHaveBeenCalledWith('new');
 });
 
+it('keeps a failed Agent visible through a direct SSH reconnect and starts a fresh checked continuation', async () => {
+  useTerminalStore.setState({
+    activeSessionId: 'old',
+    sessions: [{ sessionId: 'old', title: 'Remote', host: 'example.test', port: 22,
+      username: 'tester', profileId: 'p1', status: 'disconnected' }],
+  });
+  const original = runningAgentView('agent-old', 'old');
+  if (original.snapshot.kind !== 'agent') throw new Error('Agent fixture required');
+  const failed: AiSessionView = {
+    ...original,
+    summary: { ...original.summary, status: 'failed' },
+    status: 'failed',
+    snapshot: { kind: 'agent', value: {
+      ...original.snapshot.value,
+      header: { ...original.snapshot.value.header, target: {
+        kind: 'remote', targetId: 'terminal-old', sessionId: 'old', profileId: 'p1',
+        host: 'example.test', port: 22, username: 'tester',
+      } },
+      status: 'failed', ended: true,
+      recovery: { kind: 'terminal', status: 'none', summary: '', lastCommittedSeq: 10 },
+    } },
+  };
+  const submit = vi.fn(async (sessionId: string | null, input: Parameters<AiSessionControllerAdapter['submit']>[1]) => ({
+    sessionId: sessionId ?? input.create!.request.sessionId,
+    mode: input.mode,
+    clientOperationId: input.clientOperationId,
+  }));
+  const agent = adapter({
+    list: vi.fn(async () => ({ sessions: [failed.summary] })),
+    open: vi.fn(async () => failed),
+    subscribe: vi.fn((_id, callback) => { callback(failed); return () => undefined; }),
+    submit,
+  });
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+  await waitFor(() => expect(result.current.view?.summary.id).toBe('agent-old'));
+  act(() => useTerminalStore.getState().reconnectSession('old', {
+    sessionId: 'new', title: 'Remote', host: 'example.test', port: 22, username: 'tester',
+  }, 'p1'));
+  await waitFor(() => expect(result.current.view?.summary.id).toBe('agent-old'));
+  act(() => useTerminalStore.getState().setStatus('new', { sessionId: 'new', status: 'connected' }));
+  await waitFor(() => expect(result.current.continueOnReconnectedTerminal).not.toBeNull());
+  act(() => result.current.continueOnReconnectedTerminal?.());
+  await waitFor(() => expect(submit).toHaveBeenCalledWith(null, expect.objectContaining({
+    content: expect.stringContaining('Run checks'),
+    create: expect.objectContaining({ request: expect.objectContaining({
+      target: expect.objectContaining({ sessionId: 'new' }),
+    }) }),
+  })));
+});
+
 it('shares an explicitly frozen cold Session between paths and Skills and never guesses a root', async () => {
   connectedTerminal();
   const cold = runningAgentView();
