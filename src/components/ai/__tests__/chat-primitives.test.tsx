@@ -9,6 +9,39 @@ vi.mock('@/hooks/useI18n', () => ({
   }),
 }));
 
+function measureScroller(container: HTMLElement, itemCount: () => number) {
+  const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
+  let scrollTop = itemCount() * 100 + 32 - 100;
+  const rect = (top: number, height: number) => ({
+    top, bottom: top + height, height, left: 0, right: 320, width: 320,
+    x: 0, y: top, toJSON: () => ({}),
+  });
+  const scrollTo = vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); });
+  Object.defineProperties(viewport, {
+    clientHeight: { configurable: true, value: 100 },
+    scrollHeight: { configurable: true, get: () => itemCount() * 100 + 32 },
+    scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+    scrollTo: { configurable: true, value: scrollTo },
+    getBoundingClientRect: { configurable: true, value: () => rect(0, 100) },
+  });
+  const installItemRects = () => {
+    container.querySelectorAll<HTMLElement>('[data-slot="message-scroller-item"]').forEach((item, index) => {
+      item.getBoundingClientRect = () => rect(16 + index * 100 - scrollTop, 100);
+    });
+  };
+  installItemRects();
+  return {
+    viewport, scrollTo, installItemRects,
+    end: () => itemCount() * 100 + 32 - 100,
+    get scrollTop() { return scrollTop; },
+    set scrollTop(value: number) { scrollTop = value; },
+  };
+}
+
+function ScrollAnchorRow({ id }: { id: string; scrollAnchor: boolean }) {
+  return <div data-ai-node-key={id}>{id}</div>;
+}
+
 describe('MessageScroller', () => {
   it('reveals the positioned transcript after StrictMode remounts its effects', async () => {
     const { container } = render(
@@ -234,6 +267,86 @@ describe('MessageScroller', () => {
     itemCount = 6;
     rerender(thread());
     await waitFor(() => expect(scrollTop).toBe(500));
+  });
+
+  it.each(['content pointer', 'downward wheel'])('keeps following after $input at the bottom', async (input) => {
+    let itemCount = 3;
+    const thread = () => (
+      <MessageScroller followKey={String(itemCount)}>
+        {Array.from({ length: itemCount }, (_, index) => (
+          <div key={index} data-ai-node-key={`node-${index}`}>Message {index}</div>
+        ))}
+      </MessageScroller>
+    );
+    const { container, rerender } = render(thread());
+    const geometry = measureScroller(container, () => itemCount);
+    await waitFor(() => expect(container.querySelector('[data-slot="message-scroller"]')).not.toHaveClass('invisible'));
+    geometry.scrollTop = geometry.end();
+    fireEvent.scroll(geometry.viewport);
+    geometry.scrollTo.mockClear();
+
+    if (input === 'content pointer') {
+      fireEvent.pointerDown(container.querySelector('[data-slot="message-scroller-content"]')!);
+    } else {
+      fireEvent.wheel(geometry.viewport, { deltaY: 100 });
+    }
+    itemCount = 4;
+    rerender(thread());
+    geometry.installItemRects();
+
+    await waitFor(() => expect(geometry.scrollTop).toBe(geometry.end()));
+    expect(geometry.scrollTo).toHaveBeenCalled();
+  });
+
+  it('follows a new user turn when already at the bottom', async () => {
+    let ids = ['first', 'second'];
+    const thread = () => (
+      <MessageScroller followKey={ids.join(':')}>
+        {ids.map((id) => <ScrollAnchorRow key={id} id={id} scrollAnchor={id === 'user'} />)}
+      </MessageScroller>
+    );
+    const { container, rerender } = render(thread());
+    const geometry = measureScroller(container, () => ids.length);
+    await waitFor(() => expect(container.querySelector('[data-slot="message-scroller"]')).not.toHaveClass('invisible'));
+    geometry.scrollTop = geometry.end();
+    fireEvent.scroll(geometry.viewport);
+
+    ids = [...ids, 'user'];
+    rerender(thread());
+    geometry.installItemRects();
+    const userItem = container.querySelector('[data-ai-node-key="user"]')!.closest('[data-slot="message-scroller-item"]');
+    expect(userItem).toHaveAttribute('data-scroll-anchor', 'false');
+    await waitFor(() => expect(geometry.scrollTop).toBe(geometry.end()));
+
+    ids = [...ids, 'assistant'];
+    rerender(thread());
+    geometry.installItemRects();
+    await waitFor(() => expect(geometry.scrollTop).toBe(geometry.end()));
+    expect(userItem).toHaveAttribute('data-scroll-anchor', 'false');
+  });
+
+  it('keeps the new user message anchored when reading above the bottom', async () => {
+    let ids = ['first', 'second'];
+    const thread = () => (
+      <MessageScroller followKey={ids.join(':')}>
+        {ids.map((id) => <ScrollAnchorRow key={id} id={id} scrollAnchor={id === 'user'} />)}
+      </MessageScroller>
+    );
+    const { container, rerender } = render(thread());
+    const geometry = measureScroller(container, () => ids.length);
+    await waitFor(() => expect(container.querySelector('[data-slot="message-scroller"]')).not.toHaveClass('invisible'));
+    geometry.scrollTop = 0;
+    fireEvent.wheel(geometry.viewport, { deltaY: -100 });
+    fireEvent.scroll(geometry.viewport);
+    geometry.scrollTo.mockClear();
+
+    ids = [...ids, 'user'];
+    rerender(thread());
+    geometry.installItemRects();
+    const userItem = container.querySelector('[data-ai-node-key="user"]')!.closest('[data-slot="message-scroller-item"]');
+    expect(userItem).toHaveAttribute('data-scroll-anchor', 'true');
+    await waitFor(() => expect(geometry.scrollTo).toHaveBeenCalled());
+    expect(userItem).toHaveAttribute('data-scroll-anchor', 'true');
   });
 
   it('returns to the live edge when a followed submission is appended', async () => {

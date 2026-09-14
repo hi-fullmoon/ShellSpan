@@ -26,6 +26,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
   useMessageScroller,
+  useMessageScrollerScrollable,
 } from '@/components/ui/message-scroller';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiScrollAnchor } from '@/lib/ai/panel-route';
@@ -44,8 +45,19 @@ interface MessageScrollerProps {
   onAnchorChange?: (anchor: AiScrollAnchor) => void;
 }
 
+const SCROLL_EDGE_THRESHOLD = 8;
+
 function isAtBottom(viewport: HTMLElement): boolean {
   return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1;
+}
+
+function isNearBottom(viewport: HTMLElement): boolean {
+  return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= SCROLL_EDGE_THRESHOLD;
+}
+
+function wantsScrollAnchor(child: React.ReactNode): boolean {
+  return React.isValidElement<{ role?: string; scrollAnchor?: boolean }>(child)
+    && (child.props.scrollAnchor ?? child.props.role === 'user');
 }
 
 export const MessageScroller: React.FC<MessageScrollerProps> = (props) => {
@@ -54,7 +66,11 @@ export const MessageScroller: React.FC<MessageScrollerProps> = (props) => {
   // scrollToMessage would leave the primitive in its detached jump mode.
   const readingAnchor = openingAnchor.current?.atBottom ? undefined : openingAnchor.current;
   return (
-    <MessageScrollerProvider autoScroll defaultScrollPosition={readingAnchor ? 'start' : 'end'}>
+    <MessageScrollerProvider
+      autoScroll
+      defaultScrollPosition={readingAnchor ? 'start' : 'end'}
+      scrollEdgeThreshold={SCROLL_EDGE_THRESHOLD}
+    >
       <ConversationScroller {...props} initialAnchor={readingAnchor} />
     </MessageScrollerProvider>
   );
@@ -77,7 +93,40 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
   const restoreFrameRef = useRef<number | null>(null);
   const [positionReady, setPositionReady] = useState(false);
   const { scrollToEnd, scrollToMessage, scrollToStart } = useMessageScroller();
+  const { end: canScrollToEnd } = useMessageScrollerScrollable();
   const followEndKeyRef = useRef(followEndKey);
+  const childItems = React.Children.toArray(children);
+  const anchorDecisionsRef = useRef<Map<string, boolean> | null>(null);
+  // Existing user rows retain their anchors. A newly appended user row anchors
+  // only when the reader had already left the live edge before it appeared.
+  if (anchorDecisionsRef.current === null) {
+    anchorDecisionsRef.current = new Map(childItems.flatMap((child, index) => {
+      const itemKey = React.isValidElement(child) && child.key !== null ? child.key : index;
+      return wantsScrollAnchor(child) ? [[String(itemKey), true] as const] : [];
+    }));
+  }
+  const anchorDecisions = anchorDecisionsRef.current;
+  const newAnchorDecisions: Array<readonly [string, boolean]> = [];
+  const messageItems = childItems.map((child, index) => {
+    const itemKey = React.isValidElement(child) && child.key !== null ? child.key : index;
+    const messageId = String(itemKey);
+    const wantsAnchor = wantsScrollAnchor(child);
+    const scrollAnchor = wantsAnchor && (anchorDecisions.get(messageId) ?? canScrollToEnd);
+    if (wantsAnchor && !anchorDecisions.has(messageId)) {
+      newAnchorDecisions.push([messageId, scrollAnchor]);
+    }
+    return (
+      <MessageScrollerItem key={itemKey} messageId={messageId} scrollAnchor={scrollAnchor}>
+        {child}
+      </MessageScrollerItem>
+    );
+  });
+
+  useLayoutEffect(() => {
+    for (const [messageId, scrollAnchor] of newAnchorDecisions) {
+      anchorDecisions.set(messageId, scrollAnchor);
+    }
+  });
 
   const cancelRestore = useCallback(() => {
     if (restoreFrameRef.current !== null) cancelAnimationFrame(restoreFrameRef.current);
@@ -100,11 +149,20 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
 
   const handlePointerDown = useCallback(() => {
     interruptRestore();
-    // Any direct interaction with the transcript signals reading intent.
-    // Reuse the primitive's wheel-intent path so selecting text, opening a
-    // link, or dragging the native scrollbar all release auto-follow.
-    viewportRef.current?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 0 }));
+    const viewport = viewportRef.current;
+    if (!viewport || isNearBottom(viewport)) return;
+    // Keep the reading intent for interactions away from the live edge.
+    viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 0 }));
   }, [interruptRestore]);
+
+  const handleWheelCapture = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    const viewport = viewportRef.current;
+    if (viewport && event.deltaY >= 0 && isNearBottom(viewport)) {
+      // The primitive treats every wheel event as a request to stop following,
+      // even when a downward gesture cannot move the viewport any farther.
+      event.stopPropagation();
+    }
+  }, []);
 
   useLayoutEffect(() => () => {
     cancelRestore();
@@ -198,28 +256,13 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
       <MessageScrollerViewport
         ref={viewportRef}
         onScroll={readAnchor}
+        onWheelCapture={handleWheelCapture}
         onWheel={interruptRestore}
         onTouchMove={interruptRestore}
         onKeyDown={interruptRestore}
       >
         <MessageScrollerContent ref={contentRef} className={cn('gap-4 px-3 py-4', contentClassName)}>
-          {React.Children.toArray(children).map((child, index) => {
-            const itemKey = React.isValidElement(child) && child.key !== null
-              ? child.key
-              : index;
-            return (
-              <MessageScrollerItem
-                key={itemKey}
-                messageId={String(itemKey)}
-                scrollAnchor={
-                  React.isValidElement<{ role?: string; scrollAnchor?: boolean }>(child)
-                  && (child.props.scrollAnchor ?? child.props.role === 'user')
-                }
-              >
-                {child}
-              </MessageScrollerItem>
-            );
-          })}
+          {messageItems}
         </MessageScrollerContent>
       </MessageScrollerViewport>
       <Tooltip>
