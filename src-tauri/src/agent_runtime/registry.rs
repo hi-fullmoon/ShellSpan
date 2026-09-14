@@ -440,6 +440,7 @@ mod tests {
                 task_id: "task-1".into(),
                 goal: "test lifecycle".into(),
                 parent_session_id: None,
+                continued_from_session_id: None,
                 target: None,
                 permission_mode: None,
                 execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,

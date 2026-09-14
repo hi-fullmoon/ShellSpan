@@ -8,6 +8,7 @@ pub(super) fn create_skill_session(runtime: &AgentRuntime, session: &str, root: 
             task_id: format!("task-{session}"),
             goal: "Read Skills".into(),
             parent_session_id: None,
+            continued_from_session_id: None,
             target: Some(AgentSessionTarget {
                 kind: "local".into(),
                 target_id: "local-target".into(),
@@ -85,6 +86,7 @@ async fn skill_builtin_rootless_local_remote_slash_model_permissions_and_replay(
             task_id: "task-builtin".into(),
             goal: "Inspect target".into(),
             parent_session_id: None,
+            continued_from_session_id: None,
             target: Some(target.clone()),
             permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
             execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,

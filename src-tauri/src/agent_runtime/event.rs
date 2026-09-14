@@ -546,6 +546,8 @@ pub(crate) enum AgentSessionEventPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        continued_from_session_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         target: Option<AgentSessionTarget>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         permission_mode: Option<AgentSessionPermissionMode>,
@@ -625,6 +627,8 @@ pub(crate) enum AgentSessionEventPayload {
     SessionModelSelected { provider: AgentSubagentModel },
     #[serde(rename = "session/permission_changed")]
     SessionPermissionChanged { mode: AgentSessionPermissionMode },
+    #[serde(rename = "session/execution_surface_changed")]
+    SessionExecutionSurfaceChanged { surface: AgentExecutionSurface },
     #[serde(rename = "session/renamed")]
     SessionRenamed {
         title: String,

@@ -408,6 +408,14 @@ impl TerminalLeaseManager {
         sessions.write_session_input(session_id, data)
     }
 
+    pub(crate) fn has_lease(&self, session_id: &str) -> Result<bool, String> {
+        Ok(self
+            .leases
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+            .contains_key(session_id))
+    }
+
     #[cfg(test)]
     pub(crate) fn lease(&self, session_id: &str) -> Option<AgentTerminalLease> {
         self.leases
@@ -554,7 +562,9 @@ mod tests {
     #[test]
     fn single_owner_busy_wrong_owner_and_idempotent_release() {
         let manager = TerminalLeaseManager::default();
+        assert!(!manager.has_lease("terminal-1").unwrap());
         acquire(&manager);
+        assert!(manager.has_lease("terminal-1").unwrap());
         assert!(manager
             .acquire("terminal-1", "agent-2", "task-2", "operation-2", None)
             .unwrap_err()
@@ -578,6 +588,7 @@ mod tests {
                 TerminalLeaseReleaseReason::Completed,
             )
             .unwrap());
+        assert!(!manager.has_lease("terminal-1").unwrap());
         assert!(!manager
             .release(
                 "terminal-1",

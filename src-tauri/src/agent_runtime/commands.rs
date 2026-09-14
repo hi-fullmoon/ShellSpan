@@ -347,6 +347,23 @@ pub(crate) fn agent_runtime_set_permission(
     runtime.set_permission_mode(&input.session_id, input.mode)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentExecutionSurfaceInput {
+    session_id: String,
+    surface: super::AgentExecutionSurface,
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_set_execution_surface(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentExecutionSurfaceInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.set_execution_surface(&input.session_id, input.surface)
+}
+
 #[tauri::command]
 pub(crate) fn agent_runtime_answer_question(
     app: AppHandle,

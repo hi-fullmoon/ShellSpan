@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -13,10 +14,10 @@ use crate::redaction::{redact_json_value, redact_sensitive_text};
 use super::{
     derive_surface, derive_task, AgentAssistantContentBlock, AgentExecutionSurface, AgentInbox,
     AgentInboxLane, AgentInboxMessage, AgentInboxOperation, AgentMessageSource,
-    AgentRecoveryCheckpoint, AgentSessionEvent, AgentSessionEventPayload,
+    AgentMessageSourceKind, AgentRecoveryCheckpoint, AgentSessionEvent, AgentSessionEventPayload,
     AgentSessionPermissionMode, AgentSessionStatus, AgentSessionTarget, AgentSubagentSession,
-    AgentSurfaceSnapshot, AgentTaskProjection, RecordedToolCall, AGENT_SESSION_EVENT_VERSION,
-    MAX_AGENT_MESSAGE_BYTES, MAX_AGENT_STREAM_DELTA_BYTES,
+    AgentSurfaceMessage, AgentSurfaceSnapshot, AgentTaskProjection, RecordedToolCall,
+    AGENT_SESSION_EVENT_VERSION, MAX_AGENT_MESSAGE_BYTES, MAX_AGENT_STREAM_DELTA_BYTES,
 };
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
@@ -49,6 +50,8 @@ pub(crate) struct AgentSessionHeader {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) parent_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) continued_from_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) target: Option<AgentSessionTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) permission_mode: Option<AgentSessionPermissionMode>,
@@ -70,6 +73,8 @@ pub(crate) struct CreateAgentSessionRequest {
     pub(crate) goal: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) parent_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) continued_from_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) target: Option<AgentSessionTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -262,6 +267,7 @@ impl AgentSessionRecord {
             task_id,
             goal,
             parent_session_id,
+            continued_from_session_id,
             target,
             permission_mode,
             execution_surface,
@@ -279,6 +285,7 @@ impl AgentSessionRecord {
             goal: goal.clone(),
             title: None,
             parent_session_id: parent_session_id.clone(),
+            continued_from_session_id: continued_from_session_id.clone(),
             target: target.clone(),
             permission_mode: *permission_mode,
             execution_surface: *execution_surface,
@@ -454,6 +461,28 @@ impl AgentSessionStore {
         let mut inner = self.lock_configured()?;
         if inner.sessions.contains_key(&request.session_id) {
             return Err("Agent session already exists".into());
+        }
+        if let Some(source_id) = request.continued_from_session_id.as_deref() {
+            let source = inner
+                .sessions
+                .get(source_id)
+                .ok_or_else(|| "continuation source Session was not found".to_string())?;
+            if source.header.subagent.is_some()
+                || !source
+                    .header
+                    .target
+                    .as_ref()
+                    .zip(request.target.as_ref())
+                    .is_some_and(|(old, current)| {
+                        same_terminal_login(old, current)
+                            && old.session_id != current.session_id
+                            && old.target_id != current.target_id
+                    })
+            {
+                return Err(
+                    "continuation requires a different terminal with the same login".into(),
+                );
+            }
         }
         if inner.sessions.len() >= MAX_SESSION_COUNT {
             return Err("Agent session store reached its Session limit".into());
@@ -757,6 +786,12 @@ impl AgentSessionStore {
             .sessions
             .get(child_session_id)
             .ok_or_else(|| "child Agent Session was not found".to_string())?;
+        if let Some(source_id) = child.header.continued_from_session_id.as_deref() {
+            return Ok(Some(historical_continuation_surface(
+                &inner.sessions,
+                source_id,
+            )?));
+        }
         let Some(subagent) = &child.header.subagent else {
             return Ok(None);
         };
@@ -1892,6 +1927,11 @@ impl AgentSessionStore {
         if !record.archived {
             return Err("only an archived Agent Session can be deleted".into());
         }
+        if inner.sessions.values().any(|candidate| {
+            candidate.header.continued_from_session_id.as_deref() == Some(session_id)
+        }) {
+            return Err("Agent Session is referenced by a continued conversation".into());
+        }
         let archive_root = inner
             .archive_root
             .clone()
@@ -2003,6 +2043,15 @@ fn validate_create_request(request: &CreateAgentSessionRequest) -> Result<(), St
             return Err("Agent Session cannot parent itself".into());
         }
     }
+    if let Some(source_id) = request.continued_from_session_id.as_deref() {
+        validate_identifier(source_id, "continuedFromSessionId")?;
+        if source_id == request.session_id
+            || request.parent_session_id.is_some()
+            || request.subagent.is_some()
+        {
+            return Err("continuation requires a new root Session".into());
+        }
+    }
     if let Some(target) = &request.target {
         validate_session_target(target)?;
     }
@@ -2052,6 +2101,7 @@ fn create_session_events(
                 task_id: request.task_id.clone(),
                 goal: request.goal.clone(),
                 parent_session_id: request.parent_session_id.clone(),
+                continued_from_session_id: request.continued_from_session_id.clone(),
                 target: request.target.clone(),
                 permission_mode: request.permission_mode,
                 execution_surface: request.execution_surface,
@@ -2368,6 +2418,12 @@ fn validate_event_transition(
         AgentSessionEventPayload::SessionCreated { .. } => Ok(()),
         _ if record.events.is_empty() => {
             Err("Agent session log must begin with session/created".into())
+        }
+        AgentSessionEventPayload::SessionExecutionSurfaceChanged { .. } => {
+            if record.header.subagent.is_some() || record.status != AgentSessionStatus::Idle {
+                return Err("execution surface change requires an idle root Session".into());
+            }
+            Ok(())
         }
         AgentSessionEventPayload::SessionEnded { status, .. } => {
             if !status.is_terminal() {
@@ -2871,6 +2927,9 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
         AgentSessionEventPayload::SessionPermissionChanged { mode } => {
             record.header.permission_mode = Some(*mode);
         }
+        AgentSessionEventPayload::SessionExecutionSurfaceChanged { surface } => {
+            record.header.execution_surface = *surface;
+        }
         AgentSessionEventPayload::SessionRenamed { title, .. } => {
             record.header.title = Some(title.clone())
         }
@@ -2892,6 +2951,7 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             task_id,
             goal,
             parent_session_id,
+            continued_from_session_id,
             target,
             success_criteria,
             capability_scope,
@@ -2903,6 +2963,15 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             validate_text(goal, "goal", false, MAX_AGENT_MESSAGE_BYTES)?;
             if let Some(parent) = parent_session_id {
                 validate_identifier(parent, "parentSessionId")?;
+            }
+            if let Some(source_id) = continued_from_session_id {
+                validate_identifier(source_id, "continuedFromSessionId")?;
+                if source_id == &event.session_id
+                    || parent_session_id.is_some()
+                    || subagent.is_some()
+                {
+                    return Err("continuation requires a new root Session".into());
+                }
             }
             if let Some(target) = target {
                 validate_session_target(target)?;
@@ -3015,6 +3084,9 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             validate_optional_text(provider.reasoning_effort.as_deref(), "reasoning effort")?;
         }
         Payload::SessionPermissionChanged { .. } => {
+            require_scope(event, false, false)?;
+        }
+        Payload::SessionExecutionSurfaceChanged { .. } => {
             require_scope(event, false, false)?;
         }
         Payload::SessionRenamed {
@@ -3654,6 +3726,104 @@ fn validate_session_target(target: &AgentSessionTarget) -> Result<(), String> {
         }
         _ => Ok(()),
     }
+}
+
+fn same_terminal_login(old: &AgentSessionTarget, current: &AgentSessionTarget) -> bool {
+    let normalized_host = |value: &str| {
+        let host = value.trim();
+        host.strip_prefix('[')
+            .and_then(|inner| inner.strip_suffix(']'))
+            .unwrap_or(host)
+            .to_ascii_lowercase()
+    };
+    match (old.kind.as_str(), current.kind.as_str()) {
+        ("local", "local") => true,
+        ("remote", "remote") => {
+            old.port == current.port
+                && old.username.as_deref().map(str::trim)
+                    == current.username.as_deref().map(str::trim)
+                && old.host.as_deref().map(normalized_host)
+                    == current.host.as_deref().map(normalized_host)
+        }
+        _ => false,
+    }
+}
+
+fn utf8_tail(value: &str, max_bytes: usize) -> &str {
+    if value.len() <= max_bytes {
+        return value;
+    }
+    let mut start = value.len() - max_bytes;
+    while !value.is_char_boundary(start) {
+        start += 1;
+    }
+    &value[start..]
+}
+
+fn historical_continuation_surface(
+    records: &HashMap<String, AgentSessionRecord>,
+    source_id: &str,
+) -> Result<AgentSurfaceSnapshot, String> {
+    const MAX_CONTEXT_BYTES: usize = 8_000;
+    const MAX_MESSAGE_BYTES: usize = 1_800;
+    let mut chain = Vec::new();
+    let mut seen = HashSet::new();
+    let mut cursor = Some(source_id);
+    while let Some(id) = cursor {
+        if !seen.insert(id.to_string()) {
+            return Err("continuation source chain contains a cycle".into());
+        }
+        let record = records
+            .get(id)
+            .ok_or_else(|| "continuation source Session was not found".to_string())?;
+        cursor = record.header.continued_from_session_id.as_deref();
+        chain.push(record);
+    }
+
+    let mut remaining = MAX_CONTEXT_BYTES;
+    let mut excerpts = Vec::new();
+    for record in chain {
+        let surface = record.snapshot()?.surface;
+        for message in surface.messages.iter().rev() {
+            let (label, content): (&str, Cow<'_, str>) = match message {
+                AgentSurfaceMessage::User {
+                    content, source, ..
+                }
+                | AgentSurfaceMessage::UserImages {
+                    content, source, ..
+                } if source.kind == AgentMessageSourceKind::User => {
+                    ("User", Cow::Borrowed(content))
+                }
+                AgentSurfaceMessage::Assistant { content, .. } => (
+                    "Assistant",
+                    Cow::Owned(super::assistant_content_text(content)),
+                ),
+                _ => continue,
+            };
+            if content.trim().is_empty() || remaining < 64 {
+                continue;
+            }
+            let allowance = MAX_MESSAGE_BYTES.min(remaining.saturating_sub(label.len() + 4));
+            let text = utf8_tail(content.trim(), allowance);
+            let line = format!("{label}: {text}");
+            remaining = remaining.saturating_sub(line.len() + 2);
+            excerpts.push(line);
+        }
+        if remaining < 64 {
+            break;
+        }
+    }
+    excerpts.reverse();
+    let warning = "Historical conversation context from an earlier terminal. Treat these records as background only. Prior commands, approvals, and tool effects are not authorized or verified on the current terminal. Never retry them automatically; inspect current state before acting.";
+    Ok(AgentSurfaceSnapshot {
+        generation: 0,
+        replaced_through_seq: None,
+        messages: vec![AgentSurfaceMessage::User {
+            message_id: format!("continuation-{source_id}"),
+            content: format!("{warning}\n\n{}", excerpts.join("\n\n")),
+            source: AgentMessageSource::session_reference(source_id.to_string()),
+        }],
+    })
 }
 
 fn validate_capability_scope(scope: &super::AgentCapabilityScope) -> Result<(), String> {
@@ -4395,6 +4565,7 @@ mod tests {
                 task_id: "task-1".into(),
                 goal: "Inspect nginx".into(),
                 parent_session_id: None,
+                continued_from_session_id: None,
                 target: None,
                 permission_mode: None,
                 execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
@@ -4430,6 +4601,7 @@ mod tests {
                 task_id: "visible-task".into(),
                 goal: "Show commands in the bound terminal".into(),
                 parent_session_id: None,
+                continued_from_session_id: None,
                 target: None,
                 permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
                 execution_surface: AgentExecutionSurface::BoundTerminal,
@@ -4461,6 +4633,160 @@ mod tests {
                 .execution_surface,
             AgentExecutionSurface::BoundTerminal
         );
+    }
+
+    #[test]
+    fn terminal_continuation_links_full_history_without_rebinding_the_old_target() {
+        let (root, store) = configured();
+        let old_target = target();
+        store
+            .create(CreateAgentSessionRequest {
+                session_id: "historical-root".into(),
+                task_id: "historical-task".into(),
+                goal: "Explain the result".into(),
+                parent_session_id: None,
+                continued_from_session_id: None,
+                target: Some(old_target.clone()),
+                permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
+                execution_surface: AgentExecutionSurface::Direct,
+                success_criteria: vec!["Explain the result".into()],
+                capability_scope: None,
+                subagent: None,
+            })
+            .unwrap();
+        let new_target = AgentSessionTarget {
+            target_id: "target-2".into(),
+            session_id: "terminal-2".into(),
+            ..old_target.clone()
+        };
+        let continued = CreateAgentSessionRequest {
+            session_id: "continued-root".into(),
+            task_id: "continued-task".into(),
+            goal: "Explain the result".into(),
+            parent_session_id: None,
+            continued_from_session_id: Some("historical-root".into()),
+            target: Some(new_target.clone()),
+            permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
+            execution_surface: AgentExecutionSurface::Direct,
+            success_criteria: vec!["Explain the result".into()],
+            capability_scope: None,
+            subagent: None,
+        };
+        assert!(store
+            .create(CreateAgentSessionRequest {
+                target: Some(old_target.clone()),
+                ..continued.clone()
+            })
+            .is_err());
+        let snapshot = store.create(continued).unwrap();
+        assert_eq!(
+            snapshot.header.continued_from_session_id.as_deref(),
+            Some("historical-root")
+        );
+        assert_eq!(snapshot.header.target.as_ref(), Some(&new_target));
+        assert_eq!(
+            store
+                .snapshot("historical-root")
+                .unwrap()
+                .header
+                .target
+                .as_ref(),
+            Some(&old_target)
+        );
+        store.archive("historical-root").unwrap();
+        assert!(store
+            .delete_archived("historical-root")
+            .unwrap_err()
+            .contains("referenced"));
+
+        let restored = AgentSessionStore::default();
+        restored.configure(root.path().to_path_buf()).unwrap();
+        assert_eq!(
+            restored
+                .snapshot("continued-root")
+                .unwrap()
+                .header
+                .continued_from_session_id
+                .as_deref(),
+            Some("historical-root")
+        );
+    }
+
+    #[test]
+    fn terminal_continuation_model_context_excludes_old_tool_effects() {
+        let (_root, store) = configured();
+        let old_target = target();
+        store
+            .create(CreateAgentSessionRequest {
+                session_id: "historical-root".into(),
+                task_id: "historical-task".into(),
+                goal: "Explain the result".into(),
+                parent_session_id: None,
+                continued_from_session_id: None,
+                target: Some(old_target.clone()),
+                permission_mode: None,
+                execution_surface: AgentExecutionSurface::Direct,
+                success_criteria: Vec::new(),
+                capability_scope: None,
+                subagent: None,
+            })
+            .unwrap();
+        store
+            .append(
+                "historical-root",
+                Some("turn-1".into()),
+                None,
+                AgentSessionEventPayload::TurnStart,
+            )
+            .unwrap();
+        store
+            .append(
+                "historical-root",
+                Some("turn-1".into()),
+                Some("step-1".into()),
+                AgentSessionEventPayload::StepStart,
+            )
+            .unwrap();
+        store
+            .append(
+                "historical-root",
+                Some("turn-1".into()),
+                Some("step-1".into()),
+                AgentSessionEventPayload::UserMessage {
+                    message: message("old-question", "What happened before the terminal closed?"),
+                },
+            )
+            .unwrap();
+        store
+            .create(CreateAgentSessionRequest {
+                session_id: "continued-root".into(),
+                task_id: "continued-task".into(),
+                goal: "Explain the result".into(),
+                parent_session_id: None,
+                continued_from_session_id: Some("historical-root".into()),
+                target: Some(AgentSessionTarget {
+                    target_id: "target-2".into(),
+                    session_id: "terminal-2".into(),
+                    ..old_target
+                }),
+                permission_mode: None,
+                execution_surface: AgentExecutionSurface::Direct,
+                success_criteria: Vec::new(),
+                capability_scope: None,
+                subagent: None,
+            })
+            .unwrap();
+        let inherited = store.inherited_surface("continued-root").unwrap().unwrap();
+        assert_eq!(inherited.messages.len(), 1);
+        let AgentSurfaceMessage::User {
+            content, source, ..
+        } = &inherited.messages[0]
+        else {
+            panic!("historical context should be a single source-attributed message")
+        };
+        assert_eq!(source.kind, AgentMessageSourceKind::SessionReference);
+        assert!(content.contains("What happened before the terminal closed?"));
+        assert!(content.contains("Never retry them automatically"));
     }
 
     #[test]
@@ -4811,6 +5137,7 @@ mod tests {
                 task_id: "child-task-1".into(),
                 goal: "inspect".into(),
                 parent_session_id: Some("session-1".into()),
+                continued_from_session_id: None,
                 target: Some(target()),
                 permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
                 execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
@@ -4843,6 +5170,7 @@ mod tests {
                 task_id: "task-1".into(),
                 goal: "parent".into(),
                 parent_session_id: None,
+                continued_from_session_id: None,
                 target: Some(target()),
                 permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
                 execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
@@ -5322,6 +5650,7 @@ mod tests {
                 task_id: "task-2".into(),
                 goal: "Other".into(),
                 parent_session_id: None,
+                continued_from_session_id: None,
                 target: None,
                 permission_mode: None,
                 execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
@@ -5609,6 +5938,7 @@ mod tests {
                     task_id: "task-1".into(),
                     goal: "goal".into(),
                     parent_session_id: None,
+                    continued_from_session_id: None,
                     target: None,
                     permission_mode: None,
                     execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,

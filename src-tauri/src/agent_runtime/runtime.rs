@@ -693,6 +693,66 @@ impl AgentRuntime {
         self.sessions.snapshot(session_id)
     }
 
+    pub(crate) fn set_execution_surface(
+        &self,
+        session_id: &str,
+        surface: super::AgentExecutionSurface,
+    ) -> Result<AgentSessionSnapshot, String> {
+        let entry = self.agents.get(session_id)?;
+        let reserved = if let Some(entry) = &entry {
+            if !entry.try_acquire_archive() {
+                return Err(
+                    "EXECUTION_SURFACE_BUSY: wait for the current operation to finish".into(),
+                );
+            }
+            Some(ActiveDriverLease(Arc::clone(entry)))
+        } else {
+            None
+        };
+        let result = (|| {
+            let snapshot = self.sessions.snapshot(session_id)?;
+            if snapshot.header.subagent.is_some() || snapshot.ended || snapshot.archived {
+                return Err("Execution surface selection requires an active root Session".into());
+            }
+            if snapshot.status != super::AgentSessionStatus::Idle
+                || snapshot.uncertain_native_effects
+                || snapshot.recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval
+            {
+                return Err(
+                    "EXECUTION_SURFACE_BUSY: wait for the Agent and terminal to become idle".into(),
+                );
+            }
+            if let Some(agent) = &entry {
+                if agent.phase()? != AgentLifecyclePhase::Idle || agent.scope()?.is_some() {
+                    return Err("EXECUTION_SURFACE_BUSY: wait for the Agent to become idle".into());
+                }
+            }
+            if let Some(target) = &snapshot.header.target {
+                if self.native_engine.has_terminal_lease(&target.session_id)? {
+                    return Err(
+                        "EXECUTION_SURFACE_BUSY: wait for the terminal lease to be released".into(),
+                    );
+                }
+            }
+            if snapshot.header.execution_surface != surface {
+                self.sessions.append(
+                    session_id,
+                    None,
+                    None,
+                    super::AgentSessionEventPayload::SessionExecutionSurfaceChanged { surface },
+                )?;
+            }
+            self.sessions.snapshot(session_id)
+        })();
+        drop(reserved);
+        if self.sessions.snapshot(session_id).is_ok_and(|snapshot| {
+            !snapshot.inbox.next_turn.is_empty() || !snapshot.inbox.next_step.is_empty()
+        }) {
+            let _ = self.wake(session_id);
+        }
+        result
+    }
+
     pub(crate) fn start(
         &self,
         session_id: &str,
@@ -2391,6 +2451,7 @@ mod tests {
                 task_id: format!("task-{session_id}"),
                 goal: "exercise the Agent Runtime driver".into(),
                 parent_session_id: None,
+                continued_from_session_id: None,
                 target: Some(AgentSessionTarget {
                     kind: "local".into(),
                     target_id: "target-local".into(),
@@ -3657,6 +3718,7 @@ mod tests {
                 task_id: "task-visible-secret".into(),
                 goal: "exercise bound terminal redaction boundaries".into(),
                 parent_session_id: None,
+                continued_from_session_id: None,
                 target: Some(AgentSessionTarget {
                     kind: "local".into(),
                     target_id: "target-local".into(),
@@ -5520,6 +5582,116 @@ mod tests {
                 AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
                     if reason.starts_with("turnLimitExceeded")
             )));
+    }
+
+    #[test]
+    fn execution_surface_switch_is_durable_and_preserves_queued_input() {
+        let (root, runtime) = configured(FakeAdapter::new(vec![]));
+        create(&runtime, "surface-switch");
+        let changed = runtime
+            .set_execution_surface("surface-switch", AgentExecutionSurface::BoundTerminal)
+            .unwrap();
+        assert_eq!(
+            changed.header.execution_surface,
+            AgentExecutionSurface::BoundTerminal
+        );
+        runtime
+            .set_execution_surface("surface-switch", AgentExecutionSurface::BoundTerminal)
+            .unwrap();
+        assert_eq!(
+            runtime.session("surface-switch").unwrap().event_count,
+            changed.event_count
+        );
+        assert!(all_events(&runtime, "surface-switch")
+            .iter()
+            .any(|event| matches!(
+                event.payload,
+                AgentSessionEventPayload::SessionExecutionSurfaceChanged {
+                    surface: AgentExecutionSurface::BoundTerminal
+                }
+            )));
+
+        create(&runtime, "running-surface");
+        runtime
+            .sessions
+            .append(
+                "running-surface",
+                None,
+                None,
+                AgentSessionEventPayload::AgentStatus {
+                    status: AgentSessionStatus::Running,
+                    reason: None,
+                },
+            )
+            .unwrap();
+        assert!(runtime
+            .set_execution_surface("running-surface", AgentExecutionSurface::BoundTerminal)
+            .unwrap_err()
+            .contains("EXECUTION_SURFACE_BUSY"));
+
+        create(&runtime, "queued-surface");
+        runtime
+            .sessions
+            .enqueue(
+                "queued-surface",
+                AgentInboxLane::NextTurn,
+                AgentInboxMessage {
+                    images: Vec::new(),
+                    message_id: "queued-input".into(),
+                    client_submission_id: Some("queued-input".into()),
+                    content: "later".into(),
+                    source: AgentMessageSource::user(),
+                    terminal_context: None,
+                },
+            )
+            .unwrap();
+        let queued = runtime
+            .set_execution_surface("queued-surface", AgentExecutionSurface::BoundTerminal)
+            .unwrap();
+        assert_eq!(
+            queued.header.execution_surface,
+            AgentExecutionSurface::BoundTerminal
+        );
+        assert_eq!(queued.inbox.next_turn.len(), 1);
+
+        let recovered = AgentRuntime::default();
+        recovered.configure(root.path().to_path_buf()).unwrap();
+        assert_eq!(
+            recovered
+                .session("surface-switch")
+                .unwrap()
+                .header
+                .execution_surface,
+            AgentExecutionSurface::BoundTerminal
+        );
+    }
+
+    #[tokio::test]
+    async fn execution_surface_switch_waits_for_the_active_driver() {
+        let model = FakeAdapter::new(vec![FakeScript::Wait {
+            response: Some(response("done")),
+        }]);
+        let (_root, runtime) = configured(model.clone());
+        create(&runtime, "running-switch");
+        runtime
+            .followup("running-switch", "initial".into(), "inspect".into())
+            .unwrap();
+        runtime.start("running-switch", provider(), None).unwrap();
+        model.started.notified().await;
+        assert!(runtime
+            .set_execution_surface("running-switch", AgentExecutionSurface::BoundTerminal)
+            .unwrap_err()
+            .contains("EXECUTION_SURFACE_BUSY"));
+        model.release.notify_one();
+        runtime.await_idle("running-switch").await.unwrap();
+        assert_eq!(
+            runtime
+                .set_execution_surface("running-switch", AgentExecutionSurface::BoundTerminal)
+                .unwrap()
+                .header
+                .execution_surface,
+            AgentExecutionSurface::BoundTerminal
+        );
     }
 
     #[tokio::test]
