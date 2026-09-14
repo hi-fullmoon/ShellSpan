@@ -73,6 +73,7 @@ export function AiConversation({
     && runningIndicator === 'ask'
     && !visibleResponseStarted;
   const latestUser = latestUserIndex >= 0 ? nodes[latestUserIndex] : undefined;
+  // The optimistic and committed rows have different keys for the same submission.
   const latestUserKey = latestUser?.kind === 'userMessage'
     ? latestUser.clientSubmissionId ?? latestUser.messageId
     : undefined;
