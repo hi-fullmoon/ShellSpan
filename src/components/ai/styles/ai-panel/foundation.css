@@ -103,7 +103,7 @@
   flex-shrink: 0;
   flex-direction: column;
   overflow: hidden;
-  border-left: 0.5px solid var(--dsw-alias-border-l3);
+  border-left: 0;
   background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-label-primary);
   font-family: var(--dsw-font-family);
@@ -195,14 +195,32 @@
 .ai-panel-resize-handle {
   position: absolute;
   inset-block: 0;
-  left: -4px;
-  z-index: 10;
+  left: 0;
+  z-index: 20;
   width: 8px;
   cursor: col-resize;
   touch-action: none;
   outline: none;
+  box-shadow: inset 1px 0 var(--app-resize-divider);
 }
 
-.ai-panel-resize-handle:focus-visible {
-  box-shadow: inset -2px 0 var(--dsw-alias-state-business-primary);
+.ai-panel-resize-handle::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 4px;
+  pointer-events: none;
+  background: transparent;
+  transition: background-color 150ms;
+}
+
+.ai-panel-resize-handle:hover::after {
+  background: var(--app-resize-divider-active);
+  transition-delay: 200ms;
+}
+
+.ai-panel-resize-handle:is(:focus-visible, [data-resizing])::after {
+  background: var(--app-resize-divider-active);
+  transition-delay: 0ms;
 }

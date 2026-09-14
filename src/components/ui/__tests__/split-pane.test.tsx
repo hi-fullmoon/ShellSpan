@@ -95,7 +95,7 @@ describe('SplitPane', () => {
     expect(separator).toHaveAttribute('aria-orientation', 'vertical');
     expect(separator).toHaveAttribute('aria-valuenow', '50');
     expect(separator).toHaveAttribute('tabindex', '0');
-    expect(separator).toHaveClass('z-20', 'bg-app-border', 'shadow-none');
+    expect(separator).toHaveClass('z-20', 'bg-app-resize-divider', 'shadow-none');
     expect(separator).not.toHaveClass('-mt-px');
     expect(screen.getByTestId('left').closest('[data-slot="resizable-panel-group"]'))
       .toHaveClass('isolate');
@@ -114,7 +114,7 @@ describe('SplitPane', () => {
       'bg-app-border/15',
       'after:w-1',
       'after:delay-0',
-      'data-[separator=hover]:after:bg-app-primary',
+      'data-[separator=hover]:after:bg-app-resize-divider-active',
       'data-[separator=hover]:after:delay-200',
       'data-[separator=active]:after:delay-0',
     );
@@ -148,7 +148,7 @@ describe('SplitPane', () => {
     expect(separator).toHaveAttribute('data-separator', 'hover');
     expect(separator).toHaveClass('after:w-1');
     expect(separator).toHaveClass(
-      'data-[separator=hover]:after:bg-app-primary',
+      'data-[separator=hover]:after:bg-app-resize-divider-active',
       'data-[separator=hover]:after:delay-200',
     );
   });
