@@ -105,7 +105,7 @@ function RemoteMetricCard({
   status: HealthStatus;
 }): React.JSX.Element {
   return (
-    <Card size="sm">
+    <Card size="sm" radius="compact">
       <CardHeader>
         <CardDescription className="flex items-center gap-2">
           <Icon className="size-3.5" aria-hidden />
@@ -188,7 +188,7 @@ export function RemoteHealthSection(): React.JSX.Element {
 
   return (
     <section aria-labelledby="remote-health-heading">
-      <Card size="sm">
+      <Card size="sm" radius="compact">
         <CardHeader>
           <CardTitle id="remote-health-heading">
             {t('remoteHealth.title')}

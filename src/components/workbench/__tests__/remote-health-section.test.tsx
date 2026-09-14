@@ -40,6 +40,8 @@ describe('RemoteHealthSection authorization', () => {
     render(<RemoteHealthSection />);
 
     expect(screen.getByText('remoteHealth.title').querySelector('svg')).toBeNull();
+    expect(screen.getByText('remoteHealth.title').closest('[data-slot="card"]'))
+      .toHaveAttribute('data-radius', 'compact');
     const select = screen.getByRole('combobox', { name: 'remoteHealth.profile' });
     expect(select).toHaveTextContent('Production · root@prod.example.com:22');
     expect(select).not.toHaveTextContent(profile.id);

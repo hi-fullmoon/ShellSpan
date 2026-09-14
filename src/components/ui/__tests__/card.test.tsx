@@ -30,4 +30,23 @@ describe('Card', () => {
     expect(card).toHaveClass('border', 'border-border');
     expect(card).not.toHaveClass('ring-1', 'ring-foreground/10');
   });
+
+  it('keeps compact card and section corners aligned', () => {
+    render(
+      <Card radius="compact">
+        <CardHeader>Header</CardHeader>
+        <CardContent>Content</CardContent>
+        <CardFooter>Footer</CardFooter>
+      </Card>,
+    );
+
+    const card = screen.getByText('Content').closest('[data-slot="card"]');
+    expect(card).toHaveAttribute('data-radius', 'compact');
+    expect(card).toHaveClass('rounded-lg');
+    expect(card).not.toHaveClass('rounded-xl');
+    expect(card?.querySelector('[data-slot="card-header"]'))
+      .toHaveClass('group-data-[radius=compact]/card:rounded-t-lg');
+    expect(card?.querySelector('[data-slot="card-footer"]'))
+      .toHaveClass('group-data-[radius=compact]/card:rounded-b-lg');
+  });
 });
