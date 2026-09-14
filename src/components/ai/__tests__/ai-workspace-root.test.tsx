@@ -343,7 +343,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     scrollTop = 400;
     fireEvent.wheel(viewport, { deltaY: -100 });
     scrollTo.mockClear();
-    const committedUser = { ...nextUser, key: 'user:next-submission', delivery: 'committed' as const };
+    const committedUser = { ...nextUser, key: 'user:next-submission', clientSubmissionId: undefined, delivery: 'committed' as const };
     rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, committedUser] }} scope="terminal" />);
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
     expect(scrollTo).not.toHaveBeenCalled();
