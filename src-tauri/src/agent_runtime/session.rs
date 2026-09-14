@@ -3814,7 +3814,7 @@ fn historical_continuation_surface(
         }
     }
     excerpts.reverse();
-    let warning = "Historical conversation context from an earlier terminal. Treat these records as background only. Prior commands, approvals, and tool effects are not authorized or verified on the current terminal. Never retry them automatically; inspect current state before acting.";
+    let warning = "Historical conversation context from an earlier terminal. Treat these records as background only, not as an unfinished request. The latest human message defines the current task. If it is ambiguous or does not explicitly ask to resume earlier work, ask for clarification without calling tools. Prior commands, approvals, and tool effects are not authorized or verified on the current terminal. Never retry them automatically; inspect current state before acting on an explicit request.";
     Ok(AgentSurfaceSnapshot {
         generation: 0,
         replaced_through_seq: None,
@@ -4787,6 +4787,7 @@ mod tests {
         assert_eq!(source.kind, AgentMessageSourceKind::SessionReference);
         assert!(content.contains("What happened before the terminal closed?"));
         assert!(content.contains("Never retry them automatically"));
+        assert!(content.contains("ask for clarification without calling tools"));
     }
 
     #[test]

@@ -20,8 +20,10 @@ import {
   invokeStartAgentRuntime,
   invokeSelectAgentRuntimeModel,
   invokeSetAgentRuntimePermission,
+  invokeSetAgentRuntimeExecutionSurface,
 } from '@/lib/ipc/tauri';
 import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
+import { terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
 import type {
   AgentSessionEvent,
   AgentSessionListPage,
@@ -87,6 +89,7 @@ interface AgentCommittedClientLike {
 export interface AgentSessionAdapterDependencies {
   readonly selectModel?: typeof invokeSelectAgentRuntimeModel;
   readonly setPermission?: typeof invokeSetAgentRuntimePermission;
+  readonly setExecutionSurface?: typeof invokeSetAgentRuntimeExecutionSurface;
   readonly submitImages?: typeof invokeSubmitAgentImages;
   readonly listFileReferences?: typeof invokeListAgentFileReferences;
   readonly listSkills?: typeof invokeListAgentRuntimeSkills;
@@ -111,6 +114,7 @@ export interface AgentSessionAdapterDependencies {
 const defaultDependencies: AgentSessionAdapterDependencies = {
   selectModel: invokeSelectAgentRuntimeModel,
   setPermission: invokeSetAgentRuntimePermission,
+  setExecutionSurface: invokeSetAgentRuntimeExecutionSurface,
   submitImages: invokeSubmitAgentImages,
   listSkills: invokeListAgentRuntimeSkills,
   listFileReferences: invokeListAgentFileReferences,
@@ -154,7 +158,8 @@ function sessionSummary(
       ?? snapshot.header.goal,
     updatedAt: new Date(lastEvent?.timeUnixMs ?? snapshot.header.createdAtUnixMs).toISOString(),
     status,
-    scopeKey: snapshot.header.target?.targetId ?? snapshot.header.sessionId,
+    scopeKey: sessionScopeKey(snapshot.header.target, snapshot.header.sessionId),
+    targetId: snapshot.header.target?.targetId,
     archived: snapshot.archived,
     revision: events.length,
   };
@@ -286,6 +291,7 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
   for (const event of events) {
     if (event.type === 'session/model_selected') header.modelSelection = event.data.provider;
     if (event.type === 'session/permission_changed') header.permissionMode = event.data.mode;
+    if (event.type === 'session/execution_surface_changed') header.executionSurface = event.data.surface;
   }
   return {
     summary: sessionSummary(state.snapshot, events, activity.status),
@@ -335,10 +341,19 @@ function listSummary(page: AgentSessionListPage): readonly AiSessionSummary[] {
     title: session.header.title ?? session.header.goal,
     updatedAt: new Date(session.header.createdAtUnixMs).toISOString(),
     status: session.status,
-    scopeKey: session.header.target?.targetId ?? session.header.sessionId,
+    scopeKey: sessionScopeKey(session.header.target, session.header.sessionId),
+    targetId: session.header.target?.targetId,
     archived: session.archived,
     revision: session.eventCount,
   }));
+}
+
+function sessionScopeKey(
+  target: AgentSessionSnapshot['header']['target'],
+  sessionId: string,
+): string {
+  if (target?.targetId === 'workbench-ai') return target.targetId;
+  return (target && terminalLoginScopeKey(target)) ?? target?.targetId ?? sessionId;
 }
 
 /** Create the Agent adapter over the existing subscribe-first committed client. */
@@ -346,6 +361,13 @@ export function createAgentSessionAdapter(
   dependencies: AgentSessionAdapterDependencies = defaultDependencies,
 ): AiSessionAdapter<'agent'> {
   const entries = new Map<string, AgentAdapterEntry>();
+
+  const evict = (sessionId: string): void => {
+    const entry = entries.get(sessionId);
+    entry?.stopListening();
+    entry?.client.disconnect();
+    entries.delete(sessionId);
+  };
 
   const ensureEntry = (sessionId: string): AgentAdapterEntry => {
     const existing = entries.get(sessionId);
@@ -477,6 +499,7 @@ export function createAgentSessionAdapter(
       const page = await dependencies.list({ cursor: input.cursor, limit: input.limit });
       const sessions = listSummary(page).filter((session) => (
         (input.scopeKey === undefined || session.scopeKey === input.scopeKey)
+        && (input.targetId === undefined || session.targetId === input.targetId)
         && (input.archived === undefined || session.archived === input.archived)
       ));
       return { sessions, nextCursor: page.nextCursor };
@@ -506,6 +529,18 @@ export function createAgentSessionAdapter(
     async setPermission(sessionId, mode) {
       await (dependencies.setPermission ?? invokeSetAgentRuntimePermission)({ sessionId, mode });
       const entry = ensureEntry(sessionId);
+      entry.view = agentSessionView(await entry.client.reconnect());
+      for (const listener of entry.listeners) listener(entry.view);
+    },
+    async setExecutionSurface(sessionId, surface) {
+      const entry = ensureEntry(sessionId);
+      const current = await openEntry(sessionId);
+      if (current.snapshot.value.ended || ['cancelled', 'failed', 'completed'].includes(current.status)) {
+        await (dependencies.resume ?? invokeResumeAgentRuntime)({ sessionId });
+        entry.view = agentSessionView(await entry.client.reconnect());
+        for (const listener of entry.listeners) listener(entry.view);
+      }
+      await (dependencies.setExecutionSurface ?? invokeSetAgentRuntimeExecutionSurface)({ sessionId, surface });
       entry.view = agentSessionView(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
     },
@@ -604,11 +639,9 @@ export function createAgentSessionAdapter(
     },
     async delete(sessionId: string): Promise<void> {
       await dependencies.delete({ sessionId });
-      const entry = entries.get(sessionId);
-      entry?.stopListening();
-      entry?.client.disconnect();
-      entries.delete(sessionId);
+      evict(sessionId);
     },
+    evict,
     async mutateInbox(input: AiInboxMutationInput): Promise<void> {
       const { type, sessionId, expectedRevision, clientOperationId } = input;
       const mutation = type === 'update'

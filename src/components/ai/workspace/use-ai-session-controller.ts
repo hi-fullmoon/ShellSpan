@@ -49,6 +49,12 @@ import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore
 import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
+import { terminalLoginLabel, terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
+import {
+  canContinueHistoricalConversation,
+  loadHistoricalSources,
+  withHistoricalConversation,
+} from '@/lib/ai/historical-continuation';
 import { getRecentTerminalOutputSnapshot, truncateAiContext } from '@/lib/terminal/terminal-output-buffer';
 import type { AppSection } from '@/types';
 import type { AgentPermissionMode } from '@/types/agent-approval';
@@ -96,6 +102,8 @@ export interface AiSessionController {
   readonly modelLabel: string;
   readonly canStartAgent: boolean;
   readonly agentUnavailableReason: string | null;
+  readonly historyScopeLabel: string | null;
+  readonly readOnlySession: boolean;
   readonly announcement: AiAnnouncement | null;
   readonly navigation: AiWorkspaceNavigationState;
   readonly sessions: readonly AiSessionSummary[];
@@ -115,6 +123,9 @@ export interface AiSessionController {
   readonly stop: () => void;
   readonly retryTurn: () => void;
   readonly continueOnReconnectedTerminal: (() => void) | null;
+  readonly historicalContinuationAvailable: boolean;
+  readonly historicalContinuationBusy: boolean;
+  readonly historicalContinuationError: string | null;
   readonly retryFailedDraft: (failedDraftId: string) => void;
   readonly dismissError: () => void;
   readonly openSessions: () => void;
@@ -221,7 +232,12 @@ export function useAiSessionController({
     return providers.find((item) => item.id === defaultProviderId) ?? providers[0];
   }, [defaultProviderId, providers, routeSnapshot]);
   const activeTerminal = terminalSessions.find((item) => item.sessionId === activeTerminalId);
+  const historyScopeKey = activeTerminal ? terminalLoginScopeKey(activeTerminal) : null;
   const [view, setView] = useState<AiSessionView | null>(null);
+  const [historicalSources, setHistoricalSources] = useState<readonly AiSessionView[]>([]);
+  const [historicalContinuationBusy, setHistoricalContinuationBusy] = useState(false);
+  const [historicalContinuationError, setHistoricalContinuationError] = useState<string | null>(null);
+  const historicalContinuationPendingRef = useRef(false);
   const [openedSessionId, setOpenedSessionId] = useState<string | null>(null);
   const [optimistic, setOptimistic] = useState<readonly AiOptimisticSubmission[]>([]);
   const [announcement, setAnnouncement] = useState<AiAnnouncement | null>(null);
@@ -466,7 +482,9 @@ export function useAiSessionController({
           useAgentPermissionStore.getState().getMode(activeTerminal.sessionId),
         ),
         executionSurface: newExecutionSurface,
-        successCriteria: [content],
+        // Native tool policy bounds each criterion to 2 KiB, even when the
+        // session goal and first human message contain more context.
+        successCriteria: [content.length > 512 ? `${content.slice(0, 511)}…` : content],
       },
     };
   }, [activeTerminal, newExecutionSurface, operationId, scope, t]);
@@ -681,9 +699,9 @@ export function useAiSessionController({
       if (!sessionId && ((scope === 'workbench' && canRestoreWorkbench) || activeTerminal)) {
         if (!canPublish()) return;
         const summaries = await listAllAiSessions(adapter, {
-          scopeKey: scope === 'workbench'
-            ? WORKBENCH_AI_TARGET_ID
-            : `terminal-${activeTerminal!.sessionId}`,
+          ...(scope === 'workbench'
+            ? { scopeKey: WORKBENCH_AI_TARGET_ID }
+            : { targetId: `terminal-${activeTerminal!.sessionId}` }),
           archived: false,
           limit: 100,
         }, canPublish);
@@ -735,11 +753,13 @@ export function useAiSessionController({
       sessionId: view?.summary.id ?? null,
       status: view?.status ?? 'idle',
       terminal: view !== null
-        && (view.summary.archived || Boolean(view.snapshot.value.header.subagent)),
+        && (view.summary.archived || Boolean(view.snapshot.value.header.subagent)
+          || (scope === 'terminal'
+            && view.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId)),
       waitingApproval: view?.pendingApproval !== null && view?.pendingApproval !== undefined,
       waitingQuestion: Boolean(view?.pendingQuestion),
     });
-  }, [adoptDraft, dispatch, navigationDraftKey, openedSessionId, restoreDraft, saveCurrentDraft, view]);
+  }, [activeTerminal?.sessionId, adoptDraft, dispatch, navigationDraftKey, openedSessionId, restoreDraft, saveCurrentDraft, scope, view]);
 
   useEffect(() => {
     if (!view) return;
@@ -776,6 +796,23 @@ export function useAiSessionController({
       ),
     };
   }, [optimistic, view, workspaceScopeKey]);
+  const continuationSourceId = view?.snapshot.value.header.continuedFromSessionId;
+  useEffect(() => {
+    if (!continuationSourceId) return;
+    let alive = true;
+    void loadHistoricalSources(adapter, view!).then((sources) => {
+      if (alive) setHistoricalSources(sources);
+    }).catch((error: unknown) => {
+      if (alive) dispatch({ type: 'error.reported', error: normalizeAiSessionError(error) });
+    });
+    return () => { alive = false; };
+  }, [adapter, continuationSourceId, dispatch, view?.summary.id]);
+  const displayView = useMemo(() => (
+    visibleView && continuationSourceId
+      && historicalSources[historicalSources.length - 1]?.summary.id === continuationSourceId
+      ? withHistoricalConversation(visibleView, historicalSources)
+      : visibleView
+  ), [continuationSourceId, historicalSources, visibleView]);
   const sessionProviderResolution = useMemo(() => {
     const selection = visibleView?.snapshot.value.header.modelSelection;
     if (!selection) return { provider: undefined, error: null };
@@ -785,7 +822,18 @@ export function useAiSessionController({
       return { provider: undefined, error: normalizeAiSessionError(error).message };
     }
   }, [providers, visibleView]);
-  const agentUnavailableReason = sessionProviderResolution.error ?? terminalUnavailableReason;
+  const readOnlySession = scope === 'terminal' && Boolean(visibleView
+    && visibleView.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId);
+  const canContinueReconnectedView = scope === 'terminal' && visibleView?.snapshot.kind === 'agent'
+    && canContinueOnReconnectedTerminal(visibleView.snapshot.value, activeTerminal) && hasProvider;
+  const canContinueHistoricalView = scope === 'terminal' && readOnlySession
+    && visibleView?.snapshot.kind === 'agent'
+    && Boolean(provider)
+    && canContinueHistoricalConversation(visibleView.snapshot.value, activeTerminal);
+  const agentUnavailableReason = canContinueHistoricalView ? terminalUnavailableReason
+    : sessionProviderResolution.error
+      ?? (readOnlySession && !canContinueReconnectedView
+        ? t('ai.workspace.sessions.previousTerminalReadOnly') : terminalUnavailableReason);
   const pendingNodes = useMemo(() => (
     view ? [] : withOptimisticConversationNodes([], optimistic, workspaceScopeKey, null)
   ), [optimistic, view, workspaceScopeKey]);
@@ -802,7 +850,7 @@ export function useAiSessionController({
     try {
       const scopeKey = scope === 'workbench'
         ? WORKBENCH_AI_TARGET_ID
-        : activeTerminal ? `terminal-${activeTerminal.sessionId}` : '__no-terminal__';
+        : historyScopeKey ?? '__no-terminal__';
       const summaries = await listAllAiSessions(adapter, { scopeKey, limit: 200 }, () => (
         mountedRef.current && requestId === sessionListRequestRef.current
       ));
@@ -818,7 +866,7 @@ export function useAiSessionController({
         setSessionsLoading(false);
       }
     }
-  }, [activeTerminal, adapter, scope]);
+  }, [adapter, historyScopeKey, scope]);
 
   const openSessions = useCallback((): void => {
     claimWorkspace();
@@ -828,6 +876,7 @@ export function useAiSessionController({
 
   const openSession = useCallback((summary: AiSessionSummary): void => {
     claimWorkspace();
+    setHistoricalContinuationError(null);
     const retainedView = viewRef.current?.summary.id === summary.id ? viewRef.current : null;
     resetComposer(summary);
     // Selecting the current history entry is a new visit too; renew its
@@ -848,6 +897,8 @@ export function useAiSessionController({
 
   const newSession = useCallback((): void => {
     claimWorkspace();
+    setHistoricalSources([]);
+    setHistoricalContinuationError(null);
     automaticRestore.current = { ...automaticRestore.current, eligible: false };
     coldSkillSession.current = null;
     setSkillNavigation((generation) => generation + 1);
@@ -865,6 +916,68 @@ export function useAiSessionController({
       returnFocus: null,
     }));
   }, [claimWorkspace, resetComposer]);
+
+  const startHistoricalContinuation = useCallback((content: string): void => {
+    const message = content.trim();
+    const current = viewRef.current;
+    const terminalState = useTerminalStore.getState();
+    const terminalNow = terminalState.sessions.find((session) => session.sessionId === terminalState.activeSessionId);
+    if (!message || historicalContinuationPendingRef.current
+      || terminalNow?.sessionId !== activeTerminal?.sessionId || !provider
+      || current?.snapshot.kind !== 'agent'
+      || !canContinueHistoricalConversation(current.snapshot.value, terminalNow)) return;
+    if (imageDraft.draft?.images.length) {
+      setHistoricalContinuationError(t('ai.workspace.sessions.continueImagesUnavailable'));
+      return;
+    }
+    // The prior transcript is context, not the new task. In particular, do not
+    // carry its goal into the new session's success criteria.
+    const input = createInput(message);
+    historicalContinuationPendingRef.current = true;
+    setHistoricalContinuationBusy(true);
+    setHistoricalContinuationError(null);
+    const context = submissionContextRef.current;
+    void adapter.create({ ...input, request: {
+      ...input.request,
+      continuedFromSessionId: current.summary.id,
+    } }).then((created) => {
+      if (!mountedRef.current || submissionContextRef.current !== context
+        || viewRef.current?.summary.id !== current.summary.id) return;
+      const latestDraft = composerRef.current.draft;
+      openSession(created.summary);
+      viewRef.current = created;
+      setView(created);
+      const sourceId = current.snapshot.value.header.continuedFromSessionId;
+      const inherited = sourceId && historicalSources[historicalSources.length - 1]?.summary.id === sourceId
+        ? historicalSources : [];
+      setHistoricalSources([...inherited, current]);
+      useAiDraftStore.getState().saveDraft(navigationDraftKey(current.summary.id), '');
+      if (latestDraft !== content) dispatch({ type: 'draft.changed', value: latestDraft });
+      dispatch({ type: 'submit.requested', gesture: 'primary', accelerated: false,
+        content: message, clientOperationId: operationId(),
+        now: now(), hasProvider: true, canCreateSession: true });
+    }).catch((error: unknown) => {
+      if (mountedRef.current && submissionContextRef.current === context) {
+        setHistoricalContinuationError(normalizeAiSessionError(error).message);
+      }
+    }).finally(() => {
+      historicalContinuationPendingRef.current = false;
+      if (mountedRef.current) setHistoricalContinuationBusy(false);
+    });
+  }, [activeTerminal?.sessionId, adapter, createInput, dispatch, imageDraft.draft?.images.length,
+    historicalSources, navigationDraftKey, now, openSession, operationId, provider, t]);
+
+  useEffect(() => {
+    const onSessionDeleted = (event: Event): void => {
+      const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId;
+      if (!sessionId) return;
+      adapter.evict?.(sessionId);
+      setSessions((current) => current.filter((session) => session.id !== sessionId));
+      if (viewRef.current?.summary.id === sessionId || openedSessionId === sessionId) newSession();
+    };
+    window.addEventListener('shellspan:ai-session-deleted', onSessionDeleted);
+    return () => window.removeEventListener('shellspan:ai-session-deleted', onSessionDeleted);
+  }, [adapter, newSession, openedSessionId]);
 
   const archiveSession = useCallback((summary: AiSessionSummary): void => {
     if (archivePendingRef.current || summary.archived) return;
@@ -1035,7 +1148,7 @@ export function useAiSessionController({
       if (current.route.kind === 'toolDetails' || current.route.kind === 'artifactDetails') {
         return {
           ...current,
-          route: { kind: 'conversation', sessionId: current.route.sessionId },
+          route: { kind: 'conversation', sessionId: viewRef.current?.summary.id ?? current.route.sessionId },
         };
       }
       return current;
@@ -1103,8 +1216,7 @@ export function useAiSessionController({
     adapter.loadArtifact(sessionId, artifactId, maxBytes)
   ), [adapter]);
 
-  const reconnectedSnapshot = scope === 'terminal' && visibleView?.snapshot.kind === 'agent'
-    && canContinueOnReconnectedTerminal(visibleView.snapshot.value, activeTerminal) && hasProvider
+  const reconnectedSnapshot = canContinueReconnectedView && visibleView?.snapshot.kind === 'agent'
     ? visibleView.snapshot.value : null;
 
   return {
@@ -1123,7 +1235,7 @@ export function useAiSessionController({
     })(),
     skillsNeedsRoot: !visibleView && !openedSessionId && !skillRoot,
     skillsScopeKey: `${workspaceScopeKey}:${openedSessionId ?? "new"}:${skillNavigation}`,
-    view: visibleView,
+    view: displayView,
     answerQuestion: async (input) => {
       const current = viewRef.current?.pendingQuestion;
       if (!current || questionKey(current.identity) !== questionKey(input.identity)) throw new Error('Question is no longer active');
@@ -1131,10 +1243,10 @@ export function useAiSessionController({
     },
     pendingNodes,
     composer,
-    selectedProvider: sessionProviderResolution.provider,
-    selectedPermission: visibleView ? (visibleView.snapshot.value.header.permissionMode === 'operator'
+    selectedProvider: canContinueHistoricalView ? provider : sessionProviderResolution.provider,
+    selectedPermission: canContinueHistoricalView ? undefined : visibleView ? (visibleView.snapshot.value.header.permissionMode === 'operator'
       ? 'fullAccess' : 'autoApproveReadOnly') : undefined,
-    selectedExecutionSurface: visibleView?.snapshot.value.header.executionSurface
+    selectedExecutionSurface: canContinueHistoricalView ? newExecutionSurface : visibleView?.snapshot.value.header.executionSurface
       ?? newExecutionSurface,
     settingsBusy,
     selectModel: (provider) => changeSettings(async (sessionId) => {
@@ -1146,18 +1258,29 @@ export function useAiSessionController({
       await adapter.setPermission(sessionId, permissionMode(mode));
     }),
     selectExecutionSurface: (surface) => {
-      if (viewRef.current || composerRef.current.sessionId) return;
+      if (viewRef.current) {
+        void changeSettings(async (sessionId) => {
+          if (!adapter.setExecutionSurface) throw new Error('Execution surface selection is unavailable');
+          await adapter.setExecutionSurface(sessionId, surface);
+        });
+        return;
+      }
+      if (composerRef.current.sessionId) return;
       claimWorkspace();
       setNewExecutionSurface(surface);
     },
     providerLabel: routeSnapshot?.routes.find((route) => route.id === (
-      visibleView?.snapshot.value.header.modelSelection?.routeId ?? provider?.id
+      (canContinueHistoricalView ? undefined : visibleView?.snapshot.value.header.modelSelection?.routeId) ?? provider?.id
     ))?.displayName ?? browserProviders.find((item) => item.id === (
-      visibleView?.snapshot.value.header.modelSelection?.routeId ?? provider?.id
+      (canContinueHistoricalView ? undefined : visibleView?.snapshot.value.header.modelSelection?.routeId) ?? provider?.id
     ))?.name ?? '',
-    modelLabel: visibleView?.snapshot.value.header.modelSelection?.modelId ?? provider?.model ?? '',
+    modelLabel: (canContinueHistoricalView ? undefined : visibleView?.snapshot.value.header.modelSelection?.modelId)
+      ?? provider?.model ?? '',
     canStartAgent,
     agentUnavailableReason,
+    historyScopeLabel: scope === 'terminal' && activeTerminal
+      ? terminalLoginLabel(activeTerminal) : null,
+    readOnlySession,
     announcement,
     navigation: { ...navigation, scrollAnchorBySession: scrollAnchorsRef.current },
     sessions,
@@ -1176,6 +1299,17 @@ export function useAiSessionController({
     submit: (gesture, accelerated = false) => {
       claimWorkspace();
       const context = submissionContextRef.current;
+      if (scope === 'terminal' && viewRef.current?.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId
+        && viewRef.current?.snapshot.kind === 'agent'
+        && canContinueHistoricalConversation(viewRef.current.snapshot.value, activeTerminal)) {
+        startHistoricalContinuation(composerRef.current.draft);
+        return;
+      }
+      if (scope === 'terminal' && ((openedSessionId && !viewRef.current)
+        || (viewRef.current && viewRef.current.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId))) {
+        setAnnouncement('sessionUnavailable');
+        return;
+      }
       if (!canStartAgent) {
         setAnnouncement('sessionUnavailable');
         return;
@@ -1252,6 +1386,9 @@ export function useAiSessionController({
       dispatch({ type: 'submit.requested', gesture: 'primary', accelerated: false,
         content, clientOperationId: operationId(), now: now(), hasProvider, canCreateSession: canStartAgent });
     } : null,
+    historicalContinuationAvailable: canContinueHistoricalView,
+    historicalContinuationBusy,
+    historicalContinuationError,
     retryFailedDraft: (failedDraftId) => {
       if (!canStartAgent) {
         setAnnouncement('sessionUnavailable');

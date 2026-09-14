@@ -524,7 +524,7 @@ describe('AiWorkspaceController', () => {
     expect(result.current.composer).toMatchObject({ sessionId: null, draft: '', phase: 'idle' });
   });
 
-  it('shows previous terminal history for the same login without allowing old-target submission', async () => {
+  it('shows previous terminal history for the same login without submitting to the old target', async () => {
     connectedTerminal('terminal-new');
     const old = runningAgentView('agent-old', 'terminal-old');
     const agent = adapter({
@@ -547,15 +547,15 @@ describe('AiWorkspaceController', () => {
     await waitFor(() => expect(result.current.view?.summary.id).toBe('agent-old'));
     expect(result.current.readOnlySession).toBe(true);
     expect(result.current.composer.terminal).toBe(true);
-    act(() => { result.current.setDraft('do not execute'); result.current.submit('primary'); });
     expect(agent.submit).not.toHaveBeenCalled();
 
-    const surface = render(<AiWorkspaceRoot scope="terminal" view={old} readOnlySession />);
-    expect(within(surface.container).queryByTestId('ai-workspace-composer')).not.toBeInTheDocument();
+    const surface = render(<AiWorkspaceRoot scope="terminal" view={old} readOnlySession
+      agentUnavailableReason="This conversation is bound to an earlier terminal connection" />);
+    expect(within(surface.container).getByTestId('ai-workspace-composer')).toBeInTheDocument();
     expect(within(surface.container).getByText(/bound to an earlier terminal connection/)).toBeInTheDocument();
   });
 
-  it('continues with every old record visible and an empty composer on a fresh terminal target', async () => {
+  it('keeps every old record visible when a historical message starts a fresh terminal session', async () => {
     connectedTerminal('terminal-new');
     const base = runningAgentView('agent-old', 'terminal-old');
     const nodeBase = { sourceKind: 'agent' as const, sessionId: 'agent-old',
@@ -583,12 +583,14 @@ describe('AiWorkspaceController', () => {
     const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
     act(() => result.current.openSession(old.summary));
     await waitFor(() => expect(result.current.view?.summary.id).toBe('agent-old'));
-    expect(result.current.continueHistoricalSession).not.toBeNull();
+    expect(result.current.historicalContinuationAvailable).toBe(true);
 
-    act(() => result.current.continueHistoricalSession?.());
+    act(() => { result.current.setDraft('world'); result.current.submit('primary'); });
     await waitFor(() => expect(result.current.view?.summary.id).toBe('agent-new'));
     expect(agent.create).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({
       continuedFromSessionId: 'agent-old',
+      goal: 'world',
+      successCriteria: ['world'],
       target: expect.objectContaining({ sessionId: 'terminal-new' }),
     }) }));
     expect(result.current.view?.nodes.slice(0, 2).map((node) => node.key)).toEqual([
@@ -597,20 +599,108 @@ describe('AiWorkspaceController', () => {
     expect(result.current.composer.sessionId).toBe('agent-new');
     expect(result.current.composer.draft).toBe('');
     await waitFor(() => expect(submit).toHaveBeenCalledWith('agent-new', expect.objectContaining({
-      content: expect.stringContaining('Continue answering from where the historical conversation stopped'),
+      content: 'world',
     })));
     expect(submit.mock.calls[0][1].content).not.toContain('The deployment reached step two');
     expect(submit).not.toHaveBeenCalledWith('agent-old', expect.anything());
   });
 
-  it('shows a continue-answer action in the old-terminal notice', async () => {
+  it('shows the historical composer without an extra continue button', () => {
     const old = runningAgentView('agent-old', 'terminal-old');
-    const continueAnswer = vi.fn();
     render(<AiWorkspaceRoot scope="terminal" view={old} readOnlySession
-      onContinueHistoricalSession={continueAnswer} />);
-    expect(screen.queryByTestId('ai-workspace-composer')).not.toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Continue answering' }));
-    expect(continueAnswer).toHaveBeenCalledOnce();
+      historicalContinuationAvailable />);
+    expect(screen.getByTestId('ai-workspace-composer')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Continue answering' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Sending continues this history in a new conversation/)).toBeInTheDocument();
+  });
+
+  it('sends from the normal historical composer through a new linked session', async () => {
+    connectedTerminal('terminal-new');
+    const old = runningAgentView('agent-old', 'terminal-old');
+    const nextBase = runningAgentView('agent-new', 'terminal-new');
+    const created: AiSessionView = { ...nextBase,
+      status: 'idle', summary: { ...nextBase.summary, status: 'idle' },
+      snapshot: { kind: 'agent', value: { ...nextBase.snapshot.value, status: 'idle',
+        header: { ...nextBase.snapshot.value.header, continuedFromSessionId: 'agent-old' } } },
+    };
+    const submit = vi.fn(async (sessionId: string | null, input: Parameters<AiSessionControllerAdapter['submit']>[1]) => ({
+      sessionId: sessionId ?? input.create!.request.sessionId,
+      mode: input.mode,
+      clientOperationId: input.clientOperationId,
+    }));
+    const agent = adapter({
+      list: vi.fn(async (input) => ({ sessions: input.targetId ? [] : [old.summary] })),
+      open: vi.fn(async (id) => id === old.summary.id ? old : created),
+      create: vi.fn(async () => created),
+      submit,
+    });
+    const user = userEvent.setup();
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+    await user.click(screen.getByRole('button', { name: 'Conversation history' }));
+    const history = await screen.findByRole('dialog', { name: 'Session history' });
+    await user.click(await within(history).findByText('Run checks'));
+    const editor = await screen.findByTestId('ai-workspace-composer');
+    expect(editor).toHaveAttribute('contenteditable', 'true');
+    expect(screen.getByText(/Sending continues this history in a new conversation/)).toBeInTheDocument();
+    await user.type(editor, 'Check nginx status now');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(agent.create).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({ continuedFromSessionId: old.summary.id,
+        target: expect.objectContaining({ sessionId: 'terminal-new' }) }),
+    })));
+    await waitFor(() => expect(submit).toHaveBeenCalledWith(created.summary.id,
+      expect.objectContaining({ content: 'Check nginx status now' })));
+    expect(submit).not.toHaveBeenCalledWith(old.summary.id, expect.anything());
+    expect(editor).toHaveTextContent('');
+  });
+
+  it('keeps a historical draft when creating the continuation fails', async () => {
+    connectedTerminal('terminal-new');
+    const old = runningAgentView('agent-old', 'terminal-old');
+    const agent = adapter({
+      open: vi.fn(async () => old),
+      create: vi.fn(async () => { throw new Error('Could not create continuation'); }),
+      submit: vi.fn(async () => { throw new Error('old target must not receive input'); }),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    act(() => result.current.openSession(old.summary));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe('agent-old'));
+    act(() => { result.current.setDraft('Check current nginx status'); result.current.submit('primary'); });
+    await waitFor(() => expect(result.current.historicalContinuationError).toBe('Could not create continuation'));
+    expect(result.current.view?.summary.id).toBe('agent-old');
+    expect(result.current.composer.draft).toBe('Check current nginx status');
+    expect(agent.submit).not.toHaveBeenCalled();
+  });
+
+  it('preserves newer typing while a historical continuation is being created', async () => {
+    connectedTerminal('terminal-new');
+    const old = runningAgentView('agent-old', 'terminal-old');
+    const nextBase = runningAgentView('agent-new', 'terminal-new');
+    const created: AiSessionView = { ...nextBase,
+      status: 'idle', summary: { ...nextBase.summary, status: 'idle' },
+      snapshot: { kind: 'agent', value: { ...nextBase.snapshot.value, status: 'idle',
+        header: { ...nextBase.snapshot.value.header, continuedFromSessionId: old.summary.id } } },
+    };
+    let resolveCreate!: (view: AiSessionView) => void;
+    const submit = vi.fn(async (sessionId: string | null, input: Parameters<AiSessionControllerAdapter['submit']>[1]) => ({
+      sessionId: sessionId!, mode: input.mode, clientOperationId: input.clientOperationId,
+    }));
+    const agent = adapter({
+      open: vi.fn(async (id) => id === old.summary.id ? old : created),
+      create: vi.fn(() => new Promise<AiSessionView>((resolve) => { resolveCreate = resolve; })),
+      submit,
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    act(() => result.current.openSession(old.summary));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe(old.summary.id));
+    act(() => { result.current.setDraft('First message'); result.current.submit('primary'); });
+    await waitFor(() => expect(agent.create).toHaveBeenCalledOnce());
+    act(() => result.current.setDraft('A newer unsent draft'));
+    await act(async () => resolveCreate(created));
+    await waitFor(() => expect(submit).toHaveBeenCalledWith(created.summary.id,
+      expect.objectContaining({ content: 'First message' })));
+    expect(result.current.composer.draft).toBe('A newer unsent draft');
   });
 
   it('reloads every ancestor transcript when a continued conversation is reopened', async () => {
