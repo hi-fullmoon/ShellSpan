@@ -477,6 +477,10 @@ describe('MessageScroller', () => {
     viewport.scrollTop = 25_500;
     fireEvent.scroll(viewport);
     expect(saved).toHaveBeenLastCalledWith({ nodeKey: 'node-255', offset: 0, scrollTop: 25_500, atBottom: true });
+
+    viewport.scrollTop = 25_495;
+    fireEvent.scroll(viewport);
+    expect(saved).toHaveBeenLastCalledWith(expect.objectContaining({ atBottom: true, scrollTop: 25_495 }));
   });
 
   it('does not replay saved scroll positions when the parent updates during reading', async () => {

@@ -396,7 +396,7 @@ export function AiWorkspaceRoot({
               renderers={surfaceMode === 'ask' ? aiAskConversationNodeRenderers : undefined}
               runningIndicator={surfaceMode}
               pending={surfaceMode === 'ask' && composerState?.phase === 'submitting'}
-              followUserSubmissions={surfaceMode === 'ask'}
+              followUserSubmissions
               status={status}
               throughSeq={view?.throughSeq ?? null}
               initialAnchor={scrollAnchor}
