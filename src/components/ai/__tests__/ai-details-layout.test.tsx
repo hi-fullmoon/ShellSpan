@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiArtifactDetails } from '@/components/ai/workspace/ai-artifact-details';
 import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
+import { AiToolExpandedContent } from '@/components/ai/workspace/ai-tool-presentation';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
@@ -20,6 +21,27 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('AI details content sizing', () => {
+  it.each([
+    ['LF', 'first\nsecond\n', ['first', 'second']],
+    ['CRLF', 'first\r\nsecond\r\n', ['first', 'second']],
+    ['no final newline', 'first\nsecond', ['first', 'second']],
+    ['intentional blank line', 'first\nsecond\n\n', ['first', 'second', '\u00a0']],
+  ])('renders %s command output without a synthetic final row', (_case, output, expected) => {
+    const node: AiConversationNodeOf<'tool'> = {
+      ...baseNode,
+      kind: 'tool', key: 'tool:command-output', callId: 'command-output',
+      name: 'run_terminal_command', summary: 'Command exited', state: 'succeeded',
+      effect: 'readOnly', durationMs: 1, evidenceRefs: [],
+      detailRef: { kind: 'agentTool', sessionId: baseNode.sessionId, callId: 'command-output' },
+      input: { command: 'nginx -t' }, output: { stdout: output, exitCode: 0 }, error: null,
+      target: null, idempotency: null, approval: null,
+    };
+    const { container } = render(<AiToolExpandedContent node={node} compact />);
+    const lines = [...container.querySelectorAll('.ai-terminal-output .ai-block-line')]
+      .map((line) => line.textContent);
+    expect(lines).toEqual(expected);
+  });
+
   it('overrides the primitive inline fit-content minimum for long tool payloads', () => {
     const node: AiConversationNodeOf<'tool'> = {
       ...baseNode,

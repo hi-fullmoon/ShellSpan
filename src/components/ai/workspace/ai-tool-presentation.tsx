@@ -148,7 +148,12 @@ function toolSummary(node: ToolNode, variant: AiToolVariant): string {
 function CappedText({ text, maxLines = 8 }: { text: string; maxLines?: number }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
-  const lines = useMemo(() => bounded(text).split('\n'), [text]);
+  const lines = useMemo(() => {
+    const result = bounded(text).split(/\r?\n/u);
+    // A final line terminator ends the previous line; it is not another row.
+    if (result.length > 1 && result[result.length - 1] === '') result.pop();
+    return result;
+  }, [text]);
   if (expanded || lines.length <= maxLines) {
     return (
       <>
