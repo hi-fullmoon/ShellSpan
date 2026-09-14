@@ -119,6 +119,8 @@
   --color-app-text-soft: var(--app-text-soft);
   --color-app-border: var(--app-border);
   --color-app-primary: var(--app-primary);
+  --color-app-resize-divider: var(--app-resize-divider);
+  --color-app-resize-divider-active: var(--app-resize-divider-active);
   --color-app-primary-text: var(--app-primary-text);
   --color-app-button: var(--app-button);
   --color-app-button-text: var(--app-button-text);
@@ -141,6 +143,9 @@
   --app-text-soft: #475569;
   --app-border: rgba(100, 116, 139, 0.28);
   --app-primary: #0e7490;
+  /* Resize rails keep the shell palette inside AI's locally themed surface. */
+  --app-resize-divider: rgba(100, 116, 139, 0.28);
+  --app-resize-divider-active: #0e7490;
   --app-primary-text: #ffffff;
   --app-button: #0e7490;
   --app-button-text: #ffffff;
@@ -199,6 +204,8 @@
   --app-text-soft: #a1a1aa;
   --app-border: rgba(255, 255, 255, 0.09);
   --app-primary: #b3b3b8;
+  --app-resize-divider: rgba(255, 255, 255, 0.09);
+  --app-resize-divider-active: #b3b3b8;
   --app-primary-text: #191a1b;
   --app-button: #353638;
   --app-button-text: #f4f4f5;

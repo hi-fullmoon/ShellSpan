@@ -113,6 +113,8 @@ describe('AI panel production path and immutable shell', () => {
     const handle = screen.getByRole('separator', { name: 'ai.resize' });
     expect(handle).toHaveClass('ai-panel-resize-handle');
     expect(handle).toBeEmptyDOMElement();
+    expect(getComputedStyle(handle).left).toBe('0px');
+    expect(getComputedStyle(handle).width).toBe('8px');
     Object.defineProperties(handle, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },

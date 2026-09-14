@@ -100,9 +100,9 @@ export const SplitPane: React.FC<SplitPaneProps> = ({
         id={`${groupId}-divider`}
         data-slot="split-pane-divider"
         className={cn(
-          'group z-20 bg-transparent shadow-none after:pointer-events-none after:bg-transparent after:transition-colors after:duration-150 after:delay-0 focus-visible:after:bg-app-primary data-[separator=hover]:after:bg-app-primary data-[separator=hover]:after:delay-200 data-[separator=active]:after:bg-app-primary data-[separator=active]:after:delay-0',
+          'group z-20 bg-transparent shadow-none after:pointer-events-none after:bg-transparent after:transition-colors after:duration-150 after:delay-0 focus-visible:after:bg-app-resize-divider-active data-[separator=hover]:after:bg-app-resize-divider-active data-[separator=hover]:after:delay-200 data-[separator=active]:after:bg-app-resize-divider-active data-[separator=active]:after:delay-0',
           direction === 'vertical' && '-mt-px',
-          dividerStyle === 'subtle' ? 'bg-app-border/15' : 'bg-app-border',
+          dividerStyle === 'subtle' ? 'bg-app-border/15' : 'bg-app-resize-divider',
         )}
       />
       <ResizablePanel
