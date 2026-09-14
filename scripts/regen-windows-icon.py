@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Regenerate the whole icon set from the source artwork.
+"""Regenerate the whole icon set from the rasterized SVG artwork.
 
-The source artwork (src-tauri/icons/icon.png) is already full-bleed (see
-the git history for the original padded version); this script crops the
-opaque content just in case, re-centers it with a small margin (see
-CONTENT_FILL), renders a 1024px master, and box-downsamples it into:
+First export the editable source to the PNG consumed by this stdlib-only script:
+
+  rsvg-convert --width 1024 --height 1024 \
+    --output src-tauri/icons/icon.png src-tauri/icons/shellspan-icon.svg
+
+This script crops the opaque content, re-centers it with a small margin
+(see CONTENT_FILL), renders a 1024px master, and box-downsamples it into:
 
   - src-tauri/icons/icon.ico        (16,20,24,32,40,48,64,256 PNG entries)
   - src-tauri/icons/32x32.png
