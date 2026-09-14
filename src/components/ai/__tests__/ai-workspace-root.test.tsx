@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -305,6 +305,48 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(runningIndicator).toHaveTextContent('Working…');
     expect(runningIndicator?.querySelector('[data-slot="marker-icon"]')).toBeNull();
     expect(runningIndicator?.querySelector('[data-slot="marker-content"]')).toHaveClass('shimmer');
+  });
+
+  it('resumes live-edge scrolling when an Agent user submits a new turn', async () => {
+    const view = agentView('running');
+    const previousUser = view.nodes.find((node) => node.kind === 'userMessage');
+    if (!previousUser) throw new Error('Agent fixture has no user message');
+    const nextUser = {
+      ...previousUser,
+      key: 'optimistic:next-submission',
+      messageId: 'next-submission',
+      clientSubmissionId: 'next-submission',
+      content: 'Check the next service.',
+    };
+    const { container, rerender } = render(<AiWorkspaceRoot view={view} scope="terminal" />);
+    const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
+    let scrollHeight = 600;
+    let scrollTop = 100;
+    const scrollTo = vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); });
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+    fireEvent.wheel(viewport, { deltaY: -100 });
+    fireEvent.scroll(viewport);
+
+    scrollHeight = 1_400;
+    rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, nextUser] }} scope="terminal" />);
+
+    await waitFor(() => expect(scrollTop).toBe(1_300));
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', top: 1_300 });
+    expect(container.querySelector(`[data-ai-node-key="${nextUser.key}"]`)?.closest('[data-slot="message-scroller-item"]'))
+      .toHaveAttribute('data-scroll-anchor', 'false');
+
+    scrollTop = 400;
+    fireEvent.wheel(viewport, { deltaY: -100 });
+    scrollTo.mockClear();
+    const committedUser = { ...nextUser, key: 'user:next-submission', delivery: 'committed' as const };
+    rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, committedUser] }} scope="terminal" />);
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 
   it('keeps one collapsed reasoning row in Ask while hiding the full Agent process', async () => {

@@ -47,10 +47,6 @@ interface MessageScrollerProps {
 
 const SCROLL_EDGE_THRESHOLD = 8;
 
-function isAtBottom(viewport: HTMLElement): boolean {
-  return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1;
-}
-
 function isNearBottom(viewport: HTMLElement): boolean {
   return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= SCROLL_EDGE_THRESHOLD;
 }
@@ -192,7 +188,7 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
       const rect = row.getBoundingClientRect();
       onAnchorChange({
         nodeKey, offset: rect.top - viewportTop, scrollTop: scrollport.scrollTop,
-        atBottom: isAtBottom(scrollport),
+        atBottom: isNearBottom(scrollport),
       });
       break;
     }
@@ -222,7 +218,7 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
         const spacer = content.querySelector<HTMLElement>('[data-message-scroller-spacer]');
         // An exact end position must also resume following, including anchors
         // saved before atBottom was recorded.
-        if ((spacer && !spacer.hidden) || isAtBottom(scrollport)) scrollToEnd();
+        if ((spacer && !spacer.hidden) || isNearBottom(scrollport)) scrollToEnd();
       };
     } else {
       restoreAnchor = () => {

@@ -72,7 +72,12 @@ export function AiConversation({
   const showAskThinking = (running || pending)
     && runningIndicator === 'ask'
     && !visibleResponseStarted;
-  const latestUserKey = latestUserIndex >= 0 ? nodes[latestUserIndex]?.key : undefined;
+  const latestUser = latestUserIndex >= 0 ? nodes[latestUserIndex] : undefined;
+  const latestUserKey = latestUser?.kind === 'userMessage'
+    ? latestUser.clientSubmissionId
+      ? `submission:${latestUser.clientSubmissionId}`
+      : `message:${latestUser.messageId}`
+    : undefined;
   return (
     <MessageScroller
       className="min-h-0 flex-1"
