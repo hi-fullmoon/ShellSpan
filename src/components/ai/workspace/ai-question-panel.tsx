@@ -240,9 +240,9 @@ export function AiQuestionPanel({
                         : 'ai.workspace.question.answer',
                     )}
                   </FieldLabel>
-                  <InputGroup className="ai-question-custom-input min-h-8">
+                  <InputGroup className="ai-question-custom-input min-h-8 min-w-[min(240px,100%)]">
                     <InputGroupTextarea
-                      className="ai-question-textarea mr-0 min-h-8 max-h-[76px] w-auto flex-1 py-1.5 pr-[7px] pl-0"
+                      className="ai-question-textarea mr-0 min-h-8 min-w-0 w-full flex-1 py-1.5 pr-[7px] pl-0 [field-sizing:content]"
                       id={inputId}
                       rows={1}
                       value={currentAnswer.custom ?? ''}
