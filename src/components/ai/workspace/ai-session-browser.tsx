@@ -229,6 +229,7 @@ function SessionRow({
 export function AiSessionBrowser({
   compact = false,
   sessions,
+  scopeLabel = null,
   activeSessionKey = null,
   loading,
   error,
@@ -249,6 +250,7 @@ export function AiSessionBrowser({
 }: {
   readonly compact?: boolean;
   readonly sessions: readonly AiSessionSummary[];
+  readonly scopeLabel?: string | null;
   readonly activeSessionKey?: string | null;
   readonly loading: boolean;
   readonly error: string | null;
@@ -316,6 +318,13 @@ export function AiSessionBrowser({
             />
           )}
         />
+      )}
+
+      {scopeLabel && (
+        <p className="m-0 truncate px-[var(--ai-shell-clearance)] pt-2 text-xs text-muted-foreground"
+          aria-label={t('ai.workspace.sessions.loginScope', { identity: scopeLabel })}>
+          {scopeLabel}
+        </p>
       )}
 
       <div className="ai-session-browser-toolbar flex min-w-0 shrink-0 items-center gap-0.5 px-[var(--ai-shell-clearance)] pt-2 pb-1.5">
@@ -411,7 +420,10 @@ export function AiSessionBrowser({
       )}
 
       <ScrollArea className="ai-session-browser-scroll min-h-0 min-w-0 flex-1" aria-label={t('ai.workspace.sessions.title')}>
-        <ScrollAreaContent className="ai-session-browser-list min-h-full px-[calc(var(--ai-shell-clearance)-4px)] pt-0 pb-4">
+        <ScrollAreaContent
+          className="ai-session-browser-list min-h-full px-[calc(var(--ai-shell-clearance)-4px)] pt-0 pb-4"
+          style={{ minWidth: 0 }}
+        >
           {loading && sessions.length === 0 && <SessionBrowserLoading label={t('common.loading')} />}
           {!loading && !error && visible.length === 0 && (
             <PanelEmptyState

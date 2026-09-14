@@ -20,6 +20,7 @@ import { appendTerminalOutput, clearTerminalOutput } from '@/lib/terminal/termin
 import type { ResolvedModel } from '@/lib/ai/provider-contract';
 import * as imageDraftModule from '@/components/ai/workspace/use-image-draft';
 import * as visionContract from '@/lib/ai/vision-contract';
+import { terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
 
 const provider = {
   id: 'provider-test',
@@ -196,7 +197,8 @@ function runningAgentView(sessionId = 'agent-session-1', terminalId = 'terminal-
     summary: {
       id: sessionId, kind: 'agent', title: 'Run checks',
       updatedAt: '2026-09-03T00:00:00.000Z', status: 'running',
-      scopeKey: `terminal-${terminalId}`, archived: false,
+      scopeKey: terminalLoginScopeKey({ host: 'example.test', port: 22, username: 'tester' })!,
+      targetId: `terminal-${terminalId}`, archived: false,
     },
     snapshot: {
       kind: 'agent',
@@ -205,7 +207,8 @@ function runningAgentView(sessionId = 'agent-session-1', terminalId = 'terminal-
           sessionId, taskId: 'task-1', goal: 'Run checks',
           executionSurface: 'direct',
           createdAtUnixMs: 1,
-          target: { kind: 'remote', targetId: `terminal-${terminalId}`, sessionId: terminalId },
+          target: { kind: 'remote', targetId: `terminal-${terminalId}`, sessionId: terminalId,
+            host: 'example.test', port: 22, username: 'tester' },
         },
         status: 'running', ended: false, archived: false, eventCount: 0,
         surface: { generation: 0, messages: [] },
@@ -408,7 +411,7 @@ describe('AiWorkspaceController', () => {
       let release!: (receipt: AiSubmitReceipt) => void;
       const agent = adapter({
         list: vi.fn(async (input) => ({
-          sessions: [input.scopeKey === second.summary.scopeKey ? second.summary : first.summary],
+          sessions: [input.targetId === second.summary.targetId ? second.summary : first.summary],
         })),
         open: vi.fn(async (id) => id === second.summary.id ? second : first),
         submit: vi.fn(() => new Promise<AiSubmitReceipt>((resolve) => { release = resolve; })),
@@ -443,10 +446,16 @@ describe('AiWorkspaceController', () => {
       expect(result.current.composer.pendingSubmissions).toEqual([]);
       expect(result.current.pendingNodes).toEqual([]);
       if (expectedSession) {
+        const callsBeforeSubmit = vi.mocked(agent.submit).mock.calls.length;
         act(() => result.current.submit('primary'));
-        expect(agent.submit).toHaveBeenLastCalledWith(expectedSession, expect.objectContaining({
-          content: 'draft for the current conversation',
-        }));
+        if (destination === 'otherSession') {
+          expect(result.current.readOnlySession).toBe(true);
+          expect(agent.submit).toHaveBeenCalledTimes(callsBeforeSubmit);
+        } else {
+          expect(agent.submit).toHaveBeenLastCalledWith(expectedSession, expect.objectContaining({
+            content: 'draft for the current conversation',
+          }));
+        }
       }
     },
   );
@@ -509,10 +518,144 @@ describe('AiWorkspaceController', () => {
     await waitFor(() => expect(result.current.view?.summary.id).toBe(first.summary.id));
     act(() => result.current.setDraft('session A draft'));
     act(() => connectedTerminal('terminal-2'));
-    await waitFor(() => expect(agent.list).toHaveBeenLastCalledWith(expect.objectContaining({ scopeKey: 'terminal-terminal-2' })));
+    await waitFor(() => expect(agent.list).toHaveBeenLastCalledWith(expect.objectContaining({ targetId: 'terminal-terminal-2' })));
     expect(agent.open).toHaveBeenCalledOnce();
     expect(result.current.view).toBeNull();
     expect(result.current.composer).toMatchObject({ sessionId: null, draft: '', phase: 'idle' });
+  });
+
+  it('shows previous terminal history for the same login without allowing old-target submission', async () => {
+    connectedTerminal('terminal-new');
+    const old = runningAgentView('agent-old', 'terminal-old');
+    const agent = adapter({
+      list: vi.fn(async (input) => ({ sessions: input.scopeKey === old.summary.scopeKey ? [old.summary] : [] })),
+      open: vi.fn(async () => old),
+      submit: vi.fn(async () => { throw new Error('old target must stay read-only'); }),
+    });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    await waitFor(() => expect(agent.list).toHaveBeenCalledWith(expect.objectContaining({
+      targetId: 'terminal-terminal-new', archived: false,
+    })));
+    expect(result.current.view).toBeNull();
+
+    act(() => result.current.openSessions());
+    await waitFor(() => expect(result.current.sessions.map((session) => session.id)).toEqual(['agent-old']));
+    expect(agent.list).toHaveBeenCalledWith(expect.objectContaining({ scopeKey: old.summary.scopeKey }));
+    expect(result.current.historyScopeLabel).toBe('tester@example.test:22');
+
+    act(() => result.current.openSession(old.summary));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe('agent-old'));
+    expect(result.current.readOnlySession).toBe(true);
+    expect(result.current.composer.terminal).toBe(true);
+    act(() => { result.current.setDraft('do not execute'); result.current.submit('primary'); });
+    expect(agent.submit).not.toHaveBeenCalled();
+
+    const surface = render(<AiWorkspaceRoot scope="terminal" view={old} readOnlySession />);
+    expect(within(surface.container).queryByTestId('ai-workspace-composer')).not.toBeInTheDocument();
+    expect(within(surface.container).getByText(/bound to an earlier terminal connection/)).toBeInTheDocument();
+  });
+
+  it('continues with every old record visible and an empty composer on a fresh terminal target', async () => {
+    connectedTerminal('terminal-new');
+    const base = runningAgentView('agent-old', 'terminal-old');
+    const nodeBase = { sourceKind: 'agent' as const, sessionId: 'agent-old',
+      turnId: 'turn-old', stepId: null, firstSeq: 2, lastSeq: 2,
+      timestamp: '2026-09-14T00:00:00Z' };
+    const old: AiSessionView = { ...base, nodes: [
+      { ...nodeBase, kind: 'userMessage', key: 'user:old', messageId: 'user-old',
+        content: 'Explain the deployment result', delivery: 'committed' },
+      { ...nodeBase, kind: 'assistantMessage', key: 'assistant:old', messageId: 'assistant-old',
+        requestId: null, blocks: [{ type: 'text', text: 'The deployment reached step two' }], state: 'completed' },
+    ] };
+    const nextBase = runningAgentView('agent-new', 'terminal-new');
+    const created: AiSessionView = { ...nextBase,
+      status: 'idle', summary: { ...nextBase.summary, status: 'idle' },
+      snapshot: { kind: 'agent', value: { ...nextBase.snapshot.value, status: 'idle',
+        header: { ...nextBase.snapshot.value.header, continuedFromSessionId: 'agent-old' } } },
+    };
+    const submit = vi.fn(async (sessionId: string | null, input: Parameters<AiSessionControllerAdapter['submit']>[1]) => ({
+      sessionId: sessionId ?? input.create!.request.sessionId,
+      mode: input.mode,
+      clientOperationId: input.clientOperationId,
+    }));
+    const agent = adapter({ open: vi.fn(async (id) => id === 'agent-old' ? old : created),
+      create: vi.fn(async () => created), submit });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    act(() => result.current.openSession(old.summary));
+    await waitFor(() => expect(result.current.view?.summary.id).toBe('agent-old'));
+    expect(result.current.continueHistoricalSession).not.toBeNull();
+
+    act(() => result.current.continueHistoricalSession?.());
+    await waitFor(() => expect(result.current.view?.summary.id).toBe('agent-new'));
+    expect(agent.create).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({
+      continuedFromSessionId: 'agent-old',
+      target: expect.objectContaining({ sessionId: 'terminal-new' }),
+    }) }));
+    expect(result.current.view?.nodes.slice(0, 2).map((node) => node.key)).toEqual([
+      'history:agent-old:user:old', 'history:agent-old:assistant:old',
+    ]);
+    expect(result.current.composer.sessionId).toBe('agent-new');
+    expect(result.current.composer.draft).toBe('');
+    await waitFor(() => expect(submit).toHaveBeenCalledWith('agent-new', expect.objectContaining({
+      content: expect.stringContaining('Continue answering from where the historical conversation stopped'),
+    })));
+    expect(submit.mock.calls[0][1].content).not.toContain('The deployment reached step two');
+    expect(submit).not.toHaveBeenCalledWith('agent-old', expect.anything());
+  });
+
+  it('shows a continue-answer action in the old-terminal notice', async () => {
+    const old = runningAgentView('agent-old', 'terminal-old');
+    const continueAnswer = vi.fn();
+    render(<AiWorkspaceRoot scope="terminal" view={old} readOnlySession
+      onContinueHistoricalSession={continueAnswer} />);
+    expect(screen.queryByTestId('ai-workspace-composer')).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Continue answering' }));
+    expect(continueAnswer).toHaveBeenCalledOnce();
+  });
+
+  it('reloads every ancestor transcript when a continued conversation is reopened', async () => {
+    connectedTerminal('terminal-3');
+    const historyView = (id: string, terminalId: string, sourceId: string | undefined,
+      text: string): AiSessionView => {
+      const base = runningAgentView(id, terminalId);
+      return { ...base,
+        status: 'idle', summary: { ...base.summary, status: 'idle' },
+        snapshot: { kind: 'agent', value: { ...base.snapshot.value, status: 'idle',
+          header: { ...base.snapshot.value.header, ...(sourceId ? { continuedFromSessionId: sourceId } : {}) },
+        } },
+        nodes: [{ kind: 'userMessage', key: `user:${id}`, sourceKind: 'agent', sessionId: id,
+          turnId: `turn:${id}`, stepId: null, firstSeq: 2, lastSeq: 2,
+          timestamp: '2026-09-14T00:00:00Z', messageId: `message:${id}`, content: text,
+          delivery: 'committed' }],
+      };
+    };
+    const first = historyView('agent-first', 'terminal-1', undefined, 'First record');
+    const second = historyView('agent-second', 'terminal-2', first.summary.id, 'Second record');
+    const third = historyView('agent-third', 'terminal-3', second.summary.id, 'Third record');
+    const views = new Map([first, second, third].map((item) => [item.summary.id, item]));
+    const agent = adapter({ open: vi.fn(async (id) => views.get(id)!) });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+    act(() => result.current.openSession(third.summary));
+    await waitFor(() => expect(result.current.view?.nodes.map((node) => node.key)).toEqual([
+      'history:agent-first:user:agent-first',
+      'history:agent-second:user:agent-second',
+      'user:agent-third',
+    ]));
+    expect(result.current.composer.draft).toBe('');
+    expect(result.current.readOnlySession).toBe(false);
+  });
+
+  it('keeps the explicit safe-reconnect action visible for an old failed Session', () => {
+    const base = runningAgentView('agent-old', 'terminal-old');
+    const failed: AiSessionView = {
+      ...base,
+      status: 'failed',
+      summary: { ...base.summary, status: 'failed' },
+      snapshot: { kind: 'agent', value: { ...base.snapshot.value, status: 'failed', ended: true } },
+    };
+    render(<AiWorkspaceRoot scope="terminal" view={failed} readOnlySession
+      onContinueOnReconnectedTerminal={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Continue in reconnected terminal' })).toBeEnabled();
   });
 
   it('renews the subscription when history selects the current session again', async () => {
@@ -614,7 +757,7 @@ describe('AiWorkspaceController', () => {
     const first = runningAgentView();
     const second = runningAgentView('agent-session-2', 'terminal-2');
     const agent = adapter({
-      list: vi.fn(async (input) => ({ sessions: [input.scopeKey === second.summary.scopeKey ? second.summary : first.summary] })),
+      list: vi.fn(async (input) => ({ sessions: [input.targetId === second.summary.targetId ? second.summary : first.summary] })),
       open: vi.fn(async (id) => id === second.summary.id ? second : first),
     });
     const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
@@ -968,8 +1111,58 @@ describe('AiWorkspaceController', () => {
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
     await waitFor(() => expect(agent.open).toHaveBeenCalledWith(view.summary.id));
-    expect(await screen.findByRole('button', { name: 'Command execution: Visible terminal' })).toBeDisabled();
+    const choice = await screen.findByRole('button', { name: 'Command execution: Visible terminal' });
+    expect(choice).toBeDisabled();
+    expect(choice).toHaveAttribute('aria-description', expect.stringContaining('Agent is idle'));
     expect(screen.queryByRole('button', { name: 'Command execution: Background' })).toBeNull();
+  });
+
+  it('switches execution surface in an idle existing Session', async () => {
+    connectedTerminal();
+    const base = runningAgentView();
+    const view: AiSessionView = {
+      ...base,
+      status: 'idle',
+      summary: { ...base.summary, status: 'idle' },
+      snapshot: { kind: 'agent', value: { ...base.snapshot.value, status: 'idle' } },
+    };
+    const agent = adapter({
+      list: vi.fn(async () => ({ sessions: [view.summary] })),
+      open: vi.fn(async () => view),
+      setExecutionSurface: vi.fn(async () => undefined),
+    });
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+    const choice = await screen.findByRole('button', { name: 'Command execution: Background' });
+    expect(choice).toBeEnabled();
+    expect(choice).not.toHaveAttribute('aria-description');
+
+    const user = userEvent.setup();
+    await user.click(choice);
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Visible terminal' }));
+    await waitFor(() => expect(agent.setExecutionSurface).toHaveBeenCalledWith(view.summary.id, 'boundTerminal'));
+  });
+
+  it('allows switching an ended root conversation before its next message', async () => {
+    connectedTerminal();
+    const base = runningAgentView();
+    const ended: AiSessionView = {
+      ...base,
+      status: 'completed',
+      summary: { ...base.summary, status: 'completed' },
+      snapshot: { kind: 'agent', value: { ...base.snapshot.value, status: 'completed', ended: true } },
+    };
+    const agent = adapter({
+      list: vi.fn(async () => ({ sessions: [ended.summary] })),
+      open: vi.fn(async () => ended),
+      setExecutionSurface: vi.fn(async () => undefined),
+    });
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+    const choice = await screen.findByRole('button', { name: 'Command execution: Background' });
+    expect(choice).toBeEnabled();
+    const user = userEvent.setup();
+    await user.click(choice);
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Visible terminal' }));
+    await waitFor(() => expect(agent.setExecutionSurface).toHaveBeenCalledWith(ended.summary.id, 'boundTerminal'));
   });
 
   it('routes Agent Enter, accelerated Enter, and Stop to distinct adapter intentions', async () => {

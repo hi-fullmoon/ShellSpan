@@ -397,7 +397,12 @@ function RetryNodeView({ node }: { readonly node: AiConversationNodeOf<'retry'> 
 function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> }) {
   const { t } = useI18n();
   if (node.state === 'cancelled') {
-    return <div className="flex items-center gap-2 py-2 text-muted-foreground" role="status"><SquareIcon aria-hidden="true" /><span>{t('ai.workspace.stoppedContinue')}</span></div>;
+    return (
+      <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_minmax(0,1fr)] items-center gap-1.5 py-0.5" data-variant="cancelled" role="status">
+        <SquareIcon aria-hidden="true" />
+        <span>{t('ai.workspace.stopped')}</span>
+      </div>
+    );
   }
   return (
     <div className="ai-turn-error grid min-w-0 grid-cols-[14px_minmax(0,1fr)_auto] items-start gap-2 py-0.5" role="alert">

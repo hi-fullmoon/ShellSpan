@@ -33,7 +33,7 @@ export interface AgentExecutionSurfaceSelectorProps {
   readonly onSurfaceChange?: (surface: AgentExecutionSurface) => void;
 }
 
-/** Session-scoped execution choice. Existing Sessions render their frozen value disabled. */
+/** Session-scoped execution choice; changes apply only after the Agent becomes idle. */
 export function AgentExecutionSurfaceSelector({
   disabled = false,
   surface,
@@ -43,6 +43,7 @@ export function AgentExecutionSurfaceSelector({
   const current = EXECUTION_SURFACE_OPTIONS.find((option) => option.surface === surface)
     ?? EXECUTION_SURFACE_OPTIONS[0];
   const CurrentIcon = current.icon;
+  const disabledHint = disabled ? t('agent.executionSurface.switchHint') : undefined;
 
   return (
     <DropdownMenu>
@@ -54,6 +55,8 @@ export function AgentExecutionSurfaceSelector({
             className="ai-execution-surface-trigger h-7 min-w-0 max-w-[154px] px-[7px] @max-[480px]/ai-workspace:size-7 @max-[480px]/ai-workspace:shrink-0 @max-[480px]/ai-workspace:p-0 @max-[480px]/ai-workspace:[&_[data-icon=inline-end]]:hidden"
             disabled={disabled}
             aria-label={`${t('agent.executionSurface')}: ${t(current.label)}`}
+            aria-description={disabledHint}
+            title={disabledHint}
           />
         )}
       >

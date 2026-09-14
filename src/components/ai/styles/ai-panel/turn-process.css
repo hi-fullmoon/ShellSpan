@@ -47,6 +47,10 @@
   translate: 0 1px;
 }
 
+.ai-transcript-notice[data-variant='cancelled'] > svg {
+  translate: none;
+}
+
 .ai-disclosure-title {
   color: var(--dsw-alias-label-secondary);
   font-size: 13px;

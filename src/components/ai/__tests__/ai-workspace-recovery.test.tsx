@@ -19,7 +19,7 @@ const providerA = { id: 'provider-a', preset: 'custom' as const, profile: 'gener
 const providerB = { ...providerA, id: 'provider-b', name: 'Provider B', baseUrl: 'https://b.invalid', model: 'model-b' };
 function view(id = 'session-a'): AiSessionView {
   return {
-    summary: { id, kind: 'agent', title: id, updatedAt: '2026-09-03T00:00:00.000Z', status: 'running', scopeKey: 'terminal-terminal-1', archived: false },
+    summary: { id, kind: 'agent', title: id, updatedAt: '2026-09-03T00:00:00.000Z', status: 'running', scopeKey: 'terminal-terminal-1', targetId: 'terminal-terminal-1', archived: false },
     snapshot: { kind: 'agent', value: {
       header: { sessionId: id, taskId: 'task', goal: id, executionSurface: 'direct', createdAtUnixMs: 1, target: { kind: 'remote', targetId: 'terminal-terminal-1', sessionId: 'terminal-1' } },
       status: 'running', ended: false, archived: false, eventCount: 0,
@@ -151,9 +151,13 @@ it('restores the latest conversation from the runtime ascending session list', a
 
 it('restores existing session drafts independently after panel unmounts on different terminals', async () => {
   const first = view('session-a');
-  const second = { ...view('session-b'), summary: { ...view('session-b').summary, scopeKey: 'terminal-terminal-2' } };
+  const second = { ...view('session-b'),
+    summary: { ...view('session-b').summary, scopeKey: 'terminal-terminal-2', targetId: 'terminal-terminal-2' },
+    snapshot: { kind: 'agent' as const, value: { ...view('session-b').snapshot.value,
+      header: { ...view('session-b').snapshot.value.header,
+        target: { kind: 'remote' as const, targetId: 'terminal-terminal-2', sessionId: 'terminal-2' } } } } };
   const agent = adapter({
-    list: vi.fn(async input => ({ sessions: [input.scopeKey === first.summary.scopeKey ? first.summary : second.summary] })),
+    list: vi.fn(async input => ({ sessions: [input.targetId === first.summary.targetId ? first.summary : second.summary] })),
     open: vi.fn(async id => id === first.summary.id ? first : second),
   });
   const terminalA = useTerminalStore.getState().sessions[0];
