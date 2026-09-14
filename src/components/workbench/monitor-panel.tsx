@@ -470,6 +470,7 @@ export const MonitorPanel: React.FC = () => {
                   <Card
                     aria-labelledby="monitor-process-heading"
                     size="sm"
+                    radius="compact"
                     className="h-full @min-[72rem]:col-span-7"
                   >
                     <CardHeader>
@@ -524,6 +525,7 @@ export const MonitorPanel: React.FC = () => {
                   <Card
                     aria-labelledby="monitor-system-heading"
                     size="sm"
+                    radius="compact"
                     className="h-full @min-[72rem]:col-span-5"
                   >
                     <CardHeader>
@@ -582,7 +584,7 @@ export const MonitorPanel: React.FC = () => {
             </section>
 
             <section aria-labelledby="monitor-connections-heading">
-              <Card size="sm">
+              <Card size="sm" radius="compact">
                 <CardHeader>
                   <CardTitle id="monitor-connections-heading">
                     {t('workbench.monitor.connectionHealth')}

@@ -551,7 +551,7 @@ export const CommandPalette: React.FC = () => {
           />
         </InputGroup>
 
-        <div className="max-h-[min(32rem,65vh)] overflow-y-auto">
+        <div className="native-scrollbar-default -mr-4 max-h-[min(32rem,65vh)] overflow-y-auto pr-4">
           {filteredItems.length === 0 ? (
             <EmptyState className="min-h-36" title={t('commandPalette.noResults')} icon={<SearchIcon className="size-5" />} />
           ) : groups.map((group) => {

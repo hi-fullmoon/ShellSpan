@@ -140,6 +140,10 @@ describe('MonitorPanel health layers', () => {
     expect(rssTrend.parentElement).toHaveClass('min-h-28', 'gap-1.5', 'py-2.5');
     expect(screen.getAllByRole('progressbar')).toHaveLength(4);
     expect(document.querySelectorAll('[data-slot="card"]')).toHaveLength(3);
+    document.querySelectorAll('[data-slot="card"]').forEach((card) => {
+      expect(card).toHaveAttribute('data-radius', 'compact');
+      expect(card).toHaveClass('rounded-lg');
+    });
     expect(screen.getByText('remote-health-layer')).toBeInTheDocument();
   });
 });
