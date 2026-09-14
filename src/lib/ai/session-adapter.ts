@@ -20,6 +20,8 @@ export interface AiSessionSummary {
   readonly updatedAt: string;
   readonly status: AiSessionStatus;
   readonly scopeKey: string;
+  /** The exact execution target, which changes when a terminal reconnects. */
+  readonly targetId?: string;
   readonly archived: boolean;
   readonly revision?: number | null;
 }
@@ -100,6 +102,7 @@ export interface AiSessionRenameInput {
 
 export interface ListSessionsInput {
   readonly scopeKey?: string;
+  readonly targetId?: string;
   readonly archived?: boolean;
   readonly cursor?: string;
   readonly limit: number;
@@ -168,6 +171,7 @@ export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
   open(sessionId: string): Promise<AiSessionView>;
   selectModel?(sessionId: string, provider: AiProviderConfig): Promise<void>;
   setPermission?(sessionId: string, mode: import('@/types/agent-session').AgentSessionPermissionMode): Promise<void>;
+  setExecutionSurface?(sessionId: string, surface: import('@/types/agent-session').AgentExecutionSurface): Promise<void>;
   subscribe(sessionId: string, listener: AiSessionListener): () => void;
   submit(sessionId: string | null, input: AiSubmitInput<Kind>): Promise<AiSubmitReceipt>;
   stop(sessionId: string): Promise<void>;
@@ -175,6 +179,7 @@ export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
   reject(input: AiApprovalDecisionInput): Promise<void>;
   archive(sessionId: string): Promise<void>;
   delete(sessionId: string): Promise<void>;
+  evict?(sessionId: string): void;
   mutateInbox(input: AiInboxMutationInput): Promise<void>;
   rename(input: AiSessionRenameInput): Promise<void>;
   refresh(sessionId: string): Promise<AiSessionView>;

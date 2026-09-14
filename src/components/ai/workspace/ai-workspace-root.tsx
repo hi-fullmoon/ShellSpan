@@ -123,12 +123,17 @@ export interface AiWorkspaceRootProps {
   readonly renameError?: string | null;
   readonly canStartAgent?: boolean;
   readonly agentUnavailableReason?: string | null;
+  readonly historyScopeLabel?: string | null;
+  readonly readOnlySession?: boolean;
   readonly onDraftChange?: (value: string) => void;
   readonly onSubmit?: (input: AiWorkspaceSubmitInput) => void | Promise<void>;
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
   readonly onRetryTurn?: () => void;
   readonly onContinueOnReconnectedTerminal?: () => void;
+  readonly historicalContinuationAvailable?: boolean;
+  readonly historicalContinuationBusy?: boolean;
+  readonly historicalContinuationError?: string | null;
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onRetryFailedDraft?: (failedDraftId: string) => void;
   readonly onDismissError?: () => void;
@@ -194,12 +199,17 @@ export function AiWorkspaceRoot({
   renameError = null,
   canStartAgent = false,
   agentUnavailableReason = null,
+  historyScopeLabel = null,
+  readOnlySession = false,
   onDraftChange,
   onSubmit,
   onSubmitGesture,
   onStop,
   onRetryTurn,
   onContinueOnReconnectedTerminal,
+  historicalContinuationAvailable = false,
+  historicalContinuationBusy = false,
+  historicalContinuationError = null,
   onBusyPreferenceChange,
   onRetryFailedDraft,
   onDismissError,
@@ -250,6 +260,21 @@ export function AiWorkspaceRoot({
     ? t('agent.emptyDescription')
     : t('ai.workbench.empty');
   const surfaceMode = mode ?? 'agent';
+  const historicalComposerEnabled = readOnlySession && historicalContinuationAvailable;
+  const historicalComposerDisplay = readOnlySession
+    && (historicalComposerEnabled || !onContinueOnReconnectedTerminal);
+  const activeComposerState = historicalComposerDisplay && composerState ? {
+    ...composerState,
+    phase: historicalContinuationBusy ? 'submitting' as const : 'idle' as const,
+    runtimeStatus: 'idle' as const,
+    sessionId: historicalComposerEnabled ? null : composerState.sessionId,
+    terminal: !historicalComposerEnabled,
+    waitingApproval: false,
+    waitingQuestion: false,
+    detached: null,
+    pendingSubmissions: [],
+    failedDrafts: [],
+  } : composerState;
   const conversationNodes = useMemo(() => (
     surfaceMode === 'ask'
       ? askConversationNodes(visibleNodes)
@@ -334,6 +359,7 @@ export function AiWorkspaceRoot({
             renameError={renameError}
             canStartAgent={canStartAgent}
             agentUnavailableReason={agentUnavailableReason}
+            scopeLabel={historyScopeLabel}
             onBack={() => onBack?.()}
             onNew={() => onNewSession?.()}
             onRefresh={() => onRefreshSessions?.()}
@@ -387,31 +413,31 @@ export function AiWorkspaceRoot({
         <AiComposerSeat
           mode={surfaceMode}
           imageControls={surfaceMode === 'agent' ? imageControls : undefined}
-          onPasteImages={surfaceMode === 'agent' ? onPasteImages : undefined}
+          onPasteImages={surfaceMode === 'agent' && !readOnlySession ? onPasteImages : undefined}
           hasImages={surfaceMode === 'agent' ? hasImages : false}
           imageBusy={surfaceMode === 'agent' ? imageBusy : false}
           imageLocked={surfaceMode === 'agent' ? imageLocked : false}
           phase={hero ? 'hero' : 'active'}
-          status={status}
+          status={historicalComposerDisplay ? 'idle' : status}
           draft={draft}
           defaultDraft={defaultDraft}
           providerLabel={providerLabel}
           modelLabel={modelLabel}
           modelControl={modelControl}
-          contextUsage={surfaceMode === 'agent' ? view?.contextUsage : undefined}
+          contextUsage={surfaceMode === 'agent' && !readOnlySession ? view?.contextUsage : undefined}
           permissionControl={surfaceMode === 'agent' ? permissionControl : undefined}
           executionSurfaceControl={surfaceMode === 'agent' ? executionSurfaceControl : undefined}
-          composerState={composerState}
-          inbox={surfaceMode === 'agent' ? view?.inbox : undefined}
-          taskSteps={surfaceMode === 'agent' ? taskSteps : undefined}
-          queueMutation={surfaceMode === 'agent' ? queueMutation : undefined}
-          queueMutable={Boolean(view && !view.summary.archived && !view.snapshot.value.ended)}
+          composerState={activeComposerState}
+          inbox={surfaceMode === 'agent' && !readOnlySession ? view?.inbox : undefined}
+          taskSteps={surfaceMode === 'agent' && !readOnlySession ? taskSteps : undefined}
+          queueMutation={surfaceMode === 'agent' && !readOnlySession ? queueMutation : undefined}
+          queueMutable={Boolean(view && !readOnlySession && !view.summary.archived && !view.snapshot.value.ended)}
           announcement={announcement}
-          pendingApproval={surfaceMode === 'agent' ? view?.pendingApproval : undefined}
-          pendingQuestion={view?.pendingQuestion}
-          onAnswerQuestion={onAnswerQuestion}
-          onListFileReferences={surfaceMode === 'agent' ? onListFileReferences : undefined}
-          onListSkills={surfaceMode === 'agent' ? onListSkills : undefined}
+          pendingApproval={surfaceMode === 'agent' && !readOnlySession ? view?.pendingApproval : undefined}
+          pendingQuestion={readOnlySession ? undefined : view?.pendingQuestion}
+          onAnswerQuestion={readOnlySession ? undefined : onAnswerQuestion}
+          onListFileReferences={surfaceMode === 'agent' && !readOnlySession ? onListFileReferences : undefined}
+          onListSkills={surfaceMode === 'agent' && !readOnlySession ? onListSkills : undefined}
           skillsScopeKey={skillsScopeKey}
           skillsNeedsRoot={skillsNeedsRoot}
           projectTargetLabel={projectTargetLabel}
@@ -421,22 +447,26 @@ export function AiWorkspaceRoot({
           onDraftChange={onDraftChange}
           onSubmit={onSubmit ? (content) => onSubmit({ content }) : undefined}
           onSubmitGesture={onSubmitGesture}
-          onStop={onStop}
-          onRetryTurn={onRetryTurn}
-          onContinueOnReconnectedTerminal={onContinueOnReconnectedTerminal}
-          onBusyPreferenceChange={surfaceMode === 'agent' ? onBusyPreferenceChange : undefined}
-          onUpdateQueueItem={surfaceMode === 'agent' ? onUpdateQueueItem : undefined}
-          onRemoveQueueItem={surfaceMode === 'agent' ? onRemoveQueueItem : undefined}
-          onSteerQueueItem={surfaceMode === 'agent' ? onSteerQueueItem : undefined}
-          onResumeQueueItem={surfaceMode === 'agent' ? onResumeQueueItem : undefined}
-          onReorderQueueLane={surfaceMode === 'agent' ? onReorderQueueLane : undefined}
-          onRetryQueueMutation={surfaceMode === 'agent' ? onRetryQueueMutation : undefined}
-          onRetryFailedDraft={onRetryFailedDraft}
+          onStop={readOnlySession ? undefined : onStop}
+          onRetryTurn={readOnlySession ? undefined : onRetryTurn}
+          onContinueOnReconnectedTerminal={historicalComposerEnabled ? undefined : onContinueOnReconnectedTerminal}
+          historicalContinuationAvailable={historicalContinuationAvailable}
+          historicalContinuationBusy={historicalContinuationBusy}
+          historicalContinuationError={historicalContinuationError}
+          onBusyPreferenceChange={surfaceMode === 'agent' && !readOnlySession ? onBusyPreferenceChange : undefined}
+          onUpdateQueueItem={surfaceMode === 'agent' && !readOnlySession ? onUpdateQueueItem : undefined}
+          onRemoveQueueItem={surfaceMode === 'agent' && !readOnlySession ? onRemoveQueueItem : undefined}
+          onSteerQueueItem={surfaceMode === 'agent' && !readOnlySession ? onSteerQueueItem : undefined}
+          onResumeQueueItem={surfaceMode === 'agent' && !readOnlySession ? onResumeQueueItem : undefined}
+          onReorderQueueLane={surfaceMode === 'agent' && !readOnlySession ? onReorderQueueLane : undefined}
+          onRetryQueueMutation={surfaceMode === 'agent' && !readOnlySession ? onRetryQueueMutation : undefined}
+          onRetryFailedDraft={readOnlySession ? undefined : onRetryFailedDraft}
           onDismissError={onDismissError}
           onOpenModel={onOpenModel}
-          onApprove={surfaceMode === 'agent' ? onApprove : undefined}
-          onReject={surfaceMode === 'agent' ? onReject : undefined}
+          onApprove={surfaceMode === 'agent' && !readOnlySession ? onApprove : undefined}
+          onReject={surfaceMode === 'agent' && !readOnlySession ? onReject : undefined}
           onOpenApprovalDetails={() => {
+            if (readOnlySession) return;
             const approval = view?.pendingApproval;
             if (!view || !approval) return;
             const tool = findConversationTool(view.nodes, approval);

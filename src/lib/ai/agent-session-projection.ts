@@ -225,6 +225,7 @@ function projectActivityNodesUnchecked(
     switch (event.type) {
       case 'session/model_selected':
       case 'session/permission_changed':
+      case 'session/execution_surface_changed':
         break;
       case 'session/created':
         taskKey = `activity:task:${event.data.taskId}`;

@@ -89,6 +89,9 @@ export interface AiComposerSeatProps {
   readonly onStop?: () => void;
   readonly onRetryTurn?: () => void;
   readonly onContinueOnReconnectedTerminal?: () => void;
+  readonly historicalContinuationAvailable?: boolean;
+  readonly historicalContinuationBusy?: boolean;
+  readonly historicalContinuationError?: string | null;
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onUpdateQueueItem?: (item: AiInboxItem, content: string) => void;
   readonly onRemoveQueueItem?: (item: AiInboxItem) => void;
@@ -140,6 +143,9 @@ export function AiComposerSeat({
   onStop,
   onRetryTurn,
   onContinueOnReconnectedTerminal,
+  historicalContinuationAvailable = false,
+  historicalContinuationBusy = false,
+  historicalContinuationError = null,
   onBusyPreferenceChange,
   onUpdateQueueItem,
   onRemoveQueueItem,
@@ -241,6 +247,18 @@ export function AiComposerSeat({
     >
       {mode === 'agent' && <AiTaskStrip steps={taskSteps} />}
       <div className="ai-composer-notices flex min-w-0 flex-col gap-1.5 empty:hidden">
+        {historicalContinuationAvailable && (
+          <Alert variant="subtle" size="sm" role="status">
+            <AlertDescription>{t(historicalContinuationBusy
+              ? 'ai.workspace.sessions.continuePreparing'
+              : 'ai.workspace.sessions.continueComposerHint')}</AlertDescription>
+          </Alert>
+        )}
+        {historicalContinuationError && (
+          <Alert variant="destructiveSubtle" size="sm" role="alert">
+            <AlertDescription>{historicalContinuationError}</AlertDescription>
+          </Alert>
+        )}
         {status === 'failed' && onContinueOnReconnectedTerminal && (
           <Button type="button" variant="secondary" size="sm" className="self-center rounded-full"
             disabled={stopping || submitting || unavailable} onClick={onContinueOnReconnectedTerminal}>
@@ -492,7 +510,7 @@ export function AiComposerSeat({
                         <InputGroupButton
                           variant="ghost"
                           size="icon-sm"
-                          className="ai-composer-primary ai-composer-stop size-8 shrink-0"
+                          className="ai-composer-primary ai-composer-stop size-7 shrink-0"
                           onClick={onStop}
                           aria-label={t('ai.workspace.stop')}
                         />
@@ -509,7 +527,7 @@ export function AiComposerSeat({
                       <InputGroupButton
                         variant="default"
                         size="icon-sm"
-                        className="ai-composer-primary size-8 shrink-0"
+                        className="ai-composer-primary size-7 shrink-0"
                         onClick={() => submit('primary')}
                         disabled={submitDisabled}
                         aria-label={primaryLabel}

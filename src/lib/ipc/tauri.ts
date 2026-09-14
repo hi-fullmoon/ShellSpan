@@ -266,6 +266,13 @@ export async function invokeSetAgentRuntimePermission(input: {
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_set_permission', { input });
 }
 
+export async function invokeSetAgentRuntimeExecutionSurface(input: {
+  sessionId: string;
+  surface: import('@/types/agent-session').AgentExecutionSurface;
+}): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_set_execution_surface', { input });
+}
+
 export async function invokeSpawnAgentRuntimeSubagent(
   request: AgentSubagentSpawnRequest,
 ): Promise<AgentSessionSnapshot> {

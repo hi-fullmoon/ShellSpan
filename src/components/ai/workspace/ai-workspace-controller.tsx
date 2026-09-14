@@ -108,7 +108,7 @@ export function AiWorkspaceController({
       onStop={controller.stop}
       onRetryTurn={controller.retryTurn}
       onContinueOnReconnectedTerminal={controller.continueOnReconnectedTerminal ?? undefined}
-      onContinueHistoricalSession={controller.continueHistoricalSession ?? undefined}
+      historicalContinuationAvailable={controller.historicalContinuationAvailable}
       historicalContinuationBusy={controller.historicalContinuationBusy}
       historicalContinuationError={controller.historicalContinuationError}
       onBusyPreferenceChange={controller.setBusyPreference}

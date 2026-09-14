@@ -534,6 +534,7 @@ export function projectAgentChatNodes(
       case 'agent/inbox/item_steered':
       case 'session/model_selected':
       case 'session/permission_changed':
+      case 'session/execution_surface_changed':
       case 'session/renamed':
       case 'request/context':
       case 'compaction/start':

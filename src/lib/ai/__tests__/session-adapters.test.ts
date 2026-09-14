@@ -19,6 +19,7 @@ import type {
   AgentSessionSnapshot,
 } from '@/types/agent-session';
 import { AGENT_SESSION_EVENT_VERSION } from '@/types/agent-session';
+import { terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
 
 const provider = {
   id: 'provider-test',
@@ -54,7 +55,7 @@ function snapshot(ended = false): AgentSessionSnapshot {
   };
 }
 
-it('projects model and permission changes from live events over an older snapshot', () => {
+it('projects model, permission, and execution surface changes over an older snapshot', () => {
   const selected = {
     routeId: 'other', modelId: 'gpt-5.6',
     reasoningEffort: 'high',
@@ -64,9 +65,11 @@ it('projects model and permission changes from live events over an older snapsho
     ...base, seq: 1, type: 'session/model_selected', data: { provider: selected },
   }, {
     ...base, seq: 2, type: 'session/permission_changed', data: { mode: 'operator' },
+  }, {
+    ...base, seq: 3, type: 'session/execution_surface_changed', data: { surface: 'boundTerminal' },
   }];
-  const view = agentSessionView({ snapshot: snapshot(), events, lastCommittedSeq: 2, hasTerminalEvent: false });
-  expect(view.snapshot.value.header).toMatchObject({ modelSelection: selected, permissionMode: 'operator' });
+  const view = agentSessionView({ snapshot: snapshot(), events, lastCommittedSeq: 3, hasTerminalEvent: false });
+  expect(view.snapshot.value.header).toMatchObject({ modelSelection: selected, permissionMode: 'operator', executionSurface: 'boundTerminal' });
   expect(view.activityNodes.some(node => node.kind === 'unknown')).toBe(false);
 });
 
@@ -123,6 +126,80 @@ function agentDependencies(
 }
 
 describe('AgentSessionAdapter', () => {
+  it('lists reconnect history by login while retaining exact target filtering for auto-restore', async () => {
+    const login = { kind: 'remote' as const, host: '175.178.66.45', port: 22, username: 'root' };
+    const items = [
+      { id: 'old', terminal: 'old', username: 'root' },
+      { id: 'new', terminal: 'new', username: 'root' },
+      { id: 'other-user', terminal: 'other', username: 'deploy' },
+    ].map(({ id, terminal, username }) => ({
+      header: { ...snapshot().header, sessionId: id, target: {
+        ...login, username, targetId: `terminal-${terminal}`, sessionId: terminal,
+      } },
+      status: 'idle' as const, ended: false, archived: false, eventCount: 1,
+      pendingTurns: 0, pendingStepMessages: 0,
+    }));
+    const dependencies = agentDependencies(agentSessionEventFixture);
+    const adapter = createAgentSessionAdapter({
+      ...dependencies,
+      list: vi.fn(async () => ({ sessions: items, recoveryNotices: [] })),
+    });
+    const scopeKey = terminalLoginScopeKey({ ...login, targetId: 'terminal-current', sessionId: 'current' })!;
+
+    expect((await adapter.list({ scopeKey, limit: 100 })).sessions.map((item) => item.id)).toEqual(['old', 'new']);
+    expect((await adapter.list({ targetId: 'terminal-new', limit: 100 })).sessions.map((item) => item.id)).toEqual(['new']);
+  });
+
+  it('refreshes the existing Session after changing its execution surface', async () => {
+    const base = agentSessionEventFixture[0]!;
+    const events: AgentSessionEvent[] = [base];
+    const dependencies = agentDependencies(events);
+    const setExecutionSurface = vi.fn(async () => {
+      events.push({
+        ...base,
+        seq: 1,
+        type: 'session/execution_surface_changed',
+        data: { surface: 'boundTerminal' },
+      });
+      return snapshot();
+    });
+    const adapter = createAgentSessionAdapter({ ...dependencies, setExecutionSurface });
+    await adapter.open('session-fixture');
+
+    await adapter.setExecutionSurface?.('session-fixture', 'boundTerminal');
+
+    expect(setExecutionSurface).toHaveBeenCalledWith({ sessionId: 'session-fixture', surface: 'boundTerminal' });
+    expect((await adapter.open('session-fixture')).snapshot.value.header.executionSurface).toBe('boundTerminal');
+  });
+
+  it('resumes a completed conversation before switching its execution surface', async () => {
+    const base = agentSessionEventFixture[0]!;
+    const events: AgentSessionEvent[] = [base, {
+      ...base, seq: 1, type: 'session/ended', data: { status: 'completed' },
+    }];
+    const order: string[] = [];
+    const dependencies = agentDependencies(events);
+    const resume = vi.fn(async () => {
+      order.push('resume');
+      events.push({ ...base, seq: 2, type: 'session/resumed', data: {} });
+      return snapshot();
+    });
+    const setExecutionSurface = vi.fn(async () => {
+      order.push('switch');
+      events.push({
+        ...base, seq: 3, type: 'session/execution_surface_changed',
+        data: { surface: 'boundTerminal' },
+      });
+      return snapshot();
+    });
+    const adapter = createAgentSessionAdapter({ ...dependencies, resume, setExecutionSurface });
+
+    await adapter.setExecutionSurface?.('session-fixture', 'boundTerminal');
+
+    expect(order).toEqual(['resume', 'switch']);
+    expect((await adapter.open('session-fixture')).snapshot.value.header.executionSurface).toBe('boundTerminal');
+  });
+
   it('passes the selected execution surface through Session creation', async () => {
     const dependencies = agentDependencies(agentSessionEventFixture);
     const adapter = createAgentSessionAdapter(dependencies);

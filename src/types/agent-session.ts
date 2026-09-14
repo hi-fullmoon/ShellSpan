@@ -345,6 +345,7 @@ export type AgentSessionEvent =
       taskId: string;
       goal: string;
       parentSessionId?: string;
+      continuedFromSessionId?: string;
       target?: AgentSessionTarget;
       permissionMode?: AgentSessionPermissionMode;
       executionSurface: AgentExecutionSurface;
@@ -395,6 +396,7 @@ export type AgentSessionEvent =
     }>
   | AgentSessionEventWithData<'session/model_selected', { provider: AgentSubagentModel }>
   | AgentSessionEventWithData<'session/permission_changed', { mode: AgentSessionPermissionMode }>
+  | AgentSessionEventWithData<'session/execution_surface_changed', { surface: AgentExecutionSurface }>
   | AgentSessionEventWithData<'session/renamed', {
       title: string;
       previousRevision: number;
@@ -656,6 +658,7 @@ export interface AgentSessionHeader {
   readonly goal: string;
   readonly title?: string;
   readonly parentSessionId?: string;
+  readonly continuedFromSessionId?: string;
   readonly target?: AgentSessionTarget;
   readonly permissionMode?: AgentSessionPermissionMode;
   readonly executionSurface: AgentExecutionSurface;
@@ -717,6 +720,7 @@ export interface CreateAgentSessionRequest {
   readonly taskId: string;
   readonly goal: string;
   readonly parentSessionId?: string;
+  readonly continuedFromSessionId?: string;
   readonly target?: AgentSessionTarget;
   readonly permissionMode?: AgentSessionPermissionMode;
   readonly executionSurface: AgentExecutionSurface;
