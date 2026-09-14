@@ -74,9 +74,7 @@ export function AiConversation({
     && !visibleResponseStarted;
   const latestUser = latestUserIndex >= 0 ? nodes[latestUserIndex] : undefined;
   const latestUserKey = latestUser?.kind === 'userMessage'
-    ? latestUser.clientSubmissionId
-      ? `submission:${latestUser.clientSubmissionId}`
-      : `message:${latestUser.messageId}`
+    ? latestUser.clientSubmissionId ?? latestUser.messageId
     : undefined;
   return (
     <MessageScroller

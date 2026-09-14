@@ -216,7 +216,7 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
         // A jump can add a spacer to align a message beyond the natural end.
         // Restoring a shorter/reflowed transcript must clamp to its real end.
         const spacer = content.querySelector<HTMLElement>('[data-message-scroller-spacer]');
-        // An exact end position must also resume following, including anchors
+        // A near-end position must also resume following, including anchors
         // saved before atBottom was recorded.
         if ((spacer && !spacer.hidden) || isNearBottom(scrollport)) scrollToEnd();
       };
