@@ -78,9 +78,9 @@ type AgentSessionPermissionMode =
 
 ### 5.2 Session 级冻结
 
-`executionSurface` 在 Agent Session 创建时确定并写入 Session Header。恢复历史 Session 时沿用原值，不根据当前 UI 开关静默改变。
+`executionSurface` 在 Agent Session 创建时确定并写入 Session Header。恢复历史 Session 时沿用持久事件恢复的最新值，不根据当前 UI 开关静默改变。
 
-如后续允许切换，切换必须发生在 Agent 空闲、无待审批工具、无终端 lease 时，并记录持久事件。
+切换仅在 Agent 空闲、无待审批工具且无终端 lease 时允许，并记录 `session/execution_surface_changed` 持久事件；已结束但未归档的根会话先恢复为空闲，等待发送的消息保留，运行中的命令保持原执行方式。
 
 ### 5.3 UI 建议
 
@@ -99,7 +99,6 @@ Agent 正在操作此终端                         [中断并接管]
 
 - Agent 标识；
 - 当前命令的安全展示文本或摘要；
-- 已运行时长；
 - 中断并接管操作。
 
 键盘输入被锁定时不得静默丢弃。用户首次输入应得到可访问的提示，并可通过 Esc 或按钮接管。

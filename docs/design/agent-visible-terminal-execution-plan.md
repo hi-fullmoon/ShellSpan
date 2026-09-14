@@ -81,7 +81,7 @@
 
 - `TerminalControllerLayer` 订阅 lease acquired/released，按 `operationId` 管理状态；
 - acquired 后安装 display filter、增加输入抑制并完成有界 ready 握手；
-- 显示 Agent、脱敏命令摘要、运行时长和“中断并接管”；
+- 显示 Agent、脱敏命令摘要和“中断并接管”；
 - 首次被阻止的键盘输入提供可访问提示，不静默丢弃；
 - Esc 和按钮复用同一个幂等 takeover 动作；
 - 占用期间保持滚动、选择、复制与搜索；
