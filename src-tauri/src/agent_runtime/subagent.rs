@@ -873,6 +873,7 @@ impl SubAgentManager {
             task_id: child_task_id,
             goal: goal.clone(),
             parent_session_id: Some(parent_session_id.into()),
+            continued_from_session_id: None,
             target: target_scope.first().cloned(),
             permission_mode: parent.header.permission_mode,
             execution_surface: parent.header.execution_surface,

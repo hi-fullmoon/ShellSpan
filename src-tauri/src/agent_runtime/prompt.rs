@@ -236,6 +236,7 @@ mod tests {
             goal: "Inspect the workspace safely".into(),
             title: None,
             parent_session_id: None,
+            continued_from_session_id: None,
             target: Some(AgentSessionTarget {
                 kind: "local".into(),
                 target_id: "target-local".into(),

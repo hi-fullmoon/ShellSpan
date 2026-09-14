@@ -143,6 +143,10 @@ impl Default for NativeToolEngine {
 }
 
 impl NativeToolEngine {
+    pub(crate) fn has_terminal_lease(&self, session_id: &str) -> Result<bool, String> {
+        self.terminal_leases.has_lease(session_id)
+    }
+
     pub(crate) fn set_terminal_lease_publisher(
         &self,
         publisher: Arc<dyn Fn(&super::AgentTerminalLeaseEvent) + Send + Sync>,

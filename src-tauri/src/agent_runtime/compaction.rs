@@ -1932,6 +1932,7 @@ mod tests {
                 task_id: "task".into(),
                 goal: "Preserve audit history while compacting".into(),
                 parent_session_id: None,
+                continued_from_session_id: None,
                 target: None,
                 permission_mode: None,
                 execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
