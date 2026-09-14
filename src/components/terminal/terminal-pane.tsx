@@ -32,7 +32,6 @@ import {
   BotIcon,
   ChevronDownIcon,
   ChevronUpIcon,
-  ClockIcon,
   XIcon,
 } from 'lucide-react';
 
@@ -45,23 +44,10 @@ const effectiveShortcuts = (): ShortcutBindings => ({
 // don't make it flash.
 const MIN_CONNECTING_OVERLAY_MS = 600;
 
-function formatLeaseDuration(elapsedMs: number): string {
-  const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
-}
-
 const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ lease }) => {
   const { t } = useI18n();
   const { error: showError } = useToast();
   const shownFailureOperationRef = useRef<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [lease.operationId]);
   useEffect(() => {
     if (!lease.takeoverFailed) {
       if (shownFailureOperationRef.current === lease.operationId) {
@@ -73,7 +59,6 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
     shownFailureOperationRef.current = lease.operationId;
     showError(t('terminal.agentLease.takeoverFailed'));
   }, [lease.operationId, lease.takeoverFailed, showError, t]);
-  const duration = formatLeaseDuration(now - lease.acquiredAtUnixMs);
   const agentId = lease.agentSessionId.length > 16
     ? `${lease.agentSessionId.slice(0, 12)}…`
     : lease.agentSessionId;
@@ -124,18 +109,6 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
         aria-hidden="true"
       >
         {interactionHint}
-      </span>
-      <span
-        className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
-        aria-label={t('terminal.agentLease.runtime', { duration })}
-      >
-        <ClockIcon className="size-3.5" aria-hidden="true" />
-        <span
-          className="whitespace-nowrap text-right font-mono tabular-nums"
-          aria-hidden="true"
-        >
-          {duration}
-        </span>
       </span>
       <Button
         type="button"

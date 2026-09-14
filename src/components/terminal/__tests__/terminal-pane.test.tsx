@@ -163,50 +163,36 @@ describe('TerminalPane', () => {
     expect(screen.queryByTestId('agent-visible-terminal-aura')).not.toBeInTheDocument();
   });
 
-  it('shows a non-overlaying Agent lease bar with identity and runtime', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(3_000);
-    try {
-      const clearInterval = vi.spyOn(window, 'clearInterval');
-      setAgentLease();
-      const { container } = render(<TerminalPane activeSession={makeSession()} />);
-      const bar = screen.getByTestId('agent-terminal-lease-bar');
-      expect(bar).toHaveAttribute('data-operation-id', 'operation-1');
-      expect(bar).toHaveTextContent('terminal.agentLease.agentIdentity');
-      expect(bar).toHaveTextContent('2s');
-      expect(bar).not.toHaveClass('absolute');
-      expect(bar).toHaveClass('border-app-border/40');
-      expect(screen.getByTestId('agent-visible-terminal-aura'))
-        .toHaveClass('pointer-events-none', 'absolute', 'inset-0');
-      const identity = screen.getByTestId('agent-terminal-lease-identity');
-      expect(identity).toHaveClass('h-5', 'text-xs');
-      expect(identity).not.toHaveAttribute('title');
-      expect(bar).not.toHaveTextContent('[Agent] $ echo [REDACTED]');
-      const separator = screen.getByTestId('agent-terminal-lease-separator');
-      expect(separator).toHaveClass('relative', 'h-5');
-      expect(separator.querySelector('[data-slot="separator"]'))
-        .toHaveClass('absolute', 'top-1/2', 'h-3.5', '-translate-y-1/2');
-      expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"] > span'))
-        .toHaveClass('whitespace-nowrap', 'text-right', 'font-mono', 'tabular-nums');
-      expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"] > span'))
-        .not.toHaveClass('w-[6ch]', 'min-w-[7ch]');
-      expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
-        .toHaveAttribute('data-slot', 'button');
-      expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
-        .toHaveClass('gap-1');
-      expect(container.querySelector('.min-h-0.flex-1')).toContainElement(
-        container.querySelector('div.h-full.w-full.p-0'),
-      );
+  it('shows a non-overlaying Agent lease bar without a timer', () => {
+    setAgentLease();
+    const { container } = render(<TerminalPane activeSession={makeSession()} />);
+    const bar = screen.getByTestId('agent-terminal-lease-bar');
+    expect(bar).toHaveAttribute('data-operation-id', 'operation-1');
+    expect(bar).toHaveTextContent('terminal.agentLease.agentIdentity');
+    expect(bar).not.toHaveTextContent('terminal.agentLease.runtime');
+    expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"]')).toBeNull();
+    expect(bar).not.toHaveClass('absolute');
+    expect(bar).toHaveClass('border-app-border/40');
+    expect(screen.getByTestId('agent-visible-terminal-aura'))
+      .toHaveClass('pointer-events-none', 'absolute', 'inset-0');
+    const identity = screen.getByTestId('agent-terminal-lease-identity');
+    expect(identity).toHaveClass('h-5', 'text-xs');
+    expect(identity).not.toHaveAttribute('title');
+    expect(bar).not.toHaveTextContent('[Agent] $ echo [REDACTED]');
+    const separator = screen.getByTestId('agent-terminal-lease-separator');
+    expect(separator).toHaveClass('relative', 'h-5');
+    expect(separator.querySelector('[data-slot="separator"]'))
+      .toHaveClass('absolute', 'top-1/2', 'h-3.5', '-translate-y-1/2');
+    expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
+      .toHaveAttribute('data-slot', 'button');
+    expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
+      .toHaveClass('gap-1');
+    expect(container.querySelector('.min-h-0.flex-1')).toContainElement(
+      container.querySelector('div.h-full.w-full.p-0'),
+    );
 
-      act(() => vi.advanceTimersByTime(2_000));
-      expect(bar).toHaveTextContent('4s');
-
-      act(() => agentTerminalLeaseState.clear('s1', 'operation-1'));
-      expect(screen.queryByTestId('agent-terminal-lease-bar')).not.toBeInTheDocument();
-      expect(clearInterval).toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    act(() => agentTerminalLeaseState.clear('s1', 'operation-1'));
+    expect(screen.queryByTestId('agent-terminal-lease-bar')).not.toBeInTheDocument();
   });
 
   it('routes the takeover button and Escape through the lease action', async () => {
