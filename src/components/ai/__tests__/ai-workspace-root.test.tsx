@@ -322,18 +322,31 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
     let scrollHeight = 600;
     let scrollTop = 100;
+    const rect = (top: number) => ({
+      top, bottom: top + 100, height: 100, left: 0, right: 320, width: 320,
+      x: 0, y: top, toJSON: () => ({}),
+    });
     const scrollTo = vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); });
     Object.defineProperties(viewport, {
       clientHeight: { configurable: true, value: 100 },
       scrollHeight: { configurable: true, get: () => scrollHeight },
       scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
       scrollTo: { configurable: true, value: scrollTo },
+      getBoundingClientRect: { configurable: true, value: () => rect(0) },
     });
+    const installItemRects = (): void => {
+      const items = container.querySelectorAll<HTMLElement>('[data-slot="message-scroller-item"]');
+      items.forEach((item, index) => {
+        item.getBoundingClientRect = () => rect((index === items.length - 1 ? scrollHeight - 100 : index * 100) - scrollTop);
+      });
+    };
+    installItemRects();
     fireEvent.wheel(viewport, { deltaY: -100 });
     fireEvent.scroll(viewport);
 
     scrollHeight = 1_400;
     rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, nextUser] }} scope="terminal" />);
+    installItemRects();
 
     await waitFor(() => expect(scrollTop).toBe(1_300));
     expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', top: 1_300 });
@@ -342,11 +355,14 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     scrollTop = 400;
     fireEvent.wheel(viewport, { deltaY: -100 });
+    fireEvent.scroll(viewport);
     scrollTo.mockClear();
     const committedUser = { ...nextUser, key: 'user:next-submission', clientSubmissionId: undefined, delivery: 'committed' as const };
     rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, committedUser] }} scope="terminal" />);
+    installItemRects();
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
     expect(scrollTo).not.toHaveBeenCalled();
+    expect(scrollTop).toBe(400);
   });
 
   it('keeps one collapsed reasoning row in Ask while hiding the full Agent process', async () => {
