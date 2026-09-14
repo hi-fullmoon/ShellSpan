@@ -409,6 +409,10 @@ describe('MessageScroller', () => {
         get: () => scrollTop,
         set: (value: number) => { scrollTop = value; },
       },
+      scrollTo: {
+        configurable: true,
+        value: ({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); },
+      },
       getBoundingClientRect: {
         configurable: true,
         value: () => ({ top: 0, bottom: 100, height: 100, left: 0, right: 320, width: 320, x: 0, y: 0, toJSON: () => ({}) }),
