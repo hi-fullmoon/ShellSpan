@@ -393,6 +393,10 @@ describe('AgentSessionAdapter', () => {
       mode: 'start',
       clientOperationId: 'operation-start',
       provider,
+      terminalContext: {
+        sessionId: 'terminal-fixture', version: 1, maxLines: 200, maxBytes: 8192,
+        content: 'Welcome to the server',
+      },
     });
     await adapter.submit('session-fixture', {
       content: 'Avoid restart.',
@@ -431,6 +435,10 @@ describe('AgentSessionAdapter', () => {
       messageId: 'operation-start',
       clientSubmissionId: 'operation-start',
       content: 'Start now.',
+      terminalContext: {
+        sessionId: 'terminal-fixture', version: 1, maxLines: 200, maxBytes: 8192,
+        content: 'Welcome to the server',
+      },
     });
     expect(dependencies.steer).toHaveBeenCalledWith({
       sessionId: 'session-fixture',

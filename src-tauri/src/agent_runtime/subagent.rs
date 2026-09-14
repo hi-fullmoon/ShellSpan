@@ -912,6 +912,7 @@ impl SubAgentManager {
                 client_submission_id: None,
                 content: role_prompt(role, &goal),
                 source: AgentMessageSource::session_reference(parent_session_id.into()),
+                terminal_context: None,
             },
         )?;
         self.wake(&child_session_id)?;
@@ -946,6 +947,7 @@ impl SubAgentManager {
                 client_submission_id: None,
                 content,
                 source: AgentMessageSource::session_reference(parent_session_id.into()),
+                terminal_context: None,
             },
         )?;
         self.wake(child_session_id)

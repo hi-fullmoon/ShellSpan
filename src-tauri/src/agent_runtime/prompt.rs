@@ -23,6 +23,7 @@ impl ModelContextInjection {
             client_submission_id: None,
             content: self.content,
             source: self.source,
+            terminal_context: None,
         }
     }
 }

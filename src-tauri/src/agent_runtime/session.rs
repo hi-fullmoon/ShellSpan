@@ -690,6 +690,7 @@ impl AgentSessionStore {
                         client_submission_id: None,
                         content: summary,
                         source: AgentMessageSource::session_reference(child_session_id.to_string()),
+                        terminal_context: None,
                     }],
                 },
             ));
@@ -1164,7 +1165,15 @@ impl AgentSessionStore {
             .ok_or_else(|| "Agent session was not found".to_string())?;
         if let Some(client_submission_id) = message.client_submission_id.as_deref() {
             if let Some((previous_lane, previous)) = find_submission(record, client_submission_id) {
-                if previous_lane != lane || previous != &message {
+                // The first captured terminal snapshot belongs to the durable
+                // submission. A retry may observe newer output, but must not
+                // change the already committed user message or its context.
+                if previous_lane != lane
+                    || previous.message_id != message.message_id
+                    || previous.content != message.content
+                    || previous.images != message.images
+                    || previous.source != message.source
+                {
                     return Err(
                         "client submission id was already committed with a different payload"
                             .into(),
@@ -2293,6 +2302,24 @@ fn validate_event_transition(
         && !matches!(event.payload, AgentSessionEventPayload::SessionEnded { .. })
     {
         return Err("terminal Agent status must be followed by session/ended".into());
+    }
+    let context_messages: &[AgentInboxMessage] = match &event.payload {
+        AgentSessionEventPayload::InboxSpliced { messages, .. } => messages,
+        AgentSessionEventPayload::UserMessage { message } => std::slice::from_ref(message),
+        _ => &[],
+    };
+    for message in context_messages {
+        if let Some(context) = &message.terminal_context {
+            if record
+                .header
+                .target
+                .as_ref()
+                .map(|target| target.session_id.as_str())
+                != Some(context.session_id.as_str())
+            {
+                return Err("terminal context does not match the frozen Session target".into());
+            }
+        }
     }
     match &event.payload {
         AgentSessionEventPayload::InboxItemResumed { item_id, .. } => {
@@ -3519,6 +3546,26 @@ fn validate_inbox_message(message: &AgentInboxMessage) -> Result<(), String> {
     if !message.images.is_empty() && message.source.kind != super::AgentMessageSourceKind::User {
         return Err("IMAGE_SOURCE_NOT_USER".into());
     }
+    if let Some(context) = &message.terminal_context {
+        if message.source.kind != super::AgentMessageSourceKind::User
+            || context.version == 0
+            || context.version > MAX_JS_SAFE_INTEGER
+            || context.max_lines == 0
+            || context.max_lines > 10_000
+            || context.max_bytes == 0
+            || context.max_bytes as usize > super::MAX_TERMINAL_CONTEXT_BYTES
+            || context.content.len() > context.max_bytes as usize
+        {
+            return Err("TERMINAL_CONTEXT_SOURCE_INVALID".into());
+        }
+        validate_identifier(&context.session_id, "terminalContext.sessionId")?;
+        validate_text(
+            &context.content,
+            "terminal context content",
+            false,
+            super::MAX_TERMINAL_CONTEXT_BYTES,
+        )?;
+    }
     validate_identifier(&message.message_id, "messageId")?;
     if let Some(client_submission_id) = message.client_submission_id.as_deref() {
         validate_identifier(client_submission_id, "clientSubmissionId")?;
@@ -4298,6 +4345,7 @@ mod tests {
             client_submission_id: Some(id.into()),
             content: content.into(),
             source: AgentMessageSource::user(),
+            terminal_context: None,
         }
     }
 

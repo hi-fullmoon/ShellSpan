@@ -1744,6 +1744,7 @@ impl AgentToolPipeline {
                             client_submission_id: None,
                             content,
                             source: AgentMessageSource::runtime(label),
+                            terminal_context: None,
                         }],
                     },
                 });

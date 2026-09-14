@@ -48,15 +48,18 @@ import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore
 import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
+import { getRecentTerminalOutputSnapshot, truncateAiContext } from '@/lib/terminal/terminal-output-buffer';
 import type { AppSection } from '@/types';
 import type { AgentPermissionMode } from '@/types/agent-approval';
 import type {
   AgentExecutionSurface,
   AgentSessionPermissionMode,
   AgentSessionTarget,
+  AgentTerminalContextSnapshot,
 } from '@/types/agent-session';
 
 const OPTIMISTIC_COMMIT_TIMEOUT_MS = 15_000;
+const MAX_AGENT_TERMINAL_SNAPSHOT_BYTES = 32 * 1024;
 export const WORKBENCH_AI_TARGET_ID = 'workbench-ai';
 type AiAnnouncement = Extract<AiComposerEffect, { type: 'announce' }>['reason'];
 
@@ -253,6 +256,41 @@ export function useAiSessionController({
     if(isTauriRuntime())throw new Error('INVALID_MODEL_SELECTION: no default route');
     return useAiSettingsStore.getState().getProviderConfig();
   }, []);
+  const captureTerminalContext = (
+    model: AiProviderConfig,
+    agentSessionId: string | null,
+  ): AgentTerminalContextSnapshot | undefined => {
+    if (scope !== 'terminal' || activeTerminal?.status !== 'connected') return undefined;
+    const boundView = agentSessionId && viewRef.current?.summary.id === agentSessionId
+      ? viewRef.current : null;
+    if (agentSessionId && boundView?.snapshot.value.header.target?.sessionId !== activeTerminal.sessionId) return undefined;
+    const maxLines = useAiSettingsStore.getState().contextLines;
+    const snapshot = getRecentTerminalOutputSnapshot(
+      activeTerminal.sessionId,
+      maxLines,
+    );
+    // Spend at most roughly a quarter of the model's input budget on terminal
+    // text, leaving room for the task, tools, and existing conversation.
+    const modelInputTokens = model.modelDefinition
+      ? model.modelDefinition.contextWindow - model.modelDefinition.maxOutputTokens
+      : 8_192;
+    const maxBytes = Math.min(
+      MAX_AGENT_TERMINAL_SNAPSHOT_BYTES,
+      Math.max(1_024, Math.floor(modelInputTokens)),
+    );
+    const content = truncateAiContext(snapshot.content, maxBytes);
+    if (!content) return undefined;
+    const previous = [...(boundView?.snapshot.value.surface.messages ?? [])]
+      .reverse()
+      .find((message) => message.role === 'user'
+        && message.source.producerId === 'shellspan.terminal-output.v1'
+        && message.source.metadata?.sessionId === activeTerminal.sessionId);
+    if (previous?.role === 'user'
+      && previous.source.metadata?.version === snapshot.version
+      && previous.source.metadata?.maxLines === maxLines
+      && previous.source.metadata?.maxBytes === maxBytes) return undefined;
+    return { sessionId: activeTerminal.sessionId, version: snapshot.version, maxLines, maxBytes, content };
+  };
   const changeSettings = async (change: (sessionId: string) => Promise<void>): Promise<void> => {
     const sessionId = viewRef.current?.summary.id;
     if (!sessionId || settingsPending.current) return;
@@ -537,11 +575,13 @@ export function useAiSessionController({
     void (async () => {
       try {
         const currentProvider = currentProviderConfig();
+        const terminalContext = captureTerminalContext(currentProvider, payload.sessionId);
         const base = {
           content: payload.content,
           mode: payload.mode,
           clientOperationId: payload.clientOperationId,
           provider: currentProvider,
+          terminalContext,
         };
         const cold = payload.sessionId === null ? await coldSkillSession.current : null;
         const receipt = await adapter.submit(payload.sessionId ?? cold?.summary.id ?? null, {
@@ -1140,6 +1180,7 @@ export function useAiSessionController({
           requireVision(imageProvider);
         }
         catch (e) { imageDraft.reportError(String(e)); return; }
+        const terminalContext = captureTerminalContext(imageProvider, composer.sessionId);
         void imageDraft.send(async () => {
           const cold = await coldSkillSession.current;
           const sessionId = composer.sessionId ?? cold?.summary.id;
@@ -1157,7 +1198,7 @@ export function useAiSessionController({
             }
           }
           await adapter.submit(op.sessionId, { clientOperationId: op.id, mode: op.mode, content: value.text,
-            images: value.images, provider: imageProvider });
+            images: value.images, provider: imageProvider, terminalContext });
         }, value => {
           if (!mountedRef.current || submissionContextRef.current !== context) return;
           if (composerRef.current.draft === value.text) dispatch({ type: 'draft.changed', value: '' });

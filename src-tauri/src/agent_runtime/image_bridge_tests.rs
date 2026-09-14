@@ -72,6 +72,7 @@ async fn image_kimi_k3_submission_reaches_chat_transport_with_pixels() {
                 content: caption.into(),
                 lane: AgentInboxLane::NextTurn,
                 images: vec![image_tests::upload(image::ImageFormat::Png)],
+                terminal_context: None,
             })
             .await
             .unwrap();
@@ -214,7 +215,7 @@ async fn browser_bridge(files: bool) {
             "agent_runtime_cancel_file_references"=>{runtime.file_references.cancel(serde_json::from_value(input.clone()).unwrap())?;json!(null)},
             "agent_runtime_list_skills"=>serde_json::to_value(runtime.list_skills(session).await?).unwrap(),
             "agent_runtime_start"=>{let provider:AiProviderConfig=serde_json::from_value(input["provider"].clone()).unwrap();assert_eq!(provider.base_url,model_url);serde_json::to_value(runtime.start(session,provider,None)?).unwrap()},
-            "agent_runtime_followup"=>{runtime.followup_submission(session,input["messageId"].as_str().unwrap().into(),input["clientSubmissionId"].as_str().unwrap().into(),input["content"].as_str().unwrap().into())?;runtime.await_idle(session).await?;serde_json::to_value(runtime.session(session)?).unwrap()},
+            "agent_runtime_followup"=>{runtime.followup_submission(session,input["messageId"].as_str().unwrap().into(),input["clientSubmissionId"].as_str().unwrap().into(),input["content"].as_str().unwrap().into(),None)?;runtime.await_idle(session).await?;serde_json::to_value(runtime.session(session)?).unwrap()},
             "__restart"=>{for id in &ids {runtime.await_idle(id).await?;}runtime=AgentRuntime::default();runtime.configure(storage.path().to_path_buf())?;json!(null)},
             "__fail_submit"=>{fail_submit=true;json!(null)},
             "__state"=>json!({"pathQueries":path_queries,"requests":requests.lock().unwrap().clone(),"sessions":ids.iter().map(|id|json!({"snapshot":runtime.session(id).unwrap(),"events":all_events(&runtime,id)})).collect::<Vec<_>>()}),

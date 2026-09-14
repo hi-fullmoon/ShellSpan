@@ -254,6 +254,18 @@ fn append_surface_events<'a>(
                 }
             }
             AgentSessionEventPayload::UserMessage { message } => {
+                if let Some(context) = &message.terminal_context {
+                    messages.push(AgentSurfaceMessage::User {
+                        message_id: format!("{}-terminal-context", message.message_id),
+                        content: context.model_content(),
+                        source: AgentMessageSource::terminal_output(
+                            &context.session_id,
+                            context.version,
+                            context.max_lines,
+                            context.max_bytes,
+                        ),
+                    });
+                }
                 messages.push(if message.images.is_empty() {
                     AgentSurfaceMessage::User {
                         message_id: message.message_id.clone(),
@@ -379,6 +391,7 @@ mod tests {
                 client_submission_id: None,
                 content: content.into(),
                 source: AgentMessageSource::user(),
+                terminal_context: None,
             },
         }
     }

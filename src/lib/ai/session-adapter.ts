@@ -134,6 +134,7 @@ export interface AiSubmitInput<Kind extends AiSessionKind = AiSessionKind> {
   readonly mode: AiSubmissionMode;
   readonly clientOperationId: string;
   readonly provider: AiProviderConfig;
+  readonly terminalContext?: import('@/types/agent-session').AgentTerminalContextSnapshot;
   readonly create?: Extract<AiCreateSessionInput, { readonly kind: Kind }>;
 }
 
