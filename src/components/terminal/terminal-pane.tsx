@@ -15,25 +15,12 @@ import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutBindings } from '@/types';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Spinner as ButtonSpinner } from '@/components/ui/spinner';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 import {
   agentTerminalLeaseState,
   type AgentTerminalLeaseView,
 } from '@/components/terminal/agent-terminal-lease-state';
-import {
-  BotIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
-  XIcon,
-} from 'lucide-react';
+import { ChevronDownIcon, ChevronUpIcon, XIcon } from 'lucide-react';
 
 const effectiveShortcuts = (): ShortcutBindings => ({
   ...DEFAULT_SHORTCUTS,
@@ -59,9 +46,6 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
     shownFailureOperationRef.current = lease.operationId;
     showError(t('terminal.agentLease.takeoverFailed'));
   }, [lease.operationId, lease.takeoverFailed, showError, t]);
-  const agentId = lease.agentSessionId.length > 16
-    ? `${lease.agentSessionId.slice(0, 12)}…`
-    : lease.agentSessionId;
   const interactionHint = !lease.terminalOwned
     ? t('terminal.agentLease.turnRunning')
     : lease.inputBlocked
@@ -70,43 +54,16 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
 
   return (
     <div
-      className="flex min-h-8 shrink-0 items-center gap-1.5 border-b border-app-border/40 bg-muted/40 px-2"
+      className="relative flex min-h-8 shrink-0 items-center justify-end border-b border-app-border/40 bg-muted/40 px-2"
       role="status"
       aria-live="polite"
       aria-atomic="true"
       data-testid="agent-terminal-lease-bar"
       data-operation-id={lease.operationId}
     >
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger
-            render={(
-              <Badge
-                variant="outline"
-                data-testid="agent-terminal-lease-identity"
-              />
-            )}
-          >
-            <BotIcon data-icon="inline-start" />
-            {t('terminal.agentLease.agentIdentity', { id: agentId })}
-          </TooltipTrigger>
-          <TooltipContent>{lease.agentSessionId}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
       <span
-        className="relative h-5 w-px shrink-0"
-        aria-hidden="true"
-        data-testid="agent-terminal-lease-separator"
-      >
-        <Separator
-          orientation="vertical"
-          className="absolute inset-x-0 top-1/2 h-3.5 -translate-y-1/2"
-        />
-      </span>
-      <span className="sr-only">{interactionHint}</span>
-      <span
-        className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground lg:inline"
-        aria-hidden="true"
+        className="absolute inset-x-20 top-1/2 -translate-y-1/2 truncate text-center text-xs text-muted-foreground"
+        title={interactionHint}
       >
         {interactionHint}
       </span>

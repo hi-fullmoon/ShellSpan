@@ -604,7 +604,38 @@ impl AgentRuntime {
         &self,
         publisher: Arc<dyn Fn(&AgentSessionEvent) + Send + Sync>,
     ) -> Result<(), String> {
-        self.sessions.set_publisher(publisher)
+        let native_engine = Arc::clone(&self.native_engine);
+        let sessions = self.sessions.clone();
+        self.sessions.set_publisher(Arc::new(move |event| {
+            if matches!(event.payload, super::AgentSessionEventPayload::TurnStart) {
+                if let Err(error) = native_engine.release_terminal_turn(&event.session_id) {
+                    log::warn!("Failed to clear previous Agent terminal turn guard: {error}");
+                }
+                if let Ok(snapshot) = sessions.snapshot(&event.session_id) {
+                    if snapshot.header.execution_surface
+                        == super::AgentExecutionSurface::BoundTerminal
+                    {
+                        if let Some(target) = &snapshot.header.target {
+                            if let Err(error) = native_engine
+                                .begin_terminal_turn(&target.session_id, &event.session_id)
+                            {
+                                log::warn!("Failed to lock Agent terminal for the turn: {error}");
+                            }
+                        }
+                    }
+                }
+            } else if matches!(
+                event.payload,
+                super::AgentSessionEventPayload::TurnEnd { .. }
+                    | super::AgentSessionEventPayload::SessionEnded { .. }
+                    | super::AgentSessionEventPayload::SessionResumed { .. }
+            ) {
+                if let Err(error) = native_engine.release_terminal_turn(&event.session_id) {
+                    log::warn!("Failed to release Agent terminal turn input guard: {error}");
+                }
+            }
+            publisher(event);
+        }))
     }
 
     pub(crate) fn create_session(

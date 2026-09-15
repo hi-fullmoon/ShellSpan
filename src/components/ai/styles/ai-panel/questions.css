@@ -21,8 +21,8 @@
 
 .ai-question-panel-header [data-slot='card-description'] {
   color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 14px;
+  line-height: 20px;
 }
 
 .ai-question-panel-actions [data-slot='button'] {

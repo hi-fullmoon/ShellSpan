@@ -1,0 +1,8 @@
+[package]
+name = "agent-direct-shell-gate"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+portable-pty = { path = "../../src-tauri/vendor/portable-pty" }
+uuid = { version = "1.24.0", features = ["v4"] }

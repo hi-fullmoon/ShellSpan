@@ -163,6 +163,8 @@ fn classify_command_effect(command: &str) -> AgentEffectKindNative {
         AgentEffectKindNative::SensitiveRead
     } else if is_bounded_diagnostic_command(&normalized) {
         AgentEffectKindNative::ReadOnly
+    } else if is_plain_windows_discovery_command(&normalized) {
+        AgentEffectKindNative::ReadOnly
     } else if EXTERNAL.contains(&executable)
         || command_words.iter().any(|word| EXTERNAL.contains(word))
         || normalized.contains("http://")
@@ -184,6 +186,18 @@ fn classify_command_effect(command: &str) -> AgentEffectKindNative {
         // Unknown commands are never treated as reads. Native approval must
         // explicitly cover their state-changing effect before dispatch.
         AgentEffectKindNative::StateChange
+    }
+}
+
+fn is_plain_windows_discovery_command(command: &str) -> bool {
+    if !is_simple_shell_command(command) || command.contains("://") {
+        return false;
+    }
+    let words = command.split_ascii_whitespace().collect::<Vec<_>>();
+    match words.as_slice() {
+        ["where.exe" | "get-command", name] => safe_diagnostic_argument(name),
+        ["docker" | "docker.exe", "--version"] => true,
+        _ => false,
     }
 }
 
@@ -354,6 +368,35 @@ mod tests {
                 classify_command_effect(command),
                 AgentEffectKindNative::StateChange,
                 "{command} must still require state-change authorization"
+            );
+        }
+    }
+
+    #[test]
+    fn plain_windows_docker_discovery_does_not_look_like_network_egress() {
+        for command in [
+            "where.exe docker",
+            "where.exe docker.exe",
+            "Get-Command docker",
+            "docker --version",
+            "docker.exe --version",
+        ] {
+            assert_eq!(
+                classify_command_effect(command),
+                AgentEffectKindNative::ReadOnly,
+                "{command} is a local version or executable lookup"
+            );
+        }
+        for command in [
+            "where.exe docker; curl https://example.test",
+            "Get-Command docker | curl https://example.test",
+            "docker version",
+            "docker ps",
+        ] {
+            assert_eq!(
+                classify_command_effect(command),
+                AgentEffectKindNative::ExternalSideEffect,
+                "{command} must retain network egress classification"
             );
         }
     }

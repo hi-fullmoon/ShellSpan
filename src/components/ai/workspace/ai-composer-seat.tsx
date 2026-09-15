@@ -516,7 +516,7 @@ export function AiComposerSeat({
                         />
                       )}
                     >
-                      <SquareIcon fill="currentColor" />
+                      <SquareIcon className="ai-composer-stop-icon" fill="currentColor" />
                     </TooltipTrigger>
                     <TooltipContent>{t('ai.workspace.stopTooltip')}</TooltipContent>
                   </Tooltip>
@@ -536,7 +536,7 @@ export function AiComposerSeat({
                     )}
                   >
                     {stopPrimary
-                      ? <SquareIcon fill="currentColor" />
+                      ? <SquareIcon className="ai-composer-stop-icon" fill="currentColor" />
                       : <ArrowUpIcon />}
                   </TooltipTrigger>
                   <TooltipContent>

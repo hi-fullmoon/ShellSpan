@@ -147,6 +147,19 @@ impl NativeToolEngine {
         self.terminal_leases.has_lease(session_id)
     }
 
+    pub(crate) fn release_terminal_turn(&self, agent_session_id: &str) -> Result<(), String> {
+        self.terminal_leases.release_turn(agent_session_id)
+    }
+
+    pub(crate) fn begin_terminal_turn(
+        &self,
+        terminal_session_id: &str,
+        agent_session_id: &str,
+    ) -> Result<(), String> {
+        self.terminal_leases
+            .begin_turn(terminal_session_id, agent_session_id)
+    }
+
     pub(crate) fn set_terminal_lease_publisher(
         &self,
         publisher: Arc<dyn Fn(&super::AgentTerminalLeaseEvent) + Send + Sync>,

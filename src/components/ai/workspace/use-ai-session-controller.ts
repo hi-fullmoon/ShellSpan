@@ -1258,6 +1258,11 @@ export function useAiSessionController({
       await adapter.setPermission(sessionId, permissionMode(mode));
     }),
     selectExecutionSurface: (surface) => {
+      if (canContinueHistoricalView) {
+        claimWorkspace();
+        setNewExecutionSurface(surface);
+        return;
+      }
       if (viewRef.current) {
         void changeSettings(async (sessionId) => {
           if (!adapter.setExecutionSurface) throw new Error('Execution surface selection is unavailable');

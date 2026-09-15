@@ -394,7 +394,7 @@ export function AiWorkspaceRoot({
               key={sessionLedgerKey ?? 'pending'}
               nodes={conversationNodes}
               renderers={surfaceMode === 'ask' ? aiAskConversationNodeRenderers : undefined}
-              runningIndicator={surfaceMode}
+              runningIndicator={readOnlySession ? 'none' : surfaceMode}
               pending={surfaceMode === 'ask' && composerState?.phase === 'submitting'}
               followUserSubmissions
               status={status}

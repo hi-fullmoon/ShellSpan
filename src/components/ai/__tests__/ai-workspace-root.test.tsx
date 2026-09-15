@@ -84,6 +84,18 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiWorkspaceRoot Phase 3 skeleton', () => {
+  it('does not show a live waiting indicator for a read-only historical session', () => {
+    const view = agentView('waiting');
+    const { container, rerender } = render(
+      <AiWorkspaceRoot view={view} scope="terminal" />,
+    );
+
+    expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('Waiting');
+    rerender(<AiWorkspaceRoot view={view} scope="terminal" readOnlySession />);
+    expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+    expect(screen.getByText('Check nginx now.')).toBeVisible();
+  });
+
   it('keeps the conversation layout and title while a history entry loads', async () => {
     const view = agentView();
     const navigation = createAiWorkspaceNavigationState(view.summary.id);

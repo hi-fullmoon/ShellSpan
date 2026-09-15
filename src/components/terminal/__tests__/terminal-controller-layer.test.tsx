@@ -17,6 +17,7 @@ import type {
   AgentTerminalLeaseEvent,
 } from '@/types/agent-session';
 import {
+  invokeGetAgentRuntimeSession,
   invokeAgentTerminalLeaseReady,
   invokeInterruptAgentRuntime,
   listenToAgentRuntimeSession,
@@ -47,6 +48,9 @@ vi.mock('@/lib/ipc/tauri', () => ({
   listenToSshStatus: vi.fn().mockResolvedValue(() => {}),
   listenToSshClosed: vi.fn().mockResolvedValue(() => {}),
   invokeAgentTerminalLeaseReady: vi.fn().mockResolvedValue(true),
+  invokeGetAgentRuntimeSession: vi.fn().mockResolvedValue({
+    header: { executionSurface: 'direct' },
+  }),
   invokeInterruptAgentRuntime: vi.fn().mockResolvedValue(undefined),
   listenToAgentRuntimeSession: vi.fn().mockImplementation(async (listener) => {
     sessionListener = listener;
@@ -121,6 +125,9 @@ describe('TerminalControllerLayer', () => {
     terminalRegistry.disposeAll();
     vi.clearAllMocks();
     vi.mocked(invokeAgentTerminalLeaseReady).mockResolvedValue(true);
+    vi.mocked(invokeGetAgentRuntimeSession).mockResolvedValue({
+      header: { executionSurface: 'direct' },
+    } as AgentSessionSnapshot);
     vi.mocked(invokeInterruptAgentRuntime).mockResolvedValue({} as AgentSessionSnapshot);
     vi.mocked(listenToAgentRuntimeSession).mockImplementation(async (listener) => {
       sessionListener = listener;
@@ -314,7 +321,11 @@ describe('TerminalControllerLayer', () => {
     });
     const controller = terminalRegistry.get('s1')!;
     const release = vi.fn();
-    vi.spyOn(controller, 'suppressUserInput').mockReturnValue(release);
+    const suppressInput = controller.suppressUserInput.bind(controller);
+    vi.spyOn(controller, 'suppressUserInput').mockImplementation((onBlocked) => {
+      const unlock = suppressInput(onBlocked);
+      return () => { release(); unlock(); };
+    });
 
     await vi.waitFor(() => expect(leaseListener).toBeDefined());
     await act(async () => {
@@ -353,7 +364,42 @@ describe('TerminalControllerLayer', () => {
         },
       } as Event<AgentTerminalLeaseEvent>);
     });
+    expect(release).not.toHaveBeenCalled();
+    expect(agentTerminalLeaseState.get('s1')).toMatchObject({ terminalOwned: false });
+    await expect(controller.writeUserInput('blocked between commands')).resolves.toBe(false);
+    act(() => sessionListener?.({ payload: turnEvent('turn/end') } as Event<AgentSessionEvent>));
     expect(release).toHaveBeenCalledOnce();
+    await expect(controller.writeUserInput('accepted after turn')).resolves.toBe(true);
+  });
+
+  it('locks the bound terminal from turn start before the first command', async () => {
+    const controller = seedController();
+    act(() => {
+      addSession('s1');
+      useTerminalStore.getState().setStatus('s1', { sessionId: 's1', status: 'connected' });
+    });
+    vi.mocked(invokeGetAgentRuntimeSession).mockResolvedValue({
+      header: {
+        taskId: 'task-1',
+        executionSurface: 'boundTerminal',
+        target: { sessionId: 's1' },
+      },
+    } as AgentSessionSnapshot);
+    const coordinator = createAgentTerminalLeaseCoordinator();
+
+    coordinator.handleSession(turnEvent('turn/start'));
+    await vi.waitFor(() => expect(agentTerminalLeaseState.get('s1')).toMatchObject({
+      terminalOwned: false,
+      operationId: 'turn:turn-1',
+    }));
+    await expect(controller.writeUserInput('blocked before first command')).resolves.toBe(false);
+
+    await coordinator.handle(leaseEvent('operation-1').payload);
+    await coordinator.handle(leaseEvent('operation-1', 'released', { reason: 'failed' }).payload);
+    await expect(controller.writeUserInput('blocked between commands')).resolves.toBe(false);
+    coordinator.handleSession(turnEvent('turn/end'));
+    await expect(controller.writeUserInput('accepted after turn')).resolves.toBe(true);
+    coordinator.dispose();
   });
 
   it('cancels the Agent turn at most once and unlocks when the backend confirms', async () => {
@@ -458,12 +504,9 @@ describe('TerminalControllerLayer', () => {
       });
     });
     const releaseFirst = vi.fn();
-    const releaseSecond = vi.fn();
     const removeFirstFilter = vi.fn();
     const removeSecondFilter = vi.fn();
-    const suppress = vi.spyOn(controller, 'suppressUserInput')
-      .mockReturnValueOnce(releaseFirst)
-      .mockReturnValueOnce(releaseSecond);
+    const suppress = vi.spyOn(controller, 'suppressUserInput').mockReturnValue(releaseFirst);
     const subscribeFilter = vi.spyOn(controller, 'subscribeOutputFilter')
       .mockReturnValueOnce(removeFirstFilter)
       .mockReturnValueOnce(removeSecondFilter);
@@ -479,7 +522,7 @@ describe('TerminalControllerLayer', () => {
     await coordinator.handle(leaseEvent('operation-2', 'acquired', {
       commandDisplay: '[Agent] $ safe command',
     }).payload);
-    expect(releaseFirst).toHaveBeenCalledOnce();
+    expect(releaseFirst).not.toHaveBeenCalled();
     expect(removeFirstFilter).toHaveBeenCalledOnce();
     expect(agentTerminalLeaseState.get('s1')).toMatchObject({
       operationId: 'operation-2',
@@ -487,11 +530,11 @@ describe('TerminalControllerLayer', () => {
     });
 
     await coordinator.handle(leaseEvent('operation-1', 'released').payload);
-    expect(releaseSecond).not.toHaveBeenCalled();
+    expect(releaseFirst).not.toHaveBeenCalled();
     expect(agentTerminalLeaseState.get('s1')?.operationId).toBe('operation-2');
 
     await coordinator.handle(leaseEvent('operation-2', 'released').payload);
-    expect(releaseSecond).toHaveBeenCalledOnce();
+    expect(releaseFirst).not.toHaveBeenCalled();
     expect(removeSecondFilter).toHaveBeenCalledOnce();
     expect(agentTerminalLeaseState.get('s1')).toMatchObject({
       operationId: 'operation-2',
@@ -499,6 +542,7 @@ describe('TerminalControllerLayer', () => {
       inputBlocked: false,
     });
     coordinator.handleSession(turnEvent('turn/end'));
+    expect(releaseFirst).toHaveBeenCalledOnce();
     expect(agentTerminalLeaseState.get('s1')).toBeUndefined();
     coordinator.dispose();
   });
@@ -608,6 +652,18 @@ describe('TerminalControllerLayer', () => {
       coordinator.dispose();
     },
   );
+
+  it('clears a retained between-command lock when its terminal closes', async () => {
+    seedController();
+    const coordinator = createAgentTerminalLeaseCoordinator();
+    await coordinator.handle(leaseEvent('operation-1').payload);
+    await coordinator.handle(leaseEvent('operation-1', 'released').payload);
+    expect(agentTerminalLeaseState.get('s1')?.terminalOwned).toBe(false);
+
+    act(() => terminalRegistry.dispose('s1'));
+    expect(agentTerminalLeaseState.get('s1')).toBeUndefined();
+    coordinator.dispose();
+  });
 
   it('cleans a lease when its terminal is removed and does not carry it into a rebuild', async () => {
     seedController();
