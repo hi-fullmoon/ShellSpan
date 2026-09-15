@@ -247,13 +247,15 @@ describe('terminal execution Phase 0 protocol contract', () => {
       .toEqual(['Session: `' + phase3SessionId + '`']);
     expect(roadmap).toContain('[Phase 3 evidence](./terminal-execution-phase-3-acceptance.md)');
     const phase4SessionId = '01a0a461-d04c-7d33-ba24-d2d314c773d8';
+    const phase4FinalContinuationId = '01a0a500-3512-7be2-9516-7bfc9813ed66';
     expect(roadmap.split('\n').filter((line) => line.startsWith('| 4. Remote real terminal |')))
       .toEqual([
-        '| 4. Remote real terminal | `' + phase4SessionId + '`; continuations `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`, `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d` | **remediation verified; NOT READY (pre-existing Rust include-format gate)** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |',
+        '| 4. Remote real terminal | `' + phase4SessionId + '`; continuations `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`, `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d`, `' + phase4FinalContinuationId + '` | **complete — PASS (waived Windows native evidence)** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |',
       ]);
     expect(phase4).toContain('Original Phase 4 session: `' + phase4SessionId + '`');
-    expect(roadmap).toContain('| 5. Interactive operation | not created | **blocked — not started**');
-    expect(phase4).toContain('**Final gate: NOT READY. Phase 5 remains blocked');
+    expect(phase4).toContain('Final lifecycle and gate continuation: `' + phase4FinalContinuationId + '`');
+    expect(roadmap).toContain('| 5. Interactive operation | not created | **ready — not started**');
+    expect(phase4).toContain('**Final gate: PASS. Phase 5 is READY for a separate session');
     expect(phase4).toContain('Native Windows/ConPTY with Windows PowerShell 5.1 and');
     expect(phase4).toContain('**MISSING**, not `PASS`');
     expect(phase4).toContain('`pnpm test:terminal-visible:ssh`');
