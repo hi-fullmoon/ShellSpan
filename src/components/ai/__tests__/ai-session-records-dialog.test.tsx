@@ -95,6 +95,7 @@ describe('AI conversation record management', () => {
     render(<AiSessionRecordsDialog onOpenChange={vi.fn()} />);
 
     const title = await screen.findByText('Old terminal conversation');
+    expect(title).not.toHaveAttribute('title');
     expect(screen.getByText('Workbench conversation')).toBeInTheDocument();
     expect(mocks.list).toHaveBeenNthCalledWith(1, { limit: 256 });
     expect(mocks.list).toHaveBeenNthCalledWith(2, { limit: 256, cursor: 'workbench' });
@@ -143,6 +144,12 @@ describe('AI conversation record management', () => {
     }));
     expect(mocks.delete).not.toHaveBeenCalled();
     expect(screen.getByText('settings.ai.records.deleteActiveDescription')).toBeInTheDocument();
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog.querySelector('.lucide-trash-2')).toBeInTheDocument();
+    expect(dialog.querySelector('[data-slot="alert-dialog-media"]')).toHaveClass(
+      'bg-destructive/10',
+      'text-destructive',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'common.delete' }));
 
     await waitFor(() => expect(mocks.delete).toHaveBeenCalledWith({ sessionId: 'old-terminal' }));
