@@ -4,8 +4,9 @@ use crate::directory_request_registry::{
     DirectoryRequestRegistry, DIRECTORY_REQUEST_SUPERSEDED_MESSAGE,
 };
 use crate::models::{
-    ClosedReasonKind, ConnectionPreflightRequest, ConnectionPreflightResult, CopyLocalPathsRequest,
-    CopyRemotePathRequest, CopyRemoteToRemoteRequest, CreateRemoteEntryRequest, CreateSessionError,
+    AgentRemoteTerminalOwner, ClosedReasonKind, ConnectionPreflightRequest,
+    ConnectionPreflightResult, CopyLocalPathsRequest, CopyRemotePathRequest,
+    CopyRemoteToRemoteRequest, CreateRemoteEntryRequest, CreateSessionError,
     DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult,
     KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing, LocalFileEntry, LogFileInfo,
     ManagedSession, OpenRemoteFileRequest, PortForwardStartRequest, PreflightCancellationRegistry,
@@ -20,7 +21,7 @@ use crate::sftp_pool::SftpPool;
 use base64::Engine;
 use crossbeam_channel::{after, bounded, never, unbounded, Receiver};
 use log::{debug, error, info, warn};
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::sync::{
@@ -32,11 +33,14 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
+use crate::terminal_integration::{PreparedLocalShellIntegration, TerminalShellKind};
+
 const LOCAL_OUTPUT_QUEUE_CAPACITY: usize = 32;
 const LOCAL_OUTPUT_DRAIN_BUDGET: usize = 64;
 const LOCAL_OUTPUT_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCAL_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1_000_000;
 const LOCAL_READER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+const LOCAL_SHELL_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_LOCAL_SHELL";
 
 enum LocalWorkerActivity {
     Command(Result<SessionCommand, crossbeam_channel::RecvError>),
@@ -62,6 +66,7 @@ fn wait_for_local_worker_activity(
     }
 }
 
+#[cfg(test)]
 fn collect_local_output_batch(
     first: Vec<u8>,
     output_rx: &Receiver<Vec<u8>>,
@@ -91,6 +96,107 @@ fn should_release_local_startup_output(
         && (output_ready
             || elapsed >= LOCAL_OUTPUT_READY_TIMEOUT
             || buffered_bytes > LOCAL_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES)
+}
+
+fn remove_failed_session_registration(state: &SessionManager, session_id: &str) -> Option<String> {
+    state.remove(session_id).err()
+}
+
+fn terminate_failed_local_child(
+    child: &mut (dyn Child + Send + Sync),
+    release_pty: impl FnOnce(),
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    if let Err(error) = child.kill() {
+        errors.push(format!("failed to kill local shell: {error}"));
+    }
+    // Closing every PTY handle is a second containment boundary and ensures a
+    // child cannot retain an interactive transport if signalling failed.
+    release_pty();
+    if let Err(error) = child.wait() {
+        errors.push(format!("failed to reap local shell: {error}"));
+    }
+    errors
+}
+
+fn attachment_failure_message(primary: &str, cleanup_errors: Vec<String>) -> String {
+    if cleanup_errors.is_empty() {
+        format!("TERMINAL_BROKER_ATTACH_FAILED: {primary}")
+    } else {
+        format!(
+            "TERMINAL_BROKER_ATTACH_FAILED: {primary}; cleanup: {}",
+            cleanup_errors.join("; ")
+        )
+    }
+}
+
+fn rollback_local_broker_attachment_failure(
+    state: &SessionManager,
+    session_id: &str,
+    child: &mut (dyn Child + Send + Sync),
+    release_pty: impl FnOnce(),
+    error: &str,
+) -> String {
+    let mut cleanup_errors = remove_failed_session_registration(state, session_id)
+        .into_iter()
+        .collect::<Vec<_>>();
+    cleanup_errors.extend(terminate_failed_local_child(child, release_pty));
+    attachment_failure_message(error, cleanup_errors)
+}
+
+fn local_shell_executable() -> String {
+    if cfg!(target_os = "windows") {
+        std::env::var(LOCAL_SHELL_ENVIRONMENT_VARIABLE)
+            .or_else(|_| std::env::var("SHELL"))
+            .unwrap_or_else(|_| "powershell.exe".to_string())
+    } else {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
+    }
+}
+
+pub(crate) fn emit_terminal_integration_state(app: &AppHandle, session_id: &str) {
+    let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() else {
+        return;
+    };
+    let Ok(snapshot) = runtime.terminal_broker_snapshot(Some(session_id)) else {
+        return;
+    };
+    let Some(session) = snapshot.session else {
+        return;
+    };
+    let remote_rollout_missing = session.transport_kind
+        == crate::terminal_broker::TerminalTransportKind::SshPty
+        && session.agent_pty_owner.is_some()
+        && !snapshot.remote_agent_pty_rollout.enabled;
+    let (state, reason) = if session.integration_state
+        == crate::terminal_broker::TerminalIntegrationState::Ready
+        && (!snapshot.terminal_execute_rollout.enabled || remote_rollout_missing)
+    {
+        (
+            crate::terminal_broker::TerminalIntegrationState::Degraded,
+            Some(if remote_rollout_missing {
+                "remoteAgentPtyDisabled".to_string()
+            } else {
+                "terminalExecuteDisabled".to_string()
+            }),
+        )
+    } else {
+        (session.integration_state, session.integration_reason)
+    };
+    let event = crate::terminal_broker::TerminalIntegrationStateEvent {
+        session_id: session_id.to_string(),
+        terminal_session_id: session.terminal_session_id,
+        terminal_generation: session.terminal_generation,
+        state,
+        shell: session.integration_shell,
+        reason,
+    };
+    if let Err(error) = app.emit(
+        crate::terminal_broker::TERMINAL_INTEGRATION_STATE_EVENT,
+        event,
+    ) {
+        warn!("Failed to publish terminal integration state session_id={session_id}: {error}");
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -152,6 +258,16 @@ async fn create_remote_terminal_session(
         return Err(CreateSessionError::Other { message });
     }
 
+    let terminal_broker_enabled = app
+        .try_state::<crate::agent_runtime::AgentRuntime>()
+        .ok_or_else(|| CreateSessionError::Other {
+            message: "terminal broker runtime is unavailable".into(),
+        })?
+        .terminal_broker_snapshot(None)
+        .map_err(|message| CreateSessionError::Other { message })?
+        .rollout
+        .enabled;
+
     info!(
         "Creating SSH session {}",
         summarize_session_request(&request)
@@ -164,12 +280,14 @@ async fn create_remote_terminal_session(
     // connection here: an extra handshake per session would double the
     // connect cost. Host-key failures still come back as typed
     // CreateSessionError variants via the connection result channel below.
-    let summary = SessionSummary {
+    let mut summary = SessionSummary {
         session_id: session_id.clone(),
         title: request.name.clone(),
         host: request.host.clone(),
         port: request.port,
         username: request.username.clone(),
+        terminal_session_id: None,
+        terminal_generation: None,
     };
 
     let (tx, rx) = mpsc::channel::<SessionCommand>();
@@ -218,7 +336,7 @@ async fn create_remote_terminal_session(
     );
     let connection_request = remote_connection_request_from_session(&request);
     spawn_ssh_thread(
-        app,
+        app.clone(),
         session_id.clone(),
         request,
         rx,
@@ -228,6 +346,7 @@ async fn create_remote_terminal_session(
         pool.clone(),
         connection_request,
         Some(connection_result_tx),
+        None,
     );
 
     let connection_result = match tauri::async_runtime::spawn_blocking(move || {
@@ -237,17 +356,71 @@ async fn create_remote_terminal_session(
     {
         Ok(Ok(result)) => result,
         Ok(Err(_timeout)) => {
+            if terminal_broker_enabled {
+                let cleanup_error = state.close(&session_id).err();
+                return Err(CreateSessionError::Other {
+                    message: attachment_failure_message(
+                        "timed out before SSH broker attachment completed",
+                        cleanup_error.into_iter().collect(),
+                    ),
+                });
+            }
             warn!("Timeout waiting for connection result session_id={session_id}; falling back to async status updates");
             return Ok(summary);
         }
         Err(_) => {
+            if terminal_broker_enabled {
+                let cleanup_error = state.close(&session_id).err();
+                return Err(CreateSessionError::Other {
+                    message: attachment_failure_message(
+                        "SSH broker attachment waiter was cancelled",
+                        cleanup_error.into_iter().collect(),
+                    ),
+                });
+            }
             warn!("Connection result task cancelled session_id={session_id}; falling back to async status updates");
             return Ok(summary);
         }
     };
 
     match connection_result {
-        Ok(()) => Ok(summary),
+        Ok(()) => {
+            let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() else {
+                let cleanup_error = state.close(&session_id).err();
+                return Err(CreateSessionError::Other {
+                    message: attachment_failure_message(
+                        "terminal broker runtime is unavailable",
+                        cleanup_error.into_iter().collect(),
+                    ),
+                });
+            };
+            match runtime.terminal_broker_attachment(&session_id) {
+                Ok(Some(attachment)) => {
+                    summary.terminal_session_id = Some(attachment.terminal_session_id);
+                    summary.terminal_generation = Some(attachment.terminal_generation);
+                }
+                Ok(None) if !terminal_broker_enabled => {}
+                Ok(None) => {
+                    let cleanup_error = state.close(&session_id).err();
+                    return Err(CreateSessionError::Other {
+                        message: attachment_failure_message(
+                            "SSH transport connected without a required broker attachment",
+                            cleanup_error.into_iter().collect(),
+                        ),
+                    });
+                }
+                Err(error) => {
+                    let cleanup_error = state.close(&session_id).err();
+                    return Err(CreateSessionError::Other {
+                        message: attachment_failure_message(
+                            &error,
+                            cleanup_error.into_iter().collect(),
+                        ),
+                    });
+                }
+            }
+            Ok(summary)
+        }
         Err(create_error) => {
             error!("SSH session connection failed session_id={session_id}: {create_error:?}");
             // The frontend never receives this session id and will not call
@@ -255,10 +428,186 @@ async fn create_remote_terminal_session(
             // it. The worker thread has already sent its result; its later
             // emit_status calls tolerate the missing entry (set_status error
             // is ignored in emit_status).
-            let _ = state.remove(&session_id);
+            let _ = remove_failed_session_registration(state, &session_id);
             Err(create_error)
         }
     }
+}
+
+pub(crate) const AGENT_REMOTE_TERMINAL_CREATED_EVENT: &str =
+    "terminal-agent-remote-session-created";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentRemoteTerminalCreatedEvent {
+    pub(crate) summary: SessionSummary,
+    pub(crate) profile_id: String,
+    pub(crate) source_session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) replaces_session_id: Option<String>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_agent_remote_terminal_blocking(
+    app: &AppHandle,
+    state: &SessionManager,
+    pool: &SftpPool,
+    connection: RemoteConnectionRequest,
+    title: String,
+    profile_id: String,
+    owner: AgentRemoteTerminalOwner,
+    predecessor_session_id: Option<String>,
+    cols: u32,
+    rows: u32,
+    _approval: &crate::agent_runtime::ApprovedAgentRemoteTerminalBootstrap,
+) -> Result<SessionSummary, String> {
+    validate_connection_fields(&connection.host, &connection.username)?;
+    let rollout = app
+        .try_state::<crate::agent_runtime::AgentRuntime>()
+        .ok_or_else(|| "terminal broker runtime is unavailable".to_string())?
+        .terminal_broker_snapshot(None)?;
+    if !rollout.remote_agent_pty_rollout.enabled {
+        return Err("TERMINAL_REMOTE_AGENT_PTY_DISABLED".into());
+    }
+
+    let session_id = Uuid::new_v4().to_string();
+    let request = SessionCreateRequest {
+        operation_id: Some(format!("agent-remote-terminal-{}", Uuid::new_v4().simple())),
+        name: title.clone(),
+        host: connection.host.clone(),
+        port: connection.port,
+        username: connection.username.clone(),
+        auth_method: connection.auth_method,
+        password: connection.password.clone(),
+        keychain_key_id: connection.keychain_key_id.clone(),
+        private_key_data: connection.private_key_data.clone(),
+        passphrase: connection.passphrase.clone(),
+        terminal_cols: cols.max(1),
+        terminal_rows: rows.max(1),
+        jump_host: connection.jump_host.clone(),
+        replaces_session_id: predecessor_session_id.clone(),
+    };
+    let mut summary = SessionSummary {
+        session_id: session_id.clone(),
+        title,
+        host: connection.host.clone(),
+        port: connection.port,
+        username: connection.username.clone(),
+        terminal_session_id: None,
+        terminal_generation: None,
+    };
+    let (tx, rx) = mpsc::channel::<SessionCommand>();
+    let (connection_result_tx, connection_result_rx) =
+        mpsc::channel::<Result<(), CreateSessionError>>();
+    let (waker, wake_source) = session_wake_pair()
+        .map_err(|error| format!("failed to create Agent SSH wake channel: {error}"))?;
+    let output_ready = Arc::new(AtomicBool::new(false));
+    let output_paused = Arc::new(AtomicBool::new(false));
+    state.insert_agent_remote(
+        session_id.clone(),
+        ManagedSession {
+            sender: SessionCommandSender::Standard(tx),
+            waker: Some(waker),
+            output_state_sender: None,
+            status: StatusEvent {
+                session_id: session_id.clone(),
+                status: SessionStatus::Connecting,
+                message: Some("connecting".to_string()),
+            },
+            output_ready: output_ready.clone(),
+            output_paused: output_paused.clone(),
+            terminal_kind: SessionTerminalKind::Remote,
+            identity: SessionIdentity {
+                title: summary.title.clone(),
+                host: summary.host.clone(),
+                port: summary.port,
+                username: summary.username.clone(),
+            },
+        },
+        owner.clone(),
+    )?;
+
+    spawn_ssh_thread(
+        app.clone(),
+        session_id.clone(),
+        request,
+        rx,
+        wake_source,
+        output_ready,
+        output_paused,
+        pool.clone(),
+        connection,
+        Some(connection_result_tx),
+        Some(owner),
+    );
+
+    let result = match connection_result_rx.recv_timeout(Duration::from_secs(10)) {
+        Ok(result) => result,
+        Err(_) => {
+            let _ = state.close(&session_id);
+            return Err("timed out before Agent SSH PTY attachment completed".into());
+        }
+    };
+    if let Err(error) = result {
+        let _ = state.remove(&session_id);
+        return Err(match error {
+            CreateSessionError::HostKeyUnknown { host, port, .. } => {
+                format!("host key for {host}:{port} is not known")
+            }
+            CreateSessionError::HostKeyMismatch { host, port, .. } => {
+                format!("host key for {host}:{port} changed")
+            }
+            CreateSessionError::Other { message } => message,
+        });
+    }
+    let attachment = match app
+        .try_state::<crate::agent_runtime::AgentRuntime>()
+        .ok_or_else(|| "terminal broker runtime is unavailable".to_string())
+        .and_then(|runtime| runtime.terminal_broker_attachment(&session_id))
+        .and_then(|attachment| {
+            attachment
+                .ok_or_else(|| "Agent SSH PTY connected without a broker attachment".to_string())
+        }) {
+        Ok(attachment) => attachment,
+        Err(error) => {
+            let _ = state.close(&session_id);
+            return Err(error);
+        }
+    };
+    summary.terminal_session_id = Some(attachment.terminal_session_id);
+    summary.terminal_generation = Some(attachment.terminal_generation);
+    if let Err(error) = state.promote_agent_remote(&session_id) {
+        let _ = state.close(&session_id);
+        return Err(error);
+    }
+    if let Err(error) = app.emit(
+        AGENT_REMOTE_TERMINAL_CREATED_EVENT,
+        AgentRemoteTerminalCreatedEvent {
+            summary: summary.clone(),
+            profile_id,
+            source_session_id: owner_source_session_id(state, &session_id)?,
+            replaces_session_id: predecessor_session_id,
+        },
+    ) {
+        let _ = app
+            .try_state::<crate::agent_runtime::AgentRuntime>()
+            .map(|runtime| {
+                let _ = runtime.close_terminal_broker_transport(
+                    &session_id,
+                    crate::terminal_broker::TerminalGenerationCloseReason::BrokerShutdown,
+                );
+            });
+        let _ = state.close(&session_id);
+        return Err(format!("failed to publish Agent remote terminal: {error}"));
+    }
+    Ok(summary)
+}
+
+fn owner_source_session_id(state: &SessionManager, session_id: &str) -> Result<String, String> {
+    state
+        .agent_remote_owner(session_id)?
+        .map(|owner| owner.source_session_id)
+        .ok_or_else(|| "Agent remote terminal owner disappeared".to_string())
 }
 
 #[tauri::command]
@@ -267,19 +616,17 @@ pub(crate) fn create_local_session(
     state: State<'_, SessionManager>,
     cols: u16,
     rows: u16,
+    replaces_session_id: Option<String>,
 ) -> Result<SessionSummary, String> {
     let session_id = Uuid::new_v4().to_string();
-    let shell = if cfg!(target_os = "windows") {
-        "powershell.exe".to_string()
-    } else {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
-    };
+    let shell = local_shell_executable();
+    let shell_kind = TerminalShellKind::detect(&shell);
     let title = std::path::Path::new(&shell)
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("Local")
         .to_string();
-    let summary = SessionSummary {
+    let mut summary = SessionSummary {
         session_id: session_id.clone(),
         title,
         host: "local".to_string(),
@@ -290,6 +637,33 @@ pub(crate) fn create_local_session(
             "USER"
         })
         .unwrap_or_else(|_| "local".to_string()),
+        terminal_session_id: None,
+        terminal_generation: None,
+    };
+
+    let terminal_broker_enabled = app
+        .try_state::<crate::agent_runtime::AgentRuntime>()
+        .ok_or_else(|| "terminal broker runtime is unavailable".to_string())?
+        .terminal_broker_snapshot(None)?
+        .rollout
+        .enabled;
+    let shell_integration_enabled = terminal_broker_enabled
+        && app
+            .try_state::<crate::agent_runtime::AgentRuntime>()
+            .ok_or_else(|| "terminal broker runtime is unavailable".to_string())?
+            .terminal_shell_integration_enabled()?;
+    let prepared_integration = if shell_integration_enabled && shell_kind.supported() {
+        match PreparedLocalShellIntegration::prepare(shell_kind) {
+            Ok(integration) => Some(integration),
+            Err(error) => {
+                warn!(
+                    "Failed to prepare local shell integration session_id={session_id} shell_kind={shell_kind:?}: {error}"
+                );
+                None
+            }
+        }
+    } else {
+        None
     };
 
     let pair = native_pty_system()
@@ -305,7 +679,9 @@ pub(crate) fn create_local_session(
         })?;
     let mut command = CommandBuilder::new(&shell);
     configure_local_terminal_environment(&mut command);
-    if !cfg!(target_os = "windows") {
+    if let Some(integration) = prepared_integration.as_ref() {
+        integration.configure_command(&mut command)?;
+    } else if !cfg!(target_os = "windows") {
         command.arg("-l");
     }
     let mut child = pair.slave.spawn_command(command).map_err(|error| {
@@ -326,33 +702,188 @@ pub(crate) fn create_local_session(
     let (output_state_tx, output_state_rx) = bounded::<()>(1);
     let output_ready = Arc::new(AtomicBool::new(false));
     let output_paused = Arc::new(AtomicBool::new(false));
-    state
-        .insert(
-            session_id.clone(),
-            ManagedSession {
-                sender: SessionCommandSender::Event(tx),
-                waker: None,
-                output_state_sender: Some(output_state_tx),
-                status: StatusEvent {
-                    session_id: session_id.clone(),
-                    status: SessionStatus::Connected,
-                    message: Some("local shell ready".to_string()),
-                },
-                output_ready: output_ready.clone(),
-                output_paused: output_paused.clone(),
-                terminal_kind: SessionTerminalKind::Local,
-                identity: SessionIdentity {
-                    title: summary.title.clone(),
-                    host: summary.host.clone(),
-                    port: summary.port,
-                    username: summary.username.clone(),
-                },
+    if let Err(message) = state.insert(
+        session_id.clone(),
+        ManagedSession {
+            sender: SessionCommandSender::Event(tx),
+            waker: None,
+            output_state_sender: Some(output_state_tx),
+            status: StatusEvent {
+                session_id: session_id.clone(),
+                status: SessionStatus::Connected,
+                message: Some("local shell ready".to_string()),
             },
-        )
-        .map_err(|message| {
-            error!("Failed to register local session session_id={session_id}: {message}");
+            output_ready: output_ready.clone(),
+            output_paused: output_paused.clone(),
+            terminal_kind: SessionTerminalKind::Local,
+            identity: SessionIdentity {
+                title: summary.title.clone(),
+                host: summary.host.clone(),
+                port: summary.port,
+                username: summary.username.clone(),
+            },
+        },
+    ) {
+        error!("Failed to register local session session_id={session_id}: {message}");
+        let cleanup_errors = terminate_failed_local_child(child.as_mut(), move || {
+            drop(writer);
+            drop(master);
+            drop(reader);
+        });
+        return Err(if cleanup_errors.is_empty() {
             message
-        })?;
+        } else {
+            format!("{message}; cleanup: {}", cleanup_errors.join("; "))
+        });
+    }
+
+    let transport_kind = if cfg!(target_os = "windows") {
+        crate::terminal_broker::TerminalTransportKind::WindowsConPty
+    } else {
+        crate::terminal_broker::TerminalTransportKind::LocalPty
+    };
+    let broker_attachment = app
+        .try_state::<crate::agent_runtime::AgentRuntime>()
+        .ok_or_else(|| "terminal broker runtime is unavailable".to_string())
+        .and_then(|runtime| {
+            runtime.attach_terminal_broker_transport(
+                &session_id,
+                replaces_session_id.as_deref(),
+                transport_kind,
+                crate::terminal_broker::TerminalGeometry::new(u32::from(cols), u32::from(rows)),
+            )
+        });
+    match broker_attachment {
+        Ok(Some(attachment)) => {
+            summary.terminal_session_id = Some(attachment.terminal_session_id);
+            summary.terminal_generation = Some(attachment.terminal_generation);
+        }
+        Ok(None) if !terminal_broker_enabled => {}
+        Ok(None) => {
+            return Err(rollback_local_broker_attachment_failure(
+                &state,
+                &session_id,
+                child.as_mut(),
+                move || {
+                    drop(writer);
+                    drop(master);
+                    drop(reader);
+                },
+                "local transport was created without a required broker attachment",
+            ));
+        }
+        Err(error) => {
+            return Err(rollback_local_broker_attachment_failure(
+                &state,
+                &session_id,
+                child.as_mut(),
+                move || {
+                    drop(writer);
+                    drop(master);
+                    drop(reader);
+                },
+                &error,
+            ));
+        }
+    }
+
+    let mut terminal_integration_control = None;
+    if terminal_broker_enabled {
+        let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() else {
+            return Err(rollback_local_broker_attachment_failure(
+                &state,
+                &session_id,
+                child.as_mut(),
+                move || {
+                    drop(writer);
+                    drop(master);
+                    drop(reader);
+                },
+                "terminal integration runtime is unavailable",
+            ));
+        };
+        if let Some(integration) = prepared_integration {
+            let integration_id = integration.integration_id().to_string();
+            if let Err(error) = runtime.register_terminal_integration_channel(
+                &session_id,
+                &integration_id,
+                integration.shell(),
+            ) {
+                return Err(rollback_local_broker_attachment_failure(
+                    &state,
+                    &session_id,
+                    child.as_mut(),
+                    move || {
+                        drop(writer);
+                        drop(master);
+                        drop(reader);
+                    },
+                    &error,
+                ));
+            }
+            emit_terminal_integration_state(&app, &session_id);
+            let event_app = app.clone();
+            let event_session_id = session_id.clone();
+            let event_integration_id = integration_id.clone();
+            let closed_app = app.clone();
+            let closed_session_id = session_id.clone();
+            terminal_integration_control = Some(integration.start_reader(
+                move |event| {
+                    let runtime = event_app
+                        .try_state::<crate::agent_runtime::AgentRuntime>()
+                        .ok_or_else(|| "terminal integration runtime is unavailable".to_string())?;
+                    runtime.accept_terminal_integration_event(
+                        &event_session_id,
+                        &event_integration_id,
+                        event,
+                    )?;
+                    emit_terminal_integration_state(&event_app, &event_session_id);
+                    Ok(())
+                },
+                move |error| {
+                    let reason = if error.is_some() {
+                        "controlChannelFailed"
+                    } else {
+                        "controlChannelClosed"
+                    };
+                    if let Some(runtime) =
+                        closed_app.try_state::<crate::agent_runtime::AgentRuntime>()
+                    {
+                        let _ = runtime.terminal_integration_channel_closed(
+                            &closed_session_id,
+                            &integration_id,
+                            reason,
+                        );
+                        emit_terminal_integration_state(&closed_app, &closed_session_id);
+                    }
+                },
+            ));
+        } else {
+            let reason = if !shell_integration_enabled {
+                "shellIntegrationDisabled"
+            } else if !shell_kind.supported() {
+                "unsupportedShell"
+            } else {
+                "bootstrapFailed"
+            };
+            if let Err(error) =
+                runtime.mark_terminal_integration_degraded(&session_id, shell_kind, reason)
+            {
+                return Err(rollback_local_broker_attachment_failure(
+                    &state,
+                    &session_id,
+                    child.as_mut(),
+                    move || {
+                        drop(writer);
+                        drop(master);
+                        drop(reader);
+                    },
+                    &error,
+                ));
+            }
+            emit_terminal_integration_state(&app, &session_id);
+        }
+    }
 
     let worker_id = session_id.clone();
     let worker_output_ready = output_ready;
@@ -364,6 +895,7 @@ pub(crate) fn create_local_session(
         username: summary.username.clone(),
     };
     thread::spawn(move || {
+        let _terminal_integration_control = terminal_integration_control;
         let (output_tx, output_rx) = bounded::<Vec<u8>>(LOCAL_OUTPUT_QUEUE_CAPACITY);
         let (child_exit_tx, child_exit_rx) = bounded::<()>(1);
         let mut child_killer = child.clone_killer();
@@ -492,7 +1024,15 @@ pub(crate) fn create_local_session(
                     break;
                 }
                 LocalWorkerActivity::Output(Ok(bytes)) => {
-                    collect_local_output_batch(bytes, &output_rx, &mut pending_bytes);
+                    observe_terminal_raw_output(&app, &worker_id, &bytes);
+                    pending_bytes.extend_from_slice(&bytes);
+                    for bytes in output_rx
+                        .try_iter()
+                        .take(LOCAL_OUTPUT_DRAIN_BUDGET.saturating_sub(1))
+                    {
+                        observe_terminal_raw_output(&app, &worker_id, &bytes);
+                        pending_bytes.extend_from_slice(&bytes);
+                    }
                     drain_decoded_output(&mut pending_bytes, &mut pending_output);
                     if !pending_output.is_empty() {
                         if output_live {
@@ -541,7 +1081,10 @@ pub(crate) fn create_local_session(
                     break;
                 },
                 recv(selectable_output) -> output => match output {
-                    Ok(bytes) => pending_bytes.extend_from_slice(&bytes),
+                    Ok(bytes) => {
+                        observe_terminal_raw_output(&app, &worker_id, &bytes);
+                        pending_bytes.extend_from_slice(&bytes);
+                    }
                     Err(_) => reader_closed = true,
                 },
                 recv(selectable_child) -> _ => child_exited = true,
@@ -554,6 +1097,7 @@ pub(crate) fn create_local_session(
             let _ = child_handle.join();
         }
         while let Ok(bytes) = output_rx.try_recv() {
+            observe_terminal_raw_output(&app, &worker_id, &bytes);
             pending_bytes.extend_from_slice(&bytes);
         }
         drain_decoded_output(&mut pending_bytes, &mut pending_output);
@@ -669,24 +1213,37 @@ pub(crate) fn get_session_status(
 
 #[tauri::command]
 pub(crate) fn mark_session_ready(
+    app: AppHandle,
     state: State<'_, SessionManager>,
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     session_id: String,
 ) -> Result<(), String> {
-    state.mark_output_ready(&session_id)
+    state.mark_output_ready(&session_id)?;
+    if let Err(error) = agent_runtime.mark_terminal_broker_output_ready(&session_id) {
+        warn!("Failed to update terminal broker output readiness session_id={session_id}: {error}");
+    }
+    emit_terminal_integration_state(&app, &session_id);
+    Ok(())
 }
 
 #[tauri::command]
 pub(crate) fn set_session_output_paused(
     state: State<'_, SessionManager>,
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     session_id: String,
     paused: bool,
 ) -> Result<(), String> {
-    state.set_output_paused(&session_id, paused)
+    state.set_output_paused(&session_id, paused)?;
+    if let Err(error) = agent_runtime.set_terminal_broker_output_paused(&session_id, paused) {
+        warn!("Failed to update terminal broker backpressure session_id={session_id}: {error}");
+    }
+    Ok(())
 }
 
 #[tauri::command]
 pub(crate) fn resize_session(
     state: State<'_, SessionManager>,
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     session_id: String,
     cols: u32,
     rows: u32,
@@ -698,7 +1255,20 @@ pub(crate) fn resize_session(
             session_id, cols, rows, error
         );
     }
+    if result.is_ok() {
+        if let Err(error) = agent_runtime.resize_terminal_broker(&session_id, cols, rows) {
+            warn!("Failed to update terminal broker geometry session_id={session_id}: {error}");
+        }
+    }
     result
+}
+
+#[tauri::command]
+pub(crate) fn get_terminal_broker_snapshot(
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
+    session_id: Option<String>,
+) -> Result<crate::terminal_broker::TerminalBrokerSnapshot, String> {
+    agent_runtime.terminal_broker_snapshot(session_id.as_deref())
 }
 
 #[tauri::command]
@@ -710,6 +1280,12 @@ pub(crate) fn close_session(
     info!("Closing SSH session session_id={session_id}");
     if let Err(error) = agent_runtime.terminal_closed(&session_id) {
         warn!("Failed to clean Agent terminal lease session_id={session_id}: {error}");
+    }
+    if let Err(error) = agent_runtime.close_terminal_broker_transport(
+        &session_id,
+        crate::terminal_broker::TerminalGenerationCloseReason::UserClosed,
+    ) {
+        warn!("Failed to close terminal broker generation session_id={session_id}: {error}");
     }
     let result = state.close(&session_id);
     if let Err(error) = &result {
@@ -2578,6 +3154,7 @@ pub(crate) fn spawn_ssh_thread(
     pool: SftpPool,
     connection_request: RemoteConnectionRequest,
     connection_result_tx: Option<std::sync::mpsc::Sender<Result<(), CreateSessionError>>>,
+    agent_owner: Option<AgentRemoteTerminalOwner>,
 ) {
     thread::spawn(move || {
         debug!("Spawned SSH worker session_id={session_id}");
@@ -2593,10 +3170,70 @@ pub(crate) fn spawn_ssh_thread(
         };
 
         let tx_for_connected = connection_result_tx.clone();
+        let broker_app = app.clone();
+        let broker_session_id = session_id.clone();
+        let predecessor_session_id = request.replaces_session_id.clone();
+        let broker_geometry = crate::terminal_broker::TerminalGeometry::new(
+            request.terminal_cols,
+            request.terminal_rows,
+        );
+        let broker_agent_owner = agent_owner.clone();
         let on_connected = move || {
+            broker_app
+                .try_state::<SessionManager>()
+                .ok_or_else(|| {
+                    attachment_failure_message("terminal SessionManager is unavailable", Vec::new())
+                })?
+                .target_state(&broker_session_id)
+                .map_err(|_| {
+                    attachment_failure_message(
+                        "terminal session was cancelled before broker attachment",
+                        Vec::new(),
+                    )
+                })?;
+            let runtime = broker_app
+                .try_state::<crate::agent_runtime::AgentRuntime>()
+                .ok_or_else(|| {
+                    attachment_failure_message("terminal broker runtime is unavailable", Vec::new())
+                })?;
+            if let Some(owner) = broker_agent_owner {
+                runtime
+                    .attach_agent_ssh_terminal_broker_transport(
+                        &broker_session_id,
+                        predecessor_session_id.as_deref(),
+                        broker_geometry,
+                        crate::terminal_broker::TerminalAgentPtyOwner {
+                            agent_session_id: owner.agent_session_id,
+                            target_id: owner.target_id,
+                            source_transport_session_id: owner.source_session_id,
+                        },
+                    )
+                    .map_err(|error| attachment_failure_message(&error, Vec::new()))?;
+            } else {
+                runtime
+                    .attach_terminal_broker_transport(
+                        &broker_session_id,
+                        predecessor_session_id.as_deref(),
+                        crate::terminal_broker::TerminalTransportKind::SshPty,
+                        broker_geometry,
+                    )
+                    .map_err(|error| attachment_failure_message(&error, Vec::new()))?;
+                if runtime
+                    .terminal_shell_integration_enabled()
+                    .unwrap_or(false)
+                {
+                    let _ = runtime.mark_terminal_integration_degraded(
+                        &broker_session_id,
+                        TerminalShellKind::Unsupported,
+                        "dedicatedAgentPtyRequired",
+                    );
+                    emit_terminal_integration_state(&broker_app, &broker_session_id);
+                }
+            }
             if let Some(tx) = tx_for_connected.as_ref() {
                 let _ = tx.send(Ok(()));
             }
+            Ok(())
         };
         let run_result = run_ssh_session(
             &app,
@@ -2606,6 +3243,7 @@ pub(crate) fn spawn_ssh_thread(
             wake,
             output_ready,
             output_paused,
+            agent_owner.is_some(),
             on_connected,
         );
 
@@ -2794,20 +3432,96 @@ pub(crate) fn clear_sftp_workspace(db: State<'_, Database>) -> Result<(), String
 mod tests {
     use super::{
         collect_local_output_batch, configure_local_terminal_environment, detect_key_type,
-        expand_home_path, should_release_local_startup_output, wait_for_local_worker_activity,
-        LocalWorkerActivity, LOCAL_OUTPUT_DRAIN_BUDGET, LOCAL_OUTPUT_QUEUE_CAPACITY,
-        LOCAL_OUTPUT_READY_TIMEOUT,
+        expand_home_path, remove_failed_session_registration,
+        rollback_local_broker_attachment_failure, should_release_local_startup_output,
+        wait_for_local_worker_activity, LocalWorkerActivity, LOCAL_OUTPUT_DRAIN_BUDGET,
+        LOCAL_OUTPUT_QUEUE_CAPACITY, LOCAL_OUTPUT_READY_TIMEOUT,
     };
-    use crate::models::SessionCommand;
+    use crate::models::{
+        ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, SessionManager,
+        SessionStatus, SessionTerminalKind, StatusEvent,
+    };
     use crossbeam_channel::{bounded, never, unbounded, TryRecvError, TrySendError};
     use portable_pty::CommandBuilder;
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(unix, windows))]
     use portable_pty::{native_pty_system, PtySize};
     use std::ffi::OsStr;
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     use std::io::Read;
+    use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Barrier};
     use std::thread;
+
+    fn registered_test_session(manager: &SessionManager, session_id: &str) {
+        let (sender, _receiver) = unbounded();
+        manager
+            .insert(
+                session_id.into(),
+                ManagedSession {
+                    sender: SessionCommandSender::Event(sender),
+                    waker: None,
+                    output_state_sender: None,
+                    status: StatusEvent {
+                        session_id: session_id.into(),
+                        status: SessionStatus::Connecting,
+                        message: None,
+                    },
+                    output_ready: Arc::new(AtomicBool::new(false)),
+                    output_paused: Arc::new(AtomicBool::new(false)),
+                    terminal_kind: SessionTerminalKind::Local,
+                    identity: SessionIdentity {
+                        title: "cleanup-test".into(),
+                        host: "local".into(),
+                        port: 0,
+                        username: "tester".into(),
+                    },
+                },
+            )
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_attach_failure_removes_registry_entry_closes_pty_and_reaps_child() {
+        let manager = SessionManager::default();
+        registered_test_session(&manager, "failed-attach");
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.args(["-c", "sleep 60"]);
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        drop(pair.slave);
+
+        let error = rollback_local_broker_attachment_failure(
+            &manager,
+            "failed-attach",
+            child.as_mut(),
+            move || drop(pair.master),
+            "TERMINAL_BROKER_PREDECESSOR_NOT_FOUND",
+        );
+
+        assert_eq!(
+            error,
+            "TERMINAL_BROKER_ATTACH_FAILED: TERMINAL_BROKER_PREDECESSOR_NOT_FOUND"
+        );
+        assert!(manager.status("failed-attach").is_err());
+        assert!(child.try_wait().unwrap().is_some());
+    }
+
+    #[test]
+    fn ssh_attach_failure_removes_pending_session_registration() {
+        let manager = SessionManager::default();
+        registered_test_session(&manager, "failed-ssh-attach");
+
+        assert!(remove_failed_session_registration(&manager, "failed-ssh-attach").is_none());
+        assert!(manager.status("failed-ssh-attach").is_err());
+    }
     use std::time::{Duration, Instant};
 
     fn never_activity_channels() -> (
