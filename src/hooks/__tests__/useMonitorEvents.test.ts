@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useMonitorEvents } from '../useMonitorEvents';
 import { usePortForwardStore } from '@/stores/portForwardStore';
+import { useTerminalStore } from '@/stores/terminalStore';
 
 const { listen } = vi.hoisted(() => ({ listen: vi.fn() }));
 
@@ -13,6 +14,7 @@ describe('useMonitorEvents port-forward lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     usePortForwardStore.setState(initialPortForward, true);
+    useTerminalStore.setState({ sessions: [], activeSessionId: null });
   });
 
   afterEach(() => {
@@ -20,19 +22,19 @@ describe('useMonitorEvents port-forward lifecycle', () => {
   });
 
   it('releases the terminal owner on remote disconnect and local close', async () => {
-    let handler: ((event: { payload: Record<string, unknown> }) => void) | undefined;
-    listen.mockImplementation(async (_eventName, callback) => {
-      handler = callback;
+    const handlers = new Map<string, (event: { payload: Record<string, unknown> }) => void>();
+    listen.mockImplementation(async (eventName, callback) => {
+      handlers.set(eventName, callback);
       return vi.fn();
     });
     const stopOwner = vi.fn().mockResolvedValue(undefined);
     usePortForwardStore.setState({ stopOwner });
 
     renderHook(() => useMonitorEvents());
-    await waitFor(() => expect(handler).toBeDefined());
+    await waitFor(() => expect(handlers.get('ssh-closed')).toBeDefined());
 
     act(() => {
-      handler?.({
+      handlers.get('ssh-closed')?.({
         payload: {
           sessionId: 'session-1',
           reasonKind: 'transport_disconnect',
@@ -40,7 +42,7 @@ describe('useMonitorEvents port-forward lifecycle', () => {
           retryable: true,
         },
       });
-      handler?.({
+      handlers.get('ssh-closed')?.({
         payload: {
           sessionId: 'session-2',
           reasonKind: 'local_close',
@@ -51,5 +53,42 @@ describe('useMonitorEvents port-forward lifecycle', () => {
 
     expect(stopOwner).toHaveBeenNthCalledWith(1, 'terminal:session-1');
     expect(stopOwner).toHaveBeenNthCalledWith(2, 'terminal:session-2');
+  });
+
+  it('maps a backend-created Agent SSH PTY to an ephemeral ordinary terminal tab', async () => {
+    const handlers = new Map<string, (event: { payload: Record<string, unknown> }) => void>();
+    listen.mockImplementation(async (eventName, callback) => {
+      handlers.set(eventName, callback);
+      return vi.fn();
+    });
+
+    renderHook(() => useMonitorEvents());
+    await waitFor(() => {
+      expect(handlers.get('terminal-agent-remote-session-created')).toBeDefined();
+    });
+    act(() => {
+      handlers.get('terminal-agent-remote-session-created')?.({
+        payload: {
+          summary: {
+            sessionId: 'agent-pty-1',
+            title: 'Production',
+            host: 'prod.example.com',
+            port: 22,
+            username: 'alice',
+            terminalSessionId: 'terminal-agent-1',
+            terminalGeneration: 1,
+          },
+          profileId: 'profile-1',
+          sourceSessionId: 'user-ssh-1',
+        },
+      });
+    });
+
+    expect(useTerminalStore.getState().sessions).toContainEqual(expect.objectContaining({
+      sessionId: 'agent-pty-1',
+      agentOwned: true,
+      agentSourceSessionId: 'user-ssh-1',
+      terminalGeneration: 1,
+    }));
   });
 });

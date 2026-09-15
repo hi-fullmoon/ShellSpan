@@ -73,6 +73,24 @@ it('projects model, permission, and execution surface changes over an older snap
   expect(view.activityNodes.some(node => node.kind === 'unknown')).toBe(false);
 });
 
+it.each(['direct', 'boundTerminal'] as const)(
+  'loads the frozen %s value from a pre-surface-semantics persisted snapshot',
+  (executionSurface) => {
+    const persisted = snapshot();
+    const view = agentSessionView({
+      snapshot: {
+        ...persisted,
+        header: { ...persisted.header, executionSurface },
+      },
+      events: [],
+      lastCommittedSeq: 0,
+      hasTerminalEvent: false,
+    });
+
+    expect(view.snapshot.value.header.executionSurface).toBe(executionSurface);
+  },
+);
+
 function agentDependencies(
   events: readonly AgentSessionEvent[],
   order: string[] = [],

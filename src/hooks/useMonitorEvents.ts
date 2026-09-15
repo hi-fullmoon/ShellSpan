@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { listen, type Event, type UnlistenFn } from '@tauri-apps/api/event';
 import { useMonitorStore } from '@/stores/monitorStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import type { ClosedEvent, DisconnectEvent } from '@/types';
+import type { AgentRemoteTerminalCreatedEvent, ClosedEvent, DisconnectEvent } from '@/types';
 import { createLogger } from '@/lib/logger';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 
@@ -23,7 +23,8 @@ export function useMonitorEvents(): void {
 
   useEffect(() => {
     let disposed = false;
-    let unlisten: UnlistenFn | undefined;
+    let unlistenClosed: UnlistenFn | undefined;
+    let unlistenAgentTerminal: UnlistenFn | undefined;
 
     const handleClosed = (event: Event<ClosedEvent>): void => {
       const payload = event.payload;
@@ -58,15 +59,51 @@ export function useMonitorEvents(): void {
           unlistenFn();
           return;
         }
-        unlisten = unlistenFn;
+        unlistenClosed = unlistenFn;
       })
       .catch((error) => {
         logger.error('Failed to register ssh-closed listener', error);
       });
 
+    listen<AgentRemoteTerminalCreatedEvent>(
+      'terminal-agent-remote-session-created',
+      (event) => {
+        const payload = event.payload;
+        const store = useTerminalStore.getState();
+        if (
+          payload.replacesSessionId
+          && store.sessions.some((session) => session.sessionId === payload.replacesSessionId)
+        ) {
+          store.reconnectSession(
+            payload.replacesSessionId,
+            payload.summary,
+            payload.profileId,
+          );
+          return;
+        }
+        store.addSession(payload.summary, payload.profileId, {
+          insertAfterId: payload.sourceSessionId,
+          agentOwned: true,
+          agentSourceSessionId: payload.sourceSessionId,
+          replacesSessionId: payload.replacesSessionId,
+        });
+      },
+    )
+      .then((unlistenFn) => {
+        if (disposed) {
+          unlistenFn();
+          return;
+        }
+        unlistenAgentTerminal = unlistenFn;
+      })
+      .catch((error) => {
+        logger.error('Failed to register Agent remote terminal listener', error);
+      });
+
     return () => {
       disposed = true;
-      unlisten?.();
+      unlistenClosed?.();
+      unlistenAgentTerminal?.();
     };
   }, []);
 }
