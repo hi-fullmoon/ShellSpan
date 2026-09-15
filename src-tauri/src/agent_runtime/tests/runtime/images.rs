@@ -23,9 +23,10 @@ async fn image_submission_keeps_bound_terminal_output_with_the_image_turn() {
     assert!(requests[0].messages.iter().any(|message| matches!(message,
         ModelMessage::User { content } if content.contains("Welcome to the image server")
     )));
-    assert!(requests[0].messages.iter().any(|message| matches!(message,
-        ModelMessage::UserImages { .. }
-    )));
+    assert!(requests[0]
+        .messages
+        .iter()
+        .any(|message| matches!(message, ModelMessage::UserImages { .. })));
 }
 
 #[tokio::test]
