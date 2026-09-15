@@ -1,7 +1,10 @@
 import { readFile, access } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { includedRustFiles } from '../check-rust-includes.mjs';
+import {
+  includedRustFiles,
+  rustIncludeSourceIsFormatted,
+} from '../check-rust-includes.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 describe('quality gate wiring', () => {
@@ -32,5 +35,17 @@ describe('quality gate wiring', () => {
       'src-tauri/src/agent_runtime/tests/runtime/file_references.rs',
       'src-tauri/src/agent_runtime/tests/native_adapter/file_references_sftp.rs',
     ]));
+  });
+  it('accepts include context indentation but still rejects real Rust formatting defects', () => {
+    const formatted = 'fn ready() {\n    let value = 1;\n}\n';
+    const moduleIndented = formatted
+      .split('\n')
+      .map(line => line ? `    ${line}` : line)
+      .join('\n');
+    const unformatted = '    fn  broken( ){let value=1;}\n';
+
+    expect(rustIncludeSourceIsFormatted(formatted)).toBe(true);
+    expect(rustIncludeSourceIsFormatted(moduleIndented)).toBe(true);
+    expect(rustIncludeSourceIsFormatted(unformatted)).toBe(false);
   });
 });

@@ -1499,11 +1499,7 @@
             .unwrap();
         assert_eq!(
             broker
-                .promote_agent_ssh_candidate_transport(
-                    "agent-ssh-2",
-                    Some("agent-ssh-1"),
-                    Ok,
-                )
+                .promote_agent_ssh_candidate_transport("agent-ssh-2", Some("agent-ssh-1"), Ok,)
                 .unwrap_err(),
             "TERMINAL_BROKER_AGENT_SSH_CANDIDATE_NOT_READY"
         );
@@ -1530,7 +1526,10 @@
                 .accept_integration_event("agent-ssh-2", "candidate-integration-2", event)
                 .unwrap();
         }
-        assert_ne!(provisional.terminal_session_id, predecessor.terminal_session_id);
+        assert_ne!(
+            provisional.terminal_session_id,
+            predecessor.terminal_session_id
+        );
         assert_eq!(provisional.terminal_generation, 1);
         let predecessor_during_candidate = broker
             .snapshot(Some("agent-ssh-1"))
@@ -1604,11 +1603,7 @@
                 .unwrap();
             let integration = format!("integration-{candidate}");
             broker
-                .register_integration_channel(
-                    candidate,
-                    &integration,
-                    TerminalShellKind::Bash,
-                )
+                .register_integration_channel(candidate, &integration, TerminalShellKind::Bash)
                 .unwrap();
             for event in [
                 TerminalIntegrationControlEvent::Ready {
@@ -1655,18 +1650,23 @@
             .collect::<Vec<_>>();
         let failures = results
             .iter()
-            .filter_map(|(candidate, result)| result.as_ref().err().map(|error| (*candidate, error)))
+            .filter_map(|(candidate, result)| {
+                result.as_ref().err().map(|error| (*candidate, error))
+            })
             .collect::<Vec<_>>();
         assert_eq!(winners.len(), 1, "exactly one candidate must promote");
         assert_eq!(failures.len(), 1, "the stale candidate must be rejected");
         let (winner, promoted) = winners[0];
         let (loser, failure) = failures[0];
-        assert_eq!(promoted.terminal_session_id, predecessor.terminal_session_id);
+        assert_eq!(
+            promoted.terminal_session_id,
+            predecessor.terminal_session_id
+        );
         assert_eq!(promoted.terminal_generation, 2);
         assert!(broker.observe_raw_output("agent-ssh-1", b"stale").is_err());
         assert!(failure.starts_with("TERMINAL_BROKER_PREDECESSOR_NOT_FOUND"));
-        assert!(broker
-            .abort_agent_ssh_candidate_transport(loser)
-            .unwrap());
-        broker.observe_raw_output(winner, b"winner-current").unwrap();
+        assert!(broker.abort_agent_ssh_candidate_transport(loser).unwrap());
+        broker
+            .observe_raw_output(winner, b"winner-current")
+            .unwrap();
     }

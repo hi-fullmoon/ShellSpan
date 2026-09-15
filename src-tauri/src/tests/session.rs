@@ -883,11 +883,7 @@
         );
         assert!(snapshot.integration_capabilities.is_empty());
         assert!(broker
-            .promote_agent_ssh_candidate_transport(
-                "fixture-agent-unsupported",
-                None,
-                Ok,
-            )
+            .promote_agent_ssh_candidate_transport("fixture-agent-unsupported", None, Ok,)
             .is_err());
         assert!(broker
             .abort_agent_ssh_candidate_transport("fixture-agent-unsupported")
