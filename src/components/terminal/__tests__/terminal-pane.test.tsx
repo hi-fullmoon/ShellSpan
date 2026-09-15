@@ -168,15 +168,17 @@ describe('TerminalPane', () => {
     const { container } = render(<TerminalPane activeSession={makeSession()} />);
     const bar = screen.getByTestId('agent-terminal-lease-bar');
     expect(bar).toHaveAttribute('data-operation-id', 'operation-1');
-    expect(bar).toHaveTextContent('terminal.agentLease.agentIdentity');
+    expect(bar).toHaveTextContent('terminal.agentLease.surfaceLabel');
+    expect(bar).toHaveTextContent('terminal.agentLease.commandRunning');
+    expect(bar).toHaveTextContent('terminal.agentLease.inputLockedLabel');
     expect(bar).not.toHaveTextContent('terminal.agentLease.runtime');
     expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"]')).toBeNull();
     expect(bar).not.toHaveClass('absolute');
-    expect(bar).toHaveClass('border-app-border/40');
+    expect(bar).toHaveClass('border-app-border/50');
     expect(screen.getByTestId('agent-visible-terminal-aura'))
       .toHaveClass('pointer-events-none', 'absolute', 'inset-0');
     const identity = screen.getByTestId('agent-terminal-lease-identity');
-    expect(identity).toHaveClass('h-5', 'text-xs');
+    expect(identity).toHaveClass('h-6', 'text-xs');
     expect(identity).not.toHaveAttribute('title');
     expect(bar).not.toHaveTextContent('[Agent] $ echo [REDACTED]');
     const separator = screen.getByTestId('agent-terminal-lease-separator');

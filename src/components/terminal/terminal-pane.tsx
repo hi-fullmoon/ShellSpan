@@ -32,6 +32,7 @@ import {
   BotIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  CircleStopIcon,
   XIcon,
 } from 'lucide-react';
 
@@ -59,62 +60,78 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
     shownFailureOperationRef.current = lease.operationId;
     showError(t('terminal.agentLease.takeoverFailed'));
   }, [lease.operationId, lease.takeoverFailed, showError, t]);
-  const agentId = lease.agentSessionId.length > 16
-    ? `${lease.agentSessionId.slice(0, 12)}…`
-    : lease.agentSessionId;
   const interactionHint = !lease.terminalOwned
     ? t('terminal.agentLease.turnRunning')
     : lease.inputBlocked
       ? t('terminal.agentLease.inputBlockedAccessibleHint')
       : t('terminal.agentLease.inputLocked');
+  const activityLabel = lease.terminalOwned
+    ? t('terminal.agentLease.commandRunning')
+    : t('terminal.agentLease.turnRunning');
+  const inputLabel = lease.terminalOwned
+    ? t('terminal.agentLease.inputLockedLabel')
+    : t('terminal.agentLease.inputAvailableLabel');
 
   return (
     <div
-      className="flex min-h-8 shrink-0 items-center gap-1.5 border-b border-app-border/40 bg-muted/40 px-2"
+      className="agent-terminal-lease-bar relative flex min-h-10 shrink-0 items-center gap-2 border-b border-app-border/50 bg-app-surface px-2.5"
       role="status"
       aria-live="polite"
       aria-atomic="true"
       data-testid="agent-terminal-lease-bar"
       data-operation-id={lease.operationId}
+      data-terminal-owned={lease.terminalOwned || undefined}
+      data-input-blocked={lease.inputBlocked || undefined}
     >
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger
-            render={(
-              <Badge
-                variant="outline"
-                data-testid="agent-terminal-lease-identity"
-              />
-            )}
-          >
-            <BotIcon data-icon="inline-start" />
-            {t('terminal.agentLease.agentIdentity', { id: agentId })}
-          </TooltipTrigger>
-          <TooltipContent>{lease.agentSessionId}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-      <span
-        className="relative h-5 w-px shrink-0"
-        aria-hidden="true"
-        data-testid="agent-terminal-lease-separator"
-      >
-        <Separator
-          orientation="vertical"
-          className="absolute inset-x-0 top-1/2 h-3.5 -translate-y-1/2"
-        />
-      </span>
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger
+              render={(
+                <Badge
+                  variant="outline"
+                  className="agent-terminal-lease-identity h-6"
+                  data-testid="agent-terminal-lease-identity"
+                />
+              )}
+            >
+              <BotIcon data-icon="inline-start" />
+              {t('terminal.agentLease.surfaceLabel')}
+            </TooltipTrigger>
+            <TooltipContent>{t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <span
+          className="relative h-5 w-px shrink-0"
+          aria-hidden="true"
+          data-testid="agent-terminal-lease-separator"
+        >
+          <Separator
+            orientation="vertical"
+            className="absolute inset-x-0 top-1/2 h-3.5 -translate-y-1/2"
+          />
+        </span>
+        <span
+          className="min-w-0 truncate text-xs text-app-text-soft"
+          aria-hidden="true"
+        >
+          {activityLabel}
+        </span>
+      </div>
       <span className="sr-only">{interactionHint}</span>
-      <span
-        className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground lg:inline"
+      <Badge
+        variant={lease.terminalOwned ? 'secondary' : 'outline'}
+        className="agent-terminal-input-state hidden h-6 shrink-0 sm:inline-flex"
         aria-hidden="true"
       >
-        {interactionHint}
-      </span>
+        <span className="agent-terminal-input-state-dot" />
+        {inputLabel}
+      </Badge>
       <Button
         type="button"
-        variant="secondary"
+        variant="outline"
         size="xs"
-        className="shrink-0 gap-1"
+        className="agent-terminal-takeover shrink-0 gap-1"
         disabled={lease.takeoverRequested}
         aria-busy={lease.takeoverRequested || undefined}
         aria-label={t(lease.takeoverRequested
@@ -125,7 +142,7 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
         {lease.takeoverRequested ? (
           <ButtonSpinner data-icon="inline-start" aria-hidden="true" />
         ) : (
-          <XIcon data-icon="inline-start" />
+          <CircleStopIcon data-icon="inline-start" />
         )}
         {t('terminal.agentLease.takeover')}
       </Button>
