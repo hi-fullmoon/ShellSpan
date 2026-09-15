@@ -45,6 +45,8 @@ import type {
   SessionSummary,
   StatusEvent,
   SystemHealth,
+  TerminalBrokerSnapshot,
+  TerminalIntegrationStateEvent,
   RemoteHealthSnapshotRequest,
   RemoteHealthSnapshotResult,
   TransferBatchResult,
@@ -189,8 +191,21 @@ export async function invokeCreateSession(
 export async function invokeCreateLocalSession(
   cols = 120,
   rows = 30,
+  replacesSessionId?: string,
 ): Promise<SessionSummary> {
-  return invokeLogged<SessionSummary>('create_local_session', { cols, rows });
+  return invokeLogged<SessionSummary>('create_local_session', {
+    cols,
+    rows,
+    ...(replacesSessionId ? { replacesSessionId } : {}),
+  });
+}
+
+export async function invokeGetTerminalBrokerSnapshot(
+  sessionId?: string,
+): Promise<TerminalBrokerSnapshot> {
+  return invokeLogged<TerminalBrokerSnapshot>('get_terminal_broker_snapshot', {
+    ...(sessionId ? { sessionId } : {}),
+  });
 }
 
 export function invokeWriteSession(sessionId: string, data: string): Promise<void> {
@@ -812,6 +827,7 @@ export function buildSessionCreateRequest(
   profile: ConnectionProfile,
   cols: number,
   rows: number,
+  replacesSessionId?: string,
 ): SessionCreateRequest {
   return {
     operationId: createOperationId('ssh-connect'),
@@ -828,6 +844,7 @@ export function buildSessionCreateRequest(
     terminalCols: cols,
     terminalRows: rows,
     jumpHost: profile.jumpHost ? mapJumpHostAuthMethod(profile.jumpHost) : undefined,
+    ...(replacesSessionId ? { replacesSessionId } : {}),
   };
 }
 
@@ -896,6 +913,14 @@ export async function listenToAgentTerminalLease(
   callback: EventCallback<AgentTerminalLeaseEvent>,
 ): Promise<UnlistenFn> {
   return listen<AgentTerminalLeaseEvent>('agent-terminal-lease', (event) => {
+    callback(event);
+  });
+}
+
+export async function listenToTerminalIntegrationState(
+  callback: EventCallback<TerminalIntegrationStateEvent>,
+): Promise<UnlistenFn> {
+  return listen<TerminalIntegrationStateEvent>('terminal-integration-state', (event) => {
     callback(event);
   });
 }

@@ -36,9 +36,10 @@ vi.mock('@/lib/ipc/tauri', () => ({
   listenToSshData: vi.fn().mockResolvedValue(() => {}),
   listenToSshStatus: vi.fn().mockResolvedValue(() => {}),
   listenToSshClosed: vi.fn().mockResolvedValue(() => {}),
-  buildSessionCreateRequest: vi.fn((_profile, cols, rows) => ({
+  buildSessionCreateRequest: vi.fn((_profile, cols, rows, replacesSessionId) => ({
     terminalCols: cols,
     terminalRows: rows,
+    ...(replacesSessionId ? { replacesSessionId } : {}),
   })),
 }));
 
@@ -118,6 +119,7 @@ describe('useReconnectSession', () => {
     await result.current('s1');
 
     expect(invokeCreateLocalSession).toHaveBeenCalledTimes(1);
+    expect(invokeCreateLocalSession).toHaveBeenCalledWith(80, 24, undefined);
     expect(invokeCreateSession).not.toHaveBeenCalled();
     expect(invokeCloseSession).toHaveBeenCalledWith('s1');
     expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s3');
@@ -201,6 +203,73 @@ describe('useReconnectSession', () => {
       expect.objectContaining({ id: 'p1', password: 'mock-pass' }),
       'terminal:s2',
     );
+  });
+
+  it('restored pre-broker sessions reconnect as fresh logical broker sessions', async () => {
+    const profile = {
+      id: 'p1', name: 'Alpha', host: 'h', port: 22, username: 'u',
+      authMethod: 'password' as const, createdAt: 0, updatedAt: 0,
+    };
+    useProfileStore.setState({ profiles: [profile] });
+    useTerminalStore.getState().addRestoredSessions([{
+      sessionId: 'restored-before-broker',
+      title: 'Alpha',
+      host: 'h',
+      port: 22,
+      username: 'u',
+      profileId: 'p1',
+    }]);
+
+    const { buildSessionCreateRequest, invokeCreateSession } =
+      await import('@/lib/ipc/tauri');
+    const { result } = renderHook(() => useReconnectSession());
+    await result.current('restored-before-broker');
+
+    expect(buildSessionCreateRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'p1' }),
+      120,
+      30,
+      undefined,
+    );
+    expect(invokeCreateSession).toHaveBeenCalledWith(expect.not.objectContaining({
+      replacesSessionId: expect.anything(),
+    }));
+  });
+
+  it('requests rollover only for a valid process-local broker identity', async () => {
+    useTerminalStore.getState().addSession({
+      sessionId: 'transport-1',
+      terminalSessionId: 'terminal-stable',
+      terminalGeneration: 3,
+      title: 'powershell',
+      host: 'local',
+      port: 0,
+      username: 'u',
+    });
+
+    const { invokeCreateLocalSession } = await import('@/lib/ipc/tauri');
+    const { result } = renderHook(() => useReconnectSession());
+    await result.current('transport-1');
+
+    expect(invokeCreateLocalSession).toHaveBeenCalledWith(120, 30, 'transport-1');
+  });
+
+  it('does not request rollover for incomplete or invalid broker identity', async () => {
+    useTerminalStore.getState().addSession({
+      sessionId: 'transport-1',
+      terminalSessionId: 'invalid broker id',
+      terminalGeneration: 0,
+      title: 'powershell',
+      host: 'local',
+      port: 0,
+      username: 'u',
+    });
+
+    const { invokeCreateLocalSession } = await import('@/lib/ipc/tauri');
+    const { result } = renderHook(() => useReconnectSession());
+    await result.current('transport-1');
+
+    expect(invokeCreateLocalSession).toHaveBeenCalledWith(120, 30, undefined);
   });
 
   it('closes a replacement created after the source session was removed', async () => {
