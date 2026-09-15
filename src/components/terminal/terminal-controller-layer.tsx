@@ -5,9 +5,12 @@ import { terminalRegistry } from './registry/terminal-registry';
 import { useAppStore } from '@/stores/appStore';
 import {
   invokeAgentTerminalLeaseReady,
+  invokeGetTerminalBrokerSnapshot,
   invokeInterruptAgentRuntime,
+  invokeTakeoverAgentTerminal,
   listenToAgentRuntimeSession,
   listenToAgentTerminalLease,
+  listenToTerminalIntegrationState,
 } from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
 import { agentTerminalLeaseState } from './agent-terminal-lease-state';
@@ -141,7 +144,13 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     }, TAKEOVER_CONFIRMATION_TIMEOUT_MS);
     pendingStop = { operationId, timer };
     pendingTurnStops.set(agentSessionId, pendingStop);
-    void invokeInterruptAgentRuntime({ sessionId: agentSessionId }).then(() => {
+    void invokeTakeoverAgentTerminal({
+      sessionId,
+      agentSessionId,
+      operationId,
+    }).catch((error) => {
+      logger.warn(`Terminal takeover failed ${operationId}`, error);
+    }).then(() => invokeInterruptAgentRuntime({ sessionId: agentSessionId })).then(() => {
       if (pendingTurnStops.get(agentSessionId) !== pendingStop) return;
       clearTurn(agentSessionId);
     }).catch((error) => {
@@ -294,6 +303,7 @@ export const TerminalControllerLayer: React.FC = () => {
   const sessions = useTerminalStore((s) => s.sessions);
   const setStatus = useTerminalStore((s) => s.setStatus);
   const setClosed = useTerminalStore((s) => s.setClosed);
+  const setIntegrationState = useTerminalStore((s) => s.setIntegrationState);
   const reconnectSession = useReconnectSession();
   const terminalFontSize = useAppStore((s) => s.terminalFontSize);
   const terminalFontFamily = useAppStore((s) => s.terminalFontFamily);
@@ -361,6 +371,33 @@ export const TerminalControllerLayer: React.FC = () => {
         if (session.status === 'disconnected') {
           controller.writeDisconnectedHint();
         }
+        if (session.terminalSessionId) {
+          void invokeGetTerminalBrokerSnapshot(session.sessionId).then((snapshot) => {
+            const integrated = snapshot.session;
+            if (!integrated) return;
+            const remoteRolloutMissing = integrated.transportKind === 'sshPty'
+              && Boolean(integrated.agentPtyOwner)
+              && !snapshot.remoteAgentPtyRollout.enabled;
+            const executionRolloutMissing = !snapshot.terminalExecuteRollout.enabled
+              || remoteRolloutMissing;
+            setIntegrationState({
+              sessionId: session.sessionId,
+              terminalSessionId: integrated.terminalSessionId,
+              terminalGeneration: integrated.terminalGeneration,
+              state: integrated.integrationState === 'ready'
+                && executionRolloutMissing
+                ? 'degraded'
+                : integrated.integrationState,
+              shell: integrated.integrationShell,
+              reason: integrated.integrationState === 'ready'
+                && executionRolloutMissing
+                ? remoteRolloutMissing ? 'remoteAgentPtyDisabled' : 'terminalExecuteDisabled'
+                : integrated.integrationReason,
+            });
+          }).catch((error) => {
+            logger.warn(`Failed to read terminal integration state ${session.sessionId}`, error);
+          });
+        }
       }
     }
     for (const sessionId of knownRef.current) {
@@ -369,12 +406,13 @@ export const TerminalControllerLayer: React.FC = () => {
       }
     }
     knownRef.current = currentIds;
-  }, [sessions, setStatus, setClosed, reconnectSession]);
+  }, [sessions, setStatus, setClosed, setIntegrationState, reconnectSession]);
 
   useEffect(() => {
     let disposed = false;
     let unlistenLease: (() => void) | undefined;
     let unlistenSession: (() => void) | undefined;
+    let unlistenIntegration: (() => void) | undefined;
     const coordinator = createAgentTerminalLeaseCoordinator();
 
     void listenToAgentTerminalLease((event) => {
@@ -393,14 +431,23 @@ export const TerminalControllerLayer: React.FC = () => {
     }).catch((error) => {
       logger.warn('Failed to subscribe to Agent turn lifecycle', error);
     });
+    void listenToTerminalIntegrationState((event) => {
+      setIntegrationState(event.payload);
+    }).then((disposeListener) => {
+      if (disposed) disposeListener();
+      else unlistenIntegration = disposeListener;
+    }).catch((error) => {
+      logger.warn('Failed to subscribe to terminal integration state', error);
+    });
 
     return () => {
       disposed = true;
       unlistenLease?.();
       unlistenSession?.();
+      unlistenIntegration?.();
       coordinator.dispose();
     };
-  }, []);
+  }, [setIntegrationState]);
 
   return null;
 };

@@ -85,12 +85,17 @@ const SessionTab: React.FC<SessionTabProps> = ({
   onClose,
   onTogglePin,
 }) => {
+  const { t } = useI18n();
   return (
     <div
       role="tab"
       tabIndex={0}
       aria-selected={active}
       aria-busy={session.pendingConnection || undefined}
+      aria-label={session.agentOwned
+        ? t('terminal.tab.agentPtyLabel', { title: session.title })
+        : session.title}
+      data-agent-owned={session.agentOwned || undefined}
       data-session-tab={session.sessionId}
       // Activate on pointerdown (like browser tabs) instead of click: dnd-kit
       // swallows the click after any drag, so a trackpad tap that jitters past
@@ -159,6 +164,15 @@ const SessionTab: React.FC<SessionTabProps> = ({
           />
         )}
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
+        {session.agentOwned && (
+          <span
+            aria-hidden="true"
+            title={t('terminal.tab.agentPty')}
+            className="shrink-0 rounded border border-app-tab-accent/50 px-1 text-[9px] leading-3 text-app-tab-accent"
+          >
+            {t('terminal.tab.agentPtyBadge')}
+          </span>
+        )}
       </div>
       {!session.pendingConnection && (session.pinned ? (
         <button

@@ -168,7 +168,7 @@ describe('TerminalPane', () => {
     const { container } = render(<TerminalPane activeSession={makeSession()} />);
     const bar = screen.getByTestId('agent-terminal-lease-bar');
     expect(bar).toHaveAttribute('data-operation-id', 'operation-1');
-    expect(bar).toHaveTextContent('terminal.agentLease.surfaceLabel');
+    expect(bar).toHaveTextContent('terminal.agentLease.visibleCommandLabel');
     expect(bar).toHaveTextContent('terminal.agentLease.commandRunning');
     expect(bar).toHaveTextContent('terminal.agentLease.inputLockedLabel');
     expect(bar).not.toHaveTextContent('terminal.agentLease.runtime');
@@ -195,6 +195,21 @@ describe('TerminalPane', () => {
 
     act(() => agentTerminalLeaseState.clear('s1', 'operation-1'));
     expect(screen.queryByTestId('agent-terminal-lease-bar')).not.toBeInTheDocument();
+  });
+
+  it('restores only the legacy lease copy when surface semantics roll back', () => {
+    setAgentLease();
+    render(
+      <TerminalPane
+        activeSession={makeSession()}
+        surfaceSemanticsEnabled={false}
+      />,
+    );
+
+    const bar = screen.getByTestId('agent-terminal-lease-bar');
+    expect(bar).toHaveTextContent('terminal.agentLease.surfaceLabel');
+    expect(bar).not.toHaveTextContent('terminal.agentLease.visibleCommandLabel');
+    expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' })).toBeEnabled();
   });
 
   it('routes the takeover button and Escape through the lease action', async () => {
