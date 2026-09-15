@@ -52,7 +52,8 @@ export function AgentExecutionSurfaceSelector({
           <Button
             variant="ghost"
             size="xs"
-            className="ai-execution-surface-trigger h-7 min-w-0 max-w-[154px] px-[7px] @max-[480px]/ai-workspace:size-7 @max-[480px]/ai-workspace:shrink-0 @max-[480px]/ai-workspace:p-0 @max-[480px]/ai-workspace:[&_[data-icon=inline-end]]:hidden"
+            className="ai-execution-surface-trigger h-7 min-w-0 max-w-[154px] gap-1 px-[7px] @max-[480px]/ai-workspace:size-7 @max-[480px]/ai-workspace:shrink-0 @max-[480px]/ai-workspace:p-0 @max-[480px]/ai-workspace:[&_[data-icon=inline-end]]:hidden"
+            data-execution-surface={surface}
             disabled={disabled}
             aria-label={`${t('agent.executionSurface')}: ${t(current.label)}`}
             aria-description={disabledHint}
@@ -68,7 +69,7 @@ export function AgentExecutionSurfaceSelector({
         side="top"
         sideOffset={8}
         align="start"
-        className="ai-execution-surface-menu w-[200px] max-w-[calc(100vw-16px)] p-[3px]"
+        className="ai-execution-surface-menu w-[240px] max-w-[calc(100vw-16px)] p-[3px]"
         aria-label={t('agent.executionSurface')}
       >
         <DropdownMenuGroup>
@@ -85,11 +86,16 @@ export function AgentExecutionSurfaceSelector({
                   key={option.surface}
                   value={option.surface}
                   closeOnClick
-                  className="ai-execution-surface-menu-option min-h-[34px] gap-1.5 py-[5px] pl-2"
+                  className="ai-execution-surface-menu-option min-h-12 items-start gap-2 py-2 pr-8 pl-2"
                   aria-description={t(option.description)}
                 >
-                  <Icon strokeWidth={1.6} />
-                  <span>{t(option.label)}</span>
+                  <Icon className="mt-0.5" strokeWidth={1.6} />
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span>{t(option.label)}</span>
+                    <span className="text-[11px] leading-4 text-muted-foreground" aria-hidden="true">
+                      {t(option.description)}
+                    </span>
+                  </span>
                 </DropdownMenuRadioItem>
               );
             })}
