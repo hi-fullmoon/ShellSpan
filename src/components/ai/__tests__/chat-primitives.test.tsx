@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Message, MessageScroller } from '../chat-primitives';
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -8,6 +8,8 @@ vi.mock('@/hooks/useI18n', () => ({
     t: (key: string) => key,
   }),
 }));
+
+afterEach(() => vi.unstubAllGlobals());
 
 function measureScroller(container: HTMLElement, itemCount: () => number) {
   const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
@@ -241,7 +243,6 @@ describe('MessageScroller', () => {
 
     installItemRects();
     scrollTo.mockClear();
-    scrollTop = 100;
     if (input === 'native scrollbar') {
       // Native scrollbar gestures target the overflow viewport rather than a
       // separately mounted scrollbar element.
@@ -251,10 +252,13 @@ describe('MessageScroller', () => {
     } else {
       fireEvent.wheel(viewport, { deltaY: -100 });
     }
+    scrollTop = 100;
     fireEvent.scroll(viewport);
     const jump = container.querySelector<HTMLButtonElement>('[data-slot="message-scroller-button"]');
     await waitFor(() => expect(jump).toHaveAttribute('data-active', 'true'));
 
+    // A downward gesture while still reading above the live edge must not resume follow.
+    fireEvent.wheel(viewport, { deltaY: 20 });
     itemCount = 5;
     rerender(thread());
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -296,6 +300,59 @@ describe('MessageScroller', () => {
 
     await waitFor(() => expect(geometry.scrollTop).toBe(geometry.end()));
     expect(geometry.scrollTo).toHaveBeenCalled();
+  });
+
+  it.each(['no input', 'content pointer', 'downward wheel'])('keeps following a growing streaming row after $input during resize lag', async (input) => {
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    class ResizeObserverMock implements ResizeObserver {
+      constructor(callback: ResizeObserverCallback) { resizeCallbacks.push(callback); }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+
+    const { container } = render(
+      <MessageScroller followKey="streaming">
+        <div data-ai-node-key="response">Streaming response</div>
+      </MessageScroller>,
+    );
+    const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
+    const content = container.querySelector<HTMLElement>('[data-slot="message-scroller-content"]')!;
+    const item = container.querySelector<HTMLElement>('[data-slot="message-scroller-item"]')!;
+    let height = 300;
+    let scrollTop = 200;
+    const rect = (top: number, rectHeight: number) => ({
+      top, bottom: top + rectHeight, height: rectHeight, left: 0, right: 320, width: 320,
+      x: 0, y: top, toJSON: () => ({}),
+    });
+    const scrollTo = vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); });
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, get: () => height },
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollTo: { configurable: true, value: scrollTo },
+      getBoundingClientRect: { configurable: true, value: () => rect(0, 100) },
+    });
+    item.getBoundingClientRect = () => rect(-scrollTop, height);
+    await waitFor(() => expect(container.querySelector('[data-slot="message-scroller"]')).not.toHaveClass('invisible'));
+    fireEvent.scroll(viewport);
+    scrollTo.mockClear();
+
+    // A streamed line wraps before MessageScroller's scheduled resize pass.
+    height = 400;
+    if (input === 'content pointer') {
+      fireEvent.pointerDown(content);
+      fireEvent.pointerUp(content);
+    } else if (input === 'downward wheel') {
+      fireEvent.wheel(viewport, { deltaY: 20 });
+    }
+    act(() => {
+      for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
+    });
+
+    await waitFor(() => expect(scrollTop).toBe(300));
+    expect(scrollTo).toHaveBeenCalled();
   });
 
   it('follows a new user turn when already at the bottom', async () => {

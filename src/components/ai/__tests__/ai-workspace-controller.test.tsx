@@ -655,6 +655,74 @@ describe('AiWorkspaceController', () => {
     expect(editor).toHaveTextContent('');
   });
 
+  it('configures a historical continuation before sending without changing the old session', async () => {
+    connectedTerminal('terminal-new');
+    const old = runningAgentView('agent-old', 'terminal-old');
+    const nextBase = runningAgentView('agent-new', 'terminal-new');
+    const created: AiSessionView = { ...nextBase,
+      status: 'idle', summary: { ...nextBase.summary, status: 'idle' },
+      snapshot: { kind: 'agent', value: { ...nextBase.snapshot.value, status: 'idle',
+        header: { ...nextBase.snapshot.value.header, continuedFromSessionId: old.summary.id } } },
+    };
+    const second = { ...provider, id: 'second', model: 'second-model' };
+    useAiSettingsStore.setState({ providers: [provider, second], defaultProviderId: provider.id });
+    const agent = adapter({
+      list: vi.fn(async (input) => ({ sessions: input.targetId ? [] : [old.summary] })),
+      open: vi.fn(async (id) => id === old.summary.id ? old : created),
+      create: vi.fn(async () => created),
+      submit: vi.fn(async (sessionId, input) => ({
+        sessionId: sessionId!, mode: input.mode, clientOperationId: input.clientOperationId,
+      })),
+      selectModel: vi.fn(async () => undefined),
+      setPermission: vi.fn(async () => undefined),
+      setExecutionSurface: vi.fn(async () => undefined),
+    });
+    const user = userEvent.setup();
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+    await user.click(screen.getByRole('button', { name: 'Conversation history' }));
+    const history = await screen.findByRole('dialog', { name: 'Session history' });
+    await user.click(await within(history).findByText('Run checks'));
+
+    const model = await screen.findByRole('button', { name: /Model selection: model-test/ });
+    const permission = screen.getByRole('button', { name: /Permission mode:/ });
+    const execution = screen.getByRole('button', { name: /Command execution: Background/ });
+    expect(model).toBeEnabled();
+    expect(permission).toBeEnabled();
+    expect(execution).toBeEnabled();
+
+    await user.click(model);
+    await user.click(await screen.findByRole('menuitem', { name: /Model.*model-test/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'second-model' }));
+    await user.click(permission);
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Full access' }));
+    await user.click(await screen.findByRole('button', { name: 'Enable full access' }));
+    await user.click(execution);
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Visible terminal' }));
+
+    expect(useAiSettingsStore.getState().defaultProviderId).toBe(second.id);
+    expect(useAgentPermissionStore.getState().getMode('terminal-new')).toBe('fullAccess');
+    expect(agent.selectModel).not.toHaveBeenCalled();
+    expect(agent.setPermission).not.toHaveBeenCalled();
+    expect(agent.setExecutionSurface).not.toHaveBeenCalled();
+
+    const editor = screen.getByTestId('ai-workspace-composer');
+    await user.type(editor, 'Check the service with these settings');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(agent.create).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        continuedFromSessionId: old.summary.id,
+        target: expect.objectContaining({ sessionId: 'terminal-new' }),
+        permissionMode: 'operator',
+        executionSurface: 'boundTerminal',
+      }),
+    })));
+    await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(created.summary.id,
+      expect.objectContaining({ provider: expect.objectContaining({ id: second.id, model: second.model }) })));
+    expect(agent.selectModel).not.toHaveBeenCalled();
+    expect(agent.setPermission).not.toHaveBeenCalled();
+    expect(agent.setExecutionSurface).not.toHaveBeenCalled();
+  });
+
   it('keeps a historical draft when creating the continuation fails', async () => {
     connectedTerminal('terminal-new');
     const old = runningAgentView('agent-old', 'terminal-old');

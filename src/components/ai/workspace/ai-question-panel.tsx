@@ -134,7 +134,7 @@ export function AiQuestionPanel({
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon"
             aria-label={t(
               collapsed
                 ? 'ai.workspace.question.expand'
@@ -148,7 +148,7 @@ export function AiQuestionPanel({
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon"
             aria-label={t('common.close')}
             onClick={() => setCollapsed(true)}
           >

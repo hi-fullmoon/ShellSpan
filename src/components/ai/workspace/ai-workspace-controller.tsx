@@ -25,19 +25,28 @@ export function AiWorkspaceController({
   const controller = useAiSessionController({ scope, adapter });
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
   const session = controller.view?.snapshot.value;
+  const configuringContinuation = controller.historicalContinuationAvailable;
+  const existingSessionLocked = !configuringContinuation
+    && Boolean(session?.archived || session?.header.subagent);
   const modelSettingsLocked = controller.settingsBusy || !controller.canStartAgent
-    || controller.readOnlySession || Boolean(session?.archived || session?.header.subagent);
-  const runtimeSettingsLocked = modelSettingsLocked || Boolean(session?.ended)
-    || ['completed', 'cancelled', 'failed'].includes(controller.view?.status ?? 'idle');
+    || controller.historicalContinuationBusy
+    || (controller.readOnlySession && !configuringContinuation)
+    || existingSessionLocked;
+  const runtimeSettingsLocked = modelSettingsLocked || (!configuringContinuation && (
+    Boolean(session?.ended)
+    || ['completed', 'cancelled', 'failed'].includes(controller.view?.status ?? 'idle')
+  ));
   const executionSurfaceLocked = modelSettingsLocked
-    || controller.composer.phase === 'submitting'
-    || controller.composer.phase === 'stopping'
-    || (controller.view
-      ? controller.view.status === 'running'
-        || controller.view.status === 'waiting'
-        || Boolean(controller.view.snapshot.value.uncertainNativeEffects)
-        || Boolean(controller.view.pendingApproval || controller.view.pendingQuestion)
-      : Boolean(controller.composer.sessionId));
+    || (!configuringContinuation && (
+      controller.composer.phase === 'submitting'
+      || controller.composer.phase === 'stopping'
+      || (controller.view
+        ? controller.view.status === 'running'
+          || controller.view.status === 'waiting'
+          || Boolean(controller.view.snapshot.value.uncertainNativeEffects)
+          || Boolean(controller.view.pendingApproval || controller.view.pendingQuestion)
+        : Boolean(controller.composer.sessionId))
+    ));
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
   return (
     <AiWorkspaceRoot
@@ -80,7 +89,7 @@ export function AiWorkspaceController({
         <AiComposerModelSelector
           disabled={modelSettingsLocked}
           selection={controller.selectedProvider}
-          onSelect={controller.view ? controller.selectModel : undefined}
+          onSelect={controller.view && !configuringContinuation ? controller.selectModel : undefined}
         />
       )}
       permissionControl={scope === 'terminal' && activeTerminalId
@@ -90,7 +99,7 @@ export function AiWorkspaceController({
               variant="composer"
               disabled={runtimeSettingsLocked}
               mode={controller.selectedPermission}
-              onModeChange={controller.view ? controller.selectPermission : undefined}
+              onModeChange={controller.view && !configuringContinuation ? controller.selectPermission : undefined}
             />
         )
         : undefined}

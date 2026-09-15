@@ -18,6 +18,7 @@ const UNIT_SEPARATOR: char = '\u{001f}';
 const REPLACE_CURRENT_TERMINAL_LINE: &str = "\r\u{001b}[2K";
 const PTY_CAPTURE_LIMIT_BYTES: usize = 1024 * 1024;
 const PTY_PROTOCOL_BUFFER_LIMIT_BYTES: usize = 2 * 1024 * 1024;
+const COMMAND_DISPLAY_LIMIT_CHARS: usize = 120;
 #[cfg(not(test))]
 const FRONTEND_READY_TIMEOUT: Duration = Duration::from_secs(3);
 #[cfg(test)]
@@ -634,10 +635,7 @@ impl PtyRegistryNative {
         command: &str,
         shell_kind: Option<PtyShellKindNative>,
     ) -> Result<Arc<PtyOperationNative>, String> {
-        let safe_command_display = format!(
-            "[Agent] $ {}",
-            crate::redaction::redact_sensitive_text(command)
-        );
+        let safe_command_display = agent_command_display(command);
         // The interactive shell prompt is still visible on the current line
         // while the authenticated wrapper runs behind the display filter.
         // Replace that prompt instead of moving down and leaving an empty line.
@@ -983,7 +981,9 @@ impl PtyRegistryNative {
         } else {
             release_reason_for_lifecycle(registration.operation.snapshot()?.state)?
         };
-        self.settle_registration(session_id, &registration, reason)
+        let settled = self.settle_registration(session_id, &registration, reason)?;
+        self.leases.release_turn(&registration.agent_session_id)?;
+        Ok(settled)
     }
 
     pub(crate) fn shutdown_all(&self, sessions: &SessionManager) -> Result<usize, String> {
@@ -1070,6 +1070,22 @@ fn quote_posix(value: &str) -> String {
 
 fn quote_powershell(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
+}
+
+fn agent_command_display(command: &str) -> String {
+    let redacted = crate::redaction::redact_sensitive_text(command);
+    let normalized = redacted.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut characters = normalized.chars();
+    let shown = characters
+        .by_ref()
+        .take(COMMAND_DISPLAY_LIMIT_CHARS)
+        .collect::<String>();
+    let suffix = if characters.next().is_some() {
+        "…"
+    } else {
+        ""
+    };
+    format!("[Agent] $ {shown}{suffix}")
 }
 
 fn build_posix_wrapper(command: &str, marker: &str) -> String {
@@ -1190,10 +1206,10 @@ mod tests {
     }
 
     #[cfg(any(unix, target_os = "windows"))]
-    fn run_local_shell_protocol(wrapper: &str, cols: u16) -> String {
+    fn run_local_shell_protocol(wrapper: &str, cols: u16, rows: u16) -> String {
         let pair = native_pty_system()
             .openpty(PtySize {
-                rows: 24,
+                rows,
                 cols,
                 pixel_width: 0,
                 pixel_height: 0,
@@ -1273,30 +1289,36 @@ mod tests {
             PtyLifecycleNative::Exited,
             "single chunk raw={raw:?}"
         );
-        let operation = PtyOperationNative::new(
-            marker.into(),
-            Some(shell_kind),
-            "\r\u{1b}[2K[Agent] $ safe fixture command\r\n".into(),
-        );
-        let mut display = String::new();
         let characters = raw.chars().collect::<Vec<_>>();
-        for chunk in characters.chunks(17) {
-            display.push_str(&operation.observe(&chunk.iter().collect::<String>()));
+        for chunk_size in [1, 2, 3, 7, 17, 31, 64, 128, 4096] {
+            let operation = PtyOperationNative::new(
+                marker.into(),
+                Some(shell_kind),
+                "\r\u{1b}[2K[Agent] $ safe fixture command\r\n".into(),
+            );
+            let mut display = String::new();
+            for chunk in characters.chunks(chunk_size) {
+                display.push_str(&operation.observe(&chunk.iter().collect::<String>()));
+            }
+            let snapshot = operation.snapshot().unwrap();
+            assert_eq!(
+                snapshot.state,
+                PtyLifecycleNative::Exited,
+                "chunk={chunk_size} snapshot={snapshot:?} raw={raw:?}"
+            );
+            assert_eq!(
+                snapshot.exit_code,
+                Some(7),
+                "chunk={chunk_size} raw={raw:?}"
+            );
+            assert!(snapshot.combined_output.contains(expected_output));
+            assert!(display.contains(expected_output));
+            assert!(display.contains("[Agent] $ safe fixture command"));
+            assert!(!display.contains(marker), "chunk={chunk_size}");
+            assert!(!display.contains("__ss_"), "chunk={chunk_size}");
+            assert!(!snapshot.combined_output.contains(marker));
+            assert!(!snapshot.combined_output.contains("__ss_"));
         }
-        let snapshot = operation.snapshot().unwrap();
-        assert_eq!(
-            snapshot.state,
-            PtyLifecycleNative::Exited,
-            "snapshot={snapshot:?} raw={raw:?}"
-        );
-        assert_eq!(snapshot.exit_code, Some(7), "raw={raw:?}");
-        assert!(snapshot.combined_output.contains(expected_output));
-        assert!(display.contains(expected_output));
-        assert!(display.contains("[Agent] $ safe fixture command"));
-        assert!(!display.contains(marker));
-        assert!(!display.contains("__ss_"));
-        assert!(!snapshot.combined_output.contains(marker));
-        assert!(!snapshot.combined_output.contains("__ss_"));
     }
 
     #[test]
@@ -1659,6 +1681,19 @@ mod tests {
         assert!(stdout.contains(":7"));
     }
 
+    #[test]
+    fn displayed_agent_command_is_single_line_and_bounded() {
+        let command = format!("Write-Output {}\nWrite-Output done", "x".repeat(200));
+        let display = agent_command_display(&command);
+        assert!(display.starts_with("[Agent] $ Write-Output "));
+        assert!(display.ends_with('…'));
+        assert!(!display.contains('\n'));
+        assert!(
+            display.chars().count()
+                <= "[Agent] $ ".chars().count() + COMMAND_DISPLAY_LIMIT_CHARS + 1
+        );
+    }
+
     #[cfg(target_os = "windows")]
     #[test]
     fn windows_conpty_visible_command_protocol_is_end_to_end() {
@@ -1666,14 +1701,16 @@ mod tests {
             "shellspan_native_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let wrapper =
             build_powershell_wrapper("Write-Output 'visible-conpty-output'; exit 7", marker);
-        for cols in [40, 80, 120, 240] {
-            let raw = run_local_shell_protocol(&wrapper, cols);
-            assert_real_protocol_stream(
-                &raw,
-                marker,
-                PtyShellKindNative::PowerShell,
-                "visible-conpty-output",
-            );
+        for rows in [24, 64] {
+            for cols in [40, 80, 120, 240] {
+                let raw = run_local_shell_protocol(&wrapper, cols, rows);
+                assert_real_protocol_stream(
+                    &raw,
+                    marker,
+                    PtyShellKindNative::PowerShell,
+                    "visible-conpty-output",
+                );
+            }
         }
     }
 
@@ -1698,7 +1735,7 @@ mod tests {
     fn local_posix_pty_visible_command_protocol_is_end_to_end() {
         let marker = "marker-local-posix-e2e";
         let wrapper = build_posix_wrapper("printf visible-posix-output; exit 7", marker);
-        let raw = run_local_shell_protocol(&wrapper, 240);
+        let raw = run_local_shell_protocol(&wrapper, 240, 24);
         assert_real_protocol_stream(
             &raw,
             marker,

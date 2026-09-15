@@ -85,6 +85,8 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
   const { t } = useI18n();
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const followingIntentRef = useRef(initialAnchor === undefined);
+  const pointerScrollStartRef = useRef<number | null>(null);
   const restoredAnchorRef = useRef(false);
   const restoreFrameRef = useRef<number | null>(null);
   const [positionReady, setPositionReady] = useState(false);
@@ -139,23 +141,38 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
     followEndKeyRef.current = followEndKey;
     if (followEndKey === undefined || followEndKey === previous) return;
     cancelRestore();
+    followingIntentRef.current = true;
     scrollToEnd();
     setPositionReady(true);
   }, [cancelRestore, followEndKey, scrollToEnd]);
 
   const handlePointerDown = useCallback(() => {
     interruptRestore();
-    const viewport = viewportRef.current;
-    if (!viewport || isNearBottom(viewport)) return;
-    // Keep the reading intent for interactions away from the live edge.
-    viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 0 }));
+    pointerScrollStartRef.current = viewportRef.current?.scrollTop ?? null;
   }, [interruptRestore]);
+
+  const handleScrollCapture = useCallback(() => {
+    const viewport = viewportRef.current;
+    const start = pointerScrollStartRef.current;
+    if (!viewport || start === null || Math.abs(viewport.scrollTop - start) <= 0.5) return;
+    pointerScrollStartRef.current = null;
+    if (viewport.scrollTop < start && !isNearBottom(viewport)) {
+      followingIntentRef.current = false;
+      // The primitive can still consider a recent programmatic scroll active.
+      // Release it only after an actual pointer-driven upward scroll.
+      viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+    }
+  }, []);
 
   const handleWheelCapture = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     const viewport = viewportRef.current;
-    if (viewport && event.deltaY >= 0 && isNearBottom(viewport)) {
+    if (event.deltaY < 0) {
+      followingIntentRef.current = false;
+      return;
+    }
+    if (viewport && (followingIntentRef.current || isNearBottom(viewport))) {
       // The primitive treats every wheel event as a request to stop following,
-      // even when a downward gesture cannot move the viewport any farther.
+      // even when a downward gesture only overlaps a pending streaming resize.
       event.stopPropagation();
     }
   }, []);
@@ -167,8 +184,10 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
 
   const readAnchor = useCallback(() => {
     const scrollport = viewportRef.current;
+    if (!scrollport) return;
+    if (isNearBottom(scrollport)) followingIntentRef.current = true;
     const content = contentRef.current;
-    if (!scrollport || !content || !onAnchorChange) return;
+    if (!content || !onAnchorChange) return;
     const viewportTop = scrollport.getBoundingClientRect().top;
     const rows = content.children;
     const count = rows.length - (content.lastElementChild?.hasAttribute('data-message-scroller-spacer') ? 1 : 0);
@@ -218,7 +237,10 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
         const spacer = content.querySelector<HTMLElement>('[data-message-scroller-spacer]');
         // A near-end position must also resume following, including anchors
         // saved before atBottom was recorded.
-        if ((spacer && !spacer.hidden) || isNearBottom(scrollport)) scrollToEnd();
+        if ((spacer && !spacer.hidden) || isNearBottom(scrollport)) {
+          followingIntentRef.current = true;
+          scrollToEnd();
+        }
       };
     } else {
       restoreAnchor = () => {
@@ -251,11 +273,17 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
     >
       <MessageScrollerViewport
         ref={viewportRef}
+        onScrollCapture={handleScrollCapture}
         onScroll={readAnchor}
         onWheelCapture={handleWheelCapture}
         onWheel={interruptRestore}
-        onTouchMove={interruptRestore}
-        onKeyDown={interruptRestore}
+        onTouchMove={() => { followingIntentRef.current = false; interruptRestore(); }}
+        onKeyDown={(event) => {
+          if (['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', ' '].includes(event.key)) {
+            followingIntentRef.current = false;
+          }
+          interruptRestore();
+        }}
       >
         <MessageScrollerContent ref={contentRef} className={cn('gap-4 px-3 py-4', contentClassName)}>
           {messageItems}

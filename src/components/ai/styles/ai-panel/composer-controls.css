@@ -87,6 +87,11 @@
   opacity: 0.4;
 }
 
+.ai-composer-primary .ai-composer-stop-icon {
+  width: 12px;
+  height: 12px;
+}
+
 .ai-composer-stop {
   background: transparent;
   color: var(--dsw-alias-label-secondary);

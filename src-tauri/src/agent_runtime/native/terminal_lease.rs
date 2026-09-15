@@ -124,6 +124,7 @@ type LeasePublisher = Arc<dyn Fn(&AgentTerminalLeaseEvent) + Send + Sync>;
 #[derive(Clone)]
 pub(crate) struct TerminalLeaseManager {
     leases: Arc<Mutex<HashMap<String, LeaseRecord>>>,
+    turn_guards: Arc<Mutex<HashMap<String, String>>>,
     changed: Arc<Condvar>,
     publisher: Arc<Mutex<Option<LeasePublisher>>>,
 }
@@ -132,6 +133,7 @@ impl Default for TerminalLeaseManager {
     fn default() -> Self {
         Self {
             leases: Arc::new(Mutex::new(HashMap::new())),
+            turn_guards: Arc::new(Mutex::new(HashMap::new())),
             changed: Arc::new(Condvar::new()),
             publisher: Arc::new(Mutex::new(None)),
         }
@@ -139,6 +141,35 @@ impl Default for TerminalLeaseManager {
 }
 
 impl TerminalLeaseManager {
+    pub(crate) fn begin_turn(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+    ) -> Result<(), String> {
+        let mut turn_guards = self
+            .turn_guards
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+        if turn_guards
+            .get(session_id)
+            .is_some_and(|owner| owner != agent_session_id)
+        {
+            return Err(TerminalLeaseError::Busy.to_string());
+        }
+        let leases = self
+            .leases
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+        if leases
+            .get(session_id)
+            .is_some_and(|record| record.lease.agent_session_id != agent_session_id)
+        {
+            return Err(TerminalLeaseError::Busy.to_string());
+        }
+        turn_guards.insert(session_id.to_string(), agent_session_id.to_string());
+        Ok(())
+    }
+
     pub(crate) fn set_publisher(&self, publisher: LeasePublisher) -> Result<(), String> {
         *self
             .publisher
@@ -163,6 +194,18 @@ impl TerminalLeaseManager {
             acquired_at_unix_ms: super::current_unix_ms(),
         };
         {
+            // The guard survives individual command leases until TurnEnd.
+            // Acquire it before the lease mutex, matching the User write path.
+            let mut turn_guards = self
+                .turn_guards
+                .lock()
+                .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+            if turn_guards
+                .get(session_id)
+                .is_some_and(|owner| owner != agent_session_id)
+            {
+                return Err(TerminalLeaseError::Busy.to_string());
+            }
             let mut leases = self
                 .leases
                 .lock()
@@ -173,6 +216,7 @@ impl TerminalLeaseManager {
                 );
                 return Err(TerminalLeaseError::Busy.to_string());
             }
+            turn_guards.insert(session_id.to_string(), agent_session_id.to_string());
             leases.insert(
                 session_id.to_string(),
                 LeaseRecord {
@@ -235,6 +279,10 @@ impl TerminalLeaseManager {
         session_id: &str,
         reason: TerminalLeaseReleaseReason,
     ) -> Result<bool, String> {
+        self.turn_guards
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+            .remove(session_id);
         let lease = self
             .leases
             .lock()
@@ -252,6 +300,10 @@ impl TerminalLeaseManager {
     }
 
     pub(crate) fn release_all(&self, reason: TerminalLeaseReleaseReason) -> Result<usize, String> {
+        self.turn_guards
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+            .clear();
         let leases = {
             let mut records = self
                 .leases
@@ -400,6 +452,13 @@ impl TerminalLeaseManager {
         // Keep authorization and enqueue in one lease critical section. Without
         // this, a User write could pass while Idle and race an Agent acquire
         // before its bytes reach the terminal command queue.
+        let turn_guards = self
+            .turn_guards
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+        if matches!(source, TerminalInputSource::User) && turn_guards.contains_key(session_id) {
+            return Err(TerminalLeaseError::UserInputBlocked.to_string());
+        }
         let leases = self
             .leases
             .lock()
@@ -408,7 +467,23 @@ impl TerminalLeaseManager {
         sessions.write_session_input(session_id, data)
     }
 
+    pub(crate) fn release_turn(&self, agent_session_id: &str) -> Result<(), String> {
+        self.turn_guards
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+            .retain(|_, owner| owner != agent_session_id);
+        Ok(())
+    }
+
     pub(crate) fn has_lease(&self, session_id: &str) -> Result<bool, String> {
+        if self
+            .turn_guards
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+            .contains_key(session_id)
+        {
+            return Ok(true);
+        }
         Ok(self
             .leases
             .lock()
@@ -588,6 +663,8 @@ mod tests {
                 TerminalLeaseReleaseReason::Completed,
             )
             .unwrap());
+        assert!(manager.has_lease("terminal-1").unwrap());
+        manager.release_turn("agent-1").unwrap();
         assert!(!manager.has_lease("terminal-1").unwrap());
         assert!(!manager
             .release(
@@ -655,6 +732,78 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(writes, vec!["before", "agent"]);
+    }
+
+    #[test]
+    fn user_input_stays_blocked_between_commands_until_turn_end() {
+        let manager = TerminalLeaseManager::default();
+        let (sessions, receiver) = sessions();
+        manager.begin_turn("terminal-1", "agent-1").unwrap();
+        assert!(manager
+            .write(
+                &sessions,
+                "terminal-1",
+                "blocked before first command".into(),
+                TerminalInputSource::User,
+            )
+            .unwrap_err()
+            .starts_with("TERMINAL_INPUT_BLOCKED_BY_AGENT:"));
+        acquire(&manager);
+        manager
+            .release(
+                "terminal-1",
+                "agent-1",
+                "task-1",
+                "operation-1",
+                TerminalLeaseReleaseReason::Completed,
+            )
+            .unwrap();
+        assert!(manager.has_lease("terminal-1").unwrap());
+        assert!(manager
+            .write(
+                &sessions,
+                "terminal-1",
+                "blocked".into(),
+                TerminalInputSource::User
+            )
+            .unwrap_err()
+            .starts_with("TERMINAL_INPUT_BLOCKED_BY_AGENT:"));
+        assert!(manager
+            .acquire("terminal-1", "agent-2", "task-2", "operation-2", None)
+            .unwrap_err()
+            .starts_with("TERMINAL_LEASE_BUSY:"));
+        manager
+            .acquire("terminal-1", "agent-1", "task-1", "operation-2", None)
+            .unwrap();
+        manager
+            .release(
+                "terminal-1",
+                "agent-1",
+                "task-1",
+                "operation-2",
+                TerminalLeaseReleaseReason::Completed,
+            )
+            .unwrap();
+        manager.release_turn("agent-1").unwrap();
+        assert!(!manager.has_lease("terminal-1").unwrap());
+        manager
+            .write(
+                &sessions,
+                "terminal-1",
+                "accepted".into(),
+                TerminalInputSource::User,
+            )
+            .unwrap();
+        assert_eq!(
+            receiver
+                .try_iter()
+                .filter_map(|command| match command {
+                    SessionCommand::Write(data) => Some(data),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            vec!["accepted"]
+        );
     }
 
     #[test]

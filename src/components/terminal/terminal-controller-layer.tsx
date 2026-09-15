@@ -4,6 +4,7 @@ import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { terminalRegistry } from './registry/terminal-registry';
 import { useAppStore } from '@/stores/appStore';
 import {
+  invokeGetAgentRuntimeSession,
   invokeAgentTerminalLeaseReady,
   invokeInterruptAgentRuntime,
   listenToAgentRuntimeSession,
@@ -55,6 +56,12 @@ export interface AgentTerminalLeaseCoordinator {
 export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordinator {
   let disposed = false;
   const activeLeases = new Map<string, ActiveLeaseResources>();
+  const retainedInputs = new Map<string, {
+    sessionId: string;
+    controller: TerminalController;
+    release: () => void;
+    removeLifecycle: () => void;
+  }>();
   const turnSurfaces = new Map<string, { sessionId: string; operationId: string; turnId?: string }>();
   const currentTurns = new Map<string, string>();
   const pendingTurnStops = new Map<string, {
@@ -86,14 +93,34 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     if (pendingStop) clearTimeout(pendingStop.timer);
     pendingTurnStops.delete(agentSessionId);
     const surface = turnSurfaces.get(agentSessionId);
-    if (!surface) return;
-    const active = activeLeases.get(surface.sessionId);
-    if (active?.lease.agentSessionId === agentSessionId) releaseResources(active, false);
-    agentTerminalLeaseState.clear(surface.sessionId, surface.operationId);
-    turnSurfaces.delete(agentSessionId);
+    if (surface) {
+      const active = activeLeases.get(surface.sessionId);
+      if (active?.lease.agentSessionId === agentSessionId) releaseResources(active, false);
+      agentTerminalLeaseState.clear(surface.sessionId, surface.operationId);
+      turnSurfaces.delete(agentSessionId);
+    }
+    retainedInputs.get(agentSessionId)?.release();
+    retainedInputs.get(agentSessionId)?.removeLifecycle();
+    retainedInputs.delete(agentSessionId);
   };
 
   const cleanup = (active: ActiveLeaseResources, focus: boolean, keepForTurn = false): void => {
+    if (activeLeases.get(active.lease.sessionId)?.lease.operationId !== active.lease.operationId) return;
+    if (keepForTurn && active.releaseInput && active.controller) {
+      retainedInputs.get(active.lease.agentSessionId)?.release();
+      retainedInputs.get(active.lease.agentSessionId)?.removeLifecycle();
+      retainedInputs.set(active.lease.agentSessionId, {
+        sessionId: active.lease.sessionId,
+        controller: active.controller,
+        release: active.releaseInput,
+        removeLifecycle: active.controller.subscribeLifecycle((lifecycle) => {
+          if (lifecycle.type === 'rebound' || lifecycle.type === 'disposed') {
+            clearTurn(active.lease.agentSessionId);
+          }
+        }),
+      });
+      active.releaseInput = undefined;
+    }
     if (!releaseResources(active, focus)) return;
     const { lease } = active;
     if (keepForTurn) {
@@ -106,6 +133,9 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       }));
       return;
     }
+    retainedInputs.get(lease.agentSessionId)?.release();
+    retainedInputs.get(lease.agentSessionId)?.removeLifecycle();
+    retainedInputs.delete(lease.agentSessionId);
     agentTerminalLeaseState.clear(lease.sessionId, lease.operationId);
     const pendingStop = pendingTurnStops.get(lease.agentSessionId);
     if (pendingStop) clearTimeout(pendingStop.timer);
@@ -163,17 +193,34 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       if (lease.state === 'released') {
         const active = activeLeases.get(lease.sessionId);
         if (active?.lease.operationId === lease.operationId) {
-          cleanup(active, true, lease.reason === 'completed');
+          // A command ending does not end the Agent turn. Keep the same input
+          // suppression until TurnEnd (or an explicit confirmed takeover).
+          cleanup(active, true, true);
         }
         return;
       }
 
       const previous = activeLeases.get(lease.sessionId);
       if (previous?.lease.operationId === lease.operationId) return;
+      const controller = terminalRegistry.get(lease.sessionId);
+      let inheritedInput: (() => void) | undefined;
+      if (previous?.lease.agentSessionId === lease.agentSessionId && previous.controller === controller) {
+        inheritedInput = previous.releaseInput;
+        previous.releaseInput = undefined;
+      }
       if (previous) releaseResources(previous, false);
 
       const acquiredLease = { ...lease, state: 'acquired' as const };
-      const controller = terminalRegistry.get(lease.sessionId);
+      const retained = retainedInputs.get(lease.agentSessionId);
+      if (retained) {
+        retainedInputs.delete(lease.agentSessionId);
+        retained.removeLifecycle();
+        if (retained.sessionId === lease.sessionId && retained.controller === controller) {
+          inheritedInput = retained.release;
+        } else {
+          retained.release();
+        }
+      }
       const previousView = agentTerminalLeaseState.get(lease.sessionId);
       const pendingTurnStop = pendingTurnStops.has(lease.agentSessionId);
       const turnStartedAtUnixMs = previousView?.agentSessionId === lease.agentSessionId
@@ -182,6 +229,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       const active: ActiveLeaseResources = {
         lease: acquiredLease,
         controller,
+        releaseInput: inheritedInput,
       };
       activeLeases.set(lease.sessionId, active);
       turnSurfaces.set(lease.agentSessionId, {
@@ -195,11 +243,14 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         active.removeDisplayFilter = controller.subscribeOutputFilter(
           createAgentTerminalLeaseDisplayFilter(lease.operationId),
         );
-        active.releaseInput = controller.suppressUserInput(() => {
-          agentTerminalLeaseState.update(lease.sessionId, lease.operationId, (current) => ({
-            ...current,
-            inputBlocked: true,
-          }));
+        active.releaseInput ??= controller.suppressUserInput(() => {
+          const current = agentTerminalLeaseState.get(lease.sessionId);
+          if (current?.agentSessionId === lease.agentSessionId) {
+            agentTerminalLeaseState.update(lease.sessionId, current.operationId, (view) => ({
+              ...view,
+              inputBlocked: true,
+            }));
+          }
         });
         active.removeLifecycle = controller.subscribeLifecycle((lifecycle) => {
           if (lifecycle.type === 'rebound' || lifecycle.type === 'disposed') {
@@ -256,8 +307,58 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     handleSession(event) {
       if (disposed) return;
       if (event.type === 'turn/start' && event.turnId) {
-        clearTurn(event.sessionId);
+        const currentTurn = currentTurns.get(event.sessionId);
+        const surface = turnSurfaces.get(event.sessionId);
+        if (currentTurn && currentTurn !== event.turnId) clearTurn(event.sessionId);
+        else if (surface && !surface.turnId) {
+          turnSurfaces.set(event.sessionId, { ...surface, turnId: event.turnId });
+        }
         currentTurns.set(event.sessionId, event.turnId);
+        const turnId = event.turnId;
+        void invokeGetAgentRuntimeSession({ sessionId: event.sessionId }).then((snapshot) => {
+          if (disposed || currentTurns.get(event.sessionId) !== turnId) return;
+          if (snapshot.header.executionSurface !== 'boundTerminal') return;
+          const sessionId = snapshot.header.target?.sessionId;
+          if (!sessionId || turnSurfaces.has(event.sessionId)) return;
+          const controller = terminalRegistry.get(sessionId);
+          const operationId = `turn:${turnId}`;
+          if (controller) {
+            retainedInputs.set(event.sessionId, {
+              sessionId,
+              controller,
+              release: controller.suppressUserInput(() => {
+                const current = agentTerminalLeaseState.get(sessionId);
+                if (current?.agentSessionId === event.sessionId) {
+                  agentTerminalLeaseState.update(sessionId, current.operationId, (view) => ({
+                    ...view,
+                    inputBlocked: true,
+                  }));
+                }
+              }),
+              removeLifecycle: controller.subscribeLifecycle((lifecycle) => {
+                if (lifecycle.type === 'rebound' || lifecycle.type === 'disposed') {
+                  clearTurn(event.sessionId);
+                }
+              }),
+            });
+          }
+          turnSurfaces.set(event.sessionId, { sessionId, operationId, turnId });
+          agentTerminalLeaseState.set({
+            sessionId,
+            agentSessionId: event.sessionId,
+            taskId: snapshot.header.taskId,
+            operationId,
+            acquiredAtUnixMs: event.timeUnixMs,
+            state: 'acquired',
+            terminalOwned: false,
+            inputBlocked: false,
+            takeoverRequested: false,
+            takeoverFailed: false,
+            requestTakeover: () => requestTakeover(sessionId, operationId),
+          });
+        }).catch((error) => {
+          logger.warn(`Failed to bind Agent turn terminal ${event.sessionId}`, error);
+        });
         return;
       }
       if (event.type === 'turn/end') {
@@ -282,6 +383,11 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       for (const active of [...activeLeases.values()]) cleanup(active, false);
       activeLeases.clear();
       for (const agentSessionId of [...turnSurfaces.keys()]) clearTurn(agentSessionId);
+      for (const retained of retainedInputs.values()) {
+        retained.release();
+        retained.removeLifecycle();
+      }
+      retainedInputs.clear();
       turnSurfaces.clear();
       currentTurns.clear();
       for (const pending of pendingTurnStops.values()) clearTimeout(pending.timer);
