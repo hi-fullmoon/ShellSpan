@@ -1,4 +1,7 @@
 import type { AppSection } from '@/types';
+import {
+  legacyRealTerminalPresentationState,
+} from '@/lib/terminal/terminal-surface-semantics';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { AgentPermissionSelector } from '../agent-permission-selector';
@@ -24,6 +27,12 @@ export function AiWorkspaceController({
 }: AiWorkspaceControllerProps): React.ReactNode {
   const controller = useAiSessionController({ scope, adapter });
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
+  const activeTerminalStatus = useTerminalStore((state) => state.sessions.find(
+    (candidate) => candidate.sessionId === state.activeSessionId,
+  )?.status);
+  const activeTerminalIntegrationState = useTerminalStore((state) => state.sessions.find(
+    (candidate) => candidate.sessionId === state.activeSessionId,
+  )?.integrationState);
   const session = controller.view?.snapshot.value;
   const modelSettingsLocked = controller.settingsBusy || !controller.canStartAgent
     || controller.readOnlySession || Boolean(session?.archived || session?.header.subagent);
@@ -38,6 +47,16 @@ export function AiWorkspaceController({
         || Boolean(controller.view.snapshot.value.uncertainNativeEffects)
         || Boolean(controller.view.pendingApproval || controller.view.pendingQuestion)
       : Boolean(controller.composer.sessionId));
+  const realTerminalState = activeTerminalStatus === 'connected'
+    ? activeTerminalIntegrationState === 'ready'
+      ? 'ready'
+      : activeTerminalIntegrationState === 'initializing'
+        ? 'initializing'
+        : activeTerminalIntegrationState === 'unavailable'
+          || activeTerminalIntegrationState === 'invalidated'
+          ? 'unavailable'
+          : 'degraded'
+    : legacyRealTerminalPresentationState(activeTerminalStatus);
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
   return (
     <AiWorkspaceRoot
@@ -96,8 +115,9 @@ export function AiWorkspaceController({
         : undefined}
       executionSurfaceControl={scope === 'terminal' && activeTerminalId
         ? (
-          <AgentExecutionSurfaceSelector
+            <AgentExecutionSurfaceSelector
               surface={controller.selectedExecutionSurface}
+              realTerminalState={realTerminalState}
               disabled={executionSurfaceLocked}
               onSurfaceChange={controller.selectExecutionSurface}
             />
