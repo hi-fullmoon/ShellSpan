@@ -54,10 +54,16 @@ try {
   cargoTest('session::tests::remote_agent_ssh_pty_zsh_phase4_state_smoke', ['--ignored', '--exact']);
   cargoTest('session::tests::remote_agent_ssh_pty_unsupported_shell_is_unavailable', ['--ignored', '--exact']);
   cargoTest(
+    'session::tests::remote_integration_scope_cleans_resources_after_post_prepare_failure',
+    ['--ignored', '--exact'],
+  );
+  cargoTest(
     'execution::fixture::isolated_ssh_sftp_end_to_end_reviewed_execution_uname',
     ['--ignored', '--exact'],
   );
-  console.log('\nPhase 4 isolated SSH gate completed with real bash/zsh PTYs and Direct SSH exec.');
+  console.log(
+    '\nPhase 4 isolated SSH gate completed with real bash/zsh PTYs, post-prepare cleanup, and Direct SSH exec.',
+  );
 } finally {
   if (fixtureStarted) run(docker, [...compose, 'down']);
 }

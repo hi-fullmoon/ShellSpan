@@ -625,6 +625,14 @@ struct TransportAttachment {
 }
 
 #[derive(Debug, Clone)]
+struct AgentSshTransportCandidate {
+    expected_predecessor_transport_session_id: Option<String>,
+    provisional_terminal_session_id: String,
+    promoted_terminal_session_id: String,
+    promoted_terminal_generation: u64,
+}
+
+#[derive(Debug, Clone)]
 struct SubscriberState {
     status: TerminalSubscriberStatus,
     next_sequence: u64,
@@ -872,6 +880,7 @@ struct BrokerState {
     legacy_fallback_rollout: TerminalFeatureRolloutDecision,
     sessions: HashMap<String, SessionRecord>,
     transports: HashMap<String, TransportAttachment>,
+    agent_ssh_candidates: HashMap<String, AgentSshTransportCandidate>,
     closed_session_order: VecDeque<String>,
 }
 
@@ -914,6 +923,7 @@ impl Default for BrokerState {
             rollout,
             sessions: HashMap::new(),
             transports: HashMap::new(),
+            agent_ssh_candidates: HashMap::new(),
             closed_session_order: VecDeque::new(),
         }
     }
@@ -1129,7 +1139,7 @@ impl TerminalSessionBroker {
         )
     }
 
-    pub(crate) fn attach_agent_ssh_transport(
+    pub(crate) fn attach_agent_ssh_candidate_transport(
         &self,
         transport_session_id: &str,
         predecessor_transport_session_id: Option<&str>,
@@ -1146,13 +1156,284 @@ impl TerminalSessionBroker {
         if !enabled {
             return Err("TERMINAL_REMOTE_AGENT_PTY_DISABLED".into());
         }
-        self.attach_transport_with_owner(
-            transport_session_id,
-            predecessor_transport_session_id,
+        validate_identifier(transport_session_id, "transport session id")?;
+        let mut state = self.lock()?;
+        if state
+            .transports
+            .get(transport_session_id)
+            .is_some_and(|attachment| attachment.active)
+            || state
+                .agent_ssh_candidates
+                .contains_key(transport_session_id)
+        {
+            return Err("TERMINAL_BROKER_TRANSPORT_ALREADY_ATTACHED".into());
+        }
+
+        let (promoted_terminal_session_id, promoted_terminal_generation) =
+            match predecessor_transport_session_id {
+                Some(predecessor_transport_session_id) => {
+                    let predecessor = state
+                        .transports
+                        .get(predecessor_transport_session_id)
+                        .cloned()
+                        .ok_or_else(|| "TERMINAL_BROKER_PREDECESSOR_NOT_FOUND".to_string())?;
+                    let record = state
+                        .sessions
+                        .get(&predecessor.terminal_session_id)
+                        .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+                    if record.agent_pty_owner.as_ref() != Some(&owner) {
+                        return Err("TERMINAL_BROKER_PREDECESSOR_OWNERSHIP_MISMATCH".into());
+                    }
+                    if record.terminal_generation != predecessor.terminal_generation
+                        || record.transport_session_id != predecessor_transport_session_id
+                    {
+                        return Err("TERMINAL_BROKER_STALE_PREDECESSOR".into());
+                    }
+                    let next_generation = predecessor
+                        .terminal_generation
+                        .checked_add(1)
+                        .ok_or_else(counter_exhausted)?;
+                    if next_generation > JAVASCRIPT_MAX_SAFE_INTEGER {
+                        return Err(counter_exhausted());
+                    }
+                    (predecessor.terminal_session_id, next_generation)
+                }
+                None => (format!("terminal-{}", Uuid::new_v4()), 1),
+            };
+        let provisional_terminal_session_id = if predecessor_transport_session_id.is_some() {
+            format!("terminal-candidate-{}", Uuid::new_v4())
+        } else {
+            promoted_terminal_session_id.clone()
+        };
+        let provisional_generation = 1;
+        let record = SessionRecord::open(
+            provisional_terminal_session_id.clone(),
+            provisional_generation,
+            transport_session_id.to_string(),
             TerminalTransportKind::SshPty,
-            geometry,
             Some(owner),
+            geometry,
+        );
+        state
+            .sessions
+            .insert(provisional_terminal_session_id.clone(), record);
+        state.transports.insert(
+            transport_session_id.to_string(),
+            TransportAttachment {
+                terminal_session_id: provisional_terminal_session_id.clone(),
+                terminal_generation: provisional_generation,
+                active: true,
+            },
+        );
+        state.agent_ssh_candidates.insert(
+            transport_session_id.to_string(),
+            AgentSshTransportCandidate {
+                expected_predecessor_transport_session_id: predecessor_transport_session_id
+                    .map(str::to_string),
+                provisional_terminal_session_id: provisional_terminal_session_id.clone(),
+                promoted_terminal_session_id,
+                promoted_terminal_generation,
+            },
+        );
+        Ok(Some(TerminalBrokerAttachment {
+            terminal_session_id: provisional_terminal_session_id,
+            terminal_generation: provisional_generation,
+        }))
+    }
+
+    pub(crate) fn promote_agent_ssh_candidate_transport<T>(
+        &self,
+        transport_session_id: &str,
+        expected_predecessor_transport_session_id: Option<&str>,
+        publish: impl FnOnce(TerminalBrokerAttachment) -> Result<T, String>,
+    ) -> Result<T, String> {
+        self.promote_agent_ssh_candidate_transport_inner(
+            transport_session_id,
+            expected_predecessor_transport_session_id,
+            true,
+            publish,
         )
+    }
+
+    fn promote_agent_ssh_candidate_transport_inner<T>(
+        &self,
+        transport_session_id: &str,
+        expected_predecessor_transport_session_id: Option<&str>,
+        require_ready: bool,
+        publish: impl FnOnce(TerminalBrokerAttachment) -> Result<T, String>,
+    ) -> Result<T, String> {
+        validate_identifier(transport_session_id, "transport session id")?;
+        let mut state = self.lock()?;
+        let candidate = state
+            .agent_ssh_candidates
+            .get(transport_session_id)
+            .cloned()
+            .ok_or_else(|| "TERMINAL_BROKER_AGENT_SSH_CANDIDATE_NOT_FOUND".to_string())?;
+        if candidate
+            .expected_predecessor_transport_session_id
+            .as_deref()
+            != expected_predecessor_transport_session_id
+        {
+            return Err("TERMINAL_BROKER_STALE_PREDECESSOR".into());
+        }
+        let candidate_attachment = state
+            .transports
+            .get(transport_session_id)
+            .cloned()
+            .ok_or_else(|| "TERMINAL_BROKER_TRANSPORT_NOT_FOUND".to_string())?;
+        if !candidate_attachment.active
+            || candidate_attachment.terminal_session_id != candidate.provisional_terminal_session_id
+        {
+            return Err("TERMINAL_BROKER_STALE_GENERATION".into());
+        }
+        let candidate_record = state
+            .sessions
+            .get(&candidate.provisional_terminal_session_id)
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        if !candidate_record.open
+            || candidate_record.transport_session_id != transport_session_id
+            || candidate_record.active_command.is_some()
+        {
+            return Err("TERMINAL_BROKER_AGENT_SSH_CANDIDATE_NOT_QUIESCENT".into());
+        }
+        if require_ready
+            && (candidate_record.integration_state != TerminalIntegrationState::Ready
+                || !candidate_record.prompt_ready)
+        {
+            return Err("TERMINAL_BROKER_AGENT_SSH_CANDIDATE_NOT_READY".into());
+        }
+
+        let attachment = TerminalBrokerAttachment {
+            terminal_session_id: candidate.promoted_terminal_session_id.clone(),
+            terminal_generation: candidate.promoted_terminal_generation,
+        };
+        let Some(predecessor_transport_session_id) = expected_predecessor_transport_session_id
+        else {
+            let published = publish(attachment)?;
+            state.agent_ssh_candidates.remove(transport_session_id);
+            return Ok(published);
+        };
+
+        let predecessor_attachment = state
+            .transports
+            .get(predecessor_transport_session_id)
+            .cloned()
+            .ok_or_else(|| "TERMINAL_BROKER_PREDECESSOR_NOT_FOUND".to_string())?;
+        let predecessor_record = state
+            .sessions
+            .get(&predecessor_attachment.terminal_session_id)
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        if predecessor_record.agent_pty_owner != candidate_record.agent_pty_owner {
+            return Err("TERMINAL_BROKER_PREDECESSOR_OWNERSHIP_MISMATCH".into());
+        }
+        if predecessor_attachment.terminal_session_id != candidate.promoted_terminal_session_id
+            || predecessor_attachment
+                .terminal_generation
+                .checked_add(1)
+                .ok_or_else(counter_exhausted)?
+                != candidate.promoted_terminal_generation
+            || predecessor_record.terminal_generation != predecessor_attachment.terminal_generation
+            || predecessor_record.transport_session_id != predecessor_transport_session_id
+        {
+            return Err("TERMINAL_BROKER_STALE_PREDECESSOR".into());
+        }
+
+        let replaced_transport_ids = state
+            .transports
+            .iter()
+            .filter(|(candidate_transport_id, attachment)| {
+                candidate_transport_id.as_str() != transport_session_id
+                    && attachment.terminal_session_id == candidate.promoted_terminal_session_id
+            })
+            .map(|(transport_id, _)| transport_id.clone())
+            .collect::<Vec<_>>();
+        let replaced_transports = replaced_transport_ids
+            .into_iter()
+            .filter_map(|transport_id| {
+                state
+                    .transports
+                    .remove(&transport_id)
+                    .map(|attachment| (transport_id, attachment))
+            })
+            .collect::<Vec<_>>();
+        let mut predecessor_record = state
+            .sessions
+            .remove(&candidate.promoted_terminal_session_id)
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        let mut promoted = state
+            .sessions
+            .remove(&candidate.provisional_terminal_session_id)
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        promoted.terminal_session_id = candidate.promoted_terminal_session_id.clone();
+        promoted.terminal_generation = candidate.promoted_terminal_generation;
+        for frame in &mut promoted.replay {
+            frame.terminal_session_id = candidate.promoted_terminal_session_id.clone();
+            frame.terminal_generation = candidate.promoted_terminal_generation;
+        }
+        state
+            .sessions
+            .insert(candidate.promoted_terminal_session_id.clone(), promoted);
+        state.transports.insert(
+            transport_session_id.to_string(),
+            TransportAttachment {
+                terminal_session_id: candidate.promoted_terminal_session_id.clone(),
+                terminal_generation: candidate.promoted_terminal_generation,
+                active: true,
+            },
+        );
+
+        match publish(attachment) {
+            Ok(published) => {
+                state.agent_ssh_candidates.remove(transport_session_id);
+                state
+                    .closed_session_order
+                    .retain(|closed_id| closed_id != &candidate.promoted_terminal_session_id);
+                predecessor_record.close(TerminalGenerationCloseReason::Replaced);
+                Ok(published)
+            }
+            Err(error) => {
+                let mut staged = state
+                    .sessions
+                    .remove(&candidate.promoted_terminal_session_id)
+                    .expect("promoted Agent SSH candidate remains registered during publication");
+                staged.terminal_session_id = candidate.provisional_terminal_session_id.clone();
+                staged.terminal_generation = candidate_attachment.terminal_generation;
+                for frame in &mut staged.replay {
+                    frame.terminal_session_id = candidate.provisional_terminal_session_id.clone();
+                    frame.terminal_generation = candidate_attachment.terminal_generation;
+                }
+                state
+                    .sessions
+                    .insert(candidate.provisional_terminal_session_id, staged);
+                state
+                    .transports
+                    .insert(transport_session_id.to_string(), candidate_attachment);
+                state
+                    .sessions
+                    .insert(candidate.promoted_terminal_session_id, predecessor_record);
+                state.transports.extend(replaced_transports);
+                Err(error)
+            }
+        }
+    }
+
+    pub(crate) fn abort_agent_ssh_candidate_transport(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<bool, String> {
+        validate_identifier(transport_session_id, "transport session id")?;
+        let mut state = self.lock()?;
+        let Some(candidate) = state.agent_ssh_candidates.remove(transport_session_id) else {
+            return Ok(false);
+        };
+        state.transports.remove(transport_session_id);
+        if let Some(mut record) = state
+            .sessions
+            .remove(&candidate.provisional_terminal_session_id)
+        {
+            record.close(TerminalGenerationCloseReason::BrokerShutdown);
+        }
+        Ok(true)
     }
 
     fn attach_transport_with_owner(
