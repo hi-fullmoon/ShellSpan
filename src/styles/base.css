@@ -18,11 +18,50 @@
 }
 
 .agent-visible-terminal-aura {
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--app-primary) 18%, transparent), transparent 40px) left / 40px 100% no-repeat,
-    linear-gradient(270deg, color-mix(in srgb, var(--app-primary) 18%, transparent), transparent 40px) right / 40px 100% no-repeat,
-    linear-gradient(180deg, color-mix(in srgb, var(--app-primary) 14%, transparent), transparent 32px) top / 100% 32px no-repeat,
-    linear-gradient(0deg, color-mix(in srgb, var(--app-primary) 14%, transparent), transparent 32px) bottom / 100% 32px no-repeat;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--app-primary) 8%, transparent),
+    transparent 56px
+  ) top / 100% 56px no-repeat;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--app-primary) 28%, transparent);
+}
+
+.agent-terminal-lease-bar::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--app-primary) 28%, transparent),
+    var(--app-primary) 48%,
+    color-mix(in srgb, var(--app-primary) 28%, transparent)
+  );
+  content: '';
+}
+
+.agent-terminal-lease-identity {
+  border-color: color-mix(in srgb, var(--app-primary) 28%, var(--app-border));
+  background: color-mix(in srgb, var(--app-primary) 8%, transparent);
+  color: var(--app-primary);
+}
+
+.agent-terminal-input-state {
+  color: var(--app-text-soft);
+}
+
+.agent-terminal-input-state-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--app-success);
+}
+
+.agent-terminal-lease-bar[data-terminal-owned='true'] .agent-terminal-input-state-dot {
+  background: var(--app-warning);
+}
+
+.agent-terminal-takeover {
+  color: var(--app-text-soft);
 }
 
 .image-preview-overlay {
