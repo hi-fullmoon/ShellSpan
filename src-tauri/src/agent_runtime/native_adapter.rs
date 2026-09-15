@@ -81,10 +81,15 @@ impl NativeToolAdapter {
         {
             for session_id in sessions.agent_remote_session_ids()? {
                 let _ = runtime.terminal_closed(&session_id);
-                let _ = runtime.close_terminal_broker_transport(
-                    &session_id,
-                    crate::terminal_broker::TerminalGenerationCloseReason::BrokerShutdown,
-                );
+                if !runtime
+                    .abort_agent_ssh_terminal_broker_candidate(&session_id)
+                    .unwrap_or(false)
+                {
+                    let _ = runtime.close_terminal_broker_transport(
+                        &session_id,
+                        crate::terminal_broker::TerminalGenerationCloseReason::BrokerShutdown,
+                    );
+                }
                 let _ = sessions.close(&session_id);
             }
         }
@@ -125,6 +130,7 @@ impl NativeToolAdapter {
                 && binding.state.identity.port == *port
                 && binding.state.identity.username == *username
         });
+        let mut owned_candidate = None;
         let dedicated_session_id = if existing_ready {
             existing
                 .as_ref()
@@ -156,7 +162,7 @@ impl NativeToolAdapter {
                 database,
                 credentials,
             )?;
-            let summary = crate::commands::create_agent_remote_terminal_blocking(
+            let candidate = crate::commands::create_agent_remote_terminal_blocking(
                 &self.app,
                 sessions,
                 self.app.state::<crate::sftp_pool::SftpPool>().inner(),
@@ -171,41 +177,83 @@ impl NativeToolAdapter {
                 predecessor,
                 geometry.columns,
                 geometry.rows,
+                cancellation,
                 approval,
             )?;
-            summary.session_id
+            let session_id = candidate.session_id().to_string();
+            owned_candidate = Some(candidate);
+            session_id
         };
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        loop {
+        let readiness = loop {
             if cancellation.is_cancelled() {
-                let _ = sessions.close(&dedicated_session_id);
-                return Err(
+                break Err(
                     "Agent remote terminal creation was cancelled before command input".into(),
                 );
             }
-            let snapshot = self
+            let snapshot = match self
                 .engine
-                .terminal_broker_snapshot(Some(&dedicated_session_id))?
-                .session
-                .ok_or_else(|| "Agent remote terminal broker session disappeared".to_string())?;
+                .terminal_broker_snapshot(Some(&dedicated_session_id))
+            {
+                Ok(snapshot) => match snapshot.session {
+                    Some(session) => session,
+                    None => break Err("Agent remote terminal broker session disappeared".into()),
+                },
+                Err(error) => break Err(error),
+            };
             match snapshot.integration_state {
-                TerminalIntegrationState::Ready if snapshot.prompt_ready => return Ok(()),
+                TerminalIntegrationState::Ready if snapshot.prompt_ready => break Ok(()),
                 TerminalIntegrationState::Degraded
                 | TerminalIntegrationState::Unavailable
                 | TerminalIntegrationState::Invalidated => {
-                    return Err(format!(
+                    break Err(format!(
                         "TERMINAL_REMOTE_INTEGRATION_UNAVAILABLE: {}",
                         snapshot.integration_reason.as_deref().unwrap_or("unknown")
-                    ))
+                    ));
                 }
                 TerminalIntegrationState::Initializing | TerminalIntegrationState::Ready => {}
             }
             if std::time::Instant::now() >= deadline {
-                return Err("TERMINAL_REMOTE_INTEGRATION_TIMEOUT".into());
+                break Err("TERMINAL_REMOTE_INTEGRATION_TIMEOUT".into());
             }
             std::thread::sleep(std::time::Duration::from_millis(25));
+        };
+        if let Err(error) = readiness {
+            if let Some(candidate) = owned_candidate.as_ref() {
+                let cleanup_errors = crate::commands::abort_agent_remote_terminal_candidate(
+                    &self.app, sessions, candidate,
+                );
+                return Err(crate::commands::attachment_failure_message(
+                    &error,
+                    cleanup_errors,
+                ));
+            }
+            return Err(error);
         }
+        if let Some(candidate) = owned_candidate.as_ref() {
+            if cancellation.is_cancelled() {
+                let cleanup_errors = crate::commands::abort_agent_remote_terminal_candidate(
+                    &self.app, sessions, candidate,
+                );
+                return Err(crate::commands::attachment_failure_message(
+                    "Agent remote terminal creation was cancelled before publication",
+                    cleanup_errors,
+                ));
+            }
+            if let Err(error) = crate::commands::publish_agent_remote_terminal_candidate(
+                &self.app, sessions, candidate,
+            ) {
+                let cleanup_errors = crate::commands::abort_agent_remote_terminal_candidate(
+                    &self.app, sessions, candidate,
+                );
+                return Err(crate::commands::attachment_failure_message(
+                    &error,
+                    cleanup_errors,
+                ));
+            }
+        }
+        Ok(())
     }
 }
 

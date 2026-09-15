@@ -221,7 +221,7 @@ describe('terminal execution Phase 0 protocol contract', () => {
   });
 
   it('records Phase 2/3/4 platform evidence without promoting container results', async () => {
-    const [roadmap, rfc, matrix, phase2, phase3, phase4, windowsRunner, broker, benchmark, packageJsonText] = await Promise.all([
+    const [roadmap, rfc, matrix, phase2, phase3, phase4, windowsRunner, broker, brokerTests, benchmark, packageJsonText] = await Promise.all([
       readFile(path.join(protocolRoot, 'terminal-execution-roadmap.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-protocol-rfc.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-execution-test-matrix.md'), 'utf8'),
@@ -230,6 +230,7 @@ describe('terminal execution Phase 0 protocol contract', () => {
       readFile(path.join(protocolRoot, 'terminal-execution-phase-4-acceptance.md'), 'utf8'),
       readFile(path.join(repositoryRoot, 'scripts/verify-terminal-broker-windows.mjs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_broker.rs'), 'utf8'),
+      readFile(path.join(repositoryRoot, 'src-tauri/src/tests/terminal_broker.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/examples/terminal_transport_baseline.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'package.json'), 'utf8'),
     ]);
@@ -248,14 +249,13 @@ describe('terminal execution Phase 0 protocol contract', () => {
     const phase4SessionId = '01a0a461-d04c-7d33-ba24-d2d314c773d8';
     expect(roadmap.split('\n').filter((line) => line.startsWith('| 4. Remote real terminal |')))
       .toEqual([
-        '| 4. Remote real terminal | `' + phase4SessionId + '` | **complete (remote POSIX; Windows native evidence remains waived/missing)** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |',
+        '| 4. Remote real terminal | `' + phase4SessionId + '`; continuations `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`, `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d` | **remediation verified; NOT READY (pre-existing Rust include-format gate)** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |',
       ]);
-    expect(phase4.split('\n').filter((line) => line.startsWith('Session:')))
-      .toEqual(['Session: `' + phase4SessionId + '`']);
-    expect(roadmap).toContain('| 5. Interactive operation | not created | **ready — not started**');
-    expect(phase4).toContain('**Final gate: PASS for all required non-Windows Phase 4 gates. Phase 5 is READY');
+    expect(phase4).toContain('Original Phase 4 session: `' + phase4SessionId + '`');
+    expect(roadmap).toContain('| 5. Interactive operation | not created | **blocked — not started**');
+    expect(phase4).toContain('**Final gate: NOT READY. Phase 5 remains blocked');
     expect(phase4).toContain('Native Windows/ConPTY with Windows PowerShell 5.1 and');
-    expect(phase4).toContain('remains **MISSING**, not `PASS`');
+    expect(phase4).toContain('**MISSING**, not `PASS`');
     expect(phase4).toContain('`pnpm test:terminal-visible:ssh`');
     expect(phase3).toContain('**PASS for Phase 3 under the explicit 2026-09-15 cooperative-shell RFC');
     expect(phase3).toContain('Phase 4 is **READY for a');
@@ -308,10 +308,10 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(windowsRunner).toContain('Number.isFinite');
     expect(windowsRunner).toContain('candidate.medianMibPerSecond < baseline.medianMibPerSecond * 0.8');
     expect(windowsRunner).toContain('candidate.p95Ms > 2');
-    expect(broker).toContain('assert_eq!(first_receipt.input_sequence, 1)');
-    expect(broker).toContain('assert_eq!(second_receipt.input_sequence, 2)');
-    expect(broker).toContain('echo-independent payload');
-    expect(broker).toContain('assert!(bounded_replay.has_more)');
+    expect(brokerTests).toContain('assert_eq!(first_receipt.input_sequence, 1)');
+    expect(brokerTests).toContain('assert_eq!(second_receipt.input_sequence, 2)');
+    expect(brokerTests).toContain('echo-independent payload');
+    expect(brokerTests).toContain('assert!(bounded_replay.has_more)');
     expect(benchmark).toContain('SHELLSPAN_BENCH_PAYLOAD_BEGIN:');
     expect(benchmark).toContain('validate_emitted_payload(&output, bytes)');
     expect(matrix).toContain('Native Windows command: `pnpm test:terminal-broker:windows`');

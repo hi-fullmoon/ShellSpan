@@ -119,7 +119,7 @@ fn terminate_failed_local_child(
     errors
 }
 
-fn attachment_failure_message(primary: &str, cleanup_errors: Vec<String>) -> String {
+pub(crate) fn attachment_failure_message(primary: &str, cleanup_errors: Vec<String>) -> String {
     if cleanup_errors.is_empty() {
         format!("TERMINAL_BROKER_ATTACH_FAILED: {primary}")
     } else {
@@ -155,15 +155,22 @@ fn local_shell_executable() -> String {
 }
 
 pub(crate) fn emit_terminal_integration_state(app: &AppHandle, session_id: &str) {
-    let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() else {
-        return;
-    };
-    let Ok(snapshot) = runtime.terminal_broker_snapshot(Some(session_id)) else {
-        return;
-    };
-    let Some(session) = snapshot.session else {
-        return;
-    };
+    if let Err(error) = publish_terminal_integration_state(app, session_id) {
+        warn!("Failed to publish terminal integration state session_id={session_id}: {error}");
+    }
+}
+
+pub(crate) fn publish_terminal_integration_state(
+    app: &AppHandle,
+    session_id: &str,
+) -> Result<(), String> {
+    let runtime = app
+        .try_state::<crate::agent_runtime::AgentRuntime>()
+        .ok_or_else(|| "terminal integration runtime is unavailable".to_string())?;
+    let snapshot = runtime.terminal_broker_snapshot(Some(session_id))?;
+    let session = snapshot
+        .session
+        .ok_or_else(|| "terminal broker session is unavailable".to_string())?;
     let remote_rollout_missing = session.transport_kind
         == crate::terminal_broker::TerminalTransportKind::SshPty
         && session.agent_pty_owner.is_some()
@@ -191,12 +198,11 @@ pub(crate) fn emit_terminal_integration_state(app: &AppHandle, session_id: &str)
         shell: session.integration_shell,
         reason,
     };
-    if let Err(error) = app.emit(
+    app.emit(
         crate::terminal_broker::TERMINAL_INTEGRATION_STATE_EVENT,
         event,
-    ) {
-        warn!("Failed to publish terminal integration state session_id={session_id}: {error}");
-    }
+    )
+    .map_err(|error| format!("failed to emit terminal integration state: {error}"))
 }
 
 #[derive(Debug, Deserialize)]
@@ -447,6 +453,19 @@ pub(crate) struct AgentRemoteTerminalCreatedEvent {
     pub(crate) replaces_session_id: Option<String>,
 }
 
+pub(crate) struct AgentRemoteTerminalCandidate {
+    summary: SessionSummary,
+    profile_id: String,
+    owner: AgentRemoteTerminalOwner,
+    predecessor_session_id: Option<String>,
+}
+
+impl AgentRemoteTerminalCandidate {
+    pub(crate) fn session_id(&self) -> &str {
+        &self.summary.session_id
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn create_agent_remote_terminal_blocking(
     app: &AppHandle,
@@ -459,8 +478,9 @@ pub(crate) fn create_agent_remote_terminal_blocking(
     predecessor_session_id: Option<String>,
     cols: u32,
     rows: u32,
+    cancellation: &tokio_util::sync::CancellationToken,
     _approval: &crate::agent_runtime::ApprovedAgentRemoteTerminalBootstrap,
-) -> Result<SessionSummary, String> {
+) -> Result<AgentRemoteTerminalCandidate, String> {
     validate_connection_fields(&connection.host, &connection.username)?;
     let rollout = app
         .try_state::<crate::agent_runtime::AgentRuntime>()
@@ -487,7 +507,7 @@ pub(crate) fn create_agent_remote_terminal_blocking(
         jump_host: connection.jump_host.clone(),
         replaces_session_id: predecessor_session_id.clone(),
     };
-    let mut summary = SessionSummary {
+    let summary = SessionSummary {
         session_id: session_id.clone(),
         title,
         host: connection.host.clone(),
@@ -527,6 +547,13 @@ pub(crate) fn create_agent_remote_terminal_blocking(
         owner.clone(),
     )?;
 
+    let mut candidate = AgentRemoteTerminalCandidate {
+        summary,
+        profile_id,
+        owner: owner.clone(),
+        predecessor_session_id,
+    };
+
     spawn_ssh_thread(
         app.clone(),
         session_id.clone(),
@@ -541,16 +568,41 @@ pub(crate) fn create_agent_remote_terminal_blocking(
         Some(owner),
     );
 
-    let result = match connection_result_rx.recv_timeout(Duration::from_secs(10)) {
-        Ok(result) => result,
-        Err(_) => {
-            let _ = state.close(&session_id);
-            return Err("timed out before Agent SSH PTY attachment completed".into());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let result = loop {
+        if cancellation.is_cancelled() {
+            let cleanup_errors = abort_agent_remote_terminal_candidate(app, state, &candidate);
+            return Err(attachment_failure_message(
+                "Agent remote terminal creation was cancelled before attachment",
+                cleanup_errors,
+            ));
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            let cleanup_errors = abort_agent_remote_terminal_candidate(app, state, &candidate);
+            return Err(attachment_failure_message(
+                "timed out before Agent SSH PTY attachment completed",
+                cleanup_errors,
+            ));
+        }
+        match connection_result_rx.recv_timeout(
+            deadline
+                .saturating_duration_since(now)
+                .min(Duration::from_millis(25)),
+        ) {
+            Ok(result) => break result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let cleanup_errors = abort_agent_remote_terminal_candidate(app, state, &candidate);
+                return Err(attachment_failure_message(
+                    "Agent SSH PTY worker stopped before attachment",
+                    cleanup_errors,
+                ));
+            }
         }
     };
     if let Err(error) = result {
-        let _ = state.remove(&session_id);
-        return Err(match error {
+        let primary = match error {
             CreateSessionError::HostKeyUnknown { host, port, .. } => {
                 format!("host key for {host}:{port} is not known")
             }
@@ -558,7 +610,9 @@ pub(crate) fn create_agent_remote_terminal_blocking(
                 format!("host key for {host}:{port} changed")
             }
             CreateSessionError::Other { message } => message,
-        });
+        };
+        let cleanup_errors = abort_agent_remote_terminal_candidate(app, state, &candidate);
+        return Err(attachment_failure_message(&primary, cleanup_errors));
     }
     let attachment = match app
         .try_state::<crate::agent_runtime::AgentRuntime>()
@@ -570,44 +624,86 @@ pub(crate) fn create_agent_remote_terminal_blocking(
         }) {
         Ok(attachment) => attachment,
         Err(error) => {
-            let _ = state.close(&session_id);
-            return Err(error);
+            let cleanup_errors = abort_agent_remote_terminal_candidate(app, state, &candidate);
+            return Err(attachment_failure_message(&error, cleanup_errors));
         }
     };
-    summary.terminal_session_id = Some(attachment.terminal_session_id);
-    summary.terminal_generation = Some(attachment.terminal_generation);
-    if let Err(error) = state.promote_agent_remote(&session_id, predecessor_session_id.as_deref()) {
-        let _ = state.close(&session_id);
-        return Err(error);
-    }
-    if let Err(error) = app.emit(
-        AGENT_REMOTE_TERMINAL_CREATED_EVENT,
-        AgentRemoteTerminalCreatedEvent {
-            summary: summary.clone(),
-            profile_id,
-            source_session_id: owner_source_session_id(state, &session_id)?,
-            replaces_session_id: predecessor_session_id,
-        },
-    ) {
-        let _ = app
-            .try_state::<crate::agent_runtime::AgentRuntime>()
-            .map(|runtime| {
-                let _ = runtime.close_terminal_broker_transport(
-                    &session_id,
-                    crate::terminal_broker::TerminalGenerationCloseReason::BrokerShutdown,
-                );
-            });
-        let _ = state.close(&session_id);
-        return Err(format!("failed to publish Agent remote terminal: {error}"));
-    }
-    Ok(summary)
+    candidate.summary.terminal_session_id = Some(attachment.terminal_session_id);
+    candidate.summary.terminal_generation = Some(attachment.terminal_generation);
+    Ok(candidate)
 }
 
-fn owner_source_session_id(state: &SessionManager, session_id: &str) -> Result<String, String> {
-    state
-        .agent_remote_owner(session_id)?
-        .map(|owner| owner.source_session_id)
-        .ok_or_else(|| "Agent remote terminal owner disappeared".to_string())
+pub(crate) fn publish_agent_remote_terminal_candidate(
+    app: &AppHandle,
+    state: &SessionManager,
+    candidate: &AgentRemoteTerminalCandidate,
+) -> Result<SessionSummary, String> {
+    let runtime = app
+        .try_state::<crate::agent_runtime::AgentRuntime>()
+        .ok_or_else(|| "terminal broker runtime is unavailable".to_string())?;
+    runtime.promote_agent_ssh_terminal_broker_candidate(
+        candidate.session_id(),
+        candidate.predecessor_session_id.as_deref(),
+        |attachment| {
+            let mut summary = candidate.summary.clone();
+            summary.terminal_session_id = Some(attachment.terminal_session_id);
+            summary.terminal_generation = Some(attachment.terminal_generation);
+            let event = AgentRemoteTerminalCreatedEvent {
+                summary: summary.clone(),
+                profile_id: candidate.profile_id.clone(),
+                source_session_id: candidate.owner.source_session_id.clone(),
+                replaces_session_id: candidate.predecessor_session_id.clone(),
+            };
+            let (summary, predecessor_close_error) = state.publish_agent_remote(
+                candidate.session_id(),
+                candidate.predecessor_session_id.as_deref(),
+                || {
+                    app.emit(AGENT_REMOTE_TERMINAL_CREATED_EVENT, event)
+                        .map_err(|error| {
+                            format!("failed to publish Agent remote terminal: {error}")
+                        })?;
+                    Ok(summary)
+                },
+            )?;
+            if let Some(error) = predecessor_close_error {
+                warn!(
+                    "Agent remote predecessor transport was already unavailable session_id={}: {error}",
+                    candidate
+                        .predecessor_session_id
+                        .as_deref()
+                        .unwrap_or("none")
+                );
+            }
+            Ok(summary)
+        },
+    )
+}
+
+pub(crate) fn abort_agent_remote_terminal_candidate(
+    app: &AppHandle,
+    state: &SessionManager,
+    candidate: &AgentRemoteTerminalCandidate,
+) -> Vec<String> {
+    let mut cleanup_errors = Vec::new();
+    match app.try_state::<crate::agent_runtime::AgentRuntime>() {
+        Some(runtime) => {
+            if let Err(error) = runtime.terminal_closed(candidate.session_id()) {
+                cleanup_errors.push(format!("failed to clean Agent terminal lease: {error}"));
+            }
+            if let Err(error) =
+                runtime.abort_agent_ssh_terminal_broker_candidate(candidate.session_id())
+            {
+                cleanup_errors.push(format!(
+                    "failed to abort terminal broker candidate: {error}"
+                ));
+            }
+        }
+        None => cleanup_errors.push("terminal broker runtime is unavailable".to_string()),
+    }
+    if let Err(error) = state.close(candidate.session_id()) {
+        cleanup_errors.push(format!("failed to close Agent SSH candidate: {error}"));
+    }
+    cleanup_errors
 }
 
 #[tauri::command]
@@ -3178,7 +3274,7 @@ pub(crate) fn spawn_ssh_thread(
             request.terminal_rows,
         );
         let broker_agent_owner = agent_owner.clone();
-        let on_connected = move || {
+        let on_broker_attached = move || {
             broker_app
                 .try_state::<SessionManager>()
                 .ok_or_else(|| {
@@ -3198,7 +3294,7 @@ pub(crate) fn spawn_ssh_thread(
                 })?;
             if let Some(owner) = broker_agent_owner {
                 runtime
-                    .attach_agent_ssh_terminal_broker_transport(
+                    .attach_agent_ssh_terminal_broker_candidate(
                         &broker_session_id,
                         predecessor_session_id.as_deref(),
                         broker_geometry,
@@ -3230,10 +3326,13 @@ pub(crate) fn spawn_ssh_thread(
                     emit_terminal_integration_state(&broker_app, &broker_session_id);
                 }
             }
-            if let Some(tx) = tx_for_connected.as_ref() {
-                let _ = tx.send(Ok(()));
-            }
             Ok(())
+        };
+        let on_connected = move || match tx_for_connected.as_ref() {
+            Some(tx) => tx.send(Ok(())).map_err(|_| {
+                "SSH connection waiter stopped before readiness publication".to_string()
+            }),
+            None => Ok(()),
         };
         let run_result = run_ssh_session(
             &app,
@@ -3244,6 +3343,7 @@ pub(crate) fn spawn_ssh_thread(
             output_ready,
             output_paused,
             agent_owner.is_some(),
+            on_broker_attached,
             on_connected,
         );
 

@@ -343,7 +343,10 @@ impl SessionWakeSource {
     }
 }
 
-pub(crate) fn run_ssh_session<F: FnOnce() -> Result<(), String> + Send>(
+pub(crate) fn run_ssh_session<
+    A: FnOnce() -> Result<(), String> + Send,
+    C: FnOnce() -> Result<(), String> + Send,
+>(
     app: &AppHandle,
     session_id: &str,
     request: &SessionCreateRequest,
@@ -352,7 +355,8 @@ pub(crate) fn run_ssh_session<F: FnOnce() -> Result<(), String> + Send>(
     output_ready: Arc<AtomicBool>,
     output_paused: Arc<AtomicBool>,
     bootstrap_agent_integration: bool,
-    on_connected: F,
+    on_broker_attached: A,
+    on_connected: C,
 ) -> Result<Option<String>, ConnectionError> {
     petdex::notify(app, PetdexEvent::SshConnecting(session_id.to_string()));
     info!(
@@ -455,116 +459,153 @@ pub(crate) fn run_ssh_session<F: FnOnce() -> Result<(), String> + Send>(
         (None, None)
     };
 
-    let mut channel = session.channel_session().map_err(|error| {
-        error!("Failed to open SSH channel session_id={session_id}: {error}");
-        ConnectionError::Other {
-            message: format!("failed to open ssh channel: {error}"),
-        }
-    })?;
-    channel
-        .request_pty(
-            "xterm-256color",
-            None,
-            Some((request.terminal_cols, request.terminal_rows, 0, 0)),
+    with_remote_integration_cleanup(&session, &mut remote_integration, |remote_integration| {
+        let mut channel = session.channel_session().map_err(|error| {
+            error!("Failed to open SSH channel session_id={session_id}: {error}");
+            ConnectionError::Other {
+                message: format!("failed to open ssh channel: {error}"),
+            }
+        })?;
+        with_failure_cleanup(
+            &mut channel,
+            |channel| {
+                channel
+                    .request_pty(
+                        "xterm-256color",
+                        None,
+                        Some((request.terminal_cols, request.terminal_rows, 0, 0)),
+                    )
+                    .map_err(|error| {
+                        error!("Failed to allocate PTY session_id={session_id}: {error}");
+                        ConnectionError::Other {
+                            message: format!("failed to allocate PTY: {error}"),
+                        }
+                    })?;
+                channel
+                    .handle_extended_data(ExtendedData::Merge)
+                    .map_err(|error| {
+                        error!(
+                        "Failed to configure extended-data mode session_id={session_id}: {error}"
+                    );
+                        ConnectionError::Other {
+                            message: format!("failed to configure extended-data mode: {error}"),
+                        }
+                    })?;
+                let shell_start = match remote_integration.as_ref() {
+                    Some(integration) => integration.start_shell(channel),
+                    None => channel
+                        .shell()
+                        .map_err(|error| format!("failed to start remote shell: {error}")),
+                };
+                if let Err(message) = shell_start {
+                    error!("Failed to start remote shell session_id={session_id}: {message}");
+                    return Err(ConnectionError::Other { message });
+                }
+
+                // Register a replacement as a non-current Broker candidate. The
+                // predecessor remains usable while the new shell proves readiness.
+                on_broker_attached().map_err(|message| ConnectionError::Other { message })?;
+                let runtime = app
+                    .try_state::<crate::agent_runtime::AgentRuntime>()
+                    .ok_or_else(|| ConnectionError::Other {
+                        message: "terminal integration runtime is unavailable".into(),
+                    })?;
+                if let Some(integration) = remote_integration.as_ref() {
+                    runtime
+                        .register_terminal_integration_channel(
+                            session_id,
+                            &integration.integration_id,
+                            integration.shell,
+                        )
+                        .map_err(|message| ConnectionError::Other { message })?;
+                    crate::commands::publish_terminal_integration_state(app, session_id)
+                        .map_err(|message| ConnectionError::Other { message })?;
+                } else if let Some(message) = remote_integration_error.as_deref() {
+                    let shell = detect_remote_login_shell(&session, &request.username)
+                        .unwrap_or(TerminalShellKind::Unsupported);
+                    let reason = if message == "TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL" {
+                        "unsupportedRemoteShell"
+                    } else {
+                        "remoteBootstrapFailed"
+                    };
+                    if reason == "unsupportedRemoteShell" {
+                        runtime
+                            .mark_terminal_integration_unavailable(session_id, shell, reason)
+                            .map_err(|message| ConnectionError::Other { message })?;
+                    } else {
+                        runtime
+                            .mark_terminal_integration_degraded(session_id, shell, reason)
+                            .map_err(|message| ConnectionError::Other { message })?;
+                    }
+                    crate::commands::publish_terminal_integration_state(app, session_id)
+                        .map_err(|message| ConnectionError::Other { message })?;
+                }
+                session.set_blocking(false);
+
+                info!("SSH session connected session_id={session_id}");
+                publish_ssh_connection_ready(
+                    || {
+                        emit_status(
+                            app,
+                            session_id,
+                            SessionStatus::Connected,
+                            Some("shell ready".to_string()),
+                        )
+                    },
+                    || petdex::notify(app, PetdexEvent::SshConnected(session_id.to_string())),
+                    on_connected,
+                )
+                .map_err(|message| ConnectionError::Other { message })?;
+
+                session_loop(
+                    app,
+                    session_id,
+                    &session,
+                    channel,
+                    rx,
+                    &wake,
+                    &output_ready,
+                    &output_paused,
+                    remote_integration.as_mut(),
+                    Vec::new(),
+                )
+                .map_err(|message| ConnectionError::Other { message })
+            },
+            graceful_shutdown,
         )
-        .map_err(|error| {
-            error!("Failed to allocate PTY session_id={session_id}: {error}");
-            ConnectionError::Other {
-                message: format!("failed to allocate PTY: {error}"),
-            }
-        })?;
-    channel
-        .handle_extended_data(ExtendedData::Merge)
-        .map_err(|error| {
-            error!("Failed to configure extended-data mode session_id={session_id}: {error}");
-            ConnectionError::Other {
-                message: format!("failed to configure extended-data mode: {error}"),
-            }
-        })?;
-    let shell_start = match remote_integration.as_ref() {
-        Some(integration) => integration.start_shell(&mut channel),
-        None => channel
-            .shell()
-            .map_err(|error| format!("failed to start remote shell: {error}")),
-    };
-    if let Err(message) = shell_start {
-        error!("Failed to start remote shell session_id={session_id}: {message}");
-        if let Some(integration) = remote_integration.take() {
-            integration.close(&session);
-        }
-        graceful_shutdown(&mut channel);
-        return Err(ConnectionError::Other { message });
-    }
-    // Attach the broker generation only after the interactive PTY and shell
-    // exist, but before any output can be read or input can be accepted.
-    if let Err(error) =
-        require_ssh_broker_attachment(on_connected(), || graceful_shutdown(&mut channel))
-    {
-        if let Some(integration) = remote_integration.take() {
-            integration.close(&session);
-        }
-        return Err(error);
-    }
-    let runtime = app
-        .try_state::<crate::agent_runtime::AgentRuntime>()
-        .ok_or_else(|| ConnectionError::Other {
-            message: "terminal integration runtime is unavailable".into(),
-        })?;
-    if let Some(integration) = remote_integration.as_ref() {
-        if let Err(message) = runtime.register_terminal_integration_channel(
-            session_id,
-            &integration.integration_id,
-            integration.shell,
-        ) {
-            if let Some(integration) = remote_integration.take() {
-                integration.close(&session);
-            }
-            graceful_shutdown(&mut channel);
-            return Err(ConnectionError::Other { message });
-        }
-        crate::commands::emit_terminal_integration_state(app, session_id);
-    } else if let Some(message) = remote_integration_error {
-        let shell = detect_remote_login_shell(&session, &request.username)
-            .unwrap_or(TerminalShellKind::Unsupported);
-        let reason = if message == "TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL" {
-            "unsupportedRemoteShell"
-        } else {
-            "remoteBootstrapFailed"
-        };
-        if reason == "unsupportedRemoteShell" {
-            let _ = runtime.mark_terminal_integration_unavailable(session_id, shell, reason);
-        } else {
-            let _ = runtime.mark_terminal_integration_degraded(session_id, shell, reason);
-        }
-        crate::commands::emit_terminal_integration_state(app, session_id);
-    }
-    session.set_blocking(false);
+    })
+}
 
-    info!("SSH session connected session_id={session_id}");
-    emit_status(
-        app,
-        session_id,
-        SessionStatus::Connected,
-        Some("shell ready".to_string()),
-    )
-    .map_err(|message| ConnectionError::Other { message })?;
-    petdex::notify(app, PetdexEvent::SshConnected(session_id.to_string()));
+fn publish_ssh_connection_ready(
+    publish_status: impl FnOnce() -> Result<(), String>,
+    notify_connected: impl FnOnce(),
+    signal_waiter: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    publish_status()?;
+    notify_connected();
+    signal_waiter()
+}
 
-    let result = session_loop(
-        app,
-        session_id,
-        &session,
-        &mut channel,
-        rx,
-        &wake,
-        &output_ready,
-        &output_paused,
-        remote_integration.as_mut(),
-        Vec::new(),
-    )
-    .map_err(|message| ConnectionError::Other { message });
-    if let Some(integration) = remote_integration {
-        integration.close(&session);
+fn with_remote_integration_cleanup<T>(
+    session: &Session,
+    remote_integration: &mut Option<RemoteSshShellIntegration>,
+    operation: impl FnOnce(&mut Option<RemoteSshShellIntegration>) -> Result<T, ConnectionError>,
+) -> Result<T, ConnectionError> {
+    let result = operation(remote_integration);
+    if let Some(integration) = remote_integration.take() {
+        integration.close(session);
+    }
+    result
+}
+
+fn with_failure_cleanup<R, T, E>(
+    resource: &mut R,
+    operation: impl FnOnce(&mut R) -> Result<T, E>,
+    cleanup: impl FnOnce(&mut R),
+) -> Result<T, E> {
+    let result = operation(resource);
+    if result.is_err() {
+        cleanup(resource);
     }
     result
 }
@@ -1243,19 +1284,6 @@ fn graceful_shutdown(channel: &mut Channel) {
                     return;
                 }
             }
-        }
-    }
-}
-
-fn require_ssh_broker_attachment(
-    attachment: Result<(), String>,
-    close_channel: impl FnOnce(),
-) -> Result<(), ConnectionError> {
-    match attachment {
-        Ok(()) => Ok(()),
-        Err(message) => {
-            close_channel();
-            Err(ConnectionError::Other { message })
         }
     }
 }

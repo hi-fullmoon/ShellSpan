@@ -1,5 +1,51 @@
     use super::*;
 
+    fn attach_ready_agent_ssh_transport(
+        broker: &TerminalSessionBroker,
+        transport_session_id: &str,
+        predecessor_transport_session_id: Option<&str>,
+        geometry: TerminalGeometry,
+        owner: TerminalAgentPtyOwner,
+    ) -> TerminalBrokerAttachment {
+        broker
+            .attach_agent_ssh_candidate_transport(
+                transport_session_id,
+                predecessor_transport_session_id,
+                geometry,
+                owner,
+            )
+            .unwrap()
+            .unwrap();
+        let integration_id = format!("integration-{transport_session_id}");
+        broker
+            .register_integration_channel(
+                transport_session_id,
+                &integration_id,
+                TerminalShellKind::Bash,
+            )
+            .unwrap();
+        for event in [
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::Bash,
+            },
+            TerminalIntegrationControlEvent::PromptStart {
+                cwd: "/home".into(),
+            },
+            TerminalIntegrationControlEvent::PromptEnd,
+        ] {
+            broker
+                .accept_integration_event(transport_session_id, &integration_id, event)
+                .unwrap();
+        }
+        broker
+            .promote_agent_ssh_candidate_transport(
+                transport_session_id,
+                predecessor_transport_session_id,
+                Ok,
+            )
+            .unwrap()
+    }
+
     #[cfg(unix)]
     fn run_native_shell_broker_acceptance(shell: &str, args: &[&str], label: &str) {
         use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -1357,36 +1403,14 @@
             target_id: "target-1".into(),
             source_transport_session_id: "user-ssh".into(),
         };
-        let first = broker
-            .attach_agent_ssh_transport(
-                "agent-ssh-1",
-                None,
-                TerminalGeometry::new(100, 30),
-                owner.clone(),
-            )
-            .unwrap()
-            .unwrap();
+        let first = attach_ready_agent_ssh_transport(
+            &broker,
+            "agent-ssh-1",
+            None,
+            TerminalGeometry::new(100, 30),
+            owner.clone(),
+        );
         broker.mark_output_ready("agent-ssh-1").unwrap();
-        broker
-            .register_integration_channel(
-                "agent-ssh-1",
-                "remote-integration-1",
-                TerminalShellKind::Bash,
-            )
-            .unwrap();
-        for event in [
-            TerminalIntegrationControlEvent::Ready {
-                shell: TerminalShellKind::Bash,
-            },
-            TerminalIntegrationControlEvent::PromptStart {
-                cwd: "/home".into(),
-            },
-            TerminalIntegrationControlEvent::PromptEnd,
-        ] {
-            broker
-                .accept_integration_event("agent-ssh-1", "remote-integration-1", event)
-                .unwrap();
-        }
         let lease = broker
             .acquire_agent_lease("agent-ssh-1", "agent-session-1", "task-1", "operation-1")
             .unwrap()
@@ -1419,17 +1443,16 @@
             operation.snapshot().unwrap().state,
             TerminalCommandState::Uncertain
         );
-        let second = broker
-            .attach_agent_ssh_transport(
-                "agent-ssh-2",
-                Some("agent-ssh-1"),
-                TerminalGeometry::new(100, 30),
-                owner,
-            )
-            .unwrap()
-            .unwrap();
+        let second = attach_ready_agent_ssh_transport(
+            &broker,
+            "agent-ssh-2",
+            Some("agent-ssh-1"),
+            TerminalGeometry::new(100, 30),
+            owner,
+        );
         assert_eq!(second.terminal_session_id, first.terminal_session_id);
         assert_eq!(second.terminal_generation, first.terminal_generation + 1);
+        assert_eq!(broker.metadata_counts().2, 0);
         assert!(broker.observe_raw_output("agent-ssh-1", b"stale").is_err());
         assert!(broker
             .attach_transport(
@@ -1439,4 +1462,211 @@
                 TerminalGeometry::new(80, 24),
             )
             .is_err());
+    }
+
+    #[test]
+    fn agent_ssh_candidate_failure_keeps_predecessor_current_and_abort_removes_candidate() {
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
+        let owner = TerminalAgentPtyOwner {
+            agent_session_id: "agent-session-1".into(),
+            target_id: "target-1".into(),
+            source_transport_session_id: "user-ssh".into(),
+        };
+        let predecessor = attach_ready_agent_ssh_transport(
+            &broker,
+            "agent-ssh-1",
+            None,
+            TerminalGeometry::new(100, 30),
+            owner.clone(),
+        );
+        broker
+            .observe_raw_output("agent-ssh-1", b"before-candidate")
+            .unwrap();
+        let predecessor_before = broker
+            .snapshot(Some("agent-ssh-1"))
+            .unwrap()
+            .session
+            .unwrap();
+
+        let provisional = broker
+            .attach_agent_ssh_candidate_transport(
+                "agent-ssh-2",
+                Some("agent-ssh-1"),
+                TerminalGeometry::new(120, 40),
+                owner,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            broker
+                .promote_agent_ssh_candidate_transport(
+                    "agent-ssh-2",
+                    Some("agent-ssh-1"),
+                    Ok,
+                )
+                .unwrap_err(),
+            "TERMINAL_BROKER_AGENT_SSH_CANDIDATE_NOT_READY"
+        );
+        broker
+            .observe_raw_output("agent-ssh-1", b"not-replaced-before-ready")
+            .unwrap();
+        broker
+            .register_integration_channel(
+                "agent-ssh-2",
+                "candidate-integration-2",
+                TerminalShellKind::Bash,
+            )
+            .unwrap();
+        for event in [
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::Bash,
+            },
+            TerminalIntegrationControlEvent::PromptStart {
+                cwd: "/home".into(),
+            },
+            TerminalIntegrationControlEvent::PromptEnd,
+        ] {
+            broker
+                .accept_integration_event("agent-ssh-2", "candidate-integration-2", event)
+                .unwrap();
+        }
+        assert_ne!(provisional.terminal_session_id, predecessor.terminal_session_id);
+        assert_eq!(provisional.terminal_generation, 1);
+        let predecessor_during_candidate = broker
+            .snapshot(Some("agent-ssh-1"))
+            .unwrap()
+            .session
+            .unwrap();
+        assert_eq!(
+            predecessor_during_candidate.terminal_session_id,
+            predecessor_before.terminal_session_id
+        );
+        assert_eq!(
+            predecessor_during_candidate.terminal_generation,
+            predecessor_before.terminal_generation
+        );
+        assert!(predecessor_during_candidate.open);
+        broker
+            .observe_raw_output("agent-ssh-1", b"still-current")
+            .unwrap();
+
+        assert_eq!(
+            broker
+                .promote_agent_ssh_candidate_transport(
+                    "agent-ssh-2",
+                    Some("agent-ssh-1"),
+                    |_| Err::<(), _>("publication failed".to_string()),
+                )
+                .unwrap_err(),
+            "publication failed"
+        );
+        broker
+            .observe_raw_output("agent-ssh-1", b"restored-without-reconnect")
+            .unwrap();
+        assert!(broker
+            .snapshot(Some("agent-ssh-2"))
+            .unwrap()
+            .session
+            .is_some());
+        assert!(broker
+            .abort_agent_ssh_candidate_transport("agent-ssh-2")
+            .unwrap());
+        assert!(broker
+            .snapshot(Some("agent-ssh-2"))
+            .unwrap()
+            .session
+            .is_none());
+    }
+
+    #[test]
+    fn concurrent_agent_ssh_candidate_promotion_has_one_expected_predecessor_winner() {
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
+        let owner = TerminalAgentPtyOwner {
+            agent_session_id: "agent-session-1".into(),
+            target_id: "target-1".into(),
+            source_transport_session_id: "user-ssh".into(),
+        };
+        let predecessor = attach_ready_agent_ssh_transport(
+            &broker,
+            "agent-ssh-1",
+            None,
+            TerminalGeometry::new(100, 30),
+            owner.clone(),
+        );
+        for candidate in ["agent-ssh-2", "agent-ssh-3"] {
+            broker
+                .attach_agent_ssh_candidate_transport(
+                    candidate,
+                    Some("agent-ssh-1"),
+                    TerminalGeometry::new(120, 40),
+                    owner.clone(),
+                )
+                .unwrap();
+            let integration = format!("integration-{candidate}");
+            broker
+                .register_integration_channel(
+                    candidate,
+                    &integration,
+                    TerminalShellKind::Bash,
+                )
+                .unwrap();
+            for event in [
+                TerminalIntegrationControlEvent::Ready {
+                    shell: TerminalShellKind::Bash,
+                },
+                TerminalIntegrationControlEvent::PromptStart {
+                    cwd: "/home".into(),
+                },
+                TerminalIntegrationControlEvent::PromptEnd,
+            ] {
+                broker
+                    .accept_integration_event(candidate, &integration, event)
+                    .unwrap();
+            }
+        }
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let contenders = ["agent-ssh-2", "agent-ssh-3"]
+            .into_iter()
+            .map(|candidate| {
+                let broker = broker.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    (
+                        candidate,
+                        broker.promote_agent_ssh_candidate_transport(
+                            candidate,
+                            Some("agent-ssh-1"),
+                            Ok,
+                        ),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        barrier.wait();
+        let results = contenders
+            .into_iter()
+            .map(|contender| contender.join().unwrap())
+            .collect::<Vec<_>>();
+        let winners = results
+            .iter()
+            .filter_map(|(candidate, result)| result.as_ref().ok().map(|value| (*candidate, value)))
+            .collect::<Vec<_>>();
+        let failures = results
+            .iter()
+            .filter_map(|(candidate, result)| result.as_ref().err().map(|error| (*candidate, error)))
+            .collect::<Vec<_>>();
+        assert_eq!(winners.len(), 1, "exactly one candidate must promote");
+        assert_eq!(failures.len(), 1, "the stale candidate must be rejected");
+        let (winner, promoted) = winners[0];
+        let (loser, failure) = failures[0];
+        assert_eq!(promoted.terminal_session_id, predecessor.terminal_session_id);
+        assert_eq!(promoted.terminal_generation, 2);
+        assert!(broker.observe_raw_output("agent-ssh-1", b"stale").is_err());
+        assert!(failure.starts_with("TERMINAL_BROKER_PREDECESSOR_NOT_FOUND"));
+        assert!(broker
+            .abort_agent_ssh_candidate_transport(loser)
+            .unwrap());
+        broker.observe_raw_output(winner, b"winner-current").unwrap();
     }

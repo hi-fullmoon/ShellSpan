@@ -17,9 +17,14 @@
     #[test]
     fn ssh_broker_attachment_failure_closes_channel_and_is_visible() {
         let closed = AtomicBool::new(false);
-        let result = require_ssh_broker_attachment(
-            Err("TERMINAL_BROKER_PREDECESSOR_NOT_FOUND".into()),
-            || closed.store(true, AtomicOrdering::Relaxed),
+        let result: Result<(), ConnectionError> = with_failure_cleanup(
+            &mut (),
+            |_| {
+                Err(ConnectionError::Other {
+                    message: "TERMINAL_BROKER_PREDECESSOR_NOT_FOUND".into(),
+                })
+            },
+            |_| closed.store(true, AtomicOrdering::Relaxed),
         );
 
         assert!(closed.load(AtomicOrdering::Relaxed));
@@ -28,6 +33,42 @@
             Err(ConnectionError::Other { message })
                 if message == "TERMINAL_BROKER_PREDECESSOR_NOT_FOUND"
         ));
+    }
+
+    #[test]
+    fn ssh_success_signal_follows_status_and_connection_publication() {
+        let events = std::cell::RefCell::new(Vec::new());
+        publish_ssh_connection_ready(
+            || {
+                events.borrow_mut().push("status");
+                Ok(())
+            },
+            || events.borrow_mut().push("connected"),
+            || {
+                events.borrow_mut().push("signal");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(*events.borrow(), ["status", "connected", "signal"]);
+    }
+
+    #[test]
+    fn ssh_status_publication_failure_suppresses_success_signal() {
+        let signalled = AtomicBool::new(false);
+        assert_eq!(
+            publish_ssh_connection_ready(
+                || Err("status publication failed".into()),
+                || panic!("connection notification must follow status publication"),
+                || {
+                    signalled.store(true, AtomicOrdering::Relaxed);
+                    Ok(())
+                },
+            )
+            .unwrap_err(),
+            "status publication failed"
+        );
+        assert!(!signalled.load(AtomicOrdering::Relaxed));
     }
 
     #[test]
@@ -246,7 +287,7 @@
                 source_transport_session_id: "fixture-user-owned".into(),
             };
             broker
-                .attach_agent_ssh_transport(
+                .attach_agent_ssh_candidate_transport(
                     transport_id,
                     predecessor,
                     TerminalGeometry::new(100, 30),
@@ -276,6 +317,10 @@
                     == crate::terminal_broker::TerminalIntegrationState::Ready
                     && snapshot.prompt_ready
             });
+            fixture
+                .broker
+                .promote_agent_ssh_candidate_transport(transport_id, predecessor, Ok)
+                .expect("promote ready dedicated Agent SSH PTY");
             fixture
         }
 
@@ -809,7 +854,7 @@
 
         let broker = crate::terminal_broker::TerminalSessionBroker::phase4_enabled_for_test(64);
         broker
-            .attach_agent_ssh_transport(
+            .attach_agent_ssh_candidate_transport(
                 "fixture-agent-unsupported",
                 None,
                 crate::terminal_broker::TerminalGeometry::new(80, 24),
@@ -837,4 +882,52 @@
             crate::terminal_broker::TerminalIntegrationState::Unavailable
         );
         assert!(snapshot.integration_capabilities.is_empty());
+        assert!(broker
+            .promote_agent_ssh_candidate_transport(
+                "fixture-agent-unsupported",
+                None,
+                Ok,
+            )
+            .is_err());
+        assert!(broker
+            .abort_agent_ssh_candidate_transport("fixture-agent-unsupported")
+            .unwrap());
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn remote_integration_scope_cleans_resources_after_post_prepare_failure() {
+        let connection = crate::execution::fixture::isolated_ssh_connection();
+        let (_known_hosts, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let session = crate::connection::open_authenticated_session(
+            crate::connection::connect_tcp_stream(&connection.host, connection.port).unwrap(),
+            &connection.username,
+            connection.auth_method,
+            connection.password.as_deref(),
+            connection.private_key_data.as_deref(),
+            connection.passphrase.as_deref(),
+            &connection.host,
+            connection.port,
+            Some(&known_hosts_path),
+        )
+        .unwrap();
+        let integration = RemoteSshShellIntegration::prepare(&session, &connection.username)
+            .expect("prepare scoped remote integration resources");
+        let remote_root = integration.remote_root.clone();
+        let mut integration = Some(integration);
+
+        let error = with_remote_integration_cleanup(&session, &mut integration, |_| {
+            Err::<(), _>(ConnectionError::Other {
+                message: "injected post-prepare failure".into(),
+            })
+        })
+        .unwrap_err();
+        assert_eq!(error.message(), "injected post-prepare failure");
+        assert!(integration.is_none());
+        assert!(session
+            .sftp()
+            .unwrap()
+            .stat(Path::new(&remote_root))
+            .is_err());
     }

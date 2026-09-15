@@ -20,8 +20,17 @@ describe('quality gate wiring', () => {
     expect(ci).toContain('--all-features --no-fail-fast');
   });
   it('discovers all handoff test modules which cargo fmt cannot discover through include!', async () => {
-    const files = (await includedRustFiles(path.join(root, 'src-tauri/src'))).map(file => path.basename(file));
-    expect(files).toEqual(expect.arrayContaining(['scheduler_tests.rs', 'question_tests.rs', 'skill_tests.rs',
-      'skill_bridge_tests.rs', 'image_tests.rs', 'image_bridge_tests.rs', 'file_reference_tests.rs', 'file_reference_sftp_tests.rs']));
+    const files = (await includedRustFiles(path.join(root, 'src-tauri/src')))
+      .map(file => path.relative(root, file));
+    expect(files).toEqual(expect.arrayContaining([
+      'src-tauri/src/agent_runtime/tests/runtime/scheduler.rs',
+      'src-tauri/src/agent_runtime/tests/runtime/questions.rs',
+      'src-tauri/src/agent_runtime/tests/runtime/skills.rs',
+      'src-tauri/src/agent_runtime/tests/runtime/skill_bridge.rs',
+      'src-tauri/src/agent_runtime/tests/runtime/images.rs',
+      'src-tauri/src/agent_runtime/tests/runtime/image_bridge.rs',
+      'src-tauri/src/agent_runtime/tests/runtime/file_references.rs',
+      'src-tauri/src/agent_runtime/tests/native_adapter/file_references_sftp.rs',
+    ]));
   });
 });
