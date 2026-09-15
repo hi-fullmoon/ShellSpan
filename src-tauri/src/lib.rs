@@ -26,6 +26,7 @@ mod session;
 mod sftp_pool;
 pub mod terminal_broker;
 pub(crate) mod terminal_integration;
+pub(crate) mod terminal_screen;
 
 use log::LevelFilter;
 use tauri::{AppHandle, Emitter, Manager};

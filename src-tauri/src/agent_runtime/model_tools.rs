@@ -236,6 +236,78 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
     ]
 }
 
+pub(crate) fn model_tools_with_terminal_interaction(
+    interactive_terminal_enabled: bool,
+) -> Vec<ModelToolDefinition> {
+    let mut tools = default_model_tools();
+    if !interactive_terminal_enabled {
+        return tools;
+    }
+    tools.extend([
+        ModelToolDefinition {
+            name: "read_terminal".into(),
+            description: "Read a complete, bounded rendered screen snapshot from the bound terminal. The snapshot is derived from ordered terminal output and credential-like content is redacted.".into(),
+            input_schema: object_schema(&[], json!({})),
+        },
+        ModelToolDefinition {
+            name: "write_terminal_input".into(),
+            description: "Send one explicit text, key, paste, or interrupt input to the bound terminal under ShellSpan's exclusive Agent lease. Never use it to enter passwords, tokens, one-time codes, or other credentials.".into(),
+            input_schema: interactive_terminal_input_schema(),
+        },
+        ModelToolDefinition {
+            name: "wait_terminal".into(),
+            description: "Wait up to 60 seconds for a bounded terminal condition: screen, output, lifecycle, matching text, idle output, or closure. A timeout is an observed result, not permission to replay input.".into(),
+            input_schema: wait_terminal_schema(),
+        },
+    ]);
+    tools
+}
+
+fn interactive_terminal_input_schema() -> Value {
+    json!({
+        "oneOf": [
+            object_schema(&["inputKind", "text"], json!({
+                "inputKind": { "const": "text" },
+                "text": { "type": "string", "minLength": 1, "maxLength": 8192, "pattern": "^[^\\u0000-\\u001F\\u007F]*$" }
+            })),
+            object_schema(&["inputKind", "key"], json!({
+                "inputKind": { "const": "key" },
+                "key": { "type": "string", "enum": ["enter", "escape", "tab", "backspace", "delete", "arrowUp", "arrowDown", "arrowLeft", "arrowRight", "home", "end", "pageUp", "pageDown"] }
+            })),
+            object_schema(&["inputKind", "text"], json!({
+                "inputKind": { "const": "paste" },
+                "text": { "type": "string", "minLength": 1, "maxLength": 65536, "pattern": "^[^\\u0000\\u001B]*$" }
+            })),
+            object_schema(&["inputKind"], json!({
+                "inputKind": { "const": "interrupt" }
+            }))
+        ]
+    })
+}
+
+fn wait_terminal_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "afterScreenVersion": { "type": "integer", "minimum": 0 },
+            "afterOutputSequence": { "type": "integer", "minimum": 0 },
+            "afterLifecycleSequence": { "type": "integer", "minimum": 0 },
+            "text": bounded_string(1024),
+            "caseSensitive": { "type": "boolean" },
+            "idleMs": { "type": "integer", "minimum": 1, "maximum": 60000 },
+            "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
+        },
+        "anyOf": [
+            { "required": ["afterScreenVersion"] },
+            { "required": ["afterOutputSequence"] },
+            { "required": ["afterLifecycleSequence"] },
+            { "required": ["text"] },
+            { "required": ["idleMs"] }
+        ]
+    })
+}
+
 fn subagent_spawn_schema() -> Value {
     object_schema(
         &["goal", "role", "inheritanceMode", "targetIds"],
@@ -304,5 +376,16 @@ mod tests {
         let step = &tool.input_schema["properties"]["steps"]["items"]["properties"];
         assert_eq!(step["id"]["pattern"], "^[A-Za-z0-9_-]+$");
         assert_eq!(step["evidenceRefs"]["items"]["pattern"], "^[A-Za-z0-9_-]+$");
+    }
+
+    #[test]
+    fn interactive_terminal_tools_are_feature_gated() {
+        assert!(!default_model_tools()
+            .iter()
+            .any(|tool| tool.name == "read_terminal"));
+        let tools = model_tools_with_terminal_interaction(true);
+        for name in ["read_terminal", "write_terminal_input", "wait_terminal"] {
+            assert!(tools.iter().any(|tool| tool.name == name));
+        }
     }
 }

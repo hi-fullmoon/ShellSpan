@@ -37,6 +37,7 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 diffy = "0.4"
 crossbeam-channel = "0.5"
 portable-pty = "0.9"
+vt100 = "0.16.2"
 trash = "5"
 rusqlite = { version = "0.40", features = ["bundled"] }
 keyring-core = "1"

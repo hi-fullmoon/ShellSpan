@@ -16,6 +16,8 @@
     "test:terminal-visible:ssh": "node scripts/verify-terminal-remote-ssh.mjs",
     "test:terminal-broker:windows": "node scripts/verify-terminal-broker-windows.mjs",
     "test:terminal-visible:windows": "node scripts/verify-terminal-broker-windows.mjs",
+    "test:terminal-interactive:windows": "node scripts/verify-terminal-broker-windows.mjs",
+    "test:terminal-rollout:windows": "node scripts/verify-terminal-broker-windows.mjs",
     "review:frontend": "pnpm test && pnpm build",
     "preview": "vite preview",
     "tauri:dev": "tauri dev",

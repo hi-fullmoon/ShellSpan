@@ -3,6 +3,7 @@
         ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, SessionStatus,
         SessionTerminalKind, StatusEvent,
     };
+    use crate::terminal_broker::TerminalSessionBroker;
     use crossbeam_channel::{unbounded, Receiver};
     #[cfg(any(unix, target_os = "windows"))]
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -17,7 +18,7 @@
     use std::time::Instant;
 
     fn ready_leases() -> TerminalLeaseManager {
-        let leases = TerminalLeaseManager::default();
+        let leases = TerminalLeaseManager::new(TerminalSessionBroker::disabled_for_test());
         let acknowledger = leases.clone();
         leases
             .set_publisher(Arc::new(move |event| {
@@ -135,7 +136,10 @@
             .expect("write the authenticated command wrapper");
         writer.flush().expect("flush the authenticated wrapper");
 
-        let deadline = Instant::now() + Duration::from_secs(15);
+        // Windows ConPTY startup can be delayed when the full Rust suite runs
+        // several native-terminal fixtures concurrently. Keep the poll bounded,
+        // but allow enough headroom for a busy validation host.
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             match child.try_wait().expect("poll the local shell") {
                 Some(_) => break,
@@ -489,7 +493,7 @@
 
     #[test]
     fn command_display_is_redacted_before_the_acquired_event() {
-        let leases = TerminalLeaseManager::default();
+        let leases = TerminalLeaseManager::new(TerminalSessionBroker::disabled_for_test());
         let command_display = Arc::new(Mutex::new(None));
         let captured = command_display.clone();
         let acknowledger = leases.clone();
@@ -759,7 +763,7 @@
     #[test]
     fn frontend_rejection_or_timeout_never_writes_a_wrapper_and_cleans_the_lease() {
         for rejection in ["pendingInput", "credentialPrompt", "timeout"] {
-            let leases = TerminalLeaseManager::default();
+            let leases = TerminalLeaseManager::new(TerminalSessionBroker::disabled_for_test());
             if rejection != "timeout" {
                 let acknowledger = leases.clone();
                 let rejection = rejection.to_string();

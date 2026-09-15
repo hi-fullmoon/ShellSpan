@@ -1,6 +1,6 @@
 # Terminal Execution Phase 4 Acceptance Evidence
 
-Updated: 2026-09-15 (Asia/Shanghai)
+Updated: 2026-09-15 (Asia/Shanghai); Windows prerequisite supplement: 2026-09-16.
 
 Original Phase 4 session: `01a0a461-d04c-7d33-ba24-d2d314c773d8`
 
@@ -15,6 +15,14 @@ Roadmap: [Terminal Execution Roadmap](./terminal-execution-roadmap.md)
 Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
 
 Matrix: [Terminal Execution Platform Test Matrix](./terminal-execution-test-matrix.md)
+
+## 2026-09-16 Windows prerequisite supplement
+
+The separate native Windows prerequisite that remained after the Phase 4
+remote POSIX gate is now closed by the consolidated
+`pnpm test:terminal-interactive:windows` PASS. The historical Windows
+`MISSING` statements below remain an accurate record of the original Phase 4
+continuations but no longer block a Windows-only Phase 6 session.
 
 ## Scope and final gate
 

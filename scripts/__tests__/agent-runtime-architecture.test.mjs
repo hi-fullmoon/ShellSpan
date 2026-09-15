@@ -43,7 +43,7 @@ describe('single Agent Runtime architecture', () => {
     }
   });
 
-  it('keeps Native limited to the ten OS-effect tools', async () => {
+  it('keeps Native limited to the thirteen OS-effect tools', async () => {
     const entries = await readdir(nativeRoot);
     expect(entries).not.toEqual(
       expect.arrayContaining(['context.rs', 'fleet.rs', 'persistence.rs', 'result.rs']),
@@ -58,6 +58,9 @@ describe('single Agent Runtime architecture', () => {
     expect(manifest.tools.map(({ name }) => name)).toEqual([
       'exec_command',
       'terminal_execute',
+      'read_terminal',
+      'write_terminal_input',
+      'wait_terminal',
       'write_stdin',
       'wait_process',
       'kill_process',

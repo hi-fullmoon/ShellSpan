@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -6,27 +7,38 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::terminal_integration::{TerminalIntegrationControlEvent, TerminalShellKind};
+use crate::terminal_screen::{TerminalScreenModel, TerminalScreenSnapshot};
 
 pub(crate) const TERMINAL_BROKER_FLAG_NAME: &str = "terminal_broker_v1";
 pub(crate) const TERMINAL_BROKER_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_TERMINAL_BROKER_V1";
-pub(crate) const TERMINAL_BROKER_DEFAULT_ENABLED: bool = false;
+pub(crate) const TERMINAL_BROKER_DEFAULT_ENABLED: bool = cfg!(target_os = "windows");
 pub(crate) const TERMINAL_SHELL_INTEGRATION_FLAG_NAME: &str = "terminal_shell_integration_v1";
 pub(crate) const TERMINAL_SHELL_INTEGRATION_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_SHELL_INTEGRATION_V1";
+pub(crate) const TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED: bool = cfg!(target_os = "windows");
 pub(crate) const TERMINAL_EXECUTE_FLAG_NAME: &str = "terminal_execute_v1";
 pub(crate) const TERMINAL_EXECUTE_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_TERMINAL_EXECUTE_V1";
+pub(crate) const TERMINAL_EXECUTE_DEFAULT_ENABLED: bool = cfg!(target_os = "windows");
 pub(crate) const TERMINAL_REMOTE_AGENT_PTY_FLAG_NAME: &str = "terminal_remote_agent_pty_v1";
 pub(crate) const TERMINAL_REMOTE_AGENT_PTY_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_REMOTE_AGENT_PTY_V1";
+pub(crate) const TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED: bool = false;
+pub(crate) const TERMINAL_INTERACTIVE_TOOLS_FLAG_NAME: &str = "terminal_interactive_tools_v1";
+pub(crate) const TERMINAL_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE: &str =
+    "SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1";
+pub(crate) const TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED: bool = cfg!(target_os = "windows");
 pub(crate) const TERMINAL_LEGACY_FALLBACK_FLAG_NAME: &str = "terminal_legacy_wrapper_fallback_v1";
 pub(crate) const TERMINAL_LEGACY_FALLBACK_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_LEGACY_WRAPPER_FALLBACK_V1";
+pub(crate) const TERMINAL_LEGACY_FALLBACK_DEFAULT_ENABLED: bool = true;
 
 const DEFAULT_REPLAY_MAX_FRAMES: usize = 512;
 const DEFAULT_REPLAY_MAX_BYTES: usize = 1_048_576;
 const DEFAULT_CAPTURE_MAX_BYTES: usize = 262_144;
 const DEFAULT_CLOSED_SESSION_CAPACITY: usize = 256;
 const MAX_FRAME_BYTES: usize = 262_144;
+const TRANSPORT_LATENCY_SAMPLE_INTERVAL_FRAMES: u64 = 64;
+const TERMINAL_MAX_DIMENSION: u32 = 1_000;
 const JAVASCRIPT_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const USER_OWNER_ID: &str = "interactive-user";
 const SYSTEM_OWNER_ID: &str = "shellspan-runtime";
@@ -141,8 +153,8 @@ pub(crate) struct TerminalGeometry {
 impl TerminalGeometry {
     pub(crate) fn new(columns: u32, rows: u32) -> Self {
         Self {
-            rows: rows.max(1),
-            columns: columns.max(1),
+            rows: rows.clamp(1, TERMINAL_MAX_DIMENSION),
+            columns: columns.clamp(1, TERMINAL_MAX_DIMENSION),
         }
     }
 }
@@ -279,9 +291,91 @@ pub(crate) struct TerminalBrokerSnapshot {
     pub(crate) shell_integration_rollout: TerminalFeatureRolloutDecision,
     pub(crate) terminal_execute_rollout: TerminalFeatureRolloutDecision,
     pub(crate) remote_agent_pty_rollout: TerminalFeatureRolloutDecision,
+    pub(crate) interactive_tools_rollout: TerminalFeatureRolloutDecision,
     pub(crate) legacy_fallback_rollout: TerminalFeatureRolloutDecision,
+    pub(crate) counters: TerminalRolloutCountersSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) session: Option<TerminalBrokerSessionSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalRolloutCountersSnapshot {
+    pub(crate) integration_ready: u64,
+    pub(crate) degraded_fallback: u64,
+    pub(crate) lifecycle_matched: u64,
+    pub(crate) uncertainty: u64,
+    pub(crate) timeout: u64,
+    pub(crate) takeover: u64,
+    pub(crate) truncation: u64,
+    pub(crate) backpressure: u64,
+    pub(crate) transport_latency_samples: u64,
+    pub(crate) transport_latency_total_micros: u64,
+    pub(crate) transport_latency_max_micros: u64,
+}
+
+#[derive(Debug, Default)]
+struct TerminalRolloutCounters {
+    integration_ready: AtomicU64,
+    degraded_fallback: AtomicU64,
+    lifecycle_matched: AtomicU64,
+    uncertainty: AtomicU64,
+    timeout: AtomicU64,
+    takeover: AtomicU64,
+    truncation: AtomicU64,
+    backpressure: AtomicU64,
+    transport_latency_samples: AtomicU64,
+    transport_latency_total_micros: AtomicU64,
+    transport_latency_max_micros: AtomicU64,
+}
+
+impl TerminalRolloutCounters {
+    fn snapshot(&self) -> TerminalRolloutCountersSnapshot {
+        TerminalRolloutCountersSnapshot {
+            integration_ready: self.integration_ready.load(Ordering::Relaxed),
+            degraded_fallback: self.degraded_fallback.load(Ordering::Relaxed),
+            lifecycle_matched: self.lifecycle_matched.load(Ordering::Relaxed),
+            uncertainty: self.uncertainty.load(Ordering::Relaxed),
+            timeout: self.timeout.load(Ordering::Relaxed),
+            takeover: self.takeover.load(Ordering::Relaxed),
+            truncation: self.truncation.load(Ordering::Relaxed),
+            backpressure: self.backpressure.load(Ordering::Relaxed),
+            transport_latency_samples: self.transport_latency_samples.load(Ordering::Relaxed),
+            transport_latency_total_micros: self
+                .transport_latency_total_micros
+                .load(Ordering::Relaxed),
+            transport_latency_max_micros: self.transport_latency_max_micros.load(Ordering::Relaxed),
+        }
+    }
+
+    fn increment(counter: &AtomicU64) {
+        let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            Some(value.saturating_add(1).min(JAVASCRIPT_MAX_SAFE_INTEGER))
+        });
+    }
+
+    fn add(counter: &AtomicU64, amount: u64) {
+        let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            Some(
+                value
+                    .saturating_add(amount)
+                    .min(JAVASCRIPT_MAX_SAFE_INTEGER),
+            )
+        });
+    }
+
+    fn observe_transport_latency(&self, elapsed: Duration) {
+        let micros = u64::try_from(elapsed.as_micros())
+            .unwrap_or(JAVASCRIPT_MAX_SAFE_INTEGER)
+            .min(JAVASCRIPT_MAX_SAFE_INTEGER);
+        Self::increment(&self.transport_latency_samples);
+        Self::add(&self.transport_latency_total_micros, micros);
+        let _ = self.transport_latency_max_micros.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |value| Some(value.max(micros).min(JAVASCRIPT_MAX_SAFE_INTEGER)),
+        );
+    }
 }
 
 pub(crate) const TERMINAL_INTEGRATION_STATE_EVENT: &str = "terminal-integration-state";
@@ -390,6 +484,7 @@ struct TerminalCommandData {
 pub(crate) struct TerminalCommandOperation {
     data: Mutex<TerminalCommandData>,
     changed: Condvar,
+    counters: Arc<TerminalRolloutCounters>,
 }
 
 impl TerminalCommandOperation {
@@ -400,6 +495,7 @@ impl TerminalCommandOperation {
         command_line: String,
         capture_start_sequence: u64,
         capture_limit: usize,
+        counters: Arc<TerminalRolloutCounters>,
     ) -> Self {
         Self {
             data: Mutex::new(TerminalCommandData {
@@ -422,6 +518,7 @@ impl TerminalCommandOperation {
                 capture_open: true,
             }),
             changed: Condvar::new(),
+            counters,
         }
     }
 
@@ -469,6 +566,15 @@ impl TerminalCommandOperation {
             data.requested_settlement = Some(requested);
             data.state = TerminalCommandState::CancelRequested;
             data.revision = next_command_revision(data.revision)?;
+            match requested {
+                TerminalCommandRequestedSettlement::TimedOut => {
+                    TerminalRolloutCounters::increment(&self.counters.timeout);
+                }
+                TerminalCommandRequestedSettlement::TakenOver => {
+                    TerminalRolloutCounters::increment(&self.counters.takeover);
+                }
+                TerminalCommandRequestedSettlement::Cancelled => {}
+            }
         }
         let send_interrupt = !data.interrupt_sent;
         data.interrupt_sent = true;
@@ -505,6 +611,7 @@ impl TerminalCommandOperation {
             data.capture.extend_from_slice(&frame.bytes[..accepted]);
             if accepted < frame.bytes.len() {
                 data.capture_truncated = true;
+                TerminalRolloutCounters::increment(&self.counters.truncation);
             }
         }
         data.capture_end_sequence = Some(frame.sequence);
@@ -553,6 +660,8 @@ fn command_snapshot(data: &TerminalCommandData) -> TerminalCommandSnapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TerminalInputKind {
     Text,
+    Key,
+    Paste,
     Interrupt,
     SystemControl,
 }
@@ -596,6 +705,39 @@ pub(crate) struct TerminalReplayBatch {
     pub(crate) frames: Vec<TerminalRawOutputFrame>,
     pub(crate) through_sequence: u64,
     pub(crate) has_more: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TerminalWaitReason {
+    ScreenChanged,
+    OutputObserved,
+    LifecycleObserved,
+    TextFound,
+    Idle,
+    Closed,
+    TimedOut,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TerminalWaitRequest {
+    pub(crate) after_screen_version: Option<u64>,
+    pub(crate) after_output_sequence: Option<u64>,
+    pub(crate) after_lifecycle_sequence: Option<u64>,
+    pub(crate) text: Option<String>,
+    pub(crate) case_sensitive: bool,
+    pub(crate) idle: Option<Duration>,
+    pub(crate) timeout: Duration,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalWaitResult {
+    pub(crate) reason: TerminalWaitReason,
+    pub(crate) lifecycle_sequence: u64,
+    pub(crate) open: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) snapshot: Option<TerminalScreenSnapshot>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -724,7 +866,7 @@ impl SubscriberSet {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct SessionRecord {
     terminal_session_id: String,
     terminal_generation: u64,
@@ -743,7 +885,8 @@ struct SessionRecord {
     prompt_ready: bool,
     current_directory: Option<String>,
     active_command: Option<Arc<TerminalCommandOperation>>,
-    screen_version: u64,
+    screen_model: Option<TerminalScreenModel>,
+    last_output_at: Instant,
     lease: Option<TerminalLeaseSnapshot>,
     next_input_sequence: u64,
     output_listener_ready: bool,
@@ -765,6 +908,7 @@ impl SessionRecord {
         transport_kind: TerminalTransportKind,
         agent_pty_owner: Option<TerminalAgentPtyOwner>,
         geometry: TerminalGeometry,
+        interactive_tools_enabled: bool,
     ) -> Self {
         Self {
             terminal_session_id,
@@ -784,7 +928,8 @@ impl SessionRecord {
             prompt_ready: false,
             current_directory: None,
             active_command: None,
-            screen_version: 0,
+            screen_model: interactive_tools_enabled.then(|| TerminalScreenModel::new(geometry)),
+            last_output_at: Instant::now(),
             lease: Some(user_lease(1)),
             next_input_sequence: 1,
             output_listener_ready: false,
@@ -820,6 +965,7 @@ impl SessionRecord {
         self.replay_bytes = 0;
         self.capture.fill(0);
         self.capture.clear();
+        self.screen_model = None;
     }
 
     fn snapshot(&self) -> TerminalBrokerSessionSnapshot {
@@ -854,7 +1000,10 @@ impl SessionRecord {
                 .active_command
                 .as_ref()
                 .and_then(|command| command.command_id().ok()),
-            screen_version: self.screen_version,
+            screen_version: self
+                .screen_model
+                .as_ref()
+                .map_or(0, TerminalScreenModel::version),
             lease: self.lease.clone(),
             next_input_sequence: self.next_input_sequence,
             output_listener_ready: self.output_listener_ready,
@@ -877,6 +1026,7 @@ struct BrokerState {
     shell_integration_rollout: TerminalFeatureRolloutDecision,
     terminal_execute_rollout: TerminalFeatureRolloutDecision,
     remote_agent_pty_rollout: TerminalFeatureRolloutDecision,
+    interactive_tools_rollout: TerminalFeatureRolloutDecision,
     legacy_fallback_rollout: TerminalFeatureRolloutDecision,
     sessions: HashMap<String, SessionRecord>,
     transports: HashMap<String, TransportAttachment>,
@@ -890,32 +1040,42 @@ impl Default for BrokerState {
         Self {
             shell_integration_rollout: TerminalFeatureRolloutDecision::new(
                 TERMINAL_SHELL_INTEGRATION_FLAG_NAME,
-                false,
-                false,
+                TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED,
+                TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED,
                 rollout.enabled,
                 TerminalBrokerRolloutSource::Default,
                 "invalidateIntegrationAndMarkIncompleteCommandsUncertain",
             ),
             terminal_execute_rollout: TerminalFeatureRolloutDecision::new(
                 TERMINAL_EXECUTE_FLAG_NAME,
-                false,
-                false,
-                false,
+                TERMINAL_EXECUTE_DEFAULT_ENABLED,
+                TERMINAL_EXECUTE_DEFAULT_ENABLED,
+                rollout.enabled && TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED,
                 TerminalBrokerRolloutSource::Default,
                 "stopNewRoutingNeverReplayInflightCommands",
             ),
             remote_agent_pty_rollout: TerminalFeatureRolloutDecision::new(
                 TERMINAL_REMOTE_AGENT_PTY_FLAG_NAME,
-                false,
-                false,
-                false,
+                TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED,
+                TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED,
+                rollout.enabled
+                    && TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED
+                    && TERMINAL_EXECUTE_DEFAULT_ENABLED,
                 TerminalBrokerRolloutSource::Default,
                 "closeIdleAgentPtysAndMarkIncompleteCommandsUncertain",
             ),
+            interactive_tools_rollout: TerminalFeatureRolloutDecision::new(
+                TERMINAL_INTERACTIVE_TOOLS_FLAG_NAME,
+                TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
+                TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
+                rollout.enabled && TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED,
+                TerminalBrokerRolloutSource::Default,
+                "removeToolsRevokeAgentLeasesAndRejectLaterInput",
+            ),
             legacy_fallback_rollout: TerminalFeatureRolloutDecision::new(
                 TERMINAL_LEGACY_FALLBACK_FLAG_NAME,
-                true,
-                true,
+                TERMINAL_LEGACY_FALLBACK_DEFAULT_ENABLED,
+                TERMINAL_LEGACY_FALLBACK_DEFAULT_ENABLED,
                 true,
                 TerminalBrokerRolloutSource::Default,
                 "newOperationsOnly",
@@ -932,6 +1092,8 @@ impl Default for BrokerState {
 #[derive(Clone)]
 pub(crate) struct TerminalSessionBroker {
     state: Arc<Mutex<BrokerState>>,
+    changed: Arc<Condvar>,
+    counters: Arc<TerminalRolloutCounters>,
     config: TerminalBrokerConfig,
 }
 
@@ -939,25 +1101,61 @@ impl Default for TerminalSessionBroker {
     fn default() -> Self {
         Self {
             state: Arc::new(Mutex::new(BrokerState::default())),
+            changed: Arc::new(Condvar::new()),
+            counters: Arc::new(TerminalRolloutCounters::default()),
             config: TerminalBrokerConfig::default(),
         }
     }
 }
 
 impl TerminalSessionBroker {
+    #[cfg(test)]
+    pub(crate) fn disabled_for_test() -> Self {
+        let broker = Self::default();
+        broker
+            .apply_trusted_rollout(
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+            )
+            .expect("the compatibility test rollout must be valid");
+        broker
+    }
+
     pub(crate) fn configure_from_trusted_environment(&self) -> Result<(), String> {
         let (broker, broker_source) = trusted_rollout_value(
             TERMINAL_BROKER_ENVIRONMENT_VARIABLE,
             TERMINAL_BROKER_DEFAULT_ENABLED,
         )?;
-        let (integration, integration_source) =
-            trusted_rollout_value(TERMINAL_SHELL_INTEGRATION_ENVIRONMENT_VARIABLE, false)?;
-        let (execute, execute_source) =
-            trusted_rollout_value(TERMINAL_EXECUTE_ENVIRONMENT_VARIABLE, false)?;
-        let (remote_agent_pty, remote_agent_pty_source) =
-            trusted_rollout_value(TERMINAL_REMOTE_AGENT_PTY_ENVIRONMENT_VARIABLE, false)?;
-        let (legacy, legacy_source) =
-            trusted_rollout_value(TERMINAL_LEGACY_FALLBACK_ENVIRONMENT_VARIABLE, true)?;
+        let (integration, integration_source) = trusted_rollout_value(
+            TERMINAL_SHELL_INTEGRATION_ENVIRONMENT_VARIABLE,
+            TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED,
+        )?;
+        let (execute, execute_source) = trusted_rollout_value(
+            TERMINAL_EXECUTE_ENVIRONMENT_VARIABLE,
+            TERMINAL_EXECUTE_DEFAULT_ENABLED,
+        )?;
+        let (remote_agent_pty, remote_agent_pty_source) = trusted_rollout_value(
+            TERMINAL_REMOTE_AGENT_PTY_ENVIRONMENT_VARIABLE,
+            TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED,
+        )?;
+        let (interactive_tools, interactive_tools_source) = trusted_rollout_value(
+            TERMINAL_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE,
+            TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
+        )?;
+        let (legacy, legacy_source) = trusted_rollout_value(
+            TERMINAL_LEGACY_FALLBACK_ENVIRONMENT_VARIABLE,
+            TERMINAL_LEGACY_FALLBACK_DEFAULT_ENABLED,
+        )?;
         self.apply_trusted_rollout(
             broker,
             broker_source,
@@ -967,43 +1165,11 @@ impl TerminalSessionBroker {
             execute_source,
             remote_agent_pty,
             remote_agent_pty_source,
+            interactive_tools,
+            interactive_tools_source,
             legacy,
             legacy_source,
         )
-    }
-
-    fn apply_trusted_rollout_decision(
-        &self,
-        enabled: bool,
-        source: TerminalBrokerRolloutSource,
-    ) -> Result<(), String> {
-        let mut state = self.lock()?;
-        if state.rollout.enabled && !enabled {
-            close_all_open_generations(
-                &mut state,
-                TerminalGenerationCloseReason::BrokerShutdown,
-                self.config.closed_session_capacity,
-            );
-        }
-        state.rollout = TerminalBrokerRolloutDecision {
-            enabled,
-            source,
-            ..TerminalBrokerRolloutDecision::default()
-        };
-        let integration_requested = state.shell_integration_rollout.requested;
-        let execute_requested = state.terminal_execute_rollout.requested;
-        state.shell_integration_rollout.prerequisite_satisfied = enabled;
-        state.shell_integration_rollout.enabled = enabled && integration_requested;
-        state.terminal_execute_rollout.prerequisite_satisfied =
-            enabled && state.shell_integration_rollout.enabled;
-        state.terminal_execute_rollout.enabled =
-            state.terminal_execute_rollout.prerequisite_satisfied && execute_requested;
-        let remote_requested = state.remote_agent_pty_rollout.requested;
-        state.remote_agent_pty_rollout.prerequisite_satisfied =
-            state.terminal_execute_rollout.enabled;
-        state.remote_agent_pty_rollout.enabled =
-            state.remote_agent_pty_rollout.prerequisite_satisfied && remote_requested;
-        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1017,6 +1183,8 @@ impl TerminalSessionBroker {
         execute_source: TerminalBrokerRolloutSource,
         remote_agent_pty: bool,
         remote_agent_pty_source: TerminalBrokerRolloutSource,
+        interactive_tools: bool,
+        interactive_tools_source: TerminalBrokerRolloutSource,
         legacy: bool,
         legacy_source: TerminalBrokerRolloutSource,
     ) -> Result<(), String> {
@@ -1064,7 +1232,7 @@ impl TerminalSessionBroker {
         state.shell_integration_rollout = TerminalFeatureRolloutDecision::new(
             TERMINAL_SHELL_INTEGRATION_FLAG_NAME,
             integration,
-            false,
+            TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED,
             broker,
             integration_source,
             "invalidateIntegrationAndMarkIncompleteCommandsUncertain",
@@ -1072,7 +1240,7 @@ impl TerminalSessionBroker {
         state.terminal_execute_rollout = TerminalFeatureRolloutDecision::new(
             TERMINAL_EXECUTE_FLAG_NAME,
             execute,
-            false,
+            TERMINAL_EXECUTE_DEFAULT_ENABLED,
             broker && integration,
             execute_source,
             "stopNewRoutingNeverReplayInflightCommands",
@@ -1080,15 +1248,23 @@ impl TerminalSessionBroker {
         state.remote_agent_pty_rollout = TerminalFeatureRolloutDecision::new(
             TERMINAL_REMOTE_AGENT_PTY_FLAG_NAME,
             remote_agent_pty,
-            false,
+            TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED,
             broker && integration && execute,
             remote_agent_pty_source,
             "closeIdleAgentPtysAndMarkIncompleteCommandsUncertain",
         );
+        state.interactive_tools_rollout = TerminalFeatureRolloutDecision::new(
+            TERMINAL_INTERACTIVE_TOOLS_FLAG_NAME,
+            interactive_tools,
+            TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
+            broker && integration,
+            interactive_tools_source,
+            "removeToolsRevokeAgentLeasesAndRejectLaterInput",
+        );
         state.legacy_fallback_rollout = TerminalFeatureRolloutDecision::new(
             TERMINAL_LEGACY_FALLBACK_FLAG_NAME,
             legacy,
-            true,
+            TERMINAL_LEGACY_FALLBACK_DEFAULT_ENABLED,
             true,
             legacy_source,
             "newOperationsOnly",
@@ -1116,6 +1292,8 @@ impl TerminalSessionBroker {
             integration_source,
             execute,
             execute_source,
+            false,
+            TerminalBrokerRolloutSource::Test,
             false,
             TerminalBrokerRolloutSource::Test,
             legacy,
@@ -1206,6 +1384,11 @@ impl TerminalSessionBroker {
             promoted_terminal_session_id.clone()
         };
         let provisional_generation = 1;
+        let interactive_tools_enabled = effective_interactive_tools_for_transport(
+            &state,
+            TerminalTransportKind::SshPty,
+            Some(&owner),
+        );
         let record = SessionRecord::open(
             provisional_terminal_session_id.clone(),
             provisional_generation,
@@ -1213,6 +1396,7 @@ impl TerminalSessionBroker {
             TerminalTransportKind::SshPty,
             Some(owner),
             geometry,
+            interactive_tools_enabled,
         );
         state
             .sessions
@@ -1511,6 +1695,11 @@ impl TerminalSessionBroker {
         state
             .closed_session_order
             .retain(|closed_id| closed_id != &terminal_session_id);
+        let interactive_tools_enabled = effective_interactive_tools_for_transport(
+            &state,
+            transport_kind,
+            agent_pty_owner.as_ref(),
+        );
         let record = SessionRecord::open(
             terminal_session_id.clone(),
             terminal_generation,
@@ -1518,6 +1707,7 @@ impl TerminalSessionBroker {
             transport_kind,
             agent_pty_owner,
             geometry,
+            interactive_tools_enabled,
         );
         state.sessions.insert(terminal_session_id.clone(), record);
         state.transports.insert(
@@ -1585,6 +1775,7 @@ impl TerminalSessionBroker {
             &attachment.terminal_session_id,
             self.config.closed_session_capacity,
         );
+        self.changed.notify_all();
         Ok(true)
     }
 
@@ -1602,6 +1793,9 @@ impl TerminalSessionBroker {
         }
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        let latency_sample_started =
+            (record.next_output_sequence % TRANSPORT_LATENCY_SAMPLE_INTERVAL_FRAMES == 1)
+                .then(Instant::now);
         let frame = TerminalRawOutputFrame {
             protocol_version: 1,
             terminal_session_id: record.terminal_session_id.clone(),
@@ -1611,10 +1805,15 @@ impl TerminalSessionBroker {
             byte_offset: record.next_byte_offset,
             bytes: bytes.to_vec(),
         };
-        match accept_raw_frame(record, frame.clone(), self.config)? {
-            RawFrameAcceptance::Accepted => Ok(Some(frame)),
-            RawFrameAcceptance::Duplicate => Ok(None),
+        let accepted = match accept_raw_frame(record, frame.clone(), self.config, &self.counters)? {
+            RawFrameAcceptance::Accepted => Some(frame),
+            RawFrameAcceptance::Duplicate => None,
+        };
+        if let (Some(_), Some(started)) = (&accepted, latency_sample_started) {
+            self.counters.observe_transport_latency(started.elapsed());
         }
+        self.changed.notify_all();
+        Ok(accepted)
     }
 
     pub(crate) fn resize(
@@ -1622,9 +1821,18 @@ impl TerminalSessionBroker {
         transport_session_id: &str,
         geometry: TerminalGeometry,
     ) -> Result<(), String> {
-        self.with_current_record_mut(transport_session_id, |record| {
-            record.geometry = geometry;
-        })
+        let mut state = self.lock()?;
+        if !state.rollout.enabled {
+            return Ok(());
+        }
+        let attachment = current_attachment(&state, transport_session_id)?.clone();
+        let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        record.geometry = geometry;
+        if let Some(screen) = &mut record.screen_model {
+            screen.resize(geometry)?;
+        }
+        self.changed.notify_all();
+        Ok(())
     }
 
     pub(crate) fn mark_output_ready(&self, transport_session_id: &str) -> Result<(), String> {
@@ -1638,18 +1846,147 @@ impl TerminalSessionBroker {
         transport_session_id: &str,
         paused: bool,
     ) -> Result<(), String> {
-        self.with_current_record_mut(transport_session_id, |record| {
-            record.output_paused = paused;
-        })
+        let mut state = self.lock()?;
+        if !state.rollout.enabled {
+            return Ok(());
+        }
+        let attachment = current_attachment(&state, transport_session_id)?.clone();
+        let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        let entered_backpressure = paused && !record.output_paused;
+        record.output_paused = paused;
+        if entered_backpressure {
+            TerminalRolloutCounters::increment(&self.counters.backpressure);
+        }
+        Ok(())
     }
 
     pub(crate) fn shell_integration_enabled(&self) -> Result<bool, String> {
         Ok(self.lock()?.shell_integration_rollout.enabled)
     }
 
+    pub(crate) fn interactive_tools_enabled(&self) -> Result<bool, String> {
+        Ok(self.lock()?.interactive_tools_rollout.enabled)
+    }
+
+    pub(crate) fn screen_snapshot(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<TerminalScreenSnapshot, String> {
+        let state = self.lock()?;
+        if !state.interactive_tools_rollout.enabled {
+            return Err("TERMINAL_INTERACTIVE_TOOLS_DISABLED".into());
+        }
+        let attachment = current_attachment(&state, transport_session_id)?;
+        let record = state
+            .sessions
+            .get(&attachment.terminal_session_id)
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        record
+            .screen_model
+            .as_ref()
+            .map(|screen| screen.snapshot(&record.terminal_session_id, record.terminal_generation))
+            .ok_or_else(|| "TERMINAL_SCREEN_UNAVAILABLE".to_string())
+    }
+
+    pub(crate) fn bracketed_paste_enabled(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<bool, String> {
+        let state = self.lock()?;
+        if !state.interactive_tools_rollout.enabled {
+            return Err("TERMINAL_INTERACTIVE_TOOLS_DISABLED".into());
+        }
+        let attachment = current_attachment(&state, transport_session_id)?;
+        let record = state
+            .sessions
+            .get(&attachment.terminal_session_id)
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        record
+            .screen_model
+            .as_ref()
+            .map(TerminalScreenModel::bracketed_paste)
+            .ok_or_else(|| "TERMINAL_SCREEN_UNAVAILABLE".to_string())
+    }
+
+    pub(crate) fn wait_terminal(
+        &self,
+        transport_session_id: &str,
+        request: TerminalWaitRequest,
+    ) -> Result<TerminalWaitResult, String> {
+        let deadline = Instant::now() + request.timeout;
+        let mut state = self.lock()?;
+        if !state.interactive_tools_rollout.enabled {
+            return Err("TERMINAL_INTERACTIVE_TOOLS_DISABLED".into());
+        }
+        let attachment = current_attachment(&state, transport_session_id)?.clone();
+        let terminal_session_id = attachment.terminal_session_id;
+        let terminal_generation = attachment.terminal_generation;
+        loop {
+            let record = state
+                .sessions
+                .get(&terminal_session_id)
+                .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+            if record.terminal_generation != terminal_generation || !record.open {
+                return Ok(TerminalWaitResult {
+                    reason: TerminalWaitReason::Closed,
+                    lifecycle_sequence: record.integration_event_sequence,
+                    open: false,
+                    snapshot: None,
+                });
+            }
+            let snapshot = record
+                .screen_model
+                .as_ref()
+                .map(|screen| screen.snapshot(&terminal_session_id, terminal_generation))
+                .ok_or_else(|| "TERMINAL_SCREEN_UNAVAILABLE".to_string())?;
+            if let Some(reason) = terminal_wait_reason(record, &snapshot, &request) {
+                return Ok(TerminalWaitResult {
+                    reason,
+                    lifecycle_sequence: record.integration_event_sequence,
+                    open: true,
+                    snapshot: Some(snapshot),
+                });
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                TerminalRolloutCounters::increment(&self.counters.timeout);
+                return Ok(TerminalWaitResult {
+                    reason: TerminalWaitReason::TimedOut,
+                    lifecycle_sequence: record.integration_event_sequence,
+                    open: true,
+                    snapshot: Some(snapshot),
+                });
+            }
+            let mut remaining = deadline.saturating_duration_since(now);
+            if let Some(idle) = request.idle {
+                remaining = remaining.min(idle.saturating_sub(record.last_output_at.elapsed()));
+            }
+            let (next, _) = self
+                .changed
+                .wait_timeout(state, remaining)
+                .map_err(|_| "TERMINAL_BROKER_UNAVAILABLE".to_string())?;
+            state = next;
+        }
+    }
+
     pub(crate) fn visible_command_route(
         &self,
         transport_session_id: &str,
+    ) -> Result<TerminalVisibleCommandRoute, String> {
+        self.scoped_visible_command_route(transport_session_id, !cfg!(target_os = "windows"))
+    }
+
+    pub(crate) fn remote_visible_command_route(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<TerminalVisibleCommandRoute, String> {
+        self.scoped_visible_command_route(transport_session_id, true)
+    }
+
+    fn scoped_visible_command_route(
+        &self,
+        transport_session_id: &str,
+        legacy_fallback_allowed: bool,
     ) -> Result<TerminalVisibleCommandRoute, String> {
         let state = self.lock()?;
         if state.terminal_execute_rollout.enabled {
@@ -1667,7 +2004,8 @@ impl TerminalSessionBroker {
                 }
             }
         }
-        if state.legacy_fallback_rollout.enabled {
+        if legacy_fallback_allowed && state.legacy_fallback_rollout.enabled {
+            TerminalRolloutCounters::increment(&self.counters.degraded_fallback);
             Ok(TerminalVisibleCommandRoute::LegacyFallback)
         } else {
             Ok(TerminalVisibleCommandRoute::Unavailable)
@@ -1681,6 +2019,7 @@ impl TerminalSessionBroker {
         if state.remote_agent_pty_rollout.enabled {
             Ok(TerminalVisibleCommandRoute::TerminalExecute)
         } else if state.legacy_fallback_rollout.enabled {
+            TerminalRolloutCounters::increment(&self.counters.degraded_fallback);
             Ok(TerminalVisibleCommandRoute::LegacyFallback)
         } else {
             Ok(TerminalVisibleCommandRoute::Unavailable)
@@ -1752,6 +2091,8 @@ impl TerminalSessionBroker {
         integration_id: &str,
         event: TerminalIntegrationControlEvent,
     ) -> Result<(), String> {
+        let integration_became_ready =
+            matches!(&event, TerminalIntegrationControlEvent::Ready { .. });
         let mut state = self.lock()?;
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
@@ -1815,6 +2156,7 @@ impl TerminalSessionBroker {
                         data.state = TerminalCommandState::Uncertain;
                         data.revision = next_command_revision(data.revision)?;
                         data.capture_end_sequence = Some(through_output_sequence);
+                        TerminalRolloutCounters::increment(&self.counters.uncertainty);
                         drop(data);
                         command.notify();
                         degrade_record(record, "exactCommandLineMismatch");
@@ -1854,6 +2196,11 @@ impl TerminalSessionBroker {
             }
         }
         record.integration_event_sequence = event_sequence;
+        TerminalRolloutCounters::increment(&self.counters.lifecycle_matched);
+        if integration_became_ready {
+            TerminalRolloutCounters::increment(&self.counters.integration_ready);
+        }
+        self.changed.notify_all();
         Ok(())
     }
 
@@ -1935,6 +2282,7 @@ impl TerminalSessionBroker {
             command_line.to_string(),
             record.next_output_sequence,
             self.config.capture_max_bytes,
+            Arc::clone(&self.counters),
         ));
         record.active_command = Some(Arc::clone(&operation));
         record.prompt_ready = false;
@@ -2128,7 +2476,9 @@ impl TerminalSessionBroker {
             shell_integration_rollout: state.shell_integration_rollout.clone(),
             terminal_execute_rollout: state.terminal_execute_rollout.clone(),
             remote_agent_pty_rollout: state.remote_agent_pty_rollout.clone(),
+            interactive_tools_rollout: state.interactive_tools_rollout.clone(),
             legacy_fallback_rollout: state.legacy_fallback_rollout.clone(),
+            counters: self.counters.snapshot(),
             session,
         })
     }
@@ -2160,6 +2510,7 @@ impl TerminalSessionBroker {
             TerminalGenerationCloseReason::BrokerShutdown,
             self.config.closed_session_capacity,
         );
+        self.changed.notify_all();
         Ok(())
     }
 
@@ -2192,6 +2543,8 @@ impl TerminalSessionBroker {
     ) -> Self {
         let broker = Self {
             state: Arc::new(Mutex::new(BrokerState::default())),
+            changed: Arc::new(Condvar::new()),
+            counters: Arc::new(TerminalRolloutCounters::default()),
             config: TerminalBrokerConfig {
                 replay_max_frames,
                 replay_max_bytes,
@@ -2200,7 +2553,20 @@ impl TerminalSessionBroker {
             },
         };
         broker
-            .apply_trusted_rollout_decision(true, TerminalBrokerRolloutSource::Test)
+            .apply_trusted_rollout(
+                true,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+            )
             .unwrap();
         broker
     }
@@ -2209,6 +2575,8 @@ impl TerminalSessionBroker {
     pub(crate) fn phase3_enabled_for_test(capture: usize) -> Self {
         let broker = Self {
             state: Arc::new(Mutex::new(BrokerState::default())),
+            changed: Arc::new(Condvar::new()),
+            counters: Arc::new(TerminalRolloutCounters::default()),
             config: TerminalBrokerConfig {
                 capture_max_bytes: capture,
                 ..TerminalBrokerConfig::default()
@@ -2216,6 +2584,38 @@ impl TerminalSessionBroker {
         };
         broker
             .apply_trusted_rollout(
+                true,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+            )
+            .unwrap();
+        broker
+    }
+
+    #[cfg(test)]
+    pub(crate) fn phase4_enabled_for_test(capture: usize) -> Self {
+        let broker = Self {
+            state: Arc::new(Mutex::new(BrokerState::default())),
+            changed: Arc::new(Condvar::new()),
+            counters: Arc::new(TerminalRolloutCounters::default()),
+            config: TerminalBrokerConfig {
+                capture_max_bytes: capture,
+                ..TerminalBrokerConfig::default()
+            },
+        };
+        broker
+            .apply_trusted_rollout(
+                true,
+                TerminalBrokerRolloutSource::Test,
                 true,
                 TerminalBrokerRolloutSource::Test,
                 true,
@@ -2232,9 +2632,11 @@ impl TerminalSessionBroker {
     }
 
     #[cfg(test)]
-    pub(crate) fn phase4_enabled_for_test(capture: usize) -> Self {
+    pub(crate) fn phase5_enabled_for_test(capture: usize) -> Self {
         let broker = Self {
             state: Arc::new(Mutex::new(BrokerState::default())),
+            changed: Arc::new(Condvar::new()),
+            counters: Arc::new(TerminalRolloutCounters::default()),
             config: TerminalBrokerConfig {
                 capture_max_bytes: capture,
                 ..TerminalBrokerConfig::default()
@@ -2242,6 +2644,8 @@ impl TerminalSessionBroker {
         };
         broker
             .apply_trusted_rollout(
+                true,
+                TerminalBrokerRolloutSource::Test,
                 true,
                 TerminalBrokerRolloutSource::Test,
                 true,
@@ -2261,13 +2665,28 @@ impl TerminalSessionBroker {
     fn enabled_with_closed_capacity_for_test(closed_session_capacity: usize) -> Self {
         let broker = Self {
             state: Arc::new(Mutex::new(BrokerState::default())),
+            changed: Arc::new(Condvar::new()),
+            counters: Arc::new(TerminalRolloutCounters::default()),
             config: TerminalBrokerConfig {
                 closed_session_capacity,
                 ..TerminalBrokerConfig::default()
             },
         };
         broker
-            .apply_trusted_rollout_decision(true, TerminalBrokerRolloutSource::Test)
+            .apply_trusted_rollout(
+                true,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+            )
             .unwrap();
         broker
     }
@@ -2285,7 +2704,7 @@ impl TerminalSessionBroker {
         if record.terminal_generation != frame.terminal_generation {
             return Err("TERMINAL_BROKER_STALE_GENERATION".into());
         }
-        accept_raw_frame(record, frame, self.config)
+        accept_raw_frame(record, frame, self.config, &self.counters)
     }
 
     #[cfg(test)]
@@ -2345,7 +2764,20 @@ impl TerminalBrokerBenchmarkObserver {
         transport_kind: TerminalTransportKind,
     ) -> Result<Self, String> {
         let broker = TerminalSessionBroker::default();
-        broker.apply_trusted_rollout_decision(true, TerminalBrokerRolloutSource::Environment)?;
+        broker.apply_trusted_rollout(
+            true,
+            TerminalBrokerRolloutSource::Environment,
+            false,
+            TerminalBrokerRolloutSource::Environment,
+            false,
+            TerminalBrokerRolloutSource::Environment,
+            false,
+            TerminalBrokerRolloutSource::Environment,
+            false,
+            TerminalBrokerRolloutSource::Environment,
+            true,
+            TerminalBrokerRolloutSource::Environment,
+        )?;
         broker.attach_transport(
             transport_session_id,
             None,
@@ -2417,6 +2849,16 @@ fn remember_closed_session(
     }
 }
 
+fn effective_interactive_tools_for_transport(
+    state: &BrokerState,
+    transport_kind: TerminalTransportKind,
+    agent_pty_owner: Option<&TerminalAgentPtyOwner>,
+) -> bool {
+    state.interactive_tools_rollout.enabled
+        && (transport_kind != TerminalTransportKind::SshPty
+            || (state.remote_agent_pty_rollout.enabled && agent_pty_owner.is_some()))
+}
+
 fn current_attachment<'a>(
     state: &'a BrokerState,
     transport_session_id: &str,
@@ -2459,6 +2901,7 @@ fn accept_raw_frame(
     record: &mut SessionRecord,
     frame: TerminalRawOutputFrame,
     config: TerminalBrokerConfig,
+    counters: &TerminalRolloutCounters,
 ) -> Result<RawFrameAcceptance, String> {
     if !record.open {
         return Err("TERMINAL_BROKER_GENERATION_CLOSED".into());
@@ -2535,10 +2978,15 @@ fn accept_raw_frame(
         if accepted < frame.bytes.len() {
             record.capture_truncated = true;
             record.subscribers.capture.status = TerminalSubscriberStatus::Truncated;
+            TerminalRolloutCounters::increment(&counters.truncation);
         }
     }
     record.subscribers.integration.observe(&frame)?;
     record.subscribers.screen.observe(&frame)?;
+    if let Some(screen) = &mut record.screen_model {
+        screen.observe(&frame)?;
+    }
+    record.last_output_at = Instant::now();
     if let Some(command) = &record.active_command {
         command.capture(&frame)?;
     }
@@ -2559,6 +3007,52 @@ fn accept_raw_frame(
         }
     }
     Ok(RawFrameAcceptance::Accepted)
+}
+
+fn terminal_wait_reason(
+    record: &SessionRecord,
+    snapshot: &TerminalScreenSnapshot,
+    request: &TerminalWaitRequest,
+) -> Option<TerminalWaitReason> {
+    if let Some(text) = request.text.as_deref() {
+        let found = if request.case_sensitive {
+            snapshot.content.iter().any(|row| row.contains(text))
+        } else {
+            let needle = text.to_lowercase();
+            snapshot
+                .content
+                .iter()
+                .any(|row| row.to_lowercase().contains(&needle))
+        };
+        if found {
+            return Some(TerminalWaitReason::TextFound);
+        }
+    }
+    if request
+        .after_lifecycle_sequence
+        .is_some_and(|sequence| record.integration_event_sequence > sequence)
+    {
+        return Some(TerminalWaitReason::LifecycleObserved);
+    }
+    if request
+        .after_output_sequence
+        .is_some_and(|sequence| snapshot.through_output_sequence > sequence)
+    {
+        return Some(TerminalWaitReason::OutputObserved);
+    }
+    if request
+        .after_screen_version
+        .is_some_and(|version| snapshot.screen_version > version)
+    {
+        return Some(TerminalWaitReason::ScreenChanged);
+    }
+    if request
+        .idle
+        .is_some_and(|idle| record.last_output_at.elapsed() >= idle)
+    {
+        return Some(TerminalWaitReason::Idle);
+    }
+    None
 }
 
 fn replay_from_record(
@@ -2783,6 +3277,7 @@ fn settle_command_uncertain(
             .unwrap_or(through_output_sequence)
             .max(through_output_sequence),
     );
+    TerminalRolloutCounters::increment(&command.counters.uncertainty);
     drop(data);
     command.notify();
     true

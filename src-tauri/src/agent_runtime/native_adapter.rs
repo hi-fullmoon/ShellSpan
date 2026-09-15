@@ -105,7 +105,10 @@ impl NativeToolAdapter {
         cancellation: &CancellationToken,
         approval: &ApprovedAgentRemoteTerminalBootstrap,
     ) -> Result<(), String> {
-        if prepared.call.tool_name != "terminal_execute" {
+        if !matches!(
+            prepared.call.tool_name.as_str(),
+            "terminal_execute" | "write_terminal_input"
+        ) {
             return Ok(());
         }
         let AgentToolTargetNative::Remote {
@@ -283,6 +286,15 @@ struct McpCallArguments {
 }
 
 impl NativeToolRuntime for NativeToolAdapter {
+    fn terminal_interactive_tools_enabled(&self, remote_target: bool) -> bool {
+        self.engine
+            .terminal_broker_snapshot(None)
+            .is_ok_and(|snapshot| {
+                snapshot.interactive_tools_rollout.enabled
+                    && (!remote_target || snapshot.remote_agent_pty_rollout.enabled)
+            })
+    }
+
     fn list_file_references(
         &self,
         request: super::file_references::FileReferenceRequest,
@@ -448,7 +460,9 @@ impl NativeToolRuntime for NativeToolAdapter {
                             && binding.state.identity.port == *port
                             && binding.state.identity.username == *username
                     }) {
-                    Some(binding) => runtime.terminal_visible_command_route(&binding.session_id)?,
+                    Some(binding) => {
+                        runtime.terminal_remote_visible_command_route(&binding.session_id)?
+                    }
                     None => runtime.remote_agent_pty_new_operation_route()?,
                 },
                 _ => return Err("terminal command requires a frozen host target".into()),
@@ -493,7 +507,7 @@ impl NativeToolRuntime for NativeToolAdapter {
             provider_call_id: request.model_call.provider_call_id.clone(),
             name: request.model_call.name.clone(),
             native_name: Some(native_name.clone()),
-            arguments: prepared.call.arguments.clone(),
+            arguments: recorded_native_arguments(&native_name, &prepared.call.arguments),
             title: Some(native_name.clone()),
             effect: Some(effect),
             target: Some(request.target.clone()),
@@ -631,6 +645,7 @@ impl NativeToolRuntime for NativeToolAdapter {
                     &database,
                     &credentials,
                     &known_hosts_path,
+                    &cancellation,
                 )?;
                 let result_effect = result
                     .effects
@@ -794,13 +809,30 @@ fn normalize_arguments(
         };
     }
     match request.model_call.name.as_str() {
-        "exec_command" | "terminal_execute" | "read_file" | "list_directory" | "search_text"
-        | "apply_patch" | "transfer_file" => Ok((
+        "read_terminal" | "write_terminal_input" | "wait_terminal"
+            if request.execution_surface != super::AgentExecutionSurface::BoundTerminal =>
+        {
+            Err("interactive terminal tools require a bound-terminal Session".into())
+        }
+        "exec_command"
+        | "terminal_execute"
+        | "read_terminal"
+        | "write_terminal_input"
+        | "wait_terminal"
+        | "read_file"
+        | "list_directory"
+        | "search_text"
+        | "apply_patch"
+        | "transfer_file" => Ok((
             request.model_call.name.clone(),
             request.model_call.arguments.clone(),
         )),
         _ => Err("model requested a tool outside the Agent Runtime native registry".into()),
     }
+}
+
+fn recorded_native_arguments(tool_name: &str, arguments: &Value) -> Value {
+    super::model::recorded_tool_arguments(tool_name, arguments)
 }
 
 fn terminal_command_requires_direct_lifecycle(request: &NativeToolRequest) -> Result<bool, String> {

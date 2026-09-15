@@ -319,11 +319,29 @@ describe('connection request serialization', () => {
         legacyDisplayAuthoritative: true,
         rollback: 'disableDependentFlagsThenCloseBrokerGenerations',
       },
+      counters: {
+        integrationReady: 3,
+        degradedFallback: 1,
+        lifecycleMatched: 12,
+        uncertainty: 1,
+        timeout: 2,
+        takeover: 1,
+        truncation: 1,
+        backpressure: 1,
+        transportLatencySamples: 8,
+        transportLatencyTotalMicros: 80,
+        transportLatencyMaxMicros: 20,
+      },
     });
 
     const snapshot = await invokeGetTerminalBrokerSnapshot('transport-1');
 
     expect(snapshot.rollout.enabled).toBe(false);
+    expect(snapshot.counters).toEqual(expect.objectContaining({
+      integrationReady: 3,
+      degradedFallback: 1,
+      transportLatencySamples: 8,
+    }));
     expect(invokeMock).toHaveBeenCalledWith('get_terminal_broker_snapshot', {
       sessionId: 'transport-1',
     });

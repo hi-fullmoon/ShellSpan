@@ -377,6 +377,8 @@ export function main() {
   cargoTest('agent_runtime::native::terminal_execute::tests');
   cargoTest('terminal_integration::tests');
   cargoTest('agent_runtime::native::terminal_lease::tests');
+  cargoTest('agent_runtime::native::terminal_interactive::tests');
+  cargoTest('agent_runtime::native::runtime::tests');
   cargoTest('agent_runtime::recovery::tests');
   cargoTest('session::tests');
 
@@ -387,12 +389,22 @@ export function main() {
     const integrationTest =
       'terminal_integration::tests::windows_powershell_5_1_visible_command_integration';
     cargoTest(integrationTest, ['--ignored', '--exact'], integrationTest);
+    const interactiveTest =
+      'agent_runtime::native::terminal_interactive::tests::windows_powershell_5_1_interactive_terminal_operation';
+    cargoTest(interactiveTest, ['--ignored', '--exact'], interactiveTest);
     cargoTest('agent_runtime::native::process::tests');
     cargoTest('agent_runtime::native::pty::tests');
     cargoTest('commands::tests');
-    run(cargo, ['test', '--locked', '--manifest-path', 'src-tauri/Cargo.toml']);
+    run(cargo, [
+      'test',
+      '--locked',
+      '--manifest-path',
+      'src-tauri/Cargo.toml',
+      '--',
+      '--test-threads=1',
+    ]);
   } else {
-    console.error('MISSING: direct/legacy/full Windows suites require Windows PowerShell 5.1.');
+    console.error('MISSING: direct/compatibility/full Windows suites require Windows PowerShell 5.1.');
   }
 
   if (hasPowerShell7) {
@@ -402,6 +414,9 @@ export function main() {
     const integrationTest =
       'terminal_integration::tests::windows_powershell_7_visible_command_integration';
     cargoTest(integrationTest, ['--ignored', '--exact'], integrationTest);
+    const interactiveTest =
+      'agent_runtime::native::terminal_interactive::tests::windows_powershell_7_interactive_terminal_operation';
+    cargoTest(interactiveTest, ['--ignored', '--exact'], interactiveTest);
   }
 
   for (let round = 1; round <= 2; round += 1) {
@@ -412,11 +427,11 @@ export function main() {
   }
 
   if (missing.length > 0) {
-    console.error(`Windows Phase 2 acceptance: MISSING — ${missing.join(', ')}.`);
+    console.error(`Windows Phase 6 acceptance: MISSING — ${missing.join(', ')}.`);
     process.exit(2);
   }
 
-  console.log('Windows Phase 2/3 native ConPTY acceptance: PASS.');
+  console.log('Windows Phase 2/3/5/6 native ConPTY and rollout acceptance: PASS.');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

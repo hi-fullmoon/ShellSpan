@@ -159,6 +159,63 @@ describe('terminal execution Phase 0 protocol contract', () => {
     }), validator.errorsText(validateTool.errors)).toBe(true);
   });
 
+  it('validates the Phase 5 terminal screen, input, and bounded-wait contracts', async () => {
+    const schema = await readJson('tool-contract.schema.json');
+    const validator = new Ajv2020({ allErrors: true, strict: true });
+    const validate = validator.compile(schema);
+    const base = {
+      requestId: 'request-interactive',
+      callId: 'call-interactive',
+      target: { kind: 'local', targetId: 'target-1', sessionId: 'transport-1' },
+      capabilityId: 'capability-interactive',
+    };
+    for (const call of [
+      { ...base, toolName: 'read_terminal', arguments: {} },
+      { ...base, toolName: 'write_terminal_input', arguments: { inputKind: 'key', key: 'arrowDown' } },
+      { ...base, toolName: 'write_terminal_input', arguments: { inputKind: 'interrupt' } },
+      { ...base, toolName: 'wait_terminal', arguments: { afterScreenVersion: 4, timeoutMs: 1000 } },
+    ]) {
+      expect(validate(call), validator.errorsText(validate.errors)).toBe(true);
+    }
+    expect(validate({
+      ...base,
+      toolName: 'write_terminal_input',
+      arguments: { inputKind: 'interrupt', text: 'must-not-be-accepted' },
+    })).toBe(false);
+    expect(validate({ ...base, toolName: 'wait_terminal', arguments: { timeoutMs: 1000 } }))
+      .toBe(false);
+
+    expect(validate({
+      requestId: 'request-interactive',
+      callId: 'call-interactive',
+      toolName: 'read_terminal',
+      targetId: 'target-1',
+      status: 'completed',
+      summary: 'screen observed',
+      data: {
+        contractVersion: 1,
+        credentialLikePrompt: false,
+        snapshot: {
+          protocolVersion: 1,
+          terminalSessionId: 'terminal-1',
+          terminalGeneration: 1,
+          type: 'screenSnapshot',
+          screenVersion: 5,
+          throughOutputSequence: 4,
+          rows: 2,
+          columns: 20,
+          cursor: { row: 1, column: 3, visible: true },
+          activeBuffer: 'alternate',
+          title: 'fixture',
+          content: ['menu', '> choice'],
+        },
+      },
+      artifacts: [],
+      effects: [],
+      truncated: false,
+    }), validator.errorsText(validate.errors)).toBe(true);
+  });
+
   it('reserves every migration flag with an explicit rollback rule', async () => {
     const compatibility = await readFile(
       path.join(protocolRoot, 'terminal-execution-compatibility.md'),
@@ -178,20 +235,24 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(compatibility).toContain('| Rollback rule |');
     expect(compatibility).toMatch(/never reroute or replay an in-flight\/uncertain command/i);
     expect(compatibility).toContain('SHELLSPAN_TERMINAL_BROKER_V1');
-    expect(compatibility).toMatch(/absent value is explicitly\s+off/i);
+    expect(compatibility).toContain('SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1');
+    expect(compatibility).toMatch(/On Windows,\s+an absent value is on for broker, integration, execute, and interactive tools/i);
+    expect(compatibility).toMatch(/on macOS and Linux those absent values remain off/i);
     expect(compatibility).toMatch(/have no\s+frontend mutation IPC/i);
     expect(compatibility).toMatch(/bounded to the 256 most recently closed logical\s+sessions/i);
     expect(compatibility).toMatch(/successful reconnect drops\s+all superseded transport identities/i);
   });
 
-  it('keeps the Phase 3 path wrapper-free and the legacy fallback additive', async () => {
-    const [integration, terminalExecute, adapter, callPolicy, modelTools, legacy, manifest] = await Promise.all([
+  it('keeps the new path wrapper-free and isolates the legacy fallback from Windows local routing', async () => {
+    const [integration, terminalExecute, adapter, callPolicy, modelTools, legacy, runtime, broker, manifest] = await Promise.all([
       readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_integration.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native/terminal_execute.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native_adapter.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native/call_policy.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/model_tools.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native/pty.rs'), 'utf8'),
+      readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native/runtime.rs'), 'utf8'),
+      readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_broker.rs'), 'utf8'),
       readJson('built-in-tools.json'),
     ]);
     const terminalExecuteProduction = terminalExecute.split('#[cfg(test)]')[0];
@@ -212,6 +273,11 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(modelTools).toContain('visible-terminal lifecycle is never security evidence or a sandbox');
     expect(legacy).toContain('build_posix_wrapper');
     expect(legacy).toContain('build_powershell_wrapper');
+    expect(runtime).toContain('TERMINAL_LEGACY_WRAPPER_REMOVED_ON_WINDOWS');
+    expect(runtime).toContain('legacy_pty_wrapper_available');
+    expect(broker).toContain('TERMINAL_BROKER_DEFAULT_ENABLED: bool = cfg!(target_os = "windows")');
+    expect(broker).toContain('remote_visible_command_route');
+    expect(broker).toContain('TerminalRolloutCountersSnapshot');
     expect(manifest.tools.map(({ name }) => name)).toContain('terminal_execute');
     expect(manifest.tools.find(({ name }) => name === 'terminal_execute')).toMatchObject({
       targetKinds: ['local', 'remote'],
@@ -220,14 +286,16 @@ describe('terminal execution Phase 0 protocol contract', () => {
     });
   });
 
-  it('records Phase 2/3/4 platform evidence without promoting container results', async () => {
-    const [roadmap, rfc, matrix, phase2, phase3, phase4, windowsRunner, broker, brokerTests, benchmark, packageJsonText] = await Promise.all([
+  it('records Phase 2/3/4/5/6 platform evidence without promoting partial results', async () => {
+    const [roadmap, rfc, matrix, phase2, phase3, phase4, phase5, phase6, windowsRunner, broker, brokerTests, benchmark, packageJsonText] = await Promise.all([
       readFile(path.join(protocolRoot, 'terminal-execution-roadmap.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-protocol-rfc.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-execution-test-matrix.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-execution-phase-2-acceptance.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-execution-phase-3-acceptance.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-execution-phase-4-acceptance.md'), 'utf8'),
+      readFile(path.join(protocolRoot, 'terminal-execution-phase-5-acceptance.md'), 'utf8'),
+      readFile(path.join(protocolRoot, 'terminal-execution-phase-6-acceptance.md'), 'utf8'),
       readFile(path.join(repositoryRoot, 'scripts/verify-terminal-broker-windows.mjs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_broker.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/tests/terminal_broker.rs'), 'utf8'),
@@ -237,11 +305,11 @@ describe('terminal execution Phase 0 protocol contract', () => {
     const packageJson = JSON.parse(packageJsonText);
 
     expect(roadmap).toContain('[Phase 2 evidence](./terminal-execution-phase-2-acceptance.md)');
-    expect(roadmap).toContain('complete (waived Windows native evidence)');
+    expect(roadmap).toContain('Windows supplement `01a0a566-6a29-74a3-945e-cc310a46cecd` | **complete — PASS**');
     const phase3SessionId = '01a0a3a5-747a-7af2-b6ec-392a60141fed';
     expect(roadmap.split(/\r?\n/).filter((line) => line.startsWith('| 3. Local visible command |')))
       .toEqual([
-        '| 3. Local visible command | `' + phase3SessionId + '` | **complete (waived Windows native evidence)** | [Phase 3 evidence](./terminal-execution-phase-3-acceptance.md) |',
+        '| 3. Local visible command | `' + phase3SessionId + '`; Windows supplement `01a0a566-6a29-74a3-945e-cc310a46cecd` | **complete — PASS** | [Phase 3 evidence](./terminal-execution-phase-3-acceptance.md) and [Windows supplement](./terminal-execution-phase-5-acceptance.md) |',
       ]);
     expect(phase3.split(/\r?\n/).filter((line) => line.startsWith('Session:')))
       .toEqual(['Session: `' + phase3SessionId + '`']);
@@ -250,11 +318,29 @@ describe('terminal execution Phase 0 protocol contract', () => {
     const phase4FinalContinuationId = '01a0a500-3512-7be2-9516-7bfc9813ed66';
     expect(roadmap.split(/\r?\n/).filter((line) => line.startsWith('| 4. Remote real terminal |')))
       .toEqual([
-        '| 4. Remote real terminal | `' + phase4SessionId + '`; continuations `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`, `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d`, `' + phase4FinalContinuationId + '` | **complete — PASS (waived Windows native evidence)** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |',
+        '| 4. Remote real terminal | `' + phase4SessionId + '`; continuations `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`, `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d`, `' + phase4FinalContinuationId + '` | **complete — PASS** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |',
       ]);
     expect(phase4).toContain('Original Phase 4 session: `' + phase4SessionId + '`');
     expect(phase4).toContain('Final lifecycle and gate continuation: `' + phase4FinalContinuationId + '`');
-    expect(roadmap).toContain('| 5. Interactive operation | not created | **ready — not started**');
+    const phase5SessionId = '01a0a566-6a29-74a3-945e-cc310a46cecd';
+    expect(roadmap).toContain(
+      '| 5. Interactive operation | `' + phase5SessionId + '` | **complete — PASS (Windows scope)** | [Phase 5 evidence](./terminal-execution-phase-5-acceptance.md) |',
+    );
+    expect(phase5).toContain('Session: `' + phase5SessionId + '`');
+    expect(phase5).toContain('**Final gate: PASS for the Windows delivery scope. A Windows-only Phase 6');
+    expect(phase5).toContain('SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1');
+    expect(roadmap).toContain(
+      '| 6. Rollout and legacy removal | Windows rollout continuation (2026-09-16) | **complete — PASS (Windows scope)** | [Phase 6 evidence](./terminal-execution-phase-6-acceptance.md) |',
+    );
+    expect(phase6).toContain('**Final gate: PASS for the Windows delivery scope. Cross-platform wrapper');
+    expect(phase6).toContain('Cross-platform wrapper\nremoval is NOT READY');
+    expect(phase6).toContain('Windows Phase 2/3/5/6 native ConPTY and rollout acceptance: PASS.');
+    expect(phase6).toContain('778 passed; 0 failed; 37 ignored');
+    expect(phase6).toContain('MISSING — DEFERRED');
+    expect(matrix).toContain('Overall gate: **PASS for the Windows rollout scope**');
+    expect(matrix).toContain('| Isolated SSH bash and zsh | **MISSING — DEFERRED, DEFAULT OFF**');
+    expect(matrix).toContain('Overall gate: **PASS for the Windows delivery scope**');
+    expect(matrix).toContain('| Isolated SSH bash and zsh | **MISSING — DEFERRED**');
     expect(phase4).toContain('**Final gate: PASS. Phase 5 is READY for a separate session');
     expect(phase4).toContain('Native Windows/ConPTY with Windows PowerShell 5.1 and');
     expect(phase4).toContain('**MISSING**, not `PASS`');
@@ -268,20 +354,23 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(rfc).toContain('generation-bound isolated control plane');
     expect(rfc).toContain('**out-of-scope tampering**');
     expect(rfc).toContain('MUST use Direct execution');
-    expect(roadmap).toMatch(/Native Windows\/ConPTY remains\s+\*\*MISSING\*\*, not `PASS`/i);
-    expect(roadmap).toMatch(/waiver expires before any\s+Phase 6 default enablement or removal of the legacy wrapper/i);
+    expect(roadmap).toMatch(/native Windows PowerShell 5\.1\s+and PowerShell\s+7\.6 ConPTY acceptance passed/i);
+    expect(roadmap).toMatch(/Phase 6 is \*\*PASS for the Windows delivery\s+scope\*\*/i);
     expect(matrix).toMatch(/Linux bash and zsh \| \*\*PASS \(VM\/container\)\*\*/);
     expect(matrix).toContain('Overall gate: **PASS for Phase 3 under the 2026-09-15 cooperative-shell RFC');
     expect(matrix).toMatch(/Bare-metal Linux \| \*\*MISSING\*\*/);
     expect(phase2).toContain('macos_bash_pty_broker_preserves_raw_bytes_input_order_and_resize');
     expect(phase2).toMatch(/Linux VM\/container evidence, not bare-metal Linux evidence/);
-    expect(phase2).toContain('Phase 2 complete with waived Windows native evidence');
-    expect(phase2).toMatch(/temporary Phase 2 gate waiver, not test\s+evidence/i);
-    expect(phase2).toMatch(/Windows lane remains \*\*MISSING\*\* and must never be reported as\s+`PASS`/i);
-    expect(phase2).toMatch(/Static x86_64\/ARM64 cross-compilation and cfg checks cannot replace\s+that native run/i);
-    expect(matrix).toMatch(/temporarily waived for the Phase 2 gate only, not a pass/i);
-    expect(matrix).toMatch(/must pass before Phase 6 default enablement or removal of the\s+legacy wrapper/i);
+    expect(phase2).toContain('The original Windows waiver is closed');
+    expect(phase2).toContain('`pnpm test:terminal-interactive:windows` passed on Windows 11 x64');
+    expect(phase2).toMatch(/historical sections below preserve the evidence boundary[\s\S]*superseded for the\s+current Windows delivery state/i);
+    expect(matrix).toMatch(/Windows PowerShell 5\.1 and PowerShell 7 \| \*\*PASS\*\*/);
+    expect(matrix).toMatch(/Windows-scoped Phase 6 continuation is complete/i);
     expect(packageJson.scripts['test:terminal-broker:windows'])
+      .toBe('node scripts/verify-terminal-broker-windows.mjs');
+    expect(packageJson.scripts['test:terminal-interactive:windows'])
+      .toBe('node scripts/verify-terminal-broker-windows.mjs');
+    expect(packageJson.scripts['test:terminal-rollout:windows'])
       .toBe('node scripts/verify-terminal-broker-windows.mjs');
     expect(windowsRunner).toContain("process.platform !== 'win32'");
     expect(windowsRunner).toContain('MISSING: native Windows/ConPTY execution is required');
@@ -297,14 +386,18 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(windowsRunner).toContain("probeVersion('pwsh.exe', 'PowerShell 7')");
     expect(windowsRunner).toContain('windows_powershell_5_1_conpty_broker_preserves_raw_bytes_order_and_resize');
     expect(windowsRunner).toContain('windows_powershell_7_conpty_broker_preserves_raw_bytes_order_and_resize');
-    expect(windowsRunner.match(/\['--ignored', '--exact'\]/g)).toHaveLength(4);
+    expect(windowsRunner.match(/\['--ignored', '--exact'\]/g)).toHaveLength(6);
     expect(windowsRunner).toContain('windows_powershell_5_1_visible_command_integration');
     expect(windowsRunner).toContain('windows_powershell_7_visible_command_integration');
+    expect(windowsRunner).toContain('windows_powershell_5_1_interactive_terminal_operation');
+    expect(windowsRunner).toContain('windows_powershell_7_interactive_terminal_operation');
     expect(windowsRunner).toContain("cargoTest('agent_runtime::native::process::tests')");
     expect(windowsRunner).toContain("cargoTest('agent_runtime::native::pty::tests')");
+    expect(windowsRunner).toContain("cargoTest('agent_runtime::native::runtime::tests')");
     expect(windowsRunner).toContain("cargoTest('commands::tests')");
     expect(windowsRunner).toContain("cargoExampleTest('terminal_transport_baseline')");
     expect(windowsRunner).toContain('assertCargoTestsRan(output, filter, exactTest)');
+    expect(windowsRunner).toContain("'--test-threads=1'");
     expect(windowsRunner).toContain('runCounts[0] < 1');
     expect(windowsRunner).toContain("args.push('--broker')");
     expect(windowsRunner).toContain('Number.isFinite');
@@ -314,8 +407,14 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(brokerTests).toContain('assert_eq!(second_receipt.input_sequence, 2)');
     expect(brokerTests).toContain('echo-independent payload');
     expect(brokerTests).toContain('assert!(bounded_replay.has_more)');
+    expect(brokerTests).toContain('phase6_windows_default_is_wrapper_free_and_remote_rollback_stays_compatible');
+    expect(brokerTests).toContain('rollout_counters_are_bounded_privacy_safe_and_cover_phase6_signals');
+    expect(broker).toContain('TRANSPORT_LATENCY_SAMPLE_INTERVAL_FRAMES: u64 = 64');
     expect(benchmark).toContain('SHELLSPAN_BENCH_PAYLOAD_BEGIN:');
     expect(benchmark).toContain('validate_emitted_payload(&output, bytes)');
+    expect(benchmark).toContain('strip_terminal_controls');
+    expect(benchmark).toContain('EMIT_LINE_PAYLOAD_BYTES');
+    expect(benchmark).toContain('Duration::from_secs(30)');
     expect(matrix).toContain('Native Windows command: `pnpm test:terminal-broker:windows`');
     expect(matrix).toMatch(/x86_64 or arm64 Windows/);
     expect(phase2).toMatch(/MISSING as designed.*exit 2/i);

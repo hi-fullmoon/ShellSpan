@@ -6,10 +6,11 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use tokio_util::sync::CancellationToken;
 
 use crate::agent_runtime::{
     validate_agent_request_native, validate_tool_arguments_native,
@@ -18,7 +19,8 @@ use crate::agent_runtime::{
     AgentPolicyEvaluationNative, AgentPolicyOutcomeNative, AgentRequestNative, AgentToolCallNative,
     AgentToolResultNative, AgentToolResultStatusNative, AgentToolTargetNative,
     ExecCommandArgumentsNative, KillProcessArgumentsNative, NativeContractPolicyEngine,
-    TerminalExecuteArgumentsNative, WaitProcessArgumentsNative, WriteStdinArgumentsNative,
+    ReadTerminalArgumentsNative, TerminalExecuteArgumentsNative, WaitProcessArgumentsNative,
+    WaitTerminalArgumentsNative, WriteStdinArgumentsNative, WriteTerminalInputArgumentsNative,
 };
 use crate::db::Database;
 use crate::keychain::{CredentialManager, ProfileSecretKind};
@@ -29,7 +31,7 @@ use crate::models::{
 use crate::terminal_broker::{
     TerminalBrokerAttachment, TerminalBrokerSnapshot, TerminalGenerationCloseReason,
     TerminalGeometry, TerminalRawOutputFrame, TerminalSessionBroker, TerminalTransportKind,
-    TerminalVisibleCommandRoute,
+    TerminalVisibleCommandRoute, TerminalWaitReason,
 };
 use crate::terminal_integration::{TerminalIntegrationControlEvent, TerminalShellKind};
 
@@ -43,8 +45,8 @@ use super::{
     McpToolPolicyNative, NativeCapabilityStoreNative, ProcessLifecycleNative,
     ProcessRegistryNative, ProcessSnapshotNative, PtyLifecycleNative, PtyRegistryNative,
     PtyShellKindNative, RegisteredToolNative, RemoteProcessStartNative, TerminalExecuteRegistry,
-    TerminalInputSource, TerminalLeaseManager, TerminalLeaseReleaseReason, ToolRegistryErrorNative,
-    ToolRegistryNative,
+    TerminalInputSource, TerminalInteractiveRegistry, TerminalLeaseManager,
+    TerminalLeaseReleaseReason, ToolRegistryErrorNative, ToolRegistryNative,
 };
 
 pub(crate) const DEFAULT_CAPABILITY_TTL_MS: u64 = 120_000;
@@ -126,6 +128,7 @@ pub(crate) struct NativeToolEngine {
     processes: ProcessRegistryNative,
     pty: PtyRegistryNative,
     terminal_execute: TerminalExecuteRegistry,
+    terminal_interactive: TerminalInteractiveRegistry,
     terminal_leases: TerminalLeaseManager,
     terminal_broker: TerminalSessionBroker,
     checkpoints: CheckpointStoreNative,
@@ -139,6 +142,8 @@ impl Default for NativeToolEngine {
         let terminal_leases = TerminalLeaseManager::new(terminal_broker.clone());
         let terminal_execute =
             TerminalExecuteRegistry::new(terminal_leases.clone(), terminal_broker.clone());
+        let terminal_interactive =
+            TerminalInteractiveRegistry::new(terminal_leases.clone(), terminal_broker.clone());
         Self {
             registry: Arc::new(
                 ToolRegistryNative::from_builtin_manifest().expect("valid native tool manifest"),
@@ -147,6 +152,7 @@ impl Default for NativeToolEngine {
             processes: ProcessRegistryNative::default(),
             pty: PtyRegistryNative::new(terminal_leases.clone()),
             terminal_execute,
+            terminal_interactive,
             terminal_leases,
             terminal_broker,
             checkpoints: CheckpointStoreNative::default(),
@@ -158,7 +164,11 @@ impl Default for NativeToolEngine {
 
 impl NativeToolEngine {
     pub(crate) fn configure_terminal_broker_rollout(&self) -> Result<(), String> {
-        self.terminal_broker.configure_from_trusted_environment()
+        self.terminal_broker.configure_from_trusted_environment()?;
+        if !self.terminal_broker.interactive_tools_enabled()? {
+            self.terminal_interactive.shutdown_all()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn attach_terminal_broker_transport(
@@ -281,6 +291,14 @@ impl NativeToolEngine {
             .visible_command_route(transport_session_id)
     }
 
+    pub(crate) fn terminal_remote_visible_command_route(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<TerminalVisibleCommandRoute, String> {
+        self.terminal_broker
+            .remote_visible_command_route(transport_session_id)
+    }
+
     pub(crate) fn remote_agent_pty_new_operation_route(
         &self,
     ) -> Result<TerminalVisibleCommandRoute, String> {
@@ -348,6 +366,7 @@ impl NativeToolEngine {
     }
 
     pub(crate) fn release_terminal_turn(&self, agent_session_id: &str) -> Result<(), String> {
+        self.terminal_interactive.release_turn(agent_session_id)?;
         self.terminal_leases.release_turn(agent_session_id)
     }
 
@@ -407,7 +426,10 @@ impl NativeToolEngine {
         agent_session_id: &str,
         operation_id: &str,
     ) -> Result<bool, String> {
-        if self.terminal_execute.has_operation(session_id)? {
+        if self.terminal_interactive.has_operation(session_id)? {
+            self.terminal_interactive
+                .takeover(sessions, session_id, agent_session_id, operation_id)
+        } else if self.terminal_execute.has_operation(session_id)? {
             self.terminal_execute
                 .takeover(sessions, session_id, agent_session_id, operation_id)
         } else {
@@ -417,9 +439,10 @@ impl NativeToolEngine {
     }
 
     pub(crate) fn terminal_closed(&self, session_id: &str) -> Result<bool, String> {
+        let interactive = self.terminal_interactive.terminal_closed(session_id)?;
         let visible = self.terminal_execute.terminal_closed(session_id)?;
         let legacy = self.pty.terminal_closed(session_id)?;
-        Ok(visible || legacy)
+        Ok(interactive || visible || legacy)
     }
 
     pub(crate) fn configure_checkpoint_root(&self, root: PathBuf) -> Result<(), String> {
@@ -715,6 +738,7 @@ impl NativeToolEngine {
         database: &Database,
         credentials: &CredentialManager,
         known_hosts_path: &Path,
+        cancellation: &CancellationToken,
     ) -> Result<AgentToolResultNative, String> {
         context.validate()?;
         if call.request_id != context.request.request_id
@@ -784,6 +808,16 @@ impl NativeToolEngine {
                 sessions,
                 tool.descriptor.default_timeout_ms,
             ),
+            "read_terminal" => self.read_terminal(context, &call, &effect, sessions),
+            "write_terminal_input" => self.write_terminal_input(context, &call, &effect, sessions),
+            "wait_terminal" => self.wait_terminal(
+                context,
+                &call,
+                &effect,
+                sessions,
+                tool.descriptor.default_timeout_ms,
+                cancellation,
+            ),
             "write_stdin" => self.write_process(context, &call, &effect),
             "wait_process" => self.wait_process(context, &call, &effect),
             "kill_process" => self.kill_process(context, &call, &effect),
@@ -819,6 +853,9 @@ impl NativeToolEngine {
         if let Err(error) = self.terminal_execute.cancel_task(sessions, task_id) {
             errors.push(error);
         }
+        if let Err(error) = self.terminal_interactive.cancel_task(sessions, task_id) {
+            errors.push(error);
+        }
         if errors.is_empty() {
             Ok(())
         } else {
@@ -848,6 +885,10 @@ impl NativeToolEngine {
             Err(error) => errors.push(error),
         }
         match self.terminal_execute.shutdown_all(sessions) {
+            Ok(count) => cancelled += count,
+            Err(error) => errors.push(error),
+        }
+        match self.terminal_interactive.shutdown_all() {
             Ok(count) => cancelled += count,
             Err(error) => errors.push(error),
         }
@@ -969,7 +1010,14 @@ impl NativeToolEngine {
                 | AgentToolTargetNative::Remote { session_id, .. } => session_id,
                 _ => return Err("PTY execution requires a terminal target".into()),
             };
-            let shell_kind = pty_shell_kind(&sessions.target_state(session_id)?)?;
+            let terminal_state = sessions.target_state(session_id)?;
+            if !legacy_pty_wrapper_available(&terminal_state) {
+                return Err(
+                    "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_WINDOWS: use terminal_execute or Direct execution"
+                        .into(),
+                );
+            }
+            let shell_kind = pty_shell_kind(&terminal_state)?;
             let operation = self.pty.start(
                 sessions,
                 session_id,
@@ -1221,6 +1269,193 @@ impl NativeToolEngine {
         })
     }
 
+    fn read_terminal(
+        &self,
+        context: &NativeExecutionContext,
+        call: &AgentToolCallNative,
+        effect: &AgentObservedEffectNative,
+        sessions: &SessionManager,
+    ) -> Result<AgentToolResultNative, String> {
+        let _: ReadTerminalArgumentsNative = serde_json::from_value(call.arguments.clone())
+            .map_err(|error| format!("invalid read_terminal arguments: {error}"))?;
+        let session_id = self.interactive_terminal_session_id(context, call, sessions)?;
+        let snapshot = self.terminal_interactive.read(&session_id)?;
+        let (snapshot, credential_like_prompt) = super::sanitize_terminal_screen(snapshot);
+        Ok(AgentToolResultNative {
+            request_id: context.request.request_id.clone(),
+            call_id: call.call_id.clone(),
+            tool_name: call.tool_name.clone(),
+            target_id: call.target.target_id().to_string(),
+            status: AgentToolResultStatusNative::Completed,
+            summary: if credential_like_prompt {
+                "Terminal screen was read with credential-like content redacted.".into()
+            } else {
+                "Terminal screen was read.".into()
+            },
+            data: Some(json!({
+                "contractVersion": 1,
+                "snapshot": snapshot,
+                "credentialLikePrompt": credential_like_prompt,
+            })),
+            artifacts: Vec::new(),
+            effects: vec![effect.clone()],
+            truncated: Some(false),
+        })
+    }
+
+    fn write_terminal_input(
+        &self,
+        context: &NativeExecutionContext,
+        call: &AgentToolCallNative,
+        effect: &AgentObservedEffectNative,
+        sessions: &SessionManager,
+    ) -> Result<AgentToolResultNative, String> {
+        let arguments: WriteTerminalInputArgumentsNative =
+            serde_json::from_value(call.arguments.clone())
+                .map_err(|error| format!("invalid write_terminal_input arguments: {error}"))?;
+        let session_id = self.interactive_terminal_session_id(context, call, sessions)?;
+        let result = self.terminal_interactive.write(
+            sessions,
+            &session_id,
+            &context.request.user_session_id,
+            &context.request.task_id,
+            arguments.input_kind,
+            arguments.text.as_deref(),
+            arguments.key,
+        )?;
+        Ok(AgentToolResultNative {
+            request_id: context.request.request_id.clone(),
+            call_id: call.call_id.clone(),
+            tool_name: call.tool_name.clone(),
+            target_id: call.target.target_id().to_string(),
+            status: AgentToolResultStatusNative::Completed,
+            summary: "Terminal input was accepted by the active Agent lease.".into(),
+            data: Some(json!({
+                "contractVersion": 1,
+                "receipt": result,
+            })),
+            artifacts: Vec::new(),
+            effects: vec![effect.clone()],
+            truncated: Some(false),
+        })
+    }
+
+    fn wait_terminal(
+        &self,
+        context: &NativeExecutionContext,
+        call: &AgentToolCallNative,
+        effect: &AgentObservedEffectNative,
+        sessions: &SessionManager,
+        default_timeout_ms: u64,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentToolResultNative, String> {
+        let arguments: WaitTerminalArgumentsNative = serde_json::from_value(call.arguments.clone())
+            .map_err(|error| format!("invalid wait_terminal arguments: {error}"))?;
+        let session_id = self.interactive_terminal_session_id(context, call, sessions)?;
+        let timeout = Duration::from_millis(
+            arguments
+                .timeout_ms
+                .unwrap_or(default_timeout_ms)
+                .min(60_000),
+        );
+        let deadline = Instant::now() + timeout;
+        let base_request = crate::terminal_broker::TerminalWaitRequest {
+            after_screen_version: arguments.after_screen_version,
+            after_output_sequence: arguments.after_output_sequence,
+            after_lifecycle_sequence: arguments.after_lifecycle_sequence,
+            text: arguments.text,
+            case_sensitive: arguments.case_sensitive.unwrap_or(false),
+            idle: arguments.idle_ms.map(Duration::from_millis),
+            timeout,
+        };
+        let result = loop {
+            if cancellation.is_cancelled() {
+                return Ok(AgentToolResultNative {
+                    request_id: context.request.request_id.clone(),
+                    call_id: call.call_id.clone(),
+                    tool_name: call.tool_name.clone(),
+                    target_id: call.target.target_id().to_string(),
+                    status: AgentToolResultStatusNative::Cancelled,
+                    summary: "Terminal wait was cancelled.".into(),
+                    data: None,
+                    artifacts: Vec::new(),
+                    effects: vec![effect.clone()],
+                    truncated: Some(false),
+                });
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let slice = remaining.min(Duration::from_millis(100));
+            let mut request = base_request.clone();
+            request.timeout = slice;
+            let result = self.terminal_interactive.wait(&session_id, request)?;
+            if result.reason != TerminalWaitReason::TimedOut || slice == remaining {
+                break result;
+            }
+        };
+        let (snapshot, credential_like_prompt) = match result.snapshot {
+            Some(snapshot) => {
+                let (snapshot, credential_like_prompt) = super::sanitize_terminal_screen(snapshot);
+                (Some(snapshot), credential_like_prompt)
+            }
+            None => (None, false),
+        };
+        Ok(AgentToolResultNative {
+            request_id: context.request.request_id.clone(),
+            call_id: call.call_id.clone(),
+            tool_name: call.tool_name.clone(),
+            target_id: call.target.target_id().to_string(),
+            status: AgentToolResultStatusNative::Completed,
+            summary: "Terminal wait reached a bounded observation condition.".into(),
+            data: Some(json!({
+                "contractVersion": 1,
+                "reason": result.reason,
+                "lifecycleSequence": result.lifecycle_sequence,
+                "open": result.open,
+                "snapshot": snapshot,
+                "credentialLikePrompt": credential_like_prompt,
+            })),
+            artifacts: Vec::new(),
+            effects: vec![effect.clone()],
+            truncated: Some(false),
+        })
+    }
+
+    fn interactive_terminal_session_id(
+        &self,
+        context: &NativeExecutionContext,
+        call: &AgentToolCallNative,
+        sessions: &SessionManager,
+    ) -> Result<String, String> {
+        match &call.target {
+            AgentToolTargetNative::Local { session_id, .. } => Ok(session_id.clone()),
+            AgentToolTargetNative::Remote {
+                target_id,
+                session_id: source_session_id,
+                host,
+                port,
+                username,
+                ..
+            } => {
+                let binding = sessions
+                    .agent_remote_terminal(&context.request.user_session_id, target_id)?
+                    .ok_or_else(|| {
+                        "TERMINAL_INTERACTIVE_REQUIRES_DEDICATED_AGENT_SSH_PTY".to_string()
+                    })?;
+                if binding.owner.source_session_id != *source_session_id
+                    || binding.state.terminal_kind != SessionTerminalKind::Remote
+                    || binding.state.status != SessionStatus::Connected
+                    || binding.state.identity.host != *host
+                    || binding.state.identity.port != *port
+                    || binding.state.identity.username != *username
+                {
+                    return Err("Agent SSH PTY no longer matches its frozen remote target".into());
+                }
+                Ok(binding.session_id)
+            }
+            _ => Err("interactive terminal tools require a terminal target".into()),
+        }
+    }
+
     fn write_process(
         &self,
         context: &NativeExecutionContext,
@@ -1466,6 +1701,10 @@ fn pty_shell_kind(
         "PTY_SHELL_UNSUPPORTED: local shell `{}` is not supported; use direct execution",
         state.identity.title
     ))
+}
+
+fn legacy_pty_wrapper_available(state: &crate::models::SessionTargetState) -> bool {
+    !cfg!(target_os = "windows") || state.terminal_kind == SessionTerminalKind::Remote
 }
 
 fn pty_lifecycle_wire_state(state: PtyLifecycleNative) -> &'static str {
@@ -1767,6 +2006,15 @@ mod tests {
             pty_shell_kind(&state(SessionTerminalKind::Remote, "Production")).unwrap(),
             None
         );
+        assert_eq!(
+            legacy_pty_wrapper_available(&state(SessionTerminalKind::Local, "powershell")),
+            !cfg!(target_os = "windows"),
+            "the Phase 6 Windows local route must not reach the legacy wrapper"
+        );
+        assert!(legacy_pty_wrapper_available(&state(
+            SessionTerminalKind::Remote,
+            "Production"
+        )));
         assert!(pty_shell_kind(&state(SessionTerminalKind::Local, "fish"))
             .unwrap_err()
             .starts_with("PTY_SHELL_UNSUPPORTED:"));

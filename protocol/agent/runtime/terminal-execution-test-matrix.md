@@ -77,8 +77,8 @@ still be redacted from captured evidence. Host credentials or arbitrary user
 terminals are never used for acceptance tests.
 
 Every later-phase handoff updates this matrix with exact command output and
-marks unexecuted native platforms **MISSING**. A phase gate that requires all
-platforms is not satisfied until their independent sessions provide evidence.
+marks unexecuted native platforms **MISSING**. A platform-scoped gate may pass
+only for its evidenced platform; it does not imply or enable another platform.
 
 ## Phase 2 acceptance status
 
@@ -90,7 +90,7 @@ Detailed evidence: [Terminal Execution Phase 2 Acceptance Evidence](./terminal-e
 | macOS bash | **PASS** | Native `/bin/bash` PTY; explicit raw-byte Broker test |
 | Linux bash and zsh | **PASS (VM/container)** | Debian 12/aarch64 inside Docker Desktop LinuxKit; not bare-metal |
 | Isolated SSH `/bin/sh` | **PASS** | Loopback-only disposable SSH fixture |
-| Windows PowerShell 5.1 and PowerShell 7 | **MISSING** | No native Windows/ConPTY host evidence; temporarily waived for the Phase 2 gate only, not a pass |
+| Windows PowerShell 5.1 and PowerShell 7 | **PASS** | Native Windows 11 x64 / ConPTY consolidated gate passed on 2026-09-16; exact Broker tests and two release performance rounds passed. |
 | Bare-metal Linux | **MISSING** | Docker Desktop evidence is not promoted to bare-metal evidence; bare metal is not an additional Phase 2 minimum-environment requirement |
 
 Native Windows command: `pnpm test:terminal-broker:windows`. The command must
@@ -100,18 +100,17 @@ Rust host toolchain is unavailable. The architecture mapping is
 `x64` -> `x86_64-pc-windows-msvc` and
 `arm64` -> `aarch64-pc-windows-msvc`.
 
-The user-approved Windows waiver permits opening Phase 3 while this lane stays
-`MISSING`. It does not satisfy or delete the lane. Native execution of the
-command above must pass before Phase 6 default enablement or removal of the
-legacy wrapper; static cross-compilation cannot substitute for that run.
+The original Phase 2 waiver is closed. `pnpm test:terminal-interactive:windows`
+runs this entry point plus the Phase 3 and Phase 5 Windows lanes and exits
+nonzero if any required host, shell, functional, or performance check fails.
 
 ## Phase 3 acceptance status
 
 Detailed evidence: [Terminal Execution Phase 3 Acceptance Evidence](./terminal-execution-phase-3-acceptance.md).
 
 Overall gate: **PASS for Phase 3 under the 2026-09-15 cooperative-shell RFC
-amendment and the explicit Windows native-evidence waiver**. The macOS and
-Linux lanes pass both functional and in-scope adversarial gates. The private
+amendment**. The macOS, Linux, and Windows lanes pass their functional and
+in-scope gates. The private
 POSIX FIFO is a generation-bound isolated control plane, not authentication
 against arbitrary same-UID code: raw PTY bytes cannot reach it, ordinary
 foreground children inherit no writer, and deliberate same-UID reopen or
@@ -123,7 +122,7 @@ explicit adversarial/untrusted lifecycle requests are forced to Direct.
 | macOS zsh | **PASS** | Native Darwin arm64 production-config real PTY matrix; raw-output forgery, descriptor non-inheritance, path non-disclosure, state, capture, cancellation, takeover, and uncertainty gates pass. Same-UID active reopen remains the documented cooperative non-goal. |
 | macOS bash | **PASS** | Native Darwin arm64 `/bin/bash` 3.2 production-config real PTY matrix with the same in-scope security and behavior gates. |
 | Linux bash and zsh | **PASS (VM/container)** | Debian 12/aarch64 inside Docker Desktop LinuxKit with `C.UTF-8`; focused post-amendment production logic passes and is not promoted to bare-metal evidence. |
-| Windows PowerShell 5.1 and PowerShell 7 | **IMPLEMENTED/STATIC PASS; NATIVE EVIDENCE MISSING** | Cooperative module/named-pipe/PSReadLine contracts, native ignored ConPTY tests, runner wiring, and x64/ARM64 vendored cfg checks exist. In-shell module access is documented, `$?`/`$LASTEXITCODE` native-vs-cmdlet semantics remain unverified, and there is no native Windows execution. This is **MISSING**, never `PASS`. |
+| Windows PowerShell 5.1 and PowerShell 7 | **PASS** | Native Windows 11 x64 / ConPTY independently passed exact lifecycle, persistent cwd/environment/alias/function state, ANSI/Unicode, native exit `7`, cmdlet failure `1`, and large-output capture on 2026-09-16. |
 | Isolated SSH `/bin/sh` | **NOT APPLICABLE TO PHASE 3** | Remote real-terminal integration remains Phase 4 and was not started. |
 | Bare-metal Linux | **MISSING** | VM/container evidence is not promoted to bare-metal; bare metal is not an additional Phase 3 minimum-environment requirement. |
 
@@ -132,8 +131,8 @@ Windows host it requires and runs both
 `windows_powershell_5_1_visible_command_integration` and
 `windows_powershell_7_visible_command_integration` over real ConPTY. On any
 non-Windows host, missing PowerShell lane, unsupported architecture, or
-mismatched Rust host it exits nonzero and reports `MISSING`. This debt is a hard
-blocker before Phase 6 default enablement or legacy-wrapper removal.
+mismatched Rust host it exits nonzero and reports `MISSING`. The native Windows
+run passed on 2026-09-16 and closed the earlier waiver.
 
 ## Phase 4 acceptance status
 
@@ -143,9 +142,8 @@ Overall gate: **PASS for the remote POSIX lane**. The isolated loopback Docker
 fixture runs SSH `pty-req` plus interactive bash/zsh shells, uses a separate
 cooperative control channel, and keeps a simultaneous user-owned SSH PTY
 independent. Unsupported `/bin/sh` is explicitly `unavailable`. Direct SSH exec
-passes independently. Native Windows/ConPTY remains **MISSING** under the
-existing user deferral and is still a hard gate before Phase 6; it is not part
-of the remote POSIX gate.
+passes independently. The separate native Windows prerequisite passed in the
+2026-09-16 consolidated Windows gate; it is not part of the remote POSIX gate.
 
 | Lane | Phase 4 result | Evidence boundary |
 | --- | --- | --- |
@@ -154,8 +152,55 @@ of the remote POSIX gate.
 | Isolated SSH unsupported `/bin/sh` | **PASS (explicit unavailable)** | Separate fixture account proves no false-ready integration. |
 | Direct SSH exec | **PASS** | Existing reviewed SSH execution fixture runs independently of remote terminal flags/channels. |
 | User-owned SSH PTY isolation | **PASS** | A simultaneous real user-owned SSH shell retains its own state and is not selected by `terminal_execute`. |
-| Native Windows PowerShell 5.1 / PowerShell 7 | **MISSING** | Explicitly deferred; no native Windows result is claimed. |
+| Native Windows PowerShell 5.1 / PowerShell 7 prerequisite | **PASS** | Consolidated native Windows Phase 2/3/5 gate passed on 2026-09-16. |
 
 Phase 4 entry point: `pnpm test:terminal-visible:ssh`. It builds the disposable
 fixture, waits for health, runs the exact ignored real-SSH tests plus Direct
 regression, and always tears the compose project down.
+
+## Phase 5 acceptance status
+
+Detailed evidence: [Terminal Execution Phase 5 Acceptance Evidence](./terminal-execution-phase-5-acceptance.md).
+
+Overall gate: **PASS for the Windows delivery scope**. The Phase 5 implementation
+and deterministic core fixtures pass on the current native Windows host,
+including screen rendering,
+resize/versioning, REPL/menu text, alternate-buffer state, credential-like
+prompt redaction and input rejection, bounded waits, takeover fencing, and
+non-persistence of text/paste payloads. Independent native PowerShell 5.1 and
+PowerShell 7 ConPTY fixtures additionally exercise the production lease/input,
+screen, and credential-safety path.
+
+| Lane | Phase 5 result | Evidence boundary |
+| --- | --- | --- |
+| Deterministic Windows core | **PASS** | Native Windows Rust tests feed ordered terminal bytes through the production Broker and headless screen model; lease/input/takeover and durable audit boundaries use the production runtime. |
+| Windows PowerShell 5.1 / PowerShell 7 over ConPTY | **PASS** | Both exact native fixtures pass REPL text, single-key confirmation, resize, alternate-screen entry/exit, credential-like prompt redaction/input rejection, raw observation, and restored user input. |
+| macOS zsh and bash | **MISSING — DEFERRED** | No current-code Phase 5 native PTY fixture has run on macOS; it is outside the first Windows delivery scope. |
+| Linux bash and zsh | **MISSING — DEFERRED** | No current-code Phase 5 native PTY fixture has run on Linux; it is outside the first Windows delivery scope. |
+| Isolated SSH bash and zsh | **MISSING — DEFERRED** | The Phase 4 SSH fixture has not been extended for Phase 5 interactive scenarios; remote interactive rollout remains off. |
+
+The Windows-scoped Phase 6 continuation is complete. It retained default-off
+flags and the legacy wrapper on macOS, Linux, and remote targets. Those targets
+remain blocked until their own independent Phase 5 evidence is supplied.
+
+## Phase 6 acceptance status
+
+Detailed evidence: [Terminal Execution Phase 6 Acceptance Evidence](./terminal-execution-phase-6-acceptance.md).
+
+Overall gate: **PASS for the Windows rollout scope**. The local Windows Broker,
+shell integration, visible command, and interactive tools are absent-on after
+native acceptance. The Windows local routing graph cannot select the wrapper;
+degraded or disabled generations expose Direct without rerouting or replay.
+Protocol vocabulary and persisted execution-surface values remain additive.
+
+| Lane | Phase 6 result | Evidence boundary |
+| --- | --- | --- |
+| Windows PowerShell 5.1 / PowerShell 7 local ConPTY | **PASS — DEFAULT ON** | Native Windows 11 x64, `x86_64-pc-windows-msvc`; six exact real-ConPTY Broker/visible/interactive fixtures, Direct regression, full serial Rust, and two release performance rounds pass. |
+| Persisted sessions and event-v5 vocabulary | **PASS — UNCHANGED** | `direct` / `boundTerminal` and `exec_command.channel = direct` / `pty` retain their stored/wire meanings; no migration rewrite or replay was added. |
+| macOS zsh and bash | **MISSING — DEFERRED, DEFAULT OFF** | No Phase 5 native acceptance in this Windows continuation; wrapper/parser compatibility remains compiled and routable. |
+| Linux bash and zsh | **MISSING — DEFERRED, DEFAULT OFF** | No Phase 5 native acceptance in this Windows continuation; wrapper/parser compatibility remains compiled and routable. |
+| Isolated SSH bash and zsh | **MISSING — DEFERRED, DEFAULT OFF** | Phase 4 evidence remains valid, but remote interactive Phase 5 was not run; the remote flag stays off and wrapper fallback remains routable. |
+
+Native Windows command: `pnpm test:terminal-rollout:windows`. It is an alias of
+the consolidated host gate and reports `MISSING` rather than `PASS` if the
+matching MSVC host, Windows PowerShell 5.1, or PowerShell 7 is unavailable.

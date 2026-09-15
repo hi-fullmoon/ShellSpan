@@ -41,7 +41,7 @@ pub(crate) fn assemble_model_input(
 ) -> ModelInputAssembly {
     // A terminal identity alone does not establish a native filesystem root.
     // Advertise only tools that can operate on the immutable Session target.
-    tools.retain(|tool| tool_available_on_target(&tool.name, header.target.as_ref()));
+    tools.retain(|tool| tool_available_on_target(&tool.name, header));
     let mut sections = vec![
         ("Identity", IDENTITY.to_string()),
         ("Execution and trust", EXECUTION_CONTRACT.to_string()),
@@ -114,7 +114,8 @@ fn target_root(target: &AgentSessionTarget) -> Option<&str> {
     .filter(|root| !root.trim().is_empty())
 }
 
-fn tool_available_on_target(name: &str, target: Option<&AgentSessionTarget>) -> bool {
+fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
+    let target = header.target.as_ref();
     match name {
         "run_terminal_command" => {
             target.is_some_and(|target| matches!(target.kind.as_str(), "local" | "remote"))
@@ -130,6 +131,10 @@ fn tool_available_on_target(name: &str, target: Option<&AgentSessionTarget>) -> 
                     .as_deref()
                     .is_some_and(|root| !root.trim().is_empty())
         }),
+        "read_terminal" | "write_terminal_input" | "wait_terminal" => {
+            header.execution_surface == super::AgentExecutionSurface::BoundTerminal
+                && target.is_some_and(|target| matches!(target.kind.as_str(), "local" | "remote"))
+        }
         _ => true,
     }
 }
@@ -399,5 +404,32 @@ mod tests {
         }
         assert!(without_target.contains(&"update_plan".into()));
         assert!(without_target.contains(&crate::agent_runtime::user_questions::TOOL_NAME.into()));
+    }
+
+    #[test]
+    fn interactive_terminal_tools_are_exposed_only_on_bound_terminal_sessions() {
+        let available = |header: &AgentSessionHeader| {
+            assemble_model_input(
+                header,
+                crate::agent_runtime::model_tools_with_terminal_interaction(true),
+            )
+            .tools
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect::<Vec<_>>()
+        };
+        let interactive = ["read_terminal", "write_terminal_input", "wait_terminal"];
+        let mut session = header();
+        for name in interactive {
+            assert!(!available(&session).contains(&name.into()));
+        }
+        session.execution_surface = crate::agent_runtime::AgentExecutionSurface::BoundTerminal;
+        for name in interactive {
+            assert!(available(&session).contains(&name.into()));
+        }
+        session.target = None;
+        for name in interactive {
+            assert!(!available(&session).contains(&name.into()));
+        }
     }
 }

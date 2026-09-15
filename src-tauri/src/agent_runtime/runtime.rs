@@ -789,8 +789,10 @@ impl AgentRuntime {
     ) -> Result<(), String> {
         let native_engine = Arc::clone(&self.native_engine);
         let sessions = self.sessions.clone();
+        let tools = self.tools.clone();
         self.sessions.set_publisher(Arc::new(move |event| {
             if matches!(event.payload, super::AgentSessionEventPayload::TurnStart) {
+                tools.clear_ephemeral_terminal_results(&event.session_id);
                 if let Err(error) = native_engine.release_terminal_turn(&event.session_id) {
                     log::warn!("Failed to clear previous Agent terminal turn guard: {error}");
                 }
@@ -813,6 +815,7 @@ impl AgentRuntime {
                     | super::AgentSessionEventPayload::SessionEnded { .. }
                     | super::AgentSessionEventPayload::SessionResumed { .. }
             ) {
+                tools.clear_ephemeral_terminal_results(&event.session_id);
                 if let Err(error) = native_engine.release_terminal_turn(&event.session_id) {
                     log::warn!("Failed to release Agent terminal turn input guard: {error}");
                 }

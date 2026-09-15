@@ -210,6 +210,66 @@ pub struct TerminalExecuteArgumentsNative {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReadTerminalArgumentsNative {}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalInteractiveInputKindNative {
+    Text,
+    Key,
+    Paste,
+    Interrupt,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalKeyNative {
+    Enter,
+    Escape,
+    Tab,
+    Backspace,
+    Delete,
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WriteTerminalInputArgumentsNative {
+    pub input_kind: TerminalInteractiveInputKindNative,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub key: Option<TerminalKeyNative>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WaitTerminalArgumentsNative {
+    #[serde(default)]
+    pub after_screen_version: Option<u64>,
+    #[serde(default)]
+    pub after_output_sequence: Option<u64>,
+    #[serde(default)]
+    pub after_lifecycle_sequence: Option<u64>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub case_sensitive: Option<bool>,
+    #[serde(default)]
+    pub idle_ms: Option<u64>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WriteStdinArgumentsNative {
     pub input: String,
     #[serde(default)]

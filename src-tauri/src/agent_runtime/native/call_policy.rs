@@ -67,7 +67,10 @@ pub(crate) fn inspect_call_policy_scope_native(
         network_destinations: Vec::new(),
         sensitive_path_count,
         critical_path_count,
-        unknown_write: matches!(call.tool_name.as_str(), "exec_command" | "terminal_execute"),
+        unknown_write: matches!(
+            call.tool_name.as_str(),
+            "exec_command" | "terminal_execute" | "write_terminal_input"
+        ),
         unknown_network_egress: call.arguments.get("command").is_some(),
     })
 }

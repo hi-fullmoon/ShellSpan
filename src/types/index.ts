@@ -278,7 +278,7 @@ export interface TerminalBrokerSnapshot {
   rollout: {
     name: 'terminal_broker_v1';
     enabled: boolean;
-    defaultEnabled: false;
+    defaultEnabled: boolean;
     source: 'default' | 'environment';
     persisted: false;
     mode: 'shadowCompatibility';
@@ -287,19 +287,36 @@ export interface TerminalBrokerSnapshot {
   };
   shellIntegrationRollout: TerminalFeatureRolloutDecision & {
     name: 'terminal_shell_integration_v1';
-    defaultEnabled: false;
+    defaultEnabled: boolean;
   };
   terminalExecuteRollout: TerminalFeatureRolloutDecision & {
     name: 'terminal_execute_v1';
-    defaultEnabled: false;
+    defaultEnabled: boolean;
   };
   remoteAgentPtyRollout: TerminalFeatureRolloutDecision & {
     name: 'terminal_remote_agent_pty_v1';
     defaultEnabled: false;
   };
+  interactiveToolsRollout: TerminalFeatureRolloutDecision & {
+    name: 'terminal_interactive_tools_v1';
+    defaultEnabled: boolean;
+  };
   legacyFallbackRollout: TerminalFeatureRolloutDecision & {
     name: 'terminal_legacy_wrapper_fallback_v1';
     defaultEnabled: true;
+  };
+  counters: {
+    integrationReady: number;
+    degradedFallback: number;
+    lifecycleMatched: number;
+    uncertainty: number;
+    timeout: number;
+    takeover: number;
+    truncation: number;
+    backpressure: number;
+    transportLatencySamples: number;
+    transportLatencyTotalMicros: number;
+    transportLatencyMaxMicros: number;
   };
   session?: TerminalBrokerSessionSnapshot;
 }

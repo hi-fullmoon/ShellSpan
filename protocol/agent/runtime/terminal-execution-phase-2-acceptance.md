@@ -1,10 +1,20 @@
 # Terminal Execution Phase 2 Acceptance Evidence
 
-Updated: 2026-09-15 (Asia/Shanghai); Phase 2 complete with waived Windows native evidence.
+Updated: 2026-09-15 (Asia/Shanghai); Windows supplement: 2026-09-16.
 
 Roadmap: [Terminal Execution Roadmap](./terminal-execution-roadmap.md)
 
 Matrix: [Terminal Execution Platform Test Matrix](./terminal-execution-test-matrix.md)
+
+## 2026-09-16 Windows supplement
+
+The original Windows waiver is closed. The consolidated native command
+`pnpm test:terminal-interactive:windows` passed on Windows 11 x64 with the
+`x86_64-pc-windows-msvc` Rust host, Windows PowerShell 5.1, and PowerShell 7.6.
+It ran both exact Broker ConPTY cases and two release performance rounds. The
+historical sections below preserve the evidence boundary at the end of the
+original Phase 2 session; their `MISSING` statements are superseded for the
+current Windows delivery state by this supplement.
 
 ## Scope
 
