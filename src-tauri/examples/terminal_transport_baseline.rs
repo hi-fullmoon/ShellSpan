@@ -9,10 +9,14 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use shell_span_lib::terminal_broker::TerminalBrokerBenchmarkObserver;
+
 const DEFAULT_BYTES: usize = 2 * 1024 * 1024;
 const DEFAULT_REPETITIONS: usize = 5;
 const DEFAULT_SESSIONS: usize = 4;
 const EMIT_CHUNK_BYTES: usize = 8 * 1024;
+const EMIT_BEGIN_MARKER: &[u8] = b"SHELLSPAN_BENCH_PAYLOAD_BEGIN:";
+const EMIT_END_MARKER: &[u8] = b":SHELLSPAN_BENCH_PAYLOAD_END";
 const LOCAL_OUTPUT_QUEUE_CAPACITY: usize = 32;
 const LOCAL_WORKER_POLL_INTERVAL: Duration = Duration::from_millis(16);
 const LATENCY_SAMPLES: usize = 41;
@@ -24,6 +28,7 @@ struct Config {
     repetitions: usize,
     sessions: usize,
     ssh: bool,
+    broker: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -40,13 +45,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         config.bytes,
         config.repetitions,
         config.sessions,
-        if cfg!(debug_assertions) { "debug" } else { "release" },
+        match (cfg!(debug_assertions), config.broker) {
+            (true, true) => "debug-broker-shadow",
+            (true, false) => "debug-baseline",
+            (false, true) => "release-broker-shadow",
+            (false, false) => "release-baseline",
+        },
     );
     println!("scenario\tmedian_ms\tp95_ms\tmedian_mib_per_s\trepetitions");
 
-    run_suite("local_pty_single", config, 1, run_local_pty)?;
+    run_suite("local_pty_single", config, 1, move |bytes| {
+        run_local_pty(bytes, config.broker)
+    })?;
     if config.sessions > 1 {
-        run_suite("local_pty_multi", config, config.sessions, run_local_pty)?;
+        run_suite("local_pty_multi", config, config.sessions, move |bytes| {
+            run_local_pty(bytes, config.broker)
+        })?;
     }
 
     println!("latency_scenario\tmedian_ms\tp95_ms\tmax_ms\tsamples");
@@ -75,12 +89,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         let ssh_config = Arc::new(SshConfig::from_env()?);
         run_suite("ssh_pty_single", config, 1, {
             let ssh_config = Arc::clone(&ssh_config);
-            move |bytes| run_ssh_pty(&ssh_config, bytes)
+            move |bytes| run_ssh_pty(&ssh_config, bytes, config.broker)
         })?;
         if config.sessions > 1 {
             run_suite("ssh_pty_multi", config, config.sessions, {
                 let ssh_config = Arc::clone(&ssh_config);
-                move |bytes| run_ssh_pty(&ssh_config, bytes)
+                move |bytes| run_ssh_pty(&ssh_config, bytes, config.broker)
             })?;
         }
     } else {
@@ -272,6 +286,7 @@ fn parse_config(args: &[String]) -> Result<Config, Box<dyn Error>> {
         repetitions: DEFAULT_REPETITIONS,
         sessions: DEFAULT_SESSIONS,
         ssh: false,
+        broker: false,
     };
     let mut index = 0;
     while index < args.len() {
@@ -292,9 +307,13 @@ fn parse_config(args: &[String]) -> Result<Config, Box<dyn Error>> {
                 config.ssh = true;
                 index += 1;
             }
+            "--broker" => {
+                config.broker = true;
+                index += 1;
+            }
             "--help" | "-h" => {
                 println!(
-                    "Usage: terminal_transport_baseline [--bytes N] [--repetitions N] [--sessions N] [--ssh]"
+                    "Usage: terminal_transport_baseline [--bytes N] [--repetitions N] [--sessions N] [--ssh] [--broker]"
                 );
                 std::process::exit(0);
             }
@@ -316,14 +335,41 @@ fn parse_positive(value: Option<&String>, flag: &str) -> Result<usize, Box<dyn E
 fn emit_bytes(bytes: usize) -> Result<(), Box<dyn Error>> {
     let chunk = vec![b'x'; EMIT_CHUNK_BYTES];
     let mut stdout = std::io::stdout().lock();
+    stdout.write_all(EMIT_BEGIN_MARKER)?;
     let mut remaining = bytes;
     while remaining > 0 {
         let count = remaining.min(chunk.len());
         stdout.write_all(&chunk[..count])?;
         remaining -= count;
     }
+    stdout.write_all(EMIT_END_MARKER)?;
     stdout.flush()?;
     Ok(())
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn validate_emitted_payload(output: &[u8], expected_bytes: usize) -> Result<usize, String> {
+    let begin = find_subslice(output, EMIT_BEGIN_MARKER)
+        .ok_or_else(|| "PTY benchmark output omitted the payload begin marker".to_string())?;
+    let payload_start = begin + EMIT_BEGIN_MARKER.len();
+    let relative_end = find_subslice(&output[payload_start..], EMIT_END_MARKER)
+        .ok_or_else(|| "PTY benchmark output omitted the payload end marker".to_string())?;
+    let payload = &output[payload_start..payload_start + relative_end];
+    if payload.len() != expected_bytes {
+        return Err(format!(
+            "PTY benchmark payload contained {} bytes, expected exactly {expected_bytes}",
+            payload.len()
+        ));
+    }
+    if payload.iter().any(|byte| *byte != b'x') {
+        return Err("PTY benchmark payload bytes were corrupted or interleaved".into());
+    }
+    Ok(payload.len())
 }
 
 fn run_suite<F>(
@@ -390,7 +436,7 @@ fn percentile(sorted: &[f64], quantile: f64) -> f64 {
     sorted[index]
 }
 
-fn run_local_pty(bytes: usize) -> Result<usize, String> {
+fn run_local_pty(bytes: usize, broker_enabled: bool) -> Result<usize, String> {
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 30,
@@ -415,10 +461,20 @@ fn run_local_pty(bytes: usize) -> Result<usize, String> {
         .map_err(|error| format!("clone PTY reader: {error}"))?;
     let mut buffer = [0_u8; 8 * 1024];
     let mut received = 0_usize;
+    let mut output = Vec::with_capacity(bytes + EMIT_BEGIN_MARKER.len() + EMIT_END_MARKER.len());
+    let broker = broker_enabled
+        .then(TerminalBrokerBenchmarkObserver::local)
+        .transpose()?;
     loop {
         match reader.read(&mut buffer) {
             Ok(0) => break,
-            Ok(count) => received += count,
+            Ok(count) => {
+                if let Some(broker) = broker.as_ref() {
+                    broker.observe(&buffer[..count])?;
+                }
+                output.extend_from_slice(&buffer[..count]);
+                received += count;
+            }
             Err(_) if received >= bytes => break,
             Err(error) => return Err(format!("read PTY output after {received} bytes: {error}")),
         }
@@ -426,7 +482,7 @@ fn run_local_pty(bytes: usize) -> Result<usize, String> {
     child
         .wait()
         .map_err(|error| format!("wait for PTY output helper: {error}"))?;
-    Ok(received)
+    validate_emitted_payload(&output, bytes)
 }
 
 struct SshConfig {
@@ -447,7 +503,7 @@ impl SshConfig {
     }
 }
 
-fn run_ssh_pty(config: &SshConfig, bytes: usize) -> Result<usize, String> {
+fn run_ssh_pty(config: &SshConfig, bytes: usize, broker_enabled: bool) -> Result<usize, String> {
     let stream = TcpStream::connect((&*config.host, config.port))
         .map_err(|error| format!("connect SSH fixture: {error}"))?;
     stream
@@ -480,10 +536,18 @@ fn run_ssh_pty(config: &SshConfig, bytes: usize) -> Result<usize, String> {
 
     let mut buffer = [0_u8; 8 * 1024];
     let mut received = 0_usize;
+    let broker = broker_enabled
+        .then(TerminalBrokerBenchmarkObserver::ssh)
+        .transpose()?;
     loop {
         match channel.read(&mut buffer) {
             Ok(0) => break,
-            Ok(count) => received += count,
+            Ok(count) => {
+                if let Some(broker) = broker.as_ref() {
+                    broker.observe(&buffer[..count])?;
+                }
+                received += count;
+            }
             Err(error) => {
                 return Err(format!(
                     "read SSH PTY output after {received} bytes: {error}"
@@ -495,4 +559,40 @@ fn run_ssh_pty(config: &SshConfig, bytes: usize) -> Result<usize, String> {
         .wait_close()
         .map_err(|error| format!("close SSH channel: {error}"))?;
     Ok(received)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn framed_payload(payload: &[u8]) -> Vec<u8> {
+        [
+            b"\x1b[?25l".as_slice(),
+            EMIT_BEGIN_MARKER,
+            payload,
+            EMIT_END_MARKER,
+            b"\x1b[?25h".as_slice(),
+        ]
+        .concat()
+    }
+
+    #[test]
+    fn payload_validation_ignores_surrounding_conpty_controls_but_requires_exact_bytes() {
+        assert_eq!(validate_emitted_payload(&framed_payload(b"xxxx"), 4), Ok(4));
+
+        let truncated = [EMIT_BEGIN_MARKER, b"xxx", EMIT_END_MARKER].concat();
+        assert!(validate_emitted_payload(&truncated, 4)
+            .unwrap_err()
+            .contains("expected exactly 4"));
+
+        let corrupt = framed_payload(b"xxYx");
+        assert!(validate_emitted_payload(&corrupt, 4)
+            .unwrap_err()
+            .contains("corrupted or interleaved"));
+
+        let missing_end = [EMIT_BEGIN_MARKER, b"xxxx"].concat();
+        assert!(validate_emitted_payload(&missing_end, 4)
+            .unwrap_err()
+            .contains("end marker"));
+    }
 }

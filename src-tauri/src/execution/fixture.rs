@@ -169,8 +169,11 @@ impl FixedFixtureCommand {
                 "fixture-secret-across-read-chunk",
                 vec![FIXTURE_SECRET.to_string()],
             ),
+            // The 48-byte retained stdout head ends in `SHELLSP`; the
+            // 16-byte retained tail is `AN_SECRET_ABCDEF`. Redaction must run
+            // after those capture halves are reassembled.
             Self::SecretEchoAcrossCaptureReassembly => (
-                "sh -c 'printf XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXTERMBRID; head -c 80 /dev/zero | tr \"\\000\" M; printf GE_SECRET_ABCDEF; printf SHELLSPAN_SECRET_ABCDEF >&2'",
+                "sh -c 'head -c 41 /dev/zero | tr \"\\000\" X; printf SHELLSP; head -c 80 /dev/zero | tr \"\\000\" M; printf AN_SECRET_ABCDEF; printf SHELLSPAN_SECRET_ABCDEF >&2'",
                 "fixture-secret-echo",
                 vec![FIXTURE_SECRET.to_string()],
             ),

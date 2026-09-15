@@ -7,8 +7,9 @@ use crate::agent_runtime::{
     AgentToolEffectModeNative, AGENT_TOOL_MANIFEST, NATIVE_TOOL_CONTRACT_VERSION,
 };
 
-const IMPLEMENTED_NATIVE_TOOLS: [&str; 9] = [
+const IMPLEMENTED_NATIVE_TOOLS: [&str; 10] = [
     "exec_command",
+    "terminal_execute",
     "write_stdin",
     "wait_process",
     "kill_process",
@@ -104,7 +105,7 @@ impl ToolRegistryNative {
     pub(crate) fn from_builtin_manifest() -> Result<Self, ToolRegistryErrorNative> {
         let manifest: ToolManifestNative = serde_json::from_str(AGENT_TOOL_MANIFEST)
             .map_err(|_| ToolRegistryErrorNative::InvalidManifest)?;
-        if manifest.contract_version != NATIVE_TOOL_CONTRACT_VERSION || manifest.tools.len() != 9 {
+        if manifest.contract_version != NATIVE_TOOL_CONTRACT_VERSION || manifest.tools.len() != 10 {
             return Err(ToolRegistryErrorNative::ContractVersionMismatch);
         }
 
@@ -200,9 +201,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn manifest_registry_contains_only_the_nine_native_execution_tools() {
+    fn manifest_registry_contains_only_the_ten_native_execution_tools() {
         let registry = ToolRegistryNative::from_builtin_manifest().unwrap();
-        assert_eq!(registry.tools.len(), 9);
+        assert_eq!(registry.tools.len(), 10);
         assert_eq!(
             IMPLEMENTED_NATIVE_TOOLS
                 .iter()

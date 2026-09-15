@@ -1,0 +1,252 @@
+[
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "generationLifecycle",
+    "event": "generationStarted",
+    "transportKind": "localPty",
+    "geometry": { "rows": 3, "columns": 80 },
+    "reasonCode": "initialAttach"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "rawOutput",
+    "sequence": 1,
+    "byteOffset": 0,
+    "bytes": [36, 32]
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "integrationState",
+    "state": "initializing",
+    "capabilities": [],
+    "reasonCode": "transportAttached"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "integrationState",
+    "state": "ready",
+    "integrationId": "integration-1",
+    "shell": "zsh",
+    "capabilities": [
+      "promptLifecycle",
+      "commandLifecycle",
+      "exactCommandLine",
+      "exitStatus",
+      "currentDirectory"
+    ],
+    "reasonCode": "controlPlaneReady"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "lease",
+    "leaseId": "lease-1",
+    "revision": 1,
+    "state": "acquired",
+    "owner": {
+      "kind": "agent",
+      "ownerId": "agent-session-1",
+      "agentSessionId": "agent-session-1",
+      "taskId": "task-1",
+      "operationId": "operation-1"
+    },
+    "reasonCode": "visibleCommand"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "terminalInput",
+    "leaseId": "lease-1",
+    "inputSequence": 1,
+    "source": {
+      "kind": "agent",
+      "ownerId": "agent-session-1",
+      "operationId": "operation-1"
+    },
+    "inputKind": "text",
+    "bytes": [112, 114, 105, 110, 116, 102, 32, 111, 107, 10]
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "commandState",
+    "commandId": "command-1",
+    "operationId": "operation-1",
+    "revision": 1,
+    "state": "submitted",
+    "effect": "readOnly",
+    "reasonCode": "inputAccepted"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "integrationEvent",
+    "integrationId": "integration-1",
+    "eventSequence": 1,
+    "observedThroughOutputSequence": 1,
+    "trust": "cooperativeIntegration",
+    "event": "commandStart",
+    "commandId": "command-1",
+    "commandLine": "printf ok",
+    "cwd": "/workspace"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "rawOutput",
+    "sequence": 2,
+    "byteOffset": 2,
+    "bytes": [112, 114, 105, 110, 116, 102, 32, 111, 107, 13, 10, 111, 107]
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "screenSnapshot",
+    "screenVersion": 1,
+    "throughOutputSequence": 2,
+    "rows": 3,
+    "columns": 80,
+    "cursor": { "row": 1, "column": 2, "visible": true },
+    "activeBuffer": "primary",
+    "title": "ShellSpan",
+    "content": ["$ printf ok", "ok", ""]
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "integrationEvent",
+    "integrationId": "integration-1",
+    "eventSequence": 2,
+    "observedThroughOutputSequence": 2,
+    "trust": "cooperativeIntegration",
+    "event": "commandEnd",
+    "commandId": "command-1",
+    "exitCode": 0,
+    "cwd": "/workspace"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "commandState",
+    "commandId": "command-1",
+    "operationId": "operation-1",
+    "revision": 2,
+    "state": "completed",
+    "effect": "readOnly",
+    "outputStartSequence": 1,
+    "outputEndSequence": 2,
+    "exitCode": 0,
+    "cwd": "/workspace",
+    "truncated": false,
+    "reasonCode": "cooperativeCommandEnd"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "commandState",
+    "commandId": "command-2",
+    "operationId": "operation-2",
+    "revision": 1,
+    "state": "running",
+    "effect": "stateChange",
+    "outputStartSequence": 2,
+    "reasonCode": "cooperativeCommandStart"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "commandControl",
+    "commandId": "command-2",
+    "operationId": "operation-2",
+    "leaseId": "lease-1",
+    "action": "takeover",
+    "requester": "user"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "commandState",
+    "commandId": "command-2",
+    "operationId": "operation-2",
+    "revision": 2,
+    "state": "uncertain",
+    "effect": "stateChange",
+    "outputStartSequence": 2,
+    "reasonCode": "takeoverWithoutTrustedCompletion"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "lease",
+    "leaseId": "lease-1",
+    "revision": 2,
+    "state": "released",
+    "owner": {
+      "kind": "agent",
+      "ownerId": "agent-session-1",
+      "agentSessionId": "agent-session-1",
+      "taskId": "task-1",
+      "operationId": "operation-2"
+    },
+    "reasonCode": "takenOver"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "integrationState",
+    "state": "invalidated",
+    "integrationId": "integration-1",
+    "shell": "zsh",
+    "capabilities": [],
+    "reasonCode": "transportDisconnected"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 1,
+    "type": "generationLifecycle",
+    "event": "generationClosed",
+    "reasonCode": "transportDisconnected"
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 2,
+    "type": "generationLifecycle",
+    "event": "generationStarted",
+    "transportKind": "localPty",
+    "geometry": { "rows": 3, "columns": 80 },
+    "reasonCode": "reconnect",
+    "predecessorGeneration": 1
+  },
+  {
+    "protocolVersion": 1,
+    "terminalSessionId": "terminal-1",
+    "terminalGeneration": 2,
+    "type": "rawOutput",
+    "sequence": 1,
+    "byteOffset": 0,
+    "bytes": [36, 32]
+  }
+]

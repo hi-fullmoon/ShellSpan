@@ -112,6 +112,10 @@
   line-height: 18px;
 }
 
+.ai-execution-surface-trigger[data-execution-surface='boundTerminal'] {
+  color: var(--dsw-alias-state-business-primary);
+}
+
 .ai-permission-trigger [data-icon='inline-start'],
 .ai-execution-surface-trigger [data-icon='inline-start'] {
   width: 16px;

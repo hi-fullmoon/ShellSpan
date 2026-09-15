@@ -11,7 +11,13 @@ async fn archive_rejection_wakes_input_queued_while_the_worker_slot_was_reserved
     let entry = runtime.agents.get(id).unwrap().unwrap();
     assert!(entry.try_acquire_archive());
     runtime
-        .followup_submission(id, "message".into(), "submission".into(), "Queued".into(), None)
+        .followup_submission(
+            id,
+            "message".into(),
+            "submission".into(),
+            "Queued".into(),
+            None,
+        )
         .unwrap();
     assert_eq!(adapter.request_count(), 0);
     entry.release_driver();
@@ -59,7 +65,13 @@ async fn archive_closes_idle_conversations_and_releases_retained_agents() {
     create(&runtime, id);
     runtime.start(id, provider(), None).unwrap();
     runtime
-        .followup_submission(id, "message".into(), "submission".into(), "Hello".into(), None)
+        .followup_submission(
+            id,
+            "message".into(),
+            "submission".into(),
+            "Hello".into(),
+            None,
+        )
         .unwrap();
     runtime.await_idle(id).await.unwrap();
     let before = runtime.session(id).unwrap();
@@ -129,7 +141,13 @@ async fn archive_rejects_active_workers_without_cancelling_them() {
     create(&runtime, id);
     runtime.start(id, provider(), None).unwrap();
     runtime
-        .followup_submission(id, "message".into(), "submission".into(), "Hello".into(), None)
+        .followup_submission(
+            id,
+            "message".into(),
+            "submission".into(),
+            "Hello".into(),
+            None,
+        )
         .unwrap();
     adapter.started.notified().await;
     let before = runtime.session(id).unwrap().event_count;

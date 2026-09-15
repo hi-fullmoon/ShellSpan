@@ -1,0 +1,161 @@
+# Terminal Execution Platform Test Matrix
+
+Status: accepted Phase 0 matrix; Phase 3 cooperative-shell amendment: 2026-09-15.
+
+Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
+
+## Evidence policy
+
+Each cell is evidence from the named native host or fixture. Conditional
+compilation on another platform is not a pass. A skipped, ignored, unavailable,
+or unrun cell is recorded as **MISSING**, never inferred from another platform.
+Tests use deterministic commands and must not depend on a developer's prompt
+text, shell theme, credentials, or home-directory contents.
+
+Required host lanes are:
+
+| Lane | Minimum environment | Shells / transport |
+| --- | --- | --- |
+| macOS | current supported arm64 or x86_64 macOS | zsh and bash over local PTY |
+| Linux | current supported x86_64 or arm64 distribution | bash and zsh over local PTY |
+| Windows | current supported x86_64 or arm64 Windows | Windows PowerShell 5.1 and PowerShell 7 over ConPTY |
+| Isolated SSH | `tests/ssh-e2e` Docker image and loopback-published port | Alpine bash/zsh interactive SSH PTYs plus unsupported `/bin/sh`; no external host |
+
+## Cross-platform behavior matrix
+
+`P0` means the current baseline must be captured in Phase 0. Later labels name
+the first phase that must supply acceptance evidence.
+
+| Scenario | macOS | Linux | Windows | Isolated SSH | Gate |
+| --- | --- | --- | --- | --- | --- |
+| Direct foreground stdout/stderr/exit | native process | native process | native process | SSH exec | P0 and every phase |
+| Direct background handle, stdin, wait, kill | native process | native process | native process | SSH exec handle | P0 and every phase |
+| Direct timeout/cancel terminal-state race | native process group | native process group | job object/process tree | SSH channel | P0 and every phase |
+| Real transport smoke and resize | `portable-pty` | `portable-pty` | ConPTY | `pty-req` | P0 baseline; P2 regression |
+| Startup listener gate and bounded transport backpressure | native worker + xterm contract | native worker + xterm contract | native worker + xterm contract | SSH worker + xterm contract | P0 baseline; P2 regression |
+| Raw byte equality, sequence, replay/dedup, subscriber isolation | zsh/bash | bash/zsh | both PowerShell lanes | `/bin/sh` | P2 |
+| Reconnect increments generation and rejects stale frames/input | local replacement | local replacement | ConPTY replacement | disconnect/reconnect | P2/P4 |
+| Integration ready/degraded/unavailable and generation-bound cooperative event ordering | zsh/bash/unsupported shell | bash/zsh/unsupported shell | Windows PowerShell/PowerShell 7/unsupported shell | bash/zsh and unsupported `/bin/sh` | P3/P4 |
+| Prompt lifecycle independent of prompt text | custom empty/multiline ANSI prompts | custom empty/multiline ANSI prompts | custom functions/themes | custom `PS1` | P3/P4 |
+| Wrapper-free state preservation: `cd`, environment, alias/function, shell option | zsh and bash | bash and zsh | each PowerShell | bash and zsh | P3/P4 |
+| Exact visible command, ANSI, Unicode, no final newline, nonzero exit | zsh and bash | bash and zsh | each PowerShell | bash and zsh | P3/P4 |
+| Large output remains display-complete while capture truncates explicitly | local PTY | local PTY | ConPTY | SSH PTY | P3/P4 |
+| Forged lifecycle-like output cannot start/complete a command | local PTY | local PTY | ConPTY | SSH PTY | P3/P4 |
+| Ordinary foreground child enumerates descriptors and cannot write a lifecycle endpoint | zsh/bash real PTY | bash/zsh real PTY | static handle non-inheritance plus native ConPTY | SSH PTY | P3/P4 |
+| Same-UID endpoint reopen / in-shell hook invocation is documented as cooperative-model tampering, not a sandbox claim | documented adversarial proof | documented adversarial proof | static module-access audit plus native debt | documented boundary | P3/P4 |
+| Sensitive/destructive/external or explicit untrusted/adversarial lifecycle request is forced to Direct | native route/effect/policy | native route/effect/policy | native route/effect/policy | native route/effect/policy | P3/P4 |
+| Cancel, timeout, completion race, takeover, and input rejection after release | local PTY | local PTY | ConPTY | SSH PTY | P3/P4 |
+| Disconnect with side effect is uncertain and never auto-replayed | local close | local close | ConPTY close | forced SSH disconnect | P3/P4 |
+| Resize updates rows/columns and screen version | local PTY | local PTY | ConPTY | SSH PTY | P5 |
+| REPL, confirmation menu, credential-like prompt, alternate-screen application | deterministic fixtures | deterministic fixtures | deterministic fixtures | deterministic fixtures | P5 |
+| Credential-like input/output absent from logs, snapshots, counters, and persisted session | native checks | native checks | native checks | native checks | P5/P6 |
+| Transport throughput/latency has no material regression from Phase 0 | baseline harness | baseline harness | baseline harness | baseline harness | P2 and P6 |
+
+## Phase 0 command matrix
+
+| Evidence | Command | Pass condition |
+| --- | --- | --- |
+| Protocol/compatibility fixtures | `pnpm exec vitest run scripts/__tests__/terminal-protocol-contract.test.mjs` | TSP/1 fixture validates; event-v5 surface fixtures validate; `direct`/`pty` remain accepted. |
+| Frontend contracts | `pnpm test` | Relevant contract tests pass; unrelated failure is recorded separately and cannot be called a pass. |
+| Direct native execution | `cargo test --manifest-path src-tauri/Cargo.toml agent_runtime::native::process::tests --lib -- --nocapture` | All host-applicable direct process tests pass. |
+| Lease behavior | `cargo test --manifest-path src-tauri/Cargo.toml agent_runtime::native::terminal_lease::tests --lib -- --nocapture` | Ownership, frontend readiness, release identity, and restart tests pass. |
+| Current native PTY behavior | `cargo test --manifest-path src-tauri/Cargo.toml agent_runtime::native::pty::tests --lib -- --nocapture` | All host-applicable tests pass; ignored SSH case remains missing until the fixture command passes. |
+| Recovery behavior | `cargo test --manifest-path src-tauri/Cargo.toml agent_runtime::recovery::tests --lib -- --nocapture` plus the visible-terminal recovery filter | An execution without a durable result is uncertain and not resumable/replayed. |
+| Current transport contracts | targeted `commands::tests`, `session::tests`, terminal registry, and performance contract tests | UTF-8 boundaries, startup gates, bounded queues, ordering, resize, and high/low-watermark behavior pass. |
+| Visible-terminal host gate | `pnpm test:agent-visible-terminal` | Formatting/check, host-native PTY/lease tests, recovery filters, and frontend terminal integration tests pass. |
+| Isolated SSH visible gate | `pnpm test:agent-visible-terminal:ssh` | Docker fixture builds, becomes healthy, ignored SSH PTY test passes exactly, and compose cleanup succeeds. |
+| Local transport performance | `cargo run --release --manifest-path src-tauri/Cargo.toml --example terminal_transport_baseline -- --bytes 2097152 --repetitions 5 --sessions 4` | Expected byte counts are received; median/p95 throughput and event-vs-poll latency are recorded. |
+| SSH transport performance | Run the same example with `--ssh` and the loopback fixture environment | Expected bytes are received for single and four-session SSH PTYs; measurements are recorded. |
+
+## Deterministic fixture requirements for later phases
+
+The isolated SSH fixture must remain loopback-only and disposable. Later phases
+may extend it with scripts for persistent directory/environment state, resize,
+forced disconnect, side-effect counters, REPL/menu/password-like prompts, and an
+alternate-screen application. Fixture secrets are test-only constants and must
+still be redacted from captured evidence. Host credentials or arbitrary user
+terminals are never used for acceptance tests.
+
+Every later-phase handoff updates this matrix with exact command output and
+marks unexecuted native platforms **MISSING**. A phase gate that requires all
+platforms is not satisfied until their independent sessions provide evidence.
+
+## Phase 2 acceptance status
+
+Detailed evidence: [Terminal Execution Phase 2 Acceptance Evidence](./terminal-execution-phase-2-acceptance.md).
+
+| Lane | Phase 2 result | Evidence boundary |
+| --- | --- | --- |
+| macOS zsh | **PASS** | Native Darwin arm64 host |
+| macOS bash | **PASS** | Native `/bin/bash` PTY; explicit raw-byte Broker test |
+| Linux bash and zsh | **PASS (VM/container)** | Debian 12/aarch64 inside Docker Desktop LinuxKit; not bare-metal |
+| Isolated SSH `/bin/sh` | **PASS** | Loopback-only disposable SSH fixture |
+| Windows PowerShell 5.1 and PowerShell 7 | **MISSING** | No native Windows/ConPTY host evidence; temporarily waived for the Phase 2 gate only, not a pass |
+| Bare-metal Linux | **MISSING** | Docker Desktop evidence is not promoted to bare-metal evidence; bare metal is not an additional Phase 2 minimum-environment requirement |
+
+Native Windows command: `pnpm test:terminal-broker:windows`. The command must
+exit nonzero with an explicit `MISSING` result when Windows PowerShell 5.1,
+PowerShell 7, a supported x86_64 or arm64 Windows host, or the matching MSVC
+Rust host toolchain is unavailable. The architecture mapping is
+`x64` -> `x86_64-pc-windows-msvc` and
+`arm64` -> `aarch64-pc-windows-msvc`.
+
+The user-approved Windows waiver permits opening Phase 3 while this lane stays
+`MISSING`. It does not satisfy or delete the lane. Native execution of the
+command above must pass before Phase 6 default enablement or removal of the
+legacy wrapper; static cross-compilation cannot substitute for that run.
+
+## Phase 3 acceptance status
+
+Detailed evidence: [Terminal Execution Phase 3 Acceptance Evidence](./terminal-execution-phase-3-acceptance.md).
+
+Overall gate: **PASS for Phase 3 under the 2026-09-15 cooperative-shell RFC
+amendment and the explicit Windows native-evidence waiver**. The macOS and
+Linux lanes pass both functional and in-scope adversarial gates. The private
+POSIX FIFO is a generation-bound isolated control plane, not authentication
+against arbitrary same-UID code: raw PTY bytes cannot reach it, ordinary
+foreground children inherit no writer, and deliberate same-UID reopen or
+in-shell hook tampering is recorded as out-of-scope. Security-sensitive or
+explicit adversarial/untrusted lifecycle requests are forced to Direct.
+
+| Lane | Phase 3 result | Evidence boundary |
+| --- | --- | --- |
+| macOS zsh | **PASS** | Native Darwin arm64 production-config real PTY matrix; raw-output forgery, descriptor non-inheritance, path non-disclosure, state, capture, cancellation, takeover, and uncertainty gates pass. Same-UID active reopen remains the documented cooperative non-goal. |
+| macOS bash | **PASS** | Native Darwin arm64 `/bin/bash` 3.2 production-config real PTY matrix with the same in-scope security and behavior gates. |
+| Linux bash and zsh | **PASS (VM/container)** | Debian 12/aarch64 inside Docker Desktop LinuxKit with `C.UTF-8`; focused post-amendment production logic passes and is not promoted to bare-metal evidence. |
+| Windows PowerShell 5.1 and PowerShell 7 | **IMPLEMENTED/STATIC PASS; NATIVE EVIDENCE MISSING** | Cooperative module/named-pipe/PSReadLine contracts, native ignored ConPTY tests, runner wiring, and x64/ARM64 vendored cfg checks exist. In-shell module access is documented, `$?`/`$LASTEXITCODE` native-vs-cmdlet semantics remain unverified, and there is no native Windows execution. This is **MISSING**, never `PASS`. |
+| Isolated SSH `/bin/sh` | **NOT APPLICABLE TO PHASE 3** | Remote real-terminal integration remains Phase 4 and was not started. |
+| Bare-metal Linux | **MISSING** | VM/container evidence is not promoted to bare-metal; bare metal is not an additional Phase 3 minimum-environment requirement. |
+
+Phase 3 native Windows entry: `pnpm test:terminal-visible:windows`. On a complete
+Windows host it requires and runs both
+`windows_powershell_5_1_visible_command_integration` and
+`windows_powershell_7_visible_command_integration` over real ConPTY. On any
+non-Windows host, missing PowerShell lane, unsupported architecture, or
+mismatched Rust host it exits nonzero and reports `MISSING`. This debt is a hard
+blocker before Phase 6 default enablement or legacy-wrapper removal.
+
+## Phase 4 acceptance status
+
+Detailed evidence: [Terminal Execution Phase 4 Acceptance Evidence](./terminal-execution-phase-4-acceptance.md).
+
+Overall gate: **PASS for the remote POSIX lane**. The isolated loopback Docker
+fixture runs SSH `pty-req` plus interactive bash/zsh shells, uses a separate
+cooperative control channel, and keeps a simultaneous user-owned SSH PTY
+independent. Unsupported `/bin/sh` is explicitly `unavailable`. Direct SSH exec
+passes independently. Native Windows/ConPTY remains **MISSING** under the
+existing user deferral and is still a hard gate before Phase 6; it is not part
+of the remote POSIX gate.
+
+| Lane | Phase 4 result | Evidence boundary |
+| --- | --- | --- |
+| Isolated SSH bash | **PASS** | Alpine 3.22/aarch64 container in Docker Desktop LinuxKit; real SSH PTY, lifecycle/state/capture/resize/control/disconnect/reconnect matrix. |
+| Isolated SSH zsh | **PASS** | Same isolated sshd; independently authenticated zsh login and state-preservation smoke. |
+| Isolated SSH unsupported `/bin/sh` | **PASS (explicit unavailable)** | Separate fixture account proves no false-ready integration. |
+| Direct SSH exec | **PASS** | Existing reviewed SSH execution fixture runs independently of remote terminal flags/channels. |
+| User-owned SSH PTY isolation | **PASS** | A simultaneous real user-owned SSH shell retains its own state and is not selected by `terminal_execute`. |
+| Native Windows PowerShell 5.1 / PowerShell 7 | **MISSING** | Explicitly deferred; no native Windows result is claimed. |
+
+Phase 4 entry point: `pnpm test:terminal-visible:ssh`. It builds the disposable
+fixture, waits for health, runs the exact ignored real-SSH tests plus Direct
+regression, and always tears the compose project down.

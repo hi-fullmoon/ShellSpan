@@ -462,7 +462,7 @@ export function AiSessionBrowser({
         title={t('ai.workspace.sessions.archiveConfirmTitle')}
         description={t('ai.workspace.sessions.archiveConfirmDescription', { title: archiveTarget?.title ?? '' })}
         confirmLabel={t('ai.workspace.sessions.archive')}
-        confirmVariant="destructive"
+        media={<ArchiveIcon />}
         confirmDisabled={!archiveTarget || archivingId !== null}
         onConfirm={() => {
           if (archiveTarget) onArchive(archiveTarget);
@@ -477,6 +477,8 @@ export function AiSessionBrowser({
         description={t('ai.workspace.sessions.deleteConfirmDescription', { title: deleteTarget?.title ?? '' })}
         confirmLabel={t('ai.workspace.sessions.delete')}
         confirmVariant="destructive"
+        media={<Trash2Icon />}
+        mediaVariant="destructive"
         confirmDisabled={!deleteTarget || deletingId !== null}
         onConfirm={() => {
           if (deleteTarget) onDelete(deleteTarget);

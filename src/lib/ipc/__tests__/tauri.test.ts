@@ -20,6 +20,8 @@ import {
   buildRemoteConnectionRequest,
   buildSessionCreateRequest,
   invokeCreateAgentRuntimeSession,
+  invokeCreateLocalSession,
+  invokeGetTerminalBrokerSnapshot,
   invokeGetAiRouteApiKey,
   invokeAgentTerminalLeaseReady,
   invokeTakeoverAgentTerminal,
@@ -277,6 +279,54 @@ describe('connection request serialization', () => {
 
     expect(request.keychainKeyId).toBe('key-1');
     expect(request.jumpHost?.keychainKeyId).toBe('jump-key-1');
+  });
+
+  it('carries only the ephemeral predecessor transport during reconnect', async () => {
+    const request = buildSessionCreateRequest(
+      passwordProfile,
+      100,
+      40,
+      'transport-before-reconnect',
+    );
+    expect(request.replacesSessionId).toBe('transport-before-reconnect');
+
+    invokeMock.mockResolvedValue({
+      sessionId: 'transport-after-reconnect',
+      title: 'Local',
+      host: 'local',
+      port: 0,
+      username: 'tester',
+      terminalSessionId: 'terminal-stable',
+      terminalGeneration: 2,
+    });
+    await invokeCreateLocalSession(100, 40, 'transport-before-reconnect');
+    expect(invokeMock).toHaveBeenCalledWith('create_local_session', {
+      cols: 100,
+      rows: 40,
+      replacesSessionId: 'transport-before-reconnect',
+    });
+  });
+
+  it('exposes broker rollout and counters through a read-only IPC command', async () => {
+    invokeMock.mockResolvedValue({
+      rollout: {
+        name: 'terminal_broker_v1',
+        enabled: false,
+        defaultEnabled: false,
+        source: 'default',
+        persisted: false,
+        mode: 'shadowCompatibility',
+        legacyDisplayAuthoritative: true,
+        rollback: 'disableDependentFlagsThenCloseBrokerGenerations',
+      },
+    });
+
+    const snapshot = await invokeGetTerminalBrokerSnapshot('transport-1');
+
+    expect(snapshot.rollout.enabled).toBe(false);
+    expect(invokeMock).toHaveBeenCalledWith('get_terminal_broker_snapshot', {
+      sessionId: 'transport-1',
+    });
   });
 
   it('wraps connection preflight fields for the native command', async () => {

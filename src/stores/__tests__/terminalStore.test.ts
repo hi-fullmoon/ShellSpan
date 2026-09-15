@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { useTerminalStore } from '../terminalStore';
+import type { TerminalWorkspaceSession } from '../terminalStore';
 
 const initialState = useTerminalStore.getState();
 
@@ -99,6 +100,37 @@ describe('terminalStore', () => {
     expect(useTerminalStore.getState().sessions[0]?.status).toBe('connected');
   });
 
+  it('accepts only generation-matched ephemeral integration state', () => {
+    useTerminalStore.getState().addSession({
+      sessionId: 'transport-1',
+      terminalSessionId: 'terminal-1',
+      terminalGeneration: 2,
+      title: 'zsh',
+      host: 'local',
+      port: 0,
+      username: 'user',
+    });
+    useTerminalStore.getState().setIntegrationState({
+      sessionId: 'transport-1',
+      terminalSessionId: 'terminal-1',
+      terminalGeneration: 1,
+      state: 'ready',
+    });
+    expect(useTerminalStore.getState().sessions[0]?.integrationState).toBeUndefined();
+
+    useTerminalStore.getState().setIntegrationState({
+      sessionId: 'transport-1',
+      terminalSessionId: 'terminal-1',
+      terminalGeneration: 2,
+      state: 'degraded',
+      reason: 'unsupportedShell',
+    });
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      integrationState: 'degraded',
+      integrationReason: 'unsupportedShell',
+    });
+  });
+
   it('reorderSessions moves active to insert index', () => {
     const store = useTerminalStore.getState();
     store.addSession({ sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' });
@@ -166,6 +198,36 @@ describe('terminalStore', () => {
     expect(state.activeSessionId).toBe('s2');
   });
 
+  it('keeps broker identity stable while reconnect advances its generation', () => {
+    const store = useTerminalStore.getState();
+    store.addSession({
+      sessionId: 'transport-1',
+      terminalSessionId: 'terminal-stable',
+      terminalGeneration: 1,
+      title: 'Local',
+      host: 'local',
+      port: 0,
+      username: 'tester',
+    });
+
+    store.reconnectSession('transport-1', {
+      sessionId: 'transport-2',
+      terminalSessionId: 'terminal-stable',
+      terminalGeneration: 2,
+      title: 'Local',
+      host: 'local',
+      port: 0,
+      username: 'tester',
+    });
+
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      sessionId: 'transport-2',
+      terminalSessionId: 'terminal-stable',
+      terminalGeneration: 2,
+      replacesSessionId: 'transport-1',
+    });
+  });
+
   it('tracks reconnecting until the connection status settles', () => {
     const store = useTerminalStore.getState();
     store.addSession({ sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' });
@@ -211,6 +273,27 @@ describe('terminalStore', () => {
       profileId: 'profile-1',
       closed: { retryable: true },
     });
+  });
+
+  it('never restores ephemeral broker identity from workspace-shaped input', () => {
+    const restored = {
+      sessionId: 'saved-1',
+      title: 'Saved',
+      host: 'example.com',
+      port: 22,
+      username: 'tester',
+      profileId: 'profile-1',
+      terminalSessionId: 'must-not-survive-restart',
+      terminalGeneration: 99,
+    } as TerminalWorkspaceSession & {
+      terminalSessionId: string;
+      terminalGeneration: number;
+    };
+
+    useTerminalStore.getState().addRestoredSessions([restored]);
+
+    expect(useTerminalStore.getState().sessions[0]?.terminalSessionId).toBeUndefined();
+    expect(useTerminalStore.getState().sessions[0]?.terminalGeneration).toBeUndefined();
   });
 
   it('stores restored layout alongside restored sessions', () => {

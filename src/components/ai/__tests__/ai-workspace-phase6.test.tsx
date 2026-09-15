@@ -272,6 +272,58 @@ describe('Phase 6 Session Browser rename', () => {
     expect(screen.queryByRole('menuitem', { name: 'Rename session' })).toBeNull();
   });
 
+  it('uses consistent semantic media for archive and permanent-delete confirmations', async () => {
+    const user = userEvent.setup();
+    const completed = {
+      ...agentSummary,
+      id: 'completed',
+      title: 'Completed task',
+      status: 'completed' as const,
+    };
+    const archived = {
+      ...agentSummary,
+      id: 'archived',
+      title: 'Archived task',
+      archived: true,
+    };
+
+    render(
+      <AiSessionBrowser
+        sessions={[completed, archived]}
+        loading={false}
+        error={null}
+        archivingId={null}
+        onBack={vi.fn()}
+        onNew={vi.fn()}
+        onOpen={vi.fn()}
+        onArchive={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    await user.hover(screen.getByRole('treeitem'));
+    await user.click(screen.getByRole('button', { name: 'More actions for Completed task' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Archive' }));
+
+    let dialog = screen.getByRole('alertdialog');
+    expect(dialog.querySelector('.lucide-archive')).toBeInTheDocument();
+    expect(dialog.querySelector('[data-slot="alert-dialog-media"]')).toHaveClass('bg-muted');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await user.click(screen.getByRole('button', { name: 'Filter sessions' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Archived' }));
+    await user.hover(screen.getByRole('treeitem'));
+    await user.click(screen.getByRole('button', { name: 'More actions for Archived task' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete permanently' }));
+
+    dialog = screen.getByRole('alertdialog');
+    expect(dialog.querySelector('.lucide-trash-2')).toBeInTheDocument();
+    expect(dialog.querySelector('[data-slot="alert-dialog-media"]')).toHaveClass(
+      'bg-destructive/10',
+      'text-destructive',
+    );
+  });
+
   it('retains the rename input and exposes a revision conflict', async () => {
     const user = userEvent.setup();
     const { rerender } = render(

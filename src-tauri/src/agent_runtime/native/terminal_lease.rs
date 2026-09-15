@@ -6,6 +6,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::models::SessionManager;
+use crate::terminal_broker::{TerminalBrokerInputSource, TerminalInputKind, TerminalSessionBroker};
 
 pub(crate) const AGENT_TERMINAL_LEASE_EVENT: &str = "agent-terminal-lease";
 
@@ -127,6 +128,7 @@ pub(crate) struct TerminalLeaseManager {
     turn_guards: Arc<Mutex<HashMap<String, String>>>,
     changed: Arc<Condvar>,
     publisher: Arc<Mutex<Option<LeasePublisher>>>,
+    broker: TerminalSessionBroker,
 }
 
 impl Default for TerminalLeaseManager {
@@ -136,11 +138,19 @@ impl Default for TerminalLeaseManager {
             turn_guards: Arc::new(Mutex::new(HashMap::new())),
             changed: Arc::new(Condvar::new()),
             publisher: Arc::new(Mutex::new(None)),
+            broker: TerminalSessionBroker::default(),
         }
     }
 }
 
 impl TerminalLeaseManager {
+    pub(crate) fn new(broker: TerminalSessionBroker) -> Self {
+        Self {
+            broker,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn begin_turn(
         &self,
         session_id: &str,
@@ -216,6 +226,8 @@ impl TerminalLeaseManager {
                 );
                 return Err(TerminalLeaseError::Busy.to_string());
             }
+            self.broker
+                .acquire_agent_lease(session_id, agent_session_id, task_id, operation_id)?;
             turn_guards.insert(session_id.to_string(), agent_session_id.to_string());
             leases.insert(
                 session_id.to_string(),
@@ -262,6 +274,8 @@ impl TerminalLeaseManager {
                 return Ok(false);
             };
             validate_owner(&record.lease, agent_session_id, Some(task_id), operation_id)?;
+            self.broker
+                .release_agent_lease(session_id, agent_session_id, task_id, operation_id)?;
             leases.remove(session_id).map(|record| record.lease)
         };
         if let Some(lease) = lease {
@@ -283,12 +297,29 @@ impl TerminalLeaseManager {
             .lock()
             .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
             .remove(session_id);
-        let lease = self
-            .leases
-            .lock()
-            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
-            .remove(session_id)
-            .map(|record| record.lease);
+        let lease = {
+            let mut leases = self
+                .leases
+                .lock()
+                .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+            let lease = leases.get(session_id).map(|record| record.lease.clone());
+            if let Some(lease) = lease.as_ref() {
+                if let Err(error) = self.broker.release_agent_lease(
+                    session_id,
+                    &lease.agent_session_id,
+                    &lease.task_id,
+                    &lease.operation_id,
+                ) {
+                    // A reconnect or trusted rollback may already have
+                    // invalidated the old broker generation. The legacy
+                    // compatibility lease must still be releasable.
+                    log::warn!(
+                        "Terminal broker lease was already unavailable while releasing compatibility lease session_id={session_id}: {error}"
+                    );
+                }
+            }
+            leases.remove(session_id).map(|record| record.lease)
+        };
         if let Some(lease) = lease {
             self.changed.notify_all();
             log_release(&lease, reason);
@@ -317,6 +348,17 @@ impl TerminalLeaseManager {
         let count = leases.len();
         self.changed.notify_all();
         for lease in leases {
+            if let Err(error) = self.broker.release_agent_lease(
+                &lease.session_id,
+                &lease.agent_session_id,
+                &lease.task_id,
+                &lease.operation_id,
+            ) {
+                log::warn!(
+                    "Terminal broker lease was unavailable during compatibility shutdown session_id={}: {error}",
+                    lease.session_id
+                );
+            }
             log_release(&lease, reason);
             self.publish(released_event(lease, reason));
         }
@@ -464,7 +506,41 @@ impl TerminalLeaseManager {
             .lock()
             .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
         authorize_input(leases.get(session_id).map(|record| &record.lease), source)?;
-        sessions.write_session_input(session_id, data)
+        let broker_source = match source {
+            TerminalInputSource::User => TerminalBrokerInputSource::User,
+            TerminalInputSource::Agent {
+                agent_session_id,
+                task_id,
+                operation_id,
+            } => TerminalBrokerInputSource::Agent {
+                agent_session_id: agent_session_id.to_string(),
+                task_id: task_id.to_string(),
+                operation_id: operation_id.to_string(),
+            },
+            TerminalInputSource::System {
+                operation_id: Some(operation_id),
+            } => TerminalBrokerInputSource::System {
+                operation_id: operation_id.to_string(),
+            },
+            TerminalInputSource::System { operation_id: None } => {
+                return Err(TerminalLeaseError::OperationMismatch.to_string());
+            }
+        };
+        let input_kind = match source {
+            TerminalInputSource::System { .. } if data.as_bytes() == [3] => {
+                TerminalInputKind::Interrupt
+            }
+            TerminalInputSource::System { .. } => TerminalInputKind::SystemControl,
+            TerminalInputSource::User | TerminalInputSource::Agent { .. } => {
+                TerminalInputKind::Text
+            }
+        };
+        let bytes = data.as_bytes().to_vec();
+        self.broker
+            .admit_compatibility_input(session_id, broker_source, input_kind, &bytes, || {
+                sessions.write_session_input(session_id, data)
+            })
+            .map(|_| ())
     }
 
     pub(crate) fn release_turn(&self, agent_session_id: &str) -> Result<(), String> {
@@ -546,8 +622,7 @@ fn authorize_input(
             Some(lease),
         ) => validate_owner(lease, agent_session_id, Some(task_id), operation_id),
         (TerminalInputSource::Agent { .. }, None) => Err(TerminalLeaseError::NotFound.to_string()),
-        (TerminalInputSource::System { operation_id: None }, None) => Ok(()),
-        (TerminalInputSource::System { operation_id: None }, Some(_)) => {
+        (TerminalInputSource::System { operation_id: None }, _) => {
             Err(TerminalLeaseError::OperationMismatch.to_string())
         }
         (
@@ -590,350 +665,5 @@ fn log_release(lease: &AgentTerminalLease, reason: TerminalLeaseReleaseReason) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::models::{
-        ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, SessionStatus,
-        SessionTerminalKind, StatusEvent,
-    };
-    use crossbeam_channel::{unbounded, Receiver};
-    use std::sync::atomic::AtomicBool;
-
-    fn sessions() -> (SessionManager, Receiver<SessionCommand>) {
-        let sessions = SessionManager::default();
-        let (sender, receiver) = unbounded();
-        sessions
-            .insert(
-                "terminal-1".into(),
-                ManagedSession {
-                    sender: SessionCommandSender::Event(sender),
-                    waker: None,
-                    output_state_sender: None,
-                    status: StatusEvent {
-                        session_id: "terminal-1".into(),
-                        status: SessionStatus::Connected,
-                        message: None,
-                    },
-                    output_ready: Arc::new(AtomicBool::new(true)),
-                    output_paused: Arc::new(AtomicBool::new(false)),
-                    terminal_kind: SessionTerminalKind::Local,
-                    identity: SessionIdentity {
-                        title: "Local".into(),
-                        host: "local".into(),
-                        port: 0,
-                        username: "tester".into(),
-                    },
-                },
-            )
-            .unwrap();
-        (sessions, receiver)
-    }
-
-    fn acquire(manager: &TerminalLeaseManager) {
-        manager
-            .acquire("terminal-1", "agent-1", "task-1", "operation-1", None)
-            .unwrap();
-    }
-
-    #[test]
-    fn single_owner_busy_wrong_owner_and_idempotent_release() {
-        let manager = TerminalLeaseManager::default();
-        assert!(!manager.has_lease("terminal-1").unwrap());
-        acquire(&manager);
-        assert!(manager.has_lease("terminal-1").unwrap());
-        assert!(manager
-            .acquire("terminal-1", "agent-2", "task-2", "operation-2", None)
-            .unwrap_err()
-            .starts_with("TERMINAL_LEASE_BUSY:"));
-        assert!(manager
-            .release(
-                "terminal-1",
-                "agent-2",
-                "task-1",
-                "operation-1",
-                TerminalLeaseReleaseReason::Cancelled,
-            )
-            .unwrap_err()
-            .starts_with("TERMINAL_LEASE_OWNER_MISMATCH:"));
-        assert!(manager
-            .release(
-                "terminal-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                TerminalLeaseReleaseReason::Completed,
-            )
-            .unwrap());
-        assert!(manager.has_lease("terminal-1").unwrap());
-        manager.release_turn("agent-1").unwrap();
-        assert!(!manager.has_lease("terminal-1").unwrap());
-        assert!(!manager
-            .release(
-                "terminal-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                TerminalLeaseReleaseReason::Completed,
-            )
-            .unwrap());
-    }
-
-    #[test]
-    fn user_input_is_rejected_and_agent_operation_must_match() {
-        let manager = TerminalLeaseManager::default();
-        let (sessions, receiver) = sessions();
-        manager
-            .write(
-                &sessions,
-                "terminal-1",
-                "before".into(),
-                TerminalInputSource::User,
-            )
-            .unwrap();
-        acquire(&manager);
-        assert!(manager
-            .write(
-                &sessions,
-                "terminal-1",
-                "blocked".into(),
-                TerminalInputSource::User,
-            )
-            .unwrap_err()
-            .starts_with("TERMINAL_INPUT_BLOCKED_BY_AGENT:"));
-        assert!(manager
-            .write(
-                &sessions,
-                "terminal-1",
-                "wrong".into(),
-                TerminalInputSource::Agent {
-                    agent_session_id: "agent-1",
-                    task_id: "task-1",
-                    operation_id: "operation-2",
-                },
-            )
-            .unwrap_err()
-            .starts_with("TERMINAL_LEASE_OPERATION_MISMATCH:"));
-        manager
-            .write(
-                &sessions,
-                "terminal-1",
-                "agent".into(),
-                TerminalInputSource::Agent {
-                    agent_session_id: "agent-1",
-                    task_id: "task-1",
-                    operation_id: "operation-1",
-                },
-            )
-            .unwrap();
-        let writes = receiver
-            .try_iter()
-            .filter_map(|command| match command {
-                SessionCommand::Write(data) => Some(data),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(writes, vec!["before", "agent"]);
-    }
-
-    #[test]
-    fn user_input_stays_blocked_between_commands_until_turn_end() {
-        let manager = TerminalLeaseManager::default();
-        let (sessions, receiver) = sessions();
-        manager.begin_turn("terminal-1", "agent-1").unwrap();
-        assert!(manager
-            .write(
-                &sessions,
-                "terminal-1",
-                "blocked before first command".into(),
-                TerminalInputSource::User,
-            )
-            .unwrap_err()
-            .starts_with("TERMINAL_INPUT_BLOCKED_BY_AGENT:"));
-        acquire(&manager);
-        manager
-            .release(
-                "terminal-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                TerminalLeaseReleaseReason::Completed,
-            )
-            .unwrap();
-        assert!(manager.has_lease("terminal-1").unwrap());
-        assert!(manager
-            .write(
-                &sessions,
-                "terminal-1",
-                "blocked".into(),
-                TerminalInputSource::User
-            )
-            .unwrap_err()
-            .starts_with("TERMINAL_INPUT_BLOCKED_BY_AGENT:"));
-        assert!(manager
-            .acquire("terminal-1", "agent-2", "task-2", "operation-2", None)
-            .unwrap_err()
-            .starts_with("TERMINAL_LEASE_BUSY:"));
-        manager
-            .acquire("terminal-1", "agent-1", "task-1", "operation-2", None)
-            .unwrap();
-        manager
-            .release(
-                "terminal-1",
-                "agent-1",
-                "task-1",
-                "operation-2",
-                TerminalLeaseReleaseReason::Completed,
-            )
-            .unwrap();
-        manager.release_turn("agent-1").unwrap();
-        assert!(!manager.has_lease("terminal-1").unwrap());
-        manager
-            .write(
-                &sessions,
-                "terminal-1",
-                "accepted".into(),
-                TerminalInputSource::User,
-            )
-            .unwrap();
-        assert_eq!(
-            receiver
-                .try_iter()
-                .filter_map(|command| match command {
-                    SessionCommand::Write(data) => Some(data),
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-            vec!["accepted"]
-        );
-    }
-
-    #[test]
-    fn events_preserve_operation_identity_and_first_release_reason() {
-        let manager = TerminalLeaseManager::default();
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let captured = Arc::clone(&events);
-        manager
-            .set_publisher(Arc::new(move |event| {
-                captured.lock().unwrap().push(event.clone());
-            }))
-            .unwrap();
-        acquire(&manager);
-        manager
-            .release_terminal("terminal-1", TerminalLeaseReleaseReason::Shutdown)
-            .unwrap();
-        manager
-            .release_terminal("terminal-1", TerminalLeaseReleaseReason::Cancelled)
-            .unwrap();
-        let events = events.lock().unwrap();
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].state, TerminalLeaseEventState::Acquired);
-        assert_eq!(events[1].state, TerminalLeaseEventState::Released);
-        assert_eq!(events[1].reason, Some(TerminalLeaseReleaseReason::Shutdown));
-        assert_eq!(events[1].operation_id, "operation-1");
-        assert_eq!(
-            serde_json::to_value(&events[1]).unwrap(),
-            serde_json::json!({
-                "sessionId": "terminal-1",
-                "agentSessionId": "agent-1",
-                "taskId": "task-1",
-                "operationId": "operation-1",
-                "acquiredAtUnixMs": events[1].acquired_at_unix_ms,
-                "state": "released",
-                "reason": "shutdown"
-            })
-        );
-    }
-
-    #[test]
-    fn frontend_ready_gate_accepts_only_clean_connected_state() {
-        let manager = TerminalLeaseManager::default();
-        acquire(&manager);
-        assert!(manager
-            .acknowledge_frontend_ready(
-                "terminal-1",
-                "agent-1",
-                "operation-1",
-                true,
-                true,
-                false,
-                false,
-                false,
-            )
-            .unwrap());
-        manager
-            .wait_frontend_ready(
-                "terminal-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                Duration::ZERO,
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn frontend_ready_gate_rejects_pending_input_and_times_out_boundedly() {
-        let manager = TerminalLeaseManager::default();
-        acquire(&manager);
-        manager
-            .acknowledge_frontend_ready(
-                "terminal-1",
-                "agent-1",
-                "operation-1",
-                true,
-                true,
-                true,
-                false,
-                false,
-            )
-            .unwrap();
-        assert!(manager
-            .wait_frontend_ready(
-                "terminal-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                Duration::ZERO,
-            )
-            .unwrap_err()
-            .starts_with("TERMINAL_FRONTEND_PENDING_INPUT:"));
-        manager
-            .release_terminal("terminal-1", TerminalLeaseReleaseReason::Failed)
-            .unwrap();
-
-        acquire(&manager);
-        assert!(manager
-            .wait_frontend_ready(
-                "terminal-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                Duration::ZERO,
-            )
-            .unwrap_err()
-            .starts_with("TERMINAL_FRONTEND_READY_TIMEOUT:"));
-    }
-
-    #[test]
-    fn runtime_restart_has_no_stale_in_memory_lease_or_input_block() {
-        let before_restart = TerminalLeaseManager::default();
-        acquire(&before_restart);
-        assert!(before_restart.lease("terminal-1").is_some());
-        drop(before_restart);
-
-        let after_restart = TerminalLeaseManager::default();
-        let (sessions, receiver) = sessions();
-        assert!(after_restart.lease("terminal-1").is_none());
-        after_restart
-            .write(
-                &sessions,
-                "terminal-1",
-                "user-after-restart".into(),
-                TerminalInputSource::User,
-            )
-            .unwrap();
-        assert!(matches!(
-            receiver.recv().unwrap(),
-            SessionCommand::Write(data) if data == "user-after-restart"
-        ));
-    }
+    include!("../tests/native/terminal_lease.rs");
 }

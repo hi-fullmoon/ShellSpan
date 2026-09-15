@@ -24,6 +24,8 @@ mod remote_health;
 mod runbook;
 mod session;
 mod sftp_pool;
+pub mod terminal_broker;
+pub(crate) mod terminal_integration;
 
 use log::LevelFilter;
 use tauri::{AppHandle, Emitter, Manager};
@@ -100,6 +102,20 @@ pub(crate) fn emit_data(app: &AppHandle, session_id: &str, chunk: String) -> Res
         .map_err(|error| format!("failed to emit data event: {error}"))
 }
 
+/// Shadows raw transport output into TSP/1 before any UTF-8 decoding or legacy
+/// Agent wrapper filtering. Broker failures are diagnostic in Phase 2: the
+/// established display path remains authoritative and keeps running.
+pub(crate) fn observe_terminal_raw_output(app: &AppHandle, session_id: &str, bytes: &[u8]) {
+    if let Some(runtime) = app.try_state::<agent_runtime::AgentRuntime>() {
+        if let Err(error) = runtime.observe_terminal_raw_output(session_id, bytes) {
+            log::warn!(
+                "Terminal broker raw-output observation failed session_id={session_id} byte_count={}: {error}",
+                bytes.len()
+            );
+        }
+    }
+}
+
 /// Incrementally decodes UTF-8 from `pending_bytes` into `output`. An
 /// incomplete multi-byte sequence at the tail stays in `pending_bytes` for
 /// the next call; invalid bytes are replaced with U+FFFD.
@@ -165,6 +181,25 @@ pub(crate) fn emit_closed(
         if let Err(error) = runtime.terminal_closed(session_id) {
             log::warn!("Failed to clean Agent terminal lease after terminal close session_id={session_id}: {error}");
         }
+        let broker_reason = match reason_kind {
+            ClosedReasonKind::LocalClose => {
+                terminal_broker::TerminalGenerationCloseReason::UserClosed
+            }
+            ClosedReasonKind::RemoteExit => {
+                terminal_broker::TerminalGenerationCloseReason::RemoteExit
+            }
+            ClosedReasonKind::ControllerDropped
+            | ClosedReasonKind::TransportDisconnect
+            | ClosedReasonKind::Error => {
+                terminal_broker::TerminalGenerationCloseReason::TransportDisconnected
+            }
+        };
+        if let Err(error) = runtime.close_terminal_broker_transport(session_id, broker_reason) {
+            log::warn!(
+                "Failed to close terminal broker generation session_id={session_id}: {error}"
+            );
+        }
+        commands::emit_terminal_integration_state(app, session_id);
     }
     app.emit(
         SSH_CLOSED_EVENT,
@@ -325,6 +360,7 @@ pub fn run() {
             commands::mark_session_ready,
             commands::set_session_output_paused,
             commands::resize_session,
+            commands::get_terminal_broker_snapshot,
             commands::close_session,
             commands::request_app_restart,
             commands::request_app_exit,

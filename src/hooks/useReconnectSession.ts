@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { useProfileStore } from '@/stores/profileStore';
-import { useTerminalStore } from '@/stores/terminalStore';
+import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import {
   buildSessionCreateRequest,
   invokeCloseSession,
@@ -26,6 +26,16 @@ const logger = createLogger('reconnect');
 // a concurrent reconnect for the same session is ignored.
 const reconnectInFlight = new Set<string>();
 const AUTO_RECONNECT_DELAYS_MS = [0, 3_000, 6_000, 12_000, 24_000] as const;
+const BROKER_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
+function brokerReconnectPredecessor(session: TerminalSession): string | undefined {
+  return typeof session.terminalSessionId === 'string'
+    && BROKER_IDENTIFIER_PATTERN.test(session.terminalSessionId)
+    && Number.isSafeInteger(session.terminalGeneration)
+    && (session.terminalGeneration ?? 0) >= 1
+    ? session.sessionId
+    : undefined;
+}
 
 function retryableConnectionError(error: unknown): boolean {
   const type = typeof error === 'object' && error !== null && 'type' in error
@@ -72,13 +82,17 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
       const controller = terminalRegistry.get(sessionId);
       const cols = controller?.terminal.cols ?? 120;
       const rows = controller?.terminal.rows ?? 30;
+      // Restored workspace rows intentionally have no broker identity. The
+      // backend must attach those transports as fresh logical sessions after
+      // restart instead of resolving an ephemeral predecessor.
+      const replacesSessionId = brokerReconnectPredecessor(session);
 
       // Sessions without a profile are local shells; recreate them directly.
       if (!session.profileId) {
         setReconnecting(sessionId, true);
         logger.info(`Reconnecting local session ${sessionId}`);
         try {
-          const summary = await invokeCreateLocalSession(cols, rows);
+          const summary = await invokeCreateLocalSession(cols, rows, replacesSessionId);
 
           if (!useTerminalStore.getState().sessions.some((item) => item.sessionId === sessionId)) {
             logger.info(`Discarding replacement local session ${summary.sessionId}; source ${sessionId} was closed`);
@@ -175,7 +189,7 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
         });
         try {
           const summary = await invokeCreateSession(
-            buildSessionCreateRequest(activeProfile, cols, rows),
+            buildSessionCreateRequest(activeProfile, cols, rows, replacesSessionId),
           );
           await replaceSession(summary);
           return;
@@ -195,7 +209,7 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
             activeProfile = recoveredProfile;
             try {
               const summary = await invokeCreateSession(
-                buildSessionCreateRequest(activeProfile, cols, rows),
+                buildSessionCreateRequest(activeProfile, cols, rows, replacesSessionId),
               );
               await replaceSession(summary);
               return;

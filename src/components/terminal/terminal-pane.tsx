@@ -12,15 +12,30 @@ import type { TerminalSession as TerminalSessionState } from '@/stores/terminalS
 import { useToast } from '@/hooks/useToast';
 import { getPlatform } from '@/lib/platform';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
+import { terminalSurfaceSemanticsV1Enabled } from '@/lib/terminal/terminal-surface-semantics';
 import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutBindings } from '@/types';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import { Spinner as ButtonSpinner } from '@/components/ui/spinner';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import {
   agentTerminalLeaseState,
   type AgentTerminalLeaseView,
 } from '@/components/terminal/agent-terminal-lease-state';
-import { ChevronDownIcon, ChevronUpIcon, XIcon } from 'lucide-react';
+import {
+  BotIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  CircleStopIcon,
+  XIcon,
+} from 'lucide-react';
 
 const effectiveShortcuts = (): ShortcutBindings => ({
   ...DEFAULT_SHORTCUTS,
@@ -31,7 +46,10 @@ const effectiveShortcuts = (): ShortcutBindings => ({
 // don't make it flash.
 const MIN_CONNECTING_OVERLAY_MS = 600;
 
-const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ lease }) => {
+const AgentTerminalLeaseBar: React.FC<{
+  lease: AgentTerminalLeaseView;
+  surfaceSemanticsEnabled: boolean;
+}> = ({ lease, surfaceSemanticsEnabled }) => {
   const { t } = useI18n();
   const { error: showError } = useToast();
   const shownFailureOperationRef = useRef<string | null>(null);
@@ -51,27 +69,73 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
     : lease.inputBlocked
       ? t('terminal.agentLease.inputBlockedAccessibleHint')
       : t('terminal.agentLease.inputLocked');
+  const activityLabel = lease.terminalOwned
+    ? t('terminal.agentLease.commandRunning')
+    : t('terminal.agentLease.turnRunning');
+  const inputLabel = t('terminal.agentLease.inputLockedLabel');
 
   return (
     <div
-      className="relative flex min-h-8 shrink-0 items-center justify-end border-b border-app-border/40 bg-muted/40 px-2"
+      className="agent-terminal-lease-bar relative flex min-h-10 shrink-0 items-center gap-2 border-b border-app-border/50 bg-app-surface px-2.5"
       role="status"
       aria-live="polite"
       aria-atomic="true"
       data-testid="agent-terminal-lease-bar"
       data-operation-id={lease.operationId}
+      data-terminal-owned={lease.terminalOwned || undefined}
+      data-input-blocked={lease.inputBlocked || undefined}
     >
-      <span
-        className="absolute inset-x-20 top-1/2 -translate-y-1/2 truncate text-center text-xs text-muted-foreground"
-        title={interactionHint}
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger
+              render={(
+                <Badge
+                  variant="outline"
+                  className="agent-terminal-lease-identity h-6"
+                  data-testid="agent-terminal-lease-identity"
+                />
+              )}
+            >
+              <BotIcon data-icon="inline-start" />
+              {t(surfaceSemanticsEnabled
+                ? 'terminal.agentLease.visibleCommandLabel'
+                : 'terminal.agentLease.surfaceLabel')}
+            </TooltipTrigger>
+            <TooltipContent>{t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <span
+          className="relative h-5 w-px shrink-0"
+          aria-hidden="true"
+          data-testid="agent-terminal-lease-separator"
+        >
+          <Separator
+            orientation="vertical"
+            className="absolute inset-x-0 top-1/2 h-3.5 -translate-y-1/2"
+          />
+        </span>
+        <span
+          className="min-w-0 truncate text-xs text-app-text-soft"
+          aria-hidden="true"
+        >
+          {activityLabel}
+        </span>
+      </div>
+      <span className="sr-only">{interactionHint}</span>
+      <Badge
+        variant={lease.terminalOwned ? 'secondary' : 'outline'}
+        className="agent-terminal-input-state hidden h-6 shrink-0 sm:inline-flex"
+        aria-hidden="true"
       >
-        {interactionHint}
-      </span>
+        <span className="agent-terminal-input-state-dot" />
+        {inputLabel}
+      </Badge>
       <Button
         type="button"
-        variant="secondary"
+        variant="outline"
         size="xs"
-        className="shrink-0 gap-1"
+        className="agent-terminal-takeover shrink-0 gap-1"
         disabled={lease.takeoverRequested}
         aria-busy={lease.takeoverRequested || undefined}
         aria-label={t(lease.takeoverRequested
@@ -82,7 +146,7 @@ const AgentTerminalLeaseBar: React.FC<{ lease: AgentTerminalLeaseView }> = ({ le
         {lease.takeoverRequested ? (
           <ButtonSpinner data-icon="inline-start" aria-hidden="true" />
         ) : (
-          <XIcon data-icon="inline-start" />
+          <CircleStopIcon data-icon="inline-start" />
         )}
         {t('terminal.agentLease.takeover')}
       </Button>
@@ -122,12 +186,15 @@ export interface TerminalPaneProps {
   activeSession: TerminalSessionState | null;
   isActive?: boolean;
   isVisible?: boolean;
+  /** Test/build override; disabling restores only the pre-Phase-1 copy. */
+  surfaceSemanticsEnabled?: boolean;
 }
 
 export const TerminalPane: React.FC<TerminalPaneProps> = ({
   activeSession,
   isActive = true,
   isVisible = true,
+  surfaceSemanticsEnabled: surfaceSemanticsOverride,
 }) => {
   const paneRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
@@ -137,6 +204,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const largePasteWarning = useAppStore((state) => state.terminalLargePasteWarning);
   const trimTrailingWhitespace = useAppStore((state) => state.terminalTrimTrailingWhitespace);
   const rightClickBehavior = useAppStore((state) => state.terminalRightClickBehavior);
+  const surfaceSemanticsEnabled = terminalSurfaceSemanticsV1Enabled(surfaceSemanticsOverride);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -388,7 +456,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">
-      {activeLease && <AgentTerminalLeaseBar lease={activeLease} />}
+      {activeLease && (
+        <AgentTerminalLeaseBar
+          lease={activeLease}
+          surfaceSemanticsEnabled={surfaceSemanticsEnabled}
+        />
+      )}
       <div className="relative min-h-0 flex-1">
         {activeLease && (
           <div

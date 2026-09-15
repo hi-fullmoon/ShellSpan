@@ -9,7 +9,9 @@ vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
     t: (key: string) => ({
       'agent.permission.composer.readOnly': '仅可查看',
+      'agent.permission.composer.readOnlyDescription': '修改、破坏性及敏感读取需要确认。',
       'agent.permission.composer.fullAccess': '完全权限',
+      'agent.permission.composer.fullAccessDescription': '自动执行当前终端中的所有命令。',
     })[key] ?? key,
   }),
 }));
@@ -42,7 +44,14 @@ describe('Agent permission selector', () => {
     expect(await screen.findAllByRole('menuitemradio')).toHaveLength(2);
     expect(screen.queryByRole('menuitemradio', { name: /agent\.permission\.requestApproval/ })).toBeNull();
     fireEvent.click(await screen.findByRole('menuitemradio', { name: /agent\.permission\.fullAccess/ }));
-    expect(await screen.findByText('agent.permission.fullAccessWarning')).toBeVisible();
+    const warning = await screen.findByText('agent.permission.fullAccessWarning');
+    expect(warning).toBeVisible();
+    const dialog = warning.closest('[role="alertdialog"]');
+    expect(dialog?.querySelector('.lucide-shield-alert')).toBeInTheDocument();
+    expect(dialog?.querySelector('[data-slot="alert-dialog-media"]')).toHaveClass(
+      'bg-app-warning/10',
+      'text-app-warning',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'agent.permission.fullAccessConfirm' }));
     expect(useAgentPermissionStore.getState().getMode('session-1')).toBe('fullAccess');
   });
@@ -54,11 +63,10 @@ describe('Agent permission selector', () => {
       'composer',
     );
     fireEvent.click(screen.getByRole('button', { name: 'agent.permission.composerAria' }));
-    const options = await screen.findAllByRole('menuitemradio');
-    expect(options.map((option) => option.textContent)).toEqual([
-      '仅可查看',
-      '完全权限',
-    ]);
+    expect(await screen.findByRole('menuitemradio', { name: '仅可查看' })).toBeVisible();
+    expect(screen.getByRole('menuitemradio', { name: '完全权限' })).toBeVisible();
+    expect(screen.getByText('修改、破坏性及敏感读取需要确认。')).toBeVisible();
+    expect(screen.getByText('自动执行当前终端中的所有命令。')).toBeVisible();
     expect(screen.queryByText('工作区内修改')).toBeNull();
     expect(screen.queryByRole('menuitemradio', { name: /agent\.permission\.requestApproval/ })).toBeNull();
   });

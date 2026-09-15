@@ -122,6 +122,7 @@ function toolState(status: AgentSessionToolStatus): AiToolNode['state'] {
     case 'failed':
     case 'timedOut':
     case 'cancelled':
+    case 'uncertain':
       return 'failed';
   }
 }
@@ -993,6 +994,7 @@ export function projectAgentChatNodes(
             input: null,
             output: event.data.data ?? event.data.summary,
             error: event.data.status === 'failed' || event.data.status === 'timedOut'
+              || event.data.status === 'uncertain'
               ? event.data.summary
               : null,
             target: null,
@@ -1010,6 +1012,7 @@ export function projectAgentChatNodes(
             evidenceRefs: event.data.evidenceRefs ?? [],
             output: event.data.data ?? event.data.summary,
             error: event.data.status === 'failed' || event.data.status === 'timedOut'
+              || event.data.status === 'uncertain'
               ? event.data.summary
               : null,
           }));

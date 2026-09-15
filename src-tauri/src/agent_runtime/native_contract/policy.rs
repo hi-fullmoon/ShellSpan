@@ -4,8 +4,9 @@ use super::types::{
     AgentEffectKindNative, AgentObservedEffectNative, AgentRequestNative, AgentTargetKindNative,
     AgentToolCallNative, AgentToolTargetNative, ApplyPatchArgumentsNative,
     ExecCommandArgumentsNative, KillProcessArgumentsNative, ListDirectoryArgumentsNative,
-    ReadFileArgumentsNative, SearchTextArgumentsNative, TransferFileArgumentsNative,
-    WaitProcessArgumentsNative, WriteStdinArgumentsNative, NATIVE_TOOL_CONTRACT_VERSION,
+    ReadFileArgumentsNative, SearchTextArgumentsNative, TerminalExecuteArgumentsNative,
+    TransferFileArgumentsNative, WaitProcessArgumentsNative, WriteStdinArgumentsNative,
+    NATIVE_TOOL_CONTRACT_VERSION,
 };
 
 pub enum AgentToolEffectModeNative {
@@ -43,9 +44,15 @@ const EXEC_EFFECTS: &[AgentEffectKindNative] = &[
     AgentEffectKindNative::ExternalSideEffect,
 ];
 
-pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 9] = [
+pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 10] = [
     AgentToolDescriptorNative {
         name: "exec_command",
+        target_kinds: LOCAL_REMOTE,
+        effect_mode: AgentToolEffectModeNative::NativeClassifier,
+        allowed_effects: EXEC_EFFECTS,
+    },
+    AgentToolDescriptorNative {
+        name: "terminal_execute",
         target_kinds: LOCAL_REMOTE,
         effect_mode: AgentToolEffectModeNative::NativeClassifier,
         allowed_effects: EXEC_EFFECTS,
@@ -388,6 +395,21 @@ pub fn validate_tool_arguments_native(
             }
             if let Some(cwd) = value.cwd {
                 validate_path(&cwd)?;
+            }
+        }
+        "terminal_execute" => {
+            let value = decode_arguments::<TerminalExecuteArgumentsNative>(arguments)?;
+            if value.command.is_empty()
+                || value.command.len() > 8192
+                || value.command.chars().any(char::is_control)
+                || value.explanation.trim().is_empty()
+                || value.explanation.len() > 2_048
+                || value
+                    .timeout_ms
+                    .map(|timeout| timeout == 0 || timeout > 3_600_000)
+                    .unwrap_or(false)
+            {
+                return Err("invalid terminal_execute arguments".into());
             }
         }
         "write_stdin" => {
