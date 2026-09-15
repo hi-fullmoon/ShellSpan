@@ -47,8 +47,8 @@ These are three runtime capabilities but only two user-facing surface choices. I
 | 1. Product semantics | `01a0a2ee-f8ad-72e1-8745-32ef2b48037d` | complete | accurate UI naming, states, i18n, and migration-safe persisted values |
 | 2. Terminal Session Broker | `01a0a304-aba8-77a0-bb6a-1679805d3c61` | complete (waived Windows native evidence) | [Phase 2 evidence](./terminal-execution-phase-2-acceptance.md) |
 | 3. Local visible command | `01a0a3a5-747a-7af2-b6ec-392a60141fed` | **complete (waived Windows native evidence)** | [Phase 3 evidence](./terminal-execution-phase-3-acceptance.md) |
-| 4. Remote real terminal | `01a0a461-d04c-7d33-ba24-d2d314c773d8`; continuations `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`, `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d` | **remediation verified; NOT READY (pre-existing Rust include-format gate)** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |
-| 5. Interactive operation | not created | **blocked — not started** | Phase 4 still requires a green or explicitly waived `check:rust:includes` gate |
+| 4. Remote real terminal | `01a0a461-d04c-7d33-ba24-d2d314c773d8`; continuations `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`, `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d`, `01a0a500-3512-7be2-9516-7bfc9813ed66` | **complete — PASS (waived Windows native evidence)** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |
+| 5. Interactive operation | not created | **ready — not started** | Open only in a new session on the continuation machine |
 | 6. Rollout and legacy removal | not created | blocked by phase 5 | staged default enablement, migration evidence, wrapper removal, final verification |
 
 ## Phase 0: protocol and baseline
@@ -168,10 +168,11 @@ SSH PTY execution and the original Phase 4 matrix, but an independent review
 reopened the phase for candidate ownership, post-prepare cleanup, predecessor
 shutdown, and success-publication races. Those findings now have focused
 regression coverage. The current-code real-SSH, full Rust, frontend, build, and
-related product checks pass. Phase 4 remains **NOT READY** only because the
-pre-existing extracted-test `check:rust:includes` gate is not green or waived;
-Phase 5 must not open. The remote flag
-remains default-off and depends on broker + integration + execute. Native
+related product checks pass. The final continuation corrected the extracted
+test `include!` formatting gate without excluding discovered files; the gate
+and its regression tests now pass. Phase 4 is **PASS**, and Phase 5 is ready to
+open in a separate session on the continuation machine. The remote flag remains
+default-off and depends on broker + integration + execute. Native
 Windows/ConPTY remains **MISSING**, not `PASS`, under the existing explicit
 deferral and continues to block Phase 6 default enablement/legacy removal.
 

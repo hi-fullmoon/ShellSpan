@@ -8,6 +8,8 @@ Remediation continuation: `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`
 
 Migrated verification continuation: `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d`
 
+Final lifecycle and gate continuation: `01a0a500-3512-7be2-9516-7bfc9813ed66`
+
 Roadmap: [Terminal Execution Roadmap](./terminal-execution-roadmap.md)
 
 Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
@@ -25,10 +27,13 @@ replacement, and SSH integration cleanup were not lifecycle-safe. The four
 findings are now implemented and verified by focused regression tests, a fresh
 real-SSH fixture run, and a green full Rust suite.
 
-**Final gate: NOT READY. Phase 5 remains blocked and was not opened.** The only
-remaining repository gate is the pre-existing `check:rust:includes` formatting
-failure in extracted Agent Runtime test modules. The four protected test files
-cannot be reformatted in this continuation, and no waiver was granted.
+**Final gate: PASS. Phase 5 is READY for a separate session and was not opened
+here.** The final continuation corrected `check:rust:includes` so it validates
+included Rust fragments in their possible module-indentation contexts without
+skipping any discovered file. Its regression test accepts legitimate outer
+module indentation and still rejects a real Rust formatting defect. The
+remaining genuinely unformatted fragments were formatted mechanically, and the
+gate now passes for all 43 discovered `include!` files.
 
 Native Windows/ConPTY with Windows PowerShell 5.1 and PowerShell 7 remains
 **MISSING**, not `PASS`, under the user's explicit deferral. No native Windows
@@ -91,7 +96,7 @@ default enablement and legacy removal.
 | `pnpm test` / `pnpm review:frontend` | **PASS — 200 files passed, 1 skipped; 1,823 tests passed, 1 skipped**. `review:frontend` also completed the production build. |
 | `node scripts/check-ai-panel-styles.mjs` | **PASS — AI panel style boundaries are clean**. |
 | `pnpm check:llm:catalog` | **PASS — 55 exact models validated; 4 negative fixtures rejected**. |
-| `node scripts/check-rust-includes.mjs` | **KNOWN PRE-EXISTING FAILURE** — extracted Agent Runtime test modules are not in rustfmt's include context; the first reported file is `src-tauri/src/agent_runtime/tests/compaction.rs`. The protected files were not modified or formatted. |
+| `pnpm check:rust:includes` | **PASS — 43 discovered `include!` files checked**. The checker tests nesting depths without excluding files; a Vitest regression proves valid module indentation passes and a genuine formatting defect fails. |
 | Native Windows PowerShell 5.1 / PowerShell 7 / ConPTY | **MISSING by explicit user deferral; not run and not PASS**. |
 
 ## Historical evidence
@@ -104,14 +109,16 @@ validates the pre-remediation behavior only. Because candidate promotion and
 cleanup changed, it was not reused to close the gate; the current-code fixture
 was run again successfully.
 
-## Remaining acceptance work
+## Acceptance result
 
-Resolve the pre-existing extracted-test formatting contract without modifying
-the four protected Agent Runtime files, or grant an explicit waiver for
-`pnpm check:rust:includes`. Then rerun that gate and `git diff --check`.
+There is no remaining Phase 4 acceptance work. `pnpm check:rust:includes`, its
+targeted regression test, the Cargo formatting check, and `git diff --check`
+all pass on the final continuation. Phase 5 may open in its own session on the
+next machine.
 
-Do not change this record to PASS or open Phase 5 until that remaining gate is
-green or an explicit, separately recorded waiver is granted.
+Native Windows/ConPTY evidence remains explicitly deferred and **MISSING**. It
+does not reopen Phase 4, but it remains a hard prerequisite for Phase 6 default
+enablement or removal of the legacy wrapper.
 
 ## Protected-file and vendor disposition
 
