@@ -1377,6 +1377,7 @@ mod tests {
             terminal_cols: 120,
             terminal_rows: 32,
             jump_host: None,
+            replaces_session_id: None,
         };
 
         let summary = summarize_session_request(&request);
