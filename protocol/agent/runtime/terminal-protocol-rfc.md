@@ -393,6 +393,32 @@ execution behavior.
   timeout, takeover, truncation, backpressure, and transport latency counters
   MUST be privacy-safe and MUST NOT contain raw terminal text.
 
+## Phase 6 Windows rollout profile
+
+On Windows hosts, absent trusted configuration enables `terminal_broker_v1`,
+`terminal_shell_integration_v1`, `terminal_execute_v1`, and
+`terminal_interactive_tools_v1` for local ConPTY generations. The remote Agent
+PTY flag remains absent-off, and remote interactive publication still requires
+that independent flag. macOS and Linux keep the new-path flags absent-off.
+
+The legacy wrapper remains a decodable `exec_command.channel = "pty"`
+compatibility contract, but a Windows local target MUST reject its dispatch.
+Windows local degradation or flag rollback MUST expose the real terminal as
+unavailable/degraded and offer Direct explicitly; it MUST NOT revive the
+wrapper or replay an operation. Non-Windows and remote targets retain the
+compatibility implementation until their own Phase 5 gates pass.
+
+The read-only Broker snapshot exposes process-lifetime counters for integration
+ready transitions, degraded compatibility fallback selections, accepted
+lifecycle events, uncertain settlements, timeouts, takeovers, capture
+truncations, backpressure entries, and Broker-ingress latency sample count,
+total microseconds, and maximum microseconds. Latency MUST be sampled at the
+first accepted frame of a generation and every 64 accepted frames thereafter,
+so observation does not add per-frame atomic contention. Counter fields are unsigned,
+saturating, reset on restart, and contain numbers only. They MUST NOT retain
+raw samples, timestamps, identifiers, commands, paths, input, output, screen
+content, credentials, or nonces, and MUST NOT enter Agent Session persistence.
+
 ## Failure handling
 
 | Failure | Required behavior |

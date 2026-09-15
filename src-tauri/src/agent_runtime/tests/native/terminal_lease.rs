@@ -43,9 +43,13 @@
             .unwrap();
     }
 
+    fn compatibility_manager() -> TerminalLeaseManager {
+        TerminalLeaseManager::new(TerminalSessionBroker::disabled_for_test())
+    }
+
     #[test]
     fn single_owner_busy_wrong_owner_and_idempotent_release() {
-        let manager = TerminalLeaseManager::default();
+        let manager = compatibility_manager();
         assert!(!manager.has_lease("terminal-1").unwrap());
         acquire(&manager);
         assert!(manager.has_lease("terminal-1").unwrap());
@@ -88,7 +92,7 @@
 
     #[test]
     fn user_input_is_rejected_and_agent_operation_must_match() {
-        let manager = TerminalLeaseManager::default();
+        let manager = compatibility_manager();
         let (sessions, receiver) = sessions();
         manager
             .write(
@@ -145,7 +149,7 @@
 
     #[test]
     fn user_input_stays_blocked_between_commands_until_turn_end() {
-        let manager = TerminalLeaseManager::default();
+        let manager = compatibility_manager();
         let (sessions, receiver) = sessions();
         manager.begin_turn("terminal-1", "agent-1").unwrap();
         assert!(manager
@@ -217,7 +221,7 @@
 
     #[test]
     fn events_preserve_operation_identity_and_first_release_reason() {
-        let manager = TerminalLeaseManager::default();
+        let manager = compatibility_manager();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&events);
         manager
@@ -254,7 +258,7 @@
 
     #[test]
     fn frontend_ready_gate_accepts_only_clean_connected_state() {
-        let manager = TerminalLeaseManager::default();
+        let manager = compatibility_manager();
         acquire(&manager);
         assert!(manager
             .acknowledge_frontend_ready(
@@ -281,7 +285,7 @@
 
     #[test]
     fn frontend_ready_gate_rejects_pending_input_and_times_out_boundedly() {
-        let manager = TerminalLeaseManager::default();
+        let manager = compatibility_manager();
         acquire(&manager);
         manager
             .acknowledge_frontend_ready(
@@ -324,12 +328,12 @@
 
     #[test]
     fn runtime_restart_has_no_stale_in_memory_lease_or_input_block() {
-        let before_restart = TerminalLeaseManager::default();
+        let before_restart = compatibility_manager();
         acquire(&before_restart);
         assert!(before_restart.lease("terminal-1").is_some());
         drop(before_restart);
 
-        let after_restart = TerminalLeaseManager::default();
+        let after_restart = compatibility_manager();
         let (sessions, receiver) = sessions();
         assert!(after_restart.lease("terminal-1").is_none());
         after_restart

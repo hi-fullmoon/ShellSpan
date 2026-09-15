@@ -45,11 +45,11 @@ These are three runtime capabilities but only two user-facing surface choices. I
 | --- | --- | --- | --- |
 | 0. Protocol and baseline | `01a0a2d3-ea0c-77e1-b47d-ceda5d892fc3` | complete | RFC, compatibility plan, fixtures, and baseline evidence |
 | 1. Product semantics | `01a0a2ee-f8ad-72e1-8745-32ef2b48037d` | complete | accurate UI naming, states, i18n, and migration-safe persisted values |
-| 2. Terminal Session Broker | `01a0a304-aba8-77a0-bb6a-1679805d3c61` | complete (waived Windows native evidence) | [Phase 2 evidence](./terminal-execution-phase-2-acceptance.md) |
-| 3. Local visible command | `01a0a3a5-747a-7af2-b6ec-392a60141fed` | **complete (waived Windows native evidence)** | [Phase 3 evidence](./terminal-execution-phase-3-acceptance.md) |
-| 4. Remote real terminal | `01a0a461-d04c-7d33-ba24-d2d314c773d8`; continuations `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`, `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d`, `01a0a500-3512-7be2-9516-7bfc9813ed66` | **complete — PASS (waived Windows native evidence)** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |
-| 5. Interactive operation | not created | **ready — not started** | Open only in a new session on the continuation machine |
-| 6. Rollout and legacy removal | not created | blocked by phase 5 | staged default enablement, migration evidence, wrapper removal, final verification |
+| 2. Terminal Session Broker | `01a0a304-aba8-77a0-bb6a-1679805d3c61`; Windows supplement `01a0a566-6a29-74a3-945e-cc310a46cecd` | **complete — PASS** | [Phase 2 evidence](./terminal-execution-phase-2-acceptance.md) and [Windows supplement](./terminal-execution-phase-5-acceptance.md) |
+| 3. Local visible command | `01a0a3a5-747a-7af2-b6ec-392a60141fed`; Windows supplement `01a0a566-6a29-74a3-945e-cc310a46cecd` | **complete — PASS** | [Phase 3 evidence](./terminal-execution-phase-3-acceptance.md) and [Windows supplement](./terminal-execution-phase-5-acceptance.md) |
+| 4. Remote real terminal | `01a0a461-d04c-7d33-ba24-d2d314c773d8`; continuations `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`, `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d`, `01a0a500-3512-7be2-9516-7bfc9813ed66` | **complete — PASS** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |
+| 5. Interactive operation | `01a0a566-6a29-74a3-945e-cc310a46cecd` | **complete — PASS (Windows scope)** | [Phase 5 evidence](./terminal-execution-phase-5-acceptance.md) |
+| 6. Rollout and legacy removal | Windows rollout continuation (2026-09-16) | **complete — PASS (Windows scope)** | [Phase 6 evidence](./terminal-execution-phase-6-acceptance.md) |
 
 ## Phase 0: protocol and baseline
 
@@ -98,17 +98,13 @@ Gate:
 Acceptance evidence: [Terminal Execution Phase 2 Acceptance Evidence](./terminal-execution-phase-2-acceptance.md).
 The native macOS zsh/bash and isolated SSH lanes pass. Debian 12/aarch64
 bash/zsh pass inside the Docker Desktop LinuxKit VM/container and are recorded
-as VM/container evidence, not bare-metal. Native Windows/ConPTY remains
-**MISSING**, not `PASS`. On 2026-09-15 the user approved a temporary Phase 2
-gate waiver for that native Windows evidence, so Phase 2 is complete under the
-waiver and Phase 3 is ready to open in a separate session. Static cross-target
-compilation is supporting evidence only and cannot replace a native ConPTY run.
-The native entry point is `pnpm test:terminal-broker:windows`; it has static
-contract and vendored ConPTY cfg evidence for both x86_64 and ARM64 MSVC targets
-only and has not run on Windows. The runner accepts native x64 and ARM64 Windows
-and requires the corresponding Rust host tuple. This waiver expires before any
-Phase 6 default enablement or removal of the legacy wrapper: the native Windows
-lane must pass before either action.
+as VM/container evidence, not bare-metal. The original session temporarily
+waived native Windows evidence. That debt was closed on 2026-09-16 by
+`pnpm test:terminal-interactive:windows` on native
+`x86_64-pc-windows-msvc` with Windows PowerShell 5.1 and PowerShell 7.6. The
+runner passed raw Broker ordering/resize, Direct and compatibility regressions,
+the full serial Rust suite, and two independent release performance rounds.
+Phase 2 is therefore **PASS** at the current Windows delivery boundary.
 
 ## Phase 3: local visible command
 
@@ -140,14 +136,13 @@ known sensitive/destructive/external effects and explicit adversarial or
 untrusted-script requests are forced to Direct execution.
 
 POSIX production readiness is available only when the broker, integration, and
-execute flags and all identity/capability gates pass; defaults remain off and
-legacy fallback remains available. Windows PowerShell 5.1 and PowerShell 7
-implementation/static contracts follow the same cooperative model, but native
-ConPTY execution and full `$?`/`$LASTEXITCODE` semantics are **MISSING**, never
-`PASS`, under the user's explicit deferral. That Windows debt must be discharged
-before Phase 6 default enablement or legacy-wrapper removal. Phase 3 is complete
-under the recorded waiver; Phase 4 is ready for a separate future session and
-was not started here.
+execute flags and all identity/capability gates pass; macOS and Linux defaults
+remain off and legacy fallback remains available. Native Windows PowerShell 5.1
+and PowerShell 7.6 ConPTY acceptance passed on 2026-09-16. Phase 6 therefore
+enables the local Windows path by default. It proves persistent directory,
+environment, alias and function state, exact cooperative command lifecycle,
+ANSI/Unicode output, native exit code `7`, cmdlet failure code `1`, and bounded
+large-output capture. The previous Phase 3 Windows waiver is closed.
 
 ## Phase 4: remote real terminal
 
@@ -170,11 +165,10 @@ shutdown, and success-publication races. Those findings now have focused
 regression coverage. The current-code real-SSH, full Rust, frontend, build, and
 related product checks pass. The final continuation corrected the extracted
 test `include!` formatting gate without excluding discovered files; the gate
-and its regression tests now pass. Phase 4 is **PASS**, and Phase 5 is ready to
-open in a separate session on the continuation machine. The remote flag remains
-default-off and depends on broker + integration + execute. Native
-Windows/ConPTY remains **MISSING**, not `PASS`, under the existing explicit
-deferral and continues to block Phase 6 default enablement/legacy removal.
+and its regression tests now pass. Phase 4 is **PASS**. The remote flag remains
+default-off and depends on broker + integration + execute. The previously
+separate native Windows prerequisite was closed by the 2026-09-16 consolidated
+Windows gate recorded in the Phase 5 evidence.
 
 ## Phase 5: interactive terminal operation
 
@@ -189,16 +183,29 @@ Gate:
 - Deterministic fixtures prove operation of a REPL, a confirmation menu, a credential-like prompt without secret leakage, and a curses/alternate-screen application.
 - User takeover prevents all later Agent input for the released operation.
 
+Acceptance evidence: [Terminal Execution Phase 5 Acceptance Evidence](./terminal-execution-phase-5-acceptance.md).
+The backend screen model, gated native tools, lease-safe input, credential-like
+prompt handling, bounded waits, and deterministic fixtures pass. Independent
+real-ConPTY fixtures also pass for Windows PowerShell 5.1 and PowerShell 7.6,
+covering REPL input, a single-key confirmation, resize, alternate-screen state,
+and fail-closed credential input. At the user's 2026-09-16 direction, the first
+delivery gate is Windows-only. Phase 5 is therefore **PASS for Windows** and a
+separate Windows-only Phase 6 continuation was opened and has now passed.
+macOS, Linux, and Phase 5 SSH remain explicitly deferred and unverified; their
+flags and legacy fallback were not removed or enabled by the Windows rollout.
+
 ## Phase 6: rollout and legacy removal
 
 Deliverables:
 
 - Separate feature flags for the broker, shell integration, and interactive tools, with documented rollback behavior.
 - Privacy-safe counters for integration readiness, degraded fallback, lifecycle matching, uncertainty, timeout, takeover, truncation, backpressure, and transport latency.
-- Default enablement after local and SSH acceptance gates pass.
-- Completion of the still-`MISSING` native Windows/ConPTY lane before any
-  default enablement or removal of the legacy wrapper; the Phase 2 waiver does
-  not apply at this boundary and static cross-compilation is not a substitute.
+- Windows-scoped default enablement after the native Windows acceptance gate
+  passes; keep the new path default-off and retain the wrapper on macOS, Linux,
+  and remote targets until their independent Phase 5 gates pass.
+- Preserve platform-local rollback: removing or disabling the Windows wrapper
+  must not remove the compatibility implementation required by deferred
+  platforms.
 - Removal of the legacy wrapper, marker parser, synthetic `[Agent]` echo, and obsolete compatibility tests only after the new path has stable default evidence.
 - Updated user and protocol documentation.
 
@@ -208,6 +215,18 @@ Final gate:
 - Visible command execution is wrapper-free and shell-state preserving.
 - Interactive operation is screen-driven and lease safe.
 - Frontend build, frontend tests, Rust tests, formatting, protocol checks, locale checks, AI style checks, LLM catalog checks, and the visible-terminal host gate pass at the appropriate scope.
+
+Acceptance evidence: [Terminal Execution Phase 6 Acceptance Evidence](./terminal-execution-phase-6-acceptance.md).
+On native Windows 11 x64, absent trusted configuration now enables the local
+Broker, shell integration, `terminal_execute`, and interactive tools. Windows
+local routing cannot dispatch the legacy wrapper, including during rollback;
+it exposes Direct explicitly instead. The old `pty` vocabulary remains
+decodable, while the wrapper/parser implementation is retained only for remote
+and non-Windows compatibility. Privacy-safe bounded counters and deterministic
+latency sampling are exposed through the existing read-only Broker snapshot.
+The consolidated Windows gate, frontend checks, repository checks, and two
+release performance rounds pass. Phase 6 is **PASS for the Windows delivery
+scope**. macOS, Linux, and SSH remote rollout/removal remain deferred.
 
 ## Session handoff contract
 

@@ -15,6 +15,7 @@ const DEFAULT_BYTES: usize = 2 * 1024 * 1024;
 const DEFAULT_REPETITIONS: usize = 5;
 const DEFAULT_SESSIONS: usize = 4;
 const EMIT_CHUNK_BYTES: usize = 8 * 1024;
+const EMIT_LINE_PAYLOAD_BYTES: usize = 80;
 const EMIT_BEGIN_MARKER: &[u8] = b"SHELLSPAN_BENCH_PAYLOAD_BEGIN:";
 const EMIT_END_MARKER: &[u8] = b":SHELLSPAN_BENCH_PAYLOAD_END";
 const LOCAL_OUTPUT_QUEUE_CAPACITY: usize = 32;
@@ -333,14 +334,22 @@ fn parse_positive(value: Option<&String>, flag: &str) -> Result<usize, Box<dyn E
 }
 
 fn emit_bytes(bytes: usize) -> Result<(), Box<dyn Error>> {
-    let chunk = vec![b'x'; EMIT_CHUNK_BYTES];
     let mut stdout = std::io::stdout().lock();
     stdout.write_all(EMIT_BEGIN_MARKER)?;
     let mut remaining = bytes;
     while remaining > 0 {
-        let count = remaining.min(chunk.len());
-        stdout.write_all(&chunk[..count])?;
-        remaining -= count;
+        let payload_bytes = remaining.min(EMIT_CHUNK_BYTES);
+        let mut chunk =
+            Vec::with_capacity(payload_bytes + 2 * payload_bytes.div_ceil(EMIT_LINE_PAYLOAD_BYTES));
+        let mut chunk_remaining = payload_bytes;
+        while chunk_remaining > 0 {
+            let line_bytes = chunk_remaining.min(EMIT_LINE_PAYLOAD_BYTES);
+            chunk.extend(std::iter::repeat_n(b'x', line_bytes));
+            chunk.extend_from_slice(b"\r\n");
+            chunk_remaining -= line_bytes;
+        }
+        stdout.write_all(&chunk)?;
+        remaining -= payload_bytes;
     }
     stdout.write_all(EMIT_END_MARKER)?;
     stdout.flush()?;
@@ -353,17 +362,67 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
+fn strip_terminal_controls(input: &[u8]) -> Vec<u8> {
+    #[derive(Clone, Copy)]
+    enum State {
+        Ground,
+        Escape,
+        Csi,
+        Osc,
+        OscEscape,
+        String,
+        StringEscape,
+    }
+
+    let mut state = State::Ground;
+    let mut output = Vec::with_capacity(input.len());
+    for byte in input.iter().copied() {
+        state = match state {
+            State::Ground if byte == 0x1b => State::Escape,
+            State::Ground if byte < 0x20 || byte == 0x7f => State::Ground,
+            State::Ground => {
+                output.push(byte);
+                State::Ground
+            }
+            State::Escape if byte == b'[' => State::Csi,
+            State::Escape if byte == b']' => State::Osc,
+            State::Escape if matches!(byte, b'P' | b'X' | b'^' | b'_') => State::String,
+            State::Escape if (0x20..=0x2f).contains(&byte) => State::Escape,
+            State::Escape => State::Ground,
+            State::Csi if (0x40..=0x7e).contains(&byte) => State::Ground,
+            State::Csi => State::Csi,
+            State::Osc if byte == 0x07 => State::Ground,
+            State::Osc if byte == 0x1b => State::OscEscape,
+            State::Osc => State::Osc,
+            State::OscEscape if byte == b'\\' => State::Ground,
+            State::OscEscape if byte == 0x1b => State::OscEscape,
+            State::OscEscape => State::Osc,
+            State::String if byte == 0x1b => State::StringEscape,
+            State::String => State::String,
+            State::StringEscape if byte == b'\\' => State::Ground,
+            State::StringEscape if byte == 0x1b => State::StringEscape,
+            State::StringEscape => State::String,
+        };
+    }
+    output
+}
+
 fn validate_emitted_payload(output: &[u8], expected_bytes: usize) -> Result<usize, String> {
-    let begin = find_subslice(output, EMIT_BEGIN_MARKER)
+    // Windows ConPTY legitimately injects cursor and OSC title sequences while
+    // physically wrapping long output. Validate the exact printable payload
+    // after removing only terminal controls; Broker byte equality is measured
+    // independently on the unmodified transport stream.
+    let printable = strip_terminal_controls(output);
+    let begin = find_subslice(&printable, EMIT_BEGIN_MARKER)
         .ok_or_else(|| "PTY benchmark output omitted the payload begin marker".to_string())?;
     let payload_start = begin + EMIT_BEGIN_MARKER.len();
-    let relative_end = find_subslice(&output[payload_start..], EMIT_END_MARKER)
+    let relative_end = find_subslice(&printable[payload_start..], EMIT_END_MARKER)
         .ok_or_else(|| "PTY benchmark output omitted the payload end marker".to_string())?;
-    let payload = &output[payload_start..payload_start + relative_end];
+    let payload = &printable[payload_start..payload_start + relative_end];
     if payload.len() != expected_bytes {
         return Err(format!(
-            "PTY benchmark payload contained {} bytes, expected exactly {expected_bytes}",
-            payload.len()
+            "PTY benchmark payload contained {} printable bytes, expected exactly {expected_bytes}",
+            payload.len(),
         ));
     }
     if payload.iter().any(|byte| *byte != b'x') {
@@ -465,23 +524,48 @@ fn run_local_pty(bytes: usize, broker_enabled: bool) -> Result<usize, String> {
     let broker = broker_enabled
         .then(TerminalBrokerBenchmarkObserver::local)
         .transpose()?;
-    loop {
-        match reader.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(count) => {
-                if let Some(broker) = broker.as_ref() {
-                    broker.observe(&buffer[..count])?;
+    let reader_thread = thread::spawn(move || -> Result<Vec<u8>, String> {
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => {
+                    if let Some(broker) = broker.as_ref() {
+                        broker.observe(&buffer[..count])?;
+                    }
+                    output.extend_from_slice(&buffer[..count]);
+                    received += count;
                 }
-                output.extend_from_slice(&buffer[..count]);
-                received += count;
+                Err(_) if received >= bytes => break,
+                Err(error) => {
+                    return Err(format!("read PTY output after {received} bytes: {error}"))
+                }
             }
-            Err(_) if received >= bytes => break,
-            Err(error) => return Err(format!("read PTY output after {received} bytes: {error}")),
+        }
+        Ok(output)
+    });
+    // Read concurrently so a full ConPTY output buffer cannot block the child.
+    // On Windows the reader may not observe closure until the child has been
+    // reaped and the master is released, so never wait for EOF first.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match child
+            .try_wait()
+            .map_err(|error| format!("wait for PTY output helper: {error}"))?
+        {
+            Some(_) => break,
+            None if Instant::now() < deadline => thread::sleep(Duration::from_millis(1)),
+            None => {
+                child
+                    .kill()
+                    .map_err(|error| format!("kill timed-out PTY output helper: {error}"))?;
+                return Err("PTY output helper exceeded the 30-second deadline".into());
+            }
         }
     }
-    child
-        .wait()
-        .map_err(|error| format!("wait for PTY output helper: {error}"))?;
+    drop(pair.master);
+    let output = reader_thread
+        .join()
+        .map_err(|_| "PTY output reader panicked".to_string())??;
     validate_emitted_payload(&output, bytes)
 }
 
@@ -579,6 +663,14 @@ mod tests {
     #[test]
     fn payload_validation_ignores_surrounding_conpty_controls_but_requires_exact_bytes() {
         assert_eq!(validate_emitted_payload(&framed_payload(b"xxxx"), 4), Ok(4));
+
+        let wrapped = [
+            EMIT_BEGIN_MARKER,
+            b"xx\x1b]0;C:\\path-with-x\x07\x1b[2Cxx",
+            EMIT_END_MARKER,
+        ]
+        .concat();
+        assert_eq!(validate_emitted_payload(&wrapped, 4), Ok(4));
 
         let truncated = [EMIT_BEGIN_MARKER, b"xxx", EMIT_END_MARKER].concat();
         assert!(validate_emitted_payload(&truncated, 4)

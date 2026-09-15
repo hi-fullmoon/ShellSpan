@@ -554,7 +554,8 @@
         assert_eq!(
             snapshot.state,
             crate::terminal_broker::TerminalCommandState::Completed,
-            "exact lifecycle failed for command {command:?}: {snapshot:?}"
+            "exact lifecycle failed for command {command:?}: {snapshot:?}; broker={:?}",
+            broker.snapshot(Some(transport_id)).unwrap()
         );
         thread::sleep(Duration::from_millis(40));
         broker
@@ -824,7 +825,10 @@
             shell,
             &format!("Set-Location -LiteralPath '{path}'"),
         );
-        assert_eq!(changed.cwd.as_deref(), cwd.path().to_str());
+        let reported_cwd = std::path::Path::new(changed.cwd.as_deref().unwrap())
+            .canonicalize()
+            .unwrap();
+        assert_eq!(reported_cwd, cwd.path().canonicalize().unwrap());
         execute_visible(
             &broker,
             &writer,

@@ -5,14 +5,14 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use super::{
-    assemble_model_input, default_model_tools, estimate_model_surface_budget, recorded_tool_call,
-    AgentActiveScope, AgentAssistantContentBlock, AgentCompactionManager, AgentEntry, AgentHookBus,
-    AgentLifecyclePhase, AgentPreStepContext, AgentPreStepDecision, AgentRequestReason,
-    AgentScopedPayload, AgentSessionEventPayload, AgentSessionStatus, AgentSessionStore,
-    AgentStopReason, AgentTokenUsage, AgentToolCallDelta, AgentToolPipeline, ModelContentBlock,
-    ModelFinishReason, ModelMessage, ModelRequest, ModelResponse, ModelStreamSink,
-    NormalizedModelError, NormalizedModelErrorKind, RetryPlan, RetryPolicy, StreamDelta,
-    ToolPipelineSettlement, MAX_AGENT_STREAM_DELTA_BYTES,
+    assemble_model_input, estimate_model_surface_budget, model_tools_with_terminal_interaction,
+    recorded_tool_call, AgentActiveScope, AgentAssistantContentBlock, AgentCompactionManager,
+    AgentEntry, AgentHookBus, AgentLifecyclePhase, AgentPreStepContext, AgentPreStepDecision,
+    AgentRequestReason, AgentScopedPayload, AgentSessionEventPayload, AgentSessionStatus,
+    AgentSessionStore, AgentStopReason, AgentTokenUsage, AgentToolCallDelta, AgentToolPipeline,
+    ModelContentBlock, ModelFinishReason, ModelMessage, ModelRequest, ModelResponse,
+    ModelStreamSink, NormalizedModelError, NormalizedModelErrorKind, RetryPlan, RetryPolicy,
+    StreamDelta, ToolPipelineSettlement, MAX_AGENT_STREAM_DELTA_BYTES,
 };
 
 #[cfg(test)]
@@ -259,6 +259,7 @@ async fn drive_agent_inner(
                 sessions,
                 entry,
                 hooks,
+                tools,
                 &prepared_model,
                 compactions,
                 &turn_id,
@@ -287,6 +288,7 @@ async fn drive_agent_inner(
                 sessions,
                 entry,
                 hooks,
+                tools,
                 &prepared_model,
                 compactions,
                 &turn_id,
@@ -415,6 +417,7 @@ async fn drive_agent_inner(
                 sessions,
                 entry,
                 hooks,
+                tools,
                 &prepared_model,
                 compactions,
                 &turn_id,
@@ -461,6 +464,7 @@ async fn apply_pre_step_hooks(
     sessions: &AgentSessionStore,
     entry: &Arc<AgentEntry>,
     hooks: &AgentHookBus,
+    tools: &AgentToolPipeline,
     model: &crate::llm::runtime::PreparedModel,
     compactions: &AgentCompactionManager,
     turn_id: &str,
@@ -475,13 +479,20 @@ async fn apply_pre_step_hooks(
     );
     let snapshot = sessions.snapshot(&entry.session_id)?;
     let surface_generation = snapshot.surface.generation;
-    let assembly = assemble_model_input(&snapshot.header, model_tools_for(entry));
+    let assembly = assemble_model_input(
+        &snapshot.header,
+        model_tools_for(
+            entry,
+            tools.terminal_interactive_tools_enabled(snapshot.header.target.as_ref()),
+        ),
+    );
     let mut request = ModelRequest::from_surface(
         "pre-step-budget".into(),
         &snapshot.surface,
         assembly.system_prompt,
         assembly.tools,
     );
+    tools.apply_ephemeral_terminal_results(&entry.session_id, turn_id, &mut request)?;
     request.messages.extend(
         assembly
             .context
@@ -724,7 +735,13 @@ async fn run_step(
         } else {
             let mut snapshot = sessions.snapshot(&entry.session_id)?;
             snapshot.header.permission_mode = permission_mode;
-            let assembly = assemble_model_input(&snapshot.header, model_tools_for(entry));
+            let assembly = assemble_model_input(
+                &snapshot.header,
+                model_tools_for(
+                    entry,
+                    tools.terminal_interactive_tools_enabled(snapshot.header.target.as_ref()),
+                ),
+            );
             ensure_model_context(
                 sessions,
                 entry,
@@ -768,6 +785,7 @@ async fn run_step(
                 inherited_messages.append(&mut request.messages);
                 request.messages = inherited_messages;
             }
+            tools.apply_ephemeral_terminal_results(&entry.session_id, turn_id, &mut request)?;
             request
         };
         let request_surface_generation = request.surface_generation;
@@ -1229,8 +1247,11 @@ fn ensure_model_context(
     Ok(())
 }
 
-fn model_tools_for(entry: &AgentEntry) -> Vec<super::ModelToolDefinition> {
-    let tools = default_model_tools();
+fn model_tools_for(
+    entry: &AgentEntry,
+    interactive_terminal_enabled: bool,
+) -> Vec<super::ModelToolDefinition> {
+    let tools = model_tools_with_terminal_interaction(interactive_terminal_enabled);
     let Some(scope) = &entry.capability_scope else {
         return tools;
     };
@@ -1518,6 +1539,9 @@ async fn commit_response(
         .cloned()
         .map(recorded_tool_call)
         .collect::<Vec<_>>();
+    let has_ephemeral_tool_arguments = model_tool_calls
+        .iter()
+        .any(|call| super::model::tool_call_arguments_are_ephemeral(&call.name, &call.arguments));
     let usage = token_usage(model_usage);
     let stop_reason = stop_reason(finish_reason);
     // The Assistant event and its replay envelope bind the same redacted
@@ -1547,7 +1571,7 @@ async fn commit_response(
                 usage,
                 stop_reason,
                 interrupted: false,
-                replay: Some(replay),
+                replay: (!has_ephemeral_tool_arguments).then_some(replay),
             },
         },
         AgentScopedPayload {

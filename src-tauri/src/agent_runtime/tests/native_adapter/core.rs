@@ -175,6 +175,30 @@
     }
 
     #[test]
+    fn interactive_terminal_tools_require_bound_surface_and_do_not_record_input_content() {
+        let target = target_native(&local_target()).unwrap();
+        let direct = request("read_terminal", json!({}));
+        assert!(normalize_arguments(&direct, &target, None, false)
+            .unwrap_err()
+            .contains("bound-terminal"));
+
+        let mut bound = request(
+            "write_terminal_input",
+            json!({ "inputKind": "text", "text": "ephemeral-value" }),
+        );
+        bound.execution_surface = AgentExecutionSurface::BoundTerminal;
+        let (name, arguments) = normalize_arguments(&bound, &target, None, false).unwrap();
+        assert_eq!(name, "write_terminal_input");
+        assert_eq!(arguments["text"], "ephemeral-value");
+
+        let recorded = recorded_native_arguments(&name, &arguments);
+        assert_eq!(recorded["inputKind"], "text");
+        assert_eq!(recorded["byteLength"], 15);
+        assert_eq!(recorded["contentPersisted"], false);
+        assert!(!recorded.to_string().contains("ephemeral-value"));
+    }
+
+    #[test]
     fn visible_command_routes_additively_to_terminal_execute_without_reinterpreting_pty() {
         let target = target_native(&local_target()).unwrap();
         let mut visible = request(

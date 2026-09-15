@@ -4,9 +4,10 @@ use super::types::{
     AgentEffectKindNative, AgentObservedEffectNative, AgentRequestNative, AgentTargetKindNative,
     AgentToolCallNative, AgentToolTargetNative, ApplyPatchArgumentsNative,
     ExecCommandArgumentsNative, KillProcessArgumentsNative, ListDirectoryArgumentsNative,
-    ReadFileArgumentsNative, SearchTextArgumentsNative, TerminalExecuteArgumentsNative,
-    TransferFileArgumentsNative, WaitProcessArgumentsNative, WriteStdinArgumentsNative,
-    NATIVE_TOOL_CONTRACT_VERSION,
+    ReadFileArgumentsNative, ReadTerminalArgumentsNative, SearchTextArgumentsNative,
+    TerminalExecuteArgumentsNative, TerminalInteractiveInputKindNative,
+    TransferFileArgumentsNative, WaitProcessArgumentsNative, WaitTerminalArgumentsNative,
+    WriteStdinArgumentsNative, WriteTerminalInputArgumentsNative, NATIVE_TOOL_CONTRACT_VERSION,
 };
 
 pub enum AgentToolEffectModeNative {
@@ -44,7 +45,7 @@ const EXEC_EFFECTS: &[AgentEffectKindNative] = &[
     AgentEffectKindNative::ExternalSideEffect,
 ];
 
-pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 10] = [
+pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 13] = [
     AgentToolDescriptorNative {
         name: "exec_command",
         target_kinds: LOCAL_REMOTE,
@@ -56,6 +57,24 @@ pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 10] = [
         target_kinds: LOCAL_REMOTE,
         effect_mode: AgentToolEffectModeNative::NativeClassifier,
         allowed_effects: EXEC_EFFECTS,
+    },
+    AgentToolDescriptorNative {
+        name: "read_terminal",
+        target_kinds: LOCAL_REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: SENSITIVE_READ,
+    },
+    AgentToolDescriptorNative {
+        name: "write_terminal_input",
+        target_kinds: LOCAL_REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: STATE_CHANGE,
+    },
+    AgentToolDescriptorNative {
+        name: "wait_terminal",
+        target_kinds: LOCAL_REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: SENSITIVE_READ,
     },
     AgentToolDescriptorNative {
         name: "write_stdin",
@@ -412,6 +431,58 @@ pub fn validate_tool_arguments_native(
                 return Err("invalid terminal_execute arguments".into());
             }
         }
+        "read_terminal" => {
+            decode_arguments::<ReadTerminalArgumentsNative>(arguments)?;
+        }
+        "write_terminal_input" => {
+            let value = decode_arguments::<WriteTerminalInputArgumentsNative>(arguments)?;
+            let valid = match value.input_kind {
+                TerminalInteractiveInputKindNative::Text => {
+                    value.text.as_deref().is_some_and(|text| {
+                        !text.is_empty()
+                            && text.len() <= 8_192
+                            && !text.chars().any(char::is_control)
+                    }) && value.key.is_none()
+                }
+                TerminalInteractiveInputKindNative::Paste => {
+                    value.text.as_deref().is_some_and(|text| {
+                        !text.is_empty()
+                            && text.len() <= 65_536
+                            && !text
+                                .chars()
+                                .any(|character| matches!(character, '\0' | '\u{1b}'))
+                    }) && value.key.is_none()
+                }
+                TerminalInteractiveInputKindNative::Key => {
+                    value.text.is_none() && value.key.is_some()
+                }
+                TerminalInteractiveInputKindNative::Interrupt => {
+                    value.text.is_none() && value.key.is_none()
+                }
+            };
+            if !valid {
+                return Err("invalid write_terminal_input arguments".into());
+            }
+        }
+        "wait_terminal" => {
+            let value = decode_arguments::<WaitTerminalArgumentsNative>(arguments)?;
+            let has_condition = value.after_screen_version.is_some()
+                || value.after_output_sequence.is_some()
+                || value.after_lifecycle_sequence.is_some()
+                || value.text.is_some()
+                || value.idle_ms.is_some();
+            if !has_condition
+                || value.text.as_deref().is_some_and(|text| {
+                    text.is_empty() || text.len() > 1_024 || text.chars().any(char::is_control)
+                })
+                || value.idle_ms.is_some_and(|idle| idle == 0 || idle > 60_000)
+                || value
+                    .timeout_ms
+                    .is_some_and(|timeout| timeout == 0 || timeout > 60_000)
+            {
+                return Err("invalid wait_terminal bounds".into());
+            }
+        }
         "write_stdin" => {
             let value = decode_arguments::<WriteStdinArgumentsNative>(arguments)?;
             if value.input.len() > 65536 {
@@ -652,4 +723,41 @@ fn request_targets_are_coherent(request: &AgentRequestNative) -> bool {
         AgentToolTargetNative::Process { .. } => process_owner_is_registered(request, target),
         _ => true,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn interactive_terminal_arguments_are_bounded_and_shape_checked() {
+        assert!(validate_tool_arguments_native("read_terminal", &json!({})).is_ok());
+        assert!(validate_tool_arguments_native(
+            "write_terminal_input",
+            &json!({ "inputKind": "text", "text": "continue" }),
+        )
+        .is_ok());
+        assert!(validate_tool_arguments_native(
+            "write_terminal_input",
+            &json!({ "inputKind": "key", "key": "enter" }),
+        )
+        .is_ok());
+        assert!(validate_tool_arguments_native(
+            "write_terminal_input",
+            &json!({ "inputKind": "paste", "text": "bad\u{1b}[31m" }),
+        )
+        .is_err());
+        assert!(validate_tool_arguments_native(
+            "write_terminal_input",
+            &json!({ "inputKind": "interrupt", "text": "unexpected" }),
+        )
+        .is_err());
+        assert!(validate_tool_arguments_native("wait_terminal", &json!({})).is_err());
+        assert!(validate_tool_arguments_native(
+            "wait_terminal",
+            &json!({ "afterScreenVersion": 4, "timeoutMs": 1000 }),
+        )
+        .is_ok());
+    }
 }

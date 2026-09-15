@@ -1,5 +1,5 @@
 //! Agent history projection and image-store ownership.
-pub(crate) use super::model_tools::default_model_tools;
+pub(crate) use super::model_tools::{default_model_tools, model_tools_with_terminal_interaction};
 use super::{
     AgentAssistantContentBlock, AgentRequestToolSchema, AgentSurfaceMessage, AgentSurfaceSnapshot,
     RecordedToolCall,
@@ -276,13 +276,54 @@ pub(crate) fn recorded_tool_call(call: ModelToolCall) -> RecordedToolCall {
     RecordedToolCall {
         call_id: call.call_id,
         provider_call_id: call.provider_call_id,
+        arguments: recorded_tool_arguments(&call.name, &call.arguments),
         name: call.name,
         native_name: None,
-        arguments: call.arguments,
         title: None,
         effect: None,
         target: None,
     }
+}
+
+pub(crate) fn recorded_tool_arguments(
+    tool_name: &str,
+    arguments: &serde_json::Value,
+) -> serde_json::Value {
+    if tool_name == "write_terminal_input" {
+        let input_kind = arguments
+            .get("inputKind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown");
+        let byte_length = arguments
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .map(str::len);
+        return serde_json::json!({
+            "inputKind": input_kind,
+            "key": arguments.get("key").and_then(serde_json::Value::as_str),
+            "byteLength": byte_length,
+            "contentPersisted": false,
+        });
+    }
+    if tool_name == "wait_terminal" {
+        if let Some(text) = arguments.get("text").and_then(serde_json::Value::as_str) {
+            let mut recorded = arguments.as_object().cloned().unwrap_or_default();
+            recorded.remove("text");
+            recorded.insert("textProvided".into(), true.into());
+            recorded.insert("textByteLength".into(), text.len().into());
+            recorded.insert("contentPersisted".into(), false.into());
+            return serde_json::Value::Object(recorded);
+        }
+    }
+    arguments.clone()
+}
+
+pub(crate) fn tool_call_arguments_are_ephemeral(
+    tool_name: &str,
+    arguments: &serde_json::Value,
+) -> bool {
+    tool_name == "write_terminal_input"
+        || (tool_name == "wait_terminal" && arguments.get("text").is_some())
 }
 
 #[cfg(test)]
@@ -290,6 +331,32 @@ mod stage_c_tests {
     use super::*;
     use crate::llm::routes::{ModelSelection, ProviderRoute, RouteAuth, RouteStore, RouteTimeouts};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn terminal_input_and_wait_text_are_not_retained_in_recorded_tool_calls() {
+        let write = recorded_tool_call(ModelToolCall {
+            call_id: "write".into(),
+            provider_call_id: None,
+            name: "write_terminal_input".into(),
+            arguments: serde_json::json!({
+                "inputKind": "paste",
+                "text": "ephemeral-terminal-value",
+            }),
+        });
+        let wait = recorded_tool_call(ModelToolCall {
+            call_id: "wait".into(),
+            provider_call_id: None,
+            name: "wait_terminal".into(),
+            arguments: serde_json::json!({
+                "text": "ephemeral-terminal-value",
+                "timeoutMs": 1000,
+            }),
+        });
+        let recorded = serde_json::to_string(&(write, wait)).unwrap();
+        assert!(!recorded.contains("ephemeral-terminal-value"));
+        assert!(recorded.contains("contentPersisted"));
+        assert!(recorded.contains("textByteLength"));
+    }
 
     #[test]
     fn cold_subagent_resolves_only_its_versioned_route_credential() {

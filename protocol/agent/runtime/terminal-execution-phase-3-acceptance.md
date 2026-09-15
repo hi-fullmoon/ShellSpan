@@ -1,9 +1,6 @@
 # Terminal Execution Phase 3 Acceptance Evidence
 
-Updated: 2026-09-15 (Asia/Shanghai); final adversarial review: **Phase 3 PASS
-under the explicit cooperative-shell RFC amendment and the user-approved
-Windows native-evidence waiver**. Native Windows remains **MISSING**, never
-`PASS`.
+Updated: 2026-09-15 (Asia/Shanghai); Windows supplement: 2026-09-16.
 
 Session: `01a0a3a5-747a-7af2-b6ec-392a60141fed`
 
@@ -12,6 +9,16 @@ Roadmap: [Terminal Execution Roadmap](./terminal-execution-roadmap.md)
 Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
 
 Matrix: [Terminal Execution Platform Test Matrix](./terminal-execution-test-matrix.md)
+
+## 2026-09-16 Windows supplement
+
+The native Windows waiver is closed. Windows PowerShell 5.1 and PowerShell 7.6
+both passed the exact real-ConPTY visible-command fixture under
+`pnpm test:terminal-interactive:windows`. The run verifies persistent cwd,
+environment, alias and function state, ANSI/Unicode, native exit status `7`,
+cmdlet failure status `1`, and bounded large-output capture. The historical
+`MISSING` statements below describe the original Phase 3 session and are
+superseded for the current Windows delivery state by this supplement.
 
 ## Scope and outcome
 

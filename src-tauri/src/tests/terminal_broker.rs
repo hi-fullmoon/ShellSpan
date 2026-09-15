@@ -1,4 +1,5 @@
     use super::*;
+    use crate::terminal_screen::TerminalScreenBuffer;
 
     fn attach_ready_agent_ssh_transport(
         broker: &TerminalSessionBroker,
@@ -124,8 +125,8 @@
         });
 
         let input = format!(
-            "printf 'SHELLSPAN_{label}_RAW_BEGIN:'; printf '\\377'; printf ':\\033[31mred\\033[0m:'; printf '\\346\\261\\211'; printf ':END'; exit\n"
-        );
+                    "printf 'SHELLSPAN_{label}_RAW_BEGIN:'; printf '\\377'; printf ':\\033[31mred\\033[0m:'; printf '\\346\\261\\211'; printf ':END'; exit\n"
+                );
         broker
             .admit_compatibility_input(
                 "shell-transport",
@@ -376,16 +377,27 @@
         let (raw, frames) = reader_thread.join().unwrap().unwrap();
 
         assert!(status.success(), "{shell} exited unsuccessfully");
-        let mut expected_shell_output = output_marker.into_bytes();
-        expected_shell_output.extend_from_slice(b"\x1b[31mred\x1b[0m:");
-        expected_shell_output.extend_from_slice("汉".as_bytes());
-        expected_shell_output.extend_from_slice(b":111x33:");
-        expected_shell_output.extend(std::iter::repeat_n(b'Q', 8));
-        expected_shell_output.extend_from_slice(b":OUTPUT_END");
+        let expected_shell_output = |reset: &[u8]| {
+            let mut expected = output_marker.as_bytes().to_vec();
+            expected.extend_from_slice(b"\x1b[31mred\x1b[");
+            expected.extend_from_slice(reset);
+            expected.extend_from_slice(b"m:");
+            expected.extend_from_slice("汉".as_bytes());
+            expected.extend_from_slice(b":111x33:");
+            expected.extend(std::iter::repeat_n(b'Q', 8));
+            expected.extend_from_slice(b":OUTPUT_END");
+            expected
+        };
+        // ConPTY may canonicalize SGR reset `0m` to its equivalent `m`.
+        // Either spelling is transport output; the Broker must preserve the
+        // exact spelling it actually received, which the frame assertion below proves.
+        let expected_variants = [expected_shell_output(b"0"), expected_shell_output(b"")];
         assert!(
-            raw.windows(expected_shell_output.len())
-                .any(|window| window == expected_shell_output.as_slice()),
-            "{shell} output did not contain the echo-independent payload"
+            expected_variants.iter().any(|expected| raw
+                .windows(expected.len())
+                .any(|window| window == expected.as_slice())),
+            "{shell} output did not contain the echo-independent payload; raw={:?}",
+            String::from_utf8_lossy(&raw)
         );
         assert!(
             frames.len() > 1,
@@ -518,55 +530,304 @@
     }
 
     #[test]
-    fn rollout_default_is_off_non_persisted_and_rollback_closes_generations() {
+    fn rollout_defaults_are_windows_scoped_non_persisted_and_rollback_closes_generations() {
         let broker = TerminalSessionBroker::default();
         let snapshot = broker.snapshot(None).unwrap();
         assert_eq!(snapshot.rollout.name, TERMINAL_BROKER_FLAG_NAME);
-        assert!(!snapshot.rollout.enabled);
-        assert!(!snapshot.rollout.default_enabled);
+        assert_eq!(snapshot.rollout.enabled, cfg!(target_os = "windows"));
+        assert_eq!(
+            snapshot.rollout.default_enabled,
+            cfg!(target_os = "windows")
+        );
         assert!(!snapshot.rollout.persisted);
         assert_eq!(snapshot.rollout.mode, "shadowCompatibility");
         assert!(snapshot.rollout.legacy_display_authoritative);
-        assert!(!snapshot.shell_integration_rollout.enabled);
-        assert!(!snapshot.terminal_execute_rollout.enabled);
+        assert_eq!(
+            snapshot.shell_integration_rollout.enabled,
+            cfg!(target_os = "windows")
+        );
+        assert_eq!(
+            snapshot.terminal_execute_rollout.enabled,
+            cfg!(target_os = "windows")
+        );
         assert_eq!(
             snapshot.remote_agent_pty_rollout.name,
             TERMINAL_REMOTE_AGENT_PTY_FLAG_NAME
         );
         assert!(!snapshot.remote_agent_pty_rollout.enabled);
         assert!(!snapshot.remote_agent_pty_rollout.default_enabled);
+        assert_eq!(
+            snapshot.interactive_tools_rollout.name,
+            TERMINAL_INTERACTIVE_TOOLS_FLAG_NAME
+        );
+        assert_eq!(
+            snapshot.interactive_tools_rollout.enabled,
+            cfg!(target_os = "windows")
+        );
+        assert_eq!(
+            snapshot.interactive_tools_rollout.default_enabled,
+            cfg!(target_os = "windows")
+        );
         assert!(snapshot.legacy_fallback_rollout.enabled);
         assert!(!snapshot.shell_integration_rollout.persisted);
         assert!(!snapshot.terminal_execute_rollout.persisted);
         assert!(!snapshot.remote_agent_pty_rollout.persisted);
+        assert!(!snapshot.interactive_tools_rollout.persisted);
         assert!(!snapshot.legacy_fallback_rollout.persisted);
-        assert!(broker
-            .attach_transport(
-                "transport-1",
-                None,
-                TerminalTransportKind::LocalPty,
-                TerminalGeometry::new(80, 24),
-            )
-            .unwrap()
-            .is_none());
+        assert_eq!(
+            broker
+                .attach_transport(
+                    "transport-1",
+                    None,
+                    if cfg!(target_os = "windows") {
+                        TerminalTransportKind::WindowsConPty
+                    } else {
+                        TerminalTransportKind::LocalPty
+                    },
+                    TerminalGeometry::new(80, 24),
+                )
+                .unwrap()
+                .is_some(),
+            cfg!(target_os = "windows")
+        );
 
-        broker
-            .apply_trusted_rollout_decision(true, TerminalBrokerRolloutSource::Test)
+        let rollback = TerminalSessionBroker::enabled_for_test(8, 1_024, 32);
+        attached(&rollback, "rollback-transport");
+        rollback
+            .apply_trusted_rollout(
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+            )
             .unwrap();
-        attached(&broker, "transport-1");
-        broker
-            .apply_trusted_rollout_decision(false, TerminalBrokerRolloutSource::Test)
-            .unwrap();
-        let snapshot = broker.snapshot(Some("transport-1")).unwrap();
+        let snapshot = rollback.snapshot(Some("rollback-transport")).unwrap();
         assert!(!snapshot.rollout.enabled);
         assert_eq!(
             snapshot.session.unwrap().close_reason,
             Some(TerminalGenerationCloseReason::BrokerShutdown)
         );
-        assert!(broker
-            .observe_raw_output("transport-1", b"legacy remains authoritative")
+        assert!(rollback
+            .observe_raw_output("rollback-transport", b"legacy remains authoritative")
             .unwrap()
             .is_none());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn phase6_windows_default_is_wrapper_free_and_remote_rollback_stays_compatible() {
+        let broker = TerminalSessionBroker::default();
+        broker
+            .attach_transport(
+                "windows-local",
+                None,
+                TerminalTransportKind::WindowsConPty,
+                TerminalGeometry::new(100, 30),
+            )
+            .unwrap()
+            .unwrap();
+        broker
+            .register_integration_channel(
+                "windows-local",
+                "windows-integration",
+                TerminalShellKind::PowerShell7,
+            )
+            .unwrap();
+        for event in [
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::PowerShell7,
+            },
+            TerminalIntegrationControlEvent::PromptStart {
+                cwd: "C:\\workspace".into(),
+            },
+            TerminalIntegrationControlEvent::PromptEnd,
+        ] {
+            broker
+                .accept_integration_event("windows-local", "windows-integration", event)
+                .unwrap();
+        }
+        assert_eq!(
+            broker.visible_command_route("windows-local").unwrap(),
+            TerminalVisibleCommandRoute::TerminalExecute
+        );
+
+        broker
+            .apply_trusted_rollout(
+                true,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+            )
+            .unwrap();
+        assert_eq!(
+            broker.visible_command_route("windows-local").unwrap(),
+            TerminalVisibleCommandRoute::Unavailable,
+            "Windows local rollback must offer Direct instead of reviving the wrapper"
+        );
+        assert_eq!(
+            broker.remote_agent_pty_new_operation_route().unwrap(),
+            TerminalVisibleCommandRoute::LegacyFallback,
+            "deferred remote targets must retain the compatibility wrapper"
+        );
+    }
+
+    #[test]
+    fn rollout_counters_are_bounded_privacy_safe_and_cover_phase6_signals() {
+        let broker = TerminalSessionBroker::phase5_enabled_for_test(4);
+        let attachment = broker
+            .attach_transport(
+                "counter-transport",
+                None,
+                TerminalTransportKind::LocalPty,
+                TerminalGeometry::new(20, 4),
+            )
+            .unwrap()
+            .unwrap();
+        broker
+            .register_integration_channel(
+                "counter-transport",
+                "counter-integration",
+                TerminalShellKind::Zsh,
+            )
+            .unwrap();
+        for event in [
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::Zsh,
+            },
+            TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() },
+            TerminalIntegrationControlEvent::PromptEnd,
+        ] {
+            broker
+                .accept_integration_event("counter-transport", "counter-integration", event)
+                .unwrap();
+        }
+
+        let secret = "phase6-secret-must-not-be-counted";
+        broker
+            .observe_raw_output("counter-transport", secret.as_bytes())
+            .unwrap();
+        for _ in 0..TRANSPORT_LATENCY_SAMPLE_INTERVAL_FRAMES {
+            broker
+                .observe_raw_output("counter-transport", b"x")
+                .unwrap();
+        }
+        broker.set_output_paused("counter-transport", true).unwrap();
+        broker.set_output_paused("counter-transport", true).unwrap();
+        assert_eq!(
+            broker
+                .wait_terminal(
+                    "counter-transport",
+                    TerminalWaitRequest {
+                        after_screen_version: None,
+                        after_output_sequence: None,
+                        after_lifecycle_sequence: None,
+                        text: None,
+                        case_sensitive: false,
+                        idle: None,
+                        timeout: Duration::ZERO,
+                    },
+                )
+                .unwrap()
+                .reason,
+            TerminalWaitReason::TimedOut
+        );
+
+        let timed_out = TerminalCommandOperation::new(
+            attachment.terminal_session_id.clone(),
+            attachment.terminal_generation,
+            "counter-timeout".into(),
+            "safe".into(),
+            1,
+            4,
+            Arc::clone(&broker.counters),
+        );
+        assert!(timed_out
+            .request_settlement(TerminalCommandRequestedSettlement::TimedOut)
+            .unwrap());
+        let taken_over = TerminalCommandOperation::new(
+            attachment.terminal_session_id.clone(),
+            attachment.terminal_generation,
+            "counter-takeover".into(),
+            "safe".into(),
+            1,
+            4,
+            Arc::clone(&broker.counters),
+        );
+        assert!(taken_over
+            .request_settlement(TerminalCommandRequestedSettlement::TakenOver)
+            .unwrap());
+        let uncertain = TerminalCommandOperation::new(
+            attachment.terminal_session_id,
+            attachment.terminal_generation,
+            "counter-uncertain".into(),
+            "safe".into(),
+            1,
+            4,
+            Arc::clone(&broker.counters),
+        );
+        assert!(uncertain.mark_uncertain().unwrap());
+
+        broker
+            .apply_trusted_rollout(
+                true,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+            )
+            .unwrap();
+        assert_eq!(
+            broker.remote_agent_pty_new_operation_route().unwrap(),
+            TerminalVisibleCommandRoute::LegacyFallback
+        );
+
+        let snapshot = broker.snapshot(Some("counter-transport")).unwrap();
+        assert_eq!(snapshot.counters.integration_ready, 1);
+        assert_eq!(snapshot.counters.lifecycle_matched, 3);
+        assert_eq!(snapshot.counters.degraded_fallback, 1);
+        assert_eq!(snapshot.counters.uncertainty, 1);
+        assert_eq!(snapshot.counters.timeout, 2);
+        assert_eq!(snapshot.counters.takeover, 1);
+        assert_eq!(snapshot.counters.truncation, 1);
+        assert_eq!(snapshot.counters.backpressure, 1);
+        assert_eq!(snapshot.counters.transport_latency_samples, 2);
+        assert!(
+            snapshot.counters.transport_latency_total_micros
+                >= snapshot.counters.transport_latency_max_micros
+        );
+        let serialized = serde_json::to_string(&snapshot.counters).unwrap();
+        assert!(!serialized.contains(secret));
+        assert!(!serialized.contains("commandLine"));
+        assert!(!serialized.contains("integrationId\":\"counter-integration"));
+        let values = serde_json::from_str::<serde_json::Value>(&serialized).unwrap();
+        assert!(values
+            .as_object()
+            .unwrap()
+            .values()
+            .all(serde_json::Value::is_u64));
     }
 
     #[test]
@@ -1021,7 +1282,11 @@
         let broker = TerminalSessionBroker::default();
         assert_eq!(
             broker.visible_command_route("transport-posix").unwrap(),
-            TerminalVisibleCommandRoute::LegacyFallback
+            if cfg!(target_os = "windows") {
+                TerminalVisibleCommandRoute::Unavailable
+            } else {
+                TerminalVisibleCommandRoute::LegacyFallback
+            }
         );
         broker
             .apply_trusted_phase3_rollout(
@@ -1181,7 +1446,11 @@
         );
         assert_eq!(
             broker.visible_command_route("transport-1").unwrap(),
-            TerminalVisibleCommandRoute::LegacyFallback
+            if cfg!(target_os = "windows") {
+                TerminalVisibleCommandRoute::Unavailable
+            } else {
+                TerminalVisibleCommandRoute::LegacyFallback
+            }
         );
     }
 
@@ -1272,7 +1541,11 @@
         );
         assert_eq!(
             broker.visible_command_route("transport-2").unwrap(),
-            TerminalVisibleCommandRoute::LegacyFallback
+            if cfg!(target_os = "windows") {
+                TerminalVisibleCommandRoute::Unavailable
+            } else {
+                TerminalVisibleCommandRoute::LegacyFallback
+            }
         );
 
         let broker = ready_phase3_broker();
@@ -1312,7 +1585,11 @@
         assert!(snapshot.legacy_fallback_rollout.enabled);
         assert_eq!(
             broker.visible_command_route("transport-1").unwrap(),
-            TerminalVisibleCommandRoute::LegacyFallback
+            if cfg!(target_os = "windows") {
+                TerminalVisibleCommandRoute::Unavailable
+            } else {
+                TerminalVisibleCommandRoute::LegacyFallback
+            }
         );
 
         broker
@@ -1393,7 +1670,7 @@
             )
             .unwrap();
         assert_eq!(
-            broker.visible_command_route("user-ssh").unwrap(),
+            broker.remote_visible_command_route("user-ssh").unwrap(),
             TerminalVisibleCommandRoute::LegacyFallback,
             "a user-owned SSH terminal must never become the Phase 4 terminal_execute target"
         );
@@ -1669,4 +1946,149 @@
         broker
             .observe_raw_output(winner, b"winner-current")
             .unwrap();
+    }
+
+    #[test]
+    fn interactive_screen_wait_tracks_output_text_resize_and_alternate_buffer() {
+        let broker = TerminalSessionBroker::phase5_enabled_for_test(4_096);
+        broker
+            .attach_transport(
+                "interactive-transport",
+                None,
+                TerminalTransportKind::LocalPty,
+                TerminalGeometry::new(20, 4),
+            )
+            .unwrap()
+            .unwrap();
+        let initial = broker.screen_snapshot("interactive-transport").unwrap();
+        assert_eq!((initial.columns, initial.rows), (20, 4));
+
+        let waiter = {
+            let broker = broker.clone();
+            std::thread::spawn(move || {
+                broker
+                    .wait_terminal(
+                        "interactive-transport",
+                        TerminalWaitRequest {
+                            after_screen_version: Some(initial.screen_version),
+                            after_output_sequence: None,
+                            after_lifecycle_sequence: None,
+                            text: None,
+                            case_sensitive: false,
+                            idle: None,
+                            timeout: Duration::from_secs(2),
+                        },
+                    )
+                    .unwrap()
+            })
+        };
+        broker
+            .observe_raw_output(
+                "interactive-transport",
+                b"Select: [y/N]\x1b[?1049hmenu\x1b[2;4H",
+            )
+            .unwrap();
+        let changed = waiter.join().unwrap();
+        assert_eq!(changed.reason, TerminalWaitReason::ScreenChanged);
+        let snapshot = changed.snapshot.unwrap();
+        assert_eq!(snapshot.active_buffer, TerminalScreenBuffer::Alternate);
+        assert_eq!((snapshot.cursor.row, snapshot.cursor.column), (1, 3));
+
+        let found = broker
+            .wait_terminal(
+                "interactive-transport",
+                TerminalWaitRequest {
+                    after_screen_version: None,
+                    after_output_sequence: None,
+                    after_lifecycle_sequence: None,
+                    text: Some("MENU".into()),
+                    case_sensitive: false,
+                    idle: None,
+                    timeout: Duration::from_secs(1),
+                },
+            )
+            .unwrap();
+        assert_eq!(found.reason, TerminalWaitReason::TextFound);
+        broker
+            .observe_raw_output("interactive-transport", b"\x1b[?1049lREPL> ready")
+            .unwrap();
+        assert_eq!(
+            broker
+                .screen_snapshot("interactive-transport")
+                .unwrap()
+                .active_buffer,
+            TerminalScreenBuffer::Primary
+        );
+
+        let before_resize = broker.screen_snapshot("interactive-transport").unwrap();
+        broker
+            .resize("interactive-transport", TerminalGeometry::new(32, 6))
+            .unwrap();
+        let after_resize = broker.screen_snapshot("interactive-transport").unwrap();
+        assert!(after_resize.screen_version > before_resize.screen_version);
+        assert_eq!((after_resize.columns, after_resize.rows), (32, 6));
+        assert_eq!(after_resize.content.len(), 6);
+    }
+
+    #[test]
+    fn interactive_wait_observes_idle_and_terminal_closure_without_replay() {
+        let broker = TerminalSessionBroker::phase5_enabled_for_test(4_096);
+        broker
+            .attach_transport(
+                "interactive-close",
+                None,
+                TerminalTransportKind::LocalPty,
+                TerminalGeometry::new(40, 5),
+            )
+            .unwrap()
+            .unwrap();
+        broker
+            .observe_raw_output("interactive-close", b"working")
+            .unwrap();
+        let idle = broker
+            .wait_terminal(
+                "interactive-close",
+                TerminalWaitRequest {
+                    after_screen_version: None,
+                    after_output_sequence: None,
+                    after_lifecycle_sequence: None,
+                    text: None,
+                    case_sensitive: false,
+                    idle: Some(Duration::from_millis(5)),
+                    timeout: Duration::from_secs(1),
+                },
+            )
+            .unwrap();
+        assert_eq!(idle.reason, TerminalWaitReason::Idle);
+
+        let waiter = {
+            let broker = broker.clone();
+            std::thread::spawn(move || {
+                broker
+                    .wait_terminal(
+                        "interactive-close",
+                        TerminalWaitRequest {
+                            after_screen_version: Some(u64::MAX - 1),
+                            after_output_sequence: None,
+                            after_lifecycle_sequence: None,
+                            text: None,
+                            case_sensitive: false,
+                            idle: None,
+                            timeout: Duration::from_secs(2),
+                        },
+                    )
+                    .unwrap()
+            })
+        };
+        std::thread::sleep(Duration::from_millis(10));
+        broker
+            .close_transport(
+                "interactive-close",
+                TerminalGenerationCloseReason::UserClosed,
+            )
+            .unwrap();
+        let closed = waiter.join().unwrap();
+        assert_eq!(closed.reason, TerminalWaitReason::Closed);
+        assert!(!closed.open);
+        assert!(closed.snapshot.is_none());
     }

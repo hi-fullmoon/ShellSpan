@@ -491,6 +491,27 @@ impl TerminalLeaseManager {
         data: String,
         source: TerminalInputSource<'_>,
     ) -> Result<(), String> {
+        let input_kind = match source {
+            TerminalInputSource::System { .. } if data.as_bytes() == [3] => {
+                TerminalInputKind::Interrupt
+            }
+            TerminalInputSource::System { .. } => TerminalInputKind::SystemControl,
+            TerminalInputSource::User | TerminalInputSource::Agent { .. } => {
+                TerminalInputKind::Text
+            }
+        };
+        self.write_with_kind(sessions, session_id, data, source, input_kind)
+            .map(|_| ())
+    }
+
+    pub(crate) fn write_with_kind(
+        &self,
+        sessions: &SessionManager,
+        session_id: &str,
+        data: String,
+        source: TerminalInputSource<'_>,
+        input_kind: TerminalInputKind,
+    ) -> Result<Option<crate::terminal_broker::TerminalInputReceipt>, String> {
         // Keep authorization and enqueue in one lease critical section. Without
         // this, a User write could pass while Idle and race an Agent acquire
         // before its bytes reach the terminal command queue.
@@ -526,21 +547,19 @@ impl TerminalLeaseManager {
                 return Err(TerminalLeaseError::OperationMismatch.to_string());
             }
         };
-        let input_kind = match source {
-            TerminalInputSource::System { .. } if data.as_bytes() == [3] => {
-                TerminalInputKind::Interrupt
-            }
-            TerminalInputSource::System { .. } => TerminalInputKind::SystemControl,
-            TerminalInputSource::User | TerminalInputSource::Agent { .. } => {
-                TerminalInputKind::Text
-            }
-        };
+        if matches!(source, TerminalInputSource::System { .. })
+            && !matches!(
+                input_kind,
+                TerminalInputKind::Interrupt | TerminalInputKind::SystemControl
+            )
+        {
+            return Err(TerminalLeaseError::OperationMismatch.to_string());
+        }
         let bytes = data.as_bytes().to_vec();
         self.broker
             .admit_compatibility_input(session_id, broker_source, input_kind, &bytes, || {
                 sessions.write_session_input(session_id, data)
             })
-            .map(|_| ())
     }
 
     pub(crate) fn release_turn(&self, agent_session_id: &str) -> Result<(), String> {

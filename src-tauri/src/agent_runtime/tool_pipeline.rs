@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, Weak};
 
 use async_trait::async_trait;
@@ -15,11 +15,14 @@ use super::{
     AgentInboxMessage, AgentLifecyclePhase, AgentMessageSource, AgentPlanStep, AgentRecoveryState,
     AgentRecoveryStatus, AgentScopedPayload, AgentSessionEffect, AgentSessionEventPayload,
     AgentSessionStatus, AgentSessionStore, AgentSessionTarget, AgentToolApprovalStatus,
-    AgentToolExecutionStatus, AgentToolResultStatus, ModelToolCall, RecordedToolCall,
+    AgentToolExecutionStatus, AgentToolResultStatus, ModelMessage, ModelRequest, ModelToolCall,
+    RecordedToolCall,
 };
 
 pub(crate) const DEFAULT_NATIVE_APPROVAL_TTL_MS: u64 = 60_000;
 const MAX_INLINE_TOOL_DATA_BYTES: usize = 8 * 1024;
+const MAX_EPHEMERAL_TERMINAL_RESULTS: usize = 16;
+const MAX_EPHEMERAL_TERMINAL_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_PARALLEL_TOOL_CALLS: usize = 4;
 const MAX_PARALLEL_TOOL_CALLS: usize = 16;
 
@@ -138,7 +141,80 @@ pub(crate) struct NativeToolResult {
     pub(crate) artifacts: Vec<NativeToolArtifact>,
 }
 
+#[derive(Debug, Clone)]
+struct EphemeralTerminalResult {
+    session_id: String,
+    turn_id: String,
+    call_id: String,
+    content: String,
+}
+
+#[derive(Debug, Default)]
+struct EphemeralTerminalResultStore {
+    entries: VecDeque<EphemeralTerminalResult>,
+    total_bytes: usize,
+}
+
+impl EphemeralTerminalResultStore {
+    fn record(&mut self, entry: EphemeralTerminalResult) -> Result<(), String> {
+        if entry.content.len() > MAX_EPHEMERAL_TERMINAL_BYTES {
+            return Err("TERMINAL_OBSERVATION_TOO_LARGE".into());
+        }
+        if let Some(index) = self.entries.iter().position(|candidate| {
+            candidate.session_id == entry.session_id && candidate.call_id == entry.call_id
+        }) {
+            if let Some(replaced) = self.entries.remove(index) {
+                self.total_bytes = self.total_bytes.saturating_sub(replaced.content.len());
+            }
+        }
+        self.total_bytes = self.total_bytes.saturating_add(entry.content.len());
+        self.entries.push_back(entry);
+        while self.entries.len() > MAX_EPHEMERAL_TERMINAL_RESULTS
+            || self.total_bytes > MAX_EPHEMERAL_TERMINAL_BYTES
+        {
+            let Some(removed) = self.entries.pop_front() else {
+                break;
+            };
+            self.total_bytes = self.total_bytes.saturating_sub(removed.content.len());
+        }
+        Ok(())
+    }
+
+    fn apply(&self, session_id: &str, turn_id: &str, request: &mut ModelRequest) {
+        for message in &mut request.messages {
+            let ModelMessage::Tool {
+                call_id, content, ..
+            } = message
+            else {
+                continue;
+            };
+            if let Some(entry) = self.entries.iter().rev().find(|entry| {
+                entry.session_id == session_id
+                    && entry.turn_id == turn_id
+                    && entry.call_id == *call_id
+            }) {
+                *content = entry.content.clone();
+            }
+        }
+    }
+
+    fn clear_session(&mut self, session_id: &str) {
+        self.entries.retain(|entry| {
+            if entry.session_id == session_id {
+                self.total_bytes = self.total_bytes.saturating_sub(entry.content.len());
+                false
+            } else {
+                true
+            }
+        });
+    }
+}
+
 pub(crate) trait NativeToolRuntime: Send + Sync {
+    fn terminal_interactive_tools_enabled(&self, _remote_target: bool) -> bool {
+        false
+    }
+
     fn list_file_references(
         &self,
         request: super::file_references::FileReferenceRequest,
@@ -283,6 +359,11 @@ impl NativeToolRuntimeSlot {
 }
 
 impl NativeToolRuntime for NativeToolRuntimeSlot {
+    fn terminal_interactive_tools_enabled(&self, remote_target: bool) -> bool {
+        self.runtime()
+            .is_ok_and(|runtime| runtime.terminal_interactive_tools_enabled(remote_target))
+    }
+
     fn list_file_references(
         &self,
         request: super::file_references::FileReferenceRequest,
@@ -404,6 +485,7 @@ pub(crate) struct AgentToolPipeline {
     pending: Arc<Mutex<HashMap<String, PendingTool>>>,
     changed: Arc<Notify>,
     parallel_limit: Arc<std::sync::atomic::AtomicUsize>,
+    ephemeral_terminal_results: Arc<Mutex<EphemeralTerminalResultStore>>,
     #[cfg(test)]
     failure_observed: Arc<Notify>,
 }
@@ -433,6 +515,9 @@ impl AgentToolPipeline {
             parallel_limit: Arc::new(std::sync::atomic::AtomicUsize::new(
                 DEFAULT_PARALLEL_TOOL_CALLS,
             )),
+            ephemeral_terminal_results: Arc::new(Mutex::new(
+                EphemeralTerminalResultStore::default(),
+            )),
             #[cfg(test)]
             failure_observed: Arc::new(Notify::new()),
         }
@@ -457,6 +542,34 @@ impl AgentToolPipeline {
         self.parallel_limit
             .store(limit, std::sync::atomic::Ordering::Release);
         Ok(())
+    }
+
+    pub(crate) fn terminal_interactive_tools_enabled(
+        &self,
+        target: Option<&super::AgentSessionTarget>,
+    ) -> bool {
+        self.native.terminal_interactive_tools_enabled(
+            target.is_some_and(|target| target.kind == "remote"),
+        )
+    }
+
+    pub(crate) fn apply_ephemeral_terminal_results(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        request: &mut ModelRequest,
+    ) -> Result<(), String> {
+        self.ephemeral_terminal_results
+            .lock()
+            .map_err(|_| "ephemeral terminal result registry is unavailable".to_string())?
+            .apply(session_id, turn_id, request);
+        Ok(())
+    }
+
+    pub(crate) fn clear_ephemeral_terminal_results(&self, session_id: &str) {
+        if let Ok(mut results) = self.ephemeral_terminal_results.lock() {
+            results.clear_session(session_id);
+        }
     }
 
     pub(crate) fn mark_scheduler_failure(
@@ -1626,6 +1739,12 @@ impl AgentToolPipeline {
                 artifacts: Vec::new(),
             };
         }
+        let ephemeral_terminal_content = split_terminal_observation_for_persistence(
+            &request.model_call.name,
+            result.status,
+            &result.summary,
+            &mut result.data,
+        )?;
         let mut stored_data_artifact = None;
         if let Some(data) = result.data.as_ref() {
             let data_size = serde_json::to_vec(data)
@@ -1751,6 +1870,17 @@ impl AgentToolPipeline {
             }
         }
         self.sessions.append_batch(&request.session_id, payloads)?;
+        if let Some(content) = ephemeral_terminal_content {
+            self.ephemeral_terminal_results
+                .lock()
+                .map_err(|_| "ephemeral terminal result registry is unavailable".to_string())?
+                .record(EphemeralTerminalResult {
+                    session_id: request.session_id.clone(),
+                    turn_id: request.turn_id.clone(),
+                    call_id: request.model_call.call_id.clone(),
+                    content,
+                })?;
+        }
         Ok(())
     }
 
@@ -2434,6 +2564,76 @@ fn orchestration_effect(name: &str) -> AgentSessionEffect {
     }
 }
 
+fn split_terminal_observation_for_persistence(
+    tool_name: &str,
+    status: AgentToolResultStatus,
+    summary: &str,
+    data: &mut Option<Value>,
+) -> Result<Option<String>, String> {
+    if !matches!(tool_name, "read_terminal" | "wait_terminal")
+        || status != AgentToolResultStatus::Completed
+    {
+        return Ok(None);
+    }
+    let Some(observation) = data.as_ref() else {
+        return Ok(None);
+    };
+    let content = serde_json::to_string(&serde_json::json!({
+        "status": status,
+        "summary": summary,
+        "data": observation,
+    }))
+    .map_err(|error| format!("failed to encode ephemeral terminal observation: {error}"))?;
+    *data = Some(terminal_observation_metadata(observation));
+    Ok(Some(content))
+}
+
+fn terminal_observation_metadata(observation: &Value) -> Value {
+    let mut durable = serde_json::Map::new();
+    for field in [
+        "contractVersion",
+        "reason",
+        "lifecycleSequence",
+        "open",
+        "credentialLikePrompt",
+    ] {
+        if let Some(value) = observation.get(field) {
+            durable.insert(field.into(), value.clone());
+        }
+    }
+    if let Some(snapshot) = observation.get("snapshot").and_then(Value::as_object) {
+        let mut metadata = serde_json::Map::new();
+        for field in [
+            "protocolVersion",
+            "terminalSessionId",
+            "terminalGeneration",
+            "type",
+            "screenVersion",
+            "throughOutputSequence",
+            "rows",
+            "columns",
+            "activeBuffer",
+        ] {
+            if let Some(value) = snapshot.get(field) {
+                metadata.insert(field.into(), value.clone());
+            }
+        }
+        if let Some(cursor) = snapshot.get("cursor").and_then(Value::as_object) {
+            let mut cursor_metadata = serde_json::Map::new();
+            for field in ["row", "column", "visible"] {
+                if let Some(value) = cursor.get(field) {
+                    cursor_metadata.insert(field.into(), value.clone());
+                }
+            }
+            metadata.insert("cursor".into(), Value::Object(cursor_metadata));
+        }
+        durable.insert("snapshot".into(), Value::Object(metadata));
+    }
+    durable.insert("transientObservation".into(), true.into());
+    durable.insert("contentPersisted".into(), false.into());
+    Value::Object(durable)
+}
+
 fn approval_key(session_id: &str, step_id: &str, call_id: &str) -> String {
     format!("{session_id}\0{step_id}\0{call_id}")
 }
@@ -2445,4 +2645,73 @@ fn current_unix_ms() -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod ephemeral_terminal_result_tests {
+    use super::*;
+
+    #[test]
+    fn terminal_screen_content_is_ephemeral_but_reaches_the_current_model_turn() {
+        let mut data = Some(serde_json::json!({
+            "contractVersion": 1,
+            "credentialLikePrompt": false,
+            "snapshot": {
+                "protocolVersion": 1,
+                "terminalSessionId": "terminal-1",
+                "terminalGeneration": 1,
+                "type": "screenSnapshot",
+                "screenVersion": 2,
+                "throughOutputSequence": 1,
+                "rows": 1,
+                "columns": 40,
+                "cursor": { "row": 0, "column": 1, "visible": true },
+                "activeBuffer": "primary",
+                "title": "ephemeral-title",
+                "content": ["ephemeral-screen-value"],
+            },
+        }));
+        let content = split_terminal_observation_for_persistence(
+            "read_terminal",
+            AgentToolResultStatus::Completed,
+            "screen observed",
+            &mut data,
+        )
+        .unwrap()
+        .unwrap();
+        let durable = serde_json::to_string(&data).unwrap();
+        assert!(!durable.contains("ephemeral-screen-value"));
+        assert!(!durable.contains("ephemeral-title"));
+        assert!(durable.contains("contentPersisted"));
+
+        let mut store = EphemeralTerminalResultStore::default();
+        store
+            .record(EphemeralTerminalResult {
+                session_id: "session-1".into(),
+                turn_id: "turn-1".into(),
+                call_id: "call-1".into(),
+                content,
+            })
+            .unwrap();
+        let mut request = ModelRequest {
+            request_id: "request-1".into(),
+            surface_generation: 0,
+            system_prompt: String::new(),
+            messages: vec![ModelMessage::Tool {
+                call_id: "call-1".into(),
+                provider_call_id: None,
+                name: "read_terminal".into(),
+                content: durable,
+            }],
+            tools: Vec::new(),
+        };
+        store.apply("session-1", "turn-1", &mut request);
+        let ModelMessage::Tool { content, .. } = &request.messages[0] else {
+            panic!("expected tool result");
+        };
+        assert!(content.contains("ephemeral-screen-value"));
+        store.clear_session("session-1");
+        assert_eq!(store.total_bytes, 0);
+        assert!(store.entries.is_empty());
+    }
 }
