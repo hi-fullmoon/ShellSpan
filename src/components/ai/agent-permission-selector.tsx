@@ -32,6 +32,7 @@ const PERMISSION_OPTIONS = [
     iconClassName: 'bg-app-primary/10 text-app-primary',
     label: 'agent.permission.autoApproveReadOnly',
     composerLabel: 'agent.permission.composer.readOnly',
+    composerDescription: 'agent.permission.composer.readOnlyDescription',
     description: 'agent.permission.autoApproveReadOnlyDescription',
   },
   {
@@ -40,6 +41,7 @@ const PERMISSION_OPTIONS = [
     iconClassName: 'bg-app-warning/10 text-app-warning',
     label: 'agent.permission.fullAccess',
     composerLabel: 'agent.permission.composer.fullAccess',
+    composerDescription: 'agent.permission.composer.fullAccessDescription',
     description: 'agent.permission.fullAccessDescription',
   },
 ] as const;
@@ -137,7 +139,7 @@ export function AgentPermissionSelector({
           align="start"
           className={cn(
             composer
-              ? 'ai-permission-menu w-[200px] max-w-[calc(100vw-16px)] p-[3px]'
+              ? 'ai-permission-menu w-[240px] max-w-[calc(100vw-16px)] p-[3px]'
               : 'w-96 max-w-[calc(100vw-1rem)]',
           )}
         >
@@ -155,14 +157,20 @@ export function AgentPermissionSelector({
                     closeOnClick
                     className={cn(
                       composer
-                        ? 'ai-permission-menu-option min-h-[34px] gap-1.5 py-[5px] pl-2'
+                        ? 'ai-permission-menu-option min-h-12 items-start gap-2 py-2 pr-8 pl-2'
                         : 'items-start gap-2.5 py-2 text-[13px]',
                     )}
+                    aria-description={composer ? t(option.description) : undefined}
                   >
                     {composer ? (
                       <>
-                        <Icon strokeWidth={1.6} />
-                        <span>{t(option.composerLabel)}</span>
+                        <Icon className="mt-0.5" strokeWidth={1.6} />
+                        <span className="flex min-w-0 flex-col gap-0.5">
+                          <span>{t(option.composerLabel)}</span>
+                          <span className="text-[11px] leading-4 text-muted-foreground" aria-hidden="true">
+                            {t(option.composerDescription)}
+                          </span>
+                        </span>
                       </>
                     ) : (
                       <>
@@ -206,7 +214,8 @@ export function AgentPermissionSelector({
         description={t('agent.permission.fullAccessWarning')}
         confirmLabel={t('agent.permission.fullAccessConfirm')}
         confirmVariant="warning"
-        media={<TriangleAlertIcon className="text-app-warning" />}
+        media={<ShieldAlertIcon />}
+        mediaVariant="warning"
         onConfirm={() => {
           changeMode('fullAccess');
           setFullAccessDialogOpen(false);
