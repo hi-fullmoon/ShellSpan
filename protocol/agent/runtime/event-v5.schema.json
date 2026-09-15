@@ -47,6 +47,7 @@
         "agent/inbox/reordered",
         "session/model_selected",
         "session/permission_changed",
+        "session/execution_surface_changed",
         "session/renamed",
         "step/input_claim",
         "file_reference/scope_bound",
@@ -892,6 +893,40 @@
                     "pattern": "^[A-Za-z0-9_-]{1,80}$"
                   }
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session/execution_surface_changed"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "surface"
+            ],
+            "properties": {
+              "surface": {
+                "enum": [
+                  "direct",
+                  "boundTerminal"
+                ]
               }
             }
           }

@@ -360,7 +360,15 @@ fn has_uncertain_tool_executions(events: &[AgentSessionEvent]) -> bool {
                 dispatched.insert((event.step_id.as_deref(), call_id.as_str()));
             }
             AgentSessionEventPayload::ToolResult { call_id, .. } => {
-                dispatched.remove(&(event.step_id.as_deref(), call_id.as_str()));
+                if !matches!(
+                    &event.payload,
+                    AgentSessionEventPayload::ToolResult {
+                        status: super::AgentToolResultStatus::Uncertain,
+                        ..
+                    }
+                ) {
+                    dispatched.remove(&(event.step_id.as_deref(), call_id.as_str()));
+                }
             }
             _ => {}
         }
@@ -2810,7 +2818,7 @@ fn validate_tool_result_transition(
     let mut is_skill = false;
     let mut approval = None;
     let mut dispatched = false;
-    let mut has_result = false;
+    let mut previous_result = None;
     for previous in record
         .events
         .iter()
@@ -2828,8 +2836,9 @@ fn validate_tool_result_transition(
             } if previous_call == call_id => approval = Some(*status),
             AgentSessionEventPayload::ToolResult {
                 call_id: previous_call,
+                status,
                 ..
-            } if previous_call == call_id => has_result = true,
+            } if previous_call == call_id => previous_result = Some(*status),
             AgentSessionEventPayload::ToolExecution {
                 call_id: previous_call,
                 ..
@@ -2837,7 +2846,12 @@ fn validate_tool_result_transition(
             _ => {}
         }
     }
-    if !has_call || has_result {
+    if !has_call
+        || previous_result.is_some_and(|previous| {
+            previous != super::AgentToolResultStatus::Uncertain
+                || status == super::AgentToolResultStatus::Uncertain
+        })
+    {
         return Err("tool result has no unique durable call".into());
     }
     if let Some(question) = super::user_questions::records(&record.events)
@@ -4515,6 +4529,22 @@ mod tests {
             dispatched.clone(),
             result.clone()
         ]));
+        let uncertain = AgentSessionEvent {
+            payload: AgentSessionEventPayload::ToolResult {
+                call_id: "call-1".into(),
+                name: "terminal_execute".into(),
+                status: super::super::AgentToolResultStatus::Uncertain,
+                summary: "cooperative completion was lost".into(),
+                data: Some(serde_json::json!({ "state": "uncertain", "noAutoReplay": true })),
+                duration_ms: None,
+                evidence_refs: Vec::new(),
+            },
+            ..result.clone()
+        };
+        assert!(has_uncertain_tool_executions(&[
+            dispatched.clone(),
+            uncertain,
+        ]));
         let wrong_step = AgentSessionEvent {
             step_id: Some("step-2".into()),
             ..result
@@ -4633,6 +4663,60 @@ mod tests {
                 .execution_surface,
             AgentExecutionSurface::BoundTerminal
         );
+    }
+
+    #[test]
+    fn pre_surface_semantics_v1_sessions_restore_frozen_values_without_rewrite() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions_root = root.path().join("agent-runtime/sessions-v5");
+        fs::create_dir_all(&sessions_root).unwrap();
+        let fixtures = [
+            (
+                "pre-semantics-direct",
+                "direct",
+                AgentExecutionSurface::Direct,
+            ),
+            (
+                "pre-semantics-visible",
+                "boundTerminal",
+                AgentExecutionSurface::BoundTerminal,
+            ),
+        ];
+        let mut persisted = Vec::new();
+        for (session_id, stored_surface, _) in fixtures {
+            let bytes = format!(
+                "{}\n",
+                serde_json::json!({
+                    "version": 5,
+                    "sessionId": session_id,
+                    "seq": 0,
+                    "timeUnixMs": 1_000,
+                    "type": "session/created",
+                    "data": {
+                        "taskId": format!("task-{session_id}"),
+                        "goal": "Restore a session persisted before Phase 1 semantics",
+                        "executionSurface": stored_surface,
+                    },
+                })
+            )
+            .into_bytes();
+            let path = sessions_root.join(format!("{session_id}.jsonl"));
+            fs::write(&path, &bytes).unwrap();
+            persisted.push((path, bytes));
+        }
+
+        let store = AgentSessionStore::default();
+        store.configure(root.path().to_path_buf()).unwrap();
+
+        for (session_id, _, expected_surface) in fixtures {
+            assert_eq!(
+                store.snapshot(session_id).unwrap().header.execution_surface,
+                expected_surface
+            );
+        }
+        for (path, original_bytes) in persisted {
+            assert_eq!(fs::read(path).unwrap(), original_bytes);
+        }
     }
 
     #[test]

@@ -40,6 +40,9 @@ let sshFixtureStarted = false;
 try {
   run(cargo, ['fmt', '--manifest-path', 'src-tauri/Cargo.toml', '--all', '--', '--check']);
   run(cargo, ['check', '--manifest-path', 'src-tauri/Cargo.toml', '--all-targets']);
+  cargoTest('terminal_broker::tests');
+  cargoTest('terminal_integration::tests');
+  cargoTest('agent_runtime::native::terminal_execute::tests');
   cargoTest('agent_runtime::native::terminal_lease::tests');
   cargoTest('agent_runtime::native::pty::tests');
   cargoTest('bound_terminal_result_is_redacted_before_model_context_and_session_persistence');
@@ -53,6 +56,8 @@ try {
     'src/components/ai/__tests__/ai-workspace-controller.test.tsx',
     'src/lib/ai/__tests__/session-adapters.test.ts',
     'src/lib/ipc/__tests__/tauri.test.ts',
+    'src/stores/__tests__/terminalStore.test.ts',
+    'scripts/__tests__/terminal-protocol-contract.test.mjs',
   ]);
 
   if (includeSshFixture) {
