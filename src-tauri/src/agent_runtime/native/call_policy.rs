@@ -67,7 +67,7 @@ pub(crate) fn inspect_call_policy_scope_native(
         network_destinations: Vec::new(),
         sensitive_path_count,
         critical_path_count,
-        unknown_write: call.tool_name == "exec_command",
+        unknown_write: matches!(call.tool_name.as_str(), "exec_command" | "terminal_execute"),
         unknown_network_egress: call.arguments.get("command").is_some(),
     })
 }
@@ -94,6 +94,19 @@ pub(crate) fn enforce_native_call_policy_native(
     effect: &AgentObservedEffectNative,
     scope: &CallPolicyScopeNative,
 ) -> Result<(), String> {
+    if call.tool_name == "terminal_execute"
+        && matches!(
+            effect.kind,
+            AgentEffectKindNative::SensitiveRead
+                | AgentEffectKindNative::Destructive
+                | AgentEffectKindNative::ExternalSideEffect
+        )
+    {
+        return Err(
+            "native policy requires Direct execution for security-sensitive command lifecycle evidence"
+                .into(),
+        );
+    }
     if scope.critical_path_count > 0
         && matches!(
             effect.kind,
@@ -102,11 +115,69 @@ pub(crate) fn enforce_native_call_policy_native(
     {
         return Err("native policy rejects state changes on critical paths".into());
     }
-    if call.tool_name == "exec_command"
+    if matches!(call.tool_name.as_str(), "exec_command" | "terminal_execute")
         && scope.unknown_network_egress
         && effect.kind == AgentEffectKindNative::ExternalSideEffect
     {
         return Err("native policy rejects unscoped command network egress".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent_runtime::AgentToolTargetNative;
+    use serde_json::json;
+
+    fn terminal_call() -> AgentToolCallNative {
+        AgentToolCallNative {
+            request_id: "request-policy".into(),
+            call_id: "call-policy".into(),
+            tool_name: "terminal_execute".into(),
+            arguments: json!({
+                "command": "cat ~/.ssh/id_ed25519",
+                "explanation": "inspect a sensitive value"
+            }),
+            target: AgentToolTargetNative::Local {
+                target_id: "target-policy".into(),
+                session_id: "terminal-policy".into(),
+                cwd: Some("/workspace".into()),
+            },
+            capability_id: "pending-native-capability".into(),
+        }
+    }
+
+    fn effect(kind: AgentEffectKindNative) -> AgentObservedEffectNative {
+        AgentObservedEffectNative {
+            kind,
+            target_id: "target-policy".into(),
+            summary: "classified for test".into(),
+            paths: Vec::new(),
+            network_destinations: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn terminal_execute_cannot_bypass_direct_lifecycle_policy() {
+        let call = terminal_call();
+        let scope = inspect_call_policy_scope_native(&call).unwrap();
+        for kind in [
+            AgentEffectKindNative::SensitiveRead,
+            AgentEffectKindNative::Destructive,
+            AgentEffectKindNative::ExternalSideEffect,
+        ] {
+            assert!(
+                enforce_native_call_policy_native(&call, &effect(kind), &scope)
+                    .unwrap_err()
+                    .contains("requires Direct execution")
+            );
+        }
+        assert!(enforce_native_call_policy_native(
+            &call,
+            &effect(AgentEffectKindNative::StateChange),
+            &scope,
+        )
+        .is_ok());
+    }
 }

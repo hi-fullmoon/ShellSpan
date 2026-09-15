@@ -16,7 +16,9 @@ use crate::agent_runtime::{
 };
 use crate::db::Database;
 use crate::keychain::CredentialManager;
-use crate::models::SessionManager;
+use crate::models::{AgentRemoteTerminalOwner, SessionManager, SessionStatus, SessionTerminalKind};
+use crate::terminal_broker::TerminalIntegrationState;
+use crate::terminal_broker::TerminalVisibleCommandRoute;
 
 use super::{
     AgentSessionEffect, AgentSessionPermissionMode, AgentSessionTarget, AgentToolResultStatus,
@@ -39,6 +41,13 @@ struct PreparedNativeCall {
     started_at_unix_ms: u64,
 }
 
+/// Construction is private to this module and occurs only after the prepared
+/// native authorization has been issued. The remote session creator requires
+/// this witness before it may write bootstrap bytes to an Agent SSH PTY.
+pub(crate) struct ApprovedAgentRemoteTerminalBootstrap {
+    _private: (),
+}
+
 pub(crate) struct NativeToolAdapter {
     app: AppHandle,
     engine: Arc<NativeToolEngine>,
@@ -54,13 +63,149 @@ impl NativeToolAdapter {
         }
     }
 
-    fn configure(&self, runtime: &NativeToolEngine) -> Result<(), String> {
+    fn configure(
+        &self,
+        runtime: &NativeToolEngine,
+        sessions: &SessionManager,
+    ) -> Result<(), String> {
         let root = self
             .app
             .path()
             .app_data_dir()
             .map_err(|error| format!("failed to resolve Agent native runtime root: {error}"))?;
-        runtime.configure_checkpoint_root(root)
+        runtime.configure_checkpoint_root(root)?;
+        if !runtime
+            .terminal_broker_snapshot(None)?
+            .remote_agent_pty_rollout
+            .enabled
+        {
+            for session_id in sessions.agent_remote_session_ids()? {
+                let _ = runtime.terminal_closed(&session_id);
+                let _ = runtime.close_terminal_broker_transport(
+                    &session_id,
+                    crate::terminal_broker::TerminalGenerationCloseReason::BrokerShutdown,
+                );
+                let _ = sessions.close(&session_id);
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_remote_agent_terminal(
+        &self,
+        prepared: &PreparedAuthorizationNative,
+        sessions: &SessionManager,
+        database: &Database,
+        credentials: &CredentialManager,
+        cancellation: &CancellationToken,
+        approval: &ApprovedAgentRemoteTerminalBootstrap,
+    ) -> Result<(), String> {
+        if prepared.call.tool_name != "terminal_execute" {
+            return Ok(());
+        }
+        let AgentToolTargetNative::Remote {
+            target_id,
+            session_id: source_session_id,
+            profile_id: Some(profile_id),
+            host,
+            port,
+            username,
+            ..
+        } = &prepared.call.target
+        else {
+            return Ok(());
+        };
+        let existing =
+            sessions.agent_remote_terminal(&prepared.context.request.user_session_id, target_id)?;
+        let existing_ready = existing.as_ref().is_some_and(|binding| {
+            binding.owner.source_session_id == *source_session_id
+                && binding.state.terminal_kind == SessionTerminalKind::Remote
+                && binding.state.status == SessionStatus::Connected
+                && binding.state.identity.host == *host
+                && binding.state.identity.port == *port
+                && binding.state.identity.username == *username
+        });
+        let dedicated_session_id = if existing_ready {
+            existing
+                .as_ref()
+                .expect("existing Agent terminal checked above")
+                .session_id
+                .clone()
+        } else {
+            if cancellation.is_cancelled() {
+                return Err("Agent remote terminal creation was cancelled before dispatch".into());
+            }
+            let predecessor = existing.as_ref().map(|binding| binding.session_id.clone());
+            let geometry = predecessor
+                .as_deref()
+                .and_then(|id| self.engine.terminal_broker_snapshot(Some(id)).ok())
+                .and_then(|snapshot| snapshot.session)
+                .or_else(|| {
+                    self.engine
+                        .terminal_broker_snapshot(Some(source_session_id))
+                        .ok()
+                        .and_then(|snapshot| snapshot.session)
+                })
+                .map(|snapshot| snapshot.geometry)
+                .unwrap_or_else(|| crate::terminal_broker::TerminalGeometry::new(120, 30));
+            let profile = database
+                .get_profile(profile_id)?
+                .ok_or_else(|| "remote execution profile was not found".to_string())?;
+            let connection = super::native::connection_for_remote_target(
+                &prepared.call.target,
+                database,
+                credentials,
+            )?;
+            let summary = crate::commands::create_agent_remote_terminal_blocking(
+                &self.app,
+                sessions,
+                self.app.state::<crate::sftp_pool::SftpPool>().inner(),
+                connection,
+                profile.name,
+                profile_id.clone(),
+                AgentRemoteTerminalOwner {
+                    agent_session_id: prepared.context.request.user_session_id.clone(),
+                    target_id: target_id.clone(),
+                    source_session_id: source_session_id.clone(),
+                },
+                predecessor,
+                geometry.columns,
+                geometry.rows,
+                approval,
+            )?;
+            summary.session_id
+        };
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if cancellation.is_cancelled() {
+                let _ = sessions.close(&dedicated_session_id);
+                return Err(
+                    "Agent remote terminal creation was cancelled before command input".into(),
+                );
+            }
+            let snapshot = self
+                .engine
+                .terminal_broker_snapshot(Some(&dedicated_session_id))?
+                .session
+                .ok_or_else(|| "Agent remote terminal broker session disappeared".to_string())?;
+            match snapshot.integration_state {
+                TerminalIntegrationState::Ready if snapshot.prompt_ready => return Ok(()),
+                TerminalIntegrationState::Degraded
+                | TerminalIntegrationState::Unavailable
+                | TerminalIntegrationState::Invalidated => {
+                    return Err(format!(
+                        "TERMINAL_REMOTE_INTEGRATION_UNAVAILABLE: {}",
+                        snapshot.integration_reason.as_deref().unwrap_or("unknown")
+                    ))
+                }
+                TerminalIntegrationState::Initializing | TerminalIntegrationState::Ready => {}
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("TERMINAL_REMOTE_INTEGRATION_TIMEOUT".into());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
     }
 }
 
@@ -69,6 +214,16 @@ impl NativeToolAdapter {
 struct TerminalCommandArguments {
     command: String,
     explanation: String,
+    #[serde(default)]
+    lifecycle_trust: TerminalLifecycleTrust,
+}
+
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum TerminalLifecycleTrust {
+    #[default]
+    Cooperative,
+    DirectRequired,
 }
 
 #[derive(Debug, Deserialize)]
@@ -127,7 +282,7 @@ impl NativeToolRuntime for NativeToolAdapter {
         let sessions = self.app.state::<SessionManager>();
         let database = self.app.state::<Database>();
         let credentials = self.app.state::<CredentialManager>();
-        self.configure(runtime)?;
+        self.configure(runtime, &sessions)?;
         let known_hosts_path = crate::known_hosts::known_hosts_path(&self.app)?;
         let target = target_native(&request.target)?;
         let native_request_id = stable_native_id("request", &request.session_id);
@@ -219,7 +374,43 @@ impl NativeToolRuntime for NativeToolAdapter {
             return Ok(preparation);
         }
 
-        let (native_name, arguments) = normalize_arguments(&request, &target)?;
+        let direct_lifecycle_required = terminal_command_requires_direct_lifecycle(&request)?;
+        let visible_route = if request.model_call.name == "run_terminal_command"
+            && request.execution_surface == super::AgentExecutionSurface::BoundTerminal
+            && !direct_lifecycle_required
+        {
+            let route = match &target {
+                AgentToolTargetNative::Local { session_id, .. } => {
+                    runtime.terminal_visible_command_route(session_id)?
+                }
+                AgentToolTargetNative::Remote {
+                    target_id,
+                    session_id,
+                    host,
+                    port,
+                    username,
+                    ..
+                } => match sessions
+                    .agent_remote_terminal(&request.session_id, target_id)?
+                    .filter(|binding| {
+                        binding.owner.source_session_id == *session_id
+                            && binding.state.terminal_kind == SessionTerminalKind::Remote
+                            && binding.state.status == SessionStatus::Connected
+                            && binding.state.identity.host == *host
+                            && binding.state.identity.port == *port
+                            && binding.state.identity.username == *username
+                    }) {
+                    Some(binding) => runtime.terminal_visible_command_route(&binding.session_id)?,
+                    None => runtime.remote_agent_pty_new_operation_route()?,
+                },
+                _ => return Err("terminal command requires a frozen host target".into()),
+            };
+            Some(route)
+        } else {
+            None
+        };
+        let (native_name, arguments) =
+            normalize_arguments(&request, &target, visible_route, direct_lifecycle_required)?;
         let internal_call_id = stable_native_id(
             "call",
             &format!(
@@ -321,7 +512,7 @@ impl NativeToolRuntime for NativeToolAdapter {
         let sessions = self.app.state::<SessionManager>();
         let database = self.app.state::<Database>();
         let credentials = self.app.state::<CredentialManager>();
-        self.configure(runtime)?;
+        self.configure(runtime, &sessions)?;
         let known_hosts_path = crate::known_hosts::known_hosts_path(&self.app)?;
         match stored.authorization {
             PreparedAuthorization::Tool(prepared) => {
@@ -330,6 +521,36 @@ impl NativeToolRuntime for NativeToolAdapter {
                 let native_tool_name = prepared.call.tool_name.clone();
                 let native_target = prepared.call.target.clone();
                 let grant = runtime.issue_prepared_authorization(&prepared, approved)?;
+                let remote_bootstrap_approval =
+                    ApprovedAgentRemoteTerminalBootstrap { _private: () };
+                if cancellation.is_cancelled() {
+                    let _ = runtime.revoke_capability(&grant.capability_id);
+                    return Ok(NativeToolResult {
+                        call_id: stored.public_call_id,
+                        native_name: stored.native_name,
+                        target_id: stored.target_id,
+                        effect: stored.effect,
+                        status: AgentToolResultStatus::Cancelled,
+                        summary: "native tool execution was cancelled before dispatch".into(),
+                        data: None,
+                        duration_ms: Some(
+                            current_unix_ms().saturating_sub(stored.started_at_unix_ms),
+                        ),
+                        evidence_refs: Vec::new(),
+                        artifacts: Vec::new(),
+                    });
+                }
+                if let Err(error) = self.ensure_remote_agent_terminal(
+                    &prepared,
+                    &sessions,
+                    &database,
+                    &credentials,
+                    &cancellation,
+                    &remote_bootstrap_approval,
+                ) {
+                    let _ = runtime.revoke_capability(&grant.capability_id);
+                    return Err(error);
+                }
                 if cancellation.is_cancelled() {
                     let _ = runtime.revoke_capability(&grant.capability_id);
                     return Ok(NativeToolResult {
@@ -453,6 +674,8 @@ impl NativeToolRuntime for NativeToolAdapter {
 fn normalize_arguments(
     request: &NativeToolRequest,
     target: &AgentToolTargetNative,
+    visible_route: Option<TerminalVisibleCommandRoute>,
+    direct_lifecycle_required: bool,
 ) -> Result<(String, Value), String> {
     if request.model_call.name == "run_terminal_command" {
         let arguments: TerminalCommandArguments =
@@ -471,29 +694,78 @@ fn normalize_arguments(
             AgentToolTargetNative::Remote { .. } => None,
             _ => return Err("terminal command requires a frozen host target".into()),
         };
-        return Ok((
-            "exec_command".into(),
-            json!({
-                "command": arguments.command,
-                "explanation": arguments.explanation,
-                "channel": match request.execution_surface {
-                    super::AgentExecutionSurface::Direct => "direct",
-                    super::AgentExecutionSurface::BoundTerminal => "pty",
-                },
-                "cwd": cwd,
-                "background": false,
-                "elevated": false
-            }),
-        ));
+        return match request.execution_surface {
+            super::AgentExecutionSurface::Direct => Ok((
+                "exec_command".into(),
+                json!({
+                    "command": arguments.command,
+                    "explanation": arguments.explanation,
+                    "channel": "direct",
+                    "cwd": cwd,
+                    "background": false,
+                    "elevated": false
+                }),
+            )),
+            super::AgentExecutionSurface::BoundTerminal if direct_lifecycle_required => Ok((
+                "exec_command".into(),
+                json!({
+                    "command": arguments.command,
+                    "explanation": arguments.explanation,
+                    "channel": "direct",
+                    "cwd": cwd,
+                    "background": false,
+                    "elevated": false
+                }),
+            )),
+            super::AgentExecutionSurface::BoundTerminal => match visible_route
+                .unwrap_or(TerminalVisibleCommandRoute::LegacyFallback)
+            {
+                TerminalVisibleCommandRoute::TerminalExecute => Ok((
+                    "terminal_execute".into(),
+                    json!({
+                        "command": arguments.command,
+                        "explanation": arguments.explanation
+                    }),
+                )),
+                TerminalVisibleCommandRoute::LegacyFallback => Ok((
+                    "exec_command".into(),
+                    json!({
+                        "command": arguments.command,
+                        "explanation": arguments.explanation,
+                        "channel": "pty",
+                        "cwd": cwd,
+                        "background": false,
+                        "elevated": false
+                    }),
+                )),
+                TerminalVisibleCommandRoute::Unavailable => Err(
+                    "TERMINAL_VISIBLE_COMMAND_UNAVAILABLE: integration is not ready and legacy fallback is disabled"
+                        .into(),
+                ),
+            },
+        };
     }
     match request.model_call.name.as_str() {
-        "exec_command" | "read_file" | "list_directory" | "search_text" | "apply_patch"
-        | "transfer_file" => Ok((
+        "exec_command" | "terminal_execute" | "read_file" | "list_directory" | "search_text"
+        | "apply_patch" | "transfer_file" => Ok((
             request.model_call.name.clone(),
             request.model_call.arguments.clone(),
         )),
         _ => Err("model requested a tool outside the Agent Runtime native registry".into()),
     }
+}
+
+fn terminal_command_requires_direct_lifecycle(request: &NativeToolRequest) -> Result<bool, String> {
+    if request.model_call.name != "run_terminal_command" {
+        return Ok(false);
+    }
+    let arguments: TerminalCommandArguments =
+        serde_json::from_value(request.model_call.arguments.clone())
+            .map_err(|error| format!("run_terminal_command schema rejected arguments: {error}"))?;
+    Ok(
+        arguments.lifecycle_trust == TerminalLifecycleTrust::DirectRequired
+            || super::native::command_requires_direct_lifecycle_native(&arguments.command),
+    )
 }
 
 fn target_native(target: &AgentSessionTarget) -> Result<AgentToolTargetNative, String> {
@@ -551,6 +823,7 @@ fn status_from_native(status: AgentToolResultStatusNative) -> AgentToolResultSta
         AgentToolResultStatusNative::Failed => AgentToolResultStatus::Failed,
         AgentToolResultStatusNative::TimedOut => AgentToolResultStatus::TimedOut,
         AgentToolResultStatusNative::Cancelled => AgentToolResultStatus::Cancelled,
+        AgentToolResultStatusNative::Uncertain => AgentToolResultStatus::Uncertain,
     }
 }
 
@@ -608,6 +881,22 @@ mod tests {
         }
     }
 
+    fn remote_target() -> AgentSessionTarget {
+        AgentSessionTarget {
+            kind: "remote".into(),
+            target_id: "target-remote".into(),
+            session_id: "user-owned-remote-terminal".into(),
+            label: Some("Remote".into()),
+            profile_id: Some("profile-remote".into()),
+            host: Some("fixture.example".into()),
+            port: Some(22),
+            username: Some("tester".into()),
+            cwd: None,
+            root_path: None,
+            local_root: None,
+        }
+    }
+
     fn request(name: &str, arguments: Value) -> NativeToolRequest {
         NativeToolRequest {
             session_id: "session-native".into(),
@@ -638,6 +927,8 @@ mod tests {
                 json!({ "command": "pwd", "explanation": "inspect" }),
             ),
             &target,
+            None,
+            false,
         )
         .unwrap();
         assert_eq!(name, "exec_command");
@@ -651,7 +942,13 @@ mod tests {
             json!({ "command": "pwd", "explanation": "inspect visibly" }),
         );
         visible.execution_surface = AgentExecutionSurface::BoundTerminal;
-        let (name, arguments) = normalize_arguments(&visible, &target).unwrap();
+        let (name, arguments) = normalize_arguments(
+            &visible,
+            &target,
+            Some(TerminalVisibleCommandRoute::LegacyFallback),
+            false,
+        )
+        .unwrap();
         assert_eq!(name, "exec_command");
         assert_eq!(arguments["channel"], "pty");
         assert_eq!(arguments["background"], false);
@@ -667,9 +964,42 @@ mod tests {
                 }),
             ),
             &target,
+            None,
+            false,
         )
         .unwrap_err()
         .contains("schema rejected"));
+    }
+
+    #[test]
+    fn remote_visible_normalization_is_additive_and_direct_policy_still_wins() {
+        let target = target_native(&remote_target()).unwrap();
+        let mut visible = request(
+            "run_terminal_command",
+            json!({ "command": "export PHASE4=kept", "explanation": "preserve remote state" }),
+        );
+        visible.target = remote_target();
+        visible.execution_surface = AgentExecutionSurface::BoundTerminal;
+        let (name, arguments) = normalize_arguments(
+            &visible,
+            &target,
+            Some(TerminalVisibleCommandRoute::TerminalExecute),
+            false,
+        )
+        .unwrap();
+        assert_eq!(name, "terminal_execute");
+        assert_eq!(arguments["command"], "export PHASE4=kept");
+        assert!(arguments.get("channel").is_none());
+
+        let (name, arguments) = normalize_arguments(
+            &visible,
+            &target,
+            Some(TerminalVisibleCommandRoute::TerminalExecute),
+            true,
+        )
+        .unwrap();
+        assert_eq!(name, "exec_command");
+        assert_eq!(arguments["channel"], "direct");
     }
 
     #[test]
@@ -677,19 +1007,27 @@ mod tests {
         let target = target_native(&local_target()).unwrap();
         let arguments = json!({ "path": ".", "pageSize": 20 });
         assert_eq!(
-            normalize_arguments(&request("list_directory", arguments.clone()), &target,).unwrap(),
+            normalize_arguments(
+                &request("list_directory", arguments.clone()),
+                &target,
+                None,
+                false,
+            )
+            .unwrap(),
             ("list_directory".into(), arguments)
         );
         let mut visible_file = request("list_directory", json!({ "path": ".", "pageSize": 20 }));
         visible_file.execution_surface = AgentExecutionSurface::BoundTerminal;
         assert_eq!(
-            normalize_arguments(&visible_file, &target).unwrap(),
+            normalize_arguments(&visible_file, &target, None, false).unwrap(),
             (
                 "list_directory".into(),
                 json!({ "path": ".", "pageSize": 20 })
             )
         );
-        assert!(normalize_arguments(&request("browser_eval", json!({})), &target).is_err());
+        assert!(
+            normalize_arguments(&request("browser_eval", json!({})), &target, None, false).is_err()
+        );
         assert_eq!(
             stable_native_id("call", "same"),
             stable_native_id("call", "same")
@@ -698,6 +1036,80 @@ mod tests {
             stable_native_id("call", "same"),
             stable_native_id("call", "other")
         );
+    }
+
+    #[test]
+    fn visible_command_routes_additively_to_terminal_execute_without_reinterpreting_pty() {
+        let target = target_native(&local_target()).unwrap();
+        let mut visible = request(
+            "run_terminal_command",
+            json!({ "command": "cd /tmp", "explanation": "change current shell state" }),
+        );
+        visible.execution_surface = AgentExecutionSurface::BoundTerminal;
+
+        let (name, arguments) = normalize_arguments(
+            &visible,
+            &target,
+            Some(TerminalVisibleCommandRoute::TerminalExecute),
+            false,
+        )
+        .unwrap();
+        assert_eq!(name, "terminal_execute");
+        assert_eq!(arguments["command"], "cd /tmp");
+        assert!(arguments.get("channel").is_none());
+        assert!(arguments.get("cwd").is_none());
+        assert!(!arguments.to_string().contains("/bin/sh -c"));
+
+        assert!(normalize_arguments(
+            &visible,
+            &target,
+            Some(TerminalVisibleCommandRoute::Unavailable),
+            false,
+        )
+        .unwrap_err()
+        .contains("legacy fallback is disabled"));
+    }
+
+    #[test]
+    fn visible_sensitive_and_explicit_untrusted_commands_are_forced_to_direct() {
+        let target = target_native(&local_target()).unwrap();
+        for arguments in [
+            json!({
+                "command": "cat ~/.ssh/id_ed25519",
+                "explanation": "inspect a sensitive value"
+            }),
+            json!({
+                "command": "./third-party-script",
+                "explanation": "run an untrusted script",
+                "lifecycleTrust": "directRequired"
+            }),
+        ] {
+            let mut visible = request("run_terminal_command", arguments);
+            visible.execution_surface = AgentExecutionSurface::BoundTerminal;
+            assert!(terminal_command_requires_direct_lifecycle(&visible).unwrap());
+            let (name, normalized) = normalize_arguments(&visible, &target, None, true).unwrap();
+            assert_eq!(name, "exec_command");
+            assert_eq!(normalized["channel"], "direct");
+            assert!(normalized.get("lifecycleTrust").is_none());
+        }
+
+        let mut stateful = request(
+            "run_terminal_command",
+            json!({
+                "command": "export DEMO=value",
+                "explanation": "change the current interactive shell"
+            }),
+        );
+        stateful.execution_surface = AgentExecutionSurface::BoundTerminal;
+        assert!(!terminal_command_requires_direct_lifecycle(&stateful).unwrap());
+        let (name, _) = normalize_arguments(
+            &stateful,
+            &target,
+            Some(TerminalVisibleCommandRoute::TerminalExecute),
+            false,
+        )
+        .unwrap();
+        assert_eq!(name, "terminal_execute");
     }
 }
 

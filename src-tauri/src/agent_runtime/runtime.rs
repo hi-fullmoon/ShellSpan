@@ -531,6 +531,166 @@ impl AgentRuntime {
         self.native_engine.observe_pty_output(session_id, chunk)
     }
 
+    pub(crate) fn observe_terminal_raw_output(
+        &self,
+        session_id: &str,
+        bytes: &[u8],
+    ) -> Result<Option<crate::terminal_broker::TerminalRawOutputFrame>, String> {
+        self.native_engine
+            .observe_terminal_raw_output(session_id, bytes)
+    }
+
+    pub(crate) fn attach_terminal_broker_transport(
+        &self,
+        transport_session_id: &str,
+        predecessor_transport_session_id: Option<&str>,
+        transport_kind: crate::terminal_broker::TerminalTransportKind,
+        geometry: crate::terminal_broker::TerminalGeometry,
+    ) -> Result<Option<crate::terminal_broker::TerminalBrokerAttachment>, String> {
+        self.native_engine.attach_terminal_broker_transport(
+            transport_session_id,
+            predecessor_transport_session_id,
+            transport_kind,
+            geometry,
+        )
+    }
+
+    pub(crate) fn attach_agent_ssh_terminal_broker_transport(
+        &self,
+        transport_session_id: &str,
+        predecessor_transport_session_id: Option<&str>,
+        geometry: crate::terminal_broker::TerminalGeometry,
+        owner: crate::terminal_broker::TerminalAgentPtyOwner,
+    ) -> Result<Option<crate::terminal_broker::TerminalBrokerAttachment>, String> {
+        self.native_engine
+            .attach_agent_ssh_terminal_broker_transport(
+                transport_session_id,
+                predecessor_transport_session_id,
+                geometry,
+                owner,
+            )
+    }
+
+    pub(crate) fn terminal_broker_attachment(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<Option<crate::terminal_broker::TerminalBrokerAttachment>, String> {
+        self.native_engine
+            .terminal_broker_attachment(transport_session_id)
+    }
+
+    pub(crate) fn close_terminal_broker_transport(
+        &self,
+        transport_session_id: &str,
+        reason: crate::terminal_broker::TerminalGenerationCloseReason,
+    ) -> Result<bool, String> {
+        self.native_engine
+            .close_terminal_broker_transport(transport_session_id, reason)
+    }
+
+    pub(crate) fn resize_terminal_broker(
+        &self,
+        transport_session_id: &str,
+        columns: u32,
+        rows: u32,
+    ) -> Result<(), String> {
+        self.native_engine.resize_terminal_broker(
+            transport_session_id,
+            crate::terminal_broker::TerminalGeometry::new(columns, rows),
+        )
+    }
+
+    pub(crate) fn mark_terminal_broker_output_ready(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<(), String> {
+        self.native_engine
+            .mark_terminal_broker_output_ready(transport_session_id)
+    }
+
+    pub(crate) fn set_terminal_broker_output_paused(
+        &self,
+        transport_session_id: &str,
+        paused: bool,
+    ) -> Result<(), String> {
+        self.native_engine
+            .set_terminal_broker_output_paused(transport_session_id, paused)
+    }
+
+    pub(crate) fn terminal_broker_snapshot(
+        &self,
+        transport_session_id: Option<&str>,
+    ) -> Result<crate::terminal_broker::TerminalBrokerSnapshot, String> {
+        self.native_engine
+            .terminal_broker_snapshot(transport_session_id)
+    }
+
+    pub(crate) fn terminal_shell_integration_enabled(&self) -> Result<bool, String> {
+        self.native_engine.terminal_shell_integration_enabled()
+    }
+
+    pub(crate) fn register_terminal_integration_channel(
+        &self,
+        transport_session_id: &str,
+        integration_id: &str,
+        shell: crate::terminal_integration::TerminalShellKind,
+    ) -> Result<(), String> {
+        self.native_engine.register_terminal_integration_channel(
+            transport_session_id,
+            integration_id,
+            shell,
+        )
+    }
+
+    pub(crate) fn accept_terminal_integration_event(
+        &self,
+        transport_session_id: &str,
+        integration_id: &str,
+        event: crate::terminal_integration::TerminalIntegrationControlEvent,
+    ) -> Result<(), String> {
+        self.native_engine.accept_terminal_integration_event(
+            transport_session_id,
+            integration_id,
+            event,
+        )
+    }
+
+    pub(crate) fn terminal_integration_channel_closed(
+        &self,
+        transport_session_id: &str,
+        integration_id: &str,
+        reason: &str,
+    ) -> Result<(), String> {
+        self.native_engine.terminal_integration_channel_closed(
+            transport_session_id,
+            integration_id,
+            reason,
+        )
+    }
+
+    pub(crate) fn mark_terminal_integration_degraded(
+        &self,
+        transport_session_id: &str,
+        shell: crate::terminal_integration::TerminalShellKind,
+        reason: &str,
+    ) -> Result<(), String> {
+        self.native_engine
+            .mark_terminal_integration_degraded(transport_session_id, shell, reason)
+    }
+
+    pub(crate) fn mark_terminal_integration_unavailable(
+        &self,
+        transport_session_id: &str,
+        shell: crate::terminal_integration::TerminalShellKind,
+        reason: &str,
+    ) -> Result<(), String> {
+        self.native_engine.mark_terminal_integration_unavailable(
+            transport_session_id,
+            shell,
+            reason,
+        )
+    }
+
     pub(crate) fn write_user_terminal_input(
         &self,
         sessions: &crate::models::SessionManager,
@@ -587,6 +747,7 @@ impl AgentRuntime {
     }
 
     pub(crate) fn configure(&self, app_data_root: PathBuf) -> Result<(), String> {
+        self.native_engine.configure_terminal_broker_rollout()?;
         let parallelism = std::env::var("SHELLSPAN_MAX_PARALLEL_TOOL_CALLS")
             .map(Some)
             .or_else(|error| match error {

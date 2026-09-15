@@ -18,6 +18,22 @@
       "untrustedResultFields": ["/data/stdout", "/data/stderr", "/data/combinedOutput"]
     },
     {
+      "name": "terminal_execute",
+      "version": "1.0.0",
+      "targetKinds": ["local", "remote"],
+      "effectMode": "nativeClassifier",
+      "allowedEffects": ["readOnly", "sensitiveRead", "stateChange", "destructive", "externalSideEffect"],
+      "idempotency": "conditional",
+      "parallel": false,
+      "cancellable": true,
+      "retryPolicy": "reconcileFirst",
+      "defaultTimeoutMs": 30000,
+      "maxOutputBytes": 262144,
+      "maxConcurrency": 1,
+      "requiredCapabilities": ["terminal.exec.visible"],
+      "untrustedResultFields": ["/data/combinedOutput"]
+    },
+    {
       "name": "write_stdin",
       "version": "1.0.0",
       "targetKinds": ["process"],

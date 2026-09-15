@@ -12,12 +12,17 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "run_terminal_command".into(),
-            description: "Request one command in the frozen ShellSpan terminal session. ShellSpan decides approval and execution.".into(),
+            description: "Request one command on the frozen host. A bound terminal preserves cooperative interactive-shell state, but ShellSpan routes sensitive, destructive, or external effects through Direct execution. Set lifecycleTrust to directRequired for adversarial or untrusted scripts, secrets, authorization checks, or any command that needs process-isolated lifecycle evidence. ShellSpan decides approval before dispatch; visible-terminal lifecycle is never security evidence or a sandbox.".into(),
             input_schema: object_schema(
                 &["command", "explanation"],
                 json!({
                     "command": bounded_string(8192),
-                    "explanation": bounded_string(2048)
+                    "explanation": bounded_string(2048),
+                    "lifecycleTrust": {
+                        "type": "string",
+                        "enum": ["cooperative", "directRequired"],
+                        "default": "cooperative"
+                    }
                 }),
             ),
         },

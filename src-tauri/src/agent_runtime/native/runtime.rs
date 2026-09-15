@@ -18,7 +18,7 @@ use crate::agent_runtime::{
     AgentPolicyEvaluationNative, AgentPolicyOutcomeNative, AgentRequestNative, AgentToolCallNative,
     AgentToolResultNative, AgentToolResultStatusNative, AgentToolTargetNative,
     ExecCommandArgumentsNative, KillProcessArgumentsNative, NativeContractPolicyEngine,
-    WaitProcessArgumentsNative, WriteStdinArgumentsNative,
+    TerminalExecuteArgumentsNative, WaitProcessArgumentsNative, WriteStdinArgumentsNative,
 };
 use crate::db::Database;
 use crate::keychain::{CredentialManager, ProfileSecretKind};
@@ -26,6 +26,12 @@ use crate::models::{
     AuthMethod, JumpHostConfig, ProfileAuthMethod, RemoteConnectionRequest, SessionManager,
     SessionStatus, SessionTerminalKind,
 };
+use crate::terminal_broker::{
+    TerminalBrokerAttachment, TerminalBrokerSnapshot, TerminalGenerationCloseReason,
+    TerminalGeometry, TerminalRawOutputFrame, TerminalSessionBroker, TerminalTransportKind,
+    TerminalVisibleCommandRoute,
+};
+use crate::terminal_integration::{TerminalIntegrationControlEvent, TerminalShellKind};
 
 use super::{
     assess_effect_native, configured_tool_policy_native, current_unix_ms,
@@ -36,8 +42,9 @@ use super::{
     FileOperationRegistryNative, IssuedCapabilityNative, McpServerConfigNative,
     McpToolPolicyNative, NativeCapabilityStoreNative, ProcessLifecycleNative,
     ProcessRegistryNative, ProcessSnapshotNative, PtyLifecycleNative, PtyRegistryNative,
-    PtyShellKindNative, RegisteredToolNative, RemoteProcessStartNative, TerminalInputSource,
-    TerminalLeaseManager, TerminalLeaseReleaseReason, ToolRegistryErrorNative, ToolRegistryNative,
+    PtyShellKindNative, RegisteredToolNative, RemoteProcessStartNative, TerminalExecuteRegistry,
+    TerminalInputSource, TerminalLeaseManager, TerminalLeaseReleaseReason, ToolRegistryErrorNative,
+    ToolRegistryNative,
 };
 
 pub(crate) const DEFAULT_CAPABILITY_TTL_MS: u64 = 120_000;
@@ -118,7 +125,9 @@ pub(crate) struct NativeToolEngine {
     capabilities: NativeCapabilityStoreNative,
     processes: ProcessRegistryNative,
     pty: PtyRegistryNative,
+    terminal_execute: TerminalExecuteRegistry,
     terminal_leases: TerminalLeaseManager,
+    terminal_broker: TerminalSessionBroker,
     checkpoints: CheckpointStoreNative,
     file_operations: FileOperationRegistryNative,
     checkpoint_root: Arc<Mutex<Option<PathBuf>>>,
@@ -126,7 +135,10 @@ pub(crate) struct NativeToolEngine {
 
 impl Default for NativeToolEngine {
     fn default() -> Self {
-        let terminal_leases = TerminalLeaseManager::default();
+        let terminal_broker = TerminalSessionBroker::default();
+        let terminal_leases = TerminalLeaseManager::new(terminal_broker.clone());
+        let terminal_execute =
+            TerminalExecuteRegistry::new(terminal_leases.clone(), terminal_broker.clone());
         Self {
             registry: Arc::new(
                 ToolRegistryNative::from_builtin_manifest().expect("valid native tool manifest"),
@@ -134,7 +146,9 @@ impl Default for NativeToolEngine {
             capabilities: NativeCapabilityStoreNative::default(),
             processes: ProcessRegistryNative::default(),
             pty: PtyRegistryNative::new(terminal_leases.clone()),
+            terminal_execute,
             terminal_leases,
+            terminal_broker,
             checkpoints: CheckpointStoreNative::default(),
             file_operations: FileOperationRegistryNative::default(),
             checkpoint_root: Arc::new(Mutex::new(None)),
@@ -143,6 +157,171 @@ impl Default for NativeToolEngine {
 }
 
 impl NativeToolEngine {
+    pub(crate) fn configure_terminal_broker_rollout(&self) -> Result<(), String> {
+        self.terminal_broker.configure_from_trusted_environment()
+    }
+
+    pub(crate) fn attach_terminal_broker_transport(
+        &self,
+        transport_session_id: &str,
+        predecessor_transport_session_id: Option<&str>,
+        transport_kind: TerminalTransportKind,
+        geometry: TerminalGeometry,
+    ) -> Result<Option<TerminalBrokerAttachment>, String> {
+        self.terminal_broker.attach_transport(
+            transport_session_id,
+            predecessor_transport_session_id,
+            transport_kind,
+            geometry,
+        )
+    }
+
+    pub(crate) fn attach_agent_ssh_terminal_broker_transport(
+        &self,
+        transport_session_id: &str,
+        predecessor_transport_session_id: Option<&str>,
+        geometry: TerminalGeometry,
+        owner: crate::terminal_broker::TerminalAgentPtyOwner,
+    ) -> Result<Option<TerminalBrokerAttachment>, String> {
+        self.terminal_broker.attach_agent_ssh_transport(
+            transport_session_id,
+            predecessor_transport_session_id,
+            geometry,
+            owner,
+        )
+    }
+
+    pub(crate) fn terminal_broker_attachment(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<Option<TerminalBrokerAttachment>, String> {
+        self.terminal_broker
+            .attachment_for_transport(transport_session_id)
+    }
+
+    pub(crate) fn observe_terminal_raw_output(
+        &self,
+        transport_session_id: &str,
+        bytes: &[u8],
+    ) -> Result<Option<TerminalRawOutputFrame>, String> {
+        self.terminal_broker
+            .observe_raw_output(transport_session_id, bytes)
+    }
+
+    pub(crate) fn close_terminal_broker_transport(
+        &self,
+        transport_session_id: &str,
+        reason: TerminalGenerationCloseReason,
+    ) -> Result<bool, String> {
+        self.terminal_broker
+            .close_transport(transport_session_id, reason)
+    }
+
+    pub(crate) fn resize_terminal_broker(
+        &self,
+        transport_session_id: &str,
+        geometry: TerminalGeometry,
+    ) -> Result<(), String> {
+        self.terminal_broker.resize(transport_session_id, geometry)
+    }
+
+    pub(crate) fn mark_terminal_broker_output_ready(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<(), String> {
+        self.terminal_broker.mark_output_ready(transport_session_id)
+    }
+
+    pub(crate) fn set_terminal_broker_output_paused(
+        &self,
+        transport_session_id: &str,
+        paused: bool,
+    ) -> Result<(), String> {
+        self.terminal_broker
+            .set_output_paused(transport_session_id, paused)
+    }
+
+    pub(crate) fn terminal_broker_snapshot(
+        &self,
+        transport_session_id: Option<&str>,
+    ) -> Result<TerminalBrokerSnapshot, String> {
+        self.terminal_broker.snapshot(transport_session_id)
+    }
+
+    pub(crate) fn terminal_shell_integration_enabled(&self) -> Result<bool, String> {
+        self.terminal_broker.shell_integration_enabled()
+    }
+
+    pub(crate) fn terminal_visible_command_route(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<TerminalVisibleCommandRoute, String> {
+        self.terminal_broker
+            .visible_command_route(transport_session_id)
+    }
+
+    pub(crate) fn remote_agent_pty_new_operation_route(
+        &self,
+    ) -> Result<TerminalVisibleCommandRoute, String> {
+        self.terminal_broker.remote_agent_pty_new_operation_route()
+    }
+
+    pub(crate) fn register_terminal_integration_channel(
+        &self,
+        transport_session_id: &str,
+        integration_id: &str,
+        shell: TerminalShellKind,
+    ) -> Result<(), String> {
+        self.terminal_broker.register_integration_channel(
+            transport_session_id,
+            integration_id,
+            shell,
+        )
+    }
+
+    pub(crate) fn accept_terminal_integration_event(
+        &self,
+        transport_session_id: &str,
+        integration_id: &str,
+        event: TerminalIntegrationControlEvent,
+    ) -> Result<(), String> {
+        self.terminal_broker
+            .accept_integration_event(transport_session_id, integration_id, event)
+    }
+
+    pub(crate) fn terminal_integration_channel_closed(
+        &self,
+        transport_session_id: &str,
+        integration_id: &str,
+        reason: &str,
+    ) -> Result<(), String> {
+        self.terminal_broker.integration_channel_closed(
+            transport_session_id,
+            integration_id,
+            reason,
+        )
+    }
+
+    pub(crate) fn mark_terminal_integration_degraded(
+        &self,
+        transport_session_id: &str,
+        shell: TerminalShellKind,
+        reason: &str,
+    ) -> Result<(), String> {
+        self.terminal_broker
+            .mark_integration_degraded(transport_session_id, shell, reason)
+    }
+
+    pub(crate) fn mark_terminal_integration_unavailable(
+        &self,
+        transport_session_id: &str,
+        shell: TerminalShellKind,
+        reason: &str,
+    ) -> Result<(), String> {
+        self.terminal_broker
+            .mark_integration_unavailable(transport_session_id, shell, reason)
+    }
+
     pub(crate) fn has_terminal_lease(&self, session_id: &str) -> Result<bool, String> {
         self.terminal_leases.has_lease(session_id)
     }
@@ -194,12 +373,19 @@ impl NativeToolEngine {
         agent_session_id: &str,
         operation_id: &str,
     ) -> Result<bool, String> {
-        self.pty
-            .takeover(sessions, session_id, agent_session_id, operation_id)
+        if self.terminal_execute.has_operation(session_id)? {
+            self.terminal_execute
+                .takeover(sessions, session_id, agent_session_id, operation_id)
+        } else {
+            self.pty
+                .takeover(sessions, session_id, agent_session_id, operation_id)
+        }
     }
 
     pub(crate) fn terminal_closed(&self, session_id: &str) -> Result<bool, String> {
-        self.pty.terminal_closed(session_id)
+        let visible = self.terminal_execute.terminal_closed(session_id)?;
+        let legacy = self.pty.terminal_closed(session_id)?;
+        Ok(visible || legacy)
     }
 
     pub(crate) fn configure_checkpoint_root(&self, root: PathBuf) -> Result<(), String> {
@@ -557,6 +743,13 @@ impl NativeToolEngine {
                 tool.descriptor.default_timeout_ms,
                 tool.descriptor.max_concurrency,
             ),
+            "terminal_execute" => self.execute_terminal_command(
+                context,
+                &call,
+                &effect,
+                sessions,
+                tool.descriptor.default_timeout_ms,
+            ),
             "write_stdin" => self.write_process(context, &call, &effect),
             "wait_process" => self.wait_process(context, &call, &effect),
             "kill_process" => self.kill_process(context, &call, &effect),
@@ -589,6 +782,9 @@ impl NativeToolEngine {
         if let Err(error) = self.pty.cancel_task(sessions, task_id) {
             errors.push(error);
         }
+        if let Err(error) = self.terminal_execute.cancel_task(sessions, task_id) {
+            errors.push(error);
+        }
         if errors.is_empty() {
             Ok(())
         } else {
@@ -617,9 +813,16 @@ impl NativeToolEngine {
             }
             Err(error) => errors.push(error),
         }
+        match self.terminal_execute.shutdown_all(sessions) {
+            Ok(count) => cancelled += count,
+            Err(error) => errors.push(error),
+        }
         match self.pty.shutdown_all(sessions) {
             Ok(count) => cancelled += count,
             Err(error) => errors.push(error),
+        }
+        if let Err(error) = self.terminal_broker.shutdown() {
+            errors.push(error);
         }
         if errors.is_empty() {
             Ok(cancelled)
@@ -862,6 +1065,126 @@ impl NativeToolEngine {
             snapshot,
             background,
         ))
+    }
+
+    fn execute_terminal_command(
+        &self,
+        context: &NativeExecutionContext,
+        call: &AgentToolCallNative,
+        effect: &AgentObservedEffectNative,
+        sessions: &SessionManager,
+        default_timeout_ms: u64,
+    ) -> Result<AgentToolResultNative, String> {
+        let arguments: TerminalExecuteArgumentsNative =
+            serde_json::from_value(call.arguments.clone())
+                .map_err(|error| format!("invalid terminal_execute arguments: {error}"))?;
+        let dedicated_session_id;
+        let session_id = match &call.target {
+            AgentToolTargetNative::Local { session_id, .. } => session_id,
+            AgentToolTargetNative::Remote {
+                target_id,
+                session_id: source_session_id,
+                host,
+                port,
+                username,
+                ..
+            } => {
+                let binding = sessions
+                    .agent_remote_terminal(&context.request.user_session_id, target_id)?
+                    .ok_or_else(|| {
+                        "TERMINAL_EXECUTE_REQUIRES_DEDICATED_AGENT_SSH_PTY".to_string()
+                    })?;
+                if binding.owner.source_session_id != *source_session_id
+                    || binding.state.terminal_kind != SessionTerminalKind::Remote
+                    || binding.state.status != SessionStatus::Connected
+                    || binding.state.identity.host != *host
+                    || binding.state.identity.port != *port
+                    || binding.state.identity.username != *username
+                {
+                    return Err("Agent SSH PTY no longer matches its frozen remote target".into());
+                }
+                dedicated_session_id = binding.session_id;
+                &dedicated_session_id
+            }
+            _ => return Err("terminal_execute requires a terminal target".into()),
+        };
+        let broker_snapshot = self
+            .terminal_broker
+            .snapshot(Some(session_id))?
+            .session
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        let shell = broker_snapshot
+            .integration_shell
+            .ok_or_else(|| "TERMINAL_INTEGRATION_SHELL_UNKNOWN".to_string())?;
+        let operation = self.terminal_execute.start(
+            sessions,
+            session_id,
+            &context.request.user_session_id,
+            &context.request.task_id,
+            &call.call_id,
+            &arguments.command,
+            shell.enter(),
+        )?;
+        let timeout = Duration::from_millis(arguments.timeout_ms.unwrap_or(default_timeout_ms));
+        let snapshot = self
+            .terminal_execute
+            .wait(sessions, session_id, &operation, timeout)?;
+        let model_output =
+            crate::redaction::redact_sensitive_text(&super::strip_ansi(&snapshot.combined_output));
+        let state = terminal_command_wire_state(snapshot.state);
+        let summary = crate::redaction::redact_sensitive_text(&format!(
+            "Visible terminal command reached {state}."
+        ));
+        Ok(AgentToolResultNative {
+            request_id: context.request.request_id.clone(),
+            call_id: call.call_id.clone(),
+            tool_name: call.tool_name.clone(),
+            target_id: call.target.target_id().to_string(),
+            status: match snapshot.state {
+                crate::terminal_broker::TerminalCommandState::Completed => {
+                    AgentToolResultStatusNative::Completed
+                }
+                crate::terminal_broker::TerminalCommandState::Cancelled
+                | crate::terminal_broker::TerminalCommandState::TakenOver => {
+                    AgentToolResultStatusNative::Cancelled
+                }
+                crate::terminal_broker::TerminalCommandState::TimedOut => {
+                    AgentToolResultStatusNative::TimedOut
+                }
+                crate::terminal_broker::TerminalCommandState::Uncertain => {
+                    AgentToolResultStatusNative::Uncertain
+                }
+                crate::terminal_broker::TerminalCommandState::Submitted
+                | crate::terminal_broker::TerminalCommandState::Running
+                | crate::terminal_broker::TerminalCommandState::CancelRequested
+                | crate::terminal_broker::TerminalCommandState::Failed => {
+                    AgentToolResultStatusNative::Failed
+                }
+            },
+            summary,
+            data: Some(json!({
+                "contractVersion": 1,
+                "channel": "terminal",
+                "state": state,
+                "terminalSessionId": snapshot.terminal_session_id,
+                "terminalGeneration": snapshot.terminal_generation,
+                "operationId": snapshot.operation_id,
+                "commandId": snapshot.command_id,
+                "commandLine": snapshot.command_line,
+                "exitCode": snapshot.exit_code,
+                "cwd": snapshot.cwd,
+                "stdout": "",
+                "stderr": "",
+                "combinedOutput": model_output,
+                "captureStartSequence": snapshot.capture_start_sequence,
+                "captureEndSequence": snapshot.capture_end_sequence,
+                "truncated": snapshot.capture_truncated,
+                "noAutoReplay": snapshot.no_auto_replay,
+            })),
+            artifacts: Vec::new(),
+            effects: vec![effect.clone()],
+            truncated: Some(snapshot.capture_truncated),
+        })
     }
 
     fn write_process(
@@ -1119,6 +1442,23 @@ fn pty_lifecycle_wire_state(state: PtyLifecycleNative) -> &'static str {
         PtyLifecycleNative::TimedOut => "timedOut",
         PtyLifecycleNative::TakenOver => "takenOver",
         PtyLifecycleNative::Failed => "failed",
+    }
+}
+
+fn terminal_command_wire_state(
+    state: crate::terminal_broker::TerminalCommandState,
+) -> &'static str {
+    use crate::terminal_broker::TerminalCommandState;
+    match state {
+        TerminalCommandState::Submitted => "submitted",
+        TerminalCommandState::Running => "running",
+        TerminalCommandState::CancelRequested => "cancelRequested",
+        TerminalCommandState::Completed => "completed",
+        TerminalCommandState::Cancelled => "cancelled",
+        TerminalCommandState::TimedOut => "timedOut",
+        TerminalCommandState::TakenOver => "takenOver",
+        TerminalCommandState::Uncertain => "uncertain",
+        TerminalCommandState::Failed => "failed",
     }
 }
 

@@ -154,6 +154,7 @@ pub enum AgentToolResultStatusNative {
     Failed,
     TimedOut,
     Cancelled,
+    Uncertain,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -196,6 +197,15 @@ pub struct ExecCommandArgumentsNative {
     pub background: Option<bool>,
     #[serde(default)]
     pub elevated: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalExecuteArgumentsNative {
+    pub command: String,
+    pub explanation: String,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

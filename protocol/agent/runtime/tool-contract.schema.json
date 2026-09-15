@@ -26,6 +26,7 @@
     "toolName": {
       "enum": [
         "exec_command",
+        "terminal_execute",
         "write_stdin",
         "wait_process",
         "kill_process",
@@ -162,6 +163,21 @@
         "elevated": { "type": "boolean" }
       }
     },
+    "terminalExecuteArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "explanation"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192,
+          "pattern": "^[^\\u0000-\\u001F\\u007F]*$"
+        },
+        "explanation": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 3600000 }
+      }
+    },
     "writeStdinArguments": {
       "type": "object",
       "additionalProperties": false,
@@ -295,6 +311,21 @@
       ],
       "unevaluatedProperties": false
     },
+    "terminalExecuteCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        {
+          "type": "object",
+          "properties": {
+            "toolName": { "const": "terminal_execute" },
+            "arguments": { "$ref": "#/$defs/terminalExecuteArguments" },
+            "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/remoteTarget" }] }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
     "writeStdinCall": {
       "type": "object",
       "allOf": [
@@ -362,6 +393,7 @@
     "agentToolCall": {
       "oneOf": [
         { "$ref": "#/$defs/execCommandCall" },
+        { "$ref": "#/$defs/terminalExecuteCall" },
         { "$ref": "#/$defs/writeStdinCall" },
         { "$ref": "#/$defs/waitProcessCall" },
         { "$ref": "#/$defs/killProcessCall" },
@@ -386,6 +418,50 @@
         "processHandle": { "$ref": "#/$defs/identifier" },
         "durationMs": { "type": "integer", "minimum": 0 },
         "truncated": { "type": "boolean" }
+      }
+    },
+    "terminalExecuteResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "channel",
+        "state",
+        "terminalSessionId",
+        "terminalGeneration",
+        "operationId",
+        "commandId",
+        "commandLine",
+        "exitCode",
+        "cwd",
+        "stdout",
+        "stderr",
+        "combinedOutput",
+        "captureStartSequence",
+        "captureEndSequence",
+        "truncated",
+        "noAutoReplay"
+      ],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "channel": { "const": "terminal" },
+        "state": {
+          "enum": ["submitted", "running", "cancelRequested", "completed", "cancelled", "timedOut", "takenOver", "uncertain", "failed"]
+        },
+        "terminalSessionId": { "$ref": "#/$defs/identifier" },
+        "terminalGeneration": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "operationId": { "$ref": "#/$defs/identifier" },
+        "commandId": { "$ref": "#/$defs/identifier" },
+        "commandLine": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "exitCode": { "type": ["integer", "null"], "minimum": -2147483648, "maximum": 2147483647 },
+        "cwd": { "type": ["string", "null"], "maxLength": 16384 },
+        "stdout": { "const": "" },
+        "stderr": { "const": "" },
+        "combinedOutput": { "type": "string", "maxLength": 262144 },
+        "captureStartSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "captureEndSequence": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+        "truncated": { "type": "boolean" },
+        "noAutoReplay": { "const": true }
       }
     },
     "writeStdinResultData": {
@@ -529,7 +605,7 @@
         "callId": { "$ref": "#/$defs/identifier" },
         "toolName": { "$ref": "#/$defs/toolName" },
         "targetId": { "$ref": "#/$defs/identifier" },
-        "status": { "enum": ["completed", "rejected", "failed", "timedOut", "cancelled"] },
+        "status": { "enum": ["completed", "rejected", "failed", "timedOut", "cancelled", "uncertain"] },
         "summary": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "data": { "type": "object" },
         "artifacts": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/artifact" } },
@@ -550,6 +626,7 @@
       ]
     },
     "execCommandResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "exec_command" }, "data": { "$ref": "#/$defs/execCommandResultData" } } }], "unevaluatedProperties": false },
+    "terminalExecuteResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "terminal_execute" }, "data": { "$ref": "#/$defs/terminalExecuteResultData" } } }], "unevaluatedProperties": false },
     "writeStdinResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "write_stdin" }, "data": { "$ref": "#/$defs/writeStdinResultData" } } }], "unevaluatedProperties": false },
     "waitProcessResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "wait_process" }, "data": { "$ref": "#/$defs/waitProcessResultData" } } }], "unevaluatedProperties": false },
     "killProcessResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "kill_process" }, "data": { "$ref": "#/$defs/killProcessResultData" } } }], "unevaluatedProperties": false },
@@ -561,6 +638,7 @@
     "agentToolResult": {
       "oneOf": [
         { "$ref": "#/$defs/execCommandResult" },
+        { "$ref": "#/$defs/terminalExecuteResult" },
         { "$ref": "#/$defs/writeStdinResult" },
         { "$ref": "#/$defs/waitProcessResult" },
         { "$ref": "#/$defs/killProcessResult" },
