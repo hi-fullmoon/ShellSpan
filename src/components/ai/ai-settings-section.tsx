@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ArchiveIcon,
   PlusIcon,
   ServerIcon,
+  Trash2Icon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Field } from '@/components/ui/field';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -319,11 +320,15 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           : undefined}
       />
 
-      <ConfirmDeleteDialog
+      <ConfirmationDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         title={t('settings.ai.deleteProviderTitle', { name: selectedProvider?.name ?? '' })}
         description={t('settings.ai.deleteProviderDescription')}
+        confirmLabel={t('common.delete')}
+        confirmVariant="destructive"
+        media={<Trash2Icon />}
+        mediaVariant="destructive"
         onConfirm={() => void handleDeleteProvider()}
         buttonSize="sm"
       />
@@ -334,7 +339,9 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         title={t('settings.ai.agent.clearTitle')}
         description={t('settings.ai.agent.clearActiveDescription')}
         confirmLabel={t('settings.ai.agent.clearConfirm')}
-        confirmVariant="destructive"
+        confirmVariant="warning"
+        media={<ArchiveIcon />}
+        mediaVariant="warning"
         buttonSize="sm"
         onConfirm={() => void handleClearAgentSessions()}
       />

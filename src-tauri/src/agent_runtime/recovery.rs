@@ -78,6 +78,7 @@ struct ToolBoundary {
     approval: Option<AgentToolApprovalStatus>,
     dispatched: Option<String>,
     has_result: bool,
+    uncertain_result: bool,
 }
 
 pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentRecoveryCheckpoint {
@@ -162,9 +163,12 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
                 boundary.dispatched = Some(idempotency.clone());
                 boundary.last_seq = event.seq;
             }
-            AgentSessionEventPayload::ToolResult { call_id, .. } => {
+            AgentSessionEventPayload::ToolResult {
+                call_id, status, ..
+            } => {
                 let boundary = tools.entry(call_id.clone()).or_default();
-                boundary.has_result = true;
+                boundary.has_result = *status != super::AgentToolResultStatus::Uncertain;
+                boundary.uncertain_result = *status == super::AgentToolResultStatus::Uncertain;
                 boundary.last_seq = event.seq;
             }
             AgentSessionEventPayload::CompactionStart { .. } => compaction_open = true,
@@ -363,7 +367,11 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
                 ..make(
                     AgentRecoveryCheckpointKind::ExecutionInFlight,
                     AgentRecoveryStatus::Required,
-                    "A native call was dispatched without a durable result; its outcome is uncertain.",
+                    if boundary.uncertain_result {
+                        "The visible terminal reported an explicit uncertain outcome; reconcile it before continuing."
+                    } else {
+                        "A native call was dispatched without a durable result; its outcome is uncertain."
+                    },
                     boundary.request_id.clone(),
                     Some(call_id.clone()),
                     boundary.effect,
@@ -504,5 +512,55 @@ mod tests {
             derive_recovery_checkpoint(&events).kind,
             AgentRecoveryCheckpointKind::ToolResultCommitted
         );
+    }
+
+    #[test]
+    fn explicit_terminal_uncertainty_requires_reconciliation_and_is_not_replayed() {
+        let events = vec![
+            event(0, AgentSessionEventPayload::TurnStart),
+            event(1, AgentSessionEventPayload::StepStart),
+            event(
+                2,
+                AgentSessionEventPayload::ToolCall {
+                    call: RecordedToolCall {
+                        call_id: "call".into(),
+                        provider_call_id: None,
+                        name: "run_terminal_command".into(),
+                        native_name: Some("terminal_execute".into()),
+                        arguments: json!({"command":"side-effect"}),
+                        title: None,
+                        effect: Some(AgentSessionEffect::ExternalSideEffect),
+                        target: None,
+                    },
+                },
+            ),
+            event(
+                3,
+                AgentSessionEventPayload::ToolExecution {
+                    call_id: "call".into(),
+                    status: AgentToolExecutionStatus::Dispatched,
+                    idempotency: "conditional".into(),
+                },
+            ),
+            event(
+                4,
+                AgentSessionEventPayload::ToolResult {
+                    call_id: "call".into(),
+                    name: "run_terminal_command".into(),
+                    status: AgentToolResultStatus::Uncertain,
+                    summary: "completion unavailable".into(),
+                    data: Some(json!({"state":"uncertain","noAutoReplay":true})),
+                    duration_ms: None,
+                    evidence_refs: Vec::new(),
+                },
+            ),
+        ];
+        let checkpoint = derive_recovery_checkpoint(&events);
+        assert_eq!(
+            checkpoint.kind,
+            AgentRecoveryCheckpointKind::ExecutionInFlight
+        );
+        assert_eq!(checkpoint.status, AgentRecoveryStatus::Required);
+        assert!(checkpoint.summary.contains("explicit uncertain"));
     }
 }

@@ -23,7 +23,8 @@ fn plan_call(version: u64, status: &str) -> ModelToolCall {
 }
 
 fn disconnected_model_error() -> NormalizedModelError {
-    let mut error = NormalizedModelError::new(NormalizedModelErrorKind::Transport, "network disconnected");
+    let mut error =
+        NormalizedModelError::new(NormalizedModelErrorKind::Transport, "network disconnected");
     error.code = Some("CONNECT".into());
     error
 }
@@ -142,11 +143,16 @@ async fn alternating_tool_cycle_is_stopped_before_a_seventh_request() {
     );
     let id = "alternating-tool-loop";
     create(&runtime, id);
-    runtime.followup(id, "initial".into(), "inspect".into()).unwrap();
+    runtime
+        .followup(id, "initial".into(), "inspect".into())
+        .unwrap();
     runtime.start(id, provider(), None).unwrap();
     runtime.await_idle(id).await.unwrap();
     assert_eq!(model.request_count(), 6);
-    assert_eq!(runtime.session(id).unwrap().status, AgentSessionStatus::Failed);
+    assert_eq!(
+        runtime.session(id).unwrap().status,
+        AgentSessionStatus::Failed
+    );
 }
 
 #[tokio::test]
@@ -155,7 +161,9 @@ async fn queued_followup_survives_the_default_style_step_boundary() {
     first.finish_reason = ModelFinishReason::ToolCalls;
     set_tool_calls(&mut first, vec![repeated_read_call(0)]);
     let model = FakeAdapter::new(vec![
-        FakeScript::Wait { response: Some(first) },
+        FakeScript::Wait {
+            response: Some(first),
+        },
         reply("handled the queued followup", &[]),
     ]);
     let (_root, runtime) = configured_with_native(
@@ -168,14 +176,21 @@ async fn queued_followup_survives_the_default_style_step_boundary() {
     );
     let id = "followup-after-step-limit";
     create(&runtime, id);
-    runtime.followup(id, "initial".into(), "inspect".into()).unwrap();
+    runtime
+        .followup(id, "initial".into(), "inspect".into())
+        .unwrap();
     runtime.start(id, provider(), None).unwrap();
     model.started.notified().await;
-    runtime.followup(id, "next".into(), "handle a new request".into()).unwrap();
+    runtime
+        .followup(id, "next".into(), "handle a new request".into())
+        .unwrap();
     model.release.notify_one();
     runtime.await_idle(id).await.unwrap();
     assert_eq!(model.request_count(), 2);
-    assert_eq!(runtime.session(id).unwrap().status, AgentSessionStatus::Idle);
+    assert_eq!(
+        runtime.session(id).unwrap().status,
+        AgentSessionStatus::Idle
+    );
     assert!(all_events(&runtime, id).iter().any(|event| matches!(
         &event.payload,
         AgentSessionEventPayload::TurnEnd { reason } if reason.starts_with("stepLimitExceeded:")
@@ -192,11 +207,16 @@ async fn unfinished_plan_gets_one_completion_check_then_stays_incomplete() {
     let (_root, runtime) = configured(model.clone());
     let id = "incomplete-plan";
     create(&runtime, id);
-    runtime.followup(id, "initial".into(), "verify".into()).unwrap();
+    runtime
+        .followup(id, "initial".into(), "verify".into())
+        .unwrap();
     runtime.start(id, provider(), None).unwrap();
     runtime.await_idle(id).await.unwrap();
     assert_eq!(model.request_count(), 3);
-    assert_eq!(runtime.session(id).unwrap().status, AgentSessionStatus::Idle);
+    assert_eq!(
+        runtime.session(id).unwrap().status,
+        AgentSessionStatus::Idle
+    );
     assert!(all_events(&runtime, id).iter().any(|event| matches!(
         &event.payload,
         AgentSessionEventPayload::TurnEnd { reason } if reason == "incomplete"
@@ -218,11 +238,16 @@ async fn completion_check_allows_the_model_to_finish_the_plan() {
     let (_root, runtime) = configured(model.clone());
     let id = "completed-after-check";
     create(&runtime, id);
-    runtime.followup(id, "initial".into(), "verify".into()).unwrap();
+    runtime
+        .followup(id, "initial".into(), "verify".into())
+        .unwrap();
     runtime.start(id, provider(), None).unwrap();
     runtime.await_idle(id).await.unwrap();
     assert_eq!(model.request_count(), 4);
-    assert_eq!(runtime.session(id).unwrap().status, AgentSessionStatus::Idle);
+    assert_eq!(
+        runtime.session(id).unwrap().status,
+        AgentSessionStatus::Idle
+    );
     assert!(all_events(&runtime, id).iter().any(|event| matches!(
         &event.payload,
         AgentSessionEventPayload::TurnEnd { reason } if reason == "completed"
@@ -241,13 +266,18 @@ async fn model_stream_total_deadline_stops_a_nonresponsive_adapter() {
     );
     let id = "model-stream-total-deadline";
     create(&runtime, id);
-    runtime.followup(id, "initial".into(), "inspect".into()).unwrap();
+    runtime
+        .followup(id, "initial".into(), "inspect".into())
+        .unwrap();
     runtime.start(id, provider(), None).unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(2), runtime.await_idle(id))
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(runtime.session(id).unwrap().status, AgentSessionStatus::Failed);
+    assert_eq!(
+        runtime.session(id).unwrap().status,
+        AgentSessionStatus::Failed
+    );
     assert!(all_events(&runtime, id).iter().any(|event| matches!(
         &event.payload,
         AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
@@ -267,11 +297,16 @@ async fn exhausted_stream_deadline_does_not_dispatch_even_an_immediate_reply() {
     );
     let id = "zero-model-stream-deadline";
     create(&runtime, id);
-    runtime.followup(id, "initial".into(), "inspect".into()).unwrap();
+    runtime
+        .followup(id, "initial".into(), "inspect".into())
+        .unwrap();
     runtime.start(id, provider(), None).unwrap();
     runtime.await_idle(id).await.unwrap();
     assert_eq!(model.request_count(), 0);
-    assert_eq!(runtime.session(id).unwrap().status, AgentSessionStatus::Failed);
+    assert_eq!(
+        runtime.session(id).unwrap().status,
+        AgentSessionStatus::Failed
+    );
 }
 
 #[tokio::test]
@@ -300,11 +335,16 @@ async fn network_recovery_waits_and_retries_the_frozen_model_step() {
     );
     let id = "network-recovery";
     create(&runtime, id);
-    runtime.followup(id, "initial".into(), "respond".into()).unwrap();
+    runtime
+        .followup(id, "initial".into(), "respond".into())
+        .unwrap();
     runtime.start(id, provider(), None).unwrap();
     runtime.await_idle(id).await.unwrap();
     assert_eq!(model.request_count(), 3);
-    assert_eq!(runtime.session(id).unwrap().status, AgentSessionStatus::Idle);
+    assert_eq!(
+        runtime.session(id).unwrap().status,
+        AgentSessionStatus::Idle
+    );
     let events = all_events(&runtime, id);
     assert!(events.iter().any(|event| matches!(
         &event.payload,
@@ -316,7 +356,13 @@ async fn network_recovery_waits_and_retries_the_frozen_model_step() {
         AgentSessionEventPayload::AgentStatus { status: AgentSessionStatus::Running, reason: Some(reason) }
             if reason == "networkRetry"
     )));
-    assert!(events.iter().filter(|event| matches!(event.payload, AgentSessionEventPayload::RequestRetry { .. })).count() >= 2);
+    assert!(
+        events
+            .iter()
+            .filter(|event| matches!(event.payload, AgentSessionEventPayload::RequestRetry { .. }))
+            .count()
+            >= 2
+    );
 }
 
 #[tokio::test]
@@ -326,8 +372,11 @@ async fn network_recovery_window_expires_without_sending_an_extra_request() {
         model.clone(),
         AgentDriverConfig {
             retry_policy: RetryPolicy {
-                max_attempts: 1, initial_delay_ms: 0, max_delay_ms: 0,
-                max_server_delay_ms: 0, jitter_ratio: 0.0,
+                max_attempts: 1,
+                initial_delay_ms: 0,
+                max_delay_ms: 0,
+                max_server_delay_ms: 0,
+                jitter_ratio: 0.0,
             },
             network_recovery_window_ms: 20,
             network_recovery_max_attempts: 3,
@@ -337,14 +386,19 @@ async fn network_recovery_window_expires_without_sending_an_extra_request() {
     );
     let id = "network-window-expired";
     create(&runtime, id);
-    runtime.followup(id, "initial".into(), "respond".into()).unwrap();
+    runtime
+        .followup(id, "initial".into(), "respond".into())
+        .unwrap();
     runtime.start(id, provider(), None).unwrap();
     runtime.await_idle(id).await.unwrap();
     assert_eq!(model.request_count(), 1);
-    let reason = all_events(&runtime, id).into_iter().find_map(|event| match event.payload {
-        AgentSessionEventPayload::SessionEnded { reason, .. } => reason,
-        _ => None,
-    }).expect("network recovery must end the session");
+    let reason = all_events(&runtime, id)
+        .into_iter()
+        .find_map(|event| match event.payload {
+            AgentSessionEventPayload::SessionEnded { reason, .. } => reason,
+            _ => None,
+        })
+        .expect("network recovery must end the session");
     assert!(reason.starts_with("networkRecoveryTimeout:"), "{reason}");
 }
 
@@ -355,8 +409,11 @@ async fn network_recovery_wait_can_be_cancelled_without_another_request() {
         model.clone(),
         AgentDriverConfig {
             retry_policy: RetryPolicy {
-                max_attempts: 1, initial_delay_ms: 0, max_delay_ms: 0,
-                max_server_delay_ms: 0, jitter_ratio: 0.0,
+                max_attempts: 1,
+                initial_delay_ms: 0,
+                max_delay_ms: 0,
+                max_server_delay_ms: 0,
+                jitter_ratio: 0.0,
             },
             network_recovery_initial_delay_ms: 30_000,
             ..AgentDriverConfig::default()
@@ -364,18 +421,29 @@ async fn network_recovery_wait_can_be_cancelled_without_another_request() {
     );
     let id = "network-wait-cancel";
     create(&runtime, id);
-    runtime.followup(id, "initial".into(), "respond".into()).unwrap();
+    runtime
+        .followup(id, "initial".into(), "respond".into())
+        .unwrap();
     runtime.start(id, provider(), None).unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
-            if runtime.session(id).unwrap().status == AgentSessionStatus::Waiting { break; }
+            if runtime.session(id).unwrap().status == AgentSessionStatus::Waiting {
+                break;
+            }
             tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(2), runtime.cancel(id))
-        .await.unwrap().unwrap();
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(model.request_count(), 1);
-    assert_eq!(runtime.session(id).unwrap().status, AgentSessionStatus::Cancelled);
+    assert_eq!(
+        runtime.session(id).unwrap().status,
+        AgentSessionStatus::Cancelled
+    );
 }
 
 #[tokio::test]

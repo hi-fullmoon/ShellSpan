@@ -1,0 +1,46 @@
+[
+  {
+    "version": 5,
+    "sessionId": "agent-session-direct",
+    "seq": 0,
+    "timeUnixMs": 1000,
+    "type": "session/created",
+    "data": {
+      "taskId": "task-direct",
+      "goal": "Run a direct command",
+      "executionSurface": "direct"
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "agent-session-terminal",
+    "seq": 0,
+    "timeUnixMs": 1000,
+    "type": "session/created",
+    "data": {
+      "taskId": "task-terminal",
+      "goal": "Run a visible compatibility command",
+      "executionSurface": "boundTerminal"
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "agent-session-direct",
+    "seq": 1,
+    "timeUnixMs": 1001,
+    "type": "session/execution_surface_changed",
+    "data": {
+      "surface": "boundTerminal"
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "agent-session-terminal",
+    "seq": 1,
+    "timeUnixMs": 1001,
+    "type": "session/execution_surface_changed",
+    "data": {
+      "surface": "direct"
+    }
+  }
+]

@@ -17,7 +17,7 @@ export function serializeTerminalWorkspace(
   layout: TerminalLayoutNode | null,
 ): string {
   const snapshots: TerminalWorkspaceSession[] = sessions
-    .filter((session) => Boolean(session.profileId))
+    .filter((session) => Boolean(session.profileId) && !session.agentOwned)
     .slice(0, MAX_SESSIONS)
     .map(({
       sessionId,
@@ -38,7 +38,38 @@ export function serializeTerminalWorkspace(
       pinned,
       color,
     }));
-  return JSON.stringify({ version: TERMINAL_WORKSPACE_VERSION, sessions: snapshots, layout });
+  const ephemeralAgentIds = new Set(
+    sessions.filter((session) => session.agentOwned).map((session) => session.sessionId),
+  );
+  return JSON.stringify({
+    version: TERMINAL_WORKSPACE_VERSION,
+    sessions: snapshots,
+    layout: filterEphemeralAgentLayout(layout, ephemeralAgentIds),
+  });
+}
+
+function filterEphemeralAgentLayout(
+  node: TerminalLayoutNode | null,
+  ephemeralAgentIds: ReadonlySet<string>,
+): TerminalLayoutNode | null {
+  if (!node) return null;
+  if (node.kind === 'group') {
+    const sessionIds = node.sessionIds.filter((id) => !ephemeralAgentIds.has(id));
+    if (sessionIds.length === node.sessionIds.length) return node;
+    if (sessionIds.length === 0) return null;
+    return {
+      ...node,
+      sessionIds,
+      activeSessionId: sessionIds.includes(node.activeSessionId)
+        ? node.activeSessionId
+        : sessionIds[sessionIds.length - 1],
+    };
+  }
+  const first = filterEphemeralAgentLayout(node.first, ephemeralAgentIds);
+  const second = filterEphemeralAgentLayout(node.second, ephemeralAgentIds);
+  if (!first) return second;
+  if (!second) return first;
+  return { ...node, first, second };
 }
 
 export function parseTerminalWorkspace(raw: string | null): TerminalWorkspaceSnapshot {

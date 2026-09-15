@@ -20,6 +20,7 @@ describe('ConfirmationDialog', () => {
         confirmLabel="Continue"
         confirmVariant="destructive"
         media={<TriangleAlertIcon />}
+        mediaVariant="destructive"
         onConfirm={onConfirm}
       />,
     );
@@ -31,10 +32,19 @@ describe('ConfirmationDialog', () => {
 
     expect(dialog).toHaveClass('max-w-sm', 'gap-0', 'overflow-hidden', 'p-0');
     expect(header).toHaveClass('flex', 'flex-row', 'items-center', 'gap-3', 'border-b', 'px-4', 'py-3', 'text-left');
-    expect(screen.getByRole('heading', { name: 'Confirm action' })).toHaveClass('flex-1', 'text-sm', 'leading-5');
+    expect(screen.getByRole('heading', { name: 'Confirm action' })).toHaveClass(
+      'self-center',
+      'flex-1',
+      'text-sm',
+      'leading-5',
+    );
     expect(confirmButton).toHaveClass('bg-destructive', 'h-8');
     expect(cancelButton).toHaveClass('h-8');
-    expect(dialog.querySelector('[data-slot="alert-dialog-media"]')).toBeInTheDocument();
+    expect(dialog.querySelector('[data-slot="alert-dialog-media"]')).toHaveClass(
+      'bg-destructive/10',
+      'text-destructive',
+      'ring-destructive/20',
+    );
 
     fireEvent.click(confirmButton);
     expect(onConfirm).toHaveBeenCalledOnce();

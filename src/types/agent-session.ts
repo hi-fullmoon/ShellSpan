@@ -48,7 +48,8 @@ export type AgentSessionToolStatus =
   | 'rejected'
   | 'failed'
   | 'timedOut'
-  | 'cancelled';
+  | 'cancelled'
+  | 'uncertain';
 
 export type AgentSessionEffect =
   | 'none'
@@ -521,7 +522,7 @@ export type AgentSessionEvent =
   | AgentSessionEventWithData<'tool/result', {
       callId: string;
       name: string;
-      status: Extract<AgentSessionToolStatus, 'completed' | 'rejected' | 'failed' | 'timedOut' | 'cancelled'>;
+      status: Extract<AgentSessionToolStatus, 'completed' | 'rejected' | 'failed' | 'timedOut' | 'cancelled' | 'uncertain'>;
       summary: string;
       data?: unknown;
       durationMs?: number;
@@ -618,7 +619,7 @@ export type AgentModelSurfaceMessage =
       name: string;
       status: Extract<
         AgentSessionToolStatus,
-        'completed' | 'rejected' | 'failed' | 'timedOut' | 'cancelled'
+        'completed' | 'rejected' | 'failed' | 'timedOut' | 'cancelled' | 'uncertain'
       >;
       content: string;
     }>;

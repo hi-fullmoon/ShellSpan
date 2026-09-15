@@ -1,10 +1,22 @@
 import { create } from 'zustand';
 import type { TerminalLayoutNode } from '@/components/terminal/terminal-split';
-import type { ClosedEvent, SessionStatus, SessionSummary, StatusEvent } from '@/types';
+import type {
+  ClosedEvent,
+  SessionStatus,
+  SessionSummary,
+  StatusEvent,
+  TerminalBrokerIntegrationState,
+  TerminalIntegrationStateEvent,
+} from '@/types';
 import { generateId } from '@/lib/utils';
 
 export interface TerminalSession {
   sessionId: string;
+  /** Ephemeral broker identity; deliberately excluded from TerminalWorkspaceSession. */
+  terminalSessionId?: string;
+  terminalGeneration?: number;
+  integrationState?: TerminalBrokerIntegrationState;
+  integrationReason?: string;
   title: string;
   host: string;
   port: number;
@@ -19,6 +31,9 @@ export interface TerminalSession {
   pendingConnection?: boolean;
   /** Ephemeral predecessor used to keep split layout stable while a connection id changes. */
   replacesSessionId?: string;
+  /** Ephemeral dedicated Agent SSH PTY; excluded from workspace persistence. */
+  agentOwned?: boolean;
+  agentSourceSessionId?: string;
 }
 
 export interface PendingTerminalConnection {
@@ -43,6 +58,17 @@ const sortSessions = (sessions: TerminalSession[]): TerminalSession[] => {
   return [...pinned, ...unpinned];
 };
 
+const brokerIdentity = (
+  summary: SessionSummary,
+  fallback?: Pick<TerminalSession, 'terminalSessionId' | 'terminalGeneration'>,
+): Pick<TerminalSession, 'terminalSessionId' | 'terminalGeneration'> | Record<string, never> => {
+  const terminalSessionId = summary.terminalSessionId ?? fallback?.terminalSessionId;
+  const terminalGeneration = summary.terminalGeneration ?? fallback?.terminalGeneration;
+  return terminalSessionId && terminalGeneration
+    ? { terminalSessionId, terminalGeneration }
+    : {};
+};
+
 interface TerminalState {
   sessions: TerminalSession[];
   activeSessionId: string | null;
@@ -60,7 +86,14 @@ interface TerminalState {
   addSession: (
     summary: SessionSummary,
     profileId?: string,
-    options?: { insertAfterId?: string; pinned?: boolean; color?: string },
+    options?: {
+      insertAfterId?: string;
+      pinned?: boolean;
+      color?: string;
+      agentOwned?: boolean;
+      agentSourceSessionId?: string;
+      replacesSessionId?: string;
+    },
   ) => void;
   addRestoredSessions: (
     sessions: TerminalWorkspaceSession[],
@@ -79,6 +112,7 @@ interface TerminalState {
   clearRestoredLayout: () => void;
   setStatus: (sessionId: string, event: StatusEvent) => void;
   setClosed: (sessionId: string, event: ClosedEvent) => void;
+  setIntegrationState: (event: TerminalIntegrationStateEvent) => void;
   updateTitle: (sessionId: string, title: string) => void;
   togglePin: (sessionId: string) => void;
   setTabColor: (sessionId: string, color?: string) => void;
@@ -148,6 +182,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       const sessions = [...state.sessions];
       sessions[pendingIndex] = {
         sessionId: summary.sessionId,
+        ...brokerIdentity(summary),
         title: summary.title,
         host: summary.host,
         port: summary.port,
@@ -193,6 +228,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         : -1;
       const newSession: TerminalSession = {
         sessionId: summary.sessionId,
+        ...brokerIdentity(summary),
         title: summary.title,
         host: summary.host,
         port: summary.port,
@@ -201,6 +237,9 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         profileId,
         pinned: options?.pinned,
         color: options?.color,
+        agentOwned: options?.agentOwned,
+        agentSourceSessionId: options?.agentSourceSessionId,
+        replacesSessionId: options?.replacesSessionId,
       };
 
       let sessions: TerminalSession[];
@@ -221,7 +260,14 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
     set((state) => {
       if (state.sessions.length > 0 || restored.length === 0) return state;
       const sessions = restored.map((session) => ({
-        ...session,
+        sessionId: session.sessionId,
+        title: session.title,
+        host: session.host,
+        port: session.port,
+        username: session.username,
+        profileId: session.profileId,
+        pinned: session.pinned,
+        color: session.color,
         status: 'disconnected' as const,
         closed: {
           sessionId: session.sessionId,
@@ -262,6 +308,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       const old = state.sessions[oldIndex];
       const newSession: TerminalSession = {
         sessionId: summary.sessionId,
+        ...brokerIdentity(summary, old),
         title: old.title ?? summary.title,
         host: summary.host,
         port: summary.port,
@@ -270,6 +317,8 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         profileId,
         pinned: old.pinned,
         color: old.color,
+        agentOwned: old.agentOwned,
+        agentSourceSessionId: old.agentSourceSessionId,
         reconnecting: true,
         replacesSessionId: oldSessionId,
       };
@@ -333,6 +382,29 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           ...session,
           closed: event,
           status: event.reasonKind === 'error' ? 'error' : 'disconnected',
+        };
+      });
+      return changed ? { sessions } : state;
+    }),
+  setIntegrationState: (event) =>
+    set((state) => {
+      let changed = false;
+      const sessions = state.sessions.map((session) => {
+        if (session.sessionId !== event.sessionId) return session;
+        if (
+          session.terminalSessionId
+          && (session.terminalSessionId !== event.terminalSessionId
+            || session.terminalGeneration !== event.terminalGeneration)
+        ) return session;
+        if (
+          session.integrationState === event.state
+          && session.integrationReason === event.reason
+        ) return session;
+        changed = true;
+        return {
+          ...session,
+          integrationState: event.state,
+          integrationReason: event.reason,
         };
       });
       return changed ? { sessions } : state;

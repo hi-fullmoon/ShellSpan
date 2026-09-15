@@ -1,8 +1,12 @@
 FROM alpine:3.22
 
-RUN apk add --no-cache openssh python3 \
-    && adduser -D -s /bin/sh shellspan \
+RUN apk add --no-cache openssh python3 bash zsh \
+    && adduser -D -s /bin/bash shellspan \
+    && adduser -D -s /bin/zsh shellspan-zsh \
+    && adduser -D -s /bin/sh shellspan-sh \
     && echo 'shellspan:shellspan-e2e' | chpasswd \
+    && echo 'shellspan-zsh:shellspan-e2e' | chpasswd \
+    && echo 'shellspan-sh:shellspan-e2e' | chpasswd \
     && mkdir -p /home/shellspan/upload /run/sshd /var/lib/shellspan-m6 \
     && printf 'inactive\n' > /var/lib/shellspan-m6/service.state \
     && printf '0\n' > /var/lib/shellspan-m6/restart.count \

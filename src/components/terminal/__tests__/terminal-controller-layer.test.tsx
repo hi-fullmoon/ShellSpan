@@ -16,16 +16,21 @@ import type {
   AgentSessionSnapshot,
   AgentTerminalLeaseEvent,
 } from '@/types/agent-session';
+import type { TerminalIntegrationStateEvent } from '@/types';
 import {
   invokeGetAgentRuntimeSession,
   invokeAgentTerminalLeaseReady,
+  invokeGetTerminalBrokerSnapshot,
   invokeInterruptAgentRuntime,
+  invokeTakeoverAgentTerminal,
   listenToAgentRuntimeSession,
   listenToAgentTerminalLease,
+  listenToTerminalIntegrationState,
 } from '@/lib/ipc/tauri';
 
 let leaseListener: ((event: Event<AgentTerminalLeaseEvent>) => void) | undefined;
 let sessionListener: ((event: Event<AgentSessionEvent>) => void) | undefined;
+let integrationListener: ((event: Event<TerminalIntegrationStateEvent>) => void) | undefined;
 
 class RO {
   observe() {}
@@ -41,6 +46,9 @@ vi.mock('@/lib/ipc/tauri', () => ({
     message: 'ready',
   }),
   invokeMarkSessionReady: vi.fn().mockResolvedValue(undefined),
+  invokeGetTerminalBrokerSnapshot: vi.fn().mockResolvedValue({
+    rollout: { enabled: false },
+  }),
   invokeSetSessionOutputPaused: vi.fn().mockResolvedValue(undefined),
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
@@ -52,6 +60,7 @@ vi.mock('@/lib/ipc/tauri', () => ({
     header: { executionSurface: 'direct' },
   }),
   invokeInterruptAgentRuntime: vi.fn().mockResolvedValue(undefined),
+  invokeTakeoverAgentTerminal: vi.fn().mockResolvedValue(true),
   listenToAgentRuntimeSession: vi.fn().mockImplementation(async (listener) => {
     sessionListener = listener;
     return () => {
@@ -62,6 +71,12 @@ vi.mock('@/lib/ipc/tauri', () => ({
     leaseListener = listener;
     return () => {
       if (leaseListener === listener) leaseListener = undefined;
+    };
+  }),
+  listenToTerminalIntegrationState: vi.fn().mockImplementation(async (listener) => {
+    integrationListener = listener;
+    return () => {
+      if (integrationListener === listener) integrationListener = undefined;
     };
   }),
 }));
@@ -129,6 +144,10 @@ describe('TerminalControllerLayer', () => {
       header: { executionSurface: 'direct' },
     } as AgentSessionSnapshot);
     vi.mocked(invokeInterruptAgentRuntime).mockResolvedValue({} as AgentSessionSnapshot);
+    vi.mocked(invokeTakeoverAgentTerminal).mockResolvedValue(true);
+    vi.mocked(invokeGetTerminalBrokerSnapshot).mockResolvedValue({
+      rollout: { enabled: false },
+    } as Awaited<ReturnType<typeof invokeGetTerminalBrokerSnapshot>>);
     vi.mocked(listenToAgentRuntimeSession).mockImplementation(async (listener) => {
       sessionListener = listener;
       return () => {
@@ -139,6 +158,12 @@ describe('TerminalControllerLayer', () => {
       leaseListener = listener;
       return () => {
         if (leaseListener === listener) leaseListener = undefined;
+      };
+    });
+    vi.mocked(listenToTerminalIntegrationState).mockImplementation(async (listener) => {
+      integrationListener = listener;
+      return () => {
+        if (integrationListener === listener) integrationListener = undefined;
       };
     });
     useTerminalStore.setState({
@@ -162,6 +187,34 @@ describe('TerminalControllerLayer', () => {
       addSession('s1');
     });
     expect(terminalRegistry.get('s1')).toBeDefined();
+  });
+
+  it('projects authenticated integration state only onto its matching generation', async () => {
+    render(<TerminalControllerLayer />);
+    act(() => {
+      useTerminalStore.getState().addSession({
+        sessionId: 's1',
+        terminalSessionId: 'terminal-1',
+        terminalGeneration: 2,
+        title: 'zsh',
+        host: 'local',
+        port: 0,
+        username: 'user',
+      });
+    });
+    await vi.waitFor(() => expect(integrationListener).toBeDefined());
+    act(() => integrationListener?.({
+      id: 1,
+      event: 'terminal-integration-state',
+      payload: {
+        sessionId: 's1',
+        terminalSessionId: 'terminal-1',
+        terminalGeneration: 2,
+        state: 'ready',
+        shell: 'zsh',
+      },
+    }));
+    expect(useTerminalStore.getState().sessions[0]?.integrationState).toBe('ready');
   });
 
   it('does not create a controller until a placeholder resolves to a real session', () => {
@@ -421,6 +474,12 @@ describe('TerminalControllerLayer', () => {
       agentTerminalLeaseState.get('s1')?.requestTakeover();
     });
     await vi.waitFor(() => expect(invokeInterruptAgentRuntime).toHaveBeenCalledOnce());
+    expect(invokeTakeoverAgentTerminal).toHaveBeenCalledOnce();
+    expect(invokeTakeoverAgentTerminal).toHaveBeenCalledWith({
+      sessionId: 's1',
+      agentSessionId: 'agent-1',
+      operationId: 'operation-1',
+    });
     expect(invokeInterruptAgentRuntime).toHaveBeenCalledWith({ sessionId: 'agent-1' });
     expect(release).toHaveBeenCalledOnce();
     expect(agentTerminalLeaseState.get('s1')).toBeUndefined();

@@ -351,7 +351,12 @@ fn inbox_steer_removed_during_step_preparation_closes_turn_without_an_empty_mode
         })
         .unwrap();
     assert!(store
-        .begin_step_or_end_turn("session-1", "turn-1".into(), "unused-step".into(), "completed")
+        .begin_step_or_end_turn(
+            "session-1",
+            "turn-1".into(),
+            "unused-step".into(),
+            "completed"
+        )
         .unwrap()
         .is_none());
     let events = store.all_events("session-1").unwrap();

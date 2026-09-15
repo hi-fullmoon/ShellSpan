@@ -62,9 +62,15 @@ describe('Agent Session settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'settings.ai.agent.clearSessions' }));
     const confirmButton = screen.getByRole('button', { name: 'settings.ai.agent.clearConfirm' });
     const cancelButton = screen.getByRole('button', { name: 'common.cancel' });
+    const dialog = screen.getByRole('alertdialog');
 
-    expect(confirmButton).toHaveClass('h-8');
+    expect(confirmButton).toHaveClass('h-8', 'bg-app-warning');
     expect(cancelButton).toHaveClass('h-8');
+    expect(dialog.querySelector('.lucide-archive')).toBeInTheDocument();
+    expect(dialog.querySelector('[data-slot="alert-dialog-media"]')).toHaveClass(
+      'bg-app-warning/10',
+      'text-app-warning',
+    );
 
     fireEvent.click(confirmButton);
 

@@ -452,6 +452,7 @@ pub(crate) enum AgentToolResultStatus {
     Failed,
     TimedOut,
     Cancelled,
+    Uncertain,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]

@@ -5,6 +5,7 @@ use ssh2::{BlockDirections, Channel, ExtendedData, Session};
 use std::{
     io::{ErrorKind, Read, Write},
     net::{Ipv4Addr, TcpListener, TcpStream},
+    path::Path,
     sync::{
         atomic::{AtomicBool, Ordering as AtomicOrdering},
         mpsc::{Receiver, TryRecvError},
@@ -13,7 +14,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
+use uuid::Uuid;
 
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
@@ -31,13 +33,258 @@ use crate::{
         ClosedReasonKind, ConnectionError, SessionCommand, SessionCreateRequest, SessionErrorEvent,
         SessionStatus,
     },
+    observe_terminal_raw_output,
     petdex::{self, PetdexEvent},
+    terminal_integration::{
+        quote_remote_posix, remote_posix_bootstrap, TerminalIntegrationStreamDecoder,
+        TerminalShellKind,
+    },
 };
 
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
 const SSH_OUTPUT_FLUSH_THRESHOLD_BYTES: usize = 64 * 1024;
 const SSH_OUTPUT_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1_000_000;
+
+struct RemoteSshShellIntegration {
+    integration_id: String,
+    shell: TerminalShellKind,
+    shell_executable: String,
+    remote_root: String,
+    bootstrap_path: String,
+    fifo_path: String,
+    control: Channel,
+    decoder: TerminalIntegrationStreamDecoder,
+    active: bool,
+    accept_events: bool,
+}
+
+impl RemoteSshShellIntegration {
+    fn prepare(session: &Session, username: &str) -> Result<Self, String> {
+        let (shell, shell_executable) = detect_remote_login_shell_identity(session, username)?;
+        if !matches!(shell, TerminalShellKind::Bash | TerminalShellKind::Zsh) {
+            return Err("TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL".into());
+        }
+        let suffix = Uuid::new_v4().simple().to_string();
+        let remote_root = format!("/tmp/.shellspan-agent-terminal-{suffix}");
+        let bootstrap_path = if shell == TerminalShellKind::Zsh {
+            format!("{remote_root}/.zshrc")
+        } else {
+            format!("{remote_root}/integration")
+        };
+        let fifo_path = format!("{remote_root}/control");
+        let sftp = session
+            .sftp()
+            .map_err(|error| format!("failed to open remote integration SFTP: {error}"))?;
+        sftp.mkdir(Path::new(&remote_root), 0o700)
+            .map_err(|error| format!("failed to create remote integration root: {error}"))?;
+        let setup = (|| {
+            let source = remote_posix_bootstrap(shell, &fifo_path)?;
+            let mut remote = sftp
+                .create(Path::new(&bootstrap_path))
+                .map_err(|error| format!("failed to create remote integration script: {error}"))?;
+            remote
+                .write_all(source.as_bytes())
+                .map_err(|error| format!("failed to upload remote integration script: {error}"))?;
+            drop(remote);
+            sftp.setstat(
+                Path::new(&bootstrap_path),
+                ssh2::FileStat {
+                    size: None,
+                    uid: None,
+                    gid: None,
+                    perm: Some(0o600),
+                    atime: None,
+                    mtime: None,
+                },
+            )
+            .map_err(|error| format!("failed to protect remote integration script: {error}"))?;
+            if shell == TerminalShellKind::Zsh {
+                for (name, user_path) in [
+                    (".zshenv", "$HOME/.zshenv"),
+                    (".zprofile", "$HOME/.zprofile"),
+                    (".zlogin", "$HOME/.zlogin"),
+                ] {
+                    let path = format!("{remote_root}/{name}");
+                    let mut remote = sftp.create(Path::new(&path)).map_err(|error| {
+                        format!("failed to create remote zsh integration startup file: {error}")
+                    })?;
+                    remote
+                        .write_all(
+                            format!("[[ -r {user_path} ]] && source {user_path}\n").as_bytes(),
+                        )
+                        .map_err(|error| {
+                            format!("failed to upload remote zsh integration startup file: {error}")
+                        })?;
+                    drop(remote);
+                    sftp.setstat(
+                        Path::new(&path),
+                        ssh2::FileStat {
+                            size: None,
+                            uid: None,
+                            gid: None,
+                            perm: Some(0o600),
+                            atime: None,
+                            mtime: None,
+                        },
+                    )
+                    .map_err(|error| {
+                        format!("failed to protect remote zsh integration startup file: {error}")
+                    })?;
+                }
+            }
+            run_ssh_setup_command(
+                session,
+                &format!(
+                    "umask 077; mkfifo -- {}; chmod 600 -- {}",
+                    quote_remote_posix(&fifo_path),
+                    quote_remote_posix(&fifo_path)
+                ),
+            )?;
+            let mut control = session
+                .channel_session()
+                .map_err(|error| format!("failed to open remote integration channel: {error}"))?;
+            control
+                .exec(&format!(
+                    "exec 3<> {}; cat <&3",
+                    quote_remote_posix(&fifo_path)
+                ))
+                .map_err(|error| format!("failed to start remote integration reader: {error}"))?;
+            Ok(control)
+        })();
+        let control = match setup {
+            Ok(control) => control,
+            Err(error) => {
+                cleanup_remote_integration_files(&sftp, &remote_root, &bootstrap_path, &fifo_path);
+                return Err(error);
+            }
+        };
+        Ok(Self {
+            integration_id: format!("integration-{}", Uuid::new_v4()),
+            shell,
+            shell_executable,
+            remote_root,
+            bootstrap_path,
+            fifo_path,
+            control,
+            decoder: TerminalIntegrationStreamDecoder::default(),
+            active: true,
+            accept_events: true,
+        })
+    }
+
+    fn start_shell(&self, shell_channel: &mut Channel) -> Result<(), String> {
+        let command = match self.shell {
+            TerminalShellKind::Bash => format!(
+                "exec {} --noprofile --rcfile {} -i",
+                quote_remote_posix(&self.shell_executable),
+                quote_remote_posix(&self.bootstrap_path)
+            ),
+            TerminalShellKind::Zsh => format!(
+                "exec env ZDOTDIR={} {} -il",
+                quote_remote_posix(&self.remote_root),
+                quote_remote_posix(&self.shell_executable)
+            ),
+            _ => return Err("TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL".into()),
+        };
+        shell_channel
+            .exec(&command)
+            .map_err(|error| format!("failed to start integrated remote shell: {error}"))
+    }
+
+    fn close(mut self, session: &Session) {
+        self.active = false;
+        let _ = self.control.send_eof();
+        let _ = self.control.close();
+        session.set_blocking(true);
+        let sftp = session.sftp();
+        if let Ok(sftp) = sftp {
+            cleanup_remote_integration_files(
+                &sftp,
+                &self.remote_root,
+                &self.bootstrap_path,
+                &self.fifo_path,
+            );
+        }
+    }
+}
+
+fn cleanup_remote_integration_files(
+    sftp: &ssh2::Sftp,
+    remote_root: &str,
+    bootstrap_path: &str,
+    fifo_path: &str,
+) {
+    let _ = sftp.unlink(Path::new(bootstrap_path));
+    let _ = sftp.unlink(Path::new(fifo_path));
+    for name in [".zshenv", ".zprofile", ".zlogin"] {
+        let _ = sftp.unlink(Path::new(&format!("{remote_root}/{name}")));
+    }
+    let _ = sftp.rmdir(Path::new(remote_root));
+}
+
+fn detect_remote_login_shell(
+    session: &Session,
+    username: &str,
+) -> Result<TerminalShellKind, String> {
+    detect_remote_login_shell_identity(session, username).map(|(shell, _)| shell)
+}
+
+fn detect_remote_login_shell_identity(
+    session: &Session,
+    username: &str,
+) -> Result<(TerminalShellKind, String), String> {
+    let sftp = session
+        .sftp()
+        .map_err(|error| format!("failed to inspect remote login shell: {error}"))?;
+    let file = sftp
+        .open(Path::new("/etc/passwd"))
+        .map_err(|error| format!("failed to open remote account database: {error}"))?;
+    let mut contents = String::new();
+    file.take(1_048_577)
+        .read_to_string(&mut contents)
+        .map_err(|error| format!("failed to read remote account database: {error}"))?;
+    if contents.len() > 1_048_576 {
+        return Err("remote account database exceeds the integration inspection limit".into());
+    }
+    let prefix = format!("{username}:");
+    let shell = contents
+        .lines()
+        .find(|line| line.starts_with(&prefix))
+        .and_then(|line| line.rsplit(':').next())
+        .ok_or_else(|| "remote login shell identity is unavailable".to_string())?;
+    Ok((TerminalShellKind::detect(shell), shell.to_string()))
+}
+
+fn run_ssh_setup_command(session: &Session, command: &str) -> Result<(), String> {
+    let mut channel = session
+        .channel_session()
+        .map_err(|error| format!("failed to open remote integration setup channel: {error}"))?;
+    channel
+        .exec(command)
+        .map_err(|error| format!("failed to run remote integration setup: {error}"))?;
+    let mut output = Vec::new();
+    (&mut channel)
+        .take(8_193)
+        .read_to_end(&mut output)
+        .map_err(|error| format!("failed to drain remote integration setup: {error}"))?;
+    if output.len() > 8_192 {
+        return Err("remote integration setup output exceeded the limit".into());
+    }
+    channel
+        .wait_close()
+        .map_err(|error| format!("failed to close remote integration setup: {error}"))?;
+    let status = channel
+        .exit_status()
+        .map_err(|error| format!("failed to read remote integration setup status: {error}"))?;
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "remote integration setup exited with status {status}"
+        ))
+    }
+}
 
 /// Write half of the session self-pipe. Command senders poke it after
 /// enqueueing a command so the session loop wakes from its idle poll
@@ -96,7 +343,10 @@ impl SessionWakeSource {
     }
 }
 
-pub(crate) fn run_ssh_session<F: FnOnce() + Send>(
+pub(crate) fn run_ssh_session<
+    A: FnOnce() -> Result<(), String> + Send,
+    C: FnOnce() -> Result<(), String> + Send,
+>(
     app: &AppHandle,
     session_id: &str,
     request: &SessionCreateRequest,
@@ -104,7 +354,9 @@ pub(crate) fn run_ssh_session<F: FnOnce() + Send>(
     wake: SessionWakeSource,
     output_ready: Arc<AtomicBool>,
     output_paused: Arc<AtomicBool>,
-    on_connected: F,
+    bootstrap_agent_integration: bool,
+    on_broker_attached: A,
+    on_connected: C,
 ) -> Result<Option<String>, ConnectionError> {
     petdex::notify(app, PetdexEvent::SshConnecting(session_id.to_string()));
     info!(
@@ -159,10 +411,7 @@ pub(crate) fn run_ssh_session<F: FnOnce() + Send>(
     };
 
     let session = match session_result {
-        Ok(session) => {
-            on_connected();
-            session
-        }
+        Ok(session) => session,
         Err(connection_error) => {
             match connection_error {
                 ConnectionError::HostKeyUnknown {
@@ -201,61 +450,164 @@ pub(crate) fn run_ssh_session<F: FnOnce() + Send>(
         }
     };
 
-    let mut channel = session.channel_session().map_err(|error| {
-        error!("Failed to open SSH channel session_id={session_id}: {error}");
-        ConnectionError::Other {
-            message: format!("failed to open ssh channel: {error}"),
+    let (mut remote_integration, remote_integration_error) = if bootstrap_agent_integration {
+        match RemoteSshShellIntegration::prepare(&session, &request.username) {
+            Ok(integration) => (Some(integration), None),
+            Err(error) => (None, Some(error)),
         }
-    })?;
-    channel
-        .request_pty(
-            "xterm-256color",
-            None,
-            Some((request.terminal_cols, request.terminal_rows, 0, 0)),
+    } else {
+        (None, None)
+    };
+
+    with_remote_integration_cleanup(&session, &mut remote_integration, |remote_integration| {
+        let mut channel = session.channel_session().map_err(|error| {
+            error!("Failed to open SSH channel session_id={session_id}: {error}");
+            ConnectionError::Other {
+                message: format!("failed to open ssh channel: {error}"),
+            }
+        })?;
+        with_failure_cleanup(
+            &mut channel,
+            |channel| {
+                channel
+                    .request_pty(
+                        "xterm-256color",
+                        None,
+                        Some((request.terminal_cols, request.terminal_rows, 0, 0)),
+                    )
+                    .map_err(|error| {
+                        error!("Failed to allocate PTY session_id={session_id}: {error}");
+                        ConnectionError::Other {
+                            message: format!("failed to allocate PTY: {error}"),
+                        }
+                    })?;
+                channel
+                    .handle_extended_data(ExtendedData::Merge)
+                    .map_err(|error| {
+                        error!(
+                        "Failed to configure extended-data mode session_id={session_id}: {error}"
+                    );
+                        ConnectionError::Other {
+                            message: format!("failed to configure extended-data mode: {error}"),
+                        }
+                    })?;
+                let shell_start = match remote_integration.as_ref() {
+                    Some(integration) => integration.start_shell(channel),
+                    None => channel
+                        .shell()
+                        .map_err(|error| format!("failed to start remote shell: {error}")),
+                };
+                if let Err(message) = shell_start {
+                    error!("Failed to start remote shell session_id={session_id}: {message}");
+                    return Err(ConnectionError::Other { message });
+                }
+
+                // Register a replacement as a non-current Broker candidate. The
+                // predecessor remains usable while the new shell proves readiness.
+                on_broker_attached().map_err(|message| ConnectionError::Other { message })?;
+                let runtime = app
+                    .try_state::<crate::agent_runtime::AgentRuntime>()
+                    .ok_or_else(|| ConnectionError::Other {
+                        message: "terminal integration runtime is unavailable".into(),
+                    })?;
+                if let Some(integration) = remote_integration.as_ref() {
+                    runtime
+                        .register_terminal_integration_channel(
+                            session_id,
+                            &integration.integration_id,
+                            integration.shell,
+                        )
+                        .map_err(|message| ConnectionError::Other { message })?;
+                    crate::commands::publish_terminal_integration_state(app, session_id)
+                        .map_err(|message| ConnectionError::Other { message })?;
+                } else if let Some(message) = remote_integration_error.as_deref() {
+                    let shell = detect_remote_login_shell(&session, &request.username)
+                        .unwrap_or(TerminalShellKind::Unsupported);
+                    let reason = if message == "TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL" {
+                        "unsupportedRemoteShell"
+                    } else {
+                        "remoteBootstrapFailed"
+                    };
+                    if reason == "unsupportedRemoteShell" {
+                        runtime
+                            .mark_terminal_integration_unavailable(session_id, shell, reason)
+                            .map_err(|message| ConnectionError::Other { message })?;
+                    } else {
+                        runtime
+                            .mark_terminal_integration_degraded(session_id, shell, reason)
+                            .map_err(|message| ConnectionError::Other { message })?;
+                    }
+                    crate::commands::publish_terminal_integration_state(app, session_id)
+                        .map_err(|message| ConnectionError::Other { message })?;
+                }
+                session.set_blocking(false);
+
+                info!("SSH session connected session_id={session_id}");
+                publish_ssh_connection_ready(
+                    || {
+                        emit_status(
+                            app,
+                            session_id,
+                            SessionStatus::Connected,
+                            Some("shell ready".to_string()),
+                        )
+                    },
+                    || petdex::notify(app, PetdexEvent::SshConnected(session_id.to_string())),
+                    on_connected,
+                )
+                .map_err(|message| ConnectionError::Other { message })?;
+
+                session_loop(
+                    app,
+                    session_id,
+                    &session,
+                    channel,
+                    rx,
+                    &wake,
+                    &output_ready,
+                    &output_paused,
+                    remote_integration.as_mut(),
+                    Vec::new(),
+                )
+                .map_err(|message| ConnectionError::Other { message })
+            },
+            graceful_shutdown,
         )
-        .map_err(|error| {
-            error!("Failed to allocate PTY session_id={session_id}: {error}");
-            ConnectionError::Other {
-                message: format!("failed to allocate PTY: {error}"),
-            }
-        })?;
-    channel
-        .handle_extended_data(ExtendedData::Merge)
-        .map_err(|error| {
-            error!("Failed to configure extended-data mode session_id={session_id}: {error}");
-            ConnectionError::Other {
-                message: format!("failed to configure extended-data mode: {error}"),
-            }
-        })?;
-    channel.shell().map_err(|error| {
-        error!("Failed to start remote shell session_id={session_id}: {error}");
-        ConnectionError::Other {
-            message: format!("failed to start remote shell: {error}"),
-        }
-    })?;
-    session.set_blocking(false);
+    })
+}
 
-    info!("SSH session connected session_id={session_id}");
-    emit_status(
-        app,
-        session_id,
-        SessionStatus::Connected,
-        Some("shell ready".to_string()),
-    )
-    .map_err(|message| ConnectionError::Other { message })?;
-    petdex::notify(app, PetdexEvent::SshConnected(session_id.to_string()));
+fn publish_ssh_connection_ready(
+    publish_status: impl FnOnce() -> Result<(), String>,
+    notify_connected: impl FnOnce(),
+    signal_waiter: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    publish_status()?;
+    notify_connected();
+    signal_waiter()
+}
 
-    session_loop(
-        app,
-        session_id,
-        &session,
-        &mut channel,
-        rx,
-        &wake,
-        &output_ready,
-        &output_paused,
-    )
-    .map_err(|message| ConnectionError::Other { message })
+fn with_remote_integration_cleanup<T>(
+    session: &Session,
+    remote_integration: &mut Option<RemoteSshShellIntegration>,
+    operation: impl FnOnce(&mut Option<RemoteSshShellIntegration>) -> Result<T, ConnectionError>,
+) -> Result<T, ConnectionError> {
+    let result = operation(remote_integration);
+    if let Some(integration) = remote_integration.take() {
+        integration.close(session);
+    }
+    result
+}
+
+fn with_failure_cleanup<R, T, E>(
+    resource: &mut R,
+    operation: impl FnOnce(&mut R) -> Result<T, E>,
+    cleanup: impl FnOnce(&mut R),
+) -> Result<T, E> {
+    let result = operation(resource);
+    if result.is_err() {
+        cleanup(resource);
+    }
+    result
 }
 
 fn coalesce_session_commands(commands: Vec<SessionCommand>) -> Vec<SessionCommand> {
@@ -301,6 +653,103 @@ fn coalesce_session_commands(commands: Vec<SessionCommand>) -> Vec<SessionComman
     merged
 }
 
+fn drain_remote_integration_control(
+    app: &AppHandle,
+    session_id: &str,
+    integration: &mut RemoteSshShellIntegration,
+) -> Result<bool, String> {
+    let mut made_progress = false;
+    let mut buffer = [0_u8; 8192];
+    loop {
+        match integration.control.read(&mut buffer) {
+            Ok(0) if integration.control.eof() => {
+                if integration.accept_events {
+                    if let Err(error) = integration.decoder.finish() {
+                        log::warn!(
+                            "Remote integration control ended mid-record session_id={session_id}: {error}"
+                        );
+                    }
+                }
+                integration.active = false;
+                if let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() {
+                    let _ = runtime.terminal_integration_channel_closed(
+                        session_id,
+                        &integration.integration_id,
+                        "remoteControlChannelClosed",
+                    );
+                    crate::commands::emit_terminal_integration_state(app, session_id);
+                }
+                return Ok(true);
+            }
+            Ok(0) => return Ok(made_progress),
+            Ok(read) => {
+                made_progress = true;
+                if !integration.accept_events {
+                    continue;
+                }
+                let events = match integration.decoder.push(&buffer[..read]) {
+                    Ok(events) => events,
+                    Err(error) => {
+                        integration.accept_events = false;
+                        if let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>()
+                        {
+                            let _ = runtime.terminal_integration_channel_closed(
+                                session_id,
+                                &integration.integration_id,
+                                "remoteControlProtocolViolation",
+                            );
+                            crate::commands::emit_terminal_integration_state(app, session_id);
+                        }
+                        log::warn!(
+                            "Remote integration control rejected session_id={session_id}: {error}"
+                        );
+                        return Ok(true);
+                    }
+                };
+                for event in events {
+                    let runtime = app
+                        .try_state::<crate::agent_runtime::AgentRuntime>()
+                        .ok_or_else(|| "terminal integration runtime is unavailable".to_string())?;
+                    if let Err(error) = runtime.accept_terminal_integration_event(
+                        session_id,
+                        &integration.integration_id,
+                        event,
+                    ) {
+                        integration.accept_events = false;
+                        let _ = runtime.terminal_integration_channel_closed(
+                            session_id,
+                            &integration.integration_id,
+                            "remoteControlProtocolViolation",
+                        );
+                        crate::commands::emit_terminal_integration_state(app, session_id);
+                        log::warn!(
+                            "Remote integration event rejected session_id={session_id}: {error}"
+                        );
+                        return Ok(true);
+                    }
+                    crate::commands::emit_terminal_integration_state(app, session_id);
+                }
+            }
+            Err(error) if is_retryable_channel_error_kind(error.kind()) => {
+                return Ok(made_progress)
+            }
+            Err(error) => {
+                integration.active = false;
+                if let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() {
+                    let _ = runtime.terminal_integration_channel_closed(
+                        session_id,
+                        &integration.integration_id,
+                        "remoteControlChannelFailed",
+                    );
+                    crate::commands::emit_terminal_integration_state(app, session_id);
+                }
+                log::warn!("Remote integration control failed session_id={session_id}: {error}");
+                return Ok(true);
+            }
+        }
+    }
+}
+
 fn session_loop(
     app: &AppHandle,
     session_id: &str,
@@ -310,9 +759,12 @@ fn session_loop(
     wake: &SessionWakeSource,
     output_ready: &AtomicBool,
     output_paused: &AtomicBool,
+    remote_integration: Option<&mut RemoteSshShellIntegration>,
+    initial_pty_output: Vec<u8>,
 ) -> Result<Option<String>, String> {
-    let mut pending_bytes: Vec<u8> = Vec::new();
+    let mut pending_bytes = initial_pty_output;
     let mut pending_output = String::new();
+    drain_decoded_output(&mut pending_bytes, &mut pending_output);
     let output_wait_started = Instant::now();
     let mut output_live = false;
     let result = session_loop_inner(
@@ -328,6 +780,7 @@ fn session_loop(
         &mut pending_output,
         output_wait_started,
         &mut output_live,
+        remote_integration,
     );
     // Emit whatever decoded output remains so the final screen state is not
     // lost when the session ends.
@@ -357,6 +810,7 @@ fn session_loop_inner(
     pending_output: &mut String,
     output_wait_started: Instant,
     output_live: &mut bool,
+    mut remote_integration: Option<&mut RemoteSshShellIntegration>,
 ) -> Result<Option<String>, String> {
     let mut buffer = [0u8; 8192];
     let mut next_keepalive_at =
@@ -365,6 +819,12 @@ fn session_loop_inner(
     loop {
         let mut made_progress = false;
         let mut pending_commands = Vec::new();
+
+        if let Some(integration) = remote_integration.as_deref_mut() {
+            if integration.active {
+                made_progress |= drain_remote_integration_control(app, session_id, integration)?;
+            }
+        }
 
         if !*output_live
             && should_release_startup_output(
@@ -418,6 +878,7 @@ fn session_loop_inner(
                     }
                 }
                 Ok(read) => {
+                    observe_terminal_raw_output(app, session_id, &buffer[..read]);
                     pending_bytes.extend_from_slice(&buffer[..read]);
                     drain_decoded_output(pending_bytes, pending_output);
                     if *output_live && pending_output.len() >= SSH_OUTPUT_FLUSH_THRESHOLD_BYTES {
@@ -829,178 +1290,5 @@ fn graceful_shutdown(channel: &mut Channel) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn session_wake_pair_passes_wakeups_and_drains_without_blocking() {
-        let (waker, source) = session_wake_pair().expect("wake pair should be creatable");
-
-        source.drain();
-
-        waker.wake();
-        waker.wake();
-        // Give the loopback byte a moment to arrive, then drain must consume
-        // it and return immediately instead of blocking.
-        thread::sleep(Duration::from_millis(50));
-        source.drain();
-    }
-
-    #[test]
-    fn normalize_keepalive_delay_clamps_zero_to_one_second() {
-        assert_eq!(normalize_keepalive_delay(0), Duration::from_secs(1));
-        assert_eq!(normalize_keepalive_delay(7), Duration::from_secs(7));
-    }
-
-    #[test]
-    fn startup_output_waits_for_the_frontend_before_release() {
-        assert!(!should_release_startup_output(
-            false,
-            Duration::from_secs(1),
-            SSH_OUTPUT_FLUSH_THRESHOLD_BYTES,
-        ));
-        assert!(should_release_startup_output(
-            true,
-            Duration::from_secs(1),
-            SSH_OUTPUT_FLUSH_THRESHOLD_BYTES,
-        ));
-    }
-
-    #[test]
-    fn startup_output_gate_has_timeout_and_memory_safety_valves() {
-        assert!(should_release_startup_output(
-            false,
-            SSH_OUTPUT_READY_TIMEOUT + Duration::from_millis(1),
-            0,
-        ));
-        assert!(should_release_startup_output(
-            false,
-            Duration::ZERO,
-            SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES + 1,
-        ));
-    }
-
-    #[test]
-    fn transport_error_classifies_drain_incoming_flow_as_disconnect() {
-        let message = format_transport_error(
-            "failed to write remote input",
-            "Failure while draining incoming flow",
-        );
-
-        assert!(message.contains("ssh transport disconnected"));
-    }
-
-    #[test]
-    fn closed_reason_marks_transport_disconnect_as_retryable() {
-        let (reason_kind, retryable) = classify_closed_reason(
-            Some("failed to read remote output: ssh transport disconnected"),
-            SessionStatus::Error,
-        );
-
-        assert_eq!(reason_kind, ClosedReasonKind::TransportDisconnect);
-        assert!(retryable);
-    }
-
-    #[test]
-    fn closed_reason_keeps_remote_exit_non_retryable() {
-        let (reason_kind, retryable) =
-            classify_closed_reason(Some("remote shell exited"), SessionStatus::Disconnected);
-
-        assert_eq!(reason_kind, ClosedReasonKind::RemoteExit);
-        assert!(!retryable);
-    }
-
-    #[test]
-    fn coalesce_session_commands_merges_adjacent_write_chunks() {
-        let commands = vec![
-            SessionCommand::Write("a".to_string()),
-            SessionCommand::Write("bc".to_string()),
-            SessionCommand::Write("123".to_string()),
-        ];
-
-        let merged = coalesce_session_commands(commands);
-
-        assert_eq!(merged.len(), 1);
-        match &merged[0] {
-            SessionCommand::Write(data) => assert_eq!(data, "abc123"),
-            _ => panic!("expected a single merged write command"),
-        }
-    }
-
-    #[test]
-    fn coalesce_session_commands_keeps_only_the_last_adjacent_resize() {
-        let commands = vec![
-            SessionCommand::Resize { cols: 80, rows: 24 },
-            SessionCommand::Resize {
-                cols: 100,
-                rows: 30,
-            },
-            SessionCommand::Resize {
-                cols: 120,
-                rows: 40,
-            },
-        ];
-
-        let merged = coalesce_session_commands(commands);
-
-        assert_eq!(merged.len(), 1);
-        match &merged[0] {
-            SessionCommand::Resize { cols, rows } => {
-                assert_eq!((cols, rows), (&120, &40));
-            }
-            _ => panic!("expected a single merged resize command"),
-        }
-    }
-
-    #[test]
-    fn coalesce_session_commands_preserves_resize_write_resize_boundaries() {
-        let commands = vec![
-            SessionCommand::Write("ab".to_string()),
-            SessionCommand::Resize { cols: 80, rows: 24 },
-            SessionCommand::Resize {
-                cols: 120,
-                rows: 40,
-            },
-            SessionCommand::Write("cd".to_string()),
-            SessionCommand::Close,
-            SessionCommand::Write("ef".to_string()),
-        ];
-
-        let merged = coalesce_session_commands(commands);
-
-        assert_eq!(merged.len(), 5);
-        match &merged[0] {
-            SessionCommand::Write(data) => assert_eq!(data, "ab"),
-            _ => panic!("first command should stay write"),
-        }
-        match &merged[1] {
-            SessionCommand::Resize { cols, rows } => {
-                assert_eq!((cols, rows), (&120, &40));
-            }
-            _ => panic!("adjacent resizes should merge into the latest size"),
-        }
-        match &merged[2] {
-            SessionCommand::Write(data) => assert_eq!(data, "cd"),
-            _ => panic!("third command should stay write"),
-        }
-        match &merged[3] {
-            SessionCommand::Close => {}
-            _ => panic!("fourth command should stay close"),
-        }
-        match &merged[4] {
-            SessionCommand::Write(data) => assert_eq!(data, "ef"),
-            _ => panic!("fifth command should stay write"),
-        }
-    }
-
-    #[test]
-    fn retryable_channel_error_kind_includes_wouldblock_and_interrupted() {
-        assert!(is_retryable_channel_error_kind(ErrorKind::WouldBlock));
-        assert!(is_retryable_channel_error_kind(ErrorKind::Interrupted));
-    }
-
-    #[test]
-    fn retryable_channel_error_kind_rejects_fatal_kinds() {
-        assert!(!is_retryable_channel_error_kind(ErrorKind::ConnectionReset));
-        assert!(!is_retryable_channel_error_kind(ErrorKind::BrokenPipe));
-    }
+    include!("tests/session.rs");
 }

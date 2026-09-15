@@ -172,6 +172,10 @@ export interface SessionSummary {
   host: string;
   port: number;
   username: string;
+  /** Ephemeral broker-owned identity; omitted while terminal_broker_v1 is off. */
+  terminalSessionId?: string;
+  /** Generation of the currently attached PTY/ConPTY/SSH PTY transport. */
+  terminalGeneration?: number;
 }
 
 export interface SessionCreateRequest {
@@ -190,6 +194,139 @@ export interface SessionCreateRequest {
   terminalCols: number;
   terminalRows: number;
   jumpHost?: JumpHostConfig;
+  /** Ephemeral predecessor transport used for broker generation rollover. */
+  replacesSessionId?: string;
+}
+
+export type TerminalBrokerTransportKind = 'localPty' | 'windowsConPty' | 'sshPty';
+export type TerminalBrokerIntegrationState =
+  | 'initializing'
+  | 'ready'
+  | 'degraded'
+  | 'unavailable'
+  | 'invalidated';
+export type TerminalBrokerSubscriberStatus = 'active' | 'truncated' | 'gap' | 'closed';
+
+export interface TerminalBrokerSubscriberSnapshot {
+  status: TerminalBrokerSubscriberStatus;
+  throughOutputSequence: number;
+  observedFrames: number;
+  observedBytes: number;
+}
+
+export interface TerminalBrokerSessionSnapshot {
+  terminalSessionId: string;
+  terminalGeneration: number;
+  transportSessionId: string;
+  transportKind: TerminalBrokerTransportKind;
+  agentPtyOwner?: {
+    agentSessionId: string;
+    targetId: string;
+    sourceTransportSessionId: string;
+  };
+  geometry: { rows: number; columns: number };
+  nextOutputSequence: number;
+  nextByteOffset: number;
+  integrationState: TerminalBrokerIntegrationState;
+  integrationId?: string;
+  integrationShell?: 'bash' | 'zsh' | 'windowsPowerShell' | 'powerShell7' | 'unsupported';
+  integrationReason?: string;
+  integrationEventSequence: number;
+  integrationCapabilities: readonly (
+    | 'promptLifecycle'
+    | 'commandLifecycle'
+    | 'exactCommandLine'
+    | 'exitStatus'
+    | 'currentDirectory'
+  )[];
+  promptReady: boolean;
+  currentDirectory?: string;
+  activeCommandId?: string;
+  screenVersion: number;
+  lease?: {
+    leaseId: string;
+    revision: number;
+    owner:
+      | { kind: 'user'; ownerId: string }
+      | {
+          kind: 'agent';
+          ownerId: string;
+          agentSessionId: string;
+          taskId: string;
+          operationId: string;
+        };
+  };
+  nextInputSequence: number;
+  outputListenerReady: boolean;
+  outputPaused: boolean;
+  open: boolean;
+  closeReason?: 'userClosed' | 'remoteExit' | 'transportDisconnected' | 'replaced' | 'brokerShutdown';
+  replayFirstSequence?: number;
+  replayFrameCount: number;
+  replayByteCount: number;
+  captureByteCount: number;
+  captureTruncated: boolean;
+  subscribers: {
+    display: TerminalBrokerSubscriberSnapshot;
+    capture: TerminalBrokerSubscriberSnapshot;
+    integration: TerminalBrokerSubscriberSnapshot;
+    screen: TerminalBrokerSubscriberSnapshot;
+  };
+}
+
+export interface TerminalBrokerSnapshot {
+  rollout: {
+    name: 'terminal_broker_v1';
+    enabled: boolean;
+    defaultEnabled: false;
+    source: 'default' | 'environment';
+    persisted: false;
+    mode: 'shadowCompatibility';
+    legacyDisplayAuthoritative: true;
+    rollback: 'disableDependentFlagsThenCloseBrokerGenerations';
+  };
+  shellIntegrationRollout: TerminalFeatureRolloutDecision & {
+    name: 'terminal_shell_integration_v1';
+    defaultEnabled: false;
+  };
+  terminalExecuteRollout: TerminalFeatureRolloutDecision & {
+    name: 'terminal_execute_v1';
+    defaultEnabled: false;
+  };
+  remoteAgentPtyRollout: TerminalFeatureRolloutDecision & {
+    name: 'terminal_remote_agent_pty_v1';
+    defaultEnabled: false;
+  };
+  legacyFallbackRollout: TerminalFeatureRolloutDecision & {
+    name: 'terminal_legacy_wrapper_fallback_v1';
+    defaultEnabled: true;
+  };
+  session?: TerminalBrokerSessionSnapshot;
+}
+
+interface TerminalFeatureRolloutDecision {
+  enabled: boolean;
+  requested: boolean;
+  prerequisiteSatisfied: boolean;
+  source: 'default' | 'environment';
+  persisted: false;
+  rollback: string;
+}
+
+export interface TerminalIntegrationStateEvent {
+  sessionId: string;
+  terminalSessionId: string;
+  terminalGeneration: number;
+  state: TerminalBrokerIntegrationState;
+  shell?: TerminalBrokerSessionSnapshot['integrationShell'];
+  reason?: string;
+}
+
+export interface AgentRemoteTerminalCreatedEvent {
+  summary: SessionSummary;
+  profileId: string;
+  sourceSessionId: string;
+  replacesSessionId?: string;
 }
 
 export interface RemoteConnectionRequest {

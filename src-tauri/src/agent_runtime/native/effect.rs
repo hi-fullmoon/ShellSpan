@@ -1,7 +1,7 @@
 use crate::agent_runtime::{
     AgentEffectKindNative, AgentObservedEffectNative, AgentToolCallNative,
-    ApplyPatchArgumentsNative, ExecCommandArgumentsNative, TransferDirectionNative,
-    TransferFileArgumentsNative,
+    ApplyPatchArgumentsNative, ExecCommandArgumentsNative, TerminalExecuteArgumentsNative,
+    TransferDirectionNative, TransferFileArgumentsNative,
 };
 
 use super::inspect_call_policy_scope_native;
@@ -20,6 +20,12 @@ pub(crate) fn assess_effect_native(
             let arguments =
                 serde_json::from_value::<ExecCommandArgumentsNative>(call.arguments.clone())
                     .map_err(|_| "exec_command arguments cannot be classified".to_string())?;
+            classify_command_effect(&arguments.command)
+        }
+        ToolEffectModeNative::NativeClassifier if call.tool_name == "terminal_execute" => {
+            let arguments =
+                serde_json::from_value::<TerminalExecuteArgumentsNative>(call.arguments.clone())
+                    .map_err(|_| "terminal_execute arguments cannot be classified".to_string())?;
             classify_command_effect(&arguments.command)
         }
         ToolEffectModeNative::NativeClassifier if call.tool_name == "apply_patch" => {
@@ -201,6 +207,15 @@ fn is_plain_windows_discovery_command(command: &str) -> bool {
     }
 }
 
+pub(crate) fn command_requires_direct_lifecycle_native(command: &str) -> bool {
+    matches!(
+        classify_command_effect(command),
+        AgentEffectKindNative::SensitiveRead
+            | AgentEffectKindNative::Destructive
+            | AgentEffectKindNative::ExternalSideEffect
+    )
+}
+
 fn is_bounded_diagnostic_command(command: &str) -> bool {
     if !is_plain_diagnostic_command(command) {
         return false;
@@ -334,6 +349,26 @@ mod tests {
                 classify_command_effect(command),
                 AgentEffectKindNative::StateChange,
                 "{command} must require state-change authorization"
+            );
+        }
+    }
+
+    #[test]
+    fn security_sensitive_command_effects_require_direct_lifecycle_evidence() {
+        for command in [
+            "cat ~/.ssh/id_ed25519",
+            "rm -rf /tmp/example",
+            "curl https://example.test",
+        ] {
+            assert!(
+                command_requires_direct_lifecycle_native(command),
+                "{command} must not rely on cooperative terminal lifecycle evidence"
+            );
+        }
+        for command in ["cd /tmp", "export DEMO=value", "alias ll='ls -l'"] {
+            assert!(
+                !command_requires_direct_lifecycle_native(command),
+                "{command} must remain eligible for the stateful visible shell"
             );
         }
     }

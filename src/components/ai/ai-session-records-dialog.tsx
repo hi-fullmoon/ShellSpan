@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeftIcon, RefreshCwIcon, SearchIcon } from 'lucide-react';
+import { ChevronLeftIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { CompactDialogHeader } from '@/components/ui/compact-dialog';
@@ -253,7 +253,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
                   return (
                     <div key={item.header.sessionId} className="flex min-w-0 flex-wrap items-center gap-3 rounded-md border px-3 py-2.5">
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium" title={title}>{title}</p>
+                        <p className="truncate text-sm font-medium">{title}</p>
                         <p className="mt-1 truncate text-xs text-muted-foreground">
                           {t(`settings.ai.records.filter.${scope}`)}
                           {target?.label ? ` · ${target.label}` : ''}
@@ -291,6 +291,8 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
           : 'settings.ai.records.deleteDescription')}
         confirmLabel={t('common.delete')}
         confirmVariant="destructive"
+        media={<Trash2Icon />}
+        mediaVariant="destructive"
         onConfirm={() => void deleteRecord()}
       />
     </Dialog>

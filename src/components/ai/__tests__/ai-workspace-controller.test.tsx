@@ -135,7 +135,7 @@ it('allows changing model and permissions in a running conversation without chan
   expect(useAiSettingsStore.getState().defaultProviderId).toBe(provider.id);
   await user.click(screen.getByRole('button', { name: /Permission mode:/ }));
   await user.click(await screen.findByRole('menuitemradio', { name: 'Full access' }));
-  await user.click(await screen.findByRole('button', { name: 'Enable full access' }));
+  await user.click(await screen.findByRole('button', { name: 'Allow full access' }));
   await waitFor(() => expect(agent.setPermission).toHaveBeenCalledWith(view.summary.id, 'operator'));
   expect(useAgentPermissionStore.getState().getMode('terminal-1')).toBe('autoApproveReadOnly');
 });
@@ -685,7 +685,7 @@ describe('AiWorkspaceController', () => {
 
     const model = await screen.findByRole('button', { name: /Model selection: model-test/ });
     const permission = screen.getByRole('button', { name: /Permission mode:/ });
-    const execution = screen.getByRole('button', { name: /Command execution: Background/ });
+    const execution = screen.getByRole('button', { name: /Command execution: Direct/ });
     expect(model).toBeEnabled();
     expect(permission).toBeEnabled();
     expect(execution).toBeEnabled();
@@ -695,9 +695,9 @@ describe('AiWorkspaceController', () => {
     await user.click(screen.getByRole('menuitemradio', { name: 'second-model' }));
     await user.click(permission);
     await user.click(await screen.findByRole('menuitemradio', { name: 'Full access' }));
-    await user.click(await screen.findByRole('button', { name: 'Enable full access' }));
+    await user.click(await screen.findByRole('button', { name: 'Allow full access' }));
     await user.click(execution);
-    await user.click(await screen.findByRole('menuitemradio', { name: 'Visible terminal' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Visible command' }));
 
     expect(useAiSettingsStore.getState().defaultProviderId).toBe(second.id);
     expect(useAgentPermissionStore.getState().getMode('terminal-new')).toBe('fullAccess');
@@ -1169,8 +1169,16 @@ describe('AiWorkspaceController', () => {
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Command execution: Background' }));
-    await user.click(await screen.findByRole('menuitemradio', { name: 'Visible terminal' }));
+    const direct = screen.getByRole('button', { name: 'Command execution: Direct' });
+    expect(direct).toHaveAttribute('data-terminal-surface-state', 'direct');
+    expect(direct).toHaveAttribute(
+      'aria-description',
+      'Run reliably outside this terminal with structured output and exit status.',
+    );
+    await user.click(direct);
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Visible command' }));
+    expect(screen.getByRole('button', { name: 'Command execution: Visible command' }))
+      .toHaveAttribute('data-terminal-surface-state', 'degraded');
     await user.type(screen.getByRole('textbox'), 'Show this command');
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
 
@@ -1269,10 +1277,11 @@ describe('AiWorkspaceController', () => {
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
     await waitFor(() => expect(agent.open).toHaveBeenCalledWith(view.summary.id));
-    const choice = await screen.findByRole('button', { name: 'Command execution: Visible terminal' });
+    const choice = await screen.findByRole('button', { name: 'Command execution: Visible command' });
     expect(choice).toBeDisabled();
+    expect(choice).toHaveAttribute('data-terminal-surface-state', 'degraded');
     expect(choice).toHaveAttribute('aria-description', expect.stringContaining('Agent is idle'));
-    expect(screen.queryByRole('button', { name: 'Command execution: Background' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Command execution: Direct' })).toBeNull();
   });
 
   it('switches execution surface in an idle existing Session', async () => {
@@ -1290,13 +1299,16 @@ describe('AiWorkspaceController', () => {
       setExecutionSurface: vi.fn(async () => undefined),
     });
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
-    const choice = await screen.findByRole('button', { name: 'Command execution: Background' });
+    const choice = await screen.findByRole('button', { name: 'Command execution: Direct' });
     expect(choice).toBeEnabled();
-    expect(choice).not.toHaveAttribute('aria-description');
+    expect(choice).toHaveAttribute(
+      'aria-description',
+      'Run reliably outside this terminal with structured output and exit status.',
+    );
 
     const user = userEvent.setup();
     await user.click(choice);
-    await user.click(await screen.findByRole('menuitemradio', { name: 'Visible terminal' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Visible command' }));
     await waitFor(() => expect(agent.setExecutionSurface).toHaveBeenCalledWith(view.summary.id, 'boundTerminal'));
   });
 
@@ -1315,11 +1327,11 @@ describe('AiWorkspaceController', () => {
       setExecutionSurface: vi.fn(async () => undefined),
     });
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
-    const choice = await screen.findByRole('button', { name: 'Command execution: Background' });
+    const choice = await screen.findByRole('button', { name: 'Command execution: Direct' });
     expect(choice).toBeEnabled();
     const user = userEvent.setup();
     await user.click(choice);
-    await user.click(await screen.findByRole('menuitemradio', { name: 'Visible terminal' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Visible command' }));
     await waitFor(() => expect(agent.setExecutionSurface).toHaveBeenCalledWith(ended.summary.id, 'boundTerminal'));
   });
 
