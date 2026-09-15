@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shellspan.local/protocol/agent/runtime/terminal-protocol-v1.schema.json",
+  "title": "ShellSpan Terminal Session Protocol v1 conformance fixture",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "oneOf": [
+      { "$ref": "#/$defs/generationLifecycleFrame" },
+      { "$ref": "#/$defs/rawOutputFrame" },
+      { "$ref": "#/$defs/integrationStateFrame" },
+      { "$ref": "#/$defs/integrationEventFrame" },
+      { "$ref": "#/$defs/commandStateFrame" },
+      { "$ref": "#/$defs/screenSnapshotFrame" },
+      { "$ref": "#/$defs/leaseFrame" },
+      { "$ref": "#/$defs/terminalInputFrame" },
+      { "$ref": "#/$defs/commandControlFrame" }
+    ]
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "counter": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "positiveCounter": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "byteArray": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 262144,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 255
+      }
+    },
+    "commonFrame": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "terminalSessionId",
+        "terminalGeneration",
+        "type"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "terminalSessionId": { "$ref": "#/$defs/identifier" },
+        "terminalGeneration": { "$ref": "#/$defs/positiveCounter" },
+        "type": { "type": "string" }
+      }
+    },
+    "geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rows", "columns"],
+      "properties": {
+        "rows": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "columns": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      }
+    },
+    "generationLifecycleFrame": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/commonFrame" },
+        {
+          "type": "object",
+          "required": ["event", "reasonCode"],
+          "properties": {
+            "type": { "const": "generationLifecycle" },
+            "event": { "enum": ["generationStarted", "generationClosed"] },
+            "transportKind": { "enum": ["localPty", "windowsConPty", "sshPty"] },
+            "geometry": { "$ref": "#/$defs/geometry" },
+            "reasonCode": {
+              "enum": [
+                "initialAttach",
+                "reconnect",
+                "userClosed",
+                "remoteExit",
+                "transportDisconnected",
+                "replaced",
+                "brokerShutdown"
+              ]
+            },
+            "predecessorGeneration": { "$ref": "#/$defs/positiveCounter" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "rawOutputFrame": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/commonFrame" },
+        {
+          "type": "object",
+          "required": ["sequence", "byteOffset", "bytes"],
+          "properties": {
+            "type": { "const": "rawOutput" },
+            "sequence": { "$ref": "#/$defs/positiveCounter" },
+            "byteOffset": { "$ref": "#/$defs/counter" },
+            "bytes": { "$ref": "#/$defs/byteArray" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "integrationCapability": {
+      "enum": [
+        "promptLifecycle",
+        "commandLifecycle",
+        "exactCommandLine",
+        "exitStatus",
+        "currentDirectory"
+      ]
+    },
+    "integrationStateFrame": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/commonFrame" },
+        {
+          "type": "object",
+          "required": ["state", "capabilities", "reasonCode"],
+          "properties": {
+            "type": { "const": "integrationState" },
+            "state": { "enum": ["initializing", "ready", "degraded", "unavailable", "invalidated"] },
+            "integrationId": { "$ref": "#/$defs/identifier" },
+            "shell": { "enum": ["bash", "zsh", "windowsPowerShell", "powerShell", "posixUnknown"] },
+            "capabilities": {
+              "type": "array",
+              "maxItems": 5,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/integrationCapability" }
+            },
+            "reasonCode": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "integrationEventFrame": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/commonFrame" },
+        {
+          "type": "object",
+          "required": [
+            "integrationId",
+            "eventSequence",
+            "observedThroughOutputSequence",
+            "trust",
+            "event"
+          ],
+          "properties": {
+            "type": { "const": "integrationEvent" },
+            "integrationId": { "$ref": "#/$defs/identifier" },
+            "eventSequence": { "$ref": "#/$defs/positiveCounter" },
+            "observedThroughOutputSequence": { "$ref": "#/$defs/counter" },
+            "trust": { "const": "cooperativeIntegration" },
+            "event": { "enum": ["promptStart", "promptEnd", "commandStart", "commandEnd", "directoryChanged"] },
+            "commandId": { "$ref": "#/$defs/identifier" },
+            "commandLine": { "type": "string", "minLength": 1, "maxLength": 8192 },
+            "exitCode": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+            "cwd": { "type": "string", "minLength": 1, "maxLength": 4096 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "effect": {
+      "enum": [
+        "none",
+        "readOnly",
+        "sensitiveRead",
+        "stateChange",
+        "destructive",
+        "externalSideEffect",
+        "unknown"
+      ]
+    },
+    "commandStateFrame": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/commonFrame" },
+        {
+          "type": "object",
+          "required": ["commandId", "operationId", "revision", "state", "effect", "reasonCode"],
+          "properties": {
+            "type": { "const": "commandState" },
+            "commandId": { "$ref": "#/$defs/identifier" },
+            "operationId": { "$ref": "#/$defs/identifier" },
+            "revision": { "$ref": "#/$defs/positiveCounter" },
+            "state": {
+              "enum": [
+                "awaitingLease",
+                "submitted",
+                "running",
+                "cancelRequested",
+                "completed",
+                "cancelled",
+                "timedOut",
+                "takenOver",
+                "uncertain",
+                "failed"
+              ]
+            },
+            "effect": { "$ref": "#/$defs/effect" },
+            "outputStartSequence": { "$ref": "#/$defs/positiveCounter" },
+            "outputEndSequence": { "$ref": "#/$defs/positiveCounter" },
+            "exitCode": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+            "cwd": { "type": "string", "minLength": 1, "maxLength": 4096 },
+            "truncated": { "type": "boolean" },
+            "reasonCode": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "cursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["row", "column", "visible"],
+      "properties": {
+        "row": { "$ref": "#/$defs/counter" },
+        "column": { "$ref": "#/$defs/counter" },
+        "visible": { "type": "boolean" }
+      }
+    },
+    "screenSnapshotFrame": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/commonFrame" },
+        {
+          "type": "object",
+          "required": [
+            "screenVersion",
+            "throughOutputSequence",
+            "rows",
+            "columns",
+            "cursor",
+            "activeBuffer",
+            "title",
+            "content"
+          ],
+          "properties": {
+            "type": { "const": "screenSnapshot" },
+            "screenVersion": { "$ref": "#/$defs/positiveCounter" },
+            "throughOutputSequence": { "$ref": "#/$defs/counter" },
+            "rows": { "type": "integer", "minimum": 1, "maximum": 1000 },
+            "columns": { "type": "integer", "minimum": 1, "maximum": 1000 },
+            "cursor": { "$ref": "#/$defs/cursor" },
+            "activeBuffer": { "enum": ["primary", "alternate"] },
+            "title": { "type": "string", "maxLength": 4096 },
+            "content": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1000,
+              "items": { "type": "string", "maxLength": 16384 }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ownerId"],
+      "properties": {
+        "kind": { "enum": ["user", "agent"] },
+        "ownerId": { "$ref": "#/$defs/identifier" },
+        "agentSessionId": { "$ref": "#/$defs/identifier" },
+        "taskId": { "$ref": "#/$defs/identifier" },
+        "operationId": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "leaseFrame": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/commonFrame" },
+        {
+          "type": "object",
+          "required": ["leaseId", "revision", "state", "owner", "reasonCode"],
+          "properties": {
+            "type": { "const": "lease" },
+            "leaseId": { "$ref": "#/$defs/identifier" },
+            "revision": { "$ref": "#/$defs/positiveCounter" },
+            "state": { "enum": ["acquired", "released"] },
+            "owner": { "$ref": "#/$defs/owner" },
+            "reasonCode": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "inputSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ownerId"],
+      "properties": {
+        "kind": { "enum": ["user", "agent", "system"] },
+        "ownerId": { "$ref": "#/$defs/identifier" },
+        "operationId": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "terminalInputFrame": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/commonFrame" },
+        {
+          "type": "object",
+          "required": ["leaseId", "inputSequence", "source", "inputKind", "bytes"],
+          "properties": {
+            "type": { "const": "terminalInput" },
+            "leaseId": { "$ref": "#/$defs/identifier" },
+            "inputSequence": { "$ref": "#/$defs/positiveCounter" },
+            "source": { "$ref": "#/$defs/inputSource" },
+            "inputKind": { "enum": ["text", "key", "paste", "interrupt", "systemControl"] },
+            "bytes": { "$ref": "#/$defs/byteArray" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "commandControlFrame": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/commonFrame" },
+        {
+          "type": "object",
+          "required": ["commandId", "operationId", "leaseId", "action", "requester"],
+          "properties": {
+            "type": { "const": "commandControl" },
+            "commandId": { "$ref": "#/$defs/identifier" },
+            "operationId": { "$ref": "#/$defs/identifier" },
+            "leaseId": { "$ref": "#/$defs/identifier" },
+            "action": { "enum": ["cancel", "takeover"] },
+            "requester": { "enum": ["user", "agent", "runtime"] }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}
