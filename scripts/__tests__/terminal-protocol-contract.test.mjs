@@ -104,10 +104,8 @@ describe('terminal execution Phase 0 protocol contract', () => {
       .filter(({ type }) => type === 'session/execution_surface_changed')
       .map(({ data }) => data.surface);
     expect(new Set(changedSurfaces)).toEqual(new Set(['direct', 'boundTerminal']));
-    expect(toolSchema.$defs.execCommandArguments.properties.channel.enum)
-      .toEqual(['pty', 'direct']);
-    expect(toolSchema.$defs.execCommandResultData.properties.channel.enum)
-      .toEqual(['pty', 'direct']);
+    expect(toolSchema.$defs.execCommandArguments.properties.channel.const).toBe('direct');
+    expect(toolSchema.$defs.execCommandResultData.properties.channel.const).toBe('direct');
 
     const validateTool = validator.compile(toolSchema);
     const terminalCall = {
@@ -222,14 +220,12 @@ describe('terminal execution Phase 0 protocol contract', () => {
       'utf8',
     );
     for (const flag of [
-      'terminal_surface_semantics_v1',
       'terminal_broker_v1',
       'terminal_shell_integration_v1',
       'terminal_execute_v1',
       'terminal_remote_agent_pty_v1',
       'terminal_interactive_tools_v1',
       'terminal_remote_interactive_tools_v1',
-      'terminal_legacy_wrapper_fallback_v1',
     ]) {
       expect(compatibility).toContain(`\`${flag}\``);
     }
@@ -246,14 +242,13 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(compatibility).toMatch(/successful reconnect drops\s+all superseded transport identities/i);
   });
 
-  it('keeps the new path wrapper-free and isolates the legacy fallback from rolled-out local routing', async () => {
-    const [integration, terminalExecute, adapter, callPolicy, modelTools, legacy, runtime, broker, manifest] = await Promise.all([
+  it('keeps visible commands cooperative and removes compatibility execution', async () => {
+    const [integration, terminalExecute, adapter, callPolicy, modelTools, runtime, broker, manifest] = await Promise.all([
       readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_integration.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native/terminal_execute.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native_adapter.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native/call_policy.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/model_tools.rs'), 'utf8'),
-      readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native/pty.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native/runtime.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_broker.rs'), 'utf8'),
       readJson('built-in-tools.json'),
@@ -269,16 +264,14 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(terminalExecuteProduction).not.toContain('BEGIN:');
     expect(terminalExecuteProduction).not.toContain('[Agent]');
     expect(adapter).toContain('TerminalVisibleCommandRoute::TerminalExecute');
-    expect(adapter).toContain('TerminalVisibleCommandRoute::LegacyFallback');
+    expect(adapter).toContain('TerminalVisibleCommandRoute::Unavailable');
+    expect(adapter).not.toContain('LegacyFallback');
     expect(adapter).toContain('TerminalLifecycleTrust::DirectRequired');
     expect(callPolicy).toContain('requires Direct execution for security-sensitive command lifecycle evidence');
     expect(modelTools).toContain('"lifecycleTrust"');
     expect(modelTools).toContain('visible-terminal lifecycle is never security evidence or a sandbox');
-    expect(legacy).toContain('build_posix_wrapper');
-    expect(legacy).toContain('build_powershell_wrapper');
-    expect(runtime).toContain('TERMINAL_LEGACY_WRAPPER_REMOVED_ON_WINDOWS');
-    expect(runtime).toContain('TERMINAL_LEGACY_WRAPPER_REMOVED_ON_MACOS');
-    expect(runtime).toContain('legacy_pty_wrapper_available');
+    expect(runtime).not.toContain('AgentExecutionChannelNative::Pty');
+    expect(broker).not.toContain('terminal_legacy_wrapper_fallback_v1');
     expect(broker).toMatch(/TERMINAL_BROKER_DEFAULT_ENABLED: bool =\s+cfg!\(any\(target_os = "macos", target_os = "windows"\)\)/);
     expect(broker).toContain('remote_visible_command_route');
     expect(broker).toContain('TerminalRolloutCountersSnapshot');
@@ -411,7 +404,7 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(windowsRunner).toContain('windows_powershell_5_1_interactive_terminal_operation');
     expect(windowsRunner).toContain('windows_powershell_7_interactive_terminal_operation');
     expect(windowsRunner).toContain("cargoTest('agent_runtime::native::process::tests')");
-    expect(windowsRunner).toContain("cargoTest('agent_runtime::native::pty::tests')");
+    expect(windowsRunner).not.toContain('native::pty');
     expect(windowsRunner).toContain("cargoTest('agent_runtime::native::runtime::tests')");
     expect(windowsRunner).toContain("cargoTest('commands::tests')");
     expect(windowsRunner).toContain("cargoExampleTest('terminal_transport_baseline')");
@@ -431,8 +424,8 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(brokerTests).toContain('assert_eq!(second_receipt.input_sequence, 2)');
     expect(brokerTests).toContain('echo-independent payload');
     expect(brokerTests).toContain('assert!(bounded_replay.has_more)');
-    expect(brokerTests).toContain('phase6_windows_default_is_wrapper_free_and_remote_rollback_stays_compatible');
-    expect(brokerTests).toContain('phase6_macos_default_is_wrapper_free_and_remote_rollback_stays_compatible');
+    expect(brokerTests).toContain('phase6_windows_rollbacks_make_visible_commands_unavailable');
+    expect(brokerTests).toContain('phase6_macos_rollbacks_make_visible_commands_unavailable');
     expect(brokerTests).toContain('rollout_counters_are_bounded_privacy_safe_and_cover_phase6_signals');
     expect(broker).toContain('TRANSPORT_LATENCY_SAMPLE_INTERVAL_FRAMES: u64 = 64');
     expect(benchmark).toContain('SHELLSPAN_BENCH_PAYLOAD_BEGIN:');

@@ -159,7 +159,7 @@
           "pattern": "^[^\\u0000-\\u001F\\u007F]*$"
         },
         "explanation": { "type": "string", "minLength": 1, "maxLength": 2048 },
-        "channel": { "enum": ["pty", "direct"] },
+        "channel": { "const": "direct" },
         "cwd": { "$ref": "#/$defs/path" },
         "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 3600000 },
         "background": { "type": "boolean" },
@@ -501,7 +501,7 @@
       "additionalProperties": false,
       "required": ["channel", "state", "stdout", "stderr", "truncated"],
       "properties": {
-        "channel": { "enum": ["pty", "direct"] },
+        "channel": { "const": "direct" },
         "state": { "enum": ["running", "exited"] },
         "exitCode": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
         "stdout": { "type": "string", "maxLength": 1048576 },

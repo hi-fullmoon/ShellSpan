@@ -59,11 +59,11 @@ the first phase that must supply acceptance evidence.
 | Frontend contracts | `pnpm test` | Relevant contract tests pass; unrelated failure is recorded separately and cannot be called a pass. |
 | Direct native execution | `cargo test --manifest-path src-tauri/Cargo.toml agent_runtime::native::process::tests --lib -- --nocapture` | All host-applicable direct process tests pass. |
 | Lease behavior | `cargo test --manifest-path src-tauri/Cargo.toml agent_runtime::native::terminal_lease::tests --lib -- --nocapture` | Ownership, frontend readiness, release identity, and restart tests pass. |
-| Current native PTY behavior | `cargo test --manifest-path src-tauri/Cargo.toml agent_runtime::native::pty::tests --lib -- --nocapture` | All host-applicable tests pass; ignored SSH case remains missing until the fixture command passes. |
+| Cooperative visible-command behavior | `cargo test --manifest-path src-tauri/Cargo.toml agent_runtime::native::terminal_execute::tests --lib -- --nocapture` | All host-applicable tests pass; unsupported targets report unavailable. |
 | Recovery behavior | `cargo test --manifest-path src-tauri/Cargo.toml agent_runtime::recovery::tests --lib -- --nocapture` plus the visible-terminal recovery filter | An execution without a durable result is uncertain and not resumable/replayed. |
 | Current transport contracts | targeted `commands::tests`, `session::tests`, terminal registry, and performance contract tests | UTF-8 boundaries, startup gates, bounded queues, ordering, resize, and high/low-watermark behavior pass. |
 | Visible-terminal host gate | `pnpm test:agent-visible-terminal` | Formatting/check, host-native PTY/lease tests, recovery filters, and frontend terminal integration tests pass. |
-| Isolated SSH visible gate | `pnpm test:agent-visible-terminal:ssh` | Docker fixture builds, becomes healthy, ignored SSH PTY test passes exactly, and compose cleanup succeeds. |
+| Isolated SSH visible gate | `pnpm test:terminal-visible:ssh` | Docker fixture proves dedicated Agent SSH PTY `terminal_execute`; unsupported targets are unavailable. |
 | Local transport performance | `cargo run --release --manifest-path src-tauri/Cargo.toml --example terminal_transport_baseline -- --bytes 2097152 --repetitions 5 --sessions 4` | Expected byte counts are received; median/p95 throughput and event-vs-poll latency are recorded. |
 | SSH transport performance | Run the same example with `--ssh` and the loopback fixture environment | Expected bytes are received for single and four-session SSH PTYs; measurements are recorded. |
 
@@ -197,7 +197,7 @@ Protocol vocabulary and persisted execution-surface values remain additive.
 | Lane | Phase 6 result | Evidence boundary |
 | --- | --- | --- |
 | Windows PowerShell 5.1 / PowerShell 7 local ConPTY | **PASS — DEFAULT ON** | Native Windows 11 x64, `x86_64-pc-windows-msvc`; six exact real-ConPTY Broker/visible/interactive fixtures, Direct regression, full serial Rust, and two release performance rounds pass. |
-| Persisted sessions and event-v5 vocabulary | **PASS — UNCHANGED** | `direct` / `boundTerminal` and `exec_command.channel = direct` / `pty` retain their stored/wire meanings; no migration rewrite or replay was added. |
+| Persisted sessions and event-v5 vocabulary | **PASS** | `direct` / `boundTerminal` retain their stored meanings. New `exec_command` calls accept only `channel = direct`; visible commands use `terminal_execute`. |
 | macOS zsh and bash | **PASS — DEFAULT ON** | Native macOS 26.6.2 arm64; exact Broker/visible/interactive fixtures, Direct regression, 798-test serial Rust suite, and two release performance rounds pass. Local wrapper routing is removed. |
 | Linux bash and zsh | **MISSING — DEFERRED, DEFAULT OFF** | No Phase 5 native acceptance in this Windows continuation; wrapper/parser compatibility remains compiled and routable. |
 | Isolated SSH bash and zsh | **VISIBLE COMMAND PASS — DEFAULT ON; INTERACTIVE MISSING — DEFAULT OFF** | Phase 4 real-SSH bash/zsh evidence enables the dedicated Agent PTY on Windows and macOS desktop hosts. The separate remote-interactive flag stays off because the SSH Phase 5 matrix has not run; wrapper fallback remains available for rollback. |

@@ -250,9 +250,9 @@ ignored and recorded as a protocol violation.
 
 ## Visible-command lifecycle
 
-The runtime exposes the additive `terminal_execute` capability for visible commands.
-It is different from legacy `exec_command.channel = "pty"` and MUST NOT be
-implemented by silently changing that persisted meaning.
+The runtime exposes `terminal_execute` for visible commands. The removed
+`exec_command.channel = "pty"` contract MUST NOT be accepted or silently
+reinterpreted.
 
 The broker command states and allowed transitions are:
 
@@ -403,16 +403,15 @@ publication additionally requires the independently absent-off
 `terminal_remote_interactive_tools_v1` flag. Linux keeps the new-path flags
 absent-off.
 
-The legacy wrapper remains a decodable `exec_command.channel = "pty"`
-compatibility contract, but Windows and macOS local targets MUST reject its
-dispatch. Local degradation or flag rollback on either rolled-out platform MUST
-expose the real terminal as unavailable/degraded and offer Direct explicitly;
-it MUST NOT revive the wrapper or replay an operation. Linux and explicit remote
-rollback retain the compatibility implementation until their own removal gates pass.
+`exec_command.channel` accepts only `direct`. Visible commands use
+`terminal_execute`; the former `pty` wrapper contract, marker parser, and
+fallback route are removed. If cooperative terminal execution is not ready,
+the visible-command capability MUST be unavailable and MUST NOT reroute or
+replay the operation through another execution mechanism.
 
 The read-only Broker snapshot exposes process-lifetime counters for integration
-ready transitions, degraded compatibility fallback selections, accepted
-lifecycle events, uncertain settlements, timeouts, takeovers, capture
+ready transitions, accepted lifecycle events, uncertain settlements, timeouts,
+takeovers, capture
 truncations, backpressure entries, and Broker-ingress latency sample count,
 total microseconds, and maximum microseconds. Latency MUST be sampled at the
 first accepted frame of a generation and every 64 accepted frames thereafter,
