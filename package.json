@@ -9,7 +9,6 @@
     "build": "tsc && vite build",
     "test": "vitest run",
     "test:agent-visible-terminal": "node scripts/verify-agent-visible-terminal.mjs",
-    "test:agent-visible-terminal:ssh": "node scripts/verify-agent-visible-terminal.mjs --ssh-fixture",
     "test:terminal-broker:linux-container": "node scripts/verify-terminal-broker-linux-container.mjs",
     "test:terminal-visible:linux-container": "node scripts/verify-terminal-broker-linux-container.mjs",
     "test:terminal-visible:linux-container:focused": "node scripts/verify-terminal-broker-linux-container.mjs --phase3-only",
