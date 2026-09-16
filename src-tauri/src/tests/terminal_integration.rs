@@ -526,7 +526,7 @@
             .unwrap();
         let input = format!("{}{}", command, shell.enter());
         broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 transport_id,
                 TerminalBrokerInputSource::Agent {
                     agent_session_id: "agent-session".into(),
@@ -590,7 +590,7 @@
             .unwrap();
         let input = format!("{}{}", command, shell.enter());
         broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 transport_id,
                 TerminalBrokerInputSource::Agent {
                     agent_session_id: "agent-session".into(),
@@ -620,7 +620,7 @@
         thread::sleep(Duration::from_millis(100));
         assert!(operation.request_settlement(requested).unwrap());
         broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 transport_id,
                 TerminalBrokerInputSource::System {
                     operation_id: operation_id.clone(),
@@ -639,7 +639,7 @@
                 .release_agent_lease(transport_id, "agent-session", "task-phase3", &operation_id)
                 .unwrap();
             assert!(broker
-                .admit_compatibility_input(
+                .admit_terminal_input(
                     transport_id,
                     TerminalBrokerInputSource::Agent {
                         agent_session_id: "agent-session".into(),

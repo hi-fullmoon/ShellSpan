@@ -428,7 +428,7 @@
             let transport_id = self.transport_id.clone();
             let shell_channel = &mut self.shell_channel;
             broker
-                .admit_compatibility_input(
+                .admit_terminal_input(
                     &transport_id,
                     TerminalBrokerInputSource::Agent {
                         agent_session_id: self.owner.agent_session_id.clone(),
@@ -493,7 +493,7 @@
             let transport_id = self.transport_id.clone();
             let shell_channel = &mut self.shell_channel;
             broker
-                .admit_compatibility_input(
+                .admit_terminal_input(
                     &transport_id,
                     TerminalBrokerInputSource::System {
                         operation_id: operation_id.clone(),
@@ -586,7 +586,7 @@
             broker
                 .remote_visible_command_route("fixture-user-owned")
                 .unwrap(),
-            TerminalVisibleCommandRoute::LegacyFallback
+            TerminalVisibleCommandRoute::Unavailable
         );
         let mut terminal = RemoteFixtureTerminal::connect(
             "shellspan",
@@ -722,7 +722,7 @@
                 let wrote_in_closure = Arc::clone(&wrote);
                 assert!(terminal
                     .broker
-                    .admit_compatibility_input(
+                    .admit_terminal_input(
                         &terminal.transport_id,
                         crate::terminal_broker::TerminalBrokerInputSource::Agent {
                             agent_session_id: terminal.owner.agent_session_id.clone(),
