@@ -1027,8 +1027,8 @@ const DeploymentCenter: React.FC = () => {
             </Card>
 
             {selectedWorkflow && (
-              <ScrollArea className="min-h-0 min-w-0 @min-[64rem]:-mr-4 @min-[64rem]:h-full">
-                <div id="deployment-release-workflow" tabIndex={-1} className="flex flex-col gap-3 pb-2 outline-none @min-[64rem]:pr-4">
+              <ScrollArea className="-mr-4 min-h-0 min-w-0 @min-[64rem]:h-full">
+                <div id="deployment-release-workflow" tabIndex={-1} className="flex flex-col gap-3 pr-4 pb-2 outline-none">
                   <Card size="sm" variant="outline" radius="compact">
                     <CardHeader>
                       <CardTitle>{selectedWorkflow.name}</CardTitle>
@@ -1508,7 +1508,7 @@ const DeploymentCenter: React.FC = () => {
       >
         <DialogContent
           showCloseButton={false}
-          className="flex max-h-[calc(100vh-2rem)] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0"
+          className="flex h-[min(36rem,calc(100vh-4rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0"
         >
           <DialogHeader className="sr-only">
             <DialogTitle>{t('deployment.history.title')}</DialogTitle>

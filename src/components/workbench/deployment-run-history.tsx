@@ -281,7 +281,7 @@ export const DeploymentRunHistory: React.FC<DeploymentRunHistoryProps> = ({
         size="sm"
         radius="compact"
         className={display === 'dialog'
-          ? 'min-h-0 max-h-[min(42rem,calc(100vh-2rem))] rounded-none ring-0'
+          ? 'h-full min-h-0 flex-1 rounded-none ring-0'
           : undefined}
       >
         <CardHeader>
@@ -313,11 +313,14 @@ export const DeploymentRunHistory: React.FC<DeploymentRunHistoryProps> = ({
           className={cn(
             'flex flex-col gap-2',
             display === 'dialog'
-              && 'native-scrollbar-default min-h-0 max-h-[min(32rem,calc(100vh-12rem))] overflow-y-auto',
+              && 'native-scrollbar-default min-h-0 flex-1 overflow-y-auto',
           )}
         >
           {!runsLoading && runs.length === 0 ? (
-            <div className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-center text-sm text-muted-foreground">
+            <div className={cn(
+              'flex min-h-24 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-center text-sm text-muted-foreground',
+              display === 'dialog' && 'flex-1',
+            )}>
               <HistoryIcon aria-hidden className="size-5" />
               {t('deployment.history.empty')}
             </div>
