@@ -89,7 +89,7 @@ Deliverables:
 - A byte-oriented raw-output pipeline that fans out to display transport, bounded capture, shell-integration parsing, and the future screen model.
 - Ordered frame sequencing, bounded replay/deduplication behavior, and retained high/low-watermark backpressure.
 - One lease-authorized input path for user, Agent, and system control input.
-- No functional cutover from the legacy wrapper in this phase.
+- This historical phase did not yet perform the later cooperative cutover.
 
 Gate:
 
@@ -114,7 +114,7 @@ Deliverables:
 - Generation-bound cooperative lifecycle events for prompt start/end, command start/end, exact command line, exit status, and current directory.
 - A `terminal_execute` native tool and contract that submits real input to the current interactive shell without `/bin/sh -c`, nested PowerShell, hidden BEGIN/END wrappers, or synthetic command echo.
 - Command-scoped output capture and uncertainty semantics.
-- Feature-flagged compatibility fallback during migration.
+- A temporary migration fallback, removed by the final Phase 6 product cutover.
 
 Gate:
 
@@ -138,7 +138,7 @@ untrusted-script requests are forced to Direct execution.
 POSIX production readiness is available only when the broker, integration, and
 execute flags and all identity/capability gates pass. Native macOS bash/zsh
 Phase 5/6 acceptance passed on 2026-09-16, so the macOS local path is now
-default-on and wrapper-free; Linux remains default-off with legacy fallback.
+default-on and wrapper-free; Linux reports visible commands unavailable.
 Native Windows PowerShell 5.1 and PowerShell 7.6 ConPTY acceptance also passed
 on 2026-09-16. Phase 6 therefore enables the local Windows path by default. It
 proves persistent directory,
@@ -195,8 +195,8 @@ covering REPL input, a single-key confirmation, resize, alternate-screen state,
 and fail-closed credential input. A later native macOS continuation passed the
 same production Broker/screen/lease path on bash 3.2 and zsh 5.9. Phase 5 is
 therefore **PASS for Windows and macOS local targets**. Linux and Phase 5 SSH
-remain explicitly deferred and unverified; their flags stay off and their
-legacy fallback remains required. The missing SSH Phase 5 gate no longer blocks
+remain explicitly deferred and unverified; their flags stay off and visible
+commands are unavailable. The missing SSH Phase 5 gate no longer blocks
 the already-passed Phase 4 remote visible-command rollout.
 
 ## Phase 6: rollout and legacy removal
@@ -204,15 +204,15 @@ the already-passed Phase 4 remote visible-command rollout.
 Deliverables:
 
 - Separate feature flags for the broker, shell integration, and interactive tools, with documented rollback behavior.
-- Privacy-safe counters for integration readiness, degraded fallback, lifecycle matching, uncertainty, timeout, takeover, truncation, backpressure, and transport latency.
+- Privacy-safe counters for integration readiness, lifecycle matching, uncertainty, timeout, takeover, truncation, backpressure, and transport latency.
 - Platform-scoped default enablement after each native acceptance gate passes;
   enable the passed remote visible-command path independently, while keeping
   remote interactive tools and the Linux new path default-off until their
   independent Phase 5 gates pass.
-- Preserve platform-local rollback: removing the Windows/macOS local wrapper
-  must not remove the compatibility implementation required by deferred
-  platforms.
-- Removal of the legacy wrapper, marker parser, synthetic `[Agent]` echo, and obsolete compatibility tests only after the new path has stable default evidence.
+- Platform rollback makes visible commands unavailable while Direct remains
+  independently available; it never revives another execution mechanism.
+- Remove the legacy wrapper, marker parser, synthetic `[Agent]` echo, `pty`
+  channel, fallback flag, and obsolete compatibility tests.
 - Updated user and protocol documentation.
 
 Final gate:
@@ -225,10 +225,9 @@ Final gate:
 Acceptance evidence: [Windows Phase 6 Evidence](./terminal-execution-phase-6-acceptance.md) and [macOS Phase 6 Evidence](./terminal-execution-phase-6-macos-acceptance.md).
 On native Windows 11 x64, absent trusted configuration now enables the local
 Broker, shell integration, `terminal_execute`, and interactive tools. Windows
-local routing cannot dispatch the legacy wrapper, including during rollback;
-it exposes Direct explicitly instead. The old `pty` vocabulary remains
-decodable, while the wrapper/parser implementation is retained only for remote
-and Linux compatibility. Privacy-safe bounded counters and deterministic
+local routing cannot dispatch a wrapper, including during rollback; it exposes
+Direct explicitly instead. The `pty` vocabulary and wrapper/parser
+implementation have been removed. Privacy-safe bounded counters and deterministic
 latency sampling are exposed through the existing read-only Broker snapshot.
 The consolidated Windows gate, frontend checks, repository checks, and two
 release performance rounds pass. The independent macOS gate passes native
