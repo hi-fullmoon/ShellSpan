@@ -18,7 +18,7 @@ export type TerminalColorScheme = (typeof TERMINAL_COLOR_SCHEME_IDS)[number];
 export type TerminalBellStyle = 'none' | 'sound';
 export type TerminalRightClickBehavior = 'paste' | 'copyPaste' | 'none';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
-export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'monitor' | 'logs';
+export type WorkbenchTab = 'connections' | 'deployments' | 'knownHosts' | 'keychain' | 'monitor' | 'logs';
 export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts' | 'experimental';
 export type PetdexConnectionStatus =
   | 'notDetected'
@@ -295,11 +295,15 @@ export interface TerminalBrokerSnapshot {
   };
   remoteAgentPtyRollout: TerminalFeatureRolloutDecision & {
     name: 'terminal_remote_agent_pty_v1';
-    defaultEnabled: false;
+    defaultEnabled: boolean;
   };
   interactiveToolsRollout: TerminalFeatureRolloutDecision & {
     name: 'terminal_interactive_tools_v1';
     defaultEnabled: boolean;
+  };
+  remoteInteractiveToolsRollout: TerminalFeatureRolloutDecision & {
+    name: 'terminal_remote_interactive_tools_v1';
+    defaultEnabled: false;
   };
   legacyFallbackRollout: TerminalFeatureRolloutDecision & {
     name: 'terminal_legacy_wrapper_fallback_v1';

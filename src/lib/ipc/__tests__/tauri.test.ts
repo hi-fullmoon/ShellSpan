@@ -19,8 +19,33 @@ vi.mock('@/lib/logger', () => ({
 import {
   buildRemoteConnectionRequest,
   buildSessionCreateRequest,
+  invokeBuildDeploymentArtifact,
+  invokeApproveDeploymentPlan,
+  invokeCancelDeploymentArtifactBuild,
+  invokeCancelDeploymentArtifactTransfer,
+  invokeCancelDeploymentRemoteRunner,
   invokeCreateAgentRuntimeSession,
+  invokeCreateDeploymentPlan,
+  invokeCancelDeploymentPreflight,
+  invokeDeploymentPreflight,
+  invokeDeploymentArtifactSourceSnapshot,
+  invokeCancelDeploymentReconciliationObservation,
+  invokeDeploymentReconcile,
+  invokeDeploymentReconciliationBinding,
+  invokeDeploymentRuntimeCapabilities,
+  invokeDeploymentStartupRecovery,
+  invokeTransferDeploymentArtifact,
   invokeCreateLocalSession,
+  invokeGetDeploymentPlan,
+  invokeGetDeploymentRunDetail,
+  invokeExportDeploymentRunAudit,
+  invokeListDeploymentRunEventsBefore,
+  invokeListDeploymentRunPage,
+  invokeClaimDeploymentNotifications,
+  invokeShowDeploymentNotification,
+  invokeRejectDeploymentPlan,
+  invokeRequestDeploymentApproval,
+  invokeRunDeploymentRemote,
   invokeGetTerminalBrokerSnapshot,
   invokeGetAiRouteApiKey,
   invokeAgentTerminalLeaseReady,
@@ -39,6 +64,264 @@ import type { ConnectionProfile } from '@/types';
 beforeEach(() => {
   invokeMock.mockReset();
   loggerErrorMock.mockReset();
+});
+
+describe('deployment plan serialization', () => {
+  it('reads the native deployment rollout before admitting new work', async () => {
+    invokeMock.mockResolvedValue({ admissionsEnabled: true });
+
+    await invokeDeploymentRuntimeCapabilities();
+
+    expect(invokeMock).toHaveBeenCalledWith('deployment_runtime_capabilities', undefined);
+  });
+
+  it('uses bounded history, detail, event, and notification receipt wire shapes', async () => {
+    invokeMock.mockResolvedValue({});
+
+    await invokeListDeploymentRunPage('workflow-1', '100:run-1', 20);
+    await invokeGetDeploymentRunDetail('run-2', 100);
+    await invokeExportDeploymentRunAudit('run-2');
+    await invokeListDeploymentRunEventsBefore('run-2', 41, 25);
+    await invokeClaimDeploymentNotifications(10);
+    await invokeShowDeploymentNotification({
+      runId: 'run-2',
+      title: 'Deployment failed',
+      body: 'Open run run-2',
+      openLabel: 'Open run',
+    });
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'list_deployment_run_page', {
+      workflowId: 'workflow-1', cursor: '100:run-1', limit: 20,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'get_deployment_run_detail', {
+      id: 'run-2', eventLimit: 100,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, 'export_deployment_run_audit', {
+      runId: 'run-2',
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(4, 'list_deployment_run_events_before', {
+      runId: 'run-2', beforeSequence: 41, limit: 25,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(5, 'claim_deployment_notifications', { limit: 10 });
+    expect(invokeMock).toHaveBeenNthCalledWith(6, 'show_deployment_notification', {
+      input: {
+        runId: 'run-2',
+        title: 'Deployment failed',
+        body: 'Open run run-2',
+        openLabel: 'Open run',
+      },
+    });
+  });
+
+  it('uses the frozen startup recovery and reconciliation wire shapes', async () => {
+    invokeMock.mockResolvedValue({});
+    const input = {
+      operationId: 'deployment-reconciliation:fixture',
+      planId: `plan-${'c'.repeat(64)}`,
+      planDigest: 'c'.repeat(64),
+      runId: 'run-1',
+      expectedRunRevision: 9,
+      artifactTransferOperationId: 'deployment-artifact-transfer:fixture',
+      remoteStagingIdentity: `deployment-staging-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`,
+    };
+
+    await invokeDeploymentStartupRecovery();
+    await invokeDeploymentReconciliationBinding(input.runId);
+    await invokeDeploymentReconcile(input);
+    await invokeCancelDeploymentReconciliationObservation(input.operationId);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'deployment_startup_recovery', undefined);
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'deployment_reconciliation_binding', {
+      runId: input.runId,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, 'deployment_reconcile', { input });
+    expect(invokeMock).toHaveBeenNthCalledWith(
+      4,
+      'deployment_cancel_reconciliation_observation',
+      { operationId: input.operationId },
+    );
+  });
+
+  it('uses the typed pure-data create and query wire shapes', async () => {
+    invokeMock.mockResolvedValue({});
+    const input = {
+      workflowId: 'workflow-1',
+      expectedRevision: 3,
+      sourceRunId: null,
+      operationKind: 'deploy' as const,
+      triggerKind: 'manual' as const,
+      artifactReference: `deployment-artifact-v1:${'d'.repeat(64)}:${'e'.repeat(64)}`,
+      sourceRevision: {
+        revision: 'a'.repeat(40),
+        dirty: false,
+      },
+      target: {
+        profileId: 'profile-1',
+        profileUpdatedAt: 7,
+        host: 'example.test',
+        port: 22,
+        username: 'deploy',
+        authMethod: 'password' as const,
+        jumpHost: null,
+      },
+      currentRelease: null,
+      targetRelease: {
+        releaseId: 'release-next',
+        artifactDigestSha256: 'b'.repeat(64),
+      },
+      rollbackRelease: null,
+      preflight: {
+        checkedAt: 1_000,
+        checks: [{
+          code: 'data-ready',
+          outcome: 'passed' as const,
+          summary: 'Preflight data is ready',
+        }],
+      },
+      ttlSeconds: 600,
+    };
+
+    await invokeCreateDeploymentPlan(input);
+    await invokeGetDeploymentPlan(`plan-${'c'.repeat(64)}`);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'create_deployment_plan', { input });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'get_deployment_plan', {
+      planId: `plan-${'c'.repeat(64)}`,
+    });
+  });
+
+  it('uses the fixed deployment preflight and cancellation wire shapes', async () => {
+    invokeMock.mockResolvedValue({});
+    const input = {
+      operationId: 'deployment-preflight:fixture',
+      workflowId: 'workflow-1',
+      expectedRevision: 3,
+      artifactReference: `deployment-artifact-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`,
+      ttlSeconds: 600,
+      timeoutMs: 30_000,
+    };
+
+    await invokeDeploymentPreflight(input);
+    await invokeCancelDeploymentPreflight(input.operationId);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'deployment_preflight', { input });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'deployment_cancel_preflight', {
+      operationId: input.operationId,
+    });
+  });
+
+  it('uses typed source snapshot, artifact build, and cancellation wire shapes', async () => {
+    invokeMock.mockResolvedValue({});
+    const snapshot = { workflowId: 'workflow-1', expectedRevision: 3 };
+    const input = {
+      operationId: 'deployment-artifact-build:fixture',
+      ...snapshot,
+      sourceRevision: { revision: 'a'.repeat(40), dirty: false },
+      builderKind: 'dockerBuildx' as const,
+      timeoutMs: 900_000,
+    };
+
+    await invokeDeploymentArtifactSourceSnapshot(snapshot);
+    await invokeBuildDeploymentArtifact(input);
+    await invokeCancelDeploymentArtifactBuild(input.operationId);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'deployment_artifact_source_snapshot', { input: snapshot });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'deployment_build_artifact', { input });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, 'deployment_cancel_artifact_build', {
+      operationId: input.operationId,
+    });
+  });
+
+  it('uses the closed artifact transfer and operation-scoped cancellation wire shapes', async () => {
+    invokeMock.mockResolvedValue({});
+    const input = {
+      operationId: 'deployment-artifact-transfer:fixture',
+      planId: `plan-${'c'.repeat(64)}`,
+      planDigest: 'c'.repeat(64),
+      workflowId: 'workflow-1',
+      workflowRevision: 3,
+      artifactReference: `deployment-artifact-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`,
+      sourceRevision: { revision: 'd'.repeat(40), dirty: false },
+      target: {
+        profileId: 'profile-1',
+        profileUpdatedAt: 7,
+        host: 'example.test',
+        port: 22,
+        username: 'deploy',
+        authMethod: 'password' as const,
+        jumpHost: null,
+      },
+      remoteRoot: '/srv/api',
+      releaseId: 'release-next',
+      releaseDigestSha256: 'e'.repeat(64),
+      timeoutMs: 3_600_000,
+    };
+
+    await invokeTransferDeploymentArtifact(input);
+    await invokeCancelDeploymentArtifactTransfer(input.operationId);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'deployment_transfer_artifact', { input });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'deployment_cancel_artifact_transfer', {
+      operationId: input.operationId,
+    });
+  });
+
+  it('binds native approval decisions and remote execution to exact run identities', async () => {
+    invokeMock.mockResolvedValue({});
+    const approval = {
+      planId: `plan-${'c'.repeat(64)}`,
+      planDigest: 'c'.repeat(64),
+      runId: 'run-1',
+      runRevision: 2,
+      expiresAt: 123_000,
+    };
+    await invokeRequestDeploymentApproval(approval);
+    await invokeApproveDeploymentPlan(approval);
+    await invokeRejectDeploymentPlan(approval);
+
+    const runner = {
+      operationId: 'deployment-remote-runner:fixture',
+      planId: approval.planId,
+      planDigest: approval.planDigest,
+      runId: approval.runId,
+      runRevision: 3,
+      planExpiresAt: approval.expiresAt,
+      workflowId: 'workflow-1',
+      workflowRevision: 1,
+      artifactReference: `deployment-artifact-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`,
+      artifactTransferOperationId: 'deployment-artifact-transfer:fixture',
+      sourceRevision: { revision: 'd'.repeat(40), dirty: false },
+      target: {
+        profileId: 'profile-1',
+        profileUpdatedAt: 7,
+        host: 'example.test',
+        port: 22,
+        username: 'deploy',
+        authMethod: 'password' as const,
+        jumpHost: null,
+      },
+      remoteRoot: '/srv/api',
+      releaseId: 'release-next',
+      releaseDigestSha256: 'e'.repeat(64),
+      remoteStagingIdentity: `deployment-staging-v1:${'a'.repeat(64)}:${'b'.repeat(64)}`,
+      timeoutMs: 60_000,
+    };
+    await invokeRunDeploymentRemote(runner);
+    await invokeCancelDeploymentRemoteRunner({
+      operationId: runner.operationId,
+      planId: runner.planId,
+      planDigest: runner.planDigest,
+      runId: runner.runId,
+    });
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'request_deployment_approval', { input: approval });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'approve_deployment_plan', { input: approval });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, 'reject_deployment_plan', { input: approval });
+    expect(invokeMock).toHaveBeenNthCalledWith(4, 'deployment_run_remote', { input: runner });
+    expect(invokeMock).toHaveBeenNthCalledWith(5, 'deployment_cancel_remote_runner', {
+      input: expect.objectContaining({ operationId: runner.operationId, runId: runner.runId }),
+    });
+  });
 });
 
 describe('AI route credentials', () => {
