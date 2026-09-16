@@ -22,6 +22,21 @@ describe('SelectTrigger', () => {
     expect(trigger).toHaveClass('py-1');
   });
 
+  it('matches the small button height', () => {
+    render(
+      <Select defaultValue="a">
+        <SelectTrigger data-testid="trigger" size="sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="a">A</SelectItem>
+        </SelectContent>
+      </Select>,
+    );
+
+    expect(screen.getByTestId('trigger')).toHaveClass('data-[size=sm]:h-8');
+  });
+
   it('uses a single focus ring', () => {
     render(
       <Select defaultValue="a">
