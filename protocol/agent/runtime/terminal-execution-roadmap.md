@@ -167,8 +167,10 @@ shutdown, and success-publication races. Those findings now have focused
 regression coverage. The current-code real-SSH, full Rust, frontend, build, and
 related product checks pass. The final continuation corrected the extracted
 test `include!` formatting gate without excluding discovered files; the gate
-and its regression tests now pass. Phase 4 is **PASS**. The remote flag remains
-default-off and depends on broker + integration + execute. The previously
+and its regression tests now pass. Phase 4 is **PASS**. The remote visible-command
+flag is default-on for Windows and macOS desktop hosts and depends on broker +
+integration + execute. Remote interactive tools remain independently
+default-off. The previously
 separate native Windows prerequisite was closed by the 2026-09-16 consolidated
 Windows gate recorded in the Phase 5 evidence.
 
@@ -194,7 +196,8 @@ and fail-closed credential input. A later native macOS continuation passed the
 same production Broker/screen/lease path on bash 3.2 and zsh 5.9. Phase 5 is
 therefore **PASS for Windows and macOS local targets**. Linux and Phase 5 SSH
 remain explicitly deferred and unverified; their flags stay off and their
-legacy fallback remains required.
+legacy fallback remains required. The missing SSH Phase 5 gate no longer blocks
+the already-passed Phase 4 remote visible-command rollout.
 
 ## Phase 6: rollout and legacy removal
 
@@ -203,8 +206,9 @@ Deliverables:
 - Separate feature flags for the broker, shell integration, and interactive tools, with documented rollback behavior.
 - Privacy-safe counters for integration readiness, degraded fallback, lifecycle matching, uncertainty, timeout, takeover, truncation, backpressure, and transport latency.
 - Platform-scoped default enablement after each native acceptance gate passes;
-  keep the new path default-off and retain the wrapper on Linux and remote
-  targets until their independent Phase 5 gates pass.
+  enable the passed remote visible-command path independently, while keeping
+  remote interactive tools and the Linux new path default-off until their
+  independent Phase 5 gates pass.
 - Preserve platform-local rollback: removing the Windows/macOS local wrapper
   must not remove the compatibility implementation required by deferred
   platforms.
@@ -231,7 +235,9 @@ release performance rounds pass. The independent macOS gate passes native
 bash/zsh Broker, visible-command, interactive-operation, Direct, full serial
 Rust, and two release performance rounds; macOS local routing is now
 default-on and wrapper-free. Phase 6 is **PASS for the Windows and macOS local
-delivery scopes**. Linux and SSH remote rollout/removal remain deferred.
+delivery scopes**. Remote visible commands are also default-on for Windows and
+macOS desktop hosts using the passed Phase 4 SSH path. Linux rollout, remote
+interactive tools, and cross-platform legacy removal remain deferred.
 
 ## Session handoff contract
 

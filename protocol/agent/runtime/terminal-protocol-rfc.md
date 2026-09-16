@@ -397,16 +397,18 @@ execution behavior.
 
 On Windows and macOS hosts, absent trusted configuration enables `terminal_broker_v1`,
 `terminal_shell_integration_v1`, `terminal_execute_v1`, and
-`terminal_interactive_tools_v1` for local ConPTY/PTY generations. The remote
-Agent PTY flag remains absent-off, and remote interactive publication still
-requires that independent flag. Linux keeps the new-path flags absent-off.
+`terminal_interactive_tools_v1` for local ConPTY/PTY generations, plus
+`terminal_remote_agent_pty_v1` for remote visible commands. Remote interactive
+publication additionally requires the independently absent-off
+`terminal_remote_interactive_tools_v1` flag. Linux keeps the new-path flags
+absent-off.
 
 The legacy wrapper remains a decodable `exec_command.channel = "pty"`
 compatibility contract, but Windows and macOS local targets MUST reject its
 dispatch. Local degradation or flag rollback on either rolled-out platform MUST
 expose the real terminal as unavailable/degraded and offer Direct explicitly;
-it MUST NOT revive the wrapper or replay an operation. Linux and remote targets
-retain the compatibility implementation until their own Phase 5 gates pass.
+it MUST NOT revive the wrapper or replay an operation. Linux and explicit remote
+rollback retain the compatibility implementation until their own removal gates pass.
 
 The read-only Broker snapshot exposes process-lifetime counters for integration
 ready transitions, degraded compatibility fallback selections, accepted
@@ -495,8 +497,9 @@ process is the one persistent interactive shell and is registered as an
 ordinary terminal tab/pane. A user-owned SSH terminal remains a distinct transport and cannot be
 adopted as, reconnected into, or routed to remote `terminal_execute`.
 
-`terminal_remote_agent_pty_v1` is default-off and depends on effective broker,
-shell-integration, and terminal-execute flags. The backend freezes routing for
+`terminal_remote_agent_pty_v1` is default-on for Windows and macOS desktop hosts,
+default-off on Linux, and depends on effective broker, shell-integration, and
+terminal-execute flags. The backend freezes routing for
 the operation before dispatch. It creates or reconnects the dedicated channel
 only after the prepared authorization has been issued; no bootstrap or command
 byte is written to its PTY before that decision. Security-sensitive,
