@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+[ "$#" -eq 2 ] && [ "$1" = reload ] && [ "$2" = nginx ] || exit 64
+count_file=/var/lib/shellspan-fixture/nginx-reload.count
+count=$(sed -n '1p' "$count_file" 2>/dev/null || printf '0')
+case "$count" in ''|*[!0-9]*) exit 65 ;; esac
+printf '%s\n' "$((count + 1))" > "$count_file"
+chmod 0644 "$count_file"

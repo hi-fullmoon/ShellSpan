@@ -1,0 +1,10 @@
+services:
+  deployment:
+    image: shellspan-deployment-e2e:local
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    ports:
+      - "127.0.0.1:22224:22"
+    tmpfs:
+      - /var/lib/docker
