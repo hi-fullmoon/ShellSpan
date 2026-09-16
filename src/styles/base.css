@@ -23,20 +23,6 @@
     color-mix(in srgb, var(--app-primary) 8%, transparent),
     transparent 56px
   ) top / 100% 56px no-repeat;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--app-primary) 28%, transparent);
-}
-
-.agent-terminal-lease-bar::before {
-  position: absolute;
-  inset: 0 0 auto;
-  height: 2px;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--app-primary) 28%, transparent),
-    var(--app-primary) 48%,
-    color-mix(in srgb, var(--app-primary) 28%, transparent)
-  );
-  content: '';
 }
 
 .agent-terminal-lease-identity {
