@@ -281,8 +281,7 @@ export interface TerminalBrokerSnapshot {
     defaultEnabled: boolean;
     source: 'default' | 'environment';
     persisted: false;
-    mode: 'shadowCompatibility';
-    legacyDisplayAuthoritative: true;
+    mode: 'cooperative';
     rollback: 'disableDependentFlagsThenCloseBrokerGenerations';
   };
   shellIntegrationRollout: TerminalFeatureRolloutDecision & {
@@ -305,13 +304,8 @@ export interface TerminalBrokerSnapshot {
     name: 'terminal_remote_interactive_tools_v1';
     defaultEnabled: false;
   };
-  legacyFallbackRollout: TerminalFeatureRolloutDecision & {
-    name: 'terminal_legacy_wrapper_fallback_v1';
-    defaultEnabled: true;
-  };
   counters: {
     integrationReady: number;
-    degradedFallback: number;
     lifecycleMatched: number;
     uncertainty: number;
     timeout: number;
