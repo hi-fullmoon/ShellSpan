@@ -474,6 +474,12 @@
         run_native_shell_broker_acceptance("/bin/bash", &["--noprofile", "--norc"], "MACOS_BASH");
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_zsh_pty_broker_preserves_raw_bytes_input_order_and_resize() {
+        run_native_shell_broker_acceptance("/bin/zsh", &["-f"], "MACOS_ZSH");
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_bash_pty_broker_preserves_raw_bytes_input_order_and_resize() {
@@ -530,25 +536,28 @@
     }
 
     #[test]
-    fn rollout_defaults_are_windows_scoped_non_persisted_and_rollback_closes_generations() {
+    fn rollout_defaults_are_native_desktop_scoped_non_persisted_and_rollback_closes_generations() {
         let broker = TerminalSessionBroker::default();
         let snapshot = broker.snapshot(None).unwrap();
         assert_eq!(snapshot.rollout.name, TERMINAL_BROKER_FLAG_NAME);
-        assert_eq!(snapshot.rollout.enabled, cfg!(target_os = "windows"));
+        assert_eq!(
+            snapshot.rollout.enabled,
+            cfg!(any(target_os = "macos", target_os = "windows"))
+        );
         assert_eq!(
             snapshot.rollout.default_enabled,
-            cfg!(target_os = "windows")
+            cfg!(any(target_os = "macos", target_os = "windows"))
         );
         assert!(!snapshot.rollout.persisted);
         assert_eq!(snapshot.rollout.mode, "shadowCompatibility");
         assert!(snapshot.rollout.legacy_display_authoritative);
         assert_eq!(
             snapshot.shell_integration_rollout.enabled,
-            cfg!(target_os = "windows")
+            cfg!(any(target_os = "macos", target_os = "windows"))
         );
         assert_eq!(
             snapshot.terminal_execute_rollout.enabled,
-            cfg!(target_os = "windows")
+            cfg!(any(target_os = "macos", target_os = "windows"))
         );
         assert_eq!(
             snapshot.remote_agent_pty_rollout.name,
@@ -562,11 +571,11 @@
         );
         assert_eq!(
             snapshot.interactive_tools_rollout.enabled,
-            cfg!(target_os = "windows")
+            cfg!(any(target_os = "macos", target_os = "windows"))
         );
         assert_eq!(
             snapshot.interactive_tools_rollout.default_enabled,
-            cfg!(target_os = "windows")
+            cfg!(any(target_os = "macos", target_os = "windows"))
         );
         assert!(snapshot.legacy_fallback_rollout.enabled);
         assert!(!snapshot.shell_integration_rollout.persisted);
@@ -588,7 +597,7 @@
                 )
                 .unwrap()
                 .is_some(),
-            cfg!(target_os = "windows")
+            cfg!(any(target_os = "macos", target_os = "windows"))
         );
 
         let rollback = TerminalSessionBroker::enabled_for_test(8, 1_024, 32);
@@ -679,6 +688,72 @@
             broker.visible_command_route("windows-local").unwrap(),
             TerminalVisibleCommandRoute::Unavailable,
             "Windows local rollback must offer Direct instead of reviving the wrapper"
+        );
+        assert_eq!(
+            broker.remote_agent_pty_new_operation_route().unwrap(),
+            TerminalVisibleCommandRoute::LegacyFallback,
+            "deferred remote targets must retain the compatibility wrapper"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn phase6_macos_default_is_wrapper_free_and_remote_rollback_stays_compatible() {
+        let broker = TerminalSessionBroker::default();
+        broker
+            .attach_transport(
+                "macos-local",
+                None,
+                TerminalTransportKind::LocalPty,
+                TerminalGeometry::new(100, 30),
+            )
+            .unwrap()
+            .unwrap();
+        broker
+            .register_integration_channel(
+                "macos-local",
+                "macos-integration",
+                TerminalShellKind::Zsh,
+            )
+            .unwrap();
+        for event in [
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::Zsh,
+            },
+            TerminalIntegrationControlEvent::PromptStart {
+                cwd: "/tmp/workspace".into(),
+            },
+            TerminalIntegrationControlEvent::PromptEnd,
+        ] {
+            broker
+                .accept_integration_event("macos-local", "macos-integration", event)
+                .unwrap();
+        }
+        assert_eq!(
+            broker.visible_command_route("macos-local").unwrap(),
+            TerminalVisibleCommandRoute::TerminalExecute
+        );
+
+        broker
+            .apply_trusted_rollout(
+                true,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+            )
+            .unwrap();
+        assert_eq!(
+            broker.visible_command_route("macos-local").unwrap(),
+            TerminalVisibleCommandRoute::Unavailable,
+            "macOS local rollback must offer Direct instead of reviving the wrapper"
         );
         assert_eq!(
             broker.remote_agent_pty_new_operation_route().unwrap(),
@@ -1282,7 +1357,7 @@
         let broker = TerminalSessionBroker::default();
         assert_eq!(
             broker.visible_command_route("transport-posix").unwrap(),
-            if cfg!(target_os = "windows") {
+            if cfg!(any(target_os = "macos", target_os = "windows")) {
                 TerminalVisibleCommandRoute::Unavailable
             } else {
                 TerminalVisibleCommandRoute::LegacyFallback
@@ -1446,7 +1521,7 @@
         );
         assert_eq!(
             broker.visible_command_route("transport-1").unwrap(),
-            if cfg!(target_os = "windows") {
+            if cfg!(any(target_os = "macos", target_os = "windows")) {
                 TerminalVisibleCommandRoute::Unavailable
             } else {
                 TerminalVisibleCommandRoute::LegacyFallback
@@ -1541,7 +1616,7 @@
         );
         assert_eq!(
             broker.visible_command_route("transport-2").unwrap(),
-            if cfg!(target_os = "windows") {
+            if cfg!(any(target_os = "macos", target_os = "windows")) {
                 TerminalVisibleCommandRoute::Unavailable
             } else {
                 TerminalVisibleCommandRoute::LegacyFallback
@@ -1585,7 +1660,7 @@
         assert!(snapshot.legacy_fallback_rollout.enabled);
         assert_eq!(
             broker.visible_command_route("transport-1").unwrap(),
-            if cfg!(target_os = "windows") {
+            if cfg!(any(target_os = "macos", target_os = "windows")) {
                 TerminalVisibleCommandRoute::Unavailable
             } else {
                 TerminalVisibleCommandRoute::LegacyFallback

@@ -11,14 +11,17 @@ use crate::terminal_screen::{TerminalScreenModel, TerminalScreenSnapshot};
 
 pub(crate) const TERMINAL_BROKER_FLAG_NAME: &str = "terminal_broker_v1";
 pub(crate) const TERMINAL_BROKER_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_TERMINAL_BROKER_V1";
-pub(crate) const TERMINAL_BROKER_DEFAULT_ENABLED: bool = cfg!(target_os = "windows");
+pub(crate) const TERMINAL_BROKER_DEFAULT_ENABLED: bool =
+    cfg!(any(target_os = "macos", target_os = "windows"));
 pub(crate) const TERMINAL_SHELL_INTEGRATION_FLAG_NAME: &str = "terminal_shell_integration_v1";
 pub(crate) const TERMINAL_SHELL_INTEGRATION_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_SHELL_INTEGRATION_V1";
-pub(crate) const TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED: bool = cfg!(target_os = "windows");
+pub(crate) const TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED: bool =
+    cfg!(any(target_os = "macos", target_os = "windows"));
 pub(crate) const TERMINAL_EXECUTE_FLAG_NAME: &str = "terminal_execute_v1";
 pub(crate) const TERMINAL_EXECUTE_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_TERMINAL_EXECUTE_V1";
-pub(crate) const TERMINAL_EXECUTE_DEFAULT_ENABLED: bool = cfg!(target_os = "windows");
+pub(crate) const TERMINAL_EXECUTE_DEFAULT_ENABLED: bool =
+    cfg!(any(target_os = "macos", target_os = "windows"));
 pub(crate) const TERMINAL_REMOTE_AGENT_PTY_FLAG_NAME: &str = "terminal_remote_agent_pty_v1";
 pub(crate) const TERMINAL_REMOTE_AGENT_PTY_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_REMOTE_AGENT_PTY_V1";
@@ -26,7 +29,8 @@ pub(crate) const TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED: bool = false;
 pub(crate) const TERMINAL_INTERACTIVE_TOOLS_FLAG_NAME: &str = "terminal_interactive_tools_v1";
 pub(crate) const TERMINAL_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1";
-pub(crate) const TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED: bool = cfg!(target_os = "windows");
+pub(crate) const TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED: bool =
+    cfg!(any(target_os = "macos", target_os = "windows"));
 pub(crate) const TERMINAL_LEGACY_FALLBACK_FLAG_NAME: &str = "terminal_legacy_wrapper_fallback_v1";
 pub(crate) const TERMINAL_LEGACY_FALLBACK_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_LEGACY_WRAPPER_FALLBACK_V1";
@@ -1973,7 +1977,10 @@ impl TerminalSessionBroker {
         &self,
         transport_session_id: &str,
     ) -> Result<TerminalVisibleCommandRoute, String> {
-        self.scoped_visible_command_route(transport_session_id, !cfg!(target_os = "windows"))
+        self.scoped_visible_command_route(
+            transport_session_id,
+            !cfg!(any(target_os = "macos", target_os = "windows")),
+        )
     }
 
     pub(crate) fn remote_visible_command_route(

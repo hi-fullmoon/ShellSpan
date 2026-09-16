@@ -236,14 +236,14 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(compatibility).toMatch(/never reroute or replay an in-flight\/uncertain command/i);
     expect(compatibility).toContain('SHELLSPAN_TERMINAL_BROKER_V1');
     expect(compatibility).toContain('SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1');
-    expect(compatibility).toMatch(/On Windows,\s+an absent value is on for broker, integration, execute, and interactive tools/i);
-    expect(compatibility).toMatch(/on macOS and Linux those absent values remain off/i);
+    expect(compatibility).toMatch(/On Windows\s+and macOS, an absent value is on for broker, integration, execute, and\s+interactive tools/i);
+    expect(compatibility).toMatch(/on Linux those absent values remain off/i);
     expect(compatibility).toMatch(/have no\s+frontend mutation IPC/i);
     expect(compatibility).toMatch(/bounded to the 256 most recently closed logical\s+sessions/i);
     expect(compatibility).toMatch(/successful reconnect drops\s+all superseded transport identities/i);
   });
 
-  it('keeps the new path wrapper-free and isolates the legacy fallback from Windows local routing', async () => {
+  it('keeps the new path wrapper-free and isolates the legacy fallback from rolled-out local routing', async () => {
     const [integration, terminalExecute, adapter, callPolicy, modelTools, legacy, runtime, broker, manifest] = await Promise.all([
       readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_integration.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native/terminal_execute.rs'), 'utf8'),
@@ -274,8 +274,9 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(legacy).toContain('build_posix_wrapper');
     expect(legacy).toContain('build_powershell_wrapper');
     expect(runtime).toContain('TERMINAL_LEGACY_WRAPPER_REMOVED_ON_WINDOWS');
+    expect(runtime).toContain('TERMINAL_LEGACY_WRAPPER_REMOVED_ON_MACOS');
     expect(runtime).toContain('legacy_pty_wrapper_available');
-    expect(broker).toContain('TERMINAL_BROKER_DEFAULT_ENABLED: bool = cfg!(target_os = "windows")');
+    expect(broker).toMatch(/TERMINAL_BROKER_DEFAULT_ENABLED: bool =\s+cfg!\(any\(target_os = "macos", target_os = "windows"\)\)/);
     expect(broker).toContain('remote_visible_command_route');
     expect(broker).toContain('TerminalRolloutCountersSnapshot');
     expect(manifest.tools.map(({ name }) => name)).toContain('terminal_execute');
@@ -287,7 +288,7 @@ describe('terminal execution Phase 0 protocol contract', () => {
   });
 
   it('records Phase 2/3/4/5/6 platform evidence without promoting partial results', async () => {
-    const [roadmap, rfc, matrix, phase2, phase3, phase4, phase5, phase6, windowsRunner, broker, brokerTests, benchmark, packageJsonText] = await Promise.all([
+    const [roadmap, rfc, matrix, phase2, phase3, phase4, phase5, phase5Macos, phase6, phase6Macos, windowsRunner, macosRunner, broker, brokerTests, benchmark, packageJsonText] = await Promise.all([
       readFile(path.join(protocolRoot, 'terminal-execution-roadmap.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-protocol-rfc.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-execution-test-matrix.md'), 'utf8'),
@@ -295,8 +296,11 @@ describe('terminal execution Phase 0 protocol contract', () => {
       readFile(path.join(protocolRoot, 'terminal-execution-phase-3-acceptance.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-execution-phase-4-acceptance.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-execution-phase-5-acceptance.md'), 'utf8'),
+      readFile(path.join(protocolRoot, 'terminal-execution-phase-5-macos-acceptance.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-execution-phase-6-acceptance.md'), 'utf8'),
+      readFile(path.join(protocolRoot, 'terminal-execution-phase-6-macos-acceptance.md'), 'utf8'),
       readFile(path.join(repositoryRoot, 'scripts/verify-terminal-broker-windows.mjs'), 'utf8'),
+      readFile(path.join(repositoryRoot, 'scripts/verify-terminal-broker-macos.mjs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_broker.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/tests/terminal_broker.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/examples/terminal_transport_baseline.rs'), 'utf8'),
@@ -324,22 +328,28 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(phase4).toContain('Final lifecycle and gate continuation: `' + phase4FinalContinuationId + '`');
     const phase5SessionId = '01a0a566-6a29-74a3-945e-cc310a46cecd';
     expect(roadmap).toContain(
-      '| 5. Interactive operation | `' + phase5SessionId + '` | **complete — PASS (Windows scope)** | [Phase 5 evidence](./terminal-execution-phase-5-acceptance.md) |',
+      '| 5. Interactive operation | `' + phase5SessionId + '`; macOS continuation (2026-09-16) | **complete — PASS (Windows + macOS local)** | [Windows evidence](./terminal-execution-phase-5-acceptance.md) and [macOS evidence](./terminal-execution-phase-5-macos-acceptance.md) |',
     );
     expect(phase5).toContain('Session: `' + phase5SessionId + '`');
     expect(phase5).toContain('**Final gate: PASS for the Windows delivery scope. A Windows-only Phase 6');
     expect(phase5).toContain('SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1');
+    expect(phase5Macos).toContain('**Final gate: PASS for native macOS bash and zsh.**');
+    expect(phase5Macos).toContain('macos_bash_interactive_terminal_operation');
+    expect(phase5Macos).toContain('macos_zsh_interactive_terminal_operation');
     expect(roadmap).toContain(
-      '| 6. Rollout and legacy removal | Windows rollout continuation (2026-09-16) | **complete — PASS (Windows scope)** | [Phase 6 evidence](./terminal-execution-phase-6-acceptance.md) |',
+      '| 6. Rollout and legacy removal | Windows and macOS rollout continuations (2026-09-16) | **complete — PASS (Windows + macOS local)** | [Windows evidence](./terminal-execution-phase-6-acceptance.md) and [macOS evidence](./terminal-execution-phase-6-macos-acceptance.md) |',
     );
     expect(phase6).toContain('**Final gate: PASS for the Windows delivery scope. Cross-platform wrapper');
     expect(phase6).toContain('Cross-platform wrapper\nremoval is NOT READY');
     expect(phase6).toContain('Windows Phase 2/3/5/6 native ConPTY and rollout acceptance: PASS.');
     expect(phase6).toContain('778 passed; 0 failed; 37 ignored');
     expect(phase6).toContain('MISSING — DEFERRED');
-    expect(matrix).toContain('Overall gate: **PASS for the Windows rollout scope**');
+    expect(phase6Macos).toContain('**Final gate: PASS for the macOS local rollout scope. Cross-platform wrapper');
+    expect(phase6Macos).toContain('macOS Phase 2/3/5/6 native PTY and rollout acceptance');
+    expect(phase6Macos).toContain('798 library tests passed, 34 ignored');
+    expect(matrix).toContain('Overall gate: **PASS for the Windows and macOS local rollout scopes**');
     expect(matrix).toContain('| Isolated SSH bash and zsh | **MISSING — DEFERRED, DEFAULT OFF**');
-    expect(matrix).toContain('Overall gate: **PASS for the Windows delivery scope**');
+    expect(matrix).toContain('Overall gate: **PASS for the Windows and macOS local delivery scopes**');
     expect(matrix).toContain('| Isolated SSH bash and zsh | **MISSING — DEFERRED**');
     expect(phase4).toContain('**Final gate: PASS. Phase 5 is READY for a separate session');
     expect(phase4).toContain('Native Windows/ConPTY with Windows PowerShell 5.1 and');
@@ -354,8 +364,8 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(rfc).toContain('generation-bound isolated control plane');
     expect(rfc).toContain('**out-of-scope tampering**');
     expect(rfc).toContain('MUST use Direct execution');
-    expect(roadmap).toMatch(/native Windows PowerShell 5\.1\s+and PowerShell\s+7\.6 ConPTY acceptance passed/i);
-    expect(roadmap).toMatch(/Phase 6 is \*\*PASS for the Windows delivery\s+scope\*\*/i);
+    expect(roadmap).toMatch(/Native Windows PowerShell 5\.1 and PowerShell 7\.6 ConPTY acceptance also passed/i);
+    expect(roadmap).toMatch(/Phase 6 is \*\*PASS for the Windows and macOS local\s+delivery scopes\*\*/i);
     expect(matrix).toMatch(/Linux bash and zsh \| \*\*PASS \(VM\/container\)\*\*/);
     expect(matrix).toContain('Overall gate: **PASS for Phase 3 under the 2026-09-15 cooperative-shell RFC');
     expect(matrix).toMatch(/Bare-metal Linux \| \*\*MISSING\*\*/);
@@ -365,13 +375,19 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(phase2).toContain('`pnpm test:terminal-interactive:windows` passed on Windows 11 x64');
     expect(phase2).toMatch(/historical sections below preserve the evidence boundary[\s\S]*superseded for the\s+current Windows delivery state/i);
     expect(matrix).toMatch(/Windows PowerShell 5\.1 and PowerShell 7 \| \*\*PASS\*\*/);
-    expect(matrix).toMatch(/Windows-scoped Phase 6 continuation is complete/i);
+    expect(matrix).toMatch(/Windows and macOS Phase 6 continuations are complete/i);
     expect(packageJson.scripts['test:terminal-broker:windows'])
       .toBe('node scripts/verify-terminal-broker-windows.mjs');
     expect(packageJson.scripts['test:terminal-interactive:windows'])
       .toBe('node scripts/verify-terminal-broker-windows.mjs');
     expect(packageJson.scripts['test:terminal-rollout:windows'])
       .toBe('node scripts/verify-terminal-broker-windows.mjs');
+    expect(packageJson.scripts['test:terminal-broker:macos'])
+      .toBe('node scripts/verify-terminal-broker-macos.mjs');
+    expect(packageJson.scripts['test:terminal-interactive:macos'])
+      .toBe('node scripts/verify-terminal-broker-macos.mjs');
+    expect(packageJson.scripts['test:terminal-rollout:macos'])
+      .toBe('node scripts/verify-terminal-broker-macos.mjs');
     expect(windowsRunner).toContain("process.platform !== 'win32'");
     expect(windowsRunner).toContain('MISSING: native Windows/ConPTY execution is required');
     expect(windowsRunner).toContain("x64: 'x86_64-pc-windows-msvc'");
@@ -403,11 +419,17 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(windowsRunner).toContain('Number.isFinite');
     expect(windowsRunner).toContain('candidate.medianMibPerSecond < baseline.medianMibPerSecond * 0.8');
     expect(windowsRunner).toContain('candidate.p95Ms > 2');
+    expect(macosRunner).toContain("process.platform !== 'darwin'");
+    expect(macosRunner).toContain("arm64: 'aarch64-apple-darwin'");
+    expect(macosRunner).toContain('macos_bash_interactive_terminal_operation');
+    expect(macosRunner).toContain('macos_zsh_interactive_terminal_operation');
+    expect(macosRunner).toContain("verifyBenchmarkRound(round, control, broker, 'macOS')");
     expect(brokerTests).toContain('assert_eq!(first_receipt.input_sequence, 1)');
     expect(brokerTests).toContain('assert_eq!(second_receipt.input_sequence, 2)');
     expect(brokerTests).toContain('echo-independent payload');
     expect(brokerTests).toContain('assert!(bounded_replay.has_more)');
     expect(brokerTests).toContain('phase6_windows_default_is_wrapper_free_and_remote_rollback_stays_compatible');
+    expect(brokerTests).toContain('phase6_macos_default_is_wrapper_free_and_remote_rollback_stays_compatible');
     expect(brokerTests).toContain('rollout_counters_are_bounded_privacy_safe_and_cover_phase6_signals');
     expect(broker).toContain('TRANSPORT_LATENCY_SAMPLE_INTERVAL_FRAMES: u64 = 64');
     expect(benchmark).toContain('SHELLSPAN_BENCH_PAYLOAD_BEGIN:');
@@ -416,6 +438,7 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(benchmark).toContain('EMIT_LINE_PAYLOAD_BYTES');
     expect(benchmark).toContain('Duration::from_secs(30)');
     expect(matrix).toContain('Native Windows command: `pnpm test:terminal-broker:windows`');
+    expect(matrix).toContain('Native macOS command: `pnpm test:terminal-rollout:macos`');
     expect(matrix).toMatch(/x86_64 or arm64 Windows/);
     expect(phase2).toMatch(/MISSING as designed.*exit 2/i);
     expect(phase2).toContain('aarch64-pc-windows-msvc');
