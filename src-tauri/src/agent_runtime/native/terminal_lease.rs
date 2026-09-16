@@ -311,10 +311,10 @@ impl TerminalLeaseManager {
                     &lease.operation_id,
                 ) {
                     // A reconnect or trusted rollback may already have
-                    // invalidated the old broker generation. The legacy
-                    // compatibility lease must still be releasable.
+                    // invalidated the old broker generation. The lease must
+                    // still be releasable.
                     log::warn!(
-                        "Terminal broker lease was already unavailable while releasing compatibility lease session_id={session_id}: {error}"
+                        "Terminal broker lease was already unavailable while releasing lease session_id={session_id}: {error}"
                     );
                 }
             }
@@ -328,41 +328,6 @@ impl TerminalLeaseManager {
         } else {
             Ok(false)
         }
-    }
-
-    pub(crate) fn release_all(&self, reason: TerminalLeaseReleaseReason) -> Result<usize, String> {
-        self.turn_guards
-            .lock()
-            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
-            .clear();
-        let leases = {
-            let mut records = self
-                .leases
-                .lock()
-                .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
-            records
-                .drain()
-                .map(|(_, record)| record.lease)
-                .collect::<Vec<_>>()
-        };
-        let count = leases.len();
-        self.changed.notify_all();
-        for lease in leases {
-            if let Err(error) = self.broker.release_agent_lease(
-                &lease.session_id,
-                &lease.agent_session_id,
-                &lease.task_id,
-                &lease.operation_id,
-            ) {
-                log::warn!(
-                    "Terminal broker lease was unavailable during compatibility shutdown session_id={}: {error}",
-                    lease.session_id
-                );
-            }
-            log_release(&lease, reason);
-            self.publish(released_event(lease, reason));
-        }
-        Ok(count)
     }
 
     pub(crate) fn acknowledge_frontend_ready(
@@ -557,7 +522,7 @@ impl TerminalLeaseManager {
         }
         let bytes = data.as_bytes().to_vec();
         self.broker
-            .admit_compatibility_input(session_id, broker_source, input_kind, &bytes, || {
+            .admit_terminal_input(session_id, broker_source, input_kind, &bytes, || {
                 sessions.write_session_input(session_id, data)
             })
     }

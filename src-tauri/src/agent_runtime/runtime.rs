@@ -528,7 +528,8 @@ impl AgentRuntime {
     }
 
     pub(crate) fn observe_terminal_output(&self, session_id: &str, chunk: &str) -> String {
-        self.native_engine.observe_pty_output(session_id, chunk)
+        let _ = session_id;
+        chunk.to_string()
     }
 
     pub(crate) fn observe_terminal_raw_output(

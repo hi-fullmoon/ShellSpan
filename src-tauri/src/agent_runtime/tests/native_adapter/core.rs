@@ -78,17 +78,17 @@
             json!({ "command": "pwd", "explanation": "inspect visibly" }),
         );
         visible.execution_surface = AgentExecutionSurface::BoundTerminal;
-        let (name, arguments) = normalize_arguments(
+        let error = normalize_arguments(
             &visible,
             &target,
-            Some(TerminalVisibleCommandRoute::LegacyFallback),
+            Some(TerminalVisibleCommandRoute::Unavailable),
             false,
         )
-        .unwrap();
-        assert_eq!(name, "exec_command");
-        assert_eq!(arguments["channel"], "pty");
-        assert_eq!(arguments["background"], false);
-        assert_eq!(arguments["elevated"], false);
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "TERMINAL_VISIBLE_COMMAND_UNAVAILABLE: cooperative terminal execution is not available"
+        );
 
         assert!(normalize_arguments(
             &request(
@@ -199,7 +199,7 @@
     }
 
     #[test]
-    fn visible_command_routes_additively_to_terminal_execute_without_reinterpreting_pty() {
+    fn visible_command_routes_only_to_terminal_execute_when_available() {
         let target = target_native(&local_target()).unwrap();
         let mut visible = request(
             "run_terminal_command",
@@ -227,7 +227,7 @@
             false,
         )
         .unwrap_err()
-        .contains("legacy fallback is disabled"));
+        .contains("cooperative terminal execution is not available"));
     }
 
     #[test]

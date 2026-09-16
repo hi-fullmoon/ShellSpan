@@ -37,11 +37,6 @@ pub(crate) const TERMINAL_REMOTE_INTERACTIVE_TOOLS_FLAG_NAME: &str =
 pub(crate) const TERMINAL_REMOTE_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_REMOTE_INTERACTIVE_TOOLS_V1";
 pub(crate) const TERMINAL_REMOTE_INTERACTIVE_TOOLS_DEFAULT_ENABLED: bool = false;
-pub(crate) const TERMINAL_LEGACY_FALLBACK_FLAG_NAME: &str = "terminal_legacy_wrapper_fallback_v1";
-pub(crate) const TERMINAL_LEGACY_FALLBACK_ENVIRONMENT_VARIABLE: &str =
-    "SHELLSPAN_TERMINAL_LEGACY_WRAPPER_FALLBACK_V1";
-pub(crate) const TERMINAL_LEGACY_FALLBACK_DEFAULT_ENABLED: bool = true;
-
 const DEFAULT_REPLAY_MAX_FRAMES: usize = 512;
 const DEFAULT_REPLAY_MAX_BYTES: usize = 1_048_576;
 const DEFAULT_CAPTURE_MAX_BYTES: usize = 262_144;
@@ -134,7 +129,6 @@ pub(crate) struct TerminalBrokerRolloutDecision {
     pub(crate) source: TerminalBrokerRolloutSource,
     pub(crate) persisted: bool,
     pub(crate) mode: &'static str,
-    pub(crate) legacy_display_authoritative: bool,
     pub(crate) rollback: &'static str,
 }
 
@@ -146,8 +140,7 @@ impl Default for TerminalBrokerRolloutDecision {
             default_enabled: TERMINAL_BROKER_DEFAULT_ENABLED,
             source: TerminalBrokerRolloutSource::Default,
             persisted: false,
-            mode: "shadowCompatibility",
-            legacy_display_authoritative: true,
+            mode: "cooperative",
             rollback: "disableDependentFlagsThenCloseBrokerGenerations",
         }
     }
@@ -303,7 +296,6 @@ pub(crate) struct TerminalBrokerSnapshot {
     pub(crate) remote_agent_pty_rollout: TerminalFeatureRolloutDecision,
     pub(crate) interactive_tools_rollout: TerminalFeatureRolloutDecision,
     pub(crate) remote_interactive_tools_rollout: TerminalFeatureRolloutDecision,
-    pub(crate) legacy_fallback_rollout: TerminalFeatureRolloutDecision,
     pub(crate) counters: TerminalRolloutCountersSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) session: Option<TerminalBrokerSessionSnapshot>,
@@ -313,7 +305,6 @@ pub(crate) struct TerminalBrokerSnapshot {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TerminalRolloutCountersSnapshot {
     pub(crate) integration_ready: u64,
-    pub(crate) degraded_fallback: u64,
     pub(crate) lifecycle_matched: u64,
     pub(crate) uncertainty: u64,
     pub(crate) timeout: u64,
@@ -328,7 +319,6 @@ pub(crate) struct TerminalRolloutCountersSnapshot {
 #[derive(Debug, Default)]
 struct TerminalRolloutCounters {
     integration_ready: AtomicU64,
-    degraded_fallback: AtomicU64,
     lifecycle_matched: AtomicU64,
     uncertainty: AtomicU64,
     timeout: AtomicU64,
@@ -344,7 +334,6 @@ impl TerminalRolloutCounters {
     fn snapshot(&self) -> TerminalRolloutCountersSnapshot {
         TerminalRolloutCountersSnapshot {
             integration_ready: self.integration_ready.load(Ordering::Relaxed),
-            degraded_fallback: self.degraded_fallback.load(Ordering::Relaxed),
             lifecycle_matched: self.lifecycle_matched.load(Ordering::Relaxed),
             uncertainty: self.uncertainty.load(Ordering::Relaxed),
             timeout: self.timeout.load(Ordering::Relaxed),
@@ -443,7 +432,6 @@ pub(crate) enum TerminalCommandRequestedSettlement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TerminalVisibleCommandRoute {
     TerminalExecute,
-    LegacyFallback,
     Unavailable,
 }
 
@@ -1039,7 +1027,6 @@ struct BrokerState {
     remote_agent_pty_rollout: TerminalFeatureRolloutDecision,
     interactive_tools_rollout: TerminalFeatureRolloutDecision,
     remote_interactive_tools_rollout: TerminalFeatureRolloutDecision,
-    legacy_fallback_rollout: TerminalFeatureRolloutDecision,
     sessions: HashMap<String, SessionRecord>,
     transports: HashMap<String, TransportAttachment>,
     agent_ssh_candidates: HashMap<String, AgentSshTransportCandidate>,
@@ -1095,14 +1082,6 @@ impl Default for BrokerState {
                 TerminalBrokerRolloutSource::Default,
                 "removeRemoteToolsRevokeAgentLeasesAndRejectLaterInput",
             ),
-            legacy_fallback_rollout: TerminalFeatureRolloutDecision::new(
-                TERMINAL_LEGACY_FALLBACK_FLAG_NAME,
-                TERMINAL_LEGACY_FALLBACK_DEFAULT_ENABLED,
-                TERMINAL_LEGACY_FALLBACK_DEFAULT_ENABLED,
-                true,
-                TerminalBrokerRolloutSource::Default,
-                "newOperationsOnly",
-            ),
             rollout,
             sessions: HashMap::new(),
             transports: HashMap::new(),
@@ -1149,10 +1128,8 @@ impl TerminalSessionBroker {
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
-                true,
-                TerminalBrokerRolloutSource::Test,
             )
-            .expect("the compatibility test rollout must be valid");
+            .expect("the disabled test rollout must be valid");
         broker
     }
 
@@ -1181,10 +1158,6 @@ impl TerminalSessionBroker {
             TERMINAL_REMOTE_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE,
             TERMINAL_REMOTE_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
         )?;
-        let (legacy, legacy_source) = trusted_rollout_value(
-            TERMINAL_LEGACY_FALLBACK_ENVIRONMENT_VARIABLE,
-            TERMINAL_LEGACY_FALLBACK_DEFAULT_ENABLED,
-        )?;
         self.apply_trusted_rollout(
             broker,
             broker_source,
@@ -1198,8 +1171,6 @@ impl TerminalSessionBroker {
             interactive_tools_source,
             remote_interactive_tools,
             remote_interactive_tools_source,
-            legacy,
-            legacy_source,
         )
     }
 
@@ -1218,8 +1189,6 @@ impl TerminalSessionBroker {
         interactive_tools_source: TerminalBrokerRolloutSource,
         remote_interactive_tools: bool,
         remote_interactive_tools_source: TerminalBrokerRolloutSource,
-        legacy: bool,
-        legacy_source: TerminalBrokerRolloutSource,
     ) -> Result<(), String> {
         let mut state = self.lock()?;
         if state.rollout.enabled && !broker {
@@ -1302,14 +1271,6 @@ impl TerminalSessionBroker {
             remote_interactive_tools_source,
             "removeRemoteToolsRevokeAgentLeasesAndRejectLaterInput",
         );
-        state.legacy_fallback_rollout = TerminalFeatureRolloutDecision::new(
-            TERMINAL_LEGACY_FALLBACK_FLAG_NAME,
-            legacy,
-            TERMINAL_LEGACY_FALLBACK_DEFAULT_ENABLED,
-            true,
-            legacy_source,
-            "newOperationsOnly",
-        );
         Ok(())
     }
 
@@ -1323,8 +1284,6 @@ impl TerminalSessionBroker {
         integration_source: TerminalBrokerRolloutSource,
         execute: bool,
         execute_source: TerminalBrokerRolloutSource,
-        legacy: bool,
-        legacy_source: TerminalBrokerRolloutSource,
     ) -> Result<(), String> {
         self.apply_trusted_rollout(
             broker,
@@ -1339,8 +1298,6 @@ impl TerminalSessionBroker {
             TerminalBrokerRolloutSource::Test,
             false,
             TerminalBrokerRolloutSource::Test,
-            legacy,
-            legacy_source,
         )
     }
 
@@ -2016,23 +1973,19 @@ impl TerminalSessionBroker {
         &self,
         transport_session_id: &str,
     ) -> Result<TerminalVisibleCommandRoute, String> {
-        self.scoped_visible_command_route(
-            transport_session_id,
-            !cfg!(any(target_os = "macos", target_os = "windows")),
-        )
+        self.scoped_visible_command_route(transport_session_id)
     }
 
     pub(crate) fn remote_visible_command_route(
         &self,
         transport_session_id: &str,
     ) -> Result<TerminalVisibleCommandRoute, String> {
-        self.scoped_visible_command_route(transport_session_id, true)
+        self.scoped_visible_command_route(transport_session_id)
     }
 
     fn scoped_visible_command_route(
         &self,
         transport_session_id: &str,
-        legacy_fallback_allowed: bool,
     ) -> Result<TerminalVisibleCommandRoute, String> {
         let state = self.lock()?;
         if state.terminal_execute_rollout.enabled {
@@ -2050,12 +2003,7 @@ impl TerminalSessionBroker {
                 }
             }
         }
-        if legacy_fallback_allowed && state.legacy_fallback_rollout.enabled {
-            TerminalRolloutCounters::increment(&self.counters.degraded_fallback);
-            Ok(TerminalVisibleCommandRoute::LegacyFallback)
-        } else {
-            Ok(TerminalVisibleCommandRoute::Unavailable)
-        }
+        Ok(TerminalVisibleCommandRoute::Unavailable)
     }
 
     pub(crate) fn remote_agent_pty_new_operation_route(
@@ -2064,9 +2012,6 @@ impl TerminalSessionBroker {
         let state = self.lock()?;
         if state.remote_agent_pty_rollout.enabled {
             Ok(TerminalVisibleCommandRoute::TerminalExecute)
-        } else if state.legacy_fallback_rollout.enabled {
-            TerminalRolloutCounters::increment(&self.counters.degraded_fallback);
-            Ok(TerminalVisibleCommandRoute::LegacyFallback)
         } else {
             Ok(TerminalVisibleCommandRoute::Unavailable)
         }
@@ -2458,7 +2403,7 @@ impl TerminalSessionBroker {
         Ok(true)
     }
 
-    pub(crate) fn admit_compatibility_input<F>(
+    pub(crate) fn admit_terminal_input<F>(
         &self,
         transport_session_id: &str,
         source: TerminalBrokerInputSource,
@@ -2524,7 +2469,6 @@ impl TerminalSessionBroker {
             remote_agent_pty_rollout: state.remote_agent_pty_rollout.clone(),
             interactive_tools_rollout: state.interactive_tools_rollout.clone(),
             remote_interactive_tools_rollout: state.remote_interactive_tools_rollout.clone(),
-            legacy_fallback_rollout: state.legacy_fallback_rollout.clone(),
             counters: self.counters.snapshot(),
             session,
         })
@@ -2613,8 +2557,6 @@ impl TerminalSessionBroker {
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
-                true,
-                TerminalBrokerRolloutSource::Test,
             )
             .unwrap();
         broker
@@ -2644,8 +2586,6 @@ impl TerminalSessionBroker {
                 false,
                 TerminalBrokerRolloutSource::Test,
                 false,
-                TerminalBrokerRolloutSource::Test,
-                true,
                 TerminalBrokerRolloutSource::Test,
             )
             .unwrap();
@@ -2677,8 +2617,6 @@ impl TerminalSessionBroker {
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
-                true,
-                TerminalBrokerRolloutSource::Test,
             )
             .unwrap();
         broker
@@ -2709,8 +2647,6 @@ impl TerminalSessionBroker {
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
-                true,
-                TerminalBrokerRolloutSource::Test,
             )
             .unwrap();
         broker
@@ -2740,8 +2676,6 @@ impl TerminalSessionBroker {
                 false,
                 TerminalBrokerRolloutSource::Test,
                 false,
-                TerminalBrokerRolloutSource::Test,
-                true,
                 TerminalBrokerRolloutSource::Test,
             )
             .unwrap();
@@ -2833,8 +2767,6 @@ impl TerminalBrokerBenchmarkObserver {
             false,
             TerminalBrokerRolloutSource::Environment,
             false,
-            TerminalBrokerRolloutSource::Environment,
-            true,
             TerminalBrokerRolloutSource::Environment,
         )?;
         broker.attach_transport(

@@ -14,13 +14,13 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent_runtime::{
     validate_agent_request_native, validate_tool_arguments_native,
-    AgentCapabilityVerificationContextNative, AgentEffectKindNative, AgentExecutionChannelNative,
-    AgentObservedEffectNative, AgentPermissionModeNative, AgentPolicyEngineNative,
-    AgentPolicyEvaluationNative, AgentPolicyOutcomeNative, AgentRequestNative, AgentToolCallNative,
-    AgentToolResultNative, AgentToolResultStatusNative, AgentToolTargetNative,
-    ExecCommandArgumentsNative, KillProcessArgumentsNative, NativeContractPolicyEngine,
-    ReadTerminalArgumentsNative, TerminalExecuteArgumentsNative, WaitProcessArgumentsNative,
-    WaitTerminalArgumentsNative, WriteStdinArgumentsNative, WriteTerminalInputArgumentsNative,
+    AgentCapabilityVerificationContextNative, AgentEffectKindNative, AgentObservedEffectNative,
+    AgentPermissionModeNative, AgentPolicyEngineNative, AgentPolicyEvaluationNative,
+    AgentPolicyOutcomeNative, AgentRequestNative, AgentToolCallNative, AgentToolResultNative,
+    AgentToolResultStatusNative, AgentToolTargetNative, ExecCommandArgumentsNative,
+    KillProcessArgumentsNative, NativeContractPolicyEngine, ReadTerminalArgumentsNative,
+    TerminalExecuteArgumentsNative, WaitProcessArgumentsNative, WaitTerminalArgumentsNative,
+    WriteStdinArgumentsNative, WriteTerminalInputArgumentsNative,
 };
 use crate::db::Database;
 use crate::keychain::{CredentialManager, ProfileSecretKind};
@@ -43,10 +43,9 @@ use super::{
     CapabilityIssueRequestNative, CheckpointStoreNative, FileExecutionContextNative,
     FileOperationRegistryNative, IssuedCapabilityNative, McpServerConfigNative,
     McpToolPolicyNative, NativeCapabilityStoreNative, ProcessLifecycleNative,
-    ProcessRegistryNative, ProcessSnapshotNative, PtyLifecycleNative, PtyRegistryNative,
-    PtyShellKindNative, RegisteredToolNative, RemoteProcessStartNative, TerminalExecuteRegistry,
-    TerminalInputSource, TerminalInteractiveRegistry, TerminalLeaseManager,
-    TerminalLeaseReleaseReason, ToolRegistryErrorNative, ToolRegistryNative,
+    ProcessRegistryNative, ProcessSnapshotNative, RegisteredToolNative, RemoteProcessStartNative,
+    TerminalExecuteRegistry, TerminalInputSource, TerminalInteractiveRegistry,
+    TerminalLeaseManager, ToolRegistryErrorNative, ToolRegistryNative,
 };
 
 pub(crate) const DEFAULT_CAPABILITY_TTL_MS: u64 = 120_000;
@@ -126,7 +125,6 @@ pub(crate) struct NativeToolEngine {
     registry: Arc<ToolRegistryNative>,
     capabilities: NativeCapabilityStoreNative,
     processes: ProcessRegistryNative,
-    pty: PtyRegistryNative,
     terminal_execute: TerminalExecuteRegistry,
     terminal_interactive: TerminalInteractiveRegistry,
     terminal_leases: TerminalLeaseManager,
@@ -150,7 +148,6 @@ impl Default for NativeToolEngine {
             ),
             capabilities: NativeCapabilityStoreNative::default(),
             processes: ProcessRegistryNative::default(),
-            pty: PtyRegistryNative::new(terminal_leases.clone()),
             terminal_execute,
             terminal_interactive,
             terminal_leases,
@@ -433,16 +430,14 @@ impl NativeToolEngine {
             self.terminal_execute
                 .takeover(sessions, session_id, agent_session_id, operation_id)
         } else {
-            self.pty
-                .takeover(sessions, session_id, agent_session_id, operation_id)
+            Ok(false)
         }
     }
 
     pub(crate) fn terminal_closed(&self, session_id: &str) -> Result<bool, String> {
         let interactive = self.terminal_interactive.terminal_closed(session_id)?;
         let visible = self.terminal_execute.terminal_closed(session_id)?;
-        let legacy = self.pty.terminal_closed(session_id)?;
-        Ok(interactive || visible || legacy)
+        Ok(interactive || visible)
     }
 
     pub(crate) fn configure_checkpoint_root(&self, root: PathBuf) -> Result<(), String> {
@@ -847,9 +842,6 @@ impl NativeToolEngine {
         if let Err(error) = self.processes.cancel_task(task_id) {
             errors.push(error);
         }
-        if let Err(error) = self.pty.cancel_task(sessions, task_id) {
-            errors.push(error);
-        }
         if let Err(error) = self.terminal_execute.cancel_task(sessions, task_id) {
             errors.push(error);
         }
@@ -861,10 +853,6 @@ impl NativeToolEngine {
         } else {
             Err(errors.join("; "))
         }
-    }
-
-    pub(crate) fn observe_pty_output(&self, session_id: &str, chunk: &str) -> String {
-        self.pty.observe(session_id, chunk)
     }
 
     pub(crate) fn prepare_for_shutdown(&self, sessions: &SessionManager) -> Result<usize, String> {
@@ -889,10 +877,6 @@ impl NativeToolEngine {
             Err(error) => errors.push(error),
         }
         match self.terminal_interactive.shutdown_all() {
-            Ok(count) => cancelled += count,
-            Err(error) => errors.push(error),
-        }
-        match self.pty.shutdown_all(sessions) {
             Ok(count) => cancelled += count,
             Err(error) => errors.push(error),
         }
@@ -988,7 +972,7 @@ impl NativeToolEngine {
         context: &NativeExecutionContext,
         call: &AgentToolCallNative,
         effect: &AgentObservedEffectNative,
-        sessions: &SessionManager,
+        _sessions: &SessionManager,
         database: &Database,
         credentials: &CredentialManager,
         known_hosts_path: &Path,
@@ -1001,103 +985,6 @@ impl NativeToolEngine {
             return Err("elevated execution is unavailable in the native kernel".into());
         }
         let timeout = Duration::from_millis(arguments.timeout_ms.unwrap_or(default_timeout_ms));
-        if arguments.channel == AgentExecutionChannelNative::Pty {
-            if arguments.background.unwrap_or(false) {
-                return Err("Native PTY execution cannot detach".into());
-            }
-            let session_id = match &call.target {
-                AgentToolTargetNative::Local { session_id, .. }
-                | AgentToolTargetNative::Remote { session_id, .. } => session_id,
-                _ => return Err("PTY execution requires a terminal target".into()),
-            };
-            let terminal_state = sessions.target_state(session_id)?;
-            if !legacy_pty_wrapper_available(&terminal_state) {
-                return Err(legacy_pty_wrapper_removed_error().into());
-            }
-            let shell_kind = pty_shell_kind(&terminal_state)?;
-            let operation = self.pty.start(
-                sessions,
-                session_id,
-                &context.request.user_session_id,
-                &context.request.task_id,
-                &call.call_id,
-                &arguments.command,
-                shell_kind,
-            )?;
-            let snapshot = match operation.wait(timeout) {
-                Ok(snapshot) => snapshot,
-                Err(error) => {
-                    let _ = self.pty.complete(
-                        session_id,
-                        &context.request.user_session_id,
-                        &context.request.task_id,
-                        &call.call_id,
-                        TerminalLeaseReleaseReason::Failed,
-                    );
-                    return Err(error);
-                }
-            };
-            if snapshot.state == PtyLifecycleNative::TimedOut {
-                self.pty
-                    .interrupt_timed_out(sessions, session_id, &call.call_id)?;
-            } else {
-                let reason = match snapshot.state {
-                    PtyLifecycleNative::Exited => TerminalLeaseReleaseReason::Completed,
-                    PtyLifecycleNative::Cancelled => TerminalLeaseReleaseReason::Cancelled,
-                    PtyLifecycleNative::TimedOut => TerminalLeaseReleaseReason::TimedOut,
-                    PtyLifecycleNative::TakenOver => TerminalLeaseReleaseReason::TakenOver,
-                    PtyLifecycleNative::Failed | PtyLifecycleNative::Running => {
-                        TerminalLeaseReleaseReason::Failed
-                    }
-                };
-                self.pty.complete(
-                    session_id,
-                    &context.request.user_session_id,
-                    &context.request.task_id,
-                    &call.call_id,
-                    reason,
-                )?;
-            }
-            let model_output = crate::redaction::redact_sensitive_text(&super::strip_ansi(
-                &snapshot.combined_output,
-            ));
-            let summary = crate::redaction::redact_sensitive_text(
-                &snapshot
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| format!("PTY command reached {:?}.", snapshot.state)),
-            );
-            let result_state = pty_lifecycle_wire_state(snapshot.state);
-            return Ok(AgentToolResultNative {
-                request_id: context.request.request_id.clone(),
-                call_id: call.call_id.clone(),
-                tool_name: call.tool_name.clone(),
-                target_id: call.target.target_id().to_string(),
-                status: match snapshot.state {
-                    PtyLifecycleNative::Exited => AgentToolResultStatusNative::Completed,
-                    PtyLifecycleNative::Cancelled => AgentToolResultStatusNative::Cancelled,
-                    PtyLifecycleNative::TakenOver => AgentToolResultStatusNative::Cancelled,
-                    PtyLifecycleNative::TimedOut => AgentToolResultStatusNative::TimedOut,
-                    PtyLifecycleNative::Failed | PtyLifecycleNative::Running => {
-                        AgentToolResultStatusNative::Failed
-                    }
-                },
-                summary,
-                data: Some(json!({
-                    "channel": "pty",
-                    "state": result_state,
-                    "exitCode": snapshot.exit_code,
-                    "stdout": "",
-                    "stderr": "",
-                    "combinedOutput": model_output,
-                    "truncated": snapshot.truncated,
-                })),
-                artifacts: Vec::new(),
-                effects: vec![effect.clone()],
-                truncated: Some(snapshot.truncated),
-            });
-        }
-
         if self.processes.running_count()? >= max_concurrency as usize {
             return Err("exec_command native concurrency limit was reached".into());
         }
@@ -1675,57 +1562,6 @@ fn validate_frozen_cwd(
     }
 }
 
-fn pty_shell_kind(
-    state: &crate::models::SessionTargetState,
-) -> Result<Option<PtyShellKindNative>, String> {
-    if state.terminal_kind == SessionTerminalKind::Remote {
-        // Remote profiles do not currently freeze a shell executable. Probe
-        // the already-connected interactive shell after the frontend ready
-        // gate; the probe is hidden by the raw/display protocol splitter.
-        return Ok(None);
-    }
-    let shell = state.identity.title.to_ascii_lowercase();
-    if matches!(
-        shell.as_str(),
-        "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe"
-    ) {
-        return Ok(Some(PtyShellKindNative::PowerShell));
-    }
-    if matches!(shell.as_str(), "sh" | "bash" | "zsh" | "dash" | "ksh") {
-        return Ok(Some(PtyShellKindNative::Posix));
-    }
-    Err(format!(
-        "PTY_SHELL_UNSUPPORTED: local shell `{}` is not supported; use direct execution",
-        state.identity.title
-    ))
-}
-
-fn legacy_pty_wrapper_available(state: &crate::models::SessionTargetState) -> bool {
-    !cfg!(any(target_os = "macos", target_os = "windows"))
-        || state.terminal_kind == SessionTerminalKind::Remote
-}
-
-fn legacy_pty_wrapper_removed_error() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_WINDOWS: use terminal_execute or Direct execution"
-    } else if cfg!(target_os = "macos") {
-        "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_MACOS: use terminal_execute or Direct execution"
-    } else {
-        "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_LOCAL_PLATFORM: use terminal_execute or Direct execution"
-    }
-}
-
-fn pty_lifecycle_wire_state(state: PtyLifecycleNative) -> &'static str {
-    match state {
-        PtyLifecycleNative::Running => "running",
-        PtyLifecycleNative::Exited => "exited",
-        PtyLifecycleNative::Cancelled => "cancelled",
-        PtyLifecycleNative::TimedOut => "timedOut",
-        PtyLifecycleNative::TakenOver => "takenOver",
-        PtyLifecycleNative::Failed => "failed",
-    }
-}
-
 fn terminal_command_wire_state(
     state: crate::terminal_broker::TerminalCommandState,
 ) -> &'static str {
@@ -1984,65 +1820,5 @@ mod tests {
                 1,
             ));
         }
-    }
-
-    #[test]
-    fn pty_shell_routing_is_explicit_for_local_and_probed_for_remote() {
-        let state = |terminal_kind, title: &str| crate::models::SessionTargetState {
-            terminal_kind,
-            identity: crate::models::SessionIdentity {
-                title: title.into(),
-                host: if terminal_kind == SessionTerminalKind::Local {
-                    "local".into()
-                } else {
-                    "example.test".into()
-                },
-                port: 22,
-                username: "tester".into(),
-            },
-            status: SessionStatus::Connected,
-        };
-        assert_eq!(
-            pty_shell_kind(&state(SessionTerminalKind::Local, "bash")).unwrap(),
-            Some(PtyShellKindNative::Posix)
-        );
-        assert_eq!(
-            pty_shell_kind(&state(SessionTerminalKind::Local, "powershell")).unwrap(),
-            Some(PtyShellKindNative::PowerShell)
-        );
-        assert_eq!(
-            pty_shell_kind(&state(SessionTerminalKind::Remote, "Production")).unwrap(),
-            None
-        );
-        assert_eq!(
-            legacy_pty_wrapper_available(&state(SessionTerminalKind::Local, "powershell")),
-            !cfg!(any(target_os = "macos", target_os = "windows")),
-            "rolled-out local routes must not reach the legacy wrapper"
-        );
-        assert_eq!(
-            legacy_pty_wrapper_removed_error(),
-            if cfg!(target_os = "windows") {
-                "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_WINDOWS: use terminal_execute or Direct execution"
-            } else if cfg!(target_os = "macos") {
-                "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_MACOS: use terminal_execute or Direct execution"
-            } else {
-                "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_LOCAL_PLATFORM: use terminal_execute or Direct execution"
-            }
-        );
-        assert!(legacy_pty_wrapper_available(&state(
-            SessionTerminalKind::Remote,
-            "Production"
-        )));
-        assert!(pty_shell_kind(&state(SessionTerminalKind::Local, "fish"))
-            .unwrap_err()
-            .starts_with("PTY_SHELL_UNSUPPORTED:"));
-        assert_eq!(
-            pty_lifecycle_wire_state(PtyLifecycleNative::TakenOver),
-            "takenOver"
-        );
-        assert_eq!(
-            pty_lifecycle_wire_state(PtyLifecycleNative::TimedOut),
-            "timedOut"
-        );
     }
 }
