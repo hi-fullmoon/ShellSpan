@@ -291,7 +291,9 @@ impl NativeToolRuntime for NativeToolAdapter {
             .terminal_broker_snapshot(None)
             .is_ok_and(|snapshot| {
                 snapshot.interactive_tools_rollout.enabled
-                    && (!remote_target || snapshot.remote_agent_pty_rollout.enabled)
+                    && (!remote_target
+                        || (snapshot.remote_agent_pty_rollout.enabled
+                            && snapshot.remote_interactive_tools_rollout.enabled))
             })
     }
 
@@ -345,6 +347,17 @@ impl NativeToolRuntime for NativeToolAdapter {
         self.configure(runtime, &sessions)?;
         let known_hosts_path = crate::known_hosts::known_hosts_path(&self.app)?;
         let target = target_native(&request.target)?;
+        if matches!(
+            request.model_call.name.as_str(),
+            "read_terminal" | "write_terminal_input" | "wait_terminal"
+        ) && matches!(&target, AgentToolTargetNative::Remote { .. })
+            && !runtime
+                .terminal_broker_snapshot(None)?
+                .remote_interactive_tools_rollout
+                .enabled
+        {
+            return Err("TERMINAL_REMOTE_INTERACTIVE_TOOLS_DISABLED".into());
+        }
         let native_request_id = stable_native_id("request", &request.session_id);
         let frozen_request = AgentRequestNative {
             contract_version: NATIVE_TOOL_CONTRACT_VERSION,

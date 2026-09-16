@@ -28,20 +28,25 @@ mod result;
 mod ssh;
 mod target;
 
-#[cfg(test)]
-pub(crate) use cancellation::ExecutionCancellationErrorKind;
-pub(crate) use cancellation::ExecutionCancellationRegistry;
+pub(crate) use cancellation::{
+    valid_operation_id, CancellationHandle, ExecutionCancellationErrorKind,
+    ExecutionCancellationRegistry, ExecutionTerminalState,
+};
 pub(crate) use redaction::redact_known_secrets;
 pub(crate) use request::known_connection_secret_values;
 #[cfg(test)]
 pub(crate) use request::DEFAULT_TOTAL_READ_HARD_LIMIT_BYTES;
-#[cfg(test)]
 pub(crate) use request::{
     ExecutionOutputPolicy, FrozenTargetIdentity, ReviewedSshCommand, ReviewedSshExecutionRequest,
 };
 #[cfg(test)]
-pub(crate) use result::{ExecutionErrorCategory, ExecutionStatus, ReviewedSshExecutionResult};
+pub(crate) use result::ReviewedSshExecutionResult;
+pub(crate) use result::{ExecutionErrorCategory, ExecutionStatus};
 #[cfg(test)]
 pub(crate) use ssh::execute_reviewed_ssh_command;
 pub(crate) use ssh::open_ssh_execution_session;
 pub(crate) use ssh::start_ssh_exec_channel;
+pub(crate) use ssh::SshExecutionSession;
+pub(crate) use ssh::{
+    execute_reviewed_ssh_command_with_handle, execute_ssh_channel, SshChannelExecutionOutcome,
+};

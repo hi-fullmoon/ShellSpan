@@ -326,6 +326,45 @@ pub(crate) fn tool_call_arguments_are_ephemeral(
         || (tool_name == "wait_terminal" && arguments.get("text").is_some())
 }
 
+pub(crate) fn recorded_tool_call_omits_replay(call: &RecordedToolCall) -> bool {
+    let Some(arguments) = call.arguments.as_object() else {
+        return false;
+    };
+    if arguments.contains_key("text")
+        || arguments
+            .get("contentPersisted")
+            .and_then(serde_json::Value::as_bool)
+            != Some(false)
+    {
+        return false;
+    }
+    match call.name.as_str() {
+        "write_terminal_input" => {
+            arguments.len() == 4
+                && arguments
+                    .get("inputKind")
+                    .is_some_and(serde_json::Value::is_string)
+                && arguments
+                    .get("key")
+                    .is_some_and(|value| value.is_null() || value.is_string())
+                && arguments
+                    .get("byteLength")
+                    .is_some_and(|value| value.is_null() || value.as_u64().is_some())
+        }
+        "wait_terminal" => {
+            arguments
+                .get("textProvided")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+                && arguments
+                    .get("textByteLength")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_some()
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod stage_c_tests {
     use super::*;
@@ -352,10 +391,27 @@ mod stage_c_tests {
                 "timeoutMs": 1000,
             }),
         });
-        let recorded = serde_json::to_string(&(write, wait)).unwrap();
+        let recorded = serde_json::to_string(&(&write, &wait)).unwrap();
         assert!(!recorded.contains("ephemeral-terminal-value"));
         assert!(recorded.contains("contentPersisted"));
         assert!(recorded.contains("textByteLength"));
+        assert!(recorded_tool_call_omits_replay(&write));
+        assert!(recorded_tool_call_omits_replay(&wait));
+
+        let ordinary_wait = recorded_tool_call(ModelToolCall {
+            call_id: "wait-without-text".into(),
+            provider_call_id: None,
+            name: "wait_terminal".into(),
+            arguments: serde_json::json!({
+                "afterScreenVersion": 1,
+                "timeoutMs": 1000,
+            }),
+        });
+        assert!(!recorded_tool_call_omits_replay(&ordinary_wait));
+
+        let mut unredacted_write = write;
+        unredacted_write.arguments["text"] = "must-not-be-durable".into();
+        assert!(!recorded_tool_call_omits_replay(&unredacted_write));
     }
 
     #[test]

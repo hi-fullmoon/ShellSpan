@@ -25,12 +25,18 @@ pub(crate) const TERMINAL_EXECUTE_DEFAULT_ENABLED: bool =
 pub(crate) const TERMINAL_REMOTE_AGENT_PTY_FLAG_NAME: &str = "terminal_remote_agent_pty_v1";
 pub(crate) const TERMINAL_REMOTE_AGENT_PTY_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_REMOTE_AGENT_PTY_V1";
-pub(crate) const TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED: bool = false;
+pub(crate) const TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED: bool =
+    cfg!(any(target_os = "macos", target_os = "windows"));
 pub(crate) const TERMINAL_INTERACTIVE_TOOLS_FLAG_NAME: &str = "terminal_interactive_tools_v1";
 pub(crate) const TERMINAL_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1";
 pub(crate) const TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED: bool =
     cfg!(any(target_os = "macos", target_os = "windows"));
+pub(crate) const TERMINAL_REMOTE_INTERACTIVE_TOOLS_FLAG_NAME: &str =
+    "terminal_remote_interactive_tools_v1";
+pub(crate) const TERMINAL_REMOTE_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE: &str =
+    "SHELLSPAN_TERMINAL_REMOTE_INTERACTIVE_TOOLS_V1";
+pub(crate) const TERMINAL_REMOTE_INTERACTIVE_TOOLS_DEFAULT_ENABLED: bool = false;
 pub(crate) const TERMINAL_LEGACY_FALLBACK_FLAG_NAME: &str = "terminal_legacy_wrapper_fallback_v1";
 pub(crate) const TERMINAL_LEGACY_FALLBACK_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_LEGACY_WRAPPER_FALLBACK_V1";
@@ -296,6 +302,7 @@ pub(crate) struct TerminalBrokerSnapshot {
     pub(crate) terminal_execute_rollout: TerminalFeatureRolloutDecision,
     pub(crate) remote_agent_pty_rollout: TerminalFeatureRolloutDecision,
     pub(crate) interactive_tools_rollout: TerminalFeatureRolloutDecision,
+    pub(crate) remote_interactive_tools_rollout: TerminalFeatureRolloutDecision,
     pub(crate) legacy_fallback_rollout: TerminalFeatureRolloutDecision,
     pub(crate) counters: TerminalRolloutCountersSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1031,6 +1038,7 @@ struct BrokerState {
     terminal_execute_rollout: TerminalFeatureRolloutDecision,
     remote_agent_pty_rollout: TerminalFeatureRolloutDecision,
     interactive_tools_rollout: TerminalFeatureRolloutDecision,
+    remote_interactive_tools_rollout: TerminalFeatureRolloutDecision,
     legacy_fallback_rollout: TerminalFeatureRolloutDecision,
     sessions: HashMap<String, SessionRecord>,
     transports: HashMap<String, TransportAttachment>,
@@ -1075,6 +1083,17 @@ impl Default for BrokerState {
                 rollout.enabled && TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED,
                 TerminalBrokerRolloutSource::Default,
                 "removeToolsRevokeAgentLeasesAndRejectLaterInput",
+            ),
+            remote_interactive_tools_rollout: TerminalFeatureRolloutDecision::new(
+                TERMINAL_REMOTE_INTERACTIVE_TOOLS_FLAG_NAME,
+                TERMINAL_REMOTE_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
+                TERMINAL_REMOTE_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
+                rollout.enabled
+                    && TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED
+                    && TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED
+                    && TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
+                TerminalBrokerRolloutSource::Default,
+                "removeRemoteToolsRevokeAgentLeasesAndRejectLaterInput",
             ),
             legacy_fallback_rollout: TerminalFeatureRolloutDecision::new(
                 TERMINAL_LEGACY_FALLBACK_FLAG_NAME,
@@ -1128,6 +1147,8 @@ impl TerminalSessionBroker {
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
                 true,
                 TerminalBrokerRolloutSource::Test,
             )
@@ -1156,6 +1177,10 @@ impl TerminalSessionBroker {
             TERMINAL_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE,
             TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
         )?;
+        let (remote_interactive_tools, remote_interactive_tools_source) = trusted_rollout_value(
+            TERMINAL_REMOTE_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE,
+            TERMINAL_REMOTE_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
+        )?;
         let (legacy, legacy_source) = trusted_rollout_value(
             TERMINAL_LEGACY_FALLBACK_ENVIRONMENT_VARIABLE,
             TERMINAL_LEGACY_FALLBACK_DEFAULT_ENABLED,
@@ -1171,6 +1196,8 @@ impl TerminalSessionBroker {
             remote_agent_pty_source,
             interactive_tools,
             interactive_tools_source,
+            remote_interactive_tools,
+            remote_interactive_tools_source,
             legacy,
             legacy_source,
         )
@@ -1189,6 +1216,8 @@ impl TerminalSessionBroker {
         remote_agent_pty_source: TerminalBrokerRolloutSource,
         interactive_tools: bool,
         interactive_tools_source: TerminalBrokerRolloutSource,
+        remote_interactive_tools: bool,
+        remote_interactive_tools_source: TerminalBrokerRolloutSource,
         legacy: bool,
         legacy_source: TerminalBrokerRolloutSource,
     ) -> Result<(), String> {
@@ -1265,6 +1294,14 @@ impl TerminalSessionBroker {
             interactive_tools_source,
             "removeToolsRevokeAgentLeasesAndRejectLaterInput",
         );
+        state.remote_interactive_tools_rollout = TerminalFeatureRolloutDecision::new(
+            TERMINAL_REMOTE_INTERACTIVE_TOOLS_FLAG_NAME,
+            remote_interactive_tools,
+            TERMINAL_REMOTE_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
+            broker && integration && execute && remote_agent_pty && interactive_tools,
+            remote_interactive_tools_source,
+            "removeRemoteToolsRevokeAgentLeasesAndRejectLaterInput",
+        );
         state.legacy_fallback_rollout = TerminalFeatureRolloutDecision::new(
             TERMINAL_LEGACY_FALLBACK_FLAG_NAME,
             legacy,
@@ -1296,6 +1333,8 @@ impl TerminalSessionBroker {
             integration_source,
             execute,
             execute_source,
+            false,
+            TerminalBrokerRolloutSource::Test,
             false,
             TerminalBrokerRolloutSource::Test,
             false,
@@ -2484,6 +2523,7 @@ impl TerminalSessionBroker {
             terminal_execute_rollout: state.terminal_execute_rollout.clone(),
             remote_agent_pty_rollout: state.remote_agent_pty_rollout.clone(),
             interactive_tools_rollout: state.interactive_tools_rollout.clone(),
+            remote_interactive_tools_rollout: state.remote_interactive_tools_rollout.clone(),
             legacy_fallback_rollout: state.legacy_fallback_rollout.clone(),
             counters: self.counters.snapshot(),
             session,
@@ -2571,6 +2611,8 @@ impl TerminalSessionBroker {
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
                 true,
                 TerminalBrokerRolloutSource::Test,
             )
@@ -2596,6 +2638,8 @@ impl TerminalSessionBroker {
                 true,
                 TerminalBrokerRolloutSource::Test,
                 true,
+                TerminalBrokerRolloutSource::Test,
+                false,
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
@@ -2631,6 +2675,8 @@ impl TerminalSessionBroker {
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
                 true,
                 TerminalBrokerRolloutSource::Test,
             )
@@ -2661,6 +2707,8 @@ impl TerminalSessionBroker {
                 TerminalBrokerRolloutSource::Test,
                 true,
                 TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
                 true,
                 TerminalBrokerRolloutSource::Test,
             )
@@ -2682,6 +2730,8 @@ impl TerminalSessionBroker {
         broker
             .apply_trusted_rollout(
                 true,
+                TerminalBrokerRolloutSource::Test,
+                false,
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
@@ -2782,6 +2832,8 @@ impl TerminalBrokerBenchmarkObserver {
             TerminalBrokerRolloutSource::Environment,
             false,
             TerminalBrokerRolloutSource::Environment,
+            false,
+            TerminalBrokerRolloutSource::Environment,
             true,
             TerminalBrokerRolloutSource::Environment,
         )?;
@@ -2863,7 +2915,9 @@ fn effective_interactive_tools_for_transport(
 ) -> bool {
     state.interactive_tools_rollout.enabled
         && (transport_kind != TerminalTransportKind::SshPty
-            || (state.remote_agent_pty_rollout.enabled && agent_pty_owner.is_some()))
+            || (state.remote_agent_pty_rollout.enabled
+                && state.remote_interactive_tools_rollout.enabled
+                && agent_pty_owner.is_some()))
 }
 
 fn current_attachment<'a>(

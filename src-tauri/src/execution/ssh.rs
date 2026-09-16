@@ -528,10 +528,9 @@ pub(crate) fn execute_reviewed_ssh_command(
     credentials: &CredentialManager,
     cancellations: &ExecutionCancellationRegistry,
     known_hosts_path: &Path,
-    mut request: ReviewedSshExecutionRequest,
+    request: ReviewedSshExecutionRequest,
 ) -> ReviewedSshExecutionResult {
     let started_at = crate::db::current_timestamp_ms();
-    let started = Instant::now();
     let initial_secrets = request.known_secret_values();
     if let Err(error) = request.validate() {
         return empty_result(
@@ -566,6 +565,40 @@ pub(crate) fn execute_reviewed_ssh_command(
             );
         }
     };
+    execute_reviewed_ssh_command_with_handle(
+        database,
+        credentials,
+        known_hosts_path,
+        request,
+        cancellation,
+        started_at,
+    )
+}
+
+/// Executes a reviewed request using a cancellation registration owned by a
+/// larger fixed-purpose operation. Deployment preflight uses this so one
+/// operation ID remains cancellable during both local Git inspection and the
+/// remote SSH probe, without a registration race between those phases.
+pub(crate) fn execute_reviewed_ssh_command_with_handle(
+    database: &Database,
+    credentials: &CredentialManager,
+    known_hosts_path: &Path,
+    mut request: ReviewedSshExecutionRequest,
+    cancellation: CancellationHandle,
+    started_at: i64,
+) -> ReviewedSshExecutionResult {
+    let started = Instant::now();
+    let initial_secrets = request.known_secret_values();
+    if let Err(error) = request.validate() {
+        return empty_result(
+            &request,
+            started_at,
+            ExecutionStatus::Failed,
+            error.category,
+            error.message.to_string(),
+            &initial_secrets,
+        );
+    }
     let deadline = started + request.timeout;
 
     let outcome = if let Some(outcome) = observed_terminal_or_deadline(&cancellation, deadline) {
@@ -608,7 +641,6 @@ pub(crate) fn execute_reviewed_ssh_command(
 
     let outcome = settle_outcome_terminal(outcome, &cancellation, deadline);
     let secrets = request.known_secret_values();
-    cancellation.remove_registration();
     generic_result_from_outcome(&request, started_at, outcome, &secrets)
 }
 
