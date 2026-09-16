@@ -108,6 +108,7 @@ function connectedTerminal(sessionId = 'terminal-1'): void {
       port: 22,
       username: 'tester',
       status: 'connected',
+      integrationState: 'ready',
     }],
   });
 }
@@ -1178,7 +1179,7 @@ describe('AiWorkspaceController', () => {
     await user.click(direct);
     await user.click(await screen.findByRole('menuitemradio', { name: 'Visible command' }));
     expect(screen.getByRole('button', { name: 'Command execution: Visible command' }))
-      .toHaveAttribute('data-terminal-surface-state', 'degraded');
+      .toHaveAttribute('data-terminal-surface-state', 'ready');
     await user.type(screen.getByRole('textbox'), 'Show this command');
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
 
@@ -1279,7 +1280,7 @@ describe('AiWorkspaceController', () => {
     await waitFor(() => expect(agent.open).toHaveBeenCalledWith(view.summary.id));
     const choice = await screen.findByRole('button', { name: 'Command execution: Visible command' });
     expect(choice).toBeDisabled();
-    expect(choice).toHaveAttribute('data-terminal-surface-state', 'degraded');
+    expect(choice).toHaveAttribute('data-terminal-surface-state', 'ready');
     expect(choice).toHaveAttribute('aria-description', expect.stringContaining('Agent is idle'));
     expect(screen.queryByRole('button', { name: 'Command execution: Direct' })).toBeNull();
   });

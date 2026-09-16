@@ -217,6 +217,38 @@ describe('TerminalControllerLayer', () => {
     expect(useTerminalStore.getState().sessions[0]?.integrationState).toBe('ready');
   });
 
+  it('presents a new user SSH terminal as visible-command ready when Agent SSH PTY is enabled', async () => {
+    vi.mocked(invokeGetTerminalBrokerSnapshot).mockResolvedValue({
+      terminalExecuteRollout: { enabled: true },
+      remoteAgentPtyRollout: { enabled: true },
+      session: {
+        terminalSessionId: 'terminal-ssh',
+        terminalGeneration: 1,
+        transportKind: 'sshPty',
+        integrationState: 'degraded',
+        integrationReason: 'dedicatedAgentPtyRequired',
+      },
+    } as Awaited<ReturnType<typeof invokeGetTerminalBrokerSnapshot>>);
+    render(<TerminalControllerLayer />);
+
+    act(() => {
+      useTerminalStore.getState().addSession({
+        sessionId: 'user-ssh',
+        terminalSessionId: 'terminal-ssh',
+        terminalGeneration: 1,
+        title: 'remote',
+        host: 'example.test',
+        port: 22,
+        username: 'user',
+      });
+    });
+
+    await vi.waitFor(() => expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      integrationState: 'ready',
+      integrationReason: undefined,
+    }));
+  });
+
   it('does not create a controller until a placeholder resolves to a real session', () => {
     render(<TerminalControllerLayer />);
     act(() => {
@@ -452,6 +484,47 @@ describe('TerminalControllerLayer', () => {
     await expect(controller.writeUserInput('blocked between commands')).resolves.toBe(false);
     coordinator.handleSession(turnEvent('turn/end'));
     await expect(controller.writeUserInput('accepted after turn')).resolves.toBe(true);
+    coordinator.dispose();
+  });
+
+  it('clears the source turn lock when a dedicated Agent terminal takes over the turn', async () => {
+    const sourceController = seedController('source-ssh');
+    const agentController = seedController('agent-ssh');
+    vi.mocked(invokeGetAgentRuntimeSession).mockResolvedValue({
+      header: {
+        taskId: 'task-1',
+        executionSurface: 'boundTerminal',
+        target: { sessionId: 'source-ssh' },
+      },
+    } as AgentSessionSnapshot);
+    const coordinator = createAgentTerminalLeaseCoordinator();
+
+    coordinator.handleSession(turnEvent('turn/start'));
+    await vi.waitFor(() => expect(agentTerminalLeaseState.get('source-ssh')).toMatchObject({
+      terminalOwned: false,
+      operationId: 'turn:turn-1',
+    }));
+    await expect(sourceController.writeUserInput('blocked before Agent PTY')).resolves.toBe(false);
+
+    await coordinator.handle(leaseEvent('operation-1', 'acquired', {
+      sessionId: 'agent-ssh',
+    }).payload);
+    expect(agentTerminalLeaseState.get('source-ssh')).toBeUndefined();
+    expect(agentTerminalLeaseState.get('agent-ssh')).toMatchObject({
+      terminalOwned: true,
+      operationId: 'operation-1',
+    });
+    await expect(sourceController.writeUserInput('accepted after Agent PTY opens')).resolves.toBe(true);
+    await expect(agentController.writeUserInput('blocked on Agent PTY')).resolves.toBe(false);
+
+    await coordinator.handle(leaseEvent('operation-1', 'released', {
+      sessionId: 'agent-ssh',
+      reason: 'completed',
+    }).payload);
+    coordinator.handleSession(turnEvent('turn/end'));
+    expect(agentTerminalLeaseState.get('source-ssh')).toBeUndefined();
+    expect(agentTerminalLeaseState.get('agent-ssh')).toBeUndefined();
+    await expect(agentController.writeUserInput('accepted after turn')).resolves.toBe(true);
     coordinator.dispose();
   });
 

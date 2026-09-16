@@ -235,6 +235,19 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       const turnStartedAtUnixMs = previousView?.agentSessionId === lease.agentSessionId
         ? previousView.acquiredAtUnixMs
         : lease.acquiredAtUnixMs;
+      const previousSurface = turnSurfaces.get(lease.agentSessionId);
+      if (
+        previousSurface
+        && (
+          previousSurface.sessionId !== lease.sessionId
+          || previousSurface.operationId !== lease.operationId
+        )
+      ) {
+        agentTerminalLeaseState.clear(
+          previousSurface.sessionId,
+          previousSurface.operationId,
+        );
+      }
       const active: ActiveLeaseResources = {
         lease: acquiredLease,
         controller,
@@ -484,21 +497,29 @@ export const TerminalControllerLayer: React.FC = () => {
             const remoteRolloutMissing = integrated.transportKind === 'sshPty'
               && Boolean(integrated.agentPtyOwner)
               && !snapshot.remoteAgentPtyRollout.enabled;
+            const remoteVisibleCommandAvailable = integrated.transportKind === 'sshPty'
+              && !integrated.agentPtyOwner
+              && integrated.integrationReason === 'dedicatedAgentPtyRequired'
+              && snapshot.remoteAgentPtyRollout.enabled;
             const executionRolloutMissing = !snapshot.terminalExecuteRollout.enabled
               || remoteRolloutMissing;
             setIntegrationState({
               sessionId: session.sessionId,
               terminalSessionId: integrated.terminalSessionId,
               terminalGeneration: integrated.terminalGeneration,
-              state: integrated.integrationState === 'ready'
-                && executionRolloutMissing
-                ? 'degraded'
-                : integrated.integrationState,
+              state: remoteVisibleCommandAvailable
+                ? 'ready'
+                : integrated.integrationState === 'ready' && executionRolloutMissing
+                  ? 'unavailable'
+                  : integrated.integrationState === 'degraded'
+                    ? 'unavailable'
+                    : integrated.integrationState,
               shell: integrated.integrationShell,
-              reason: integrated.integrationState === 'ready'
-                && executionRolloutMissing
-                ? remoteRolloutMissing ? 'remoteAgentPtyDisabled' : 'terminalExecuteDisabled'
-                : integrated.integrationReason,
+              reason: remoteVisibleCommandAvailable
+                ? undefined
+                : integrated.integrationState === 'ready' && executionRolloutMissing
+                  ? remoteRolloutMissing ? 'remoteAgentPtyDisabled' : 'terminalExecuteDisabled'
+                  : integrated.integrationReason,
             });
           }).catch((error) => {
             logger.warn(`Failed to read terminal integration state ${session.sessionId}`, error);

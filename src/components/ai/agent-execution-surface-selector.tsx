@@ -14,26 +14,10 @@ import { useI18n } from '@/hooks/useI18n';
 import type { LocaleKey } from '@/locales';
 import {
   resolveTerminalSurfacePresentation,
-  terminalSurfaceSemanticsV1Enabled,
   type RealTerminalPresentationState,
   type TerminalSurfaceRuntimeFallbackSignal,
 } from '@/lib/terminal/terminal-surface-semantics';
 import type { AgentExecutionSurface } from '@/types/agent-session';
-
-const LEGACY_EXECUTION_SURFACE_OPTIONS = [
-  {
-    surface: 'direct',
-    icon: MonitorCogIcon,
-    label: 'agent.executionSurface.direct',
-    description: 'agent.executionSurface.directDescription',
-  },
-  {
-    surface: 'boundTerminal',
-    icon: SquareTerminalIcon,
-    label: 'agent.executionSurface.boundTerminal',
-    description: 'agent.executionSurface.boundTerminalDescription',
-  },
-] as const;
 
 const SEMANTIC_EXECUTION_SURFACE_OPTIONS = [
   {
@@ -46,7 +30,7 @@ const SEMANTIC_EXECUTION_SURFACE_OPTIONS = [
     surface: 'boundTerminal',
     icon: SquareTerminalIcon,
     label: 'agent.executionSurface.v1.visibleCommand',
-    description: 'agent.executionSurface.v1.degradedDescription',
+    description: 'agent.executionSurface.v1.readyDescription',
   },
 ] as const;
 
@@ -66,10 +50,6 @@ const REAL_TERMINAL_STATE_COPY: Record<
     label: 'agent.executionSurface.v1.state.unavailable',
     description: 'agent.executionSurface.v1.unavailableDescription',
   },
-  degraded: {
-    label: 'agent.executionSurface.v1.state.degraded',
-    description: 'agent.executionSurface.v1.degradedDescription',
-  },
 };
 
 const DIRECT_FALLBACK_COPY = {
@@ -83,8 +63,6 @@ export interface AgentExecutionSurfaceSelectorProps {
   readonly realTerminalState?: RealTerminalPresentationState;
   /** Reserved for a future authoritative runtime routing result. */
   readonly runtimeFallback?: TerminalSurfaceRuntimeFallbackSignal;
-  /** Test/build override; the rollout switch is deliberately not persisted. */
-  readonly surfaceSemanticsEnabled?: boolean;
   readonly onSurfaceChange?: (surface: AgentExecutionSurface) => void;
 }
 
@@ -92,9 +70,8 @@ export interface AgentExecutionSurfaceSelectorProps {
 export function AgentExecutionSurfaceSelector({
   disabled = false,
   surface,
-  realTerminalState = 'degraded',
+  realTerminalState = 'unavailable',
   runtimeFallback,
-  surfaceSemanticsEnabled,
   onSurfaceChange,
 }: AgentExecutionSurfaceSelectorProps): React.ReactNode {
   const { t } = useI18n();
@@ -103,21 +80,16 @@ export function AgentExecutionSurfaceSelector({
     realTerminalState,
     runtimeFallback,
   );
-  const semanticsEnabled = terminalSurfaceSemanticsV1Enabled(surfaceSemanticsEnabled);
-  const options = semanticsEnabled
-    ? SEMANTIC_EXECUTION_SURFACE_OPTIONS
-    : LEGACY_EXECUTION_SURFACE_OPTIONS;
+  const options = SEMANTIC_EXECUTION_SURFACE_OPTIONS;
   const current = options.find((option) => option.surface === surface) ?? options[0];
   const CurrentIcon = current.icon;
   const disabledHint = disabled ? t('agent.executionSurface.switchHint') : undefined;
   const realTerminalCopy = REAL_TERMINAL_STATE_COPY[presentation.realTerminalState];
-  const currentStateDescription = semanticsEnabled
-    ? presentation.state === 'directFallback'
-      ? t(DIRECT_FALLBACK_COPY.description)
-      : surface === 'boundTerminal'
-        ? t(realTerminalCopy.description)
-        : t(current.description)
-    : undefined;
+  const currentStateDescription = presentation.state === 'directFallback'
+    ? t(DIRECT_FALLBACK_COPY.description)
+    : surface === 'boundTerminal'
+      ? t(realTerminalCopy.description)
+      : t(current.description);
   const accessibleDescription = [currentStateDescription, disabledHint]
     .filter((value): value is string => Boolean(value))
     .join(' ') || undefined;
@@ -131,9 +103,8 @@ export function AgentExecutionSurfaceSelector({
             size="xs"
             className="ai-execution-surface-trigger h-7 min-w-0 max-w-[154px] gap-1 px-[7px] @max-[480px]/ai-workspace:size-7 @max-[480px]/ai-workspace:shrink-0 @max-[480px]/ai-workspace:p-0 @max-[480px]/ai-workspace:[&_[data-icon=inline-end]]:hidden"
             data-execution-surface={surface}
-            data-terminal-surface-state={semanticsEnabled ? presentation.state : undefined}
-            data-real-terminal-state={semanticsEnabled ? presentation.realTerminalState : undefined}
-            data-terminal-surface-semantics={semanticsEnabled ? 'v1' : 'legacy'}
+            data-terminal-surface-state={presentation.state}
+            data-real-terminal-state={presentation.realTerminalState}
             disabled={disabled}
             aria-label={`${t('agent.executionSurface')}: ${t(current.label)}`}
             aria-description={accessibleDescription}
@@ -156,15 +127,17 @@ export function AgentExecutionSurfaceSelector({
           <DropdownMenuRadioGroup
             value={surface}
             onValueChange={(value) => {
-              if (value === 'direct' || value === 'boundTerminal') onSurfaceChange?.(value);
+              if (value === 'direct') onSurfaceChange?.(value);
+              if (value === 'boundTerminal' && presentation.realTerminalState === 'ready') {
+                onSurfaceChange?.(value);
+              }
             }}
           >
             {options.map((option) => {
               const Icon = option.icon;
-              const directFallback = semanticsEnabled
-                && option.surface === 'direct'
+              const directFallback = option.surface === 'direct'
                 && presentation.state === 'directFallback';
-              const terminalState = semanticsEnabled && option.surface === 'boundTerminal'
+              const terminalState = option.surface === 'boundTerminal'
                 ? realTerminalCopy
                 : undefined;
               const statusCopy = directFallback ? DIRECT_FALLBACK_COPY : terminalState;
@@ -175,6 +148,8 @@ export function AgentExecutionSurfaceSelector({
                   key={option.surface}
                   value={option.surface}
                   closeOnClick
+                  disabled={option.surface === 'boundTerminal'
+                    && presentation.realTerminalState !== 'ready'}
                   className="ai-execution-surface-menu-option min-h-12 items-start gap-2 py-2 pr-8 pl-2"
                   aria-description={t(description)}
                 >
