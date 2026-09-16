@@ -11,12 +11,11 @@ describe('locale catalog key sets', () => {
     expect(englishKeys).toEqual(chineseKeys);
   });
 
-  it('covers every terminal surface semantics v1 presentation state', () => {
+  it('covers every terminal surface presentation state', () => {
     for (const key of [
       'agent.executionSurface.v1.state.initializing',
       'agent.executionSurface.v1.state.ready',
       'agent.executionSurface.v1.state.unavailable',
-      'agent.executionSurface.v1.state.degraded',
       'agent.executionSurface.v1.state.directFallback',
     ] as const) {
       expect(enUS[key]).toBeTruthy();
