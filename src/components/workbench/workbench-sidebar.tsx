@@ -19,8 +19,10 @@ import {
 import type { SettingsSection, WorkbenchTab } from '@/types';
 import { useUpdateStore } from '@/stores/updateStore';
 import { useAppStore } from '@/stores/appStore';
+import { useDeploymentStore } from '@/stores/deploymentStore';
 import {
   ActivityIcon,
+  CloudUploadIcon,
   ChevronUpIcon,
   FileTextIcon,
   InfoIcon,
@@ -48,6 +50,7 @@ interface MenuItem {
   key: WorkbenchTab;
   label: string;
   icon: React.ElementType;
+  badge?: number;
 }
 
 interface WorkbenchSidebarItemProps {
@@ -76,7 +79,15 @@ const WorkbenchSidebarItem: React.FC<WorkbenchSidebarItemProps> = ({
       )}
     >
       <Icon aria-hidden="true" />
-      {item.label}
+      <span className="min-w-0 flex-1 truncate text-left">{item.label}</span>
+      {item.badge != null && item.badge > 0 && (
+        <span
+          className="min-w-5 rounded-full bg-destructive px-1.5 text-center text-[11px] leading-5 text-destructive-foreground"
+          aria-label={item.badge.toString()}
+        >
+          {item.badge > 99 ? '99+' : item.badge}
+        </span>
+      )}
     </button>
   );
 };
@@ -98,6 +109,9 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
   const checkingForUpdates = updatePhase === 'checking';
   const downloadingUpdate = updatePhase === 'update_available' || updatePhase === 'downloading';
   const updateBusy = checkingForUpdates || downloadingUpdate;
+  const deploymentAttentionCount = useDeploymentStore(
+    (state) => state.recoveryCandidates.length,
+  );
 
   const items: MenuItem[] = [
     {
@@ -109,6 +123,12 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
       key: 'keychain',
       label: t('workbench.keychain.title'),
       icon: KeyRoundIcon,
+    },
+    {
+      key: 'deployments',
+      label: t('deployment.title'),
+      icon: CloudUploadIcon,
+      badge: deploymentAttentionCount,
     },
     {
       key: 'knownHosts',
