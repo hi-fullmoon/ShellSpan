@@ -1,0 +1,13 @@
+Port 22
+ListenAddress 0.0.0.0
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin no
+UsePAM no
+AllowUsers shellspan
+AllowTcpForwarding no
+X11Forwarding no
+HostKeyAlgorithms ssh-ed25519,rsa-sha2-256,rsa-sha2-512
+Subsystem sftp internal-sftp
+PidFile /run/sshd/sshd.pid
