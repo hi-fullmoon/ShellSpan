@@ -29,6 +29,13 @@ const Toaster = ({ ...props }: ToasterProps) => {
         duration: t.duration,
         onDismiss: () => removeToast(t.id),
         onAutoClose: () => removeToast(t.id),
+        action: t.action ? {
+          label: t.action.label,
+          onClick: () => {
+            t.action?.onClick()
+            removeToast(t.id)
+          },
+        } : undefined,
       }
 
       switch (t.variant) {
