@@ -202,21 +202,6 @@ describe('TerminalPane', () => {
     expect(screen.queryByTestId('agent-terminal-lease-bar')).not.toBeInTheDocument();
   });
 
-  it('restores only the legacy lease copy when surface semantics roll back', () => {
-    setAgentLease();
-    render(
-      <TerminalPane
-        activeSession={makeSession()}
-        surfaceSemanticsEnabled={false}
-      />,
-    );
-
-    const bar = screen.getByTestId('agent-terminal-lease-bar');
-    expect(bar).toHaveTextContent('terminal.agentLease.surfaceLabel');
-    expect(bar).not.toHaveTextContent('terminal.agentLease.visibleCommandLabel');
-    expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' })).toBeEnabled();
-  });
-
   it('routes the takeover button and Escape through the lease action', async () => {
     const requestTakeover = setAgentLease();
     const terminal = makeMockTerminal();

@@ -1,22 +1,10 @@
 import type { AgentExecutionSurface } from '@/types/agent-session';
 import type { SessionStatus } from '@/types';
 
-/**
- * Phase 1 has no general runtime feature service to evaluate presentation-only
- * flags. Keep this source default non-persisted and outside the Agent protocol:
- * changing it to false is the complete legacy-copy rollback.
- */
-export const TERMINAL_SURFACE_SEMANTICS_V1 = {
-  name: 'terminal_surface_semantics_v1',
-  defaultEnabled: true,
-  rollback: 'legacyCopyOnly',
-} as const;
-
 export type RealTerminalPresentationState =
   | 'initializing'
   | 'ready'
-  | 'unavailable'
-  | 'degraded';
+  | 'unavailable';
 
 export type TerminalSurfacePresentationState =
   | 'direct'
@@ -35,22 +23,18 @@ export interface TerminalSurfacePresentation {
   readonly realTerminalState: RealTerminalPresentationState;
 }
 
-export function terminalSurfaceSemanticsV1Enabled(override?: boolean): boolean {
-  return override ?? TERMINAL_SURFACE_SEMANTICS_V1.defaultEnabled;
-}
-
 /**
- * Phase 1 intentionally classifies every connected legacy-wrapper terminal as
- * degraded. Only a later generation-bound cooperative integration signal may supply `ready`.
+ * A connected terminal without cooperative integration does not support visible
+ * commands. Unsupported terminals are presented as unavailable.
  */
-export function legacyRealTerminalPresentationState(
+export function terminalConnectionPresentationState(
   status: SessionStatus | undefined,
 ): Exclude<RealTerminalPresentationState, 'ready'> {
   switch (status) {
     case 'connecting':
       return 'initializing';
     case 'connected':
-      return 'degraded';
+      return 'unavailable';
     case 'disconnected':
     case 'error':
     case undefined:

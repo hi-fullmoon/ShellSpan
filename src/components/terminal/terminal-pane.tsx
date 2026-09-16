@@ -12,7 +12,6 @@ import type { TerminalSession as TerminalSessionState } from '@/stores/terminalS
 import { useToast } from '@/hooks/useToast';
 import { getPlatform } from '@/lib/platform';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
-import { terminalSurfaceSemanticsV1Enabled } from '@/lib/terminal/terminal-surface-semantics';
 import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutBindings } from '@/types';
@@ -48,8 +47,7 @@ const MIN_CONNECTING_OVERLAY_MS = 600;
 
 const AgentTerminalLeaseBar: React.FC<{
   lease: AgentTerminalLeaseView;
-  surfaceSemanticsEnabled: boolean;
-}> = ({ lease, surfaceSemanticsEnabled }) => {
+}> = ({ lease }) => {
   const { t } = useI18n();
   const { error: showError } = useToast();
   const shownFailureOperationRef = useRef<string | null>(null);
@@ -97,9 +95,7 @@ const AgentTerminalLeaseBar: React.FC<{
             )}
           >
             <BotIcon data-icon="inline-start" />
-            {t(surfaceSemanticsEnabled
-              ? 'terminal.agentLease.visibleCommandLabel'
-              : 'terminal.agentLease.surfaceLabel')}
+            {t('terminal.agentLease.visibleCommandLabel')}
           </TooltipTrigger>
           <TooltipContent>{t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}</TooltipContent>
         </Tooltip>
@@ -188,15 +184,12 @@ export interface TerminalPaneProps {
   activeSession: TerminalSessionState | null;
   isActive?: boolean;
   isVisible?: boolean;
-  /** Test/build override; disabling restores only the pre-Phase-1 copy. */
-  surfaceSemanticsEnabled?: boolean;
 }
 
 export const TerminalPane: React.FC<TerminalPaneProps> = ({
   activeSession,
   isActive = true,
   isVisible = true,
-  surfaceSemanticsEnabled: surfaceSemanticsOverride,
 }) => {
   const paneRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
@@ -206,7 +199,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const largePasteWarning = useAppStore((state) => state.terminalLargePasteWarning);
   const trimTrailingWhitespace = useAppStore((state) => state.terminalTrimTrailingWhitespace);
   const rightClickBehavior = useAppStore((state) => state.terminalRightClickBehavior);
-  const surfaceSemanticsEnabled = terminalSurfaceSemanticsV1Enabled(surfaceSemanticsOverride);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -459,10 +451,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">
       {activeLease && (
-        <AgentTerminalLeaseBar
-          lease={activeLease}
-          surfaceSemanticsEnabled={surfaceSemanticsEnabled}
-        />
+        <AgentTerminalLeaseBar lease={activeLease} />
       )}
       <div className="relative min-h-0 flex-1">
         {activeLease && (

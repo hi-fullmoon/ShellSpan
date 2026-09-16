@@ -1,43 +1,31 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  legacyRealTerminalPresentationState,
   resolveTerminalSurfacePresentation,
-  TERMINAL_SURFACE_SEMANTICS_V1,
-  terminalSurfaceSemanticsV1Enabled,
+  terminalConnectionPresentationState,
 } from '../terminal-surface-semantics';
 
-describe('terminal_surface_semantics_v1', () => {
-  it('defaults on with presentation-only legacy-copy rollback semantics', () => {
-    expect(TERMINAL_SURFACE_SEMANTICS_V1).toEqual({
-      name: 'terminal_surface_semantics_v1',
-      defaultEnabled: true,
-      rollback: 'legacyCopyOnly',
-    });
-    expect(terminalSurfaceSemanticsV1Enabled()).toBe(true);
-    expect(terminalSurfaceSemanticsV1Enabled(false)).toBe(false);
-  });
-
+describe('terminal surface semantics', () => {
   it.each([
     ['connecting', 'initializing'],
-    ['connected', 'degraded'],
+    ['connected', 'unavailable'],
     ['disconnected', 'unavailable'],
     ['error', 'unavailable'],
     [undefined, 'unavailable'],
-  ] as const)('maps the legacy terminal status %s to %s', (status, expected) => {
-    expect(legacyRealTerminalPresentationState(status)).toBe(expected);
+  ] as const)('maps terminal status %s to %s without compatibility mode', (status, expected) => {
+    expect(terminalConnectionPresentationState(status)).toBe(expected);
   });
 
-  it('never promotes the legacy connected path to real-terminal ready', () => {
-    const current = legacyRealTerminalPresentationState('connected');
+  it('does not claim visible-command support without an authoritative ready state', () => {
+    const current = terminalConnectionPresentationState('connected');
     expect(current).not.toBe('ready');
     expect(resolveTerminalSurfacePresentation('boundTerminal', current)).toEqual({
-      state: 'degraded',
-      realTerminalState: 'degraded',
+      state: 'unavailable',
+      realTerminalState: 'unavailable',
     });
   });
 
-  it.each(['initializing', 'ready', 'unavailable', 'degraded'] as const)(
+  it.each(['initializing', 'ready', 'unavailable'] as const)(
     'keeps an ordinary Direct selection ordinary while real-terminal state is %s',
     (realTerminalState) => {
       expect(resolveTerminalSurfacePresentation('direct', realTerminalState)).toEqual({

@@ -598,13 +598,11 @@ describe('connection request serialization', () => {
         defaultEnabled: false,
         source: 'default',
         persisted: false,
-        mode: 'shadowCompatibility',
-        legacyDisplayAuthoritative: true,
+        mode: 'cooperative',
         rollback: 'disableDependentFlagsThenCloseBrokerGenerations',
       },
       counters: {
         integrationReady: 3,
-        degradedFallback: 1,
         lifecycleMatched: 12,
         uncertainty: 1,
         timeout: 2,
@@ -622,7 +620,6 @@ describe('connection request serialization', () => {
     expect(snapshot.rollout.enabled).toBe(false);
     expect(snapshot.counters).toEqual(expect.objectContaining({
       integrationReady: 3,
-      degradedFallback: 1,
       transportLatencySamples: 8,
     }));
     expect(invokeMock).toHaveBeenCalledWith('get_terminal_broker_snapshot', {

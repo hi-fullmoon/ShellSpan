@@ -1,6 +1,6 @@
 import type { AppSection } from '@/types';
 import {
-  legacyRealTerminalPresentationState,
+  terminalConnectionPresentationState,
 } from '@/lib/terminal/terminal-surface-semantics';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -61,11 +61,11 @@ export function AiWorkspaceController({
       ? 'ready'
       : activeTerminalIntegrationState === 'initializing'
         ? 'initializing'
-        : activeTerminalIntegrationState === 'unavailable'
+      : activeTerminalIntegrationState === 'unavailable'
           || activeTerminalIntegrationState === 'invalidated'
           ? 'unavailable'
-          : 'degraded'
-    : legacyRealTerminalPresentationState(activeTerminalStatus);
+          : 'unavailable'
+    : terminalConnectionPresentationState(activeTerminalStatus);
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
   return (
     <AiWorkspaceRoot
