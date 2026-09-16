@@ -22,10 +22,8 @@
     use std::thread;
 
     #[test]
-    fn user_ssh_visible_command_presentation_is_ready_or_unavailable_without_compatibility() {
-        use crate::terminal_broker::{
-            TerminalIntegrationState, TerminalTransportKind,
-        };
+    fn user_ssh_visible_command_presentation_is_binary() {
+        use crate::terminal_broker::{TerminalIntegrationState, TerminalTransportKind};
 
         assert_eq!(
             visible_command_integration_presentation(

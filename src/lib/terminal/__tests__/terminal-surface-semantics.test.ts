@@ -12,7 +12,7 @@ describe('terminal surface semantics', () => {
     ['disconnected', 'unavailable'],
     ['error', 'unavailable'],
     [undefined, 'unavailable'],
-  ] as const)('maps terminal status %s to %s without compatibility mode', (status, expected) => {
+  ] as const)('maps terminal status %s to %s', (status, expected) => {
     expect(terminalConnectionPresentationState(status)).toBe(expected);
   });
 
