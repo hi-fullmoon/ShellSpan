@@ -19,10 +19,10 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Spinner } from '@/components/ui/empty-state';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Spinner } from '@/components/ui/spinner';
 import {
   Select,
   SelectContent,
@@ -145,6 +145,7 @@ export function RemoteHealthSection(): React.JSX.Element {
   const collect = useRemoteHealthStore((state) => state.collect);
   const cancel = useRemoteHealthStore((state) => state.cancel);
   const [authorizationProfileId, setAuthorizationProfileId] = useState<string>();
+  const [authorizationPending, setAuthorizationPending] = useState(false);
   const [now, setNow] = useState(Date.now());
 
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId)
@@ -186,6 +187,26 @@ export function RemoteHealthSection(): React.JSX.Element {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!authorizationPending || !authorizationProfileId) return;
+    const phase = entries[authorizationProfileId]?.phase;
+    if (phase === 'collecting' || phase === 'cancelling') {
+      setAuthorizationPending(false);
+      setAuthorizationProfileId(undefined);
+    }
+  }, [authorizationPending, authorizationProfileId, entries]);
+
+  const confirmAuthorization = async (): Promise<void> => {
+    if (!authorizationProfile || authorizationPending) return;
+    setAuthorizationPending(true);
+    try {
+      await collect(authorizationProfile, true);
+    } finally {
+      setAuthorizationPending(false);
+      setAuthorizationProfileId(undefined);
+    }
+  };
+
   return (
     <section aria-labelledby="remote-health-heading">
       <Card size="sm" radius="compact">
@@ -214,7 +235,7 @@ export function RemoteHealthSection(): React.JSX.Element {
                   disabled={busy}
                 >
                   {busy
-                    ? <Spinner data-icon="inline-start" />
+                    ? <Spinner data-icon="inline-start" aria-hidden="true" />
                     : <ShieldCheckIcon data-icon="inline-start" />}
                   {entry?.phase === 'preparing'
                     ? t('remoteHealth.preparing')
@@ -367,19 +388,21 @@ export function RemoteHealthSection(): React.JSX.Element {
 
       <ConfirmationDialog
         open={Boolean(authorizationProfile)}
-        onOpenChange={(open) => !open && setAuthorizationProfileId(undefined)}
+        onOpenChange={(open) => {
+          if (!open && !authorizationPending) setAuthorizationProfileId(undefined);
+        }}
         title={t('remoteHealth.authorization.title')}
         description={t('remoteHealth.authorization.description', {
           host: authorizationProfile
             ? `${authorizationProfile.username}@${authorizationProfile.host}:${authorizationProfile.port}`
             : '',
         })}
-        confirmLabel={t('remoteHealth.authorization.confirm')}
+        confirmLabel={t(authorizationPending
+          ? 'remoteHealth.preparing'
+          : 'remoteHealth.authorization.confirm')}
+        confirmPending={authorizationPending}
         media={<ShieldCheckIcon />}
-        onConfirm={() => {
-          if (authorizationProfile) void collect(authorizationProfile, true);
-          setAuthorizationProfileId(undefined);
-        }}
+        onConfirm={() => void confirmAuthorization()}
       >
         <Alert variant="default">
           <ShieldCheckIcon />

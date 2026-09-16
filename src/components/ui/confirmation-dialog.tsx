@@ -13,6 +13,7 @@ import {
   CompactAlertDialogHeader,
   CompactAlertDialogTitle,
 } from '@/components/ui/compact-alert-dialog';
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 
@@ -28,6 +29,7 @@ export interface ConfirmationDialogProps {
   confirmVariant?: React.ComponentProps<typeof AlertDialogAction>['variant'];
   buttonSize?: React.ComponentProps<typeof AlertDialogAction>['size'];
   confirmDisabled?: boolean;
+  confirmPending?: boolean;
   cancelDisabled?: boolean;
   media?: React.ReactNode;
   mediaVariant?: ConfirmationDialogMediaVariant;
@@ -45,6 +47,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   confirmVariant = 'default',
   buttonSize = 'sm',
   confirmDisabled = false,
+  confirmPending = false,
   cancelDisabled = false,
   media,
   mediaVariant = 'default',
@@ -80,15 +83,17 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
           {children}
         </CompactAlertDialogBody>
         <CompactAlertDialogFooter>
-          <AlertDialogCancel size={buttonSize} disabled={cancelDisabled}>
+          <AlertDialogCancel size={buttonSize} disabled={cancelDisabled || confirmPending}>
             {t('common.cancel')}
           </AlertDialogCancel>
           <AlertDialogAction
             variant={confirmVariant}
             size={buttonSize}
-            disabled={confirmDisabled}
+            disabled={confirmDisabled || confirmPending}
+            aria-busy={confirmPending}
             onClick={onConfirm}
           >
+            {confirmPending && <Spinner data-icon="inline-start" aria-hidden="true" />}
             {confirmLabel}
           </AlertDialogAction>
         </CompactAlertDialogFooter>
