@@ -10,13 +10,13 @@ Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
 | --- | --- | --- | --- |
 | `AgentExecutionSurface` | Persisted values are `direct` and `boundTerminal` in Rust event v5 and TypeScript. On Windows local ConPTY and macOS local PTY, `boundTerminal` now selects wrapper-free terminal execution when integration is ready. Deferred platforms retain compatibility routing. | Preserve both serialized values. Do not add a third persisted surface for interactive operation; it is a runtime capability of the real-terminal surface. | Existing v5 session fixtures and restart tests continue to load both values. Runtime readiness remains ephemeral and platform-scoped. |
 | Model tool `run_terminal_command` | Stable model-facing facade normalized by the native adapter. | Keep the facade during migration. Routing is chosen and frozen before dispatch. The optional additive `lifecycleTrust = directRequired` requests Direct for adversarial or untrusted code; known sensitive, destructive, and external effects are forced to Direct independently of the selected surface. Do not expose rollout flags to the model. | Adapter/effect/policy tests prove old calls remain accepted, stateful shell commands remain eligible for the visible terminal, and strong-lifecycle requests cannot reach `terminal_execute`. |
-| Native `exec_command.channel` | Contract v3 accepts `direct` and `pty`. `direct` uses process/SSH exec; `pty` names the legacy wrapper contract. | Preserve both enum values so old calls/results remain decodable; never reinterpret `pty` as wrapper-free execution. Phase 6 rejects new `pty` dispatch to Windows and macOS local targets. Linux and remote targets retain the compatibility implementation. | Protocol tests freeze both values, native routing tests prove local rejection on rolled-out platforms, and remote compatibility tests retain the wrapper. |
+| Native `exec_command.channel` | Contract v3 accepts `direct` and `pty`. `direct` uses process/SSH exec; `pty` names the legacy wrapper contract. | Preserve both enum values so old calls/results remain decodable; never reinterpret `pty` as wrapper-free execution. Phase 6 rejects new `pty` dispatch to Windows and macOS local targets. Linux and remote rollback retain the compatibility implementation. | Protocol tests freeze both values, native routing tests prove local rejection on rolled-out platforms, and remote compatibility tests retain the wrapper. |
 | Agent Session event v5 | Append-only JSONL source of truth. `session/created.executionSurface` and `session/execution_surface_changed.data.surface` persist surface choice; `tool/call`, `tool/execution`, and `tool/result` persist execution boundaries. | Keep version 5. Phase 0 repairs the schema enum to match the already-shipped surface-change event. Raw frames, integration secrets, and screen contents do not enter event v5. Phase 3 adds the `uncertain` tool-result status and versioned `terminal_execute` result data without changing the envelope; explicit uncertainty remains a reconciliation boundary. | Event-v5 compatibility fixtures validate `direct` and `boundTerminal`; Rust replay tests retain every older result status and prove `uncertain` is never auto-replayed. A v5 version bump is required only for an incompatible event-envelope change. |
 | Persisted Agent Sessions | Stored under `sessions-v5`; historical events are replayed strictly. | Never rewrite old logs in place. Continue deriving `boundTerminal` exactly as stored. New runtime readiness is ephemeral/derived and must not make an old record unloadable. | Rust restart tests plus frontend adapter fixtures cover restoration. Migration tests in Phase 1 must include pre-feature sessions. |
 | Persisted terminal workspace | Terminal tabs restore identity and layout; a reconnect currently replaces the transport session id and records `replacesSessionId` ephemerally. | Preserve the stored workspace format through Phase 1. The broker later maps a replacement transport to a new terminal generation; it must not mutate an old Agent target or imply safe continuation. | Existing workspace persistence and reconnect tests remain green. Phase 2 adds generation tests before cutover. |
 | Direct process handles | Opaque `proc-*` handles bind request, task, and owner target. `write_stdin`, `wait_process`, and `kill_process` target those handles. | No terminal flag changes this path. Do not attach terminal generations or leases to process handles. Preserve structured stdout/stderr, exit, timeout, cancellation, and recovery. | Native process tests and direct-execution fixture gate must pass at every phase. |
 | Current terminal transport | Local `portable-pty` and interactive SSH PTY decode bytes to strings before Tauri emission. Frontend xterm applies high/low-watermark backpressure. | Phase 2 introduces byte-oriented broker frames without functional cutover. Existing transport remains fallback until byte equality, ordering, generation, and performance gates pass. | Broker shadow tests compare exact payload/order against the legacy display branch and the recorded baseline. |
-| Legacy PTY wrapper | Injects a POSIX `/bin/sh -c` or nested PowerShell command, authenticated BEGIN/END records, synthetic `[Agent]` display, and backend output filtering. | Phase 6 removes it from Windows and macOS local routing. Keep the implementation only for deferred Linux and remote targets; it is never called “real terminal” and receives no new behavior. | Windows/macOS local `boundTerminal` cannot select or directly dispatch the wrapper. `terminal_legacy_wrapper_fallback_v1` remains independently controllable only for compatibility targets. |
+| Legacy PTY wrapper | Injects a POSIX `/bin/sh -c` or nested PowerShell command, authenticated BEGIN/END records, synthetic `[Agent]` display, and backend output filtering. | Phase 6 removes it from Windows and macOS local routing. Keep the implementation only for deferred Linux and explicit remote rollback; it is never called “real terminal” and receives no new behavior. | Windows/macOS local `boundTerminal` cannot select or directly dispatch the wrapper. `terminal_legacy_wrapper_fallback_v1` remains independently controllable only for compatibility targets. |
 
 ## Additive migration rules
 
@@ -54,9 +54,10 @@ phase listed below; Phase 0 only reserves their names and behavior.
 | `terminal_broker_v1` | 2 | on for Windows and macOS local; off elsewhere | none | Creates broker session records and fans raw bytes to bounded consumers without rewriting display bytes. | Disable dependent flags before the broker for new local generations. Close active broker generations; unresolved operations become uncertain. Deferred platforms keep their compatibility transport. |
 | `terminal_shell_integration_v1` | 3 | on for Windows and macOS local; off elsewhere | `terminal_broker_v1` | Installs supported local cooperative shell integration with a generation-bound control plane. Unsupported or failed initialization degrades explicitly. | Stop new integration bootstrap and mark affected generations degraded. Invalidate active integration; any command lacking accepted completion becomes uncertain. |
 | `terminal_execute_v1` | 3 | on for Windows and macOS local; off elsewhere | broker + ready cooperative shell integration | Routes eligible non-security-sensitive visible commands to wrapper-free `terminal_execute`. Effect policy and `lifecycleTrust = directRequired` force Direct where cooperative evidence is insufficient. | Stop routing new calls. Existing calls finish on their chosen path or become uncertain; never replay. Rolled-out local platforms offer explicit Direct instead of reviving the wrapper. |
-| `terminal_remote_agent_pty_v1` | 4 | off | broker + shell integration + terminal execute | Opens a dedicated Agent SSH PTY and bootstraps remote integration. | Stop opening new Agent PTYs and close idle flagged channels. Active incomplete operations become uncertain. Preserve ordinary user SSH terminals and Direct SSH exec. |
-| `terminal_interactive_tools_v1` | 5 | on for Windows and macOS local; off elsewhere | broker + shell integration; remote flag for remote targets | Publishes terminal input/key/snapshot/wait tools and the headless screen model. | Remove tools from new model requests, revoke Agent leases, and reject later Agent input. Reconcile any operation without accepted completion; user ownership remains available. |
-| `terminal_legacy_wrapper_fallback_v1` | 3-6 | on for deferred Linux and remote targets; unavailable to Windows/macOS local | compatibility scope only; mutually exclusive per operation with `terminal_execute_v1` routing | Allows wrapped `exec_command.channel = "pty"` only on Linux or remote targets that have not passed their Phase 5 gate. | Re-enable only for new compatibility-scope operations. It cannot restore Windows or macOS local wrapper routing. Never reroute or replay an in-flight/uncertain command. |
+| `terminal_remote_agent_pty_v1` | 4 | on for Windows and macOS desktop hosts; off on Linux | broker + shell integration + terminal execute | Opens a dedicated Agent SSH PTY and bootstraps remote integration for wrapper-free visible commands. | Stop opening new Agent PTYs and close idle flagged channels. Active incomplete operations become uncertain. Preserve ordinary user SSH terminals and Direct SSH exec. |
+| `terminal_interactive_tools_v1` | 5 | on for Windows and macOS local; off elsewhere | broker + shell integration; remote Agent PTY and remote-interactive flags for remote targets | Publishes terminal input/key/snapshot/wait tools and the headless screen model. | Remove tools from new model requests, revoke Agent leases, and reject later Agent input. Reconcile any operation without accepted completion; user ownership remains available. |
+| `terminal_remote_interactive_tools_v1` | 5 | off | interactive tools + remote Agent PTY | Separately admits screen observation and interactive input for remote Agent SSH PTYs after the SSH Phase 5 gate passes. It does not gate visible commands. | Remove remote interactive tools from new model requests and reject later remote interactive input without disabling remote visible commands. |
+| `terminal_legacy_wrapper_fallback_v1` | 3-6 | on for deferred Linux and remote rollback; unavailable to Windows/macOS local | compatibility scope only; mutually exclusive per operation with `terminal_execute_v1` routing | Allows wrapped `exec_command.channel = "pty"` on Linux or after an explicit remote Agent PTY rollback. | Re-enable only for new compatibility-scope operations. It cannot restore Windows or macOS local wrapper routing. Never reroute or replay an in-flight/uncertain command. |
 
 ## Flag evaluation and dependency rules
 
@@ -66,10 +67,11 @@ for `SHELLSPAN_TERMINAL_SHELL_INTEGRATION_V1`,
 `SHELLSPAN_TERMINAL_EXECUTE_V1`, and
 `SHELLSPAN_TERMINAL_LEGACY_WRAPPER_FALLBACK_V1`. Phase 4 adds
 `SHELLSPAN_TERMINAL_REMOTE_AGENT_PTY_V1`, and Phase 5 adds
-`SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1`, through the same parser. On Windows
-and macOS, an absent value is on for broker, integration, execute, and
-interactive tools; on Linux those absent values remain off. Remote Agent PTY
-is absent-off on every platform. An absent legacy-fallback value is on for
+`SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1` and
+`SHELLSPAN_TERMINAL_REMOTE_INTERACTIVE_TOOLS_V1`, through the same parser. On
+Windows and macOS, an absent value is on for broker, integration, execute,
+remote Agent PTY, and local interactive tools; on Linux those absent values
+remain off. Remote interactive tools are absent-off on every platform. An absent legacy-fallback value is on for
 deferred Linux and remote scopes but cannot enable Windows or macOS local
 wrapper routing. Accepted enabled values are `1`, `true`, and `on`,
 and accepted disabled values are `0`, `false`, and `off`. Effective execute
@@ -108,8 +110,9 @@ closes registered Agent PTYs during runtime reconciliation; no command is
 rerouted or replayed through Direct or legacy PTY.
 
 The Phase 5 interactive flag is effective only when broker and shell integration
-are effective. Remote targets additionally require the Phase 4 remote Agent PTY
-flag and use only the dedicated Agent-owned SSH terminal; interactive tools
+are effective. Remote targets additionally require both the Phase 4 remote Agent
+PTY flag and the independently default-off remote-interactive flag, and use only
+the dedicated Agent-owned SSH terminal; interactive tools
 never attach to an arbitrary user-owned remote terminal. The flag controls
 headless screen-model creation and model publication of `read_terminal`,
 `write_terminal_input`, and `wait_terminal`. Disabling it removes those tools
@@ -131,8 +134,9 @@ the transient observation, so a resumed task must read the current screen again.
 - A dependent flag evaluates false when any prerequisite is false.
 - Backend routing state is authoritative; frontend flags control presentation
   only and cannot grant execution capability.
-- Rollback order is the reverse dependency order: interactive tools, remote PTY,
-  terminal execute, shell integration, then broker. The semantics flag can be
+- Rollback order is the reverse dependency order: remote interactive tools,
+  interactive tools, remote PTY, terminal execute, shell integration, then
+  broker. The semantics flag can be
   rolled back independently because it does not alter persisted data.
 - Emergency rollback keeps Direct enabled. Windows and macOS local rollback
   explicitly offers Direct and cannot revive the wrapper. Deferred Linux and

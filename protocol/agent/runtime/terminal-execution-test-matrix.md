@@ -179,9 +179,10 @@ screen, and credential-safety path.
 | Linux bash and zsh | **MISSING — DEFERRED** | No current-code Phase 5 native PTY fixture has run on Linux; it is outside the first Windows delivery scope. |
 | Isolated SSH bash and zsh | **MISSING — DEFERRED** | The Phase 4 SSH fixture has not been extended for Phase 5 interactive scenarios; remote interactive rollout remains off. |
 
-The Windows and macOS Phase 6 continuations are complete. Linux and remote
-targets retain default-off flags and the legacy wrapper until their independent
-Phase 5 evidence is supplied.
+The Windows and macOS Phase 6 continuations are complete. The passed Phase 4
+remote visible-command path is default-on for those desktop hosts. Linux and
+remote interactive tools retain default-off flags, and the legacy wrapper stays
+available for rollback until their independent Phase 5 evidence is supplied.
 
 ## Phase 6 acceptance status
 
@@ -199,7 +200,7 @@ Protocol vocabulary and persisted execution-surface values remain additive.
 | Persisted sessions and event-v5 vocabulary | **PASS — UNCHANGED** | `direct` / `boundTerminal` and `exec_command.channel = direct` / `pty` retain their stored/wire meanings; no migration rewrite or replay was added. |
 | macOS zsh and bash | **PASS — DEFAULT ON** | Native macOS 26.6.2 arm64; exact Broker/visible/interactive fixtures, Direct regression, 798-test serial Rust suite, and two release performance rounds pass. Local wrapper routing is removed. |
 | Linux bash and zsh | **MISSING — DEFERRED, DEFAULT OFF** | No Phase 5 native acceptance in this Windows continuation; wrapper/parser compatibility remains compiled and routable. |
-| Isolated SSH bash and zsh | **MISSING — DEFERRED, DEFAULT OFF** | Phase 4 evidence remains valid, but remote interactive Phase 5 was not run; the remote flag stays off and wrapper fallback remains routable. |
+| Isolated SSH bash and zsh | **VISIBLE COMMAND PASS — DEFAULT ON; INTERACTIVE MISSING — DEFAULT OFF** | Phase 4 real-SSH bash/zsh evidence enables the dedicated Agent PTY on Windows and macOS desktop hosts. The separate remote-interactive flag stays off because the SSH Phase 5 matrix has not run; wrapper fallback remains available for rollback. |
 
 Native Windows command: `pnpm test:terminal-rollout:windows`. It is an alias of
 the consolidated host gate and reports `MISSING` rather than `PASS` if the
