@@ -100,8 +100,19 @@ describe('RemoteHealthSection authorization', () => {
     expect(pendingConfirm.querySelector('[data-slot="spinner"]')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'common.cancel' })).toBeDisabled();
 
-    await act(async () => resolveCollection(result));
+    act(() => useRemoteHealthStore.setState({
+      entries: {
+        [profile.id]: {
+          profileId: profile.id,
+          phase: 'collecting',
+          operationId: 'remote-health:test',
+        },
+      },
+    }));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'remoteHealth.collecting' })).toBeDisabled();
+
+    await act(async () => resolveCollection(result));
   });
 
   it('keeps cancel next to the active collection control', () => {
