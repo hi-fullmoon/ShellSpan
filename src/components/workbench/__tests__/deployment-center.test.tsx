@@ -399,7 +399,7 @@ describe('DeploymentCenter', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'deployment.history.title' }));
     const dialog = screen.getByRole('dialog');
-    expect(dialog).toHaveClass('max-h-[calc(100vh-2rem)]', 'overflow-hidden');
+    expect(dialog).toHaveClass('h-[min(36rem,calc(100vh-4rem))]', 'overflow-hidden');
     expect(within(dialog).getAllByText('deployment.history.description')).not.toHaveLength(0);
 
     await userEvent.click(within(dialog).getByRole('button', { name: 'common.close' }));
@@ -670,11 +670,11 @@ describe('DeploymentCenter', () => {
       .closest<HTMLElement>('[data-slot="card"]');
     expect(workflowListCard).toHaveClass('min-h-0', '@min-[64rem]:h-full');
     const workflowDetail = document.getElementById('deployment-release-workflow');
-    expect(workflowDetail).toHaveClass('@min-[64rem]:pr-4');
+    expect(workflowDetail).toHaveClass('pr-4');
     expect(workflowDetail?.closest('[data-slot="scroll-area"]')).toHaveClass(
+      '-mr-4',
       'min-h-0',
       'min-w-0',
-      '@min-[64rem]:-mr-4',
       '@min-[64rem]:h-full',
     );
   });
