@@ -228,6 +228,7 @@ describe('terminal execution Phase 0 protocol contract', () => {
       'terminal_execute_v1',
       'terminal_remote_agent_pty_v1',
       'terminal_interactive_tools_v1',
+      'terminal_remote_interactive_tools_v1',
       'terminal_legacy_wrapper_fallback_v1',
     ]) {
       expect(compatibility).toContain(`\`${flag}\``);
@@ -236,8 +237,10 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(compatibility).toMatch(/never reroute or replay an in-flight\/uncertain command/i);
     expect(compatibility).toContain('SHELLSPAN_TERMINAL_BROKER_V1');
     expect(compatibility).toContain('SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1');
-    expect(compatibility).toMatch(/On Windows\s+and macOS, an absent value is on for broker, integration, execute, and\s+interactive tools/i);
-    expect(compatibility).toMatch(/on Linux those absent values remain off/i);
+    expect(compatibility).toContain('SHELLSPAN_TERMINAL_REMOTE_INTERACTIVE_TOOLS_V1');
+    expect(compatibility).toMatch(/On\s+Windows and macOS, an absent value is on for broker, integration, execute,\s+remote Agent PTY, and local interactive tools/i);
+    expect(compatibility).toMatch(/Remote interactive tools are absent-off on every platform/i);
+    expect(compatibility).toMatch(/on Linux those absent values\s+remain off/i);
     expect(compatibility).toMatch(/have no\s+frontend mutation IPC/i);
     expect(compatibility).toMatch(/bounded to the 256 most recently closed logical\s+sessions/i);
     expect(compatibility).toMatch(/successful reconnect drops\s+all superseded transport identities/i);
@@ -348,7 +351,7 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(phase6Macos).toContain('macOS Phase 2/3/5/6 native PTY and rollout acceptance');
     expect(phase6Macos).toContain('798 library tests passed, 34 ignored');
     expect(matrix).toContain('Overall gate: **PASS for the Windows and macOS local rollout scopes**');
-    expect(matrix).toContain('| Isolated SSH bash and zsh | **MISSING — DEFERRED, DEFAULT OFF**');
+    expect(matrix).toContain('| Isolated SSH bash and zsh | **VISIBLE COMMAND PASS — DEFAULT ON; INTERACTIVE MISSING — DEFAULT OFF**');
     expect(matrix).toContain('Overall gate: **PASS for the Windows and macOS local delivery scopes**');
     expect(matrix).toContain('| Isolated SSH bash and zsh | **MISSING — DEFERRED**');
     expect(phase4).toContain('**Final gate: PASS. Phase 5 is READY for a separate session');

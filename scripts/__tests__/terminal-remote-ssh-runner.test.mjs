@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 
 describe('Terminal Execution Phase 4 remote SSH contracts', () => {
-  it('keeps the remote flag default-off, dependency-gated, and Agent-owned', async () => {
+  it('ships remote visible commands separately from remote interactive tools', async () => {
     const [broker, adapter, runtime, manifest] = await Promise.all([
       readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_broker.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native_adapter.rs'), 'utf8'),
@@ -14,6 +14,9 @@ describe('Terminal Execution Phase 4 remote SSH contracts', () => {
       readFile(path.join(repositoryRoot, 'protocol/agent/runtime/built-in-tools.json'), 'utf8'),
     ]);
     expect(broker).toContain('SHELLSPAN_TERMINAL_REMOTE_AGENT_PTY_V1');
+    expect(broker).toContain('TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED: bool =');
+    expect(broker).toContain('SHELLSPAN_TERMINAL_REMOTE_INTERACTIVE_TOOLS_V1');
+    expect(broker).toContain('TERMINAL_REMOTE_INTERACTIVE_TOOLS_DEFAULT_ENABLED: bool = false');
     expect(broker).toContain('TERMINAL_REMOTE_AGENT_PTY_DISABLED');
     expect(broker).toContain('TERMINAL_BROKER_AGENT_SSH_CANDIDATE_NOT_READY');
     expect(broker).toContain('abort_agent_ssh_candidate_transport');
@@ -21,6 +24,8 @@ describe('Terminal Execution Phase 4 remote SSH contracts', () => {
     expect(broker).toContain('TERMINAL_EXECUTE_REQUIRES_DEDICATED_AGENT_SSH_PTY');
     expect(adapter.indexOf('issue_prepared_authorization(&prepared, approved)'))
       .toBeLessThan(adapter.indexOf('self.ensure_remote_agent_terminal('));
+    expect(adapter).toContain('TERMINAL_REMOTE_INTERACTIVE_TOOLS_DISABLED');
+    expect(adapter).toContain('remote_interactive_tools_rollout');
     expect(adapter).toContain('if let Some(candidate) = owned_candidate.as_ref()');
     expect(runtime).toContain('AgentToolTargetNative::Remote');
     expect(JSON.parse(manifest).tools.find(({ name }) => name === 'terminal_execute'))
