@@ -14,6 +14,7 @@
     "test:terminal-visible:linux-container": "node scripts/verify-terminal-broker-linux-container.mjs",
     "test:terminal-visible:linux-container:focused": "node scripts/verify-terminal-broker-linux-container.mjs --phase3-only",
     "test:terminal-visible:ssh": "node scripts/verify-terminal-remote-ssh.mjs",
+    "test:deployment:e2e": "node scripts/verify-deployment-e2e.mjs",
     "test:terminal-broker:windows": "node scripts/verify-terminal-broker-windows.mjs",
     "test:terminal-visible:windows": "node scripts/verify-terminal-broker-windows.mjs",
     "test:terminal-interactive:windows": "node scripts/verify-terminal-broker-windows.mjs",
