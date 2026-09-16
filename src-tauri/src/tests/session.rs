@@ -583,7 +583,9 @@
             )
             .unwrap();
         assert_eq!(
-            broker.visible_command_route("fixture-user-owned").unwrap(),
+            broker
+                .remote_visible_command_route("fixture-user-owned")
+                .unwrap(),
             TerminalVisibleCommandRoute::LegacyFallback
         );
         let mut terminal = RemoteFixtureTerminal::connect(
@@ -593,7 +595,9 @@
             broker.clone(),
         );
         assert_eq!(
-            broker.visible_command_route("fixture-agent-ssh-1").unwrap(),
+            broker
+                .remote_visible_command_route("fixture-agent-ssh-1")
+                .unwrap(),
             TerminalVisibleCommandRoute::TerminalExecute
         );
         user_session.set_blocking(false);

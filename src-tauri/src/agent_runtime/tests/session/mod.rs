@@ -133,6 +133,93 @@
             .join("agent-runtime/sessions-v5/session-1.jsonl")
     }
 
+    fn begin_prepared_request(store: &AgentSessionStore) -> crate::llm::runtime::RequestSnapshot {
+        store
+            .append(
+                "session-1",
+                Some("turn-1".into()),
+                None,
+                AgentSessionEventPayload::TurnStart,
+            )
+            .unwrap();
+        store
+            .append(
+                "session-1",
+                Some("turn-1".into()),
+                Some("step-1".into()),
+                AgentSessionEventPayload::StepStart,
+            )
+            .unwrap();
+        let snapshot = crate::llm::runtime::RequestSnapshot::Prepared {
+            route_id: "route-a".into(),
+            route_revision: 4,
+            adapter_id: "chat-completions".into(),
+            model_id: "model-a".into(),
+            catalog_version: 1,
+            capabilities: crate::llm::catalog::fixture_definition(
+                crate::llm::config::AiProviderKind::OpenAiCompatible,
+                8192,
+            ),
+            endpoint_identity: "https://example.test/v1/chat/completions".into(),
+            replay_domain_id: "domain-a".into(),
+            reasoning_effort: None,
+            output_tokens: 8192,
+            retry_policy: Default::default(),
+            timeouts: Default::default(),
+            purpose: "step".into(),
+            preparation_version: 1,
+            projection_policy: "immutable-png-v1-strict".into(),
+            content_hash: crate::llm::runtime::digest(b"request"),
+            images: Vec::new(),
+        };
+        let series = crate::agent_runtime::AgentRequestSeries {
+            series_id: "series-1".into(),
+            request_index: 0,
+            starts_series: true,
+        };
+        store
+            .append_batch(
+                "session-1",
+                vec![
+                    AgentScopedPayload {
+                        turn_id: Some("turn-1".into()),
+                        step_id: Some("step-1".into()),
+                        payload: AgentSessionEventPayload::RequestHeader {
+                            request_id: "request-1".into(),
+                            snapshot: snapshot.clone(),
+                            snapshot_digest: snapshot.digest(),
+                            provider_id: "route-a".into(),
+                            model: "model-a".into(),
+                            reasoning_effort: None,
+                            reason: crate::agent_runtime::AgentRequestReason::Initial,
+                            series: series.clone(),
+                            snapshot_reason:
+                                crate::agent_runtime::AgentRequestSnapshotReason::Initial,
+                            system_prompt: "system".into(),
+                            tool_schemas: Vec::new(),
+                            attempt: 1,
+                        },
+                    },
+                    AgentScopedPayload {
+                        turn_id: Some("turn-1".into()),
+                        step_id: Some("step-1".into()),
+                        payload: AgentSessionEventPayload::RequestStart {
+                            request_id: "request-1".into(),
+                            header_request_id: "request-1".into(),
+                            provider_id: "route-a".into(),
+                            model: "model-a".into(),
+                            reasoning_effort: None,
+                            reason: crate::agent_runtime::AgentRequestReason::Initial,
+                            series,
+                            attempt: 1,
+                        },
+                    },
+                ],
+            )
+            .unwrap();
+        snapshot
+    }
+
     #[test]
     fn execution_surface_is_persisted_in_session_created_and_restored_from_header() {
         let (root, store) = configured();
@@ -383,6 +470,68 @@
         assert!(content.contains("What happened before the terminal closed?"));
         assert!(content.contains("Never retry them automatically"));
         assert!(content.contains("ask for clarification without calling tools"));
+    }
+
+    #[test]
+    fn prepared_response_may_omit_replay_only_for_redacted_ephemeral_terminal_arguments() {
+        let (root, store) = configured();
+        create(&store);
+        begin_prepared_request(&store);
+
+        let missing_replay = store
+            .append(
+                "session-1",
+                Some("turn-1".into()),
+                Some("step-1".into()),
+                AgentSessionEventPayload::AssistantMessage {
+                    message_id: "ordinary-response".into(),
+                    content: vec![AgentAssistantContentBlock::Text {
+                        text: "ordinary response".into(),
+                    }],
+                    usage: crate::agent_runtime::AgentTokenUsage::default(),
+                    stop_reason: crate::agent_runtime::AgentStopReason::Stop,
+                    interrupted: false,
+                    replay: None,
+                },
+            )
+            .unwrap_err();
+        assert!(missing_replay.contains("REPLAY_CAPTURE_MISSING"));
+
+        let call = super::super::recorded_tool_call(crate::llm::types::ModelToolCall {
+            call_id: "write-1".into(),
+            provider_call_id: None,
+            name: "write_terminal_input".into(),
+            arguments: serde_json::json!({
+                "inputKind": "text",
+                "text": "systemctl status nginx\n",
+            }),
+        });
+        store
+            .append(
+                "session-1",
+                Some("turn-1".into()),
+                Some("step-1".into()),
+                AgentSessionEventPayload::AssistantMessage {
+                    message_id: "ephemeral-terminal-response".into(),
+                    content: vec![AgentAssistantContentBlock::ToolCall {
+                        call: Box::new(call),
+                    }],
+                    usage: crate::agent_runtime::AgentTokenUsage::default(),
+                    stop_reason: crate::agent_runtime::AgentStopReason::ToolCalls,
+                    interrupted: false,
+                    replay: None,
+                },
+            )
+            .unwrap();
+
+        let encoded = serde_json::to_string(&store.all_events("session-1").unwrap()).unwrap();
+        assert!(!encoded.contains("systemctl status nginx"));
+        assert!(encoded.contains("contentPersisted"));
+        drop(store);
+
+        let restarted = AgentSessionStore::default();
+        restarted.configure(root.path().to_path_buf()).unwrap();
+        assert!(restarted.snapshot("session-1").is_ok());
     }
 
     #[test]

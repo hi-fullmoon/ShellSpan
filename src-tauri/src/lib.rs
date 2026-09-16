@@ -5,6 +5,7 @@ mod ai;
 mod commands;
 mod connection;
 mod db;
+mod deployment;
 mod directory_request_registry;
 mod execution;
 mod health;
@@ -430,6 +431,39 @@ pub fn run() {
             commands::list_recent_profiles,
             commands::touch_recent_profile,
             commands::remove_recent_profile,
+            deployment::commands::list_deployment_workflows,
+            deployment::commands::deployment_runtime_capabilities,
+            deployment::commands::get_deployment_workflow,
+            deployment::commands::create_deployment_workflow,
+            deployment::commands::update_deployment_workflow,
+            deployment::commands::delete_deployment_workflow,
+            deployment::commands::list_deployment_runs,
+            deployment::commands::list_deployment_run_page,
+            deployment::commands::get_deployment_run,
+            deployment::commands::get_deployment_run_detail,
+            deployment::commands::export_deployment_run_audit,
+            deployment::commands::list_deployment_run_events,
+            deployment::commands::list_deployment_run_events_before,
+            deployment::commands::claim_deployment_notifications,
+            deployment::commands::show_deployment_notification,
+            deployment::commands::deployment_startup_recovery,
+            deployment::commands::deployment_reconciliation_binding,
+            deployment::commands::deployment_reconcile,
+            deployment::commands::deployment_cancel_reconciliation_observation,
+            deployment::commands::create_deployment_plan,
+            deployment::commands::get_deployment_plan,
+            deployment::commands::request_deployment_approval,
+            deployment::commands::approve_deployment_plan,
+            deployment::commands::reject_deployment_plan,
+            deployment::commands::deployment_artifact_source_snapshot,
+            deployment::commands::deployment_build_artifact,
+            deployment::commands::deployment_cancel_artifact_build,
+            deployment::commands::deployment_transfer_artifact,
+            deployment::commands::deployment_cancel_artifact_transfer,
+            deployment::commands::deployment_run_remote,
+            deployment::commands::deployment_cancel_remote_runner,
+            deployment::commands::deployment_preflight,
+            deployment::commands::deployment_cancel_preflight,
             commands::list_sftp_bookmarks,
             commands::add_sftp_bookmark,
             commands::remove_sftp_bookmark,

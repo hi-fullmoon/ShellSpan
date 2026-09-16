@@ -1,11 +1,17 @@
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 1;
+const CURRENT_SCHEMA_VERSION: i32 = 6;
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
+
+struct SchemaMigration {
+    version: i32,
+    name: &'static str,
+    sql: &'static str,
+}
 
 fn validate_terminal_workspace(workspace_json: &str) -> Result<(), String> {
     if workspace_json.len() > MAX_TERMINAL_WORKSPACE_BYTES {
@@ -30,13 +36,16 @@ fn validate_terminal_workspace(workspace_json: &str) -> Result<(), String> {
     Ok(())
 }
 
-const CURRENT_SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS schema_version (
+const SCHEMA_VERSION_TABLE: &str = "
+CREATE TABLE schema_version (
     version INTEGER PRIMARY KEY,
+    migration_name TEXT NOT NULL,
     applied_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+";
 
-CREATE TABLE IF NOT EXISTS profiles (
+const SCHEMA_V1: &str = "
+CREATE TABLE profiles (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     host TEXT NOT NULL,
@@ -50,19 +59,19 @@ CREATE TABLE IF NOT EXISTS profiles (
     updated_at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS preferences (
+CREATE TABLE preferences (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS recent_profiles (
+CREATE TABLE recent_profiles (
     profile_id TEXT NOT NULL,
     sort_order INTEGER NOT NULL,
     PRIMARY KEY (profile_id),
     FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS sftp_bookmarks (
+CREATE TABLE sftp_bookmarks (
     id TEXT PRIMARY KEY,
     host TEXT NOT NULL,
     port INTEGER NOT NULL DEFAULT 22,
@@ -73,19 +82,19 @@ CREATE TABLE IF NOT EXISTS sftp_bookmarks (
     created_at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS terminal_workspace (
+CREATE TABLE terminal_workspace (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     sessions_json TEXT NOT NULL,
     updated_at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS sftp_workspace (
+CREATE TABLE sftp_workspace (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     workspace_json TEXT NOT NULL,
     updated_at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS key_credentials (
+CREATE TABLE key_credentials (
     id TEXT PRIMARY KEY,
     label TEXT NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -95,8 +104,462 @@ CREATE TABLE IF NOT EXISTS key_credentials (
     certificate TEXT,
     service TEXT NOT NULL DEFAULT 'com.shellspan.key'
 );
-INSERT INTO schema_version (version) VALUES (1);
 ";
+
+const SCHEMA_V2: &str = "
+CREATE TABLE deployment_workflows (
+    id TEXT PRIMARY KEY
+        CHECK(length(id) BETWEEN 1 AND 128 AND id = trim(id)),
+    name TEXT NOT NULL
+        CHECK(length(name) BETWEEN 1 AND 200 AND name = trim(name)),
+    connection_profile_id TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+    definition_version INTEGER NOT NULL CHECK(definition_version = 1),
+    definition_json TEXT NOT NULL
+        CHECK(length(CAST(definition_json AS BLOB)) BETWEEN 2 AND 131072)
+        CHECK(json_valid(definition_json) AND json_type(definition_json) = 'object'),
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(updated_at >= created_at),
+    FOREIGN KEY (connection_profile_id) REFERENCES profiles(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE deployment_runs (
+    id TEXT PRIMARY KEY
+        CHECK(length(id) BETWEEN 1 AND 128 AND id = trim(id)),
+    workflow_id TEXT NOT NULL,
+    workflow_revision INTEGER NOT NULL CHECK(workflow_revision >= 1),
+    source_run_id TEXT,
+    operation_kind TEXT NOT NULL
+        CHECK(operation_kind IN ('deploy', 'resume', 'rollback')),
+    trigger_kind TEXT NOT NULL
+        CHECK(trigger_kind IN ('manual', 'agent', 'quick_action', 'recovery')),
+    status TEXT NOT NULL
+        CHECK(status IN (
+            'planned', 'awaiting_approval', 'approved', 'reconciling',
+            'in_progress', 'verifying', 'succeeded', 'cancel_requested',
+            'canceled', 'failed', 'state_unknown'
+        )),
+    approval_summary_json TEXT NOT NULL
+        CHECK(length(CAST(approval_summary_json AS BLOB)) BETWEEN 2 AND 65536)
+        CHECK(json_valid(approval_summary_json) AND json_type(approval_summary_json) = 'object'),
+    approval_digest TEXT NOT NULL
+        CHECK(length(approval_digest) = 64)
+        CHECK(approval_digest = lower(approval_digest))
+        CHECK(approval_digest NOT GLOB '*[^0-9a-f]*'),
+    reconciliation_required INTEGER NOT NULL DEFAULT 0
+        CHECK(reconciliation_required IN (0, 1)),
+    last_event_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_event_sequence >= 0),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(updated_at >= created_at),
+    started_at INTEGER CHECK(started_at IS NULL OR started_at >= created_at),
+    finished_at INTEGER CHECK(finished_at IS NULL OR finished_at >= created_at),
+    CHECK(source_run_id IS NULL OR source_run_id <> id),
+    CHECK(status <> 'state_unknown' OR reconciliation_required = 1),
+    CHECK(
+        (status IN ('succeeded', 'canceled', 'failed') AND finished_at IS NOT NULL)
+        OR (status NOT IN ('succeeded', 'canceled', 'failed'))
+    ),
+    FOREIGN KEY (workflow_id) REFERENCES deployment_workflows(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_run_id) REFERENCES deployment_runs(id) ON DELETE SET NULL
+);
+
+CREATE TABLE deployment_run_events (
+    run_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK(sequence >= 1),
+    event_kind TEXT NOT NULL
+        CHECK(event_kind IN (
+            'run_created', 'approval_requested', 'approval_granted',
+            'approval_rejected', 'reconciliation_started',
+            'reconciliation_completed', 'status_changed',
+            'cancellation_requested', 'resume_linked', 'rollback_linked',
+            'run_succeeded', 'run_canceled', 'run_failed'
+        )),
+    status TEXT
+        CHECK(status IS NULL OR status IN (
+            'planned', 'awaiting_approval', 'approved', 'reconciling',
+            'in_progress', 'verifying', 'succeeded', 'cancel_requested',
+            'canceled', 'failed', 'state_unknown'
+        )),
+    summary TEXT NOT NULL
+        CHECK(length(CAST(summary AS BLOB)) BETWEEN 1 AND 4096 AND summary = trim(summary)),
+    payload_json TEXT
+        CHECK(payload_json IS NULL OR (
+            length(CAST(payload_json AS BLOB)) BETWEEN 2 AND 65536
+            AND json_valid(payload_json)
+            AND json_type(payload_json) = 'object'
+        )),
+    recorded_at INTEGER NOT NULL CHECK(recorded_at >= 0),
+    PRIMARY KEY (run_id, sequence),
+    FOREIGN KEY (run_id) REFERENCES deployment_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX deployment_workflows_profile_idx
+    ON deployment_workflows(connection_profile_id, updated_at DESC);
+CREATE INDEX deployment_runs_workflow_idx
+    ON deployment_runs(workflow_id, created_at DESC);
+CREATE INDEX deployment_runs_status_idx
+    ON deployment_runs(status, updated_at DESC);
+CREATE INDEX deployment_runs_source_idx
+    ON deployment_runs(source_run_id) WHERE source_run_id IS NOT NULL;
+CREATE INDEX deployment_run_events_recorded_idx
+    ON deployment_run_events(run_id, recorded_at);
+
+CREATE TRIGGER deployment_run_events_sequence_guard
+BEFORE INSERT ON deployment_run_events
+FOR EACH ROW
+WHEN NEW.sequence <> COALESCE(
+    (SELECT MAX(sequence) + 1 FROM deployment_run_events WHERE run_id = NEW.run_id),
+    1
+)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment event sequence must be contiguous');
+END;
+
+CREATE TRIGGER deployment_run_events_advance_sequence
+AFTER INSERT ON deployment_run_events
+FOR EACH ROW
+BEGIN
+    UPDATE deployment_runs
+    SET last_event_sequence = NEW.sequence,
+        updated_at = MAX(updated_at, NEW.recorded_at)
+    WHERE id = NEW.run_id;
+END;
+
+CREATE TRIGGER deployment_run_events_immutable
+BEFORE UPDATE ON deployment_run_events
+BEGIN
+    SELECT RAISE(ABORT, 'deployment events are immutable');
+END;
+
+CREATE TRIGGER deployment_run_events_no_direct_delete
+BEFORE DELETE ON deployment_run_events
+WHEN EXISTS (SELECT 1 FROM deployment_runs WHERE id = OLD.run_id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment events may only be deleted with their run');
+END;
+
+CREATE TRIGGER deployment_runs_no_direct_delete
+BEFORE DELETE ON deployment_runs
+WHEN EXISTS (SELECT 1 FROM deployment_workflows WHERE id = OLD.workflow_id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment runs may only be deleted with their workflow');
+END;
+";
+
+const SCHEMA_V3: &str = "
+CREATE INDEX deployment_runs_approval_digest_idx
+    ON deployment_runs(approval_digest, created_at DESC);
+
+CREATE TRIGGER deployment_runs_initial_status_guard
+BEFORE INSERT ON deployment_runs
+FOR EACH ROW
+WHEN NEW.status <> 'planned'
+BEGIN
+    SELECT RAISE(ABORT, 'deployment runs must be created as planned');
+END;
+
+CREATE TRIGGER deployment_runs_status_transition_guard
+BEFORE UPDATE OF status ON deployment_runs
+FOR EACH ROW
+WHEN OLD.status <> NEW.status AND NOT (
+    (OLD.status = 'planned' AND NEW.status IN ('awaiting_approval', 'canceled'))
+    OR (OLD.status = 'awaiting_approval' AND NEW.status IN ('approved', 'canceled', 'failed'))
+    OR (OLD.status = 'approved' AND NEW.status IN (
+        'awaiting_approval', 'reconciling', 'in_progress', 'cancel_requested', 'failed'
+    ))
+    OR (OLD.status = 'reconciling' AND NEW.status IN (
+        'approved', 'in_progress', 'canceled', 'failed', 'state_unknown'
+    ))
+    OR (OLD.status = 'in_progress' AND NEW.status IN (
+        'verifying', 'cancel_requested', 'failed', 'state_unknown'
+    ))
+    OR (OLD.status = 'verifying' AND NEW.status IN (
+        'succeeded', 'cancel_requested', 'failed', 'state_unknown'
+    ))
+    OR (OLD.status = 'cancel_requested' AND NEW.status IN ('canceled', 'failed', 'state_unknown'))
+    OR (OLD.status = 'state_unknown' AND NEW.status = 'reconciling')
+)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid deployment run status transition');
+END;
+
+CREATE TRIGGER deployment_runs_frozen_plan_immutable
+BEFORE UPDATE OF workflow_id, workflow_revision, source_run_id, operation_kind,
+                 trigger_kind, approval_summary_json, approval_digest
+ON deployment_runs
+WHEN EXISTS (SELECT 1 FROM deployment_workflows WHERE id = OLD.workflow_id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment run plan inputs are immutable');
+END;
+";
+
+const SCHEMA_V4: &str = "
+CREATE TABLE deployment_transfer_receipts (
+    operation_id TEXT PRIMARY KEY
+        CHECK(length(operation_id) BETWEEN 1 AND 128 AND operation_id = trim(operation_id)),
+    run_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL
+        CHECK(length(plan_id) = 69 AND plan_id LIKE 'plan-%'),
+    plan_digest TEXT NOT NULL
+        CHECK(length(plan_digest) = 64)
+        CHECK(plan_digest = lower(plan_digest))
+        CHECK(plan_digest NOT GLOB '*[^0-9a-f]*'),
+    request_json TEXT NOT NULL
+        CHECK(length(CAST(request_json AS BLOB)) BETWEEN 2 AND 65536)
+        CHECK(json_valid(request_json) AND json_type(request_json) = 'object'),
+    result_json TEXT NOT NULL
+        CHECK(length(CAST(result_json AS BLOB)) BETWEEN 2 AND 65536)
+        CHECK(json_valid(result_json) AND json_type(result_json) = 'object'),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    FOREIGN KEY (run_id) REFERENCES deployment_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX deployment_transfer_receipts_run_idx
+    ON deployment_transfer_receipts(run_id, created_at DESC);
+
+CREATE TRIGGER deployment_transfer_receipts_immutable
+BEFORE UPDATE ON deployment_transfer_receipts
+BEGIN
+    SELECT RAISE(ABORT, 'deployment transfer receipts are immutable');
+END;
+
+CREATE TRIGGER deployment_transfer_receipts_no_direct_delete
+BEFORE DELETE ON deployment_transfer_receipts
+WHEN EXISTS (SELECT 1 FROM deployment_runs WHERE id = OLD.run_id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment transfer receipts may only be deleted with their run');
+END;
+";
+
+const SCHEMA_V5: &str = "
+DROP TRIGGER deployment_runs_status_transition_guard;
+
+CREATE TRIGGER deployment_runs_status_transition_guard
+BEFORE UPDATE OF status ON deployment_runs
+FOR EACH ROW
+WHEN OLD.status <> NEW.status AND NOT (
+    (OLD.status = 'planned' AND NEW.status IN ('awaiting_approval', 'canceled'))
+    OR (OLD.status = 'awaiting_approval' AND NEW.status IN ('approved', 'canceled', 'failed'))
+    OR (OLD.status = 'approved' AND NEW.status IN (
+        'awaiting_approval', 'reconciling', 'in_progress', 'cancel_requested', 'failed'
+    ))
+    OR (OLD.status = 'reconciling' AND NEW.status IN (
+        'approved', 'in_progress', 'verifying', 'succeeded', 'cancel_requested',
+        'canceled', 'failed', 'state_unknown'
+    ))
+    OR (OLD.status = 'in_progress' AND NEW.status IN (
+        'reconciling', 'verifying', 'cancel_requested', 'failed', 'state_unknown'
+    ))
+    OR (OLD.status = 'verifying' AND NEW.status IN (
+        'reconciling', 'succeeded', 'cancel_requested', 'failed', 'state_unknown'
+    ))
+    OR (OLD.status = 'cancel_requested' AND NEW.status IN (
+        'reconciling', 'canceled', 'failed', 'state_unknown'
+    ))
+    OR (OLD.status = 'state_unknown' AND NEW.status = 'reconciling')
+)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid deployment run status transition');
+END;
+";
+
+const SCHEMA_V6: &str = "
+CREATE TABLE deployment_notification_receipts (
+    run_id TEXT NOT NULL,
+    event_sequence INTEGER NOT NULL CHECK(event_sequence >= 1),
+    notification_kind TEXT NOT NULL
+        CHECK(notification_kind IN (
+            'succeeded', 'automatic_restore_completed', 'failed', 'user_action_required'
+        )),
+    run_status TEXT NOT NULL
+        CHECK(run_status IN ('awaiting_approval', 'succeeded', 'canceled', 'failed', 'state_unknown')),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    PRIMARY KEY (run_id, event_sequence, notification_kind),
+    FOREIGN KEY (run_id) REFERENCES deployment_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX deployment_notification_receipts_created_idx
+    ON deployment_notification_receipts(created_at DESC);
+
+CREATE TRIGGER deployment_notification_receipts_immutable
+BEFORE UPDATE ON deployment_notification_receipts
+BEGIN
+    SELECT RAISE(ABORT, 'deployment notification receipts are immutable');
+END;
+
+CREATE TRIGGER deployment_notification_receipts_no_direct_delete
+BEFORE DELETE ON deployment_notification_receipts
+WHEN EXISTS (SELECT 1 FROM deployment_runs WHERE id = OLD.run_id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment notification receipts may only be deleted with their run');
+END;
+
+-- Existing durable outcomes predate Phase 7 notifications. Mark them delivered so an
+-- upgrade never produces a burst of stale notifications; new transitions remain claimable.
+INSERT INTO deployment_notification_receipts (
+    run_id, event_sequence, notification_kind, run_status, created_at
+)
+SELECT id, last_event_sequence,
+       CASE
+           WHEN status = 'succeeded' THEN 'succeeded'
+           WHEN status = 'failed' THEN 'failed'
+           WHEN status = 'canceled' THEN 'automatic_restore_completed'
+           ELSE 'user_action_required'
+       END,
+       status, updated_at
+FROM deployment_runs
+WHERE last_event_sequence >= 1
+  AND (
+      status IN ('awaiting_approval', 'succeeded', 'failed', 'state_unknown')
+      OR (
+          status = 'canceled'
+          AND EXISTS (
+              SELECT 1 FROM deployment_run_events e
+              WHERE e.run_id = deployment_runs.id
+                AND e.sequence = deployment_runs.last_event_sequence
+                AND (
+                    json_extract(e.payload_json, '$.rollbackReleaseId') IS NOT NULL
+                    OR json_extract(e.payload_json, '$.result.evidence.rollbackReleaseVerified') = 1
+                )
+          )
+      )
+  );
+";
+
+const MIGRATIONS: &[SchemaMigration] = &[
+    SchemaMigration {
+        version: 1,
+        name: "initial_schema",
+        sql: SCHEMA_V1,
+    },
+    SchemaMigration {
+        version: 2,
+        name: "deployment_foundation",
+        sql: SCHEMA_V2,
+    },
+    SchemaMigration {
+        version: 3,
+        name: "deployment_plan_guards",
+        sql: SCHEMA_V3,
+    },
+    SchemaMigration {
+        version: 4,
+        name: "deployment_phase5_runtime",
+        sql: SCHEMA_V4,
+    },
+    SchemaMigration {
+        version: 5,
+        name: "deployment_phase6_reconciliation",
+        sql: SCHEMA_V5,
+    },
+    SchemaMigration {
+        version: 6,
+        name: "deployment_phase7_history_notifications",
+        sql: SCHEMA_V6,
+    },
+];
+
+fn read_applied_schema_versions(conn: &Connection) -> Result<Vec<i32>, String> {
+    let mut statement = conn
+        .prepare("SELECT version FROM schema_version ORDER BY version ASC")
+        .map_err(|e| format!("failed to read database schema migrations: {e}"))?;
+    let versions = statement
+        .query_map([], |row| row.get(0))
+        .map_err(|e| format!("failed to query database schema migrations: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("failed to collect database schema migrations: {e}"))?;
+    Ok(versions)
+}
+
+fn schema_version_has_migration_name(conn: &Connection) -> Result<bool, String> {
+    let mut statement = conn
+        .prepare("PRAGMA table_info(schema_version)")
+        .map_err(|e| format!("failed to inspect schema migration ledger: {e}"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| format!("failed to query schema migration ledger: {e}"))?;
+    for column in columns {
+        if column.map_err(|e| format!("failed to read schema migration ledger: {e}"))?
+            == "migration_name"
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn apply_schema_migration(
+    conn: &mut Connection,
+    migration: &SchemaMigration,
+) -> Result<(), String> {
+    let tx = conn.transaction().map_err(|e| {
+        format!(
+            "failed to start schema migration {} ({}): {e}",
+            migration.version, migration.name
+        )
+    })?;
+    if migration.version == 2 && !schema_version_has_migration_name(&tx)? {
+        tx.execute_batch(
+            "ALTER TABLE schema_version ADD COLUMN migration_name TEXT;\
+             UPDATE schema_version SET migration_name = 'initial_schema' WHERE version = 1;",
+        )
+        .map_err(|e| format!("failed to upgrade schema migration ledger: {e}"))?;
+    }
+    tx.execute_batch(migration.sql).map_err(|e| {
+        format!(
+            "failed to apply schema migration {} ({}): {e}",
+            migration.version, migration.name
+        )
+    })?;
+    tx.execute(
+        "INSERT INTO schema_version (version, migration_name) VALUES (?1, ?2)",
+        params![migration.version, migration.name],
+    )
+    .map_err(|e| {
+        format!(
+            "failed to record schema migration {} ({}): {e}",
+            migration.version, migration.name
+        )
+    })?;
+    tx.commit().map_err(|e| {
+        format!(
+            "failed to commit schema migration {} ({}): {e}",
+            migration.version, migration.name
+        )
+    })
+}
+
+fn validate_schema_migration_ledger(conn: &Connection) -> Result<(), String> {
+    if !schema_version_has_migration_name(conn)? {
+        return Err("invalid database schema migration ledger: migration names are missing".into());
+    }
+    let mut statement = conn
+        .prepare("SELECT version, migration_name FROM schema_version ORDER BY version ASC")
+        .map_err(|e| format!("failed to validate schema migration ledger: {e}"))?;
+    let applied = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, i32>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+        .map_err(|e| format!("failed to query schema migration ledger: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("failed to collect schema migration ledger: {e}"))?;
+    for (migration, (version, name)) in MIGRATIONS.iter().zip(applied.iter()) {
+        if *version != migration.version || name.as_deref() != Some(migration.name) {
+            return Err(format!(
+                "invalid database schema migration ledger at version {version}"
+            ));
+        }
+    }
+    if applied.len() != MIGRATIONS.len() {
+        return Err(format!(
+            "invalid database schema migration ledger: expected {} entries, found {}",
+            MIGRATIONS.len(),
+            applied.len()
+        ));
+    }
+    Ok(())
+}
 
 #[derive(Clone)]
 pub(crate) struct Database {
@@ -160,7 +623,7 @@ impl Database {
     }
 
     fn initialize_or_validate_schema(&self) -> Result<(), String> {
-        let conn = self
+        let mut conn = self
             .conn
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
@@ -183,29 +646,46 @@ impl Database {
             if user_table_count != 0 {
                 return Err("unsupported unversioned database schema".into());
             }
-            conn.execute_batch(CURRENT_SCHEMA)
-                .map_err(|e| format!("failed to initialize database schema: {e}"))?;
-            return Ok(());
+            conn.execute_batch(SCHEMA_VERSION_TABLE)
+                .map_err(|e| format!("failed to initialize schema migration ledger: {e}"))?;
         }
-        let current: i32 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|e| format!("failed to read database schema version: {e}"))?;
-        if current != CURRENT_SCHEMA_VERSION {
+
+        let applied_versions = read_applied_schema_versions(&conn)?;
+        if let Some(version) = applied_versions
+            .iter()
+            .copied()
+            .find(|version| *version > CURRENT_SCHEMA_VERSION)
+        {
             return Err(format!(
-                "unsupported database schema version {current}; expected {CURRENT_SCHEMA_VERSION}"
+                "unsupported database schema version {version}; latest supported version is {CURRENT_SCHEMA_VERSION}"
             ));
         }
+
+        for (index, version) in applied_versions.iter().copied().enumerate() {
+            let expected = i32::try_from(index + 1)
+                .map_err(|_| "database schema migration history is too large".to_string())?;
+            if version != expected {
+                return Err(format!(
+                    "invalid database schema migration history: expected version {expected}, found {version}"
+                ));
+            }
+        }
+
+        if has_schema_table && applied_versions.is_empty() {
+            return Err("invalid database schema migration history: no applied versions".into());
+        }
+
+        let current = applied_versions.last().copied().unwrap_or(0);
+        for migration in MIGRATIONS
+            .iter()
+            .filter(|migration| migration.version > current)
+        {
+            apply_schema_migration(&mut conn, migration)?;
+        }
+        validate_schema_migration_ledger(&conn)?;
         Ok(())
     }
 
-    #[expect(
-        dead_code,
-        reason = "reserved database boundary for later durable Agent task storage"
-    )]
     pub(crate) fn with_connection<T>(
         &self,
         operation: impl FnOnce(&Connection) -> Result<T, String>,
@@ -215,6 +695,24 @@ impl Database {
             .lock()
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         operation(&conn)
+    }
+
+    pub(crate) fn with_transaction<T>(
+        &self,
+        operation: impl FnOnce(&Transaction<'_>) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("database lock poisoned: {e}"))?;
+        let transaction = conn
+            .transaction()
+            .map_err(|e| format!("failed to start database transaction: {e}"))?;
+        let result = operation(&transaction)?;
+        transaction
+            .commit()
+            .map_err(|e| format!("failed to commit database transaction: {e}"))?;
+        Ok(result)
     }
 
     // --- Profiles ---

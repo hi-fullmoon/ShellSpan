@@ -563,8 +563,14 @@
             snapshot.remote_agent_pty_rollout.name,
             TERMINAL_REMOTE_AGENT_PTY_FLAG_NAME
         );
-        assert!(!snapshot.remote_agent_pty_rollout.enabled);
-        assert!(!snapshot.remote_agent_pty_rollout.default_enabled);
+        assert_eq!(
+            snapshot.remote_agent_pty_rollout.enabled,
+            cfg!(any(target_os = "macos", target_os = "windows"))
+        );
+        assert_eq!(
+            snapshot.remote_agent_pty_rollout.default_enabled,
+            cfg!(any(target_os = "macos", target_os = "windows"))
+        );
         assert_eq!(
             snapshot.interactive_tools_rollout.name,
             TERMINAL_INTERACTIVE_TOOLS_FLAG_NAME
@@ -577,12 +583,28 @@
             snapshot.interactive_tools_rollout.default_enabled,
             cfg!(any(target_os = "macos", target_os = "windows"))
         );
+        assert_eq!(
+            snapshot.remote_interactive_tools_rollout.name,
+            TERMINAL_REMOTE_INTERACTIVE_TOOLS_FLAG_NAME
+        );
+        assert!(!snapshot.remote_interactive_tools_rollout.enabled);
+        assert!(!snapshot.remote_interactive_tools_rollout.default_enabled);
         assert!(snapshot.legacy_fallback_rollout.enabled);
         assert!(!snapshot.shell_integration_rollout.persisted);
         assert!(!snapshot.terminal_execute_rollout.persisted);
         assert!(!snapshot.remote_agent_pty_rollout.persisted);
         assert!(!snapshot.interactive_tools_rollout.persisted);
+        assert!(!snapshot.remote_interactive_tools_rollout.persisted);
         assert!(!snapshot.legacy_fallback_rollout.persisted);
+        assert_eq!(
+            broker.remote_agent_pty_new_operation_route().unwrap(),
+            if cfg!(any(target_os = "macos", target_os = "windows")) {
+                TerminalVisibleCommandRoute::TerminalExecute
+            } else {
+                TerminalVisibleCommandRoute::LegacyFallback
+            },
+            "remote visible command rollout is independent from remote interactive tools"
+        );
         assert_eq!(
             broker
                 .attach_transport(
@@ -604,6 +626,8 @@
         attached(&rollback, "rollback-transport");
         rollback
             .apply_trusted_rollout(
+                false,
+                TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
                 false,
@@ -680,6 +704,8 @@
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
                 true,
                 TerminalBrokerRolloutSource::Test,
             )
@@ -739,6 +765,8 @@
                 true,
                 TerminalBrokerRolloutSource::Test,
                 true,
+                TerminalBrokerRolloutSource::Test,
+                false,
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
@@ -869,6 +897,8 @@
                 false,
                 TerminalBrokerRolloutSource::Test,
                 true,
+                TerminalBrokerRolloutSource::Test,
+                false,
                 TerminalBrokerRolloutSource::Test,
                 true,
                 TerminalBrokerRolloutSource::Test,
@@ -1814,6 +1844,42 @@
                 TerminalGeometry::new(80, 24),
             )
             .is_err());
+    }
+
+    #[test]
+    fn remote_visible_commands_do_not_publish_unaccepted_interactive_tools() {
+        let broker = TerminalSessionBroker::phase5_enabled_for_test(4_096);
+        let rollout = broker.snapshot(None).unwrap();
+        assert!(rollout.remote_agent_pty_rollout.enabled);
+        assert!(rollout.interactive_tools_rollout.enabled);
+        assert!(!rollout.remote_interactive_tools_rollout.enabled);
+
+        let owner = TerminalAgentPtyOwner {
+            agent_session_id: "agent-session-visible-only".into(),
+            target_id: "target-visible-only".into(),
+            source_transport_session_id: "user-ssh-visible-only".into(),
+        };
+        attach_ready_agent_ssh_transport(
+            &broker,
+            "agent-ssh-visible-only",
+            None,
+            TerminalGeometry::new(100, 30),
+            owner,
+        );
+        broker.mark_output_ready("agent-ssh-visible-only").unwrap();
+
+        assert_eq!(
+            broker
+                .remote_visible_command_route("agent-ssh-visible-only")
+                .unwrap(),
+            TerminalVisibleCommandRoute::TerminalExecute
+        );
+        assert_eq!(
+            broker
+                .screen_snapshot("agent-ssh-visible-only")
+                .unwrap_err(),
+            "TERMINAL_SCREEN_UNAVAILABLE"
+        );
     }
 
     #[test]

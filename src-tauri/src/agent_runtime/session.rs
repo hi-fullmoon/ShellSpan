@@ -2565,10 +2565,21 @@ fn validate_event_transition(
                     )
                     .map_err(crate::llm::replay::replay_error_string)
                 }
-                None => Err(
-                    "REPLAY_CAPTURE_MISSING: prepared response requires a prepared replay envelope"
-                        .into(),
-                ),
+                None => {
+                    // Interactive input/search text is intentionally absent from both
+                    // the durable call and its response-wide replay envelope.
+                    if content.iter().any(|block| {
+                        matches!(
+                            block,
+                            AgentAssistantContentBlock::ToolCall { call }
+                                if super::model::recorded_tool_call_omits_replay(call)
+                        )
+                    }) {
+                        Ok(())
+                    } else {
+                        Err("REPLAY_CAPTURE_MISSING: prepared response requires a prepared replay envelope".into())
+                    }
+                }
             }
         }
         AgentSessionEventPayload::FileReferenceScopeBound { scope } => {
