@@ -128,7 +128,7 @@
                     "printf 'SHELLSPAN_{label}_RAW_BEGIN:'; printf '\\377'; printf ':\\033[31mred\\033[0m:'; printf '\\346\\261\\211'; printf ':END'; exit\n"
                 );
         broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 "shell-transport",
                 TerminalBrokerInputSource::User,
                 TerminalInputKind::Text,
@@ -310,7 +310,7 @@
             .windows(output_marker.len())
             .any(|window| window == output_marker.as_bytes()));
         let first_receipt = broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 "windows-shell-transport",
                 TerminalBrokerInputSource::User,
                 TerminalInputKind::Text,
@@ -341,7 +341,7 @@
             .windows("汉".len())
             .any(|window| window == "汉".as_bytes()));
         let second_receipt = broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 "windows-shell-transport",
                 TerminalBrokerInputSource::User,
                 TerminalInputKind::Text,
@@ -549,8 +549,7 @@
             cfg!(any(target_os = "macos", target_os = "windows"))
         );
         assert!(!snapshot.rollout.persisted);
-        assert_eq!(snapshot.rollout.mode, "shadowCompatibility");
-        assert!(snapshot.rollout.legacy_display_authoritative);
+        assert_eq!(snapshot.rollout.mode, "cooperative");
         assert_eq!(
             snapshot.shell_integration_rollout.enabled,
             cfg!(any(target_os = "macos", target_os = "windows"))
@@ -589,19 +588,17 @@
         );
         assert!(!snapshot.remote_interactive_tools_rollout.enabled);
         assert!(!snapshot.remote_interactive_tools_rollout.default_enabled);
-        assert!(snapshot.legacy_fallback_rollout.enabled);
         assert!(!snapshot.shell_integration_rollout.persisted);
         assert!(!snapshot.terminal_execute_rollout.persisted);
         assert!(!snapshot.remote_agent_pty_rollout.persisted);
         assert!(!snapshot.interactive_tools_rollout.persisted);
         assert!(!snapshot.remote_interactive_tools_rollout.persisted);
-        assert!(!snapshot.legacy_fallback_rollout.persisted);
         assert_eq!(
             broker.remote_agent_pty_new_operation_route().unwrap(),
             if cfg!(any(target_os = "macos", target_os = "windows")) {
                 TerminalVisibleCommandRoute::TerminalExecute
             } else {
-                TerminalVisibleCommandRoute::LegacyFallback
+                TerminalVisibleCommandRoute::Unavailable
             },
             "remote visible command rollout is independent from remote interactive tools"
         );
@@ -638,8 +635,6 @@
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
-                true,
-                TerminalBrokerRolloutSource::Test,
             )
             .unwrap();
         let snapshot = rollback.snapshot(Some("rollback-transport")).unwrap();
@@ -649,14 +644,14 @@
             Some(TerminalGenerationCloseReason::BrokerShutdown)
         );
         assert!(rollback
-            .observe_raw_output("rollback-transport", b"legacy remains authoritative")
+            .observe_raw_output("rollback-transport", b"display remains available")
             .unwrap()
             .is_none());
     }
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn phase6_windows_default_is_wrapper_free_and_remote_rollback_stays_compatible() {
+    fn phase6_windows_rollbacks_make_visible_commands_unavailable() {
         let broker = TerminalSessionBroker::default();
         broker
             .attach_transport(
@@ -706,25 +701,23 @@
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
-                true,
-                TerminalBrokerRolloutSource::Test,
             )
             .unwrap();
         assert_eq!(
             broker.visible_command_route("windows-local").unwrap(),
             TerminalVisibleCommandRoute::Unavailable,
-            "Windows local rollback must offer Direct instead of reviving the wrapper"
+            "Windows local rollback must make visible commands unavailable"
         );
         assert_eq!(
             broker.remote_agent_pty_new_operation_route().unwrap(),
-            TerminalVisibleCommandRoute::LegacyFallback,
-            "deferred remote targets must retain the compatibility wrapper"
+            TerminalVisibleCommandRoute::Unavailable,
+            "remote rollback must make visible commands unavailable"
         );
     }
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn phase6_macos_default_is_wrapper_free_and_remote_rollback_stays_compatible() {
+    fn phase6_macos_rollbacks_make_visible_commands_unavailable() {
         let broker = TerminalSessionBroker::default();
         broker
             .attach_transport(
@@ -774,19 +767,17 @@
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
-                true,
-                TerminalBrokerRolloutSource::Test,
             )
             .unwrap();
         assert_eq!(
             broker.visible_command_route("macos-local").unwrap(),
             TerminalVisibleCommandRoute::Unavailable,
-            "macOS local rollback must offer Direct instead of reviving the wrapper"
+            "macOS local rollback must make visible commands unavailable"
         );
         assert_eq!(
             broker.remote_agent_pty_new_operation_route().unwrap(),
-            TerminalVisibleCommandRoute::LegacyFallback,
-            "deferred remote targets must retain the compatibility wrapper"
+            TerminalVisibleCommandRoute::Unavailable,
+            "remote rollback must make visible commands unavailable"
         );
     }
 
@@ -900,19 +891,16 @@
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
-                true,
-                TerminalBrokerRolloutSource::Test,
             )
             .unwrap();
         assert_eq!(
             broker.remote_agent_pty_new_operation_route().unwrap(),
-            TerminalVisibleCommandRoute::LegacyFallback
+            TerminalVisibleCommandRoute::Unavailable
         );
 
         let snapshot = broker.snapshot(Some("counter-transport")).unwrap();
         assert_eq!(snapshot.counters.integration_ready, 1);
         assert_eq!(snapshot.counters.lifecycle_matched, 3);
-        assert_eq!(snapshot.counters.degraded_fallback, 1);
         assert_eq!(snapshot.counters.uncertainty, 1);
         assert_eq!(snapshot.counters.timeout, 2);
         assert_eq!(snapshot.counters.takeover, 1);
@@ -1198,7 +1186,7 @@
         let written = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
         let sink = Arc::clone(&written);
         broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 "transport-1",
                 TerminalBrokerInputSource::User,
                 TerminalInputKind::Text,
@@ -1234,7 +1222,7 @@
             .unwrap()
             .unwrap();
         assert!(broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 "transport-1",
                 TerminalBrokerInputSource::User,
                 TerminalInputKind::Text,
@@ -1244,7 +1232,7 @@
             .unwrap_err()
             .starts_with("TERMINAL_BROKER_LEASE_IDENTITY_MISMATCH"));
         broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 "transport-1",
                 TerminalBrokerInputSource::Agent {
                     agent_session_id: "agent-1".into(),
@@ -1257,7 +1245,7 @@
             )
             .unwrap();
         broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 "transport-1",
                 TerminalBrokerInputSource::System {
                     operation_id: "operation-1".into(),
@@ -1268,7 +1256,7 @@
             )
             .unwrap();
         assert!(broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 "transport-1",
                 TerminalBrokerInputSource::System {
                     operation_id: "operation-wrong".into(),
@@ -1329,7 +1317,7 @@
         attached(&broker, "transport-1");
         assert_eq!(
             broker
-                .admit_compatibility_input(
+                .admit_terminal_input(
                     "transport-1",
                     TerminalBrokerInputSource::User,
                     TerminalInputKind::Text,
@@ -1387,16 +1375,10 @@
         let broker = TerminalSessionBroker::default();
         assert_eq!(
             broker.visible_command_route("transport-posix").unwrap(),
-            if cfg!(any(target_os = "macos", target_os = "windows")) {
-                TerminalVisibleCommandRoute::Unavailable
-            } else {
-                TerminalVisibleCommandRoute::LegacyFallback
-            }
+            TerminalVisibleCommandRoute::Unavailable
         );
         broker
             .apply_trusted_phase3_rollout(
-                true,
-                TerminalBrokerRolloutSource::Test,
                 true,
                 TerminalBrokerRolloutSource::Test,
                 true,
@@ -1551,11 +1533,7 @@
         );
         assert_eq!(
             broker.visible_command_route("transport-1").unwrap(),
-            if cfg!(any(target_os = "macos", target_os = "windows")) {
-                TerminalVisibleCommandRoute::Unavailable
-            } else {
-                TerminalVisibleCommandRoute::LegacyFallback
-            }
+            TerminalVisibleCommandRoute::Unavailable
         );
     }
 
@@ -1612,7 +1590,7 @@
         let writes = Arc::new(Mutex::new(0_u32));
         let written = Arc::clone(&writes);
         broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 "transport-1",
                 TerminalBrokerInputSource::Agent {
                     agent_session_id: "agent-1".into(),
@@ -1649,7 +1627,7 @@
             if cfg!(any(target_os = "macos", target_os = "windows")) {
                 TerminalVisibleCommandRoute::Unavailable
             } else {
-                TerminalVisibleCommandRoute::LegacyFallback
+                TerminalVisibleCommandRoute::Unavailable
             }
         );
 
@@ -1676,8 +1654,6 @@
                 TerminalBrokerRolloutSource::Test,
                 false,
                 TerminalBrokerRolloutSource::Test,
-                true,
-                TerminalBrokerRolloutSource::Test,
             )
             .unwrap();
         assert_eq!(
@@ -1687,13 +1663,12 @@
         let snapshot = broker.snapshot(Some("transport-1")).unwrap();
         assert!(snapshot.shell_integration_rollout.enabled);
         assert!(!snapshot.terminal_execute_rollout.enabled);
-        assert!(snapshot.legacy_fallback_rollout.enabled);
         assert_eq!(
             broker.visible_command_route("transport-1").unwrap(),
             if cfg!(any(target_os = "macos", target_os = "windows")) {
                 TerminalVisibleCommandRoute::Unavailable
             } else {
-                TerminalVisibleCommandRoute::LegacyFallback
+                TerminalVisibleCommandRoute::Unavailable
             }
         );
 
@@ -1705,8 +1680,6 @@
                 TerminalBrokerRolloutSource::Test,
                 true,
                 TerminalBrokerRolloutSource::Test,
-                false,
-                TerminalBrokerRolloutSource::Test,
             )
             .unwrap();
         let snapshot = broker.snapshot(Some("transport-1")).unwrap();
@@ -1714,7 +1687,6 @@
         assert!(!snapshot.terminal_execute_rollout.enabled);
         assert!(snapshot.terminal_execute_rollout.requested);
         assert!(!snapshot.terminal_execute_rollout.prerequisite_satisfied);
-        assert!(!snapshot.legacy_fallback_rollout.enabled);
         assert_eq!(
             broker.visible_command_route("transport-1").unwrap(),
             TerminalVisibleCommandRoute::Unavailable
@@ -1776,7 +1748,7 @@
             .unwrap();
         assert_eq!(
             broker.remote_visible_command_route("user-ssh").unwrap(),
-            TerminalVisibleCommandRoute::LegacyFallback,
+            TerminalVisibleCommandRoute::Unavailable,
             "a user-owned SSH terminal must never become the Phase 4 terminal_execute target"
         );
 
@@ -1801,7 +1773,7 @@
             .begin_command("agent-ssh-1", "operation-1", "printf remote")
             .unwrap();
         broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 "agent-ssh-1",
                 TerminalBrokerInputSource::Agent {
                     agent_session_id: "agent-session-1".into(),
