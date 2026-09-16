@@ -43,6 +43,7 @@ pnpm check:llm:catalog
 - 优先使用 `src/components/ui/` 中已有的 shadcn 组件、尺寸和变体，不为单个页面硬编码颜色、边框、圆角或控件高度。工作台中的紧凑卡片优先使用 `size="sm"`、`radius="compact"`；需要清晰边界时使用 `variant="outline"`。
 - 工作台中同级 Card 的横向和纵向间距统一使用 `gap-3`（12px）；Card 内部字段、按钮或指标可按组件语义使用更小或更大的间距，但不得用内部间距替代卡片容器间距。
 - 同一操作行中的 Input、Select 和 Button 必须视觉等高。不要假设不同组件的同名 `size` 天然一致；检查共享组件定义和实际渲染尺寸。若差异属于全局设计系统问题，修正共享 primitive 并增加组件测试。
+- 工作台页面顶部统一使用 `WorkbenchPageHeader` 的默认内边距和高度结构，不做页面级 padding 覆盖。窄容器中的 Header 操作区应尽量保持单行；搜索框需使用 `min-w-0 flex-1` 允许收缩，并在宽容器断点恢复固定宽度，避免页面切换时因按钮换行产生高度跳动。
 - Select 的 `value` 只用于状态与提交，用户界面必须显示可读 label，不能直接暴露数据库 ID、内部枚举或 `all`、`none` 等原始值。Base UI Select 应向根组件传入同源的 `{ value, label }` `items` 映射，触发器和选项列表共用该映射；所有 label 遵循 i18n。
 - 长弹框必须形成完整的高度收缩链：`DialogContent` 使用明确或有上限的视口内高度，固定 Header/Footer 使用 `shrink-0`，中间容器使用 `min-h-0 flex-1`，仅正文 `ScrollArea` 滚动。只设置 `max-height` 不足以保证 flex/grid 子项收缩，也不得让操作栏滚出视口。
 - 滚动条应属于全宽滚动层并保持可见；内容内边距放在滚动层内部。不要用会把滚动条推入 `overflow-hidden` 裁剪区的负边距。需要滚动条贴边时，应让滚动层延伸到未裁剪的父级边缘，同时在内容容器补回内边距，并验证窄屏行为。

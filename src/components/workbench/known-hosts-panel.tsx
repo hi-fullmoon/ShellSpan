@@ -89,10 +89,11 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t('workbench.knownHosts.searchPlaceholder')}
                 aria-label={t('workbench.knownHosts.searchPlaceholder')}
-            />
-            <Button variant="outline" size="sm" onClick={loadHosts}>
-              <RefreshCwIcon data-icon="inline-start" className={cn(loading && 'animate-spin')} />
-              {t('common.refresh')}
+                containerClassName="min-w-0 flex-1 @min-[64rem]:w-64 @min-[64rem]:flex-none"
+              />
+              <Button variant="outline" size="sm" onClick={loadHosts}>
+                <RefreshCwIcon data-icon="inline-start" className={cn(loading && 'animate-spin')} />
+                {t('common.refresh')}
               </Button>
             </>
           )}
