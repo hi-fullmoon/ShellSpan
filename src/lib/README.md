@@ -5,6 +5,7 @@ in the matching directory instead of the library root.
 
 - `ai/`: AI session state, projections, provider contracts, and composer policy.
 - `connections/`: connection import and credential prompt workflows.
+- `deployment/`: deployment workflow, frozen approval-plan, run, and event wire types.
 - `host/`: host actions, host health, monitoring, and overview projections.
 - `ipc/`: typed Tauri command and event adapters.
 - `petdex/`: Petdex integration and feedback helpers.
