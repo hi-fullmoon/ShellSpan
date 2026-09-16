@@ -297,7 +297,7 @@ export function RemoteHealthSection(): React.JSX.Element {
               <ResponsiveCardGrid
                 columns={1}
                 breakpoints={REMOTE_METRIC_BREAKPOINTS}
-                gap="0.625rem"
+                gap="0.75rem"
               >
                 <RemoteMetricCard
                   icon={CpuIcon}

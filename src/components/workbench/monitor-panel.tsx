@@ -432,7 +432,7 @@ export const MonitorPanel: React.FC = () => {
         />
 
         <ScrollArea className="min-h-0 flex-1">
-          <WorkbenchPageContent className="gap-4">
+          <WorkbenchPageContent>
             <section aria-labelledby="local-monitor-heading" className="flex flex-col gap-3">
               <h2 id="local-monitor-heading" className="sr-only">
                 {t('workbench.monitor.localTitle')}

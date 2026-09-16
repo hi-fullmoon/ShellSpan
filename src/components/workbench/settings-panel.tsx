@@ -146,7 +146,7 @@ const SettingsGrid: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   if (currentGroup.rows.length > 0) groups.push(currentGroup);
 
   return (
-    <div data-slot="settings-groups" className="flex flex-col gap-4">
+    <div data-slot="settings-groups" className="flex flex-col gap-3">
       {groups.map((group, groupIndex) => (
         <SettingsGroup key={groupIndex} title={group.title}>
           {group.rows}
@@ -989,7 +989,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </TabsContent>
 
             <TabsContent value="shortcuts" className="w-full">
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-3">
                 {SHORTCUT_GROUPS.map((group) => (
                   <SettingsGroup key={group.id} title={t(SHORTCUT_GROUP_LABEL_KEYS[group.id])}>
                     {group.actions.map((action) => {

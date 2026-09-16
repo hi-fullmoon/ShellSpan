@@ -96,7 +96,7 @@ export function HostOverviewDialog({ profile, onClose }: HostOverviewDialogProps
 
         {snapshot && (
           <CompactDialogBody className="flex flex-col gap-3">
-            <div className="grid shrink-0 grid-cols-2 gap-2">
+            <div className="grid shrink-0 grid-cols-2 gap-3">
               <MetricCard
                 icon={TerminalIcon}
                 label={t('hostOverview.terminals')}

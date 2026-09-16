@@ -97,5 +97,7 @@ describe('HostQuickActionsDialog', () => {
 
     expect(screen.getByRole('button', { name: 'Insert only' })).toBeDisabled();
     expect(screen.getByText(/never sends Enter/i)).toBeInTheDocument();
+    const actionCard = screen.getByText('Check status').closest('[data-slot="card"]');
+    expect(actionCard?.parentElement).toHaveClass('flex-col', 'gap-3');
   });
 });

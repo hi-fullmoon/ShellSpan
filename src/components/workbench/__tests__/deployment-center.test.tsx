@@ -659,7 +659,7 @@ describe('DeploymentCenter', () => {
     const responsiveGrid = [...document.querySelectorAll<HTMLElement>('div')]
       .find((element) => element.className.includes('@min-[64rem]:grid-cols-[minmax(14rem,20rem)_minmax(0,1fr)]'));
     expect(responsiveGrid).toBeDefined();
-    expect(responsiveGrid).toHaveClass('flex-1', 'items-stretch');
+    expect(responsiveGrid).toHaveClass('flex-1', 'items-stretch', 'gap-3');
     expect(responsiveGrid).not.toHaveClass('lg:grid-cols-[minmax(14rem,20rem)_minmax(0,1fr)]');
     expect(document.querySelector('[data-slot="workbench-page-content"]')).toHaveClass(
       'flex-1',

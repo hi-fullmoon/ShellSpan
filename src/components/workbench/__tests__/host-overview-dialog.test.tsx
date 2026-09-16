@@ -36,5 +36,7 @@ describe('HostOverviewDialog', () => {
     dialog.querySelectorAll('[data-slot="card"]').forEach((card) => {
       expect(card).toHaveAttribute('data-size', 'sm');
     });
+    const metricCards = dialog.querySelectorAll('[data-slot="card"]');
+    expect(metricCards[0]?.parentElement).toHaveClass('grid', 'gap-3');
   });
 });
