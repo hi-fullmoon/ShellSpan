@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { WorkbenchSidebar } from '../workbench-sidebar';
 import { useUpdateStore } from '@/stores/updateStore';
+import { useDeploymentStore } from '@/stores/deploymentStore';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -29,6 +30,21 @@ vi.mock('@/hooks/useI18n', () => ({
 describe('WorkbenchSidebar', () => {
   beforeEach(() => {
     useUpdateStore.setState({ phase: 'idle' });
+    useDeploymentStore.setState({ recoveryCandidates: [] });
+  });
+
+  it('shows the unresolved deployment count without adding an execution action', () => {
+    useDeploymentStore.setState({
+      recoveryCandidates: [
+        { runId: 'run-1', planId: 'plan-1', planDigest: 'a'.repeat(64), status: 'state_unknown', lastEventSequence: 2, reconciliationRequired: true },
+        { runId: 'run-2', planId: 'plan-2', planDigest: 'b'.repeat(64), status: 'in_progress', lastEventSequence: 3, reconciliationRequired: false },
+      ],
+    });
+    render(<WorkbenchSidebar activeTab="connections" onTabChange={vi.fn()} onOpenSettings={vi.fn()} onCheckForUpdates={vi.fn()} onOpenAbout={vi.fn()} onRequestExit={vi.fn()} />);
+
+    const deployments = screen.getByRole('button', { name: /deployment.title/ });
+    expect(deployments).toHaveTextContent('2');
+    expect(screen.queryByRole('button', { name: /approve|execute/i })).not.toBeInTheDocument();
   });
 
   it('activates a menu item when WKWebView drops its trackpad pointerdown', () => {

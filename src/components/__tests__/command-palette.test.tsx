@@ -14,6 +14,7 @@ import { useProfileStore } from '@/stores/profileStore';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { ConnectionProfile, SftpBookmarkRow } from '@/types';
+import type { DeploymentWorkflowRecord } from '@/lib/deployment/types';
 
 const { invokeListSftpBookmarks } = vi.hoisted(() => ({
   invokeListSftpBookmarks: vi.fn().mockResolvedValue([]),
@@ -67,6 +68,32 @@ const terminalSession = {
   username: 'deploy',
   status: 'connected' as const,
   profileId: profile.id,
+};
+
+const workflow: DeploymentWorkflowRecord = {
+  id: 'workflow-api',
+  name: 'Payments API',
+  connectionProfileId: profile.id,
+  revision: 3,
+  enabled: true,
+  createdAt: 1,
+  updatedAt: 3,
+  definition: {
+    schemaVersion: 2,
+    sourceDirectory: '/workspace/payments',
+    build: {
+      context: '.',
+      dockerfile: 'Dockerfile',
+      platform: 'linux/amd64',
+      imageRepository: 'example.test/payments',
+      compression: 'zstd',
+    },
+    target: { connectionProfileId: profile.id, remoteRoot: '/srv/payments' },
+    compose: { projectName: 'payments', files: ['compose.yaml'], services: ['api'], pullBeforeUp: true },
+    healthCheck: null,
+    reloadNginxAfterHealthy: false,
+    releasesToKeep: 3,
+  },
 };
 
 function buildOptions(
@@ -167,6 +194,40 @@ describe('CommandPalette', () => {
       'settings',
     ]));
     expect(items.some((item) => item.id === 'navigation-runbooks')).toBe(false);
+    expect(items.some((item) => item.id === 'navigation-deployments')).toBe(true);
+  });
+
+  it('opens deployments globally and with an explicit host filter', () => {
+    const navigate = vi.fn();
+    const openHostTool = vi.fn();
+    const items = buildCommandPaletteItems(buildOptions({ navigate, openHostTool }));
+
+    items.find((item) => item.id === 'navigation-deployments')?.run();
+    items.find((item) => item.id === 'profile-deployments-profile-1')?.run();
+
+    expect(navigate).toHaveBeenCalledWith('workbench', 'deployments');
+    expect(openHostTool).toHaveBeenCalledWith('profile-1', 'deployments');
+  });
+
+  it('searches deployment workflows by workflow and host and only navigates', () => {
+    const openDeployment = vi.fn();
+    const items = buildCommandPaletteItems(buildOptions({
+      workflows: [workflow],
+      openDeployment,
+    }));
+    const details = items.find((item) => item.id === 'deployment-workflow-workflow-api');
+    const release = items.find((item) => item.id === 'deployment-new-release-workflow-api');
+
+    expect(details).toMatchObject({
+      group: 'deployment',
+      keywords: expect.stringContaining('Payments API'),
+    });
+    expect(details?.keywords).toContain(profile.host);
+    details?.run();
+    release?.run();
+    expect(openDeployment).toHaveBeenNthCalledWith(1, workflow.id, 'details');
+    expect(openDeployment).toHaveBeenNthCalledWith(2, workflow.id, 'newRelease');
+    expect(items.some((item) => /approve|execute|shell/i.test(item.id))).toBe(false);
   });
 
   it('deduplicates bookmark loads by endpoint and retains a usable profile target', async () => {

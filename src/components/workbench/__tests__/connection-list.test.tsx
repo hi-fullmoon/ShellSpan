@@ -480,6 +480,7 @@ describe('ConnectionList', () => {
 
     const menuActionNames = [
       'remoteHealth.open',
+      'deployment.openForHost',
       'portForward.open',
       'hostQuickActions.open',
       'hostOverview.open',

@@ -174,7 +174,12 @@ describe('TerminalPane', () => {
     expect(bar).not.toHaveTextContent('terminal.agentLease.runtime');
     expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"]')).toBeNull();
     expect(bar).not.toHaveClass('absolute');
-    expect(bar).toHaveClass('border-app-border/50');
+    expect(bar).toHaveClass(
+      'grid',
+      'grid-cols-[auto_minmax(0,1fr)_auto]',
+      'gap-x-3',
+    );
+    expect(bar).not.toHaveClass('border-b', 'border-app-border/50');
     expect(screen.getByTestId('agent-visible-terminal-aura'))
       .toHaveClass('pointer-events-none', 'absolute', 'inset-0');
     const identity = screen.getByTestId('agent-terminal-lease-identity');

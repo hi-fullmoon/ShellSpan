@@ -76,7 +76,7 @@ const AgentTerminalLeaseBar: React.FC<{
 
   return (
     <div
-      className="agent-terminal-lease-bar relative flex min-h-10 shrink-0 items-center gap-2 border-b border-app-border/50 bg-app-surface px-2.5"
+      className="agent-terminal-lease-bar grid min-h-10 shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 bg-app-surface px-3 py-2"
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -85,26 +85,26 @@ const AgentTerminalLeaseBar: React.FC<{
       data-terminal-owned={lease.terminalOwned || undefined}
       data-input-blocked={lease.inputBlocked || undefined}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-2.5">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger
-              render={(
-                <Badge
-                  variant="outline"
-                  className="agent-terminal-lease-identity h-6"
-                  data-testid="agent-terminal-lease-identity"
-                />
-              )}
-            >
-              <BotIcon data-icon="inline-start" />
-              {t(surfaceSemanticsEnabled
-                ? 'terminal.agentLease.visibleCommandLabel'
-                : 'terminal.agentLease.surfaceLabel')}
-            </TooltipTrigger>
-            <TooltipContent>{t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger
+            render={(
+              <Badge
+                variant="outline"
+                className="agent-terminal-lease-identity h-6"
+                data-testid="agent-terminal-lease-identity"
+              />
+            )}
+          >
+            <BotIcon data-icon="inline-start" />
+            {t(surfaceSemanticsEnabled
+              ? 'terminal.agentLease.visibleCommandLabel'
+              : 'terminal.agentLease.surfaceLabel')}
+          </TooltipTrigger>
+          <TooltipContent>{t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <div className="flex min-w-0 items-center gap-3">
         <span
           className="relative h-5 w-px shrink-0"
           aria-hidden="true"
@@ -123,33 +123,35 @@ const AgentTerminalLeaseBar: React.FC<{
         </span>
       </div>
       <span className="sr-only">{interactionHint}</span>
-      <Badge
-        variant={lease.terminalOwned ? 'secondary' : 'outline'}
-        className="agent-terminal-input-state hidden h-6 shrink-0 sm:inline-flex"
-        aria-hidden="true"
-      >
-        <span className="agent-terminal-input-state-dot" />
-        {inputLabel}
-      </Badge>
-      <Button
-        type="button"
-        variant="outline"
-        size="xs"
-        className="agent-terminal-takeover shrink-0 gap-1"
-        disabled={lease.takeoverRequested}
-        aria-busy={lease.takeoverRequested || undefined}
-        aria-label={t(lease.takeoverRequested
-          ? 'terminal.agentLease.takingOver'
-          : 'terminal.agentLease.takeover')}
-        onClick={lease.requestTakeover}
-      >
-        {lease.takeoverRequested ? (
-          <ButtonSpinner data-icon="inline-start" aria-hidden="true" />
-        ) : (
-          <CircleStopIcon data-icon="inline-start" />
-        )}
-        {t('terminal.agentLease.takeover')}
-      </Button>
+      <div className="flex shrink-0 items-center gap-2">
+        <Badge
+          variant={lease.terminalOwned ? 'secondary' : 'outline'}
+          className="agent-terminal-input-state hidden h-6 shrink-0 sm:inline-flex"
+          aria-hidden="true"
+        >
+          <span className="agent-terminal-input-state-dot" />
+          {inputLabel}
+        </Badge>
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="agent-terminal-takeover shrink-0 gap-1"
+          disabled={lease.takeoverRequested}
+          aria-busy={lease.takeoverRequested || undefined}
+          aria-label={t(lease.takeoverRequested
+            ? 'terminal.agentLease.takingOver'
+            : 'terminal.agentLease.takeover')}
+          onClick={lease.requestTakeover}
+        >
+          {lease.takeoverRequested ? (
+            <ButtonSpinner data-icon="inline-start" aria-hidden="true" />
+          ) : (
+            <CircleStopIcon data-icon="inline-start" />
+          )}
+          {t('terminal.agentLease.takeover')}
+        </Button>
+      </div>
     </div>
   );
 };
