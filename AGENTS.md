@@ -38,6 +38,18 @@ pnpm check:llm:catalog
 - 用户可见文案必须通过 i18n；同时更新 `src/locales/zh-CN.ts` 与 `src/locales/en-US.ts`，并保持键集合一致。
 - 测试放在离被测代码最近的 `__tests__/` 中，断言可观察行为。
 
+### UI、布局与反馈
+
+- 优先使用 `src/components/ui/` 中已有的 shadcn 组件、尺寸和变体，不为单个页面硬编码颜色、边框、圆角或控件高度。工作台中的紧凑卡片优先使用 `size="sm"`、`radius="compact"`；需要清晰边界时使用 `variant="outline"`。
+- 同一操作行中的 Input、Select 和 Button 必须视觉等高。不要假设不同组件的同名 `size` 天然一致；检查共享组件定义和实际渲染尺寸。若差异属于全局设计系统问题，修正共享 primitive 并增加组件测试。
+- Select 的 `value` 只用于状态与提交，用户界面必须显示可读 label，不能直接暴露数据库 ID、内部枚举或 `all`、`none` 等原始值。Base UI Select 应向根组件传入同源的 `{ value, label }` `items` 映射，触发器和选项列表共用该映射；所有 label 遵循 i18n。
+- 长弹框必须形成完整的高度收缩链：`DialogContent` 使用明确或有上限的视口内高度，固定 Header/Footer 使用 `shrink-0`，中间容器使用 `min-h-0 flex-1`，仅正文 `ScrollArea` 滚动。只设置 `max-height` 不足以保证 flex/grid 子项收缩，也不得让操作栏滚出视口。
+- 滚动条应属于全宽滚动层并保持可见；内容内边距放在滚动层内部。不要用会把滚动条推入 `overflow-hidden` 裁剪区的负边距。需要滚动条贴边时，应让滚动层延伸到未裁剪的父级边缘，同时在内容容器补回内边距，并验证窄屏行为。
+- 主从双栏和工作台面板必须从页面容器到 grid、Card、ScrollArea 连续设置 `min-h-0`/`flex-1`。工作台可能被 AI 面板动态压窄，布局断点必须基于 `WorkbenchPage` 的 container query（`@min-*`），不能仅使用视口级 `sm`/`lg`；宽容器中侧栏卡片占满可用高度、两侧各自滚动，窄容器中切回自然纵向布局。
+- Card 的主要操作优先放入标题右侧的 `CardAction`。仅当操作语义确实属于底部确认区时使用 `CardFooter`；无状态、无结果的空 `CardContent` 不应产生大块留白。次要且低频的信息（如历史记录）若持续挤占主流程空间，优先放入 Dialog/Drawer。
+- 一次性成功或失败（保存、刷新、构建请求、上传请求、列表加载等）使用 Toast，并在展示后清理错误状态、防止 Strict Mode 或重复渲染造成重复通知。需要持续查看或会阻塞流程的状态（恢复门禁、审批状态、构建/预检/上传/执行结果）保留在对应上下文的 Alert；确认操作使用 Dialog。不要同时用 Toast 和 Alert 重复呈现同一错误。
+- UI 修复必须增加就近回归测试，至少覆盖可读 label、控件尺寸、滚动/高度结构、CardAction 位置、Toast 去重或响应式结构中的相关项；布局类问题还应在代表性窗口尺寸下进行一次实际渲染检查。
+
 ### Tauri 与 Rust
 
 - 前端调用后端时优先经过 `src/lib/ipc/tauri.ts` 的类型化适配层，不在组件中散布新的裸 `invoke`/事件处理。
