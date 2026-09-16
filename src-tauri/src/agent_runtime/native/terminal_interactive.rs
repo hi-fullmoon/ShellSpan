@@ -501,9 +501,9 @@ mod tests {
     use crossbeam_channel::{unbounded, Receiver};
     use std::sync::atomic::AtomicBool;
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     use base64::Engine;
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     use std::io::Write;
 
     fn interactive_harness() -> (
@@ -595,6 +595,386 @@ mod tests {
         format!(
             "Invoke-Expression ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{encoded}')))"
         )
+    }
+
+    #[cfg(target_os = "macos")]
+    fn posix_encoded_command(script: &str) -> String {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(script);
+        format!("eval \"$(printf '%s' '{encoded}' | base64 -D)\"")
+    }
+
+    #[cfg(target_os = "macos")]
+    #[allow(clippy::too_many_arguments)]
+    fn deliver_macos_agent_input(
+        registry: &TerminalInteractiveRegistry,
+        sessions: &SessionManager,
+        receiver: &Receiver<SessionCommand>,
+        writer: &mut dyn Write,
+        input_kind: TerminalInteractiveInputKindNative,
+        text: Option<&str>,
+        key: Option<TerminalKeyNative>,
+    ) -> TerminalInteractiveWriteResult {
+        let receipt = registry
+            .write(
+                sessions,
+                "phase5-macos-pty",
+                "phase5-agent",
+                "phase5-task",
+                input_kind,
+                text,
+                key,
+            )
+            .unwrap();
+        let SessionCommand::Write(data) = receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("interactive input was not enqueued")
+        else {
+            panic!("expected an interactive terminal write")
+        };
+        assert_eq!(receipt.accepted_bytes, data.len());
+        writer.write_all(data.as_bytes()).unwrap();
+        writer.flush().unwrap();
+        receipt
+    }
+
+    #[cfg(target_os = "macos")]
+    fn run_macos_posix_interactive_acceptance(
+        shell: &str,
+        shell_kind: TerminalShellKind,
+        label: &str,
+    ) {
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+        use std::io::Read;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        const SESSION_ID: &str = "phase5-macos-pty";
+        const AGENT_SESSION_ID: &str = "phase5-agent";
+        const TASK_ID: &str = "phase5-task";
+
+        let broker = TerminalSessionBroker::phase5_enabled_for_test(1_048_576);
+        broker
+            .attach_transport(
+                SESSION_ID,
+                None,
+                TerminalTransportKind::LocalPty,
+                TerminalGeometry::new(80, 24),
+            )
+            .unwrap()
+            .unwrap();
+        broker
+            .register_integration_channel(SESSION_ID, "phase5-integration", shell_kind)
+            .unwrap();
+        for event in [
+            TerminalIntegrationControlEvent::Ready { shell: shell_kind },
+            TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() },
+            TerminalIntegrationControlEvent::PromptEnd,
+        ] {
+            broker
+                .accept_integration_event(SESSION_ID, "phase5-integration", event)
+                .unwrap();
+        }
+
+        let leases = TerminalLeaseManager::new(broker.clone());
+        let acknowledger = leases.clone();
+        leases
+            .set_publisher(Arc::new(move |event| {
+                if event.state == super::super::TerminalLeaseEventState::Acquired {
+                    acknowledger
+                        .acknowledge_frontend_ready(
+                            &event.session_id,
+                            &event.agent_session_id,
+                            &event.operation_id,
+                            true,
+                            true,
+                            false,
+                            false,
+                            false,
+                        )
+                        .unwrap();
+                }
+            }))
+            .unwrap();
+        let registry = TerminalInteractiveRegistry::new(leases, broker.clone());
+        let sessions = SessionManager::default();
+        let (sender, receiver) = unbounded();
+        sessions
+            .insert(
+                SESSION_ID.into(),
+                ManagedSession {
+                    sender: SessionCommandSender::Event(sender),
+                    waker: None,
+                    output_state_sender: None,
+                    status: StatusEvent {
+                        session_id: SESSION_ID.into(),
+                        status: SessionStatus::Connected,
+                        message: None,
+                    },
+                    output_ready: Arc::new(AtomicBool::new(true)),
+                    output_paused: Arc::new(AtomicBool::new(false)),
+                    terminal_kind: SessionTerminalKind::Local,
+                    identity: SessionIdentity {
+                        title: shell.into(),
+                        host: "local".into(),
+                        port: 0,
+                        username: "phase5".into(),
+                    },
+                },
+            )
+            .unwrap();
+
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        let mut writer = pair.master.take_writer().unwrap();
+        let mut command = CommandBuilder::new(shell);
+        match shell_kind {
+            TerminalShellKind::Bash => command.args(["--noprofile", "--norc"]),
+            TerminalShellKind::Zsh => command.args(["-f"]),
+            _ => unreachable!("macOS Phase 5 accepts only bash and zsh"),
+        }
+        command.env("TERM", "xterm-256color");
+        command.env("PS1", "");
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        drop(pair.slave);
+
+        let reader_broker = broker.clone();
+        let reader_shell = shell.to_string();
+        let reader_thread = thread::spawn(move || -> Result<Vec<u8>, String> {
+            let mut raw = Vec::new();
+            let mut buffer = [0_u8; 97];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        let bytes = &buffer[..count];
+                        reader_broker.observe_raw_output(SESSION_ID, bytes)?;
+                        raw.extend_from_slice(bytes);
+                    }
+                    Err(_) if !raw.is_empty() => break,
+                    Err(error) => return Err(format!("read {reader_shell} PTY: {error}")),
+                }
+            }
+            Ok(raw)
+        });
+
+        let wait_for_text = |text: &str| {
+            let result = registry
+                .wait(
+                    SESSION_ID,
+                    TerminalWaitRequest {
+                        after_screen_version: None,
+                        after_output_sequence: None,
+                        after_lifecycle_sequence: None,
+                        text: Some(text.into()),
+                        case_sensitive: true,
+                        idle: None,
+                        timeout: Duration::from_secs(10),
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                result.reason,
+                TerminalWaitReason::TextFound,
+                "{shell} screen did not render {text:?}"
+            );
+            result.snapshot.unwrap()
+        };
+        let send_script = |script: &str, writer: &mut Box<dyn Write + Send>| {
+            let command = posix_encoded_command(script);
+            assert!(
+                !command.contains("PHASE5_") && !command.to_ascii_lowercase().contains("password"),
+                "encoded command leaked a screen marker into the echoed input"
+            );
+            deliver_macos_agent_input(
+                &registry,
+                &sessions,
+                &receiver,
+                writer,
+                TerminalInteractiveInputKindNative::Text,
+                Some(&command),
+                None,
+            );
+            deliver_macos_agent_input(
+                &registry,
+                &sessions,
+                &receiver,
+                writer,
+                TerminalInteractiveInputKindNative::Key,
+                None,
+                Some(TerminalKeyNative::Enter),
+            );
+        };
+
+        let repl_ready = format!("PHASE5_{label}_REPL_READY");
+        let repl_echo = format!("PHASE5_{label}_REPL_ECHO=macos-value");
+        send_script(
+            &format!(
+                "printf '{repl_ready}> '; IFS= read -r value; printf '\\r\\nPHASE5_{label}_REPL_ECHO=%s\\r\\n' \"$value\""
+            ),
+            &mut writer,
+        );
+        wait_for_text(&repl_ready);
+        deliver_macos_agent_input(
+            &registry,
+            &sessions,
+            &receiver,
+            &mut writer,
+            TerminalInteractiveInputKindNative::Text,
+            Some("macos-value"),
+            None,
+        );
+        deliver_macos_agent_input(
+            &registry,
+            &sessions,
+            &receiver,
+            &mut writer,
+            TerminalInteractiveInputKindNative::Key,
+            None,
+            Some(TerminalKeyNative::Enter),
+        );
+        wait_for_text(&repl_echo);
+
+        let confirm_prompt = format!("PHASE5_{label}_CONFIRM");
+        let confirm_result = format!("PHASE5_{label}_CONFIRMED=y");
+        let read_one = match shell_kind {
+            TerminalShellKind::Bash => "IFS= read -r -n 1 answer",
+            TerminalShellKind::Zsh => "IFS= read -r -k 1 answer",
+            _ => unreachable!(),
+        };
+        send_script(
+            &format!(
+                "printf '{confirm_prompt} [y/N] '; {read_one}; printf '\\r\\nPHASE5_{label}_CONFIRMED=%s\\r\\n' \"$answer\""
+            ),
+            &mut writer,
+        );
+        wait_for_text(&confirm_prompt);
+        deliver_macos_agent_input(
+            &registry,
+            &sessions,
+            &receiver,
+            &mut writer,
+            TerminalInteractiveInputKindNative::Text,
+            Some("y"),
+            None,
+        );
+        wait_for_text(&confirm_result);
+
+        pair.master
+            .resize(PtySize {
+                rows: 30,
+                cols: 100,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        broker
+            .resize(SESSION_ID, TerminalGeometry::new(100, 30))
+            .unwrap();
+        let resized = registry.read(SESSION_ID).unwrap();
+        assert_eq!((resized.columns, resized.rows), (100, 30));
+
+        let alternate_marker = format!("PHASE5_{label}_ALT_SCREEN");
+        let primary_marker = format!("PHASE5_{label}_ALT_DONE");
+        send_script(
+            &format!(
+                "printf '\\033[?1049h{alternate_marker}\\033[2;4H'; sleep 1; printf '\\033[?1049l{primary_marker}'"
+            ),
+            &mut writer,
+        );
+        let alternate = wait_for_text(&alternate_marker);
+        assert_eq!(
+            alternate.active_buffer,
+            crate::terminal_screen::TerminalScreenBuffer::Alternate
+        );
+        let primary = wait_for_text(&primary_marker);
+        assert_eq!(
+            primary.active_buffer,
+            crate::terminal_screen::TerminalScreenBuffer::Primary
+        );
+
+        let credential_marker = format!("Password: PHASE5_{label}_CREDENTIAL");
+        send_script(&format!("printf '{credential_marker}'"), &mut writer);
+        let credential_screen = wait_for_text(&credential_marker);
+        assert_eq!(
+            registry
+                .write(
+                    &sessions,
+                    SESSION_ID,
+                    AGENT_SESSION_ID,
+                    TASK_ID,
+                    TerminalInteractiveInputKindNative::Text,
+                    Some("MUST_NOT_REACH_PTY"),
+                    None,
+                )
+                .unwrap_err(),
+            "TERMINAL_CREDENTIAL_INPUT_FORBIDDEN"
+        );
+        assert!(receiver.try_recv().is_err());
+        let (redacted, credential_like) = sanitize_terminal_screen(credential_screen);
+        assert!(credential_like);
+        assert!(!redacted.content.join("\n").contains(&credential_marker));
+        assert!(redacted
+            .content
+            .iter()
+            .any(|row| row == "[credential-like terminal screen redacted]"));
+
+        let exit_input = "exit\r";
+        broker
+            .admit_compatibility_input(
+                SESSION_ID,
+                crate::terminal_broker::TerminalBrokerInputSource::User,
+                TerminalInputKind::Text,
+                exit_input.as_bytes(),
+                || {
+                    writer
+                        .write_all(exit_input.as_bytes())
+                        .map_err(|error| format!("write {shell} PTY exit: {error}"))?;
+                    writer
+                        .flush()
+                        .map_err(|error| format!("flush {shell} PTY exit: {error}"))
+                },
+            )
+            .unwrap()
+            .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            match child.try_wait().unwrap() {
+                Some(status) => break status,
+                None if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+                None => {
+                    child.kill().unwrap();
+                    panic!("{shell} interactive PTY did not exit before acceptance deadline");
+                }
+            }
+        };
+        drop(writer);
+        drop(pair.master);
+        let raw = reader_thread.join().unwrap().unwrap();
+
+        assert!(status.success(), "{shell} exited unsuccessfully");
+        for marker in [
+            repl_echo.as_str(),
+            confirm_result.as_str(),
+            alternate_marker.as_str(),
+            credential_marker.as_str(),
+        ] {
+            assert!(
+                raw.windows(marker.len())
+                    .any(|window| window == marker.as_bytes()),
+                "{shell} raw PTY output omitted {marker}"
+            );
+        }
+        assert!(!raw
+            .windows("MUST_NOT_REACH_PTY".len())
+            .any(|window| window == "MUST_NOT_REACH_PTY".as_bytes()));
     }
 
     #[cfg(target_os = "windows")]
@@ -1107,6 +1487,20 @@ mod tests {
         );
         assert!(!registry.has_operation("transport-1").unwrap());
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "run explicitly in the native macOS bash Phase 5 acceptance lane"]
+    fn macos_bash_interactive_terminal_operation() {
+        run_macos_posix_interactive_acceptance("/bin/bash", TerminalShellKind::Bash, "MACOS_BASH");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "run explicitly in the native macOS zsh Phase 5 acceptance lane"]
+    fn macos_zsh_interactive_terminal_operation() {
+        run_macos_posix_interactive_acceptance("/bin/zsh", TerminalShellKind::Zsh, "MACOS_ZSH");
     }
 
     #[cfg(target_os = "windows")]

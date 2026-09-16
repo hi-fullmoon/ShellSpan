@@ -1012,10 +1012,7 @@ impl NativeToolEngine {
             };
             let terminal_state = sessions.target_state(session_id)?;
             if !legacy_pty_wrapper_available(&terminal_state) {
-                return Err(
-                    "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_WINDOWS: use terminal_execute or Direct execution"
-                        .into(),
-                );
+                return Err(legacy_pty_wrapper_removed_error().into());
             }
             let shell_kind = pty_shell_kind(&terminal_state)?;
             let operation = self.pty.start(
@@ -1704,7 +1701,18 @@ fn pty_shell_kind(
 }
 
 fn legacy_pty_wrapper_available(state: &crate::models::SessionTargetState) -> bool {
-    !cfg!(target_os = "windows") || state.terminal_kind == SessionTerminalKind::Remote
+    !cfg!(any(target_os = "macos", target_os = "windows"))
+        || state.terminal_kind == SessionTerminalKind::Remote
+}
+
+fn legacy_pty_wrapper_removed_error() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_WINDOWS: use terminal_execute or Direct execution"
+    } else if cfg!(target_os = "macos") {
+        "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_MACOS: use terminal_execute or Direct execution"
+    } else {
+        "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_LOCAL_PLATFORM: use terminal_execute or Direct execution"
+    }
 }
 
 fn pty_lifecycle_wire_state(state: PtyLifecycleNative) -> &'static str {
@@ -2008,8 +2016,18 @@ mod tests {
         );
         assert_eq!(
             legacy_pty_wrapper_available(&state(SessionTerminalKind::Local, "powershell")),
-            !cfg!(target_os = "windows"),
-            "the Phase 6 Windows local route must not reach the legacy wrapper"
+            !cfg!(any(target_os = "macos", target_os = "windows")),
+            "rolled-out local routes must not reach the legacy wrapper"
+        );
+        assert_eq!(
+            legacy_pty_wrapper_removed_error(),
+            if cfg!(target_os = "windows") {
+                "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_WINDOWS: use terminal_execute or Direct execution"
+            } else if cfg!(target_os = "macos") {
+                "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_MACOS: use terminal_execute or Direct execution"
+            } else {
+                "TERMINAL_LEGACY_WRAPPER_REMOVED_ON_LOCAL_PLATFORM: use terminal_execute or Direct execution"
+            }
         );
         assert!(legacy_pty_wrapper_available(&state(
             SessionTerminalKind::Remote,

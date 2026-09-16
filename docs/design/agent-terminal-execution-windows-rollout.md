@@ -3,6 +3,7 @@
 > 状态：Phase 6 Windows 首发范围
 > 更新：2026-09-16
 > 协议依据：`protocol/agent/runtime/terminal-protocol-rfc.md`
+> 后续：macOS 已通过独立验收并启用，见 `agent-terminal-execution-macos-rollout.md`。
 
 ## 用户可见行为
 
@@ -23,7 +24,8 @@ kill、超时、取消和恢复语义不依赖终端 rollout。
 ## 平台边界
 
 - Windows 本地 ConPTY：新路径默认开启；旧 wrapper 已从本地路由移除。
-- macOS 与 Linux 本地 PTY：新路径仍默认关闭，compatibility wrapper 保留。
+- macOS 本地 PTY：已在后续独立验收中默认开启；此 Windows 首发记录不提供其证据。
+- Linux 本地 PTY：新路径仍默认关闭，compatibility wrapper 保留。
 - SSH/remote：专用 Agent SSH PTY 与交互工具仍默认关闭，compatibility wrapper
   保留；Windows 本地发布不能替远端或其他平台提供验收证据。
 - `exec_command.channel = "pty"` 仍可解码旧协议记录，但 Windows 本地目标会拒绝

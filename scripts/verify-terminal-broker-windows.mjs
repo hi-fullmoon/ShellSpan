@@ -289,7 +289,7 @@ function benchmark(broker) {
   return result;
 }
 
-export function verifyBenchmarkRound(round, control, broker) {
+export function verifyBenchmarkRound(round, control, broker, platformLabel = 'Windows') {
   assertBenchmarkShape(control, false);
   assertBenchmarkShape(broker, true);
   for (const scenario of throughputScenarios) {
@@ -321,7 +321,7 @@ export function verifyBenchmarkRound(round, control, broker) {
       throw new Error(`benchmark round ${round} ${scenario} p95 exceeded 2 ms`);
     }
   }
-  console.log(`Windows broker benchmark round ${round}: PASS`);
+  console.log(`${platformLabel} broker benchmark round ${round}: PASS`);
 }
 
 export function main() {

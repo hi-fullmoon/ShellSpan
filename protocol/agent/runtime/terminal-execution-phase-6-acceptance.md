@@ -17,6 +17,11 @@ implementation.
 removal is NOT READY.** It remains blocked on independent native Phase 5
 acceptance for macOS, Linux, and isolated SSH.
 
+This file preserves the original Windows rollout boundary. Native macOS later
+passed its independent Phase 5/6 gate; current macOS status is recorded in
+[Terminal Execution Phase 6 macOS Acceptance Evidence](./terminal-execution-phase-6-macos-acceptance.md).
+Linux and isolated SSH remain deferred.
+
 ## Worktree status at handoff
 
 The exact cumulative `git status --short` is below. Phase 0–5 changes were

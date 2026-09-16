@@ -162,8 +162,8 @@ regression, and always tears the compose project down.
 
 Detailed evidence: [Terminal Execution Phase 5 Acceptance Evidence](./terminal-execution-phase-5-acceptance.md).
 
-Overall gate: **PASS for the Windows delivery scope**. The Phase 5 implementation
-and deterministic core fixtures pass on the current native Windows host,
+Overall gate: **PASS for the Windows and macOS local delivery scopes**. The
+Phase 5 implementation and deterministic core fixtures pass on native hosts,
 including screen rendering,
 resize/versioning, REPL/menu text, alternate-buffer state, credential-like
 prompt redaction and input rejection, bounded waits, takeover fencing, and
@@ -175,21 +175,21 @@ screen, and credential-safety path.
 | --- | --- | --- |
 | Deterministic Windows core | **PASS** | Native Windows Rust tests feed ordered terminal bytes through the production Broker and headless screen model; lease/input/takeover and durable audit boundaries use the production runtime. |
 | Windows PowerShell 5.1 / PowerShell 7 over ConPTY | **PASS** | Both exact native fixtures pass REPL text, single-key confirmation, resize, alternate-screen entry/exit, credential-like prompt redaction/input rejection, raw observation, and restored user input. |
-| macOS zsh and bash | **MISSING — DEFERRED** | No current-code Phase 5 native PTY fixture has run on macOS; it is outside the first Windows delivery scope. |
+| macOS zsh and bash | **PASS** | Native macOS 26.6.2 arm64; both exact real-PTY fixtures pass REPL text, single-key confirmation, resize, alternate-screen entry/exit, credential-like prompt redaction/input rejection, and raw observation. |
 | Linux bash and zsh | **MISSING — DEFERRED** | No current-code Phase 5 native PTY fixture has run on Linux; it is outside the first Windows delivery scope. |
 | Isolated SSH bash and zsh | **MISSING — DEFERRED** | The Phase 4 SSH fixture has not been extended for Phase 5 interactive scenarios; remote interactive rollout remains off. |
 
-The Windows-scoped Phase 6 continuation is complete. It retained default-off
-flags and the legacy wrapper on macOS, Linux, and remote targets. Those targets
-remain blocked until their own independent Phase 5 evidence is supplied.
+The Windows and macOS Phase 6 continuations are complete. Linux and remote
+targets retain default-off flags and the legacy wrapper until their independent
+Phase 5 evidence is supplied.
 
 ## Phase 6 acceptance status
 
 Detailed evidence: [Terminal Execution Phase 6 Acceptance Evidence](./terminal-execution-phase-6-acceptance.md).
 
-Overall gate: **PASS for the Windows rollout scope**. The local Windows Broker,
-shell integration, visible command, and interactive tools are absent-on after
-native acceptance. The Windows local routing graph cannot select the wrapper;
+Overall gate: **PASS for the Windows and macOS local rollout scopes**. The local
+Broker, shell integration, visible command, and interactive tools are absent-on
+after native acceptance. Neither local routing graph can select the wrapper;
 degraded or disabled generations expose Direct without rerouting or replay.
 Protocol vocabulary and persisted execution-surface values remain additive.
 
@@ -197,10 +197,14 @@ Protocol vocabulary and persisted execution-surface values remain additive.
 | --- | --- | --- |
 | Windows PowerShell 5.1 / PowerShell 7 local ConPTY | **PASS — DEFAULT ON** | Native Windows 11 x64, `x86_64-pc-windows-msvc`; six exact real-ConPTY Broker/visible/interactive fixtures, Direct regression, full serial Rust, and two release performance rounds pass. |
 | Persisted sessions and event-v5 vocabulary | **PASS — UNCHANGED** | `direct` / `boundTerminal` and `exec_command.channel = direct` / `pty` retain their stored/wire meanings; no migration rewrite or replay was added. |
-| macOS zsh and bash | **MISSING — DEFERRED, DEFAULT OFF** | No Phase 5 native acceptance in this Windows continuation; wrapper/parser compatibility remains compiled and routable. |
+| macOS zsh and bash | **PASS — DEFAULT ON** | Native macOS 26.6.2 arm64; exact Broker/visible/interactive fixtures, Direct regression, 798-test serial Rust suite, and two release performance rounds pass. Local wrapper routing is removed. |
 | Linux bash and zsh | **MISSING — DEFERRED, DEFAULT OFF** | No Phase 5 native acceptance in this Windows continuation; wrapper/parser compatibility remains compiled and routable. |
 | Isolated SSH bash and zsh | **MISSING — DEFERRED, DEFAULT OFF** | Phase 4 evidence remains valid, but remote interactive Phase 5 was not run; the remote flag stays off and wrapper fallback remains routable. |
 
 Native Windows command: `pnpm test:terminal-rollout:windows`. It is an alias of
 the consolidated host gate and reports `MISSING` rather than `PASS` if the
 matching MSVC host, Windows PowerShell 5.1, or PowerShell 7 is unavailable.
+
+Native macOS command: `pnpm test:terminal-rollout:macos`. It reports `MISSING`
+rather than `PASS` unless the matching Darwin Rust host, `/bin/bash`, and
+`/bin/zsh` are available.

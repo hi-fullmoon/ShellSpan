@@ -27,6 +27,11 @@ not inferred passes and cannot inherit Windows rollout state.
 **Final gate: PASS for the Windows delivery scope. A Windows-only Phase 6
 session is READY.**
 
+This file preserves the original Windows evidence boundary. The later native
+macOS gate is recorded separately in
+[Terminal Execution Phase 5 macOS Acceptance Evidence](./terminal-execution-phase-5-macos-acceptance.md)
+and supersedes only the current macOS status, not the historical results below.
+
 ## Requirement disposition
 
 | Requirement | Result | Evidence |

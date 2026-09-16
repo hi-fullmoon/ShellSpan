@@ -393,20 +393,20 @@ execution behavior.
   timeout, takeover, truncation, backpressure, and transport latency counters
   MUST be privacy-safe and MUST NOT contain raw terminal text.
 
-## Phase 6 Windows rollout profile
+## Phase 6 native desktop rollout profile
 
-On Windows hosts, absent trusted configuration enables `terminal_broker_v1`,
+On Windows and macOS hosts, absent trusted configuration enables `terminal_broker_v1`,
 `terminal_shell_integration_v1`, `terminal_execute_v1`, and
-`terminal_interactive_tools_v1` for local ConPTY generations. The remote Agent
-PTY flag remains absent-off, and remote interactive publication still requires
-that independent flag. macOS and Linux keep the new-path flags absent-off.
+`terminal_interactive_tools_v1` for local ConPTY/PTY generations. The remote
+Agent PTY flag remains absent-off, and remote interactive publication still
+requires that independent flag. Linux keeps the new-path flags absent-off.
 
 The legacy wrapper remains a decodable `exec_command.channel = "pty"`
-compatibility contract, but a Windows local target MUST reject its dispatch.
-Windows local degradation or flag rollback MUST expose the real terminal as
-unavailable/degraded and offer Direct explicitly; it MUST NOT revive the
-wrapper or replay an operation. Non-Windows and remote targets retain the
-compatibility implementation until their own Phase 5 gates pass.
+compatibility contract, but Windows and macOS local targets MUST reject its
+dispatch. Local degradation or flag rollback on either rolled-out platform MUST
+expose the real terminal as unavailable/degraded and offer Direct explicitly;
+it MUST NOT revive the wrapper or replay an operation. Linux and remote targets
+retain the compatibility implementation until their own Phase 5 gates pass.
 
 The read-only Broker snapshot exposes process-lifetime counters for integration
 ready transitions, degraded compatibility fallback selections, accepted

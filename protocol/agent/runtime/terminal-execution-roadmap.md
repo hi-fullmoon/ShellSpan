@@ -48,8 +48,8 @@ These are three runtime capabilities but only two user-facing surface choices. I
 | 2. Terminal Session Broker | `01a0a304-aba8-77a0-bb6a-1679805d3c61`; Windows supplement `01a0a566-6a29-74a3-945e-cc310a46cecd` | **complete — PASS** | [Phase 2 evidence](./terminal-execution-phase-2-acceptance.md) and [Windows supplement](./terminal-execution-phase-5-acceptance.md) |
 | 3. Local visible command | `01a0a3a5-747a-7af2-b6ec-392a60141fed`; Windows supplement `01a0a566-6a29-74a3-945e-cc310a46cecd` | **complete — PASS** | [Phase 3 evidence](./terminal-execution-phase-3-acceptance.md) and [Windows supplement](./terminal-execution-phase-5-acceptance.md) |
 | 4. Remote real terminal | `01a0a461-d04c-7d33-ba24-d2d314c773d8`; continuations `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`, `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d`, `01a0a500-3512-7be2-9516-7bfc9813ed66` | **complete — PASS** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |
-| 5. Interactive operation | `01a0a566-6a29-74a3-945e-cc310a46cecd` | **complete — PASS (Windows scope)** | [Phase 5 evidence](./terminal-execution-phase-5-acceptance.md) |
-| 6. Rollout and legacy removal | Windows rollout continuation (2026-09-16) | **complete — PASS (Windows scope)** | [Phase 6 evidence](./terminal-execution-phase-6-acceptance.md) |
+| 5. Interactive operation | `01a0a566-6a29-74a3-945e-cc310a46cecd`; macOS continuation (2026-09-16) | **complete — PASS (Windows + macOS local)** | [Windows evidence](./terminal-execution-phase-5-acceptance.md) and [macOS evidence](./terminal-execution-phase-5-macos-acceptance.md) |
+| 6. Rollout and legacy removal | Windows and macOS rollout continuations (2026-09-16) | **complete — PASS (Windows + macOS local)** | [Windows evidence](./terminal-execution-phase-6-acceptance.md) and [macOS evidence](./terminal-execution-phase-6-macos-acceptance.md) |
 
 ## Phase 0: protocol and baseline
 
@@ -136,10 +136,12 @@ known sensitive/destructive/external effects and explicit adversarial or
 untrusted-script requests are forced to Direct execution.
 
 POSIX production readiness is available only when the broker, integration, and
-execute flags and all identity/capability gates pass; macOS and Linux defaults
-remain off and legacy fallback remains available. Native Windows PowerShell 5.1
-and PowerShell 7.6 ConPTY acceptance passed on 2026-09-16. Phase 6 therefore
-enables the local Windows path by default. It proves persistent directory,
+execute flags and all identity/capability gates pass. Native macOS bash/zsh
+Phase 5/6 acceptance passed on 2026-09-16, so the macOS local path is now
+default-on and wrapper-free; Linux remains default-off with legacy fallback.
+Native Windows PowerShell 5.1 and PowerShell 7.6 ConPTY acceptance also passed
+on 2026-09-16. Phase 6 therefore enables the local Windows path by default. It
+proves persistent directory,
 environment, alias and function state, exact cooperative command lifecycle,
 ANSI/Unicode output, native exit code `7`, cmdlet failure code `1`, and bounded
 large-output capture. The previous Phase 3 Windows waiver is closed.
@@ -183,16 +185,16 @@ Gate:
 - Deterministic fixtures prove operation of a REPL, a confirmation menu, a credential-like prompt without secret leakage, and a curses/alternate-screen application.
 - User takeover prevents all later Agent input for the released operation.
 
-Acceptance evidence: [Terminal Execution Phase 5 Acceptance Evidence](./terminal-execution-phase-5-acceptance.md).
+Acceptance evidence: [Windows Phase 5 Evidence](./terminal-execution-phase-5-acceptance.md) and [macOS Phase 5 Evidence](./terminal-execution-phase-5-macos-acceptance.md).
 The backend screen model, gated native tools, lease-safe input, credential-like
 prompt handling, bounded waits, and deterministic fixtures pass. Independent
 real-ConPTY fixtures also pass for Windows PowerShell 5.1 and PowerShell 7.6,
 covering REPL input, a single-key confirmation, resize, alternate-screen state,
-and fail-closed credential input. At the user's 2026-09-16 direction, the first
-delivery gate is Windows-only. Phase 5 is therefore **PASS for Windows** and a
-separate Windows-only Phase 6 continuation was opened and has now passed.
-macOS, Linux, and Phase 5 SSH remain explicitly deferred and unverified; their
-flags and legacy fallback were not removed or enabled by the Windows rollout.
+and fail-closed credential input. A later native macOS continuation passed the
+same production Broker/screen/lease path on bash 3.2 and zsh 5.9. Phase 5 is
+therefore **PASS for Windows and macOS local targets**. Linux and Phase 5 SSH
+remain explicitly deferred and unverified; their flags stay off and their
+legacy fallback remains required.
 
 ## Phase 6: rollout and legacy removal
 
@@ -200,10 +202,10 @@ Deliverables:
 
 - Separate feature flags for the broker, shell integration, and interactive tools, with documented rollback behavior.
 - Privacy-safe counters for integration readiness, degraded fallback, lifecycle matching, uncertainty, timeout, takeover, truncation, backpressure, and transport latency.
-- Windows-scoped default enablement after the native Windows acceptance gate
-  passes; keep the new path default-off and retain the wrapper on macOS, Linux,
-  and remote targets until their independent Phase 5 gates pass.
-- Preserve platform-local rollback: removing or disabling the Windows wrapper
+- Platform-scoped default enablement after each native acceptance gate passes;
+  keep the new path default-off and retain the wrapper on Linux and remote
+  targets until their independent Phase 5 gates pass.
+- Preserve platform-local rollback: removing the Windows/macOS local wrapper
   must not remove the compatibility implementation required by deferred
   platforms.
 - Removal of the legacy wrapper, marker parser, synthetic `[Agent]` echo, and obsolete compatibility tests only after the new path has stable default evidence.
@@ -216,17 +218,20 @@ Final gate:
 - Interactive operation is screen-driven and lease safe.
 - Frontend build, frontend tests, Rust tests, formatting, protocol checks, locale checks, AI style checks, LLM catalog checks, and the visible-terminal host gate pass at the appropriate scope.
 
-Acceptance evidence: [Terminal Execution Phase 6 Acceptance Evidence](./terminal-execution-phase-6-acceptance.md).
+Acceptance evidence: [Windows Phase 6 Evidence](./terminal-execution-phase-6-acceptance.md) and [macOS Phase 6 Evidence](./terminal-execution-phase-6-macos-acceptance.md).
 On native Windows 11 x64, absent trusted configuration now enables the local
 Broker, shell integration, `terminal_execute`, and interactive tools. Windows
 local routing cannot dispatch the legacy wrapper, including during rollback;
 it exposes Direct explicitly instead. The old `pty` vocabulary remains
 decodable, while the wrapper/parser implementation is retained only for remote
-and non-Windows compatibility. Privacy-safe bounded counters and deterministic
+and Linux compatibility. Privacy-safe bounded counters and deterministic
 latency sampling are exposed through the existing read-only Broker snapshot.
 The consolidated Windows gate, frontend checks, repository checks, and two
-release performance rounds pass. Phase 6 is **PASS for the Windows delivery
-scope**. macOS, Linux, and SSH remote rollout/removal remain deferred.
+release performance rounds pass. The independent macOS gate passes native
+bash/zsh Broker, visible-command, interactive-operation, Direct, full serial
+Rust, and two release performance rounds; macOS local routing is now
+default-on and wrapper-free. Phase 6 is **PASS for the Windows and macOS local
+delivery scopes**. Linux and SSH remote rollout/removal remain deferred.
 
 ## Session handoff contract
 
