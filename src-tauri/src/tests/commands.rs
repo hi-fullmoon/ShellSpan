@@ -2,8 +2,9 @@
         collect_local_output_batch, configure_local_terminal_environment, detect_key_type,
         expand_home_path, remove_failed_session_registration,
         rollback_local_broker_attachment_failure, should_release_local_startup_output,
-        wait_for_local_worker_activity, LocalWorkerActivity, LOCAL_OUTPUT_DRAIN_BUDGET,
-        LOCAL_OUTPUT_QUEUE_CAPACITY, LOCAL_OUTPUT_READY_TIMEOUT,
+        visible_command_integration_presentation, wait_for_local_worker_activity,
+        LocalWorkerActivity, LOCAL_OUTPUT_DRAIN_BUDGET, LOCAL_OUTPUT_QUEUE_CAPACITY,
+        LOCAL_OUTPUT_READY_TIMEOUT,
     };
     use crate::models::{
         ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, SessionManager,
@@ -19,6 +20,39 @@
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Barrier};
     use std::thread;
+
+    #[test]
+    fn user_ssh_visible_command_presentation_is_ready_or_unavailable_without_compatibility() {
+        use crate::terminal_broker::{
+            TerminalIntegrationState, TerminalTransportKind,
+        };
+
+        assert_eq!(
+            visible_command_integration_presentation(
+                TerminalIntegrationState::Degraded,
+                Some("dedicatedAgentPtyRequired"),
+                TerminalTransportKind::SshPty,
+                false,
+                true,
+                true,
+            ),
+            (TerminalIntegrationState::Ready, None)
+        );
+        assert_eq!(
+            visible_command_integration_presentation(
+                TerminalIntegrationState::Degraded,
+                Some("dedicatedAgentPtyRequired"),
+                TerminalTransportKind::SshPty,
+                false,
+                true,
+                false,
+            ),
+            (
+                TerminalIntegrationState::Unavailable,
+                Some("dedicatedAgentPtyRequired".into())
+            )
+        );
+    }
 
     fn registered_test_session(manager: &SessionManager, session_id: &str) {
         let (sender, _receiver) = unbounded();

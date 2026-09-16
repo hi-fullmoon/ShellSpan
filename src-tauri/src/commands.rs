@@ -160,6 +160,56 @@ pub(crate) fn emit_terminal_integration_state(app: &AppHandle, session_id: &str)
     }
 }
 
+fn visible_command_integration_presentation(
+    state: crate::terminal_broker::TerminalIntegrationState,
+    reason: Option<&str>,
+    transport_kind: crate::terminal_broker::TerminalTransportKind,
+    agent_owned: bool,
+    terminal_execute_enabled: bool,
+    remote_agent_pty_enabled: bool,
+) -> (
+    crate::terminal_broker::TerminalIntegrationState,
+    Option<String>,
+) {
+    let user_ssh_ready = transport_kind == crate::terminal_broker::TerminalTransportKind::SshPty
+        && !agent_owned
+        && state == crate::terminal_broker::TerminalIntegrationState::Degraded
+        && reason == Some("dedicatedAgentPtyRequired")
+        && remote_agent_pty_enabled;
+    if user_ssh_ready {
+        return (
+            crate::terminal_broker::TerminalIntegrationState::Ready,
+            None,
+        );
+    }
+
+    let remote_rollout_missing = transport_kind
+        == crate::terminal_broker::TerminalTransportKind::SshPty
+        && agent_owned
+        && !remote_agent_pty_enabled;
+    if state == crate::terminal_broker::TerminalIntegrationState::Ready
+        && (!terminal_execute_enabled || remote_rollout_missing)
+    {
+        return (
+            crate::terminal_broker::TerminalIntegrationState::Unavailable,
+            Some(if remote_rollout_missing {
+                "remoteAgentPtyDisabled".to_string()
+            } else {
+                "terminalExecuteDisabled".to_string()
+            }),
+        );
+    }
+
+    (
+        if state == crate::terminal_broker::TerminalIntegrationState::Degraded {
+            crate::terminal_broker::TerminalIntegrationState::Unavailable
+        } else {
+            state
+        },
+        reason.map(str::to_string),
+    )
+}
+
 pub(crate) fn publish_terminal_integration_state(
     app: &AppHandle,
     session_id: &str,
@@ -171,25 +221,14 @@ pub(crate) fn publish_terminal_integration_state(
     let session = snapshot
         .session
         .ok_or_else(|| "terminal broker session is unavailable".to_string())?;
-    let remote_rollout_missing = session.transport_kind
-        == crate::terminal_broker::TerminalTransportKind::SshPty
-        && session.agent_pty_owner.is_some()
-        && !snapshot.remote_agent_pty_rollout.enabled;
-    let (state, reason) = if session.integration_state
-        == crate::terminal_broker::TerminalIntegrationState::Ready
-        && (!snapshot.terminal_execute_rollout.enabled || remote_rollout_missing)
-    {
-        (
-            crate::terminal_broker::TerminalIntegrationState::Degraded,
-            Some(if remote_rollout_missing {
-                "remoteAgentPtyDisabled".to_string()
-            } else {
-                "terminalExecuteDisabled".to_string()
-            }),
-        )
-    } else {
-        (session.integration_state, session.integration_reason)
-    };
+    let (state, reason) = visible_command_integration_presentation(
+        session.integration_state,
+        session.integration_reason.as_deref(),
+        session.transport_kind,
+        session.agent_pty_owner.is_some(),
+        snapshot.terminal_execute_rollout.enabled,
+        snapshot.remote_agent_pty_rollout.enabled,
+    );
     let event = crate::terminal_broker::TerminalIntegrationStateEvent {
         session_id: session_id.to_string(),
         terminal_session_id: session.terminal_session_id,
