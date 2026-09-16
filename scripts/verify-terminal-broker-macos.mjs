@@ -158,7 +158,6 @@ export function main() {
   }
 
   cargoTest('agent_runtime::native::process::tests');
-  cargoTest('agent_runtime::native::pty::tests');
   cargoTest('commands::tests');
   run(cargo, [
     'test',

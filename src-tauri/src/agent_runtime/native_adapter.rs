@@ -794,7 +794,7 @@ fn normalize_arguments(
                 }),
             )),
             super::AgentExecutionSurface::BoundTerminal => match visible_route
-                .unwrap_or(TerminalVisibleCommandRoute::LegacyFallback)
+                .unwrap_or(TerminalVisibleCommandRoute::Unavailable)
             {
                 TerminalVisibleCommandRoute::TerminalExecute => Ok((
                     "terminal_execute".into(),
@@ -803,19 +803,8 @@ fn normalize_arguments(
                         "explanation": arguments.explanation
                     }),
                 )),
-                TerminalVisibleCommandRoute::LegacyFallback => Ok((
-                    "exec_command".into(),
-                    json!({
-                        "command": arguments.command,
-                        "explanation": arguments.explanation,
-                        "channel": "pty",
-                        "cwd": cwd,
-                        "background": false,
-                        "elevated": false
-                    }),
-                )),
                 TerminalVisibleCommandRoute::Unavailable => Err(
-                    "TERMINAL_VISIBLE_COMMAND_UNAVAILABLE: integration is not ready and legacy fallback is disabled"
+                    "TERMINAL_VISIBLE_COMMAND_UNAVAILABLE: cooperative terminal execution is not available"
                         .into(),
                 ),
             },

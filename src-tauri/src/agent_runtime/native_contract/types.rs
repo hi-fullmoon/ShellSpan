@@ -179,7 +179,6 @@ pub struct AgentToolResultNative {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentExecutionChannelNative {
-    Pty,
     Direct,
 }
 

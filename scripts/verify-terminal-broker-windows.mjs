@@ -393,7 +393,6 @@ export function main() {
       'agent_runtime::native::terminal_interactive::tests::windows_powershell_5_1_interactive_terminal_operation';
     cargoTest(interactiveTest, ['--ignored', '--exact'], interactiveTest);
     cargoTest('agent_runtime::native::process::tests');
-    cargoTest('agent_runtime::native::pty::tests');
     cargoTest('commands::tests');
     run(cargo, [
       'test',

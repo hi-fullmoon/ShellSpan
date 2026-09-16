@@ -927,7 +927,7 @@ mod tests {
 
         let exit_input = "exit\r";
         broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 SESSION_ID,
                 crate::terminal_broker::TerminalBrokerInputSource::User,
                 TerminalInputKind::Text,
@@ -1301,7 +1301,7 @@ mod tests {
 
         let exit_input = "exit\r";
         broker
-            .admit_compatibility_input(
+            .admit_terminal_input(
                 SESSION_ID,
                 crate::terminal_broker::TerminalBrokerInputSource::User,
                 TerminalInputKind::Text,

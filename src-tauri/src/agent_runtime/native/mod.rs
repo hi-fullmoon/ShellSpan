@@ -1,3 +1,4 @@
+mod ansi;
 mod call_policy;
 mod capability;
 mod checkpoint;
@@ -5,7 +6,6 @@ mod effect;
 mod filesystem;
 mod mcp;
 mod process;
-mod pty;
 mod registry;
 mod runtime;
 pub(crate) mod scoped_read;
@@ -13,6 +13,7 @@ mod terminal_execute;
 mod terminal_interactive;
 mod terminal_lease;
 
+pub(crate) use ansi::*;
 pub(crate) use call_policy::*;
 pub(crate) use capability::*;
 pub(crate) use checkpoint::*;
@@ -20,7 +21,6 @@ pub(crate) use effect::*;
 pub(crate) use filesystem::*;
 pub(crate) use mcp::*;
 pub(crate) use process::*;
-pub(crate) use pty::*;
 pub(crate) use registry::*;
 pub(crate) use runtime::*;
 pub(crate) use terminal_execute::*;
