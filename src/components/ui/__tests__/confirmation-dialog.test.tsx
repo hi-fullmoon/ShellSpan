@@ -83,4 +83,29 @@ describe('ConfirmationDialog', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveClass('h-6');
     expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveClass('h-6');
   });
+
+  it('shows and locks the shared pending confirmation state', () => {
+    const onConfirm = vi.fn();
+
+    render(
+      <ConfirmationDialog
+        open
+        onOpenChange={vi.fn()}
+        title="Confirm action"
+        description="This action is starting."
+        confirmLabel="Starting"
+        confirmPending
+        onConfirm={onConfirm}
+      />,
+    );
+
+    const confirmButton = screen.getByRole('button', { name: 'Starting' });
+    expect(confirmButton).toBeDisabled();
+    expect(confirmButton).toHaveAttribute('aria-busy', 'true');
+    expect(confirmButton.querySelector('[data-slot="spinner"]')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'common.cancel' })).toBeDisabled();
+
+    fireEvent.click(confirmButton);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
 });

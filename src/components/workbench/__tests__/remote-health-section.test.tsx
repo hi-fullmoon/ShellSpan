@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RemoteHealthSection } from '../remote-health-section';
 import { useProfileStore } from '@/stores/profileStore';
@@ -63,7 +63,10 @@ describe('RemoteHealthSection authorization', () => {
         username: profile.username,
       },
     };
-    const collect = vi.fn().mockResolvedValue(result);
+    let resolveCollection: (value: RemoteHealthSnapshotResult) => void = () => {};
+    const collect = vi.fn(() => new Promise<RemoteHealthSnapshotResult>((resolve) => {
+      resolveCollection = resolve;
+    }));
     useRemoteHealthStore.setState({ collect });
     render(<RemoteHealthSection />);
 
@@ -89,6 +92,16 @@ describe('RemoteHealthSection authorization', () => {
 
     await waitFor(() => expect(collect).toHaveBeenCalledOnce());
     expect(collect).toHaveBeenCalledWith(profile, true);
+    const pendingConfirm = within(dialog).getByRole('button', {
+      name: 'remoteHealth.preparing',
+    });
+    expect(pendingConfirm).toBeDisabled();
+    expect(pendingConfirm).toHaveAttribute('aria-busy', 'true');
+    expect(pendingConfirm.querySelector('[data-slot="spinner"]')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'common.cancel' })).toBeDisabled();
+
+    await act(async () => resolveCollection(result));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   });
 
   it('keeps cancel next to the active collection control', () => {
