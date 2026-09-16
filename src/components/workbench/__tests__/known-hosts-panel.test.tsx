@@ -44,7 +44,9 @@ describe('KnownHostsPanel', () => {
       'min-w-0',
       'w-64',
       'max-w-full',
-      'flex-none',
+      'flex-1',
+      '@min-[64rem]:w-64',
+      '@min-[64rem]:flex-none',
     );
   });
 
