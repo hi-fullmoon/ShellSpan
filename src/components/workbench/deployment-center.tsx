@@ -983,7 +983,7 @@ const DeploymentCenter: React.FC = () => {
             action={<Button onClick={openCreate} disabled={!admissionsEnabled}><PlusIcon data-icon="inline-start" />{t('deployment.new')}</Button>}
           />
         ) : (
-          <div className="grid min-h-0 flex-1 items-stretch gap-4 @min-[64rem]:grid-cols-[minmax(14rem,20rem)_minmax(0,1fr)]">
+          <div className="grid min-h-0 flex-1 items-stretch gap-3 @min-[64rem]:grid-cols-[minmax(14rem,20rem)_minmax(0,1fr)]">
             <Card className="min-h-0 @min-[64rem]:h-full" size="sm" variant="outline" radius="compact">
               <CardHeader>
                 <CardTitle>{t('deployment.workflows')}</CardTitle>

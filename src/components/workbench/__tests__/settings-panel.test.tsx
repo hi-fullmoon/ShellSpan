@@ -410,7 +410,7 @@ describe('SettingsPanel', () => {
     expect(settingsCard).toHaveAttribute('data-variant', 'outline');
     expect(updateRow?.closest('[data-slot="card"]')).toBe(settingsCard);
     expect(settingsCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(4);
-    expect(settingsGroups).toHaveClass('flex-col', 'gap-4');
+    expect(settingsGroups).toHaveClass('flex-col', 'gap-3');
 
     openSection('settings.terminal.title');
     const terminalGroups = screen

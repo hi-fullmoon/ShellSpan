@@ -133,6 +133,7 @@ describe('MonitorPanel health layers', () => {
     expect(processCard?.parentElement).toBe(systemCard?.parentElement);
     expect(processCard?.nextElementSibling).toBe(systemCard);
     expect(processCard?.parentElement).toHaveClass('grid', 'items-stretch');
+    expect(document.querySelector('[data-slot="workbench-page-content"]')).toHaveClass('gap-3');
     expect(processCard).toHaveClass('@min-[72rem]:col-span-7');
     expect(systemCard).toHaveClass('@min-[72rem]:col-span-5');
     const rssTrend = screen.getByRole('img', { name: 'workbench.monitor.rss' });
