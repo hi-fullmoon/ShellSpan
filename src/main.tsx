@@ -25,6 +25,11 @@ initGlobalErrorLogging();
 
 async function bootstrap(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
+  if (import.meta.env.DEV && params.has('deploymentVisual')) {
+    const { mountDeploymentWorkflowPage } = await import('./test/deployment-workflow-page');
+    await mountDeploymentWorkflowPage(document.getElementById('root')!);
+    return;
+  }
   if (import.meta.env.DEV && params.has('aiComposerVisual')) {
     const { mountComposerPage } = await import('./test/agent-composer-page');
     await mountComposerPage(document.getElementById('root')!);

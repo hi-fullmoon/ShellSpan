@@ -19,7 +19,7 @@ import {
 import type { SettingsSection, WorkbenchTab } from '@/types';
 import { useUpdateStore } from '@/stores/updateStore';
 import { useAppStore } from '@/stores/appStore';
-import { useDeploymentStore } from '@/stores/deploymentStore';
+import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import {
   ActivityIcon,
   CloudUploadIcon,
@@ -109,8 +109,8 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
   const checkingForUpdates = updatePhase === 'checking';
   const downloadingUpdate = updatePhase === 'update_available' || updatePhase === 'downloading';
   const updateBusy = checkingForUpdates || downloadingUpdate;
-  const deploymentAttentionCount = useDeploymentStore(
-    (state) => state.recoveryCandidates.length,
+  const deploymentAttentionCount = useDeploymentWorkflowRunStore(
+    (state) => state.runs.filter((run) => run.status === 'state_unknown').length,
   );
 
   const items: MenuItem[] = [

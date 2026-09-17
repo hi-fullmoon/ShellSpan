@@ -1,19 +1,652 @@
-export const DEPLOYMENT_WORKFLOW_SCHEMA_VERSION = 2 as const;
-export const DEPLOYMENT_APPROVAL_SCHEMA_VERSION = 2 as const;
+export type DeploymentJsonPrimitive = string | number | boolean | null;
+export type DeploymentJsonValue =
+  | DeploymentJsonPrimitive
+  | readonly DeploymentJsonValue[]
+  | { readonly [key: string]: DeploymentJsonValue };
+export type DeploymentJsonObject = {
+  readonly [key: string]: DeploymentJsonValue;
+};
 
-export interface DeploymentRuntimeCapabilities {
-  schemaVersion: 1;
-  admissionsEnabled: boolean;
-  defaultEnabled: boolean;
-  flagName: 'SHELLSPAN_DEPLOYMENT_CENTER_V1';
-  source: 'default' | 'environment' | 'invalidEnvironment';
-  readOnlyRecoveryAvailable: true;
-  automaticReleaseCleanup: false;
+export type Sha256Digest = `sha256:${string}`;
+export type DeploymentArtifactReference =
+  `deployment-artifact:${Sha256Digest}`;
+
+export type DeploymentPortType =
+  | 'source.snapshot'
+  | 'artifact.bundle'
+  | 'target.snapshot'
+  | 'release.candidate'
+  | 'transfer.receipt'
+  | 'release.receipt'
+  | 'activation.receipt'
+  | 'verification.evidence'
+  | 'control.approval'
+  | 'scalar.string'
+  | 'scalar.boolean'
+  | 'scalar.integer';
+
+export type DeploymentEffectClass =
+  | 'pure'
+  | 'localRead'
+  | 'localBuild'
+  | 'remoteRead'
+  | 'control'
+  | 'remoteWrite'
+  | 'serviceControl'
+  | 'trafficSwitch'
+  | 'cleanup'
+  | 'finalizer';
+
+export type DeploymentExecutionDomain = 'local' | 'target' | 'nativeUi';
+export type DeploymentRiskLevel = 'low' | 'medium' | 'high' | 'critical';
+
+export interface DeploymentPortBinding {
+  fromNodeId: string;
+  fromPort: string;
 }
 
-export type DeploymentOperationKind = 'deploy' | 'resume' | 'rollback';
+export interface DeploymentNodeRetryPolicy {
+  maxAttempts: number;
+  initialBackoffSeconds: number;
+  maxBackoffSeconds: number;
+}
 
-export type DeploymentTriggerKind = 'manual' | 'agent' | 'quick_action' | 'recovery';
+export type DeploymentScalarValue = string | number | boolean;
+
+export type DeploymentNodeCondition =
+  | {
+      op: 'equals';
+      input: DeploymentPortBinding;
+      value: DeploymentScalarValue;
+    }
+  | {
+      op: 'in';
+      input: DeploymentPortBinding;
+      values: readonly DeploymentScalarValue[];
+    }
+  | { op: 'exists'; input: DeploymentPortBinding };
+
+export interface DeploymentWorkflowTarget {
+  id: string;
+  connectionProfileId: string;
+  remoteRoot: string;
+}
+
+export interface DeploymentWorkflowParameter {
+  id: string;
+  displayName: string;
+  type: 'string' | 'boolean' | 'integer';
+  required: boolean;
+  defaultValue?: DeploymentScalarValue;
+}
+
+export interface DeploymentWorkflowNode {
+  id: string;
+  type: string;
+  typeVersion: number;
+  displayName: string;
+  inputs: Readonly<Record<string, DeploymentPortBinding>>;
+  config: DeploymentJsonObject;
+  timeoutSeconds: number;
+  retry: DeploymentNodeRetryPolicy;
+  runWhen: 'allSucceeded' | 'anyFailed' | 'always';
+  condition?: DeploymentNodeCondition;
+}
+
+export interface DeploymentWorkflowPolicy {
+  failFast: true;
+  maxParallelLocalNodes: number;
+  releasesToKeep: number;
+  automaticRestore: boolean;
+}
+
+export interface DeploymentWorkflowDefinition {
+  schemaVersion: 3;
+  targets: readonly DeploymentWorkflowTarget[];
+  parameters: readonly DeploymentWorkflowParameter[];
+  nodes: readonly DeploymentWorkflowNode[];
+  outputs: Readonly<Record<string, DeploymentPortBinding>>;
+  policy: DeploymentWorkflowPolicy;
+}
+
+export interface DeploymentWorkflowNodeLayout {
+  x: number;
+  y: number;
+  collapsed?: boolean;
+}
+
+export interface DeploymentWorkflowLayoutGroup {
+  id: string;
+  title: string;
+  nodeIds: readonly string[];
+}
+
+export interface DeploymentWorkflowLayout {
+  schemaVersion: 1;
+  nodes: Readonly<Record<string, DeploymentWorkflowNodeLayout>>;
+  groups: readonly DeploymentWorkflowLayoutGroup[];
+  viewport?: { x: number; y: number; zoom: number };
+}
+
+export type DeploymentArtifactRole =
+  | 'application'
+  | 'deployment-config'
+  | 'metadata'
+  | 'sbom'
+  | 'signature'
+  | 'auxiliary';
+
+export interface DeploymentArtifactDescriptor {
+  name: string;
+  role: DeploymentArtifactRole;
+  mediaType: string;
+  digest: Sha256Digest;
+  size: number;
+  platform?: {
+    os?: string;
+    architecture?: string;
+    variant?: string;
+  };
+  annotations: Readonly<Record<string, string>>;
+}
+
+export interface DeploymentArtifactBundleManifest {
+  schemaVersion: 2;
+  artifactType: string;
+  source: {
+    revision: string;
+    dirty: boolean;
+    snapshotDigest: Sha256Digest;
+  };
+  components: readonly DeploymentArtifactDescriptor[];
+  producer: {
+    nodeType: string;
+    nodeTypeVersion: number;
+    configDigest: Sha256Digest;
+  };
+  annotations: Readonly<Record<string, string>>;
+}
+
+export interface DeploymentArtifactHandle {
+  artifactReference: DeploymentArtifactReference;
+  manifestDigest: Sha256Digest;
+  contentDigest: Sha256Digest;
+}
+
+export type DeploymentNodeCategory =
+  | 'source'
+  | 'build'
+  | 'artifact'
+  | 'target'
+  | 'release'
+  | 'control'
+  | 'transfer'
+  | 'runtime'
+  | 'deploy'
+  | 'verify'
+  | 'proxy'
+  | 'finalize';
+
+export type DeploymentNodeCapability =
+  | 'sourceSnapshot'
+  | 'packageManager'
+  | 'dockerBuildx'
+  | 'ssh'
+  | 'sftp'
+  | 'atomicSymlink'
+  | 'dockerRuntime'
+  | 'dockerCompose'
+  | 'httpProbe'
+  | 'nginx'
+  | 'notification';
+
+export interface DeploymentNodePortSpec {
+  name: string;
+  portType: DeploymentPortType;
+  required: boolean;
+  artifactTypes?: readonly string[];
+}
+
+export interface DeploymentNodeCompensationSpec {
+  kind: string;
+  fixedActions: readonly string[];
+}
+
+export type DeploymentNodeConfigFieldKind =
+  | 'string'
+  | 'integer'
+  | 'boolean'
+  | 'select'
+  | 'stringList'
+  | 'integerList';
+
+export interface DeploymentNodeConfigOption {
+  value: string;
+  labelKey: string;
+}
+
+export interface DeploymentNodeConfigFieldSpec {
+  name: string;
+  labelKey: string;
+  descriptionKey: string;
+  kind: DeploymentNodeConfigFieldKind;
+  required: boolean;
+  options?: readonly DeploymentNodeConfigOption[];
+  minimum?: number;
+  maximum?: number;
+}
+
+export interface DeploymentNodeConfigSchema {
+  schemaVersion: 1;
+  fields: readonly DeploymentNodeConfigFieldSpec[];
+}
+
+export interface DeploymentNodeTypeSpec {
+  typeName: string;
+  typeVersion: number;
+  displayNameKey: string;
+  descriptionKey: string;
+  category: DeploymentNodeCategory;
+  inputs: readonly DeploymentNodePortSpec[];
+  outputs: readonly DeploymentNodePortSpec[];
+  executionDomain: DeploymentExecutionDomain;
+  effectClass: DeploymentEffectClass;
+  capabilities: readonly DeploymentNodeCapability[];
+  configSchemaVersion: number;
+  configSchema: DeploymentNodeConfigSchema;
+  defaultConfig: DeploymentJsonObject;
+  riskLevel: DeploymentRiskLevel;
+  fixedActions: readonly string[];
+  compensation?: DeploymentNodeCompensationSpec;
+  retryable: boolean;
+}
+
+export interface DeploymentNodeTypeCatalog {
+  schemaVersion: 1;
+  nodes: readonly DeploymentNodeTypeSpec[];
+}
+
+export interface DeploymentCompiledNodePlan {
+  nodeId: string;
+  displayName: string;
+  nodeType: string;
+  nodeTypeVersion: number;
+  executionDomain: DeploymentExecutionDomain;
+  effectClass: DeploymentEffectClass;
+  targetId?: string;
+  configDigest: Sha256Digest;
+  inputDigest: Sha256Digest;
+  timeoutSeconds: number;
+  retry: DeploymentNodeRetryPolicy;
+  fixedActions: readonly string[];
+}
+
+export interface DeploymentPlanRiskEntry {
+  nodeId: string;
+  level: DeploymentRiskLevel;
+  effectClass: DeploymentEffectClass;
+  summaryKey: string;
+}
+
+export interface DeploymentPlannedCompensation {
+  nodeId: string;
+  compensationKind: string;
+  fixedActions: readonly string[];
+}
+
+export interface DeploymentCompiledRunPlanDraft {
+  schemaVersion: 1;
+  definitionDigest: Sha256Digest;
+  planDigest: Sha256Digest;
+  topologyLayers: readonly (readonly string[])[];
+  targetEffectLanes: Readonly<Record<string, readonly string[]>>;
+  nodes: readonly DeploymentCompiledNodePlan[];
+  risks: {
+    highestLevel: DeploymentRiskLevel;
+    entries: readonly DeploymentPlanRiskEntry[];
+  };
+  compensations: readonly DeploymentPlannedCompensation[];
+  policy: DeploymentWorkflowPolicy;
+}
+
+export interface DeploymentFrozenSourceSnapshot {
+  sourceRef: string;
+  revision: string;
+  dirty: boolean;
+  snapshotDigest: Sha256Digest;
+  metadataDigest: Sha256Digest;
+}
+
+export interface DeploymentFrozenTargetIdentity {
+  targetId: string;
+  connectionProfileId: string;
+  profileRevision: number;
+  hostIdentityDigest: Sha256Digest;
+  remoteRoot: string;
+  capabilitiesDigest: Sha256Digest;
+}
+
+export interface DeploymentFrozenReleaseIdentity {
+  releaseId: string;
+  artifactContentDigest: Sha256Digest;
+  layoutDigest: Sha256Digest;
+}
+
+export interface DeploymentImmutableRunPlan {
+  schemaVersion: 1;
+  workflowId: string;
+  workflowRevision: number;
+  runId: string;
+  operationKind: 'deploy' | 'rollback';
+  triggerKind: 'manual' | 'agent' | 'quickAction' | 'recovery';
+  definitionDigest: Sha256Digest;
+  parameters: Readonly<Record<string, DeploymentScalarValue>>;
+  source: DeploymentFrozenSourceSnapshot;
+  target: DeploymentFrozenTargetIdentity;
+  artifacts: readonly DeploymentArtifactHandle[];
+  currentRelease?: DeploymentFrozenReleaseIdentity;
+  previousRelease?: DeploymentFrozenReleaseIdentity;
+  targetRelease: DeploymentFrozenReleaseIdentity;
+  executorVersions: Readonly<Record<string, string>>;
+  compiled: DeploymentCompiledRunPlanDraft;
+  preparedAt: number;
+  expiresAt: number;
+  planDigest: Sha256Digest;
+}
+
+export type DeploymentWorkflowValidationCode =
+  | 'INVALID_JSON'
+  | 'JSON_TOO_LARGE'
+  | 'UNSUPPORTED_SCHEMA_VERSION'
+  | 'LIMIT_EXCEEDED'
+  | 'INVALID_IDENTIFIER'
+  | 'DUPLICATE_IDENTIFIER'
+  | 'INVALID_PATH'
+  | 'INVALID_POLICY'
+  | 'UNKNOWN_NODE_TYPE'
+  | 'UNSUPPORTED_NODE_VERSION'
+  | 'INVALID_NODE_CONFIG'
+  | 'DANGEROUS_CONFIG'
+  | 'INVALID_RETRY'
+  | 'INVALID_RUN_CONDITION'
+  | 'MISSING_INPUT'
+  | 'UNKNOWN_INPUT_PORT'
+  | 'UNKNOWN_OUTPUT_PORT'
+  | 'DANGLING_BINDING'
+  | 'PORT_TYPE_MISMATCH'
+  | 'ARTIFACT_TYPE_MISMATCH'
+  | 'INVALID_CONDITION'
+  | 'CYCLE_DETECTED'
+  | 'UNREACHABLE_NODE'
+  | 'MISSING_ARTIFACT_PRODUCER'
+  | 'MISSING_APPROVAL'
+  | 'APPROVAL_BYPASS'
+  | 'MISSING_DEPLOYMENT'
+  | 'MISSING_VERIFICATION'
+  | 'VERIFICATION_NOT_COVERED'
+  | 'UNKNOWN_TARGET'
+  | 'TARGET_MISMATCH'
+  | 'CAPABILITY_NOT_COVERED'
+  | 'CROSS_TARGET_EFFECTS'
+  | 'COMPENSATION_NOT_COVERED'
+  | 'INVALID_ARTIFACT';
+
+export interface DeploymentWorkflowValidationError {
+  code: DeploymentWorkflowValidationCode;
+  message: string;
+  path?: string;
+  nodeId?: string;
+}
+
+export interface DeploymentEffectReceipt {
+  schemaVersion: 1;
+  receiptType: string;
+  operationId: string;
+  runId: string;
+  nodeId: string;
+  attempt: number;
+  targetId: string;
+  planDigest: Sha256Digest;
+  payloadDigest: Sha256Digest;
+}
+
+export interface DeploymentVerificationEvidence {
+  schemaVersion: 1;
+  evidenceType: string;
+  runId: string;
+  nodeId: string;
+  targetId: string;
+  planDigest: Sha256Digest;
+  observedAt: number;
+  outcome: string;
+  payloadDigest: Sha256Digest;
+}
+
+export type DeploymentNodeAttemptStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'canceled'
+  | 'stateUnknown'
+  | 'compensated';
+
+export interface DeploymentNodeAttempt {
+  schemaVersion: 1;
+  runId: string;
+  nodeId: string;
+  attempt: number;
+  idempotencyKey: string;
+  status: DeploymentNodeAttemptStatus;
+  startedAt?: number;
+  finishedAt?: number;
+  failureCategory?: string;
+}
+
+export interface DeploymentCompensationRecord {
+  schemaVersion: 1;
+  runId: string;
+  nodeId: string;
+  compensationKind: string;
+  idempotencyKey: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'stateUnknown';
+  receipt?: DeploymentEffectReceipt;
+}
+
+export interface DeploymentWorkflowCapabilities {
+  schemaVersion: 1;
+  admissionsEnabled: boolean;
+  defaultEnabled: false;
+  flagName: 'SHELLSPAN_DEPLOYMENT_WORKFLOW';
+  source: 'defaultDisabled' | 'environment' | 'invalidEnvironment';
+  readOnlyAvailable: true;
+  cancelRecoveryAuditAvailable: true;
+  coordinatorAvailable: boolean;
+}
+
+export interface DeploymentWorkflowValidationResult {
+  valid: boolean;
+  errors: readonly DeploymentWorkflowValidationError[];
+  compiled?: DeploymentCompiledRunPlanDraft;
+}
+
+export interface CreateDeploymentWorkflowInput {
+  name: string;
+  definition: DeploymentWorkflowDefinition;
+  layout?: DeploymentWorkflowLayout;
+  enabled: boolean;
+}
+
+export interface CreateStaticSiteDeploymentWorkflowInput {
+  name: string;
+  connectionProfileId: string;
+  remoteRoot: string;
+  enabled: boolean;
+}
+
+export interface UpdateDeploymentWorkflowInput {
+  name: string;
+  definition: DeploymentWorkflowDefinition;
+  enabled: boolean;
+}
+
+export interface UpdateDeploymentWorkflowLayoutInput {
+  layout: DeploymentWorkflowLayout;
+}
+
+export interface DeploymentWorkflowRecord {
+  id: string;
+  name: string;
+  enabled: boolean;
+  archived: boolean;
+  revision: number;
+  definitionDigest: Sha256Digest;
+  definition: DeploymentWorkflowDefinition;
+  layoutRevision: number;
+  layout?: DeploymentWorkflowLayout;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DeploymentWorkflowPage {
+  items: readonly DeploymentWorkflowRecord[];
+  nextCursor: string | null;
+}
+
+export interface DeploymentWorkflowLayoutRecord {
+  workflowId: string;
+  layoutRevision: number;
+  layoutDigest: Sha256Digest;
+  layout: DeploymentWorkflowLayout;
+  createdAt: number;
+}
+
+export interface PrepareDeploymentRunInput {
+  workflowId: string;
+  workflowRevision: number;
+  operationKind: 'deploy' | 'rollback';
+  triggerKind: 'manual' | 'agent' | 'quickAction' | 'recovery';
+  parameters: Readonly<Record<string, DeploymentScalarValue>>;
+  rollbackReleaseId?: string;
+}
+
+export interface DeploymentRunPlanBindingInput {
+  runId: string;
+  planDigest: Sha256Digest;
+}
+
+export interface DeploymentRunIdInput {
+  runId: string;
+}
+
+export interface DeploymentPrepareResult {
+  runId: string;
+  planDigest: Sha256Digest;
+  expiresAt: number;
+}
+
+export interface DeploymentRunProjection {
+  runId: string;
+  status: string;
+  planDigest: Sha256Digest;
+}
+
+export interface DeploymentReconciliationResult {
+  runId: string;
+  status: string;
+  evidenceComplete: boolean;
+}
+
+export interface DeploymentAuditExportResult {
+  schemaVersion: 3;
+  runId: string;
+  saved: boolean;
+  bytes: number;
+  documentSha256: string;
+}
+
+export interface DeploymentNodeProgressEvent {
+  operationId: string;
+  runId: string;
+  nodeId: string;
+  attempt: number;
+  sequence: number;
+  phase: 'running' | 'succeeded' | 'failed';
+  completed: number;
+  total: number;
+  unit: 'steps';
+  summaryKey: string;
+}
+
+export type DeploymentRunNodeStatus =
+  | 'pending'
+  | 'ready'
+  | 'running'
+  | 'awaiting_approval'
+  | 'succeeded'
+  | 'skipped'
+  | 'retry_waiting'
+  | 'cancel_requested'
+  | 'canceled'
+  | 'failed'
+  | 'state_unknown'
+  | 'compensating'
+  | 'compensated';
+
+export interface DeploymentRunNodeRecord {
+  runId: string;
+  nodeId: string;
+  nodeType: string;
+  nodeTypeVersion: number;
+  status: DeploymentRunNodeStatus;
+  lastAttempt: number;
+  outputSummary?: DeploymentJsonValue;
+  startedAt?: number;
+  finishedAt?: number;
+  updatedAt: number;
+}
+
+export interface DeploymentNodeAttemptRecord extends DeploymentNodeAttempt {
+  nodeType: string;
+  nodeTypeVersion: number;
+  executorVersion: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DeploymentNodeAttemptPage {
+  items: readonly DeploymentNodeAttemptRecord[];
+  nextBeforeAttempt: number | null;
+}
+
+export interface DeploymentArtifactRetention {
+  referenceCount: number;
+  leaseCount: number;
+  currentRelease: boolean;
+  previousRelease: boolean;
+  retainedUntil?: number;
+  protected: boolean;
+}
+
+export interface DeploymentArtifactInspection {
+  handle: DeploymentArtifactHandle;
+  manifest: DeploymentArtifactBundleManifest;
+  componentCount: number;
+  totalSize: number;
+  retention: DeploymentArtifactRetention;
+  references: readonly DeploymentArtifactReferenceRecord[];
+}
+
+export interface DeploymentArtifactReferenceRecord {
+  workflowId: string | null;
+  runId: string | null;
+  nodeId: string | null;
+  referenceKind: 'run' | 'node' | 'release_current' | 'release_previous' | 'audit';
+  ownerId: string;
+  leaseActive: boolean;
+  retainUntil: number | null;
+  createdAt: number;
+}
 
 export type DeploymentRunStatus =
   | 'planned'
@@ -28,734 +661,117 @@ export type DeploymentRunStatus =
   | 'failed'
   | 'state_unknown';
 
-export type DeploymentEventKind =
-  | 'run_created'
-  | 'approval_requested'
-  | 'approval_granted'
-  | 'approval_rejected'
-  | 'reconciliation_started'
-  | 'reconciliation_completed'
-  | 'status_changed'
-  | 'cancellation_requested'
-  | 'resume_linked'
-  | 'rollback_linked'
-  | 'run_succeeded'
-  | 'run_canceled'
-  | 'run_failed';
-
-export type ApprovedDeploymentAction =
-  | 'stage_release'
-  | 'prepare_release'
-  | 'load_image'
-  | 'compose_pull'
-  | 'compose_config'
-  | 'compose_up'
-  | 'verify_health'
-  | 'validate_nginx'
-  | 'reload_nginx'
-  | 'reverify_health'
-  | 'activate_release'
-  | 'automatic_restore'
-  | 'restore_release';
-
-export interface DeploymentTarget {
-  connectionProfileId: string;
-  remoteRoot: string;
-}
-
-export interface DockerComposePlan {
-  projectName: string;
-  files: string[];
-  services: string[];
-  pullBeforeUp: boolean;
-}
-
-export type DeploymentArtifactBuilderKind = 'dockerBuildx';
-
-export type DeploymentArtifactCompression = 'zstd' | 'gzip' | 'none';
-
-export interface DockerBuildxPlan {
-  context: string;
-  dockerfile: string;
-  platform: 'linux/amd64' | 'linux/arm64';
-  imageRepository: string;
-  compression: DeploymentArtifactCompression;
-}
-
-export interface HttpHealthCheck {
-  path: string;
-  expectedStatus: number;
-  timeoutSeconds: number;
-}
-
-/**
- * The v1 workflow is intentionally closed over typed Docker Compose inputs.
- * There is no arbitrary command or remote-shell field.
- */
-export interface DeploymentWorkflowDefinition {
-  schemaVersion: 1 | typeof DEPLOYMENT_WORKFLOW_SCHEMA_VERSION;
-  sourceDirectory: string;
-  build: DockerBuildxPlan;
-  target: DeploymentTarget;
-  compose: DockerComposePlan;
-  healthCheck: HttpHealthCheck | null;
-  reloadNginxAfterHealthy: boolean;
-  releasesToKeep: number;
-}
-
-export interface DeploymentFrozenSourceRevision {
-  revision: string;
-  dirty: boolean;
-}
-
-export interface DeploymentJumpHostIdentitySnapshot {
-  host: string;
-  port: number;
-  username: string;
-  authMethod: 'password' | 'key';
-}
-
-export interface DeploymentTargetIdentitySnapshot {
-  profileId: string;
-  profileUpdatedAt: number;
-  host: string;
-  port: number;
-  username: string;
-  authMethod: 'password' | 'key';
-  jumpHost: DeploymentJumpHostIdentitySnapshot | null;
-}
-
-export interface DeploymentReleaseIdentity {
-  releaseId: string;
-  artifactDigestSha256: string;
-}
-
-export type DeploymentPreflightOutcome = 'passed' | 'warning' | 'blocked';
-
-export interface DeploymentPreflightCheckSummary {
-  code: string;
-  outcome: DeploymentPreflightOutcome;
-  summary: string;
-}
-
-export interface DeploymentPreflightSummary {
-  checkedAt: number;
-  checks: DeploymentPreflightCheckSummary[];
-}
-
-export interface DeploymentPreflightRequest {
-  operationId: string;
-  workflowId: string;
-  expectedRevision: number;
-  artifactReference: string;
-  ttlSeconds: number;
-  timeoutMs: number;
-}
-
-export type DeploymentPreflightStatus =
-  | 'passed'
-  | 'blocked'
-  | 'cancelled'
-  | 'timedOut'
-  | 'failed';
-
-export type DeploymentPreflightFailureCategory =
-  | 'invalidRequest'
-  | 'workflowNotFound'
-  | 'revisionConflict'
-  | 'workflowDisabled'
-  | 'profileNotFound'
-  | 'targetChanged'
-  | 'artifactInvalid'
-  | 'sourceChanged'
-  | 'sourceUnavailable'
-  | 'sourceOutputLimit'
-  | 'credentialUnavailable'
-  | 'hostKeyRejected'
-  | 'connectionFailed'
-  | 'remoteCommandFailed'
-  | 'remoteOutputLimit'
-  | 'invalidRemoteOutput'
-  | 'cancelled'
-  | 'timedOut'
-  | 'internal';
-
-export interface DeploymentPreflightFailure {
-  category: DeploymentPreflightFailureCategory;
-  message: string;
-}
-
-export interface DeploymentPreflightResult {
-  operationId: string;
-  workflowId: string;
-  workflowRevision: number | null;
-  artifactReference: string;
-  status: DeploymentPreflightStatus;
-  checkedAt: number;
-  source: {
-    kind: 'gitAndSshReadOnly';
-    commandSetVersion: string;
-  };
-  sourceRevision: DeploymentFrozenSourceRevision | null;
-  target: DeploymentTargetIdentitySnapshot | null;
-  server: {
-    os: string;
-    architecture: string;
-  } | null;
-  remoteRoot: {
-    path: string;
-    reachable: boolean;
-    availableBytes: number;
-  } | null;
-  tools: {
-    docker: boolean;
-    compose: boolean;
-    flock: boolean;
-    curl: boolean;
-    nginx: boolean;
-    nginxReload: boolean;
-    sha256: string | null;
-    compression: string | null;
-  } | null;
-  currentRelease: DeploymentReleaseIdentity | null;
-  rollbackReleases: DeploymentReleaseIdentity[];
-  checks: DeploymentPreflightCheckSummary[];
-  planInput: DeploymentPlanCreateInput | null;
-  failure: DeploymentPreflightFailure | null;
-}
-
-export interface DeploymentArtifactSourceSnapshotRequest {
-  workflowId: string;
-  expectedRevision: number;
-}
-
-export interface DeploymentArtifactBuildRequest {
-  operationId: string;
-  workflowId: string;
-  expectedRevision: number;
-  sourceRevision: DeploymentFrozenSourceRevision;
-  builderKind: DeploymentArtifactBuilderKind;
-  timeoutMs: number;
-}
-
-export type DeploymentArtifactBuildStep =
-  | 'validating'
-  | 'checkingSource'
-  | 'detectingTools'
-  | 'buildingImage'
-  | 'inspectingImage'
-  | 'savingImage'
-  | 'compressingArchive'
-  | 'writingManifest'
-  | 'verifyingArtifact'
-  | 'completed';
-
-export interface DeploymentArtifactBuildProgress {
-  operationId: string;
-  sequence: number;
-  step: DeploymentArtifactBuildStep;
-  completedBytes: number | null;
-  totalBytes: number | null;
-  summary: string;
-}
-
-export type DeploymentArtifactBuildStatus =
-  | 'succeeded'
-  | 'cancelled'
-  | 'timedOut'
-  | 'failed';
-
-export type DeploymentArtifactBuildFailureCategory =
-  | 'invalidRequest'
-  | 'workflowNotFound'
-  | 'revisionConflict'
-  | 'workflowDisabled'
-  | 'sourceUnavailable'
-  | 'sourceChanged'
-  | 'sourceDirty'
-  | 'pathBoundary'
-  | 'dockerUnavailable'
-  | 'buildxUnavailable'
-  | 'compressorUnavailable'
-  | 'buildFailed'
-  | 'inspectFailed'
-  | 'saveFailed'
-  | 'compressionFailed'
-  | 'outputLimit'
-  | 'cancelled'
-  | 'timedOut'
-  | 'artifactConflict'
-  | 'artifactIo'
-  | 'internal';
-
-export interface DeploymentArtifactBuildFailure {
-  category: DeploymentArtifactBuildFailureCategory;
-  message: string;
-}
-
-export interface DeploymentArtifactArchiveManifest {
-  fileName: string;
-  compression: DeploymentArtifactCompression;
-  bytes: number;
-  sha256: string;
-}
-
-export interface DeploymentArtifactImageManifest {
-  repository: string;
-  tag: string;
-  imageId: string;
-}
-
-export interface DeploymentArtifactComposeFileManifest {
-  path: string;
-  fileName: string;
-  bytes: number;
-  sha256: string;
-}
-
-export interface DeploymentArtifactManifest {
-  schemaVersion: 1;
-  contentIdentitySha256: string;
+export interface DeploymentRunSummary {
+  runId: string;
   workflowId: string;
   workflowRevision: number;
-  sourceRevision: DeploymentFrozenSourceRevision;
-  releaseId: string;
-  platform: string;
-  image: DeploymentArtifactImageManifest;
-  archive: DeploymentArtifactArchiveManifest;
-  composeFiles: DeploymentArtifactComposeFileManifest[];
-  createdAt: number;
-  manifestDigestSha256: string;
-}
-
-export interface DeploymentArtifactBuildResult {
-  operationId: string;
-  workflowId: string;
-  workflowRevision: number | null;
-  builderKind: DeploymentArtifactBuilderKind;
-  status: DeploymentArtifactBuildStatus;
-  sourceRevision: DeploymentFrozenSourceRevision | null;
-  releaseId: string | null;
-  artifactDigestSha256: string | null;
-  artifactBytes: number | null;
-  artifactReference: string | null;
-  manifest: DeploymentArtifactManifest | null;
-  reused: boolean;
-  failure: DeploymentArtifactBuildFailure | null;
-}
-
-export interface DeploymentArtifactTransferRequest {
-  operationId: string;
-  planId: string;
-  planDigest: string;
-  workflowId: string;
-  workflowRevision: number;
-  artifactReference: string;
-  sourceRevision: DeploymentFrozenSourceRevision;
-  target: DeploymentTargetIdentitySnapshot;
-  remoteRoot: string;
-  releaseId: string;
-  releaseDigestSha256: string;
-  timeoutMs: number;
-}
-
-export type DeploymentArtifactTransferStep =
-  | 'revalidate'
-  | 'lock'
-  | 'stageArchive'
-  | 'stageCompose'
-  | 'verifyRemote'
-  | 'complete';
-
-export interface DeploymentArtifactTransferProgress {
-  operationId: string;
-  sequence: number;
-  step: DeploymentArtifactTransferStep;
-  fileId: string | null;
-  completedBytes: number | null;
-  totalBytes: number | null;
-  summary: string;
-}
-
-export type DeploymentArtifactTransferStatus =
-  | 'succeeded'
-  | 'cancelled'
-  | 'timedOut'
-  | 'failed'
-  | 'stateUnknown';
-
-export type DeploymentArtifactTransferFailureCategory =
-  | 'invalidRequest'
-  | 'planNotFound'
-  | 'planDigestMismatch'
-  | 'planExpired'
-  | 'planNotApproved'
-  | 'workflowNotFound'
-  | 'revisionConflict'
-  | 'workflowDisabled'
-  | 'sourceChanged'
-  | 'targetChanged'
-  | 'artifactInvalid'
-  | 'artifactChanged'
-  | 'releaseChanged'
-  | 'credentialUnavailable'
-  | 'hostKeyRejected'
-  | 'connectionFailed'
-  | 'remotePathUnsafe'
-  | 'remoteConflict'
-  | 'remotePartialInvalid'
-  | 'remoteIo'
-  | 'remoteDigestMismatch'
-  | 'cancelled'
-  | 'timedOut'
-  | 'stateUnknown'
-  | 'internal';
-
-export interface DeploymentArtifactTransferFailure {
-  category: DeploymentArtifactTransferFailureCategory;
-  message: string;
-}
-
-export interface DeploymentArtifactTransferResult {
-  operationId: string;
-  planId: string;
-  releaseId: string;
-  remoteStagingIdentity: string | null;
-  transferredBytes: number;
-  remoteDigestSha256: string | null;
-  status: DeploymentArtifactTransferStatus;
-  failure: DeploymentArtifactTransferFailure | null;
-  reused: boolean;
-  resumed: boolean;
-}
-
-/** Frozen Phase 5 input. It consumes an opaque verified staging identity, never a path. */
-export interface DeploymentRemoteRunnerRequest {
-  operationId: string;
-  planId: string;
-  planDigest: string;
-  runId: string;
-  runRevision: number;
-  planExpiresAt: number;
-  workflowId: string;
-  workflowRevision: number;
-  artifactReference: string;
-  artifactTransferOperationId: string;
-  sourceRevision: DeploymentFrozenSourceRevision;
-  target: DeploymentTargetIdentitySnapshot;
-  remoteRoot: string;
-  releaseId: string;
-  releaseDigestSha256: string;
-  remoteStagingIdentity: string;
-  timeoutMs: number;
-}
-
-export type DeploymentRemoteRunnerStep =
-  | 'revalidate'
-  | 'lock'
-  | 'prepareRelease'
-  | 'loadImage'
-  | 'composePull'
-  | 'composeConfig'
-  | 'composeUp'
-  | 'verifyHealth'
-  | 'validateNginx'
-  | 'reloadNginx'
-  | 'reverifyHealth'
-  | 'activateRelease'
-  | 'restoreRelease'
-  | 'recordResult';
-
-export type DeploymentRemoteRunnerStatus =
-  | 'running'
-  | 'verifying'
-  | 'succeeded'
-  | 'cancelRequested'
-  | 'cancelled'
-  | 'rolledBack'
-  | 'failed'
-  | 'stateUnknown';
-
-export interface DeploymentRemoteRunnerProgress {
-  operationId: string;
-  sequence: number;
-  step: DeploymentRemoteRunnerStep;
-  status: DeploymentRemoteRunnerStatus;
-  summary: string;
-}
-
-export type DeploymentRemoteRunnerFailureCategory =
-  | 'invalidRequest'
-  | 'planNotFound'
-  | 'planDigestMismatch'
-  | 'planExpired'
-  | 'planNotApproved'
-  | 'workflowChanged'
-  | 'sourceChanged'
-  | 'targetChanged'
-  | 'releaseChanged'
-  | 'transferNotFound'
-  | 'transferMismatch'
-  | 'stagingInvalid'
-  | 'lockConflict'
-  | 'imageLoadFailed'
-  | 'imageMismatch'
-  | 'releasePrepareFailed'
-  | 'composePullFailed'
-  | 'composeConfigFailed'
-  | 'composeUpFailed'
-  | 'healthCheckFailed'
-  | 'nginxValidationFailed'
-  | 'nginxReloadFailed'
-  | 'activationFailed'
-  | 'rollbackFailed'
-  | 'cancelled'
-  | 'timedOut'
-  | 'stateUnknown'
-  | 'internal';
-
-export interface DeploymentRemoteRunnerResult {
-  operationId: string;
-  planId: string;
-  runId: string;
-  releaseId: string;
-  status: Exclude<DeploymentRemoteRunnerStatus, 'running' | 'verifying' | 'cancelRequested'>;
-  activeRelease: DeploymentReleaseIdentity | null;
-  rollbackRelease: DeploymentReleaseIdentity | null;
-  reconciliationRequired: boolean;
-  failureCategory: DeploymentRemoteRunnerFailureCategory | null;
-}
-
-export interface DeploymentFrozenPlanInputs {
-  sourceRevision: DeploymentFrozenSourceRevision;
-  target: DeploymentTargetIdentitySnapshot;
-  currentRelease: DeploymentReleaseIdentity | null;
-  targetRelease: DeploymentReleaseIdentity;
-  rollbackRelease: DeploymentReleaseIdentity | null;
-  preflight: DeploymentPreflightSummary;
-}
-
-export interface DeploymentApprovalPlanSummary {
-  schemaVersion: 1 | typeof DEPLOYMENT_APPROVAL_SCHEMA_VERSION;
-  workflowId: string;
-  workflowRevision: number;
-  operationKind: DeploymentOperationKind;
-  artifactReference?: string;
-  frozen: DeploymentFrozenPlanInputs;
-  remoteRoot: string;
-  composeProject: string;
-  composeFiles: string[];
-  services: string[];
-  actions: ApprovedDeploymentAction[];
-  generatedAt: number;
-  expiresAt: number;
-}
-
-export interface DeploymentPlanCreateInput {
-  workflowId: string;
-  expectedRevision: number;
-  sourceRunId: string | null;
-  operationKind: DeploymentOperationKind;
-  triggerKind: DeploymentTriggerKind;
-  artifactReference: string;
-  sourceRevision: DeploymentFrozenSourceRevision;
-  target: DeploymentTargetIdentitySnapshot;
-  currentRelease: DeploymentReleaseIdentity | null;
-  targetRelease: DeploymentReleaseIdentity;
-  rollbackRelease: DeploymentReleaseIdentity | null;
-  preflight: DeploymentPreflightSummary;
-  ttlSeconds: number;
-}
-
-export interface DeploymentApprovalRequest {
-  planId: string;
-  planDigest: string;
-  runId: string;
-  runRevision: number;
-  expiresAt: number;
-}
-
-export type DeploymentApprovalDecisionRequest = DeploymentApprovalRequest;
-
-export interface DeploymentRemoteRunnerCancelRequest {
-  operationId: string;
-  planId: string;
-  planDigest: string;
-  runId: string;
-}
-
-/** Frozen Phase 6 boundary. Startup recovery must reconcile before any effect. */
-export interface DeploymentReconciliationRequest {
-  operationId: string;
-  planId: string;
-  planDigest: string;
-  runId: string;
-  expectedRunRevision: number;
-  artifactTransferOperationId: string;
-  remoteStagingIdentity: string;
-}
-
-/** Frozen Phase 6 read-only startup discovery projection. */
-export interface DeploymentStartupRecoveryCandidate {
-  runId: string;
-  planId: string;
-  planDigest: string;
-  status: Extract<DeploymentRunStatus, 'in_progress' | 'verifying' | 'cancel_requested' | 'state_unknown'>;
-  lastEventSequence: number;
-  reconciliationRequired: boolean;
-}
-
-export interface DeploymentStartupRecoveryResult {
-  schemaVersion: 1;
-  candidates: DeploymentStartupRecoveryCandidate[];
-}
-
-export interface DeploymentReconciliationBinding {
-  candidate: DeploymentStartupRecoveryCandidate;
-  artifactTransferOperationId: string;
-  remoteStagingIdentity: string;
-  reconciliationOperationId: string | null;
-}
-
-export type DeploymentReconciliationOutcome =
-  | 'targetHealthy'
-  | 'rollbackHealthy'
-  | 'stillRunning'
-  | 'noSideEffects'
-  | 'stateUnknown'
-  | 'observationStopped';
-
-export interface DeploymentReconciliationEvidence {
-  remoteSequence: number | null;
-  runnerIdentityVerified: boolean;
-  requestIdentityVerified: boolean;
-  ledgerVerified: boolean;
-  currentReleaseId: string | null;
-  previousReleaseId: string | null;
-  targetReleaseVerified: boolean;
-  rollbackReleaseVerified: boolean;
-  composeServicesVerified: boolean;
-  healthVerified: boolean;
-  sideEffectsStarted: boolean | null;
-  approvalReusable: boolean;
-}
-
-export interface DeploymentReconciliationResult {
-  operationId: string;
-  planId: string;
-  runId: string;
+  operationKind: 'deploy' | 'rollback';
+  triggerKind: 'manual' | 'agent' | 'quickAction' | 'recovery';
   status: DeploymentRunStatus;
-  outcome: DeploymentReconciliationOutcome;
-  reconciliationRequired: boolean;
-  evidence: DeploymentReconciliationEvidence;
-}
-
-export interface DeploymentStoredPlanRecord {
-  planId: string;
-  planDigest: string;
-  runId: string;
-  runRevision: number;
-  status: DeploymentRunStatus;
-  approvalSummary: DeploymentApprovalPlanSummary;
-  createdAt: number;
+  planDigest: Sha256Digest;
+  targetRelease: DeploymentFrozenReleaseIdentity;
+  artifactReferences: readonly DeploymentArtifactReference[];
   expiresAt: number;
-}
-
-export interface DeploymentWorkflowRecord {
-  id: string;
-  name: string;
-  connectionProfileId: string;
-  revision: number;
-  definition: DeploymentWorkflowDefinition;
-  enabled: boolean;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface DeploymentWorkflowCreate {
-  name: string;
-  definition: DeploymentWorkflowDefinition;
-  enabled: boolean;
-}
-
-export interface DeploymentWorkflowUpdate extends DeploymentWorkflowCreate {
-  expectedRevision: number;
-}
-
-export interface DeploymentRunRecord {
-  id: string;
-  workflowId: string;
-  workflowRevision: number;
-  sourceRunId: string | null;
-  operationKind: DeploymentOperationKind;
-  triggerKind: DeploymentTriggerKind;
-  status: DeploymentRunStatus;
-  approvalSummary: DeploymentApprovalPlanSummary;
-  approvalDigest: string;
-  reconciliationRequired: boolean;
-  lastEventSequence: number;
+  expired: boolean;
+  planDrifted: boolean;
   createdAt: number;
   updatedAt: number;
   startedAt: number | null;
   finishedAt: number | null;
 }
 
-export interface DeploymentRunEvent {
-  runId: string;
-  sequence: number;
-  eventKind: DeploymentEventKind;
-  status: DeploymentRunStatus | null;
-  summary: string;
-  payload: Readonly<Record<string, unknown>> | null;
-  recordedAt: number;
-}
-
 export interface DeploymentRunPage {
-  items: DeploymentRunRecord[];
+  items: readonly DeploymentRunSummary[];
   nextCursor: string | null;
 }
 
-export interface DeploymentRunEventPage {
-  items: DeploymentRunEvent[];
-  nextBeforeSequence: number | null;
+export interface DeploymentApprovalArtifactSummary {
+  handle: DeploymentArtifactHandle;
+  artifactType: string;
+  components: readonly DeploymentArtifactDescriptor[];
+  componentCount: number;
+  totalSize: number;
 }
 
-export interface DeploymentRunDetail {
-  run: DeploymentRunRecord;
-  events: DeploymentRunEvent[];
-  nextBeforeSequence: number | null;
+export interface DeploymentApprovalEffectSummary {
+  nodeId: string;
+  displayName: string;
+  effectClass: DeploymentEffectClass;
+  fixedActions: readonly string[];
 }
 
-export interface DeploymentAuditExportResult {
+export interface DeploymentApprovalSummary {
   schemaVersion: 1;
+  workflowId: string;
+  workflowRevision: number;
+  definitionDigest: Sha256Digest;
   runId: string;
-  saved: boolean;
-  bytes: number;
-  documentSha256: string;
+  operationKind: 'deploy' | 'rollback';
+  triggerKind: 'manual' | 'agent' | 'quickAction' | 'recovery';
+  parameters: Readonly<Record<string, DeploymentScalarValue>>;
+  planDigest: Sha256Digest;
+  preparedAt: number;
+  expiresAt: number;
+  source: DeploymentFrozenSourceSnapshot;
+  target: DeploymentFrozenTargetIdentity;
+  preflight: DeploymentJsonObject;
+  artifacts: readonly DeploymentApprovalArtifactSummary[];
+  currentRelease?: DeploymentFrozenReleaseIdentity;
+  previousRelease?: DeploymentFrozenReleaseIdentity;
+  targetRelease: DeploymentFrozenReleaseIdentity;
+  effects: readonly DeploymentApprovalEffectSummary[];
+  risks: {
+    highestLevel: DeploymentRiskLevel;
+    entries: readonly DeploymentPlanRiskEntry[];
+  };
+  compensations: readonly DeploymentPlannedCompensation[];
+  verificationNodes: readonly string[];
+  retention: number;
 }
 
-export type DeploymentNotificationKind =
-  | 'succeeded'
-  | 'automaticRestoreCompleted'
-  | 'failed'
-  | 'userActionRequired';
-
-export interface DeploymentNotificationReceipt {
-  runId: string;
-  workflowId: string;
-  workflowName: string;
-  eventSequence: number;
-  status: Extract<
-    DeploymentRunStatus,
-    'awaiting_approval' | 'succeeded' | 'canceled' | 'failed' | 'state_unknown'
-  >;
-  kind: DeploymentNotificationKind;
+export interface DeploymentRunOutputProjection {
+  nodeId: string;
+  outputName: string;
+  outputKind: 'scalar' | 'artifact' | 'receipt' | 'evidence';
+  value: DeploymentJsonValue;
+  artifactReference: DeploymentArtifactReference | null;
   createdAt: number;
 }
 
-export interface DeploymentNotificationDisplayRequest {
+export interface DeploymentRunDetail {
+  summary: DeploymentRunSummary;
+  approvalSummary: DeploymentApprovalSummary | null;
+  outputs: readonly DeploymentRunOutputProjection[];
+  receipts: readonly DeploymentEffectReceipt[];
+}
+
+export interface DeploymentRunEvent {
   runId: string;
-  title: string;
-  body: string;
-  openLabel: string;
+  sequence: number;
+  nodeId: string | null;
+  attempt: number | null;
+  eventKind: string;
+  status: string | null;
+  summaryKey: string;
+  payload: DeploymentJsonObject | null;
+  recordedAt: number;
+}
+
+export interface DeploymentRunEventPage {
+  items: readonly DeploymentRunEvent[];
+  nextBeforeSequence: number | null;
+}
+
+export interface DeploymentReleaseRecord {
+  workflowId: string;
+  releaseId: string;
+  position: 'current' | 'previous';
+  artifactReference: DeploymentArtifactReference;
+  manifestDigest: Sha256Digest;
+  contentDigest: Sha256Digest;
+  artifactType: string;
+  identity: DeploymentFrozenReleaseIdentity | null;
+  sourceRunId: string | null;
+  activatedAt: number | null;
+  rollbackable: boolean;
 }

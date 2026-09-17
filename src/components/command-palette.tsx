@@ -46,7 +46,7 @@ import { isPortForwardActive, usePortForwardStore } from '@/stores/portForwardSt
 import { useProfileStore } from '@/stores/profileStore';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import { useDeploymentStore } from '@/stores/deploymentStore';
+import { useDeploymentWorkflowStore } from '@/stores/deploymentWorkflowStore';
 import type { DeploymentWorkflowRecord } from '@/lib/deployment/types';
 import type { TerminalSession } from '@/stores/terminalStore';
 import type {
@@ -273,11 +273,16 @@ export function buildCommandPaletteItems({
   ]);
 
   const deployments = workflows.flatMap((workflow): CommandPaletteItem[] => {
-    const profile = profiles.find((candidate) => candidate.id === workflow.connectionProfileId);
+    const target = workflow.definition.targets[0];
+    if (!target) return [];
+    const profile = profiles.find((candidate) => candidate.id === target.connectionProfileId);
     const detail = profile
       ? `${profile.name} · ${profile.username}@${profile.host}:${profile.port}`
-      : workflow.connectionProfileId;
-    const keywords = `${workflow.name} ${workflow.definition.compose.projectName} ${detail} deployment workflow release host`;
+      : target.connectionProfileId;
+    const composeProject = workflow.definition.nodes
+      .find((node) => node.type === 'deploy.compose')
+      ?.config.projectName;
+    const keywords = `${workflow.name} ${String(composeProject ?? '')} ${detail} deployment workflow release host`;
     return [
       {
         id: `deployment-workflow-${workflow.id}`,
@@ -437,7 +442,8 @@ export const CommandPalette: React.FC = () => {
   const activeTerminalSessionId = useTerminalStore((state) => state.activeSessionId);
   const sftpConnections = useSftpStore((state) => state.connections);
   const portForwardRuntimes = usePortForwardStore((state) => state.runtimes);
-  const workflows = useDeploymentStore((state) => state.workflows);
+  const workflows = useDeploymentWorkflowStore((state) => state.workflows);
+  const deploymentInitialized = useDeploymentWorkflowStore((state) => state.initialized);
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const [activeIndex, setActiveIndex] = React.useState(0);
@@ -457,6 +463,11 @@ export const CommandPalette: React.FC = () => {
     });
     return () => { cancelled = true; };
   }, [open, profiles]);
+
+  React.useEffect(() => {
+    if (!open || deploymentInitialized) return;
+    void useDeploymentWorkflowStore.getState().initialize().catch(() => undefined);
+  }, [deploymentInitialized, open]);
 
   const items = React.useMemo(
     () => buildCommandPaletteItems({
@@ -485,7 +496,7 @@ export const CommandPalette: React.FC = () => {
         const app = useAppStore.getState();
         app.setActiveSection('workbench');
         if (tool === 'deployments') {
-          useDeploymentStore.getState().setProfileFilter(profileId);
+          useDeploymentWorkflowStore.getState().setProfileFilter(profileId);
           app.setActiveWorkbenchTab('deployments');
           return;
         }
@@ -532,16 +543,16 @@ export const CommandPalette: React.FC = () => {
       },
       openDeployment: (workflowId, mode) => {
         const app = useAppStore.getState();
-        const deployment = useDeploymentStore.getState();
+        const deployment = useDeploymentWorkflowStore.getState();
         deployment.setProfileFilter(null);
         app.setActiveSection('workbench');
         app.setActiveWorkbenchTab('deployments');
         if (mode === 'newRelease') {
-          deployment.requestNewRelease(workflowId);
+          deployment.selectWorkflow(workflowId);
+          deployment.requestTab('prepare');
         } else {
           deployment.selectWorkflow(workflowId);
-          void deployment.selectRun(null);
-          useDeploymentStore.setState({ navigationTarget: 'history' });
+          deployment.requestTab('runs');
         }
       },
     }),

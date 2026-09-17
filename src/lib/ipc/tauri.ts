@@ -54,40 +54,33 @@ import type {
 } from '@/types';
 import type { AiProviderConfig, AiProviderConnectionConfig } from '@/types/ai';
 import type {
-  DeploymentArtifactBuildProgress,
-  DeploymentArtifactBuildRequest,
-  DeploymentArtifactBuildResult,
-  DeploymentArtifactTransferProgress,
-  DeploymentArtifactTransferRequest,
-  DeploymentArtifactTransferResult,
+  CreateDeploymentWorkflowInput,
+  CreateStaticSiteDeploymentWorkflowInput,
+  DeploymentArtifactReference,
+  DeploymentArtifactInspection,
   DeploymentAuditExportResult,
-  DeploymentArtifactSourceSnapshotRequest,
-  DeploymentApprovalDecisionRequest,
-  DeploymentApprovalRequest,
-  DeploymentFrozenSourceRevision,
-  DeploymentPlanCreateInput,
-  DeploymentPreflightRequest,
-  DeploymentPreflightResult,
-  DeploymentReconciliationBinding,
-  DeploymentReconciliationRequest,
+  DeploymentNodeAttemptPage,
+  DeploymentNodeProgressEvent,
+  DeploymentNodeTypeCatalog,
+  DeploymentPrepareResult,
   DeploymentReconciliationResult,
-  DeploymentNotificationReceipt,
-  DeploymentNotificationDisplayRequest,
-  DeploymentRunEvent,
+  DeploymentRunIdInput,
   DeploymentRunDetail,
   DeploymentRunEventPage,
+  DeploymentRunNodeRecord,
   DeploymentRunPage,
-  DeploymentRunRecord,
-  DeploymentRemoteRunnerCancelRequest,
-  DeploymentRemoteRunnerProgress,
-  DeploymentRemoteRunnerRequest,
-  DeploymentRemoteRunnerResult,
-  DeploymentRuntimeCapabilities,
-  DeploymentStoredPlanRecord,
-  DeploymentStartupRecoveryResult,
-  DeploymentWorkflowCreate,
+  DeploymentRunPlanBindingInput,
+  DeploymentReleaseRecord,
+  DeploymentRunProjection,
+  DeploymentWorkflowLayoutRecord,
+  DeploymentWorkflowCapabilities,
+  DeploymentWorkflowPage,
   DeploymentWorkflowRecord,
-  DeploymentWorkflowUpdate,
+  DeploymentWorkflowValidationResult,
+  DeploymentWorkflowDefinition,
+  PrepareDeploymentRunInput,
+  UpdateDeploymentWorkflowLayoutInput,
+  UpdateDeploymentWorkflowInput,
 } from '@/lib/deployment/types';
 import type {
   AgentArtifactRequest,
@@ -995,14 +988,34 @@ export function invokeAnswerAgentRuntimeQuestion(input: import('@/types/agent-qu
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_answer_question', { input });
 }
 
-// --- Database commands ---
+// --- Deployment Workflow high-level commands ---
 
-export async function invokeListDeploymentWorkflows(): Promise<DeploymentWorkflowRecord[]> {
-  return invokeLogged<DeploymentWorkflowRecord[]>('list_deployment_workflows');
+export async function invokeDeploymentWorkflowCapabilities(): Promise<DeploymentWorkflowCapabilities> {
+  return invokeLogged<DeploymentWorkflowCapabilities>('deployment_workflow_capabilities');
 }
 
-export async function invokeDeploymentRuntimeCapabilities(): Promise<DeploymentRuntimeCapabilities> {
-  return invokeLogged<DeploymentRuntimeCapabilities>('deployment_runtime_capabilities');
+export async function invokeListDeploymentNodeTypes(): Promise<DeploymentNodeTypeCatalog> {
+  return invokeLogged<DeploymentNodeTypeCatalog>('list_deployment_node_types');
+}
+
+export async function invokeValidateDeploymentWorkflow(
+  definition: DeploymentWorkflowDefinition,
+): Promise<DeploymentWorkflowValidationResult> {
+  return invokeLogged<DeploymentWorkflowValidationResult>('validate_deployment_workflow', {
+    input: { definition },
+  });
+}
+
+export async function invokeListDeploymentWorkflows(
+  cursor: string | null = null,
+  limit = 50,
+  includeArchived = false,
+): Promise<DeploymentWorkflowPage> {
+  return invokeLogged<DeploymentWorkflowPage>('list_deployment_workflows', {
+    cursor,
+    limit,
+    includeArchived,
+  });
 }
 
 export async function invokeGetDeploymentWorkflow(
@@ -1012,159 +1025,149 @@ export async function invokeGetDeploymentWorkflow(
 }
 
 export async function invokeCreateDeploymentWorkflow(
-  input: DeploymentWorkflowCreate,
+  input: CreateDeploymentWorkflowInput,
 ): Promise<DeploymentWorkflowRecord> {
   return invokeLogged<DeploymentWorkflowRecord>('create_deployment_workflow', { input });
 }
 
-export async function invokeUpdateDeploymentWorkflow(
-  id: string,
-  input: DeploymentWorkflowUpdate,
+export async function invokeCreateStaticSiteDeploymentWorkflow(
+  input: CreateStaticSiteDeploymentWorkflowInput,
 ): Promise<DeploymentWorkflowRecord> {
-  return invokeLogged<DeploymentWorkflowRecord>('update_deployment_workflow', { id, input });
-}
-
-export async function invokeDeleteDeploymentWorkflow(
-  id: string,
-  expectedRevision: number,
-): Promise<void> {
-  return invokeLogged('delete_deployment_workflow', { id, expectedRevision });
-}
-
-export async function invokeCreateDeploymentPlan(
-  input: DeploymentPlanCreateInput,
-): Promise<DeploymentStoredPlanRecord> {
-  return invokeLogged<DeploymentStoredPlanRecord>('create_deployment_plan', { input });
-}
-
-export async function invokeGetDeploymentPlan(
-  planId: string,
-): Promise<DeploymentStoredPlanRecord> {
-  return invokeLogged<DeploymentStoredPlanRecord>('get_deployment_plan', { planId });
-}
-
-export async function invokeRequestDeploymentApproval(
-  input: DeploymentApprovalRequest,
-): Promise<DeploymentStoredPlanRecord> {
-  return invokeLogged<DeploymentStoredPlanRecord>('request_deployment_approval', { input });
-}
-
-export async function invokeApproveDeploymentPlan(
-  input: DeploymentApprovalDecisionRequest,
-): Promise<DeploymentStoredPlanRecord> {
-  return invokeLogged<DeploymentStoredPlanRecord>('approve_deployment_plan', { input });
-}
-
-export async function invokeRejectDeploymentPlan(
-  input: DeploymentApprovalDecisionRequest,
-): Promise<DeploymentStoredPlanRecord> {
-  return invokeLogged<DeploymentStoredPlanRecord>('reject_deployment_plan', { input });
-}
-
-export async function invokeDeploymentArtifactSourceSnapshot(
-  input: DeploymentArtifactSourceSnapshotRequest,
-): Promise<DeploymentFrozenSourceRevision> {
-  return invokeLogged<DeploymentFrozenSourceRevision>('deployment_artifact_source_snapshot', { input });
-}
-
-export async function invokeBuildDeploymentArtifact(
-  input: DeploymentArtifactBuildRequest,
-): Promise<DeploymentArtifactBuildResult> {
-  return invokeLogged<DeploymentArtifactBuildResult>('deployment_build_artifact', { input });
-}
-
-export async function invokeCancelDeploymentArtifactBuild(operationId: string): Promise<boolean> {
-  return invokeLogged<boolean>('deployment_cancel_artifact_build', { operationId });
-}
-
-export async function listenToDeploymentArtifactBuildProgress(
-  callback: EventCallback<DeploymentArtifactBuildProgress>,
-): Promise<UnlistenFn> {
-  return listen<DeploymentArtifactBuildProgress>('deployment-artifact-build-progress', callback);
-}
-
-export async function invokeTransferDeploymentArtifact(
-  input: DeploymentArtifactTransferRequest,
-): Promise<DeploymentArtifactTransferResult> {
-  return invokeLogged<DeploymentArtifactTransferResult>('deployment_transfer_artifact', { input });
-}
-
-export async function invokeCancelDeploymentArtifactTransfer(
-  operationId: string,
-): Promise<boolean> {
-  return invokeLogged<boolean>('deployment_cancel_artifact_transfer', { operationId });
-}
-
-export async function listenToDeploymentArtifactTransferProgress(
-  callback: EventCallback<DeploymentArtifactTransferProgress>,
-): Promise<UnlistenFn> {
-  return listen<DeploymentArtifactTransferProgress>(
-    'deployment-artifact-transfer-progress',
-    callback,
+  return invokeLogged<DeploymentWorkflowRecord>(
+    'create_static_site_deployment_workflow',
+    { input },
   );
 }
 
-export async function invokeRunDeploymentRemote(
-  input: DeploymentRemoteRunnerRequest,
-): Promise<DeploymentRemoteRunnerResult> {
-  return invokeLogged<DeploymentRemoteRunnerResult>('deployment_run_remote', { input });
-}
-
-export async function invokeCancelDeploymentRemoteRunner(
-  input: DeploymentRemoteRunnerCancelRequest,
-): Promise<boolean> {
-  return invokeLogged<boolean>('deployment_cancel_remote_runner', { input });
-}
-
-export async function listenToDeploymentRemoteRunnerProgress(
-  callback: EventCallback<DeploymentRemoteRunnerProgress>,
-): Promise<UnlistenFn> {
-  return listen<DeploymentRemoteRunnerProgress>('deployment-remote-runner-progress', callback);
-}
-
-export async function invokeDeploymentPreflight(
-  input: DeploymentPreflightRequest,
-): Promise<DeploymentPreflightResult> {
-  return invokeLogged<DeploymentPreflightResult>('deployment_preflight', { input });
-}
-
-export async function invokeCancelDeploymentPreflight(operationId: string): Promise<boolean> {
-  return invokeLogged<boolean>('deployment_cancel_preflight', { operationId });
-}
-
-export async function invokeListDeploymentRuns(
-  workflowId?: string,
-  limit = 50,
-): Promise<DeploymentRunRecord[]> {
-  return invokeLogged<DeploymentRunRecord[]>('list_deployment_runs', {
-    workflowId,
-    limit,
+export async function invokeUpdateDeploymentWorkflow(
+  id: string,
+  expectedRevision: number,
+  input: UpdateDeploymentWorkflowInput,
+): Promise<DeploymentWorkflowRecord> {
+  return invokeLogged<DeploymentWorkflowRecord>('update_deployment_workflow', {
+    id,
+    expectedRevision,
+    input,
   });
 }
 
-export async function invokeListDeploymentRunPage(
-  workflowId: string | null,
-  cursor: string | null,
+export async function invokeUpdateDeploymentWorkflowLayout(
+  id: string,
+  expectedLayoutRevision: number,
+  input: UpdateDeploymentWorkflowLayoutInput,
+): Promise<DeploymentWorkflowLayoutRecord> {
+  return invokeLogged<DeploymentWorkflowLayoutRecord>(
+    'update_deployment_workflow_layout',
+    { id, expectedLayoutRevision, input },
+  );
+}
+
+export async function invokeArchiveDeploymentWorkflow(
+  id: string,
+  expectedRevision: number,
+): Promise<void> {
+  return invokeLogged('archive_deployment_workflow', { id, expectedRevision });
+}
+
+export async function invokePrepareDeploymentRun(
+  input: PrepareDeploymentRunInput,
+): Promise<DeploymentPrepareResult> {
+  return invokeLogged<DeploymentPrepareResult>('prepare_deployment_run', { input });
+}
+
+export async function listenToDeploymentNodeProgress(
+  callback: EventCallback<DeploymentNodeProgressEvent>,
+): Promise<UnlistenFn> {
+  return listen<DeploymentNodeProgressEvent>('deployment-node-progress', callback);
+}
+
+export async function invokeApproveDeploymentRun(
+  input: DeploymentRunPlanBindingInput,
+): Promise<DeploymentRunProjection> {
+  return invokeLogged<DeploymentRunProjection>('approve_deployment_run', {
+    input: { ...input, approvalSource: 'manualUi' },
+  });
+}
+
+export async function invokeStartDeploymentRun(
+  input: DeploymentRunPlanBindingInput,
+): Promise<DeploymentRunProjection> {
+  return invokeLogged<DeploymentRunProjection>('start_deployment_run', { input });
+}
+
+export async function invokeCancelDeploymentRun(
+  input: DeploymentRunIdInput,
+): Promise<void> {
+  return invokeLogged('cancel_deployment_run', { input });
+}
+
+export async function invokeReconcileDeploymentRun(
+  input: DeploymentRunIdInput,
+): Promise<DeploymentReconciliationResult> {
+  return invokeLogged<DeploymentReconciliationResult>('reconcile_deployment_run', { input });
+}
+
+export async function invokeListDeploymentRunNodes(
+  runId: string,
+): Promise<DeploymentRunNodeRecord[]> {
+  return invokeLogged<DeploymentRunNodeRecord[]>('list_deployment_run_nodes', { runId });
+}
+
+export async function invokeListDeploymentRuns(
+  workflowId: string,
+  cursor: string | null = null,
   limit = 20,
 ): Promise<DeploymentRunPage> {
-  return invokeLogged<DeploymentRunPage>('list_deployment_run_page', {
+  return invokeLogged<DeploymentRunPage>('list_deployment_runs', {
     workflowId,
     cursor,
     limit,
   });
 }
 
-export async function invokeGetDeploymentRun(id: string): Promise<DeploymentRunRecord | null> {
-  return invokeLogged<DeploymentRunRecord | null>('get_deployment_run', { id });
+export async function invokeGetDeploymentRunDetail(
+  runId: string,
+): Promise<DeploymentRunDetail | null> {
+  return invokeLogged<DeploymentRunDetail | null>('get_deployment_run_detail', { runId });
 }
 
-export async function invokeGetDeploymentRunDetail(
-  id: string,
-  eventLimit = 100,
-): Promise<DeploymentRunDetail | null> {
-  return invokeLogged<DeploymentRunDetail | null>('get_deployment_run_detail', {
-    id,
-    eventLimit,
+export async function invokeListDeploymentRunEvents(
+  runId: string,
+  beforeSequence: number | null = null,
+  limit = 50,
+): Promise<DeploymentRunEventPage> {
+  return invokeLogged<DeploymentRunEventPage>('list_deployment_run_events', {
+    runId,
+    beforeSequence,
+    limit,
+  });
+}
+
+export async function invokeListDeploymentReleases(
+  workflowId: string,
+): Promise<DeploymentReleaseRecord[]> {
+  return invokeLogged<DeploymentReleaseRecord[]>('list_deployment_releases', { workflowId });
+}
+
+export async function invokeListDeploymentNodeAttempts(
+  runId: string,
+  nodeId: string,
+  beforeAttempt: number | null = null,
+  limit = 50,
+): Promise<DeploymentNodeAttemptPage> {
+  return invokeLogged<DeploymentNodeAttemptPage>('list_deployment_node_attempts', {
+    runId,
+    nodeId,
+    beforeAttempt,
+    limit,
+  });
+}
+
+export async function invokeInspectDeploymentArtifact(
+  artifactReference: DeploymentArtifactReference,
+): Promise<DeploymentArtifactInspection> {
+  return invokeLogged<DeploymentArtifactInspection>('inspect_deployment_artifact', {
+    artifactReference,
   });
 }
 
@@ -1172,72 +1175,6 @@ export async function invokeExportDeploymentRunAudit(
   runId: string,
 ): Promise<DeploymentAuditExportResult> {
   return invokeLogged<DeploymentAuditExportResult>('export_deployment_run_audit', { runId });
-}
-
-export async function invokeListDeploymentRunEvents(
-  runId: string,
-  afterSequence = 0,
-  limit = 200,
-): Promise<DeploymentRunEvent[]> {
-  return invokeLogged<DeploymentRunEvent[]>('list_deployment_run_events', {
-    runId,
-    afterSequence,
-    limit,
-  });
-}
-
-export async function invokeListDeploymentRunEventsBefore(
-  runId: string,
-  beforeSequence: number,
-  limit = 100,
-): Promise<DeploymentRunEventPage> {
-  return invokeLogged<DeploymentRunEventPage>('list_deployment_run_events_before', {
-    runId,
-    beforeSequence,
-    limit,
-  });
-}
-
-export async function invokeClaimDeploymentNotifications(
-  limit = 50,
-): Promise<DeploymentNotificationReceipt[]> {
-  return invokeLogged<DeploymentNotificationReceipt[]>('claim_deployment_notifications', { limit });
-}
-
-export async function invokeShowDeploymentNotification(
-  input: DeploymentNotificationDisplayRequest,
-): Promise<void> {
-  return invokeLogged('show_deployment_notification', { input });
-}
-
-export async function listenToDeploymentNotificationOpen(
-  callback: EventCallback<string>,
-): Promise<() => void> {
-  return listen<string>('deployment-notification-open', callback);
-}
-
-export async function invokeDeploymentStartupRecovery(): Promise<DeploymentStartupRecoveryResult> {
-  return invokeLogged<DeploymentStartupRecoveryResult>('deployment_startup_recovery');
-}
-
-export async function invokeDeploymentReconciliationBinding(
-  runId: string,
-): Promise<DeploymentReconciliationBinding> {
-  return invokeLogged<DeploymentReconciliationBinding>('deployment_reconciliation_binding', {
-    runId,
-  });
-}
-
-export async function invokeDeploymentReconcile(
-  input: DeploymentReconciliationRequest,
-): Promise<DeploymentReconciliationResult> {
-  return invokeLogged<DeploymentReconciliationResult>('deployment_reconcile', { input });
-}
-
-export async function invokeCancelDeploymentReconciliationObservation(
-  operationId: string,
-): Promise<boolean> {
-  return invokeLogged<boolean>('deployment_cancel_reconciliation_observation', { operationId });
 }
 
 export async function invokeListProfiles(): Promise<ProfileRow[]> {
