@@ -46,6 +46,10 @@ const REAL_TERMINAL_STATE_COPY: Record<
     label: 'agent.executionSurface.v1.state.ready',
     description: 'agent.executionSurface.v1.readyDescription',
   },
+  busy: {
+    label: 'agent.executionSurface.v1.state.busy',
+    description: 'agent.executionSurface.v1.busyDescription',
+  },
   unavailable: {
     label: 'agent.executionSurface.v1.state.unavailable',
     description: 'agent.executionSurface.v1.unavailableDescription',

@@ -109,6 +109,7 @@ function connectedTerminal(sessionId = 'terminal-1'): void {
       username: 'tester',
       status: 'connected',
       integrationState: 'ready',
+      promptReady: true,
     }],
   });
 }
@@ -1188,6 +1189,25 @@ describe('AiWorkspaceController', () => {
         request: expect.objectContaining({ executionSurface: 'boundTerminal' }),
       }),
     })));
+  });
+
+  it('presents a ready integration without a prompt boundary as terminal busy', async () => {
+    connectedTerminal();
+    useTerminalStore.setState((state) => ({
+      sessions: state.sessions.map((session) => ({ ...session, promptReady: false })),
+    }));
+    render(<AiWorkspaceController scope="terminal" adapter={adapter()} />);
+
+    const direct = screen.getByRole('button', { name: 'Command execution: Direct' });
+    expect(direct).toHaveAttribute('data-real-terminal-state', 'busy');
+    await userEvent.click(direct);
+    const visibleCommand = await screen.findByRole('menuitemradio', { name: 'Visible command' });
+    expect(visibleCommand).toHaveTextContent('Terminal busy');
+    expect(visibleCommand).toHaveAttribute('aria-disabled', 'true');
+    expect(visibleCommand).toHaveAttribute(
+      'aria-description',
+      'This terminal is running a foreground program. Wait for the prompt to return, or use Direct.',
+    );
   });
 
   it('submits the active SSH welcome output as a bounded, redacted terminal snapshot', async () => {

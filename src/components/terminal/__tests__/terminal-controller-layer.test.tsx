@@ -211,22 +211,27 @@ describe('TerminalControllerLayer', () => {
         terminalSessionId: 'terminal-1',
         terminalGeneration: 2,
         state: 'ready',
+        promptReady: true,
         shell: 'zsh',
       },
     }));
-    expect(useTerminalStore.getState().sessions[0]?.integrationState).toBe('ready');
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      integrationState: 'ready',
+      promptReady: true,
+    });
   });
 
-  it('presents a new user SSH terminal as visible-command ready when Agent SSH PTY is enabled', async () => {
+  it('does not present dedicatedAgentPtyRequired as visible-command ready', async () => {
     vi.mocked(invokeGetTerminalBrokerSnapshot).mockResolvedValue({
       terminalExecuteRollout: { enabled: true },
-      remoteAgentPtyRollout: { enabled: true },
+      remoteBoundTerminalRollout: { enabled: true },
       session: {
         terminalSessionId: 'terminal-ssh',
         terminalGeneration: 1,
         transportKind: 'sshPty',
         integrationState: 'degraded',
         integrationReason: 'dedicatedAgentPtyRequired',
+        promptReady: false,
       },
     } as Awaited<ReturnType<typeof invokeGetTerminalBrokerSnapshot>>);
     render(<TerminalControllerLayer />);
@@ -244,8 +249,9 @@ describe('TerminalControllerLayer', () => {
     });
 
     await vi.waitFor(() => expect(useTerminalStore.getState().sessions[0]).toMatchObject({
-      integrationState: 'ready',
-      integrationReason: undefined,
+      integrationState: 'unavailable',
+      integrationReason: 'dedicatedAgentPtyRequired',
+      promptReady: false,
     }));
   });
 
@@ -487,7 +493,7 @@ describe('TerminalControllerLayer', () => {
     coordinator.dispose();
   });
 
-  it('clears the source turn lock when a dedicated Agent terminal takes over the turn', async () => {
+  it('keeps the frozen source terminal locked and rejects a lease for another terminal', async () => {
     const sourceController = seedController('source-ssh');
     const agentController = seedController('agent-ssh');
     vi.mocked(invokeGetAgentRuntimeSession).mockResolvedValue({
@@ -509,26 +515,29 @@ describe('TerminalControllerLayer', () => {
     await coordinator.handle(leaseEvent('operation-1', 'acquired', {
       sessionId: 'agent-ssh',
     }).payload);
-    expect(agentTerminalLeaseState.get('source-ssh')).toBeUndefined();
-    expect(agentTerminalLeaseState.get('agent-ssh')).toMatchObject({
-      terminalOwned: true,
-      operationId: 'operation-1',
+    expect(agentTerminalLeaseState.get('source-ssh')).toMatchObject({
+      terminalOwned: false,
+      operationId: 'turn:turn-1',
     });
-    await expect(sourceController.writeUserInput('accepted after Agent PTY opens')).resolves.toBe(true);
-    await expect(agentController.writeUserInput('blocked on Agent PTY')).resolves.toBe(false);
-
-    await coordinator.handle(leaseEvent('operation-1', 'released', {
+    expect(agentTerminalLeaseState.get('agent-ssh')).toBeUndefined();
+    await expect(sourceController.writeUserInput('still blocked on frozen source')).resolves.toBe(false);
+    await expect(agentController.writeUserInput('never locked on rejected target')).resolves.toBe(true);
+    expect(invokeAgentTerminalLeaseReady).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'agent-ssh',
-      reason: 'completed',
-    }).payload);
+      operationId: 'operation-1',
+      terminalConnected: false,
+      outputListenerReady: false,
+    }));
+
     coordinator.handleSession(turnEvent('turn/end'));
     expect(agentTerminalLeaseState.get('source-ssh')).toBeUndefined();
     expect(agentTerminalLeaseState.get('agent-ssh')).toBeUndefined();
-    await expect(agentController.writeUserInput('accepted after turn')).resolves.toBe(true);
+    await expect(sourceController.writeUserInput('accepted after turn')).resolves.toBe(true);
     coordinator.dispose();
   });
 
-  it('cancels the Agent turn at most once and unlocks when the backend confirms', async () => {
+  it('restores input immediately after takeover and fences late Agent leases', async () => {
+    vi.mocked(invokeInterruptAgentRuntime).mockReturnValue(new Promise<AgentSessionSnapshot>(() => {}));
     const controller = seedController();
     act(() => {
       addSession('s1');
@@ -556,10 +565,20 @@ describe('TerminalControllerLayer', () => {
     expect(invokeInterruptAgentRuntime).toHaveBeenCalledWith({ sessionId: 'agent-1' });
     expect(release).toHaveBeenCalledOnce();
     expect(agentTerminalLeaseState.get('s1')).toBeUndefined();
+
+    await coordinator.handle(leaseEvent('operation-late').payload);
+    expect(invokeAgentTerminalLeaseReady).toHaveBeenLastCalledWith(expect.objectContaining({
+      operationId: 'operation-late',
+      terminalConnected: false,
+      outputListenerReady: false,
+    }));
+    expect(release).toHaveBeenCalledOnce();
+    expect(agentTerminalLeaseState.get('s1')).toBeUndefined();
     coordinator.dispose();
   });
 
   it('allows turn cancellation to be retried after a rejected request', async () => {
+    vi.mocked(invokeTakeoverAgentTerminal).mockResolvedValue(false);
     vi.mocked(invokeInterruptAgentRuntime)
       .mockRejectedValueOnce(new Error('cancel rejected'))
       .mockResolvedValueOnce({} as AgentSessionSnapshot);
@@ -586,6 +605,7 @@ describe('TerminalControllerLayer', () => {
 
   it('recovers from an unconfirmed turn cancellation and ignores its late response', async () => {
     vi.useFakeTimers();
+    vi.mocked(invokeTakeoverAgentTerminal).mockResolvedValue(false);
     let resolveFirst!: () => void;
     let resolveSecond!: () => void;
     vi.mocked(invokeInterruptAgentRuntime)
@@ -628,6 +648,13 @@ describe('TerminalControllerLayer', () => {
 
   it('replaces resources by operation and ignores duplicate acquire and stale release events', async () => {
     const controller = seedController();
+    vi.mocked(invokeGetAgentRuntimeSession).mockResolvedValue({
+      header: {
+        taskId: 'task-1',
+        executionSurface: 'boundTerminal',
+        target: { sessionId: 's1' },
+      },
+    } as AgentSessionSnapshot);
     act(() => {
       addSession('s1');
       useTerminalStore.getState().setStatus('s1', {
