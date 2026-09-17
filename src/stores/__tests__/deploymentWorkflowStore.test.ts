@@ -112,6 +112,136 @@ describe('deploymentWorkflowStore', () => {
     expect(useDeploymentWorkflowStore.getState().draft!.definition.nodes[0].inputs).toEqual({});
   });
 
+  it('keeps layout and semantic dirty transitions separate for moves, connections, and disconnections', () => {
+    const current = record();
+    useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current] });
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+    const originalDefinition = structuredClone(useDeploymentWorkflowStore.getState().draft!.definition);
+
+    useDeploymentWorkflowStore.getState().moveNode('source', 48, 72);
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      layoutDirty: true,
+      semanticDirty: false,
+    });
+    expect(useDeploymentWorkflowStore.getState().draft?.definition).toEqual(originalDefinition);
+
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+    useDeploymentWorkflowStore.getState().connectInput('build', 'source', null);
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      layoutDirty: false,
+      semanticDirty: true,
+    });
+    expect(useDeploymentWorkflowStore.getState().draft?.definition.nodes.find((node) => node.id === 'build')?.inputs).not.toHaveProperty('source');
+
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+    useDeploymentWorkflowStore.getState().connectInput('build', 'source', {
+      fromNodeId: 'source',
+      fromPort: 'source',
+    });
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      layoutDirty: false,
+      semanticDirty: true,
+    });
+    expect(useDeploymentWorkflowStore.getState().draft?.definition.nodes.find((node) => node.id === 'build')?.inputs.source).toEqual({
+      fromNodeId: 'source',
+      fromPort: 'source',
+    });
+  });
+
+  it('commits a multi-node move as one layout-only store update', () => {
+    const current = record();
+    useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current] });
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+    const originalDefinition = structuredClone(useDeploymentWorkflowStore.getState().draft!.definition);
+    let draftUpdates = 0;
+    const unsubscribe = useDeploymentWorkflowStore.subscribe((state, previous) => {
+      if (state.draft !== previous.draft) draftUpdates += 1;
+    });
+
+    useDeploymentWorkflowStore.getState().moveNodes([
+      { id: 'source', x: 48, y: 72 },
+      { id: 'build', x: 320, y: 96 },
+    ]);
+    unsubscribe();
+
+    expect(draftUpdates).toBe(1);
+    expect(useDeploymentWorkflowStore.getState().draft?.layout.nodes).toMatchObject({
+      source: { x: 48, y: 72 },
+      build: { x: 320, y: 96 },
+    });
+    expect(useDeploymentWorkflowStore.getState().draft?.definition).toEqual(originalDefinition);
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      layoutDirty: true,
+      semanticDirty: false,
+    });
+  });
+
+  it('disconnects and reconnects bindings atomically without touching layout', () => {
+    const current = record();
+    const source = current.definition.nodes.find((item) => item.id === 'source')!;
+    const build = current.definition.nodes.find((item) => item.id === 'build')!;
+    const currentLayout = current.layout!;
+    const withAlternativeSource: DeploymentWorkflowRecord = {
+      ...current,
+      definition: {
+        ...current.definition,
+        nodes: [
+          ...current.definition.nodes,
+          { ...source, id: 'source-2', displayName: 'Source 2' },
+          { ...build, id: 'build-2', displayName: 'Build 2', inputs: {} },
+        ],
+      },
+      layout: {
+        ...currentLayout,
+        nodes: {
+          ...currentLayout.nodes,
+          'source-2': { x: 0, y: 190 },
+          'build-2': { x: 280, y: 190 },
+        },
+      },
+    };
+    useDeploymentWorkflowStore.setState({ catalog: null, workflows: [withAlternativeSource] });
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+    const originalLayout = structuredClone(useDeploymentWorkflowStore.getState().draft!.layout);
+
+    useDeploymentWorkflowStore.getState().disconnectInput('build', 'source');
+    expect(useDeploymentWorkflowStore.getState().draft?.definition.nodes
+      .find((item) => item.id === 'build')?.inputs).not.toHaveProperty('source');
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      semanticDirty: true,
+      layoutDirty: false,
+    });
+
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+    let draftUpdates = 0;
+    const unsubscribe = useDeploymentWorkflowStore.subscribe((state, previous) => {
+      if (state.draft !== previous.draft) draftUpdates += 1;
+    });
+    useDeploymentWorkflowStore.getState().reconnectInput(
+      'build',
+      'source',
+      'build-2',
+      'source',
+      { fromNodeId: 'source-2', fromPort: 'source' },
+    );
+    unsubscribe();
+
+    expect(draftUpdates).toBe(1);
+    expect(useDeploymentWorkflowStore.getState().draft?.definition.nodes
+      .find((item) => item.id === 'build')?.inputs).not.toHaveProperty('source');
+    expect(useDeploymentWorkflowStore.getState().draft?.definition.nodes
+      .find((item) => item.id === 'build-2')?.inputs.source).toEqual({
+        fromNodeId: 'source-2',
+        fromPort: 'source',
+      });
+    expect(useDeploymentWorkflowStore.getState().draft?.layout).toEqual(originalLayout);
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      semanticDirty: true,
+      layoutDirty: false,
+    });
+    expect(useDeploymentWorkflowStore.getState().draft?.definition).not.toHaveProperty('edges');
+  });
+
   it('saves layout without incrementing semantic revision and semantic changes with CAS revision', async () => {
     const current = record();
     useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current] });
@@ -130,11 +260,17 @@ describe('deploymentWorkflowStore', () => {
     expect(mocks.updateLayout).toHaveBeenCalledWith(current.id, 1, expect.anything());
     expect(useDeploymentWorkflowStore.getState().draft?.revision).toBe(1);
     expect(useDeploymentWorkflowStore.getState().draft?.layoutRevision).toBe(2);
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      semanticDirty: false,
+      layoutDirty: false,
+    });
 
     useDeploymentWorkflowStore.getState().updateNode(firstNode.id, { displayName: 'Renamed source' });
     mocks.update.mockResolvedValue({
       ...current,
       revision: 2,
+      layoutRevision: 2,
+      layout: useDeploymentWorkflowStore.getState().draft!.layout,
       definition: useDeploymentWorkflowStore.getState().draft!.definition,
       updatedAt: 3,
     });
@@ -143,6 +279,11 @@ describe('deploymentWorkflowStore', () => {
       definition: expect.objectContaining({ nodes: expect.arrayContaining([expect.objectContaining({ displayName: 'Renamed source' })]) }),
     }));
     expect(useDeploymentWorkflowStore.getState().draft?.revision).toBe(2);
+    expect(useDeploymentWorkflowStore.getState().draft?.layoutRevision).toBe(2);
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      semanticDirty: false,
+      layoutDirty: false,
+    });
   });
 
   it('surfaces semantic revision conflicts without replacing the draft', async () => {

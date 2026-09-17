@@ -111,6 +111,9 @@ describe('deployment editor domain', () => {
     expect(projectDeploymentEdges(definition)).toEqual([
       expect.objectContaining({ sourceNodeId: 'source', targetNodeId: 'build' }),
     ]);
+    definition.nodes = definition.nodes.map((node) => node.id === 'build' ? { ...node, inputs: {} } : node);
+    expect(projectDeploymentEdges(definition)).toEqual([]);
+    expect(definition).not.toHaveProperty('edges');
     expect(topologyOrder(definition).map((node) => node.id)).toEqual(['source', 'build']);
   });
 

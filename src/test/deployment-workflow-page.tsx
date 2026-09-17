@@ -16,6 +16,7 @@ import type {
   DeploymentWorkflowRecord,
 } from '@/lib/deployment/types';
 import { initI18n, t, type LocaleKey } from '@/locales';
+import { useAppStore } from '@/stores/appStore';
 import { useDeploymentWorkflowStore } from '@/stores/deploymentWorkflowStore';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import { useProfileStore } from '@/stores/profileStore';
@@ -23,6 +24,68 @@ import { useProfileStore } from '@/stores/profileStore';
 const profile = {
   id: 'visual-profile', name: 'Production', host: 'web-01.example.test', port: 22,
   username: 'deploy', authMethod: 'password' as const, createdAt: 1, updatedAt: 1,
+};
+
+const VISUAL_SCENARIOS = ['wide', 'medium', 'narrow', 'ai'] as const;
+const VISUAL_VIEWS = ['design', 'prepare', 'runs', 'versions'] as const;
+const VISUAL_OVERLAYS = ['approval', 'artifact', 'evidence', 'rollback'] as const;
+
+type VisualScenario = typeof VISUAL_SCENARIOS[number];
+type VisualView = typeof VISUAL_VIEWS[number];
+type VisualOverlay = typeof VISUAL_OVERLAYS[number];
+
+export const DEPLOYMENT_VISUAL_SCENARIO_WIDTHS: Readonly<Record<VisualScenario, number>> = {
+  wide: 1_420,
+  medium: 860,
+  narrow: 430,
+  ai: 780,
+};
+
+function supportedValue<const T extends readonly string[]>(
+  value: string | null,
+  supported: T,
+  fallback: T[number],
+): T[number] {
+  return value && supported.includes(value) ? value as T[number] : fallback;
+}
+
+function optionalSupportedValue<const T extends readonly string[]>(
+  value: string | null,
+  supported: T,
+): T[number] | null {
+  return value && supported.includes(value) ? value as T[number] : null;
+}
+
+const OVERLAY_TRIGGER_TEST_IDS: Partial<Record<VisualOverlay, string>> = {
+  approval: 'deployment-open-approval',
+  evidence: 'deployment-open-evidence',
+  rollback: 'deployment-open-rollback',
+};
+
+const VisualOverlayOpener: React.FC<{ overlay: VisualOverlay | null }> = ({ overlay }) => {
+  React.useEffect(() => {
+    const triggerTestId = overlay ? OVERLAY_TRIGGER_TEST_IDS[overlay] : undefined;
+    if (!triggerTestId) return undefined;
+    let nestedFrame: number | null = null;
+    const frame = window.requestAnimationFrame(() => {
+      const trigger = document.querySelector<HTMLElement>(`[data-testid="${triggerTestId}"]`);
+      if (trigger) {
+        trigger.click();
+        return;
+      }
+      if (overlay === 'evidence') {
+        document.querySelector<HTMLElement>('[data-testid="deployment-open-runtime-inspector"]')?.click();
+        nestedFrame = window.requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>(`[data-testid="${triggerTestId}"]`)?.click();
+        });
+      }
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (nestedFrame !== null) window.cancelAnimationFrame(nestedFrame);
+    };
+  }, [overlay]);
+  return null;
 };
 
 const PORTS: Record<string, {
@@ -81,6 +144,10 @@ function visualCatalog(nodes: readonly DeploymentWorkflowNode[]): DeploymentNode
 export async function mountDeploymentWorkflowPage(root: HTMLElement): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const locale = params.get('locale') === 'en-US' ? 'en-US' : 'zh-CN';
+  const scenario = supportedValue(params.get('scenario'), VISUAL_SCENARIOS, 'wide');
+  const initialTab = supportedValue(params.get('view'), VISUAL_VIEWS, 'design');
+  const overlay = optionalSupportedValue(params.get('overlay'), VISUAL_OVERLAYS);
+  useAppStore.setState({ locale });
   await initI18n(locale);
   const { definition, layout } = buildDeploymentTemplate(
     'staticSite',
@@ -119,16 +186,15 @@ export async function mountDeploymentWorkflowPage(root: HTMLElement): Promise<vo
   const contentDigest = `sha256:${'c'.repeat(64)}` as const;
   const manifestDigest = `sha256:${'d'.repeat(64)}` as const;
   const artifactReference = `deployment-artifact:${manifestDigest}` as const;
-  const viewParam = params.get('view');
   const runSummary: DeploymentRunSummary = {
     runId: 'run-visual-7', workflowId: workflow.id, workflowRevision: workflow.revision,
-    operationKind: 'deploy', triggerKind: 'manual', status: viewParam === 'prepare' ? 'awaiting_approval' : 'succeeded',
+    operationKind: 'deploy', triggerKind: 'manual', status: initialTab === 'prepare' ? 'awaiting_approval' : 'succeeded',
     planDigest,
     targetRelease: { releaseId: 'release-c0ffee42', artifactContentDigest: contentDigest, layoutDigest: `sha256:${'e'.repeat(64)}` as const },
     artifactReferences: [artifactReference], expiresAt: Date.now() + 900_000,
     expired: false, planDrifted: false, createdAt: Date.now() - 82_000,
     updatedAt: Date.now() - 2_000, startedAt: Date.now() - 80_000,
-    finishedAt: viewParam === 'prepare' ? null : Date.now() - 2_000,
+    finishedAt: initialTab === 'prepare' ? null : Date.now() - 2_000,
   };
   const runNodes: DeploymentRunNodeRecord[] = definition.nodes.map((node, index): DeploymentRunNodeRecord => ({
     runId: runSummary.runId, nodeId: node.id, nodeType: node.type,
@@ -179,7 +245,7 @@ export async function mountDeploymentWorkflowPage(root: HTMLElement): Promise<vo
     selectedRunId: runSummary.runId,
     detail: {
       summary: runSummary,
-      approvalSummary: viewParam === 'prepare' ? approvalSummary : null,
+      approvalSummary: initialTab === 'prepare' ? approvalSummary : null,
       outputs: [{
         nodeId: definition.nodes[1].id,
         outputName: 'bundle',
@@ -225,25 +291,35 @@ export async function mountDeploymentWorkflowPage(root: HTMLElement): Promise<vo
         sourceRunId: 'run-visual-6', activatedAt: Date.now() - 86_400_000, rollbackable: true,
       },
     ],
-    artifact: params.get('overlay') === 'artifact' ? artifactInspection : null,
+    artifact: overlay === 'artifact' ? artifactInspection : null,
   });
 
-  const scenario = params.get('scenario') ?? 'wide';
-  const initialTab = viewParam === 'prepare'
-    ? 'prepare'
-    : viewParam === 'versions'
-      ? 'versions'
-      : viewParam === 'runs'
-        ? 'runs'
-        : 'design';
-  const width = scenario === 'narrow' ? 430 : scenario === 'medium' ? 860 : scenario === 'ai' ? 780 : 1_420;
+  const width = DEPLOYMENT_VISUAL_SCENARIO_WIDTHS[scenario];
   ReactDOM.createRoot(root).render(
-    <div className="flex h-screen bg-app-bg p-3">
-      <div className="min-w-0 overflow-hidden rounded-xl border bg-background" style={{ width }}>
+    <div
+      className="flex h-screen bg-app-bg p-3"
+      data-testid="deployment-visual-fixture"
+      data-scenario={scenario}
+      data-view={initialTab}
+      data-overlay={overlay ?? 'none'}
+      data-locale={locale}
+    >
+      <div
+        className="min-w-0 overflow-hidden rounded-xl border bg-background"
+        style={{ width }}
+        data-testid="deployment-visual-workbench"
+      >
         <DeploymentWorkflowCenter initialTab={initialTab} />
+        <VisualOverlayOpener overlay={overlay} />
       </div>
       {scenario === 'ai' && (
-        <Card className="ml-3 min-w-0 flex-1" size="sm" variant="outline" radius="compact">
+        <Card
+          className="ml-3 min-w-0 flex-1"
+          size="sm"
+          variant="outline"
+          radius="compact"
+          data-testid="deployment-visual-ai-panel"
+        >
           <CardHeader><CardTitle>{locale === 'zh-CN' ? 'AI 助手' : 'AI assistant'}</CardTitle></CardHeader>
           <CardContent className="text-sm text-muted-foreground">{locale === 'zh-CN' ? '工作台被 AI 面板动态压窄。' : 'The AI panel narrows the workbench container.'}</CardContent>
         </Card>

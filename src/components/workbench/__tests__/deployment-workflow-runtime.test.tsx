@@ -1,6 +1,6 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DeploymentWorkflowRuntimeOverlays,
   DeploymentWorkflowRuntimeView,
@@ -8,6 +8,7 @@ import {
 import type {
   DeploymentApprovalSummary,
   DeploymentArtifactInspection,
+  DeploymentReleaseRecord,
   DeploymentRunDetail,
   DeploymentRunNodeRecord,
   DeploymentRunSummary,
@@ -50,7 +51,7 @@ const workflow: DeploymentWorkflowRecord = {
     parameters: [],
     nodes: [
       { id: 'source', type: 'source.snapshot', typeVersion: 1, displayName: 'Freeze source', inputs: {}, config: { sourceRef: 'workspace' }, timeoutSeconds: 60, retry: { maxAttempts: 1, initialBackoffSeconds: 0, maxBackoffSeconds: 0 }, runWhen: 'allSucceeded' },
-      { id: 'approval', type: 'control.approval', typeVersion: 1, displayName: 'Human approval', inputs: {}, config: { targetId: 'production' }, timeoutSeconds: 60, retry: { maxAttempts: 1, initialBackoffSeconds: 0, maxBackoffSeconds: 0 }, runWhen: 'allSucceeded' },
+      { id: 'approval', type: 'control.approval', typeVersion: 1, displayName: 'Human approval', inputs: { source: { fromNodeId: 'source', fromPort: 'source' } }, config: { targetId: 'production' }, timeoutSeconds: 60, retry: { maxAttempts: 1, initialBackoffSeconds: 0, maxBackoffSeconds: 0 }, runWhen: 'allSucceeded' },
       { id: 'verify', type: 'verify.http', typeVersion: 2, displayName: 'HTTP verification', inputs: {}, config: { targetId: 'production' }, timeoutSeconds: 60, retry: { maxAttempts: 1, initialBackoffSeconds: 0, maxBackoffSeconds: 0 }, runWhen: 'allSucceeded' },
     ],
     outputs: {},
@@ -104,7 +105,51 @@ const node: DeploymentRunNodeRecord = {
   status: 'succeeded', lastAttempt: 1, outputSummary: { files: 4 }, startedAt: 10, finishedAt: 20, updatedAt: 20,
 };
 
+const approvalNode: DeploymentRunNodeRecord = {
+  runId: 'run-1', nodeId: 'approval', nodeType: 'control.approval', nodeTypeVersion: 1,
+  status: 'awaiting_approval', lastAttempt: 0, updatedAt: 20,
+};
+
+let runtimeWorkspaceResize: ((width: number) => void) | null = null;
+
+class RuntimeResizeObserverMock implements ResizeObserver {
+  readonly callback: ResizeObserverCallback;
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+  }
+
+  disconnect(): void {}
+
+  observe(target: Element): void {
+    if (target.getAttribute('data-testid') === 'deployment-runtime-workspace') {
+      runtimeWorkspaceResize = (width) => this.callback([{
+        target,
+        contentRect: {
+          width, height: 640, x: 0, y: 0, top: 0,
+          right: width, bottom: 640, left: 0, toJSON: () => ({}),
+        },
+      } as ResizeObserverEntry], this);
+    }
+    if (target.getAttribute('data-slot') === 'scroll-area-viewport') {
+      Object.defineProperty(target, 'getAnimations', {
+        configurable: true,
+        value: () => [],
+      });
+    }
+  }
+
+  unobserve(): void {}
+}
+
+function resizeRuntimeWorkspace(width: number): void {
+  if (!runtimeWorkspaceResize) throw new Error('Runtime workspace observer was not registered');
+  act(() => runtimeWorkspaceResize?.(width));
+}
+
 beforeEach(() => {
+  runtimeWorkspaceResize = null;
+  vi.stubGlobal('ResizeObserver', RuntimeResizeObserverMock);
   exportAudit.mockReset();
   exportAudit.mockResolvedValue({
     schemaVersion: 3,
@@ -123,16 +168,21 @@ beforeEach(() => {
     runs: [summary],
     selectedRunId: summary.runId,
     detail: { summary, approvalSummary: approvalSummary(), outputs: [], receipts: [] },
-    nodes: [node],
+    nodes: [node, approvalNode],
     selectedNodeId: node.nodeId,
     events: [{ runId: summary.runId, sequence: 2, nodeId: node.nodeId, attempt: 1, eventKind: 'node_succeeded', status: 'succeeded', summaryKey: 'deployment.node.succeeded', payload: null, recordedAt: 20 }],
     attempts: [{ schemaVersion: 1, runId: summary.runId, nodeId: node.nodeId, attempt: 1, nodeType: node.nodeType, nodeTypeVersion: 1, executorVersion: 'native/v1', idempotencyKey: 'attempt-1', status: 'succeeded', startedAt: 10, finishedAt: 20, createdAt: 10, updatedAt: 20 }],
   });
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('DeploymentWorkflowRuntimeView', () => {
   it('groups approval by user meaning and keeps long content inside a fixed dialog chain', async () => {
     render(<DeploymentWorkflowRuntimeView kind="prepare" workflow={workflow} />);
+    expect(screen.getByTestId('deployment-prepare-view').querySelector('[data-slot="card"]')).not.toBeInTheDocument();
     const trigger = screen.getByRole('button', { name: 'deployment.runtime.reviewApproval' });
     trigger.focus();
     fireEvent.click(trigger);
@@ -144,6 +194,7 @@ describe('DeploymentWorkflowRuntimeView', () => {
     expect(screen.getByRole('heading', { name: 'deployment.runtime.approval.failure' })).toBeInTheDocument();
     const content = document.querySelector('[data-slot="dialog-content"]');
     expect(content).toHaveClass('overflow-hidden');
+    expect(content?.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
     expect(content?.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
     expect(content?.querySelector('[data-slot="dialog-footer"]')).toHaveClass('shrink-0');
     await waitFor(() => expect(screen.getByRole('button', { name: 'deployment.runtime.approveAndRun' })).toHaveFocus());
@@ -160,15 +211,128 @@ describe('DeploymentWorkflowRuntimeView', () => {
     expect(screen.getByRole('button', { name: 'deployment.runtime.approveAndRun' })).toBeDisabled();
   });
 
+  it('keeps semantic drift as a preparation gate and approval wired to the run coordinator', async () => {
+    const prepare = vi.fn().mockResolvedValue(undefined);
+    const approveAndStart = vi.fn().mockResolvedValue(undefined);
+    useDeploymentWorkflowRunStore.setState({ prepare, approveAndStart });
+    const view = render(
+      <DeploymentWorkflowRuntimeView kind="prepare" workflow={workflow} semanticDirty />,
+    );
+
+    expect(screen.getByRole('button', { name: 'deployment.runtime.prepare.action' })).toBeDisabled();
+    expect(screen.getByText('deployment.runtime.drift.unsavedTitle')).toBeInTheDocument();
+    view.unmount();
+
+    render(<DeploymentWorkflowRuntimeView kind="prepare" workflow={workflow} />);
+    fireEvent.click(screen.getByRole('button', { name: 'deployment.runtime.reviewApproval' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'deployment.runtime.approveAndRun' }));
+    await waitFor(() => expect(approveAndStart).toHaveBeenCalledTimes(1));
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
   it('shows node attempts, bounded logs, and opens audit evidence with fixed scrolling', async () => {
     render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+    const runsView = screen.getByTestId('deployment-runs-view');
+    expect(runsView.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
     expect(screen.getByLabelText('deployment.runtime.attempt.select')).toHaveTextContent('deployment.runtime.attemptNumber:1');
     expect(screen.getByText('#2 · deployment.node.succeeded')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'deployment.runtime.evidence.action' }));
+    const trigger = screen.getByRole('button', { name: 'deployment.runtime.evidence.action' });
+    trigger.focus();
+    fireEvent.click(trigger);
     expect(await screen.findByRole('heading', { name: 'deployment.runtime.evidence.title' })).toBeInTheDocument();
-    expect(document.querySelector('[data-slot="dialog-content"]')).toHaveClass('overflow-hidden');
+    const content = document.querySelector('[data-slot="dialog-content"]');
+    expect(content).toHaveClass('overflow-hidden');
+    expect(content?.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'deployment.history.exportAudit' }));
     await waitFor(() => expect(exportAudit).toHaveBeenCalledWith('run-1'));
+    fireEvent.click(screen.getAllByRole('button', { name: 'common.close' })[0]!);
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('projects workflow bindings and native node state into a strictly read-only runtime DAG', () => {
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+
+    const flow = screen.getByTestId('deployment-runtime-flow');
+    expect(flow).toHaveAttribute('data-read-only', 'true');
+    expect(flow.querySelectorAll('[data-node-id]')).toHaveLength(2);
+    expect(flow.querySelector('[data-node-id="source"]')).toMatchObject({
+      dataset: { nodeStatus: 'succeeded', nodeAttempt: '1' },
+    });
+    expect(flow.querySelector('[data-node-id="approval"]')).toMatchObject({
+      dataset: { nodeStatus: 'awaiting_approval', nodeAttempt: '0' },
+    });
+    expect(flow.querySelectorAll('[data-edge-id]')).toHaveLength(1);
+    expect(flow.querySelector('[data-edge-id]')).toMatchObject({
+      dataset: {
+        sourceNodeId: 'source',
+        sourcePort: 'source',
+        targetNodeId: 'approval',
+        targetPort: 'source',
+      },
+    });
+    const anchors = [...flow.querySelectorAll<HTMLElement>('[data-runtime-anchor]')];
+    expect(anchors).toHaveLength(4);
+    expect(anchors.every((anchor) => (
+      anchor.getAttribute('aria-hidden') === 'true'
+      && anchor.tabIndex === -1
+      && anchor.classList.contains('pointer-events-none')
+      && anchor.classList.contains('opacity-0')
+    ))).toBe(true);
+    expect(flow).toHaveTextContent('deployment.runtime.status.succeeded');
+    expect(flow).toHaveTextContent('deployment.runtime.status.awaiting_approval');
+  });
+
+  it('moves run history and the inspector into fixed-title drawers with focus return', async () => {
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+    resizeRuntimeWorkspace(858);
+
+    const runsTrigger = screen.getByRole('button', { name: 'deployment.runtime.runs.title' });
+    runsTrigger.focus();
+    fireEvent.click(runsTrigger);
+    expect((await screen.findAllByRole('heading', { name: 'deployment.runtime.runs.title' })).length).toBeGreaterThan(0);
+    const runsDrawer = document.querySelector('[data-slot="drawer-content"]');
+    expect(runsDrawer).toHaveClass('min-h-0', 'overflow-hidden');
+    expect(runsDrawer?.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    await waitFor(() => expect(runsTrigger).toHaveFocus());
+
+    const inspectorTrigger = screen.getByRole('button', { name: 'deployment.runtime.node.details' });
+    inspectorTrigger.focus();
+    fireEvent.click(inspectorTrigger);
+    expect(await screen.findByTestId('deployment-runtime-inspector')).toBeInTheDocument();
+    const inspectorDrawer = document.querySelector('[data-slot="drawer-content"]');
+    expect(inspectorDrawer?.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    await waitFor(() => expect(inspectorTrigger).toHaveFocus());
+  });
+
+  it('keeps state_unknown recovery read-only and does not expose cancellation', () => {
+    const unknown = runSummary({ status: 'state_unknown' });
+    useDeploymentWorkflowRunStore.setState({
+      detail: { summary: unknown, approvalSummary: null, outputs: [], receipts: [] },
+      nodes: [{ ...node, status: 'state_unknown' }],
+    });
+
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+
+    expect(screen.getByRole('button', { name: 'deployment.runtime.reconcile' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'common.cancel' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('deployment-runtime-flow')).toHaveAttribute('data-read-only', 'true');
+  });
+
+  it('keeps active-run cancellation behind its confirmation dialog', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const active = runSummary({ status: 'in_progress' });
+    useDeploymentWorkflowRunStore.setState({
+      detail: { summary: active, approvalSummary: null, outputs: [], receipts: [] },
+      cancel,
+    });
+
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+    expect(await screen.findByRole('heading', { name: 'deployment.runtime.cancel.title' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'deployment.runtime.cancel.action' }));
+    await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
   });
 
   it('renders artifact identity, references, lease, and retention in a scrollable drawer', () => {
@@ -184,11 +348,75 @@ describe('DeploymentWorkflowRuntimeView', () => {
       retention: { referenceCount: 2, leaseCount: 1, currentRelease: true, previousRelease: false, protected: true },
       references: [{ workflowId: workflow.id, runId: 'run-1', nodeId: null, referenceKind: 'release_current', ownerId: 'release-next', leaseActive: true, retainUntil: null, createdAt: 10 }],
     };
-    useDeploymentWorkflowRunStore.setState({ artifact });
-    render(<DeploymentWorkflowRuntimeOverlays />);
+    render(
+      <>
+        <button type="button" data-testid="artifact-trigger">artifact</button>
+        <DeploymentWorkflowRuntimeOverlays />
+      </>,
+    );
+    const trigger = screen.getByTestId('artifact-trigger');
+    trigger.focus();
+    act(() => useDeploymentWorkflowRunStore.setState({ artifact }));
     expect(screen.getByRole('heading', { name: 'deployment.runtime.artifact.title' })).toBeInTheDocument();
     expect(screen.getByText('deployment.runtime.artifact.reference.release_current')).toBeInTheDocument();
     expect(screen.getByTestId('deployment-artifact-drawer')).toHaveClass('min-h-0');
+    expect(screen.getByTestId('deployment-artifact-drawer').querySelector('[data-slot="card"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
+    fireEvent.click(screen.getAllByRole('button', { name: 'common.close' })[0]!);
+    return waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('prepares rollback as a new run for a readable retained release', async () => {
+    const prepare = vi.fn().mockResolvedValue(undefined);
+    const releases: DeploymentReleaseRecord[] = [
+      {
+        workflowId: workflow.id,
+        releaseId: 'release-current',
+        position: 'current',
+        artifactReference,
+        manifestDigest: digest('a'),
+        contentDigest: digest('c'),
+        artifactType: 'application/vnd.shellspan.file-tree',
+        identity: { releaseId: 'release-current', artifactContentDigest: digest('c'), layoutDigest: digest('d') },
+        sourceRunId: 'run-1',
+        activatedAt: 20,
+        rollbackable: false,
+      },
+      {
+        workflowId: workflow.id,
+        releaseId: 'release-previous',
+        position: 'previous',
+        artifactReference,
+        manifestDigest: digest('a'),
+        contentDigest: digest('6'),
+        artifactType: 'application/vnd.shellspan.file-tree',
+        identity: { releaseId: 'release-previous', artifactContentDigest: digest('6'), layoutDigest: digest('7') },
+        sourceRunId: 'run-previous',
+        activatedAt: 10,
+        rollbackable: true,
+      },
+    ];
+    useDeploymentWorkflowRunStore.setState({ releases, prepare });
+    render(<DeploymentWorkflowRuntimeView kind="versions" workflow={workflow} />);
+
+    expect(screen.getByTestId('deployment-versions-view').querySelector('[data-slot="card"]')).not.toBeInTheDocument();
+
+    const trigger = screen.getByTestId('deployment-open-rollback');
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = await screen.findByTestId('deployment-rollback-dialog');
+    expect(dialog).toHaveClass('overflow-hidden');
+    expect(dialog.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('deployment.runtime.rollback.release')).toHaveTextContent('release-previous');
+    expect(dialog.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
+    expect(dialog.querySelector('[data-slot="dialog-footer"]')).toHaveClass('shrink-0');
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+    fireEvent.click(trigger);
+    await screen.findByTestId('deployment-rollback-dialog');
+
+    fireEvent.click(screen.getByRole('button', { name: 'deployment.runtime.rollback.prepare' }));
+    await waitFor(() => expect(prepare).toHaveBeenCalledWith(workflow, 'release-previous'));
   });
 });

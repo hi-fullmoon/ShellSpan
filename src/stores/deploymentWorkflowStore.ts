@@ -45,6 +45,12 @@ export interface DeploymentEditorNotice {
   kind: 'created' | 'saved' | 'layoutSaved';
 }
 
+export interface DeploymentNodePositionChange {
+  id: string;
+  x: number;
+  y: number;
+}
+
 interface DeploymentWorkflowStoreState {
   capabilities: DeploymentWorkflowCapabilities | null;
   catalog: DeploymentNodeTypeCatalog | null;
@@ -86,7 +92,16 @@ interface DeploymentWorkflowStoreState {
     targetPort: string,
     binding: DeploymentPortBinding | null,
   ) => void;
+  disconnectInput: (targetNodeId: string, targetPort: string) => void;
+  reconnectInput: (
+    previousTargetNodeId: string,
+    previousTargetPort: string,
+    targetNodeId: string,
+    targetPort: string,
+    binding: DeploymentPortBinding,
+  ) => void;
   moveNode: (id: string, x: number, y: number) => void;
+  moveNodes: (changes: readonly DeploymentNodePositionChange[]) => void;
   validateDraft: () => Promise<DeploymentEditorIssue[]>;
   saveDraft: () => Promise<DeploymentWorkflowRecord>;
   clearError: () => void;
@@ -373,18 +388,85 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
     };
     set({ draft: next, semanticDirty: true, issues: localIssues(next, get().catalog) });
   },
-  moveNode: (id, x, y) => {
+  disconnectInput: (targetNodeId, targetPort) => {
     const draft = get().draft;
-    if (!draft || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    const targetNode = draft?.definition.nodes.find((item) => item.id === targetNodeId);
+    if (!draft || !targetNode?.inputs[targetPort]) return;
+    const next: DeploymentWorkflowDraft = {
+      ...draft,
+      definition: {
+        ...draft.definition,
+        nodes: draft.definition.nodes.map((item) => {
+          if (item.id !== targetNodeId) return item;
+          const inputs = { ...item.inputs };
+          delete inputs[targetPort];
+          return { ...item, inputs };
+        }),
+      },
+    };
+    set({ draft: next, semanticDirty: true, issues: localIssues(next, get().catalog) });
+  },
+  reconnectInput: (
+    previousTargetNodeId,
+    previousTargetPort,
+    targetNodeId,
+    targetPort,
+    binding,
+  ) => {
+    const draft = get().draft;
+    if (!draft) return;
+    let changed = false;
+    const nodes = draft.definition.nodes.map((item) => {
+      if (item.id !== previousTargetNodeId && item.id !== targetNodeId) return item;
+      const inputs = { ...item.inputs };
+      let nodeChanged = false;
+      if (item.id === previousTargetNodeId && inputs[previousTargetPort]) {
+        delete inputs[previousTargetPort];
+        nodeChanged = true;
+      }
+      if (item.id === targetNodeId) {
+        const current = inputs[targetPort];
+        if (current?.fromNodeId !== binding.fromNodeId || current.fromPort !== binding.fromPort) {
+          inputs[targetPort] = binding;
+          nodeChanged = true;
+        }
+      }
+      changed ||= nodeChanged;
+      return nodeChanged ? { ...item, inputs } : item;
+    });
+    if (!changed) return;
+    const next: DeploymentWorkflowDraft = {
+      ...draft,
+      definition: { ...draft.definition, nodes },
+    };
+    set({ draft: next, semanticDirty: true, issues: localIssues(next, get().catalog) });
+  },
+  moveNode: (id, x, y) => get().moveNodes([{ id, x, y }]),
+  moveNodes: (changes) => {
+    const draft = get().draft;
+    if (!draft) return;
+    const nodeIds = new Set(draft.definition.nodes.map((item) => item.id));
+    const validChanges = new Map(changes
+      .filter((change) => nodeIds.has(change.id)
+        && Number.isFinite(change.x)
+        && Number.isFinite(change.y))
+      .map((change) => [change.id, change]));
+    if (validChanges.size === 0) return;
+    const layoutNodes = { ...draft.layout.nodes };
+    let changed = false;
+    for (const change of validChanges.values()) {
+      const current = layoutNodes[change.id];
+      if (current?.x === change.x && current.y === change.y) continue;
+      layoutNodes[change.id] = { ...current, x: change.x, y: change.y };
+      changed = true;
+    }
+    if (!changed) return;
     set({
       draft: {
         ...draft,
         layout: {
           ...draft.layout,
-          nodes: {
-            ...draft.layout.nodes,
-            [id]: { ...draft.layout.nodes[id], x, y },
-          },
+          nodes: layoutNodes,
         },
       },
       layoutDirty: true,
