@@ -4,6 +4,16 @@ Status: complete — PASS for the Windows delivery scope
 Date: 2026-09-16
 Continuation: Windows rollout continuation delegated from Phase 5 session `01a0a566-6a29-74a3-945e-cc310a46cecd`
 
+## Subsequent revision — 2026-09-17
+
+This file remains the historical Phase 6 acceptance evidence for its recorded
+delivery scopes. The later remote bound-terminal reuse revision replaced the
+dedicated Agent SSH terminal path with the frozen user SSH PTY and renamed its
+rollout contract. Current behavior and gates are documented in the RFC,
+compatibility plan, roadmap, test matrix, and reuse plan. The historical PASS
+statements below are not rewritten and do not imply completion of the revised
+stage 7 full or representative-window validation.
+
 ## Scope and recommendation
 
 This continuation completed only the Windows portion of Phase 6. Local Windows

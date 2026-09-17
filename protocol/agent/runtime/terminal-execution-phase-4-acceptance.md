@@ -16,6 +16,16 @@ Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
 
 Matrix: [Terminal Execution Platform Test Matrix](./terminal-execution-test-matrix.md)
 
+## Subsequent revision — 2026-09-17
+
+This is a historical acceptance record and its results below are unchanged. The
+remote bound-terminal reuse revision later removed the dedicated Agent SSH PTY
+production topology and now routes remote `boundTerminal` commands to the
+frozen user SSH PTY. Current normative behavior and its new gate are defined in
+the RFC, compatibility plan, roadmap, and test matrix linked above; the PASS
+recorded here must not be treated as evidence that the revised topology passed
+its still-pending stage 7 full/window validation.
+
 ## 2026-09-16 Windows prerequisite supplement
 
 The separate native Windows prerequisite that remained after the Phase 4

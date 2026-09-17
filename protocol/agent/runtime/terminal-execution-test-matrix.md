@@ -1,6 +1,6 @@
 # Terminal Execution Platform Test Matrix
 
-Status: accepted Phase 0 matrix; Phase 3 cooperative-shell amendment: 2026-09-15.
+Status: accepted Phase 0 matrix; Phase 3 cooperative-shell amendment: 2026-09-15; remote bound-terminal reuse gate added 2026-09-17.
 
 Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
 
@@ -46,6 +46,9 @@ the first phase that must supply acceptance evidence.
 | Sensitive/destructive/external or explicit untrusted/adversarial lifecycle request is forced to Direct | native route/effect/policy | native route/effect/policy | native route/effect/policy | native route/effect/policy | P3/P4 |
 | Cancel, timeout, completion race, takeover, and input rejection after release | local PTY | local PTY | ConPTY | SSH PTY | P3/P4 |
 | Disconnect with side effect is uncertain and never auto-replayed | local close | local close | ConPTY close | forced SSH disconnect | P3/P4 |
+| Remote `boundTerminal` resolves the frozen source session and creates no extra terminal | n/a | n/a | n/a | current user SSH PTY; stable tab count | Remote reuse |
+| `promptReady = false` or a foreground program blocks every Agent byte | n/a | n/a | n/a | busy source SSH PTY | Remote reuse |
+| Remote rollout disable makes active work uncertain, revokes lease/turn guard, and keeps transport open | n/a | n/a | n/a | source SSH PTY stays usable without reconnect | Remote reuse |
 | Resize updates rows/columns and screen version | local PTY | local PTY | ConPTY | SSH PTY | P5 |
 | REPL, confirmation menu, credential-like prompt, alternate-screen application | deterministic fixtures | deterministic fixtures | deterministic fixtures | deterministic fixtures | P5 |
 | Credential-like input/output absent from logs, snapshots, counters, and persisted session | native checks | native checks | native checks | native checks | P5/P6 |
@@ -63,7 +66,7 @@ the first phase that must supply acceptance evidence.
 | Recovery behavior | `cargo test --manifest-path src-tauri/Cargo.toml agent_runtime::recovery::tests --lib -- --nocapture` plus the visible-terminal recovery filter | An execution without a durable result is uncertain and not resumable/replayed. |
 | Current transport contracts | targeted `commands::tests`, `session::tests`, terminal registry, and performance contract tests | UTF-8 boundaries, startup gates, bounded queues, ordering, resize, and high/low-watermark behavior pass. |
 | Visible-terminal host gate | `pnpm test:agent-visible-terminal` | Formatting/check, host-native PTY/lease tests, recovery filters, and frontend terminal integration tests pass. |
-| Isolated SSH visible gate | `pnpm test:terminal-visible:ssh` | Docker fixture proves dedicated Agent SSH PTY `terminal_execute`; unsupported targets are unavailable. |
+| Isolated SSH visible gate | `pnpm test:terminal-visible:ssh` | Docker fixture proves current-user SSH PTY `terminal_execute`, shared shell state, busy fencing, fallback to an ordinary shell on integration failure, and no extra terminal; unsupported targets are unavailable. |
 | Local transport performance | `cargo run --release --manifest-path src-tauri/Cargo.toml --example terminal_transport_baseline -- --bytes 2097152 --repetitions 5 --sessions 4` | Expected byte counts are received; median/p95 throughput and event-vs-poll latency are recorded. |
 | SSH transport performance | Run the same example with `--ssh` and the loopback fixture environment | Expected bytes are received for single and four-session SSH PTYs; measurements are recorded. |
 
@@ -138,7 +141,7 @@ run passed on 2026-09-16 and closed the earlier waiver.
 
 Detailed evidence: [Terminal Execution Phase 4 Acceptance Evidence](./terminal-execution-phase-4-acceptance.md).
 
-Overall gate: **PASS for the remote POSIX lane**. The isolated loopback Docker
+Overall gate: **PASS for the historical Phase 4 remote POSIX lane**. The isolated loopback Docker
 fixture runs SSH `pty-req` plus interactive bash/zsh shells, uses a separate
 cooperative control channel, and keeps a simultaneous user-owned SSH PTY
 independent. Unsupported `/bin/sh` is explicitly `unavailable`. Direct SSH exec
@@ -151,7 +154,7 @@ passes independently. The separate native Windows prerequisite passed in the
 | Isolated SSH zsh | **PASS** | Same isolated sshd; independently authenticated zsh login and state-preservation smoke. |
 | Isolated SSH unsupported `/bin/sh` | **PASS (explicit unavailable)** | Separate fixture account proves no false-ready integration. |
 | Direct SSH exec | **PASS** | Existing reviewed SSH execution fixture runs independently of remote terminal flags/channels. |
-| User-owned SSH PTY isolation | **PASS** | A simultaneous real user-owned SSH shell retains its own state and is not selected by `terminal_execute`. |
+| User-owned SSH PTY isolation | **PASS (historical topology)** | A simultaneous real user-owned SSH shell retained its own state and was not selected by the original `terminal_execute` route. The current reuse gate below supersedes that topology and requires the frozen user SSH PTY to be selected. |
 | Native Windows PowerShell 5.1 / PowerShell 7 prerequisite | **PASS** | Consolidated native Windows Phase 2/3/5 gate passed on 2026-09-16. |
 
 Phase 4 entry point: `pnpm test:terminal-visible:ssh`. It builds the disposable
@@ -179,10 +182,11 @@ screen, and credential-safety path.
 | Linux bash and zsh | **MISSING — DEFERRED** | No current-code Phase 5 native PTY fixture has run on Linux; it is outside the first Windows delivery scope. |
 | Isolated SSH bash and zsh | **MISSING — DEFERRED** | The Phase 4 SSH fixture has not been extended for Phase 5 interactive scenarios; remote interactive rollout remains off. |
 
-The Windows and macOS Phase 6 continuations are complete. The passed Phase 4
-remote visible-command path is default-on for those desktop hosts. Linux and
-remote interactive tools retain default-off flags, and the legacy wrapper stays
-available for rollback until their independent Phase 5 evidence is supplied.
+The Windows and macOS Phase 6 continuations are complete. Remote visible
+commands now use the current-user SSH bound-terminal path on those desktop
+hosts. Linux and remote interactive tools retain default-off flags. Rollback
+makes remote visible commands unavailable; it does not restore a wrapper or a
+dedicated Agent SSH terminal.
 
 ## Phase 6 acceptance status
 
@@ -200,7 +204,54 @@ Protocol vocabulary and persisted execution-surface values remain additive.
 | Persisted sessions and event-v5 vocabulary | **PASS** | `direct` / `boundTerminal` retain their stored meanings. New `exec_command` calls accept only `channel = direct`; visible commands use `terminal_execute`. |
 | macOS zsh and bash | **PASS — DEFAULT ON** | Native macOS 26.6.2 arm64; exact Broker/visible/interactive fixtures, Direct regression, 798-test serial Rust suite, and two release performance rounds pass. Local wrapper routing is removed. |
 | Linux bash and zsh | **MISSING — DEFERRED, DEFAULT OFF** | No Phase 5 native acceptance in this Windows continuation; wrapper/parser compatibility remains compiled and routable. |
-| Isolated SSH bash and zsh | **VISIBLE COMMAND PASS — DEFAULT ON; INTERACTIVE MISSING — DEFAULT OFF** | Phase 4 real-SSH bash/zsh evidence enables the dedicated Agent PTY on Windows and macOS desktop hosts. The separate remote-interactive flag stays off because the SSH Phase 5 matrix has not run; wrapper fallback remains available for rollback. |
+| Isolated SSH bash and zsh | **HISTORICAL VISIBLE COMMAND PASS; CURRENT REUSE GATE BELOW; INTERACTIVE MISSING — DEFAULT OFF** | Phase 4 proved the original remote shell-integration lane. Current production routing uses the frozen user SSH PTY and must satisfy the reuse gate below. The separate remote-interactive flag stays off because the SSH Phase 5 matrix has not run; rollback only disables remote visible commands. |
+
+## Remote bound-terminal reuse current gate
+
+This gate is authoritative for current remote `boundTerminal` behavior. The
+historical Phase 4 acceptance remains evidence for what was tested then, but it
+does not prove the revised transport topology.
+
+| Requirement | Focused gate | Stage 7 status |
+| --- | --- | --- |
+| Frozen target `sessionId` resolves directly to the current user SSH PTY; no Agent terminal map/event/tab/store field remains | Native route/runtime tests, frontend event/store/tab regressions, and residual source search | **AUTOMATED PASS**; original native-window tab-count check blocked by unavailable computer-use app/window RPC |
+| `integrationState = ready` and `promptReady = true` are both required; busy/active-command/generation drift writes no bytes | Broker, command presentation, Native adapter/runtime, and frontend selector/controller tests | **PASS**; real SSH busy fixture and full frontend/Rust gates passed 2026-09-17 |
+| User and Agent share cwd, environment, aliases/functions, prompt/history startup semantics, and one output stream | `pnpm test:terminal-visible:ssh` bash/zsh real-SSH fixture | **PASS** on the 2026-09-17 isolated Bash/Zsh gate |
+| Integration preparation failure still opens an ordinary usable SSH shell and does not create a replacement terminal | Session/commands tests plus no-SFTP/unsupported-shell/control-channel real-SSH fixture | **PASS** on the 2026-09-17 isolated fallback gate |
+| Whole-turn guard, per-command lease, takeover fencing, disconnect uncertainty, and no automatic replay | Terminal lease/runtime/Broker focused tests | **AUTOMATED PASS**; native-window takeover presentation remains blocked by unavailable computer-use app/window RPC |
+| No implicit Direct fallback; sensitive/effect/direct-required policy continues to select Direct explicitly | Native adapter/effect/policy focused tests and protocol contract | **PASS** in focused and full Rust gates |
+| `terminal_remote_bound_terminal_v1`, `SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1`, and `remoteBoundTerminalRollout` are authoritative and non-persisted | Environment precedence test, Broker JSON serialization test, TypeScript IPC/type test, residual search | **PASS** in focused and full gates |
+| Rollout disable makes incomplete work uncertain, revokes Agent lease/turn guard, preserves the SSH transport, and uses ordinary shell startup on later connection/reconnect | Broker rollback and Native runtime reconciliation regressions | **AUTOMATED PASS**; native-window reconnect presentation remains blocked by unavailable computer-use app/window RPC |
+
+### Stage 7 execution record (2026-09-17, Windows 11 x64)
+
+- The complete §11.4 command sequence passed after one minimal Windows-only
+  durability correction in deployment artifact publication. The first full Rust
+  run found four deployment artifact failures because `sync_all()` used a
+  read-only Windows file handle (`os error 5`); reopening the already-created
+  archive with write access fixed the blocker. The five affected focused tests,
+  `cargo fmt --check`, and the complete Rust suite then passed.
+- `pnpm test:terminal-visible:ssh` passed once without retry. Its isolated Docker
+  services proved Bash/Zsh startup compatibility and shared-shell state, busy
+  zero-write, takeover fencing, disconnect no-replay, integration cleanup,
+  unsupported-shell/no-SFTP fallback, and independent Direct SSH exec.
+- Full frontend result: 206 passed files / 1884 passed tests, with one file and
+  one test skipped. Full Rust result: 832 passed / 41 ignored, plus five passed
+  `petdex_contract_probe` integration tests. The production build and all four
+  static/format checks passed.
+- Additional UI-adjacent regression evidence passed: eight terminal/Agent files
+  with 170 tests, plus 38 TerminalPane tests covering the non-overlaying lease
+  bar, takeover button/Escape, input-block announcement, between-command guard,
+  failure toast, and disconnect/reconnect presentation.
+- The native Tauri app and SSH fixture were launched, but computer-use could not
+  enumerate or bind a native window: `@oai/sky` reported `Trusted RPC service is
+  not configured: sky`, and the active runtime exposed no native app/window API.
+  Therefore native narrow/wide tab-count, takeover, and reconnect observation is
+  **NOT RUN**. As a non-equivalent Web substitute, the repository's existing
+  `aiComposerVisual` page rendered at 1200×760 and 1600×1000 and showed the bound
+  terminal idle, running/stop, and unavailable states with the relevant header
+  and composer controls present in the render tree. That page has no Tauri IPC,
+  terminal tabs, live lease events, or reconnect transport.
 
 Native Windows command: `pnpm test:terminal-rollout:windows`. It is an alias of
 the consolidated host gate and reports `MISSING` rather than `PASS` if the
