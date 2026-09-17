@@ -16,8 +16,7 @@ use crate::agent_runtime::{
 };
 use crate::db::Database;
 use crate::keychain::CredentialManager;
-use crate::models::{AgentRemoteTerminalOwner, SessionManager, SessionStatus, SessionTerminalKind};
-use crate::terminal_broker::TerminalIntegrationState;
+use crate::models::{SessionManager, SessionStatus, SessionTerminalKind};
 use crate::terminal_broker::TerminalVisibleCommandRoute;
 
 use super::{
@@ -41,13 +40,6 @@ struct PreparedNativeCall {
     started_at_unix_ms: u64,
 }
 
-/// Construction is private to this module and occurs only after the prepared
-/// native authorization has been issued. The remote session creator requires
-/// this witness before it may write bootstrap bytes to an Agent SSH PTY.
-pub(crate) struct ApprovedAgentRemoteTerminalBootstrap {
-    _private: (),
-}
-
 pub(crate) struct NativeToolAdapter {
     app: AppHandle,
     engine: Arc<NativeToolEngine>,
@@ -63,199 +55,14 @@ impl NativeToolAdapter {
         }
     }
 
-    fn configure(
-        &self,
-        runtime: &NativeToolEngine,
-        sessions: &SessionManager,
-    ) -> Result<(), String> {
+    fn configure(&self, runtime: &NativeToolEngine) -> Result<(), String> {
         let root = self
             .app
             .path()
             .app_data_dir()
             .map_err(|error| format!("failed to resolve Agent native runtime root: {error}"))?;
         runtime.configure_checkpoint_root(root)?;
-        if !runtime
-            .terminal_broker_snapshot(None)?
-            .remote_agent_pty_rollout
-            .enabled
-        {
-            for session_id in sessions.agent_remote_session_ids()? {
-                let _ = runtime.terminal_closed(&session_id);
-                if !runtime
-                    .abort_agent_ssh_terminal_broker_candidate(&session_id)
-                    .unwrap_or(false)
-                {
-                    let _ = runtime.close_terminal_broker_transport(
-                        &session_id,
-                        crate::terminal_broker::TerminalGenerationCloseReason::BrokerShutdown,
-                    );
-                }
-                let _ = sessions.close(&session_id);
-            }
-        }
-        Ok(())
-    }
-
-    fn ensure_remote_agent_terminal(
-        &self,
-        prepared: &PreparedAuthorizationNative,
-        sessions: &SessionManager,
-        database: &Database,
-        credentials: &CredentialManager,
-        cancellation: &CancellationToken,
-        approval: &ApprovedAgentRemoteTerminalBootstrap,
-    ) -> Result<(), String> {
-        if !matches!(
-            prepared.call.tool_name.as_str(),
-            "terminal_execute" | "write_terminal_input"
-        ) {
-            return Ok(());
-        }
-        let AgentToolTargetNative::Remote {
-            target_id,
-            session_id: source_session_id,
-            profile_id: Some(profile_id),
-            host,
-            port,
-            username,
-            ..
-        } = &prepared.call.target
-        else {
-            return Ok(());
-        };
-        let existing =
-            sessions.agent_remote_terminal(&prepared.context.request.user_session_id, target_id)?;
-        let existing_ready = existing.as_ref().is_some_and(|binding| {
-            binding.owner.source_session_id == *source_session_id
-                && binding.state.terminal_kind == SessionTerminalKind::Remote
-                && binding.state.status == SessionStatus::Connected
-                && binding.state.identity.host == *host
-                && binding.state.identity.port == *port
-                && binding.state.identity.username == *username
-        });
-        let mut owned_candidate = None;
-        let dedicated_session_id = if existing_ready {
-            existing
-                .as_ref()
-                .expect("existing Agent terminal checked above")
-                .session_id
-                .clone()
-        } else {
-            if cancellation.is_cancelled() {
-                return Err("Agent remote terminal creation was cancelled before dispatch".into());
-            }
-            let predecessor = existing.as_ref().map(|binding| binding.session_id.clone());
-            let geometry = predecessor
-                .as_deref()
-                .and_then(|id| self.engine.terminal_broker_snapshot(Some(id)).ok())
-                .and_then(|snapshot| snapshot.session)
-                .or_else(|| {
-                    self.engine
-                        .terminal_broker_snapshot(Some(source_session_id))
-                        .ok()
-                        .and_then(|snapshot| snapshot.session)
-                })
-                .map(|snapshot| snapshot.geometry)
-                .unwrap_or_else(|| crate::terminal_broker::TerminalGeometry::new(120, 30));
-            let profile = database
-                .get_profile(profile_id)?
-                .ok_or_else(|| "remote execution profile was not found".to_string())?;
-            let connection = super::native::connection_for_remote_target(
-                &prepared.call.target,
-                database,
-                credentials,
-            )?;
-            let candidate = crate::commands::create_agent_remote_terminal_blocking(
-                &self.app,
-                sessions,
-                self.app.state::<crate::sftp_pool::SftpPool>().inner(),
-                connection,
-                profile.name,
-                profile_id.clone(),
-                AgentRemoteTerminalOwner {
-                    agent_session_id: prepared.context.request.user_session_id.clone(),
-                    target_id: target_id.clone(),
-                    source_session_id: source_session_id.clone(),
-                },
-                predecessor,
-                geometry.columns,
-                geometry.rows,
-                cancellation,
-                approval,
-            )?;
-            let session_id = candidate.session_id().to_string();
-            owned_candidate = Some(candidate);
-            session_id
-        };
-
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let readiness = loop {
-            if cancellation.is_cancelled() {
-                break Err(
-                    "Agent remote terminal creation was cancelled before command input".into(),
-                );
-            }
-            let snapshot = match self
-                .engine
-                .terminal_broker_snapshot(Some(&dedicated_session_id))
-            {
-                Ok(snapshot) => match snapshot.session {
-                    Some(session) => session,
-                    None => break Err("Agent remote terminal broker session disappeared".into()),
-                },
-                Err(error) => break Err(error),
-            };
-            match snapshot.integration_state {
-                TerminalIntegrationState::Ready if snapshot.prompt_ready => break Ok(()),
-                TerminalIntegrationState::Degraded
-                | TerminalIntegrationState::Unavailable
-                | TerminalIntegrationState::Invalidated => {
-                    break Err(format!(
-                        "TERMINAL_REMOTE_INTEGRATION_UNAVAILABLE: {}",
-                        snapshot.integration_reason.as_deref().unwrap_or("unknown")
-                    ));
-                }
-                TerminalIntegrationState::Initializing | TerminalIntegrationState::Ready => {}
-            }
-            if std::time::Instant::now() >= deadline {
-                break Err("TERMINAL_REMOTE_INTEGRATION_TIMEOUT".into());
-            }
-            std::thread::sleep(std::time::Duration::from_millis(25));
-        };
-        if let Err(error) = readiness {
-            if let Some(candidate) = owned_candidate.as_ref() {
-                let cleanup_errors = crate::commands::abort_agent_remote_terminal_candidate(
-                    &self.app, sessions, candidate,
-                );
-                return Err(crate::commands::attachment_failure_message(
-                    &error,
-                    cleanup_errors,
-                ));
-            }
-            return Err(error);
-        }
-        if let Some(candidate) = owned_candidate.as_ref() {
-            if cancellation.is_cancelled() {
-                let cleanup_errors = crate::commands::abort_agent_remote_terminal_candidate(
-                    &self.app, sessions, candidate,
-                );
-                return Err(crate::commands::attachment_failure_message(
-                    "Agent remote terminal creation was cancelled before publication",
-                    cleanup_errors,
-                ));
-            }
-            if let Err(error) = crate::commands::publish_agent_remote_terminal_candidate(
-                &self.app, sessions, candidate,
-            ) {
-                let cleanup_errors = crate::commands::abort_agent_remote_terminal_candidate(
-                    &self.app, sessions, candidate,
-                );
-                return Err(crate::commands::attachment_failure_message(
-                    &error,
-                    cleanup_errors,
-                ));
-            }
-        }
+        runtime.reconcile_remote_visible_rollout()?;
         Ok(())
     }
 }
@@ -292,7 +99,7 @@ impl NativeToolRuntime for NativeToolAdapter {
             .is_ok_and(|snapshot| {
                 snapshot.interactive_tools_rollout.enabled
                     && (!remote_target
-                        || (snapshot.remote_agent_pty_rollout.enabled
+                        || (snapshot.remote_bound_terminal_rollout.enabled
                             && snapshot.remote_interactive_tools_rollout.enabled))
             })
     }
@@ -344,7 +151,7 @@ impl NativeToolRuntime for NativeToolAdapter {
         let sessions = self.app.state::<SessionManager>();
         let database = self.app.state::<Database>();
         let credentials = self.app.state::<CredentialManager>();
-        self.configure(runtime, &sessions)?;
+        self.configure(runtime)?;
         let known_hosts_path = crate::known_hosts::known_hosts_path(&self.app)?;
         let target = target_native(&request.target)?;
         if matches!(
@@ -457,27 +264,25 @@ impl NativeToolRuntime for NativeToolAdapter {
                     runtime.terminal_visible_command_route(session_id)?
                 }
                 AgentToolTargetNative::Remote {
-                    target_id,
                     session_id,
                     host,
                     port,
                     username,
                     ..
-                } => match sessions
-                    .agent_remote_terminal(&request.session_id, target_id)?
-                    .filter(|binding| {
-                        binding.owner.source_session_id == *session_id
-                            && binding.state.terminal_kind == SessionTerminalKind::Remote
-                            && binding.state.status == SessionStatus::Connected
-                            && binding.state.identity.host == *host
-                            && binding.state.identity.port == *port
-                            && binding.state.identity.username == *username
-                    }) {
-                    Some(binding) => {
-                        runtime.terminal_remote_visible_command_route(&binding.session_id)?
+                } => {
+                    let state = sessions.target_state(session_id)?;
+                    if state.terminal_kind != SessionTerminalKind::Remote
+                        || state.status != SessionStatus::Connected
+                        || state.identity.host != *host
+                        || state.identity.port != *port
+                        || state.identity.username != *username
+                    {
+                        return Err(
+                            "remote target no longer matches its frozen Session identity".into(),
+                        );
                     }
-                    None => runtime.remote_agent_pty_new_operation_route()?,
-                },
+                    runtime.terminal_remote_visible_command_route(session_id)?
+                }
                 _ => return Err("terminal command requires a frozen host target".into()),
             };
             Some(route)
@@ -587,7 +392,7 @@ impl NativeToolRuntime for NativeToolAdapter {
         let sessions = self.app.state::<SessionManager>();
         let database = self.app.state::<Database>();
         let credentials = self.app.state::<CredentialManager>();
-        self.configure(runtime, &sessions)?;
+        self.configure(runtime)?;
         let known_hosts_path = crate::known_hosts::known_hosts_path(&self.app)?;
         match stored.authorization {
             PreparedAuthorization::Tool(prepared) => {
@@ -596,8 +401,6 @@ impl NativeToolRuntime for NativeToolAdapter {
                 let native_tool_name = prepared.call.tool_name.clone();
                 let native_target = prepared.call.target.clone();
                 let grant = runtime.issue_prepared_authorization(&prepared, approved)?;
-                let remote_bootstrap_approval =
-                    ApprovedAgentRemoteTerminalBootstrap { _private: () };
                 if cancellation.is_cancelled() {
                     let _ = runtime.revoke_capability(&grant.capability_id);
                     return Ok(NativeToolResult {
@@ -614,17 +417,6 @@ impl NativeToolRuntime for NativeToolAdapter {
                         evidence_refs: Vec::new(),
                         artifacts: Vec::new(),
                     });
-                }
-                if let Err(error) = self.ensure_remote_agent_terminal(
-                    &prepared,
-                    &sessions,
-                    &database,
-                    &credentials,
-                    &cancellation,
-                    &remote_bootstrap_approval,
-                ) {
-                    let _ = runtime.revoke_capability(&grant.capability_id);
-                    return Err(error);
                 }
                 if cancellation.is_cancelled() {
                     let _ = runtime.revoke_capability(&grant.capability_id);

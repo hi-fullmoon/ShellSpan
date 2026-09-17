@@ -30,8 +30,8 @@ use crate::models::{
 };
 use crate::terminal_broker::{
     TerminalBrokerAttachment, TerminalBrokerSnapshot, TerminalGenerationCloseReason,
-    TerminalGeometry, TerminalRawOutputFrame, TerminalSessionBroker, TerminalTransportKind,
-    TerminalVisibleCommandRoute, TerminalWaitReason,
+    TerminalGeometry, TerminalIntegrationState, TerminalLeaseOwner, TerminalRawOutputFrame,
+    TerminalSessionBroker, TerminalTransportKind, TerminalVisibleCommandRoute, TerminalWaitReason,
 };
 use crate::terminal_integration::{TerminalIntegrationControlEvent, TerminalShellKind};
 
@@ -44,8 +44,9 @@ use super::{
     FileOperationRegistryNative, IssuedCapabilityNative, McpServerConfigNative,
     McpToolPolicyNative, NativeCapabilityStoreNative, ProcessLifecycleNative,
     ProcessRegistryNative, ProcessSnapshotNative, RegisteredToolNative, RemoteProcessStartNative,
-    TerminalExecuteRegistry, TerminalInputSource, TerminalInteractiveRegistry,
-    TerminalLeaseManager, ToolRegistryErrorNative, ToolRegistryNative,
+    TerminalExecuteRegistry, TerminalExecuteValidationStage, TerminalInputSource,
+    TerminalInteractiveRegistry, TerminalInteractiveValidationStage, TerminalLeaseManager,
+    ToolRegistryErrorNative, ToolRegistryNative,
 };
 
 pub(crate) const DEFAULT_CAPABILITY_TTL_MS: u64 = 120_000;
@@ -183,42 +184,6 @@ impl NativeToolEngine {
         )
     }
 
-    pub(crate) fn attach_agent_ssh_terminal_broker_candidate(
-        &self,
-        transport_session_id: &str,
-        predecessor_transport_session_id: Option<&str>,
-        geometry: TerminalGeometry,
-        owner: crate::terminal_broker::TerminalAgentPtyOwner,
-    ) -> Result<Option<TerminalBrokerAttachment>, String> {
-        self.terminal_broker.attach_agent_ssh_candidate_transport(
-            transport_session_id,
-            predecessor_transport_session_id,
-            geometry,
-            owner,
-        )
-    }
-
-    pub(crate) fn promote_agent_ssh_terminal_broker_candidate<T>(
-        &self,
-        transport_session_id: &str,
-        expected_predecessor_transport_session_id: Option<&str>,
-        publish: impl FnOnce(TerminalBrokerAttachment) -> Result<T, String>,
-    ) -> Result<T, String> {
-        self.terminal_broker.promote_agent_ssh_candidate_transport(
-            transport_session_id,
-            expected_predecessor_transport_session_id,
-            publish,
-        )
-    }
-
-    pub(crate) fn abort_agent_ssh_terminal_broker_candidate(
-        &self,
-        transport_session_id: &str,
-    ) -> Result<bool, String> {
-        self.terminal_broker
-            .abort_agent_ssh_candidate_transport(transport_session_id)
-    }
-
     pub(crate) fn terminal_broker_attachment(
         &self,
         transport_session_id: &str,
@@ -296,12 +261,6 @@ impl NativeToolEngine {
             .remote_visible_command_route(transport_session_id)
     }
 
-    pub(crate) fn remote_agent_pty_new_operation_route(
-        &self,
-    ) -> Result<TerminalVisibleCommandRoute, String> {
-        self.terminal_broker.remote_agent_pty_new_operation_route()
-    }
-
     pub(crate) fn register_terminal_integration_channel(
         &self,
         transport_session_id: &str,
@@ -372,6 +331,13 @@ impl NativeToolEngine {
         terminal_session_id: &str,
         agent_session_id: &str,
     ) -> Result<(), String> {
+        let snapshot = self.terminal_broker.snapshot(Some(terminal_session_id))?;
+        if snapshot.session.as_ref().is_some_and(|session| {
+            session.transport_kind == TerminalTransportKind::SshPty
+                && !snapshot.remote_bound_terminal_rollout.enabled
+        }) {
+            return Err("TERMINAL_VISIBLE_COMMAND_UNAVAILABLE".into());
+        }
         self.terminal_leases
             .begin_turn(terminal_session_id, agent_session_id)
     }
@@ -438,6 +404,50 @@ impl NativeToolEngine {
         let interactive = self.terminal_interactive.terminal_closed(session_id)?;
         let visible = self.terminal_execute.terminal_closed(session_id)?;
         Ok(interactive || visible)
+    }
+
+    pub(crate) fn reconcile_remote_visible_rollout(&self) -> Result<usize, String> {
+        if self
+            .terminal_broker
+            .snapshot(None)?
+            .remote_bound_terminal_rollout
+            .enabled
+        {
+            return Ok(0);
+        }
+        let mut released = 0;
+        let mut errors = Vec::new();
+        for session_id in self.terminal_leases.protected_session_ids()? {
+            let is_remote_transport = self
+                .terminal_broker
+                .snapshot(Some(&session_id))
+                .ok()
+                .and_then(|snapshot| snapshot.session)
+                .is_some_and(|session| {
+                    session.open && session.transport_kind == TerminalTransportKind::SshPty
+                });
+            if !is_remote_transport {
+                continue;
+            }
+            if let Err(error) = self.terminal_interactive.terminal_closed(&session_id) {
+                errors.push(error);
+            }
+            if let Err(error) = self.terminal_execute.terminal_closed(&session_id) {
+                errors.push(error);
+            }
+            match self
+                .terminal_leases
+                .release_terminal(&session_id, super::TerminalLeaseReleaseReason::Failed)
+            {
+                Ok(did_release) => released += usize::from(did_release),
+                Err(error) => errors.push(error),
+            }
+        }
+        if errors.is_empty() {
+            Ok(released)
+        } else {
+            Err(errors.join("; "))
+        }
     }
 
     pub(crate) fn configure_checkpoint_root(&self, root: PathBuf) -> Result<(), String> {
@@ -966,6 +976,190 @@ impl NativeToolEngine {
         }
     }
 
+    fn terminal_target_session_id(
+        &self,
+        target: &AgentToolTargetNative,
+        sessions: &SessionManager,
+    ) -> Result<String, String> {
+        match target {
+            AgentToolTargetNative::Local { session_id, .. } => {
+                let state = sessions.target_state(session_id)?;
+                if state.terminal_kind != SessionTerminalKind::Local
+                    || state.status != SessionStatus::Connected
+                    || state.identity.host != "local"
+                {
+                    return Err("local target no longer matches its frozen Session identity".into());
+                }
+                Ok(session_id.clone())
+            }
+            AgentToolTargetNative::Remote {
+                session_id,
+                host,
+                port,
+                username,
+                ..
+            } => {
+                let state = sessions.target_state(session_id)?;
+                if state.terminal_kind != SessionTerminalKind::Remote
+                    || state.status != SessionStatus::Connected
+                    || state.identity.host != *host
+                    || state.identity.port != *port
+                    || state.identity.username != *username
+                {
+                    return Err(
+                        "remote target no longer matches its frozen Session identity".into(),
+                    );
+                }
+                Ok(session_id.clone())
+            }
+            _ => Err("terminal tool requires a frozen terminal target".into()),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn revalidate_terminal_execution(
+        &self,
+        target: &AgentToolTargetNative,
+        sessions: &SessionManager,
+        expected_terminal_session_id: &str,
+        expected_terminal_generation: u64,
+        agent_session_id: &str,
+        task_id: &str,
+        operation_id: &str,
+        stage: TerminalExecuteValidationStage,
+    ) -> Result<(), String> {
+        let transport_session_id = self.terminal_target_session_id(target, sessions)?;
+        let broker_snapshot = self.terminal_broker.snapshot(Some(&transport_session_id))?;
+        if !broker_snapshot.terminal_execute_rollout.enabled {
+            return Err("TERMINAL_VISIBLE_COMMAND_UNAVAILABLE".into());
+        }
+        let remote = matches!(target, AgentToolTargetNative::Remote { .. });
+        if remote && !broker_snapshot.remote_bound_terminal_rollout.enabled {
+            return Err("TERMINAL_VISIBLE_COMMAND_UNAVAILABLE".into());
+        }
+        let terminal = broker_snapshot
+            .session
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        if !terminal.open
+            || terminal.transport_session_id != transport_session_id
+            || terminal.terminal_session_id != expected_terminal_session_id
+            || terminal.terminal_generation != expected_terminal_generation
+        {
+            return Err("TERMINAL_BROKER_STALE_GENERATION".into());
+        }
+        if (remote && terminal.transport_kind != TerminalTransportKind::SshPty)
+            || (!remote && terminal.transport_kind == TerminalTransportKind::SshPty)
+        {
+            return Err("TERMINAL_BROKER_TRANSPORT_IDENTITY_MISMATCH".into());
+        }
+        if terminal.integration_state != TerminalIntegrationState::Ready
+            || terminal.integration_shell.is_none()
+        {
+            return Err("TERMINAL_VISIBLE_COMMAND_UNAVAILABLE".into());
+        }
+
+        let lease_matches_agent = terminal.lease.as_ref().is_some_and(|lease| {
+            matches!(
+                &lease.owner,
+                TerminalLeaseOwner::Agent {
+                    agent_session_id: expected_agent,
+                    task_id: expected_task,
+                    operation_id: expected_operation,
+                    ..
+                } if expected_agent == agent_session_id
+                    && expected_task == task_id
+                    && expected_operation == operation_id
+            )
+        });
+        match stage {
+            TerminalExecuteValidationStage::BeforeLease => {
+                if !terminal
+                    .lease
+                    .as_ref()
+                    .is_some_and(|lease| matches!(lease.owner, TerminalLeaseOwner::User { .. }))
+                {
+                    return Err("TERMINAL_BROKER_LEASE_BUSY".into());
+                }
+                if !terminal.prompt_ready || terminal.active_command_id.is_some() {
+                    return Err("TERMINAL_VISIBLE_COMMAND_BUSY".into());
+                }
+            }
+            TerminalExecuteValidationStage::BeforeCommand => {
+                if !lease_matches_agent {
+                    return Err("TERMINAL_BROKER_LEASE_IDENTITY_MISMATCH".into());
+                }
+                if !terminal.prompt_ready || terminal.active_command_id.is_some() {
+                    return Err("TERMINAL_VISIBLE_COMMAND_BUSY".into());
+                }
+            }
+            TerminalExecuteValidationStage::BeforeWrite => {
+                if !lease_matches_agent {
+                    return Err("TERMINAL_BROKER_LEASE_IDENTITY_MISMATCH".into());
+                }
+                if terminal.prompt_ready || terminal.active_command_id.is_none() {
+                    return Err("TERMINAL_COMMAND_LIFECYCLE_MISMATCH".into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn revalidate_terminal_interactive_write(
+        &self,
+        target: &AgentToolTargetNative,
+        sessions: &SessionManager,
+        expected_terminal_session_id: &str,
+        expected_terminal_generation: u64,
+        agent_session_id: &str,
+        task_id: &str,
+        stage: TerminalInteractiveValidationStage,
+    ) -> Result<(), String> {
+        let transport_session_id = self.terminal_target_session_id(target, sessions)?;
+        let broker_snapshot = self.terminal_broker.snapshot(Some(&transport_session_id))?;
+        let remote = matches!(target, AgentToolTargetNative::Remote { .. });
+        if !broker_snapshot.interactive_tools_rollout.enabled
+            || (remote
+                && (!broker_snapshot.remote_bound_terminal_rollout.enabled
+                    || !broker_snapshot.remote_interactive_tools_rollout.enabled))
+        {
+            return Err("TERMINAL_INTERACTIVE_TOOLS_DISABLED".into());
+        }
+        let terminal = broker_snapshot
+            .session
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        if !terminal.open
+            || terminal.transport_session_id != transport_session_id
+            || terminal.terminal_session_id != expected_terminal_session_id
+            || terminal.terminal_generation != expected_terminal_generation
+        {
+            return Err("TERMINAL_BROKER_STALE_GENERATION".into());
+        }
+        if (remote && terminal.transport_kind != TerminalTransportKind::SshPty)
+            || (!remote && terminal.transport_kind == TerminalTransportKind::SshPty)
+        {
+            return Err("TERMINAL_BROKER_TRANSPORT_IDENTITY_MISMATCH".into());
+        }
+        if terminal.integration_state != TerminalIntegrationState::Ready {
+            return Err("TERMINAL_INTERACTIVE_NOT_AT_SHELL_BOUNDARY".into());
+        }
+        if stage == TerminalInteractiveValidationStage::BeforeWrite
+            && !terminal.lease.as_ref().is_some_and(|lease| {
+                matches!(
+                    &lease.owner,
+                    TerminalLeaseOwner::Agent {
+                        agent_session_id: expected_agent,
+                        task_id: expected_task,
+                        ..
+                    } if expected_agent == agent_session_id && expected_task == task_id
+                )
+            })
+        {
+            return Err("TERMINAL_BROKER_LEASE_IDENTITY_MISMATCH".into());
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn execute_command(
         &self,
@@ -1044,57 +1238,42 @@ impl NativeToolEngine {
         let arguments: TerminalExecuteArgumentsNative =
             serde_json::from_value(call.arguments.clone())
                 .map_err(|error| format!("invalid terminal_execute arguments: {error}"))?;
-        let dedicated_session_id;
-        let session_id = match &call.target {
-            AgentToolTargetNative::Local { session_id, .. } => session_id,
-            AgentToolTargetNative::Remote {
-                target_id,
-                session_id: source_session_id,
-                host,
-                port,
-                username,
-                ..
-            } => {
-                let binding = sessions
-                    .agent_remote_terminal(&context.request.user_session_id, target_id)?
-                    .ok_or_else(|| {
-                        "TERMINAL_EXECUTE_REQUIRES_DEDICATED_AGENT_SSH_PTY".to_string()
-                    })?;
-                if binding.owner.source_session_id != *source_session_id
-                    || binding.state.terminal_kind != SessionTerminalKind::Remote
-                    || binding.state.status != SessionStatus::Connected
-                    || binding.state.identity.host != *host
-                    || binding.state.identity.port != *port
-                    || binding.state.identity.username != *username
-                {
-                    return Err("Agent SSH PTY no longer matches its frozen remote target".into());
-                }
-                dedicated_session_id = binding.session_id;
-                &dedicated_session_id
-            }
-            _ => return Err("terminal_execute requires a terminal target".into()),
-        };
+        let session_id = self.terminal_target_session_id(&call.target, sessions)?;
         let broker_snapshot = self
             .terminal_broker
-            .snapshot(Some(session_id))?
+            .snapshot(Some(&session_id))?
             .session
             .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
         let shell = broker_snapshot
             .integration_shell
             .ok_or_else(|| "TERMINAL_INTEGRATION_SHELL_UNKNOWN".to_string())?;
-        let operation = self.terminal_execute.start(
+        let expected_terminal_session_id = broker_snapshot.terminal_session_id;
+        let expected_terminal_generation = broker_snapshot.terminal_generation;
+        let operation = self.terminal_execute.start_with_revalidation(
             sessions,
-            session_id,
+            &session_id,
             &context.request.user_session_id,
             &context.request.task_id,
             &call.call_id,
             &arguments.command,
             shell.enter(),
+            |stage| {
+                self.revalidate_terminal_execution(
+                    &call.target,
+                    sessions,
+                    &expected_terminal_session_id,
+                    expected_terminal_generation,
+                    &context.request.user_session_id,
+                    &context.request.task_id,
+                    &call.call_id,
+                    stage,
+                )
+            },
         )?;
         let timeout = Duration::from_millis(arguments.timeout_ms.unwrap_or(default_timeout_ms));
         let snapshot = self
             .terminal_execute
-            .wait(sessions, session_id, &operation, timeout)?;
+            .wait(sessions, &session_id, &operation, timeout)?;
         let model_output =
             crate::redaction::redact_sensitive_text(&super::strip_ansi(&snapshot.combined_output));
         let state = terminal_command_wire_state(snapshot.state);
@@ -1198,7 +1377,14 @@ impl NativeToolEngine {
             serde_json::from_value(call.arguments.clone())
                 .map_err(|error| format!("invalid write_terminal_input arguments: {error}"))?;
         let session_id = self.interactive_terminal_session_id(context, call, sessions)?;
-        let result = self.terminal_interactive.write(
+        let broker_snapshot = self
+            .terminal_broker
+            .snapshot(Some(&session_id))?
+            .session
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        let expected_terminal_session_id = broker_snapshot.terminal_session_id;
+        let expected_terminal_generation = broker_snapshot.terminal_generation;
+        let result = self.terminal_interactive.write_with_revalidation(
             sessions,
             &session_id,
             &context.request.user_session_id,
@@ -1206,6 +1392,17 @@ impl NativeToolEngine {
             arguments.input_kind,
             arguments.text.as_deref(),
             arguments.key,
+            |stage| {
+                self.revalidate_terminal_interactive_write(
+                    &call.target,
+                    sessions,
+                    &expected_terminal_session_id,
+                    expected_terminal_generation,
+                    &context.request.user_session_id,
+                    &context.request.task_id,
+                    stage,
+                )
+            },
         )?;
         Ok(AgentToolResultNative {
             request_id: context.request.request_id.clone(),
@@ -1306,38 +1503,11 @@ impl NativeToolEngine {
 
     fn interactive_terminal_session_id(
         &self,
-        context: &NativeExecutionContext,
+        _context: &NativeExecutionContext,
         call: &AgentToolCallNative,
         sessions: &SessionManager,
     ) -> Result<String, String> {
-        match &call.target {
-            AgentToolTargetNative::Local { session_id, .. } => Ok(session_id.clone()),
-            AgentToolTargetNative::Remote {
-                target_id,
-                session_id: source_session_id,
-                host,
-                port,
-                username,
-                ..
-            } => {
-                let binding = sessions
-                    .agent_remote_terminal(&context.request.user_session_id, target_id)?
-                    .ok_or_else(|| {
-                        "TERMINAL_INTERACTIVE_REQUIRES_DEDICATED_AGENT_SSH_PTY".to_string()
-                    })?;
-                if binding.owner.source_session_id != *source_session_id
-                    || binding.state.terminal_kind != SessionTerminalKind::Remote
-                    || binding.state.status != SessionStatus::Connected
-                    || binding.state.identity.host != *host
-                    || binding.state.identity.port != *port
-                    || binding.state.identity.username != *username
-                {
-                    return Err("Agent SSH PTY no longer matches its frozen remote target".into());
-                }
-                Ok(binding.session_id)
-            }
-            _ => Err("interactive terminal tools require a terminal target".into()),
-        }
+        self.terminal_target_session_id(&call.target, sessions)
     }
 
     fn write_process(
@@ -1760,6 +1930,55 @@ fn truncate_utf8(value: &str, limit: usize) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{
+        ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, StatusEvent,
+    };
+    use crossbeam_channel::unbounded;
+    use std::sync::atomic::AtomicBool;
+    use std::thread;
+
+    fn engine_with_terminal_broker_for_test(
+        terminal_broker: TerminalSessionBroker,
+    ) -> NativeToolEngine {
+        let terminal_leases = TerminalLeaseManager::new(terminal_broker.clone());
+        let acknowledger = terminal_leases.clone();
+        terminal_leases
+            .set_publisher(Arc::new(move |event| {
+                if event.state == super::super::TerminalLeaseEventState::Acquired {
+                    acknowledger
+                        .acknowledge_frontend_ready(
+                            &event.session_id,
+                            &event.agent_session_id,
+                            &event.operation_id,
+                            true,
+                            true,
+                            false,
+                            false,
+                            false,
+                        )
+                        .unwrap();
+                }
+            }))
+            .unwrap();
+        let terminal_execute =
+            TerminalExecuteRegistry::new(terminal_leases.clone(), terminal_broker.clone());
+        let terminal_interactive =
+            TerminalInteractiveRegistry::new(terminal_leases.clone(), terminal_broker.clone());
+        NativeToolEngine {
+            registry: Arc::new(
+                ToolRegistryNative::from_builtin_manifest().expect("valid native tool manifest"),
+            ),
+            capabilities: NativeCapabilityStoreNative::default(),
+            processes: ProcessRegistryNative::default(),
+            terminal_execute,
+            terminal_interactive,
+            terminal_leases,
+            terminal_broker,
+            checkpoints: CheckpointStoreNative::default(),
+            file_operations: FileOperationRegistryNative::default(),
+            checkpoint_root: Arc::new(Mutex::new(None)),
+        }
+    }
 
     #[test]
     fn execution_context_is_call_scoped_and_rejects_missing_step_identity() {
@@ -1820,5 +2039,462 @@ mod tests {
                 1,
             ));
         }
+    }
+
+    #[test]
+    fn remote_terminal_execute_uses_the_frozen_source_session_without_an_agent_terminal_map() {
+        const SOURCE_SESSION_ID: &str = "user-owned-remote-terminal";
+        const INTEGRATION_ID: &str = "integration-user-owned-remote-terminal";
+        const COMMAND: &str = "printf source-shell";
+
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
+        broker
+            .attach_transport(
+                SOURCE_SESSION_ID,
+                None,
+                TerminalTransportKind::SshPty,
+                TerminalGeometry::new(100, 30),
+            )
+            .unwrap();
+        broker
+            .register_integration_channel(
+                SOURCE_SESSION_ID,
+                INTEGRATION_ID,
+                TerminalShellKind::Bash,
+            )
+            .unwrap();
+        for event in [
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::Bash,
+            },
+            TerminalIntegrationControlEvent::PromptStart {
+                cwd: "/home/tester".into(),
+            },
+            TerminalIntegrationControlEvent::PromptEnd,
+        ] {
+            broker
+                .accept_integration_event(SOURCE_SESSION_ID, INTEGRATION_ID, event)
+                .unwrap();
+        }
+
+        let engine = engine_with_terminal_broker_for_test(broker.clone());
+        let sessions = SessionManager::default();
+        let (sender, receiver) = unbounded();
+        sessions
+            .insert(
+                SOURCE_SESSION_ID.into(),
+                ManagedSession {
+                    sender: SessionCommandSender::Event(sender),
+                    waker: None,
+                    output_state_sender: None,
+                    status: StatusEvent {
+                        session_id: SOURCE_SESSION_ID.into(),
+                        status: SessionStatus::Connected,
+                        message: None,
+                    },
+                    output_ready: Arc::new(AtomicBool::new(true)),
+                    output_paused: Arc::new(AtomicBool::new(false)),
+                    terminal_kind: SessionTerminalKind::Remote,
+                    identity: SessionIdentity {
+                        title: "fixture.example".into(),
+                        host: "fixture.example".into(),
+                        port: 22,
+                        username: "tester".into(),
+                    },
+                },
+            )
+            .unwrap();
+
+        let worker_broker = broker.clone();
+        let worker = thread::spawn(move || -> Result<(), String> {
+            for iteration in 1..=2 {
+                let SessionCommand::Write(input) = receiver
+                    .recv_timeout(Duration::from_millis(500))
+                    .map_err(|error| {
+                        format!(
+                            "Native Tool did not write call {iteration} to the frozen source SSH session: {error}"
+                        )
+                    })?
+                else {
+                    return Err("expected command input on the frozen source SSH session".into());
+                };
+                assert!(input.starts_with(COMMAND));
+                worker_broker
+                    .accept_integration_event(
+                        SOURCE_SESSION_ID,
+                        INTEGRATION_ID,
+                        TerminalIntegrationControlEvent::CommandStart {
+                            command_line: COMMAND.into(),
+                            cwd: "/home/tester".into(),
+                        },
+                    )
+                    .unwrap();
+                worker_broker
+                    .observe_raw_output(
+                        SOURCE_SESSION_ID,
+                        format!("source-shell-{iteration}").as_bytes(),
+                    )
+                    .unwrap();
+                worker_broker
+                    .accept_integration_event(
+                        SOURCE_SESSION_ID,
+                        INTEGRATION_ID,
+                        TerminalIntegrationControlEvent::CommandEnd {
+                            exit_code: 0,
+                            cwd: "/home/tester".into(),
+                        },
+                    )
+                    .unwrap();
+                for event in [
+                    TerminalIntegrationControlEvent::PromptStart {
+                        cwd: "/home/tester".into(),
+                    },
+                    TerminalIntegrationControlEvent::PromptEnd,
+                ] {
+                    worker_broker
+                        .accept_integration_event(SOURCE_SESSION_ID, INTEGRATION_ID, event)
+                        .unwrap();
+                }
+            }
+            Ok(())
+        });
+
+        let target = AgentToolTargetNative::Remote {
+            target_id: "target-remote".into(),
+            session_id: SOURCE_SESSION_ID.into(),
+            profile_id: Some("profile-remote".into()),
+            host: "fixture.example".into(),
+            port: 22,
+            username: "tester".into(),
+            root_path: None,
+            local_root: None,
+        };
+        let context = NativeExecutionContext {
+            request: AgentRequestNative {
+                contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
+                request_id: "request-remote-source".into(),
+                user_session_id: "agent-session-1".into(),
+                task_id: "task-1".into(),
+                goal: "reuse the visible remote shell".into(),
+                success_criteria: vec!["command runs in the frozen source Session".into()],
+                targets: vec![target.clone()],
+                permission_mode: AgentPermissionModeNative::Operator,
+            },
+            turn_id: "turn-1".into(),
+            step_id: "step-1".into(),
+        };
+        let call = AgentToolCallNative {
+            request_id: context.request.request_id.clone(),
+            call_id: "operation-1".into(),
+            tool_name: "terminal_execute".into(),
+            arguments: json!({
+                "command": COMMAND,
+                "explanation": "verify source terminal routing",
+                "timeoutMs": 1_000
+            }),
+            target,
+            capability_id: "test-capability".into(),
+        };
+        let effect = AgentObservedEffectNative {
+            kind: AgentEffectKindNative::StateChange,
+            target_id: "target-remote".into(),
+            summary: "execute in the visible remote shell".into(),
+            paths: Vec::new(),
+            network_destinations: Vec::new(),
+        };
+
+        assert_eq!(
+            engine
+                .interactive_terminal_session_id(&context, &call, &sessions)
+                .unwrap(),
+            SOURCE_SESSION_ID,
+            "remote interactive tools must resolve the same frozen source sessionId"
+        );
+
+        let session_count_before = sessions.session_count().unwrap();
+        let first_result =
+            engine.execute_terminal_command(&context, &call, &effect, &sessions, 1_000);
+        let mut second_call = call.clone();
+        second_call.call_id = "operation-2".into();
+        let second_result =
+            engine.execute_terminal_command(&context, &second_call, &effect, &sessions, 1_000);
+        let worker_result = worker.join();
+        assert!(
+            first_result.is_ok() && second_result.is_ok(),
+            "consecutive remote terminal_execute calls must reuse the frozen source session: first={first_result:?} second={second_result:?}"
+        );
+        assert_eq!(sessions.session_count().unwrap(), session_count_before);
+        worker_result.unwrap().unwrap();
+    }
+
+    #[test]
+    fn remote_rollout_disable_releases_agent_protection_without_closing_user_transport() {
+        const SOURCE_SESSION_ID: &str = "user-owned-remote-terminal";
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
+        broker
+            .attach_transport(
+                SOURCE_SESSION_ID,
+                None,
+                TerminalTransportKind::SshPty,
+                TerminalGeometry::new(100, 30),
+            )
+            .unwrap();
+        broker
+            .register_integration_channel(
+                SOURCE_SESSION_ID,
+                "integration-user-owned-remote-terminal",
+                TerminalShellKind::Bash,
+            )
+            .unwrap();
+        for event in [
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::Bash,
+            },
+            TerminalIntegrationControlEvent::PromptStart {
+                cwd: "/home/tester".into(),
+            },
+            TerminalIntegrationControlEvent::PromptEnd,
+        ] {
+            broker
+                .accept_integration_event(
+                    SOURCE_SESSION_ID,
+                    "integration-user-owned-remote-terminal",
+                    event,
+                )
+                .unwrap();
+        }
+        let engine = engine_with_terminal_broker_for_test(broker.clone());
+        let sessions = SessionManager::default();
+        let (sender, receiver) = unbounded();
+        sessions
+            .insert(
+                SOURCE_SESSION_ID.into(),
+                ManagedSession {
+                    sender: SessionCommandSender::Event(sender),
+                    waker: None,
+                    output_state_sender: None,
+                    status: StatusEvent {
+                        session_id: SOURCE_SESSION_ID.into(),
+                        status: SessionStatus::Connected,
+                        message: None,
+                    },
+                    output_ready: Arc::new(AtomicBool::new(true)),
+                    output_paused: Arc::new(AtomicBool::new(false)),
+                    terminal_kind: SessionTerminalKind::Remote,
+                    identity: SessionIdentity {
+                        title: "fixture.example".into(),
+                        host: "fixture.example".into(),
+                        port: 22,
+                        username: "tester".into(),
+                    },
+                },
+            )
+            .unwrap();
+        engine
+            .begin_terminal_turn(SOURCE_SESSION_ID, "agent-session-1")
+            .unwrap();
+        engine
+            .terminal_leases
+            .acquire(
+                SOURCE_SESSION_ID,
+                "agent-session-1",
+                "task-1",
+                "operation-1",
+                None,
+            )
+            .unwrap();
+
+        broker.set_remote_visible_rollout_for_test(false).unwrap();
+        engine.reconcile_remote_visible_rollout().unwrap();
+
+        let snapshot = broker
+            .snapshot(Some(SOURCE_SESSION_ID))
+            .unwrap()
+            .session
+            .unwrap();
+        assert!(snapshot.open);
+        assert!(matches!(
+            snapshot.lease.unwrap().owner,
+            TerminalLeaseOwner::User { .. }
+        ));
+        assert!(!engine.has_terminal_lease(SOURCE_SESSION_ID).unwrap());
+        assert_eq!(
+            engine
+                .begin_terminal_turn(SOURCE_SESSION_ID, "agent-session-1")
+                .unwrap_err(),
+            "TERMINAL_VISIBLE_COMMAND_UNAVAILABLE"
+        );
+        engine
+            .write_user_terminal_input(&sessions, SOURCE_SESSION_ID, "user-input".into())
+            .unwrap();
+        assert!(matches!(
+            receiver.recv_timeout(Duration::from_millis(250)).unwrap(),
+            SessionCommand::Write(data) if data == "user-input"
+        ));
+    }
+
+    #[test]
+    fn remote_terminal_execute_revalidates_frozen_identity_after_lease_before_write() {
+        const SOURCE_SESSION_ID: &str = "user-owned-remote-terminal";
+        const INTEGRATION_ID: &str = "integration-user-owned-remote-terminal";
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
+        broker
+            .attach_transport(
+                SOURCE_SESSION_ID,
+                None,
+                TerminalTransportKind::SshPty,
+                TerminalGeometry::new(100, 30),
+            )
+            .unwrap();
+        broker
+            .register_integration_channel(
+                SOURCE_SESSION_ID,
+                INTEGRATION_ID,
+                TerminalShellKind::Bash,
+            )
+            .unwrap();
+        for event in [
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::Bash,
+            },
+            TerminalIntegrationControlEvent::PromptStart {
+                cwd: "/home/tester".into(),
+            },
+            TerminalIntegrationControlEvent::PromptEnd,
+        ] {
+            broker
+                .accept_integration_event(SOURCE_SESSION_ID, INTEGRATION_ID, event)
+                .unwrap();
+        }
+        let engine = engine_with_terminal_broker_for_test(broker);
+        let sessions = SessionManager::default();
+        let (sender, receiver) = unbounded();
+        sessions
+            .insert(
+                SOURCE_SESSION_ID.into(),
+                ManagedSession {
+                    sender: SessionCommandSender::Event(sender),
+                    waker: None,
+                    output_state_sender: None,
+                    status: StatusEvent {
+                        session_id: SOURCE_SESSION_ID.into(),
+                        status: SessionStatus::Connected,
+                        message: None,
+                    },
+                    output_ready: Arc::new(AtomicBool::new(true)),
+                    output_paused: Arc::new(AtomicBool::new(false)),
+                    terminal_kind: SessionTerminalKind::Remote,
+                    identity: SessionIdentity {
+                        title: "fixture.example".into(),
+                        host: "fixture.example".into(),
+                        port: 22,
+                        username: "tester".into(),
+                    },
+                },
+            )
+            .unwrap();
+        let acknowledger = engine.terminal_leases.clone();
+        let drifting_sessions = sessions.clone();
+        engine
+            .terminal_leases
+            .set_publisher(Arc::new(move |event| {
+                if event.state != super::super::TerminalLeaseEventState::Acquired {
+                    return;
+                }
+                let (drift_sender, _drift_receiver) = unbounded();
+                drifting_sessions
+                    .insert(
+                        SOURCE_SESSION_ID.into(),
+                        ManagedSession {
+                            sender: SessionCommandSender::Event(drift_sender),
+                            waker: None,
+                            output_state_sender: None,
+                            status: StatusEvent {
+                                session_id: SOURCE_SESSION_ID.into(),
+                                status: SessionStatus::Connected,
+                                message: None,
+                            },
+                            output_ready: Arc::new(AtomicBool::new(true)),
+                            output_paused: Arc::new(AtomicBool::new(false)),
+                            terminal_kind: SessionTerminalKind::Remote,
+                            identity: SessionIdentity {
+                                title: "drifted.example".into(),
+                                host: "drifted.example".into(),
+                                port: 2222,
+                                username: "other".into(),
+                            },
+                        },
+                    )
+                    .unwrap();
+                acknowledger
+                    .acknowledge_frontend_ready(
+                        &event.session_id,
+                        &event.agent_session_id,
+                        &event.operation_id,
+                        true,
+                        true,
+                        false,
+                        false,
+                        false,
+                    )
+                    .unwrap();
+            }))
+            .unwrap();
+
+        let target = AgentToolTargetNative::Remote {
+            target_id: "target-remote".into(),
+            session_id: SOURCE_SESSION_ID.into(),
+            profile_id: Some("profile-remote".into()),
+            host: "fixture.example".into(),
+            port: 22,
+            username: "tester".into(),
+            root_path: None,
+            local_root: None,
+        };
+        let context = NativeExecutionContext {
+            request: AgentRequestNative {
+                contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
+                request_id: "request-remote-revalidate".into(),
+                user_session_id: "agent-session-1".into(),
+                task_id: "task-1".into(),
+                goal: "reject identity drift".into(),
+                success_criteria: vec!["no bytes reach a drifted Session".into()],
+                targets: vec![target.clone()],
+                permission_mode: AgentPermissionModeNative::Operator,
+            },
+            turn_id: "turn-1".into(),
+            step_id: "step-1".into(),
+        };
+        let call = AgentToolCallNative {
+            request_id: context.request.request_id.clone(),
+            call_id: "operation-1".into(),
+            tool_name: "terminal_execute".into(),
+            arguments: json!({
+                "command": "printf must-not-run",
+                "explanation": "verify post-lease revalidation",
+                "timeoutMs": 1_000
+            }),
+            target,
+            capability_id: "test-capability".into(),
+        };
+        let effect = AgentObservedEffectNative {
+            kind: AgentEffectKindNative::StateChange,
+            target_id: "target-remote".into(),
+            summary: "must reject drift".into(),
+            paths: Vec::new(),
+            network_destinations: Vec::new(),
+        };
+
+        let error = engine
+            .execute_terminal_command(&context, &call, &effect, &sessions, 1_000)
+            .unwrap_err();
+        assert!(
+            error.contains("frozen Session identity"),
+            "unexpected post-lease validation error: {error}"
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "identity drift must write no PTY bytes"
+        );
     }
 }

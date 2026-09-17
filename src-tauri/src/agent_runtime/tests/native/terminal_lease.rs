@@ -220,6 +220,53 @@
     }
 
     #[test]
+    fn takeover_restores_user_input_and_fences_late_agent_input_until_turn_end() {
+        let manager = disabled_broker_manager();
+        let (sessions, receiver) = sessions();
+        manager.begin_turn("terminal-1", "agent-1").unwrap();
+        acquire(&manager);
+
+        assert!(manager
+            .release_after_takeover("terminal-1", "agent-1", "task-1", "operation-1")
+            .unwrap());
+        manager
+            .write(
+                &sessions,
+                "terminal-1",
+                "user-after-takeover".into(),
+                TerminalInputSource::User,
+            )
+            .unwrap();
+        assert!(manager
+            .write(
+                &sessions,
+                "terminal-1",
+                "late-agent-input".into(),
+                TerminalInputSource::Agent {
+                    agent_session_id: "agent-1",
+                    task_id: "task-1",
+                    operation_id: "operation-1",
+                },
+            )
+            .unwrap_err()
+            .starts_with("TERMINAL_LEASE_NOT_FOUND:"));
+        assert!(manager
+            .acquire("terminal-1", "agent-1", "task-1", "operation-2", None)
+            .unwrap_err()
+            .starts_with("TERMINAL_LEASE_TAKEN_OVER:"));
+        assert!(matches!(
+            receiver.recv().unwrap(),
+            SessionCommand::Write(data) if data == "user-after-takeover"
+        ));
+
+        manager.release_turn("agent-1").unwrap();
+        manager.begin_turn("terminal-1", "agent-1").unwrap();
+        manager
+            .acquire("terminal-1", "agent-1", "task-1", "operation-2", None)
+            .unwrap();
+    }
+
+    #[test]
     fn events_preserve_operation_identity_and_first_release_reason() {
         let manager = disabled_broker_manager();
         let events = Arc::new(Mutex::new(Vec::new()));

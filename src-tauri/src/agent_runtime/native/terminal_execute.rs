@@ -17,6 +17,13 @@ const INTERRUPT_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(2);
 const CAPTURE_DRAIN_GRACE: Duration = Duration::from_millis(25);
 const WAIT_SLICE: Duration = Duration::from_millis(50);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TerminalExecuteValidationStage {
+    BeforeLease,
+    BeforeCommand,
+    BeforeWrite,
+}
+
 #[derive(Clone)]
 struct TerminalExecuteRegistration {
     agent_session_id: String,
@@ -49,6 +56,7 @@ impl TerminalExecuteRegistry {
             .contains_key(session_id))
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn start(
         &self,
@@ -60,6 +68,31 @@ impl TerminalExecuteRegistry {
         command: &str,
         enter: &str,
     ) -> Result<Arc<TerminalCommandOperation>, String> {
+        self.start_with_revalidation(
+            sessions,
+            session_id,
+            agent_session_id,
+            task_id,
+            operation_id,
+            command,
+            enter,
+            |_| Ok(()),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn start_with_revalidation(
+        &self,
+        sessions: &SessionManager,
+        session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+        operation_id: &str,
+        command: &str,
+        enter: &str,
+        mut revalidate: impl FnMut(TerminalExecuteValidationStage) -> Result<(), String>,
+    ) -> Result<Arc<TerminalCommandOperation>, String> {
+        revalidate(TerminalExecuteValidationStage::BeforeLease)?;
         self.leases
             .acquire(session_id, agent_session_id, task_id, operation_id, None)?;
         if let Err(error) = self.leases.wait_frontend_ready(
@@ -100,6 +133,16 @@ impl TerminalExecuteRegistry {
                 TerminalLeaseReleaseReason::Failed,
             );
             return Err("TERMINAL_EXECUTE_NOT_CONNECTED".into());
+        }
+        if let Err(error) = revalidate(TerminalExecuteValidationStage::BeforeCommand) {
+            let _ = self.leases.release(
+                session_id,
+                agent_session_id,
+                task_id,
+                operation_id,
+                TerminalLeaseReleaseReason::Failed,
+            );
+            return Err(error);
         }
 
         let operation = match self.broker.begin_command(session_id, operation_id, command) {
@@ -156,6 +199,18 @@ impl TerminalExecuteRegistry {
             );
         }
 
+        if let Err(error) = revalidate(TerminalExecuteValidationStage::BeforeWrite) {
+            let command_id = operation.command_id()?;
+            let _ = self.broker.mark_command_uncertain(session_id, &command_id);
+            let _ = self.finish_registration(
+                session_id,
+                agent_session_id,
+                task_id,
+                operation_id,
+                TerminalLeaseReleaseReason::Failed,
+            );
+            return Err(error);
+        }
         let input = format!("{command}{enter}");
         if let Err(error) = self.leases.write(
             sessions,
@@ -280,12 +335,11 @@ impl TerminalExecuteRegistry {
                 },
             );
         }
-        self.leases.release(
+        self.leases.release_after_takeover(
             session_id,
             &registration.agent_session_id,
             &registration.task_id,
             operation_id,
-            TerminalLeaseReleaseReason::TakenOver,
         )?;
         Ok(true)
     }
