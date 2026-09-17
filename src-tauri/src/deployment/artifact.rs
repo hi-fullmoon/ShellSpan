@@ -1952,7 +1952,13 @@ fn build_deployment_artifact_with_executor(
             message,
         );
     }
-    if let Err(error) = File::open(&archive_path).and_then(|file| file.sync_all()) {
+    // Windows FlushFileBuffers requires a writable handle even though the
+    // archive contents are already complete at this durability boundary.
+    if let Err(error) = OpenOptions::new()
+        .write(true)
+        .open(&archive_path)
+        .and_then(|file| file.sync_all())
+    {
         return failure_result(
             &request,
             Some(workflow.revision),
