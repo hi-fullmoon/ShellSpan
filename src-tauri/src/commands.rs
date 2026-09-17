@@ -217,6 +217,7 @@ pub(crate) fn publish_terminal_integration_state(
         session_id: session_id.to_string(),
         terminal_session_id: session.terminal_session_id,
         terminal_generation: session.terminal_generation,
+        integration_state_revision: session.integration_state_revision,
         state,
         prompt_ready: session.prompt_ready,
         shell: session.integration_shell,

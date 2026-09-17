@@ -1400,6 +1400,115 @@
     }
 
     #[test]
+    fn integration_state_revision_orders_lifecycle_failure_and_re_registration() {
+        let broker = TerminalSessionBroker::phase3_enabled_for_test(32);
+        attached(&broker, "transport-revision");
+        let initial = broker
+            .snapshot(Some("transport-revision"))
+            .unwrap()
+            .session
+            .unwrap();
+        assert_eq!(initial.integration_state_revision, 0);
+
+        broker
+            .register_integration_channel(
+                "transport-revision",
+                "integration-1",
+                TerminalShellKind::Zsh,
+            )
+            .unwrap();
+        for event in [
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::Zsh,
+            },
+            TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() },
+            TerminalIntegrationControlEvent::PromptEnd,
+        ] {
+            broker
+                .accept_integration_event("transport-revision", "integration-1", event)
+                .unwrap();
+        }
+        let first_ready = broker
+            .snapshot(Some("transport-revision"))
+            .unwrap()
+            .session
+            .unwrap();
+        assert_eq!(first_ready.integration_event_sequence, 3);
+        assert_eq!(first_ready.integration_state_revision, 4);
+        assert!(first_ready.prompt_ready);
+
+        broker
+            .integration_channel_closed(
+                "transport-revision",
+                "integration-1",
+                "controlChannelClosed",
+            )
+            .unwrap();
+        let degraded = broker
+            .snapshot(Some("transport-revision"))
+            .unwrap()
+            .session
+            .unwrap();
+        assert_eq!(degraded.integration_event_sequence, 3);
+        assert_eq!(degraded.integration_state_revision, 5);
+        assert_eq!(
+            degraded.integration_state,
+            TerminalIntegrationState::Degraded
+        );
+        assert!(!degraded.prompt_ready);
+
+        broker
+            .register_integration_channel(
+                "transport-revision",
+                "integration-2",
+                TerminalShellKind::Zsh,
+            )
+            .unwrap();
+        for event in [
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::Zsh,
+            },
+            TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() },
+            TerminalIntegrationControlEvent::PromptEnd,
+        ] {
+            broker
+                .accept_integration_event("transport-revision", "integration-2", event)
+                .unwrap();
+        }
+        let second_ready = broker
+            .snapshot(Some("transport-revision"))
+            .unwrap()
+            .session
+            .unwrap();
+        assert_eq!(second_ready.integration_event_sequence, 3);
+        assert_eq!(second_ready.integration_state_revision, 9);
+        assert!(second_ready.prompt_ready);
+
+        broker
+            .acquire_agent_lease(
+                "transport-revision",
+                "agent-revision",
+                "task-revision",
+                "operation-revision",
+            )
+            .unwrap();
+        let _operation = broker
+            .begin_command(
+                "transport-revision",
+                "operation-revision",
+                "printf revision",
+            )
+            .unwrap();
+        let command_submitted = broker
+            .snapshot(Some("transport-revision"))
+            .unwrap()
+            .session
+            .unwrap();
+        assert_eq!(command_submitted.integration_state_revision, 10);
+        assert!(!command_submitted.prompt_ready);
+    }
+
+    #[test]
     fn production_config_accepts_cooperative_integration_only_after_all_flags_enable() {
         let broker = TerminalSessionBroker::default();
         assert_eq!(

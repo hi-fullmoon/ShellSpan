@@ -256,6 +256,7 @@ pub(crate) struct TerminalBrokerSessionSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) integration_reason: Option<String>,
     pub(crate) integration_event_sequence: u64,
+    pub(crate) integration_state_revision: u64,
     pub(crate) integration_capabilities: Vec<&'static str>,
     pub(crate) prompt_ready: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -379,6 +380,7 @@ pub(crate) struct TerminalIntegrationStateEvent {
     pub(crate) session_id: String,
     pub(crate) terminal_session_id: String,
     pub(crate) terminal_generation: u64,
+    pub(crate) integration_state_revision: u64,
     pub(crate) state: TerminalIntegrationState,
     pub(crate) prompt_ready: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -865,6 +867,7 @@ struct SessionRecord {
     integration_shell: Option<TerminalShellKind>,
     integration_reason: Option<String>,
     integration_event_sequence: u64,
+    integration_state_revision: u64,
     prompt_started: bool,
     prompt_ready: bool,
     current_directory: Option<String>,
@@ -906,6 +909,7 @@ impl SessionRecord {
             integration_shell: None,
             integration_reason: None,
             integration_event_sequence: 0,
+            integration_state_revision: 0,
             prompt_started: false,
             prompt_ready: false,
             current_directory: None,
@@ -926,7 +930,7 @@ impl SessionRecord {
         }
     }
 
-    fn close(&mut self, reason: TerminalGenerationCloseReason) {
+    fn close(&mut self, reason: TerminalGenerationCloseReason) -> Result<(), String> {
         self.open = false;
         self.close_reason = Some(reason);
         self.integration_state = TerminalIntegrationState::Invalidated;
@@ -948,6 +952,8 @@ impl SessionRecord {
         self.capture.fill(0);
         self.capture.clear();
         self.screen_model = None;
+        advance_integration_state_revision(self)?;
+        Ok(())
     }
 
     fn snapshot(&self) -> TerminalBrokerSessionSnapshot {
@@ -964,6 +970,7 @@ impl SessionRecord {
             integration_shell: self.integration_shell,
             integration_reason: self.integration_reason.clone(),
             integration_event_sequence: self.integration_event_sequence,
+            integration_state_revision: self.integration_state_revision,
             integration_capabilities: if self.integration_state == TerminalIntegrationState::Ready {
                 vec![
                     "promptLifecycle",
@@ -1196,10 +1203,10 @@ impl TerminalSessionBroker {
                 &mut state,
                 TerminalGenerationCloseReason::BrokerShutdown,
                 self.config.closed_session_capacity,
-            );
+            )?;
         } else if state.shell_integration_rollout.enabled && !(broker && integration) {
             for record in state.sessions.values_mut().filter(|record| record.open) {
-                degrade_record(record, "shellIntegrationRollback");
+                degrade_record(record, "shellIntegrationRollback")?;
             }
         } else if state.terminal_execute_rollout.enabled && !(broker && integration && execute) {
             for record in state.sessions.values_mut().filter(|record| record.open) {
@@ -1355,7 +1362,7 @@ impl TerminalSessionBroker {
                     if record.transport_session_id != predecessor_transport_session_id {
                         return Err("TERMINAL_BROKER_STALE_PREDECESSOR".into());
                     }
-                    record.close(TerminalGenerationCloseReason::Replaced);
+                    record.close(TerminalGenerationCloseReason::Replaced)?;
                 }
                 if let Some(attachment) = state.transports.get_mut(predecessor_transport_session_id)
                 {
@@ -1444,7 +1451,7 @@ impl TerminalSessionBroker {
             {
                 return Ok(false);
             }
-            record.close(reason);
+            record.close(reason)?;
         }
         if let Some(attachment) = state.transports.get_mut(transport_session_id) {
             attachment.active = false;
@@ -1517,6 +1524,7 @@ impl TerminalSessionBroker {
     pub(crate) fn mark_output_ready(&self, transport_session_id: &str) -> Result<(), String> {
         self.with_current_record_mut(transport_session_id, |record| {
             record.output_listener_ready = true;
+            Ok(())
         })
     }
 
@@ -1702,8 +1710,8 @@ impl TerminalSessionBroker {
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
         if !shell.supported() {
-            degrade_record(record, "unsupportedShell");
             record.integration_shell = Some(shell);
+            degrade_record(record, "unsupportedShell")?;
             return Ok(());
         }
         record.integration_state = TerminalIntegrationState::Initializing;
@@ -1713,6 +1721,7 @@ impl TerminalSessionBroker {
         record.integration_event_sequence = 0;
         record.prompt_started = false;
         record.prompt_ready = false;
+        advance_integration_state_revision(record)?;
         Ok(())
     }
 
@@ -1724,7 +1733,7 @@ impl TerminalSessionBroker {
     ) -> Result<(), String> {
         self.with_current_record_mut(transport_session_id, |record| {
             record.integration_shell = Some(shell);
-            degrade_record(record, reason);
+            degrade_record(record, reason)
         })
     }
 
@@ -1744,6 +1753,7 @@ impl TerminalSessionBroker {
             if let Some(command) = &record.active_command {
                 settle_command_uncertain(command, record.next_output_sequence.saturating_sub(1));
             }
+            advance_integration_state_revision(record)
         })
     }
 
@@ -1774,7 +1784,7 @@ impl TerminalSessionBroker {
                 if record.integration_state != TerminalIntegrationState::Initializing
                     || record.integration_shell != Some(shell)
                 {
-                    degrade_record(record, "shellIdentityMismatch");
+                    degrade_record(record, "shellIdentityMismatch")?;
                     return Err("TERMINAL_INTEGRATION_SHELL_IDENTITY_MISMATCH".into());
                 }
                 record.integration_state = TerminalIntegrationState::Ready;
@@ -1811,7 +1821,7 @@ impl TerminalSessionBroker {
                         TerminalCommandState::Submitted | TerminalCommandState::CancelRequested
                     ) {
                         drop(data);
-                        degrade_record(record, "unexpectedCommandStart");
+                        degrade_record(record, "unexpectedCommandStart")?;
                         return Err("TERMINAL_COMMAND_START_OUT_OF_ORDER".into());
                     }
                     if command_line != data.command_line {
@@ -1821,7 +1831,7 @@ impl TerminalSessionBroker {
                         TerminalRolloutCounters::increment(&self.counters.uncertainty);
                         drop(data);
                         command.notify();
-                        degrade_record(record, "exactCommandLineMismatch");
+                        degrade_record(record, "exactCommandLineMismatch")?;
                         return Err("TERMINAL_COMMAND_LINE_MISMATCH".into());
                     }
                     if data.state == TerminalCommandState::Submitted {
@@ -1858,6 +1868,7 @@ impl TerminalSessionBroker {
             }
         }
         record.integration_event_sequence = event_sequence;
+        advance_integration_state_revision(record)?;
         TerminalRolloutCounters::increment(&self.counters.lifecycle_matched);
         if integration_became_ready {
             TerminalRolloutCounters::increment(&self.counters.integration_ready);
@@ -1884,7 +1895,7 @@ impl TerminalSessionBroker {
         if record.integration_id.as_deref() != Some(integration_id) {
             return Ok(());
         }
-        degrade_record(record, reason);
+        degrade_record(record, reason)?;
         Ok(())
     }
 
@@ -1936,6 +1947,7 @@ impl TerminalSessionBroker {
         ));
         record.active_command = Some(Arc::clone(&operation));
         record.prompt_ready = false;
+        advance_integration_state_revision(record)?;
         Ok(operation)
     }
 
@@ -2187,7 +2199,7 @@ impl TerminalSessionBroker {
             &mut state,
             TerminalGenerationCloseReason::BrokerShutdown,
             self.config.closed_session_capacity,
-        );
+        )?;
         self.changed.notify_all();
         Ok(())
     }
@@ -2195,7 +2207,7 @@ impl TerminalSessionBroker {
     fn with_current_record_mut(
         &self,
         transport_session_id: &str,
-        update: impl FnOnce(&mut SessionRecord),
+        update: impl FnOnce(&mut SessionRecord) -> Result<(), String>,
     ) -> Result<(), String> {
         let mut state = self.lock()?;
         if !state.rollout.enabled {
@@ -2203,8 +2215,7 @@ impl TerminalSessionBroker {
         }
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
-        update(record);
-        Ok(())
+        update(record)
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, BrokerState>, String> {
@@ -2479,7 +2490,7 @@ fn close_all_open_generations(
     state: &mut BrokerState,
     reason: TerminalGenerationCloseReason,
     closed_session_capacity: usize,
-) {
+) -> Result<(), String> {
     let closing = state
         .sessions
         .iter()
@@ -2488,7 +2499,7 @@ fn close_all_open_generations(
         .collect::<Vec<_>>();
     for terminal_session_id in &closing {
         if let Some(record) = state.sessions.get_mut(terminal_session_id) {
-            record.close(reason);
+            record.close(reason)?;
         }
     }
     for attachment in state.transports.values_mut() {
@@ -2497,6 +2508,7 @@ fn close_all_open_generations(
     for terminal_session_id in closing {
         remember_closed_session(state, &terminal_session_id, closed_session_capacity);
     }
+    Ok(())
 }
 
 fn remember_closed_session(
@@ -2889,7 +2901,7 @@ fn validate_cwd(cwd: &str) -> Result<(), String> {
     }
 }
 
-fn degrade_record(record: &mut SessionRecord, reason: &str) {
+fn degrade_record(record: &mut SessionRecord, reason: &str) -> Result<(), String> {
     record.integration_state = TerminalIntegrationState::Degraded;
     record.integration_reason = Some(reason.to_string());
     record.integration_id = None;
@@ -2898,6 +2910,19 @@ fn degrade_record(record: &mut SessionRecord, reason: &str) {
     if let Some(command) = &record.active_command {
         settle_command_uncertain(command, record.next_output_sequence.saturating_sub(1));
     }
+    advance_integration_state_revision(record)
+}
+
+fn advance_integration_state_revision(record: &mut SessionRecord) -> Result<(), String> {
+    let revision = record
+        .integration_state_revision
+        .checked_add(1)
+        .ok_or_else(counter_exhausted)?;
+    if revision > JAVASCRIPT_MAX_SAFE_INTEGER {
+        return Err(counter_exhausted());
+    }
+    record.integration_state_revision = revision;
+    Ok(())
 }
 
 fn settle_command_from_integration(

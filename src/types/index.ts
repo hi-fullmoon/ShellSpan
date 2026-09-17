@@ -232,6 +232,7 @@ export interface TerminalBrokerSessionSnapshot {
   integrationShell?: 'bash' | 'zsh' | 'windowsPowerShell' | 'powerShell7' | 'unsupported';
   integrationReason?: string;
   integrationEventSequence: number;
+  integrationStateRevision: number;
   integrationCapabilities: readonly (
     | 'promptLifecycle'
     | 'commandLifecycle'
@@ -332,6 +333,7 @@ export interface TerminalIntegrationStateEvent {
   sessionId: string;
   terminalSessionId: string;
   terminalGeneration: number;
+  integrationStateRevision: number;
   state: TerminalBrokerIntegrationState;
   promptReady: boolean;
   shell?: TerminalBrokerSessionSnapshot['integrationShell'];

@@ -114,6 +114,7 @@ describe('terminalStore', () => {
       sessionId: 'transport-1',
       terminalSessionId: 'terminal-1',
       terminalGeneration: 1,
+      integrationStateRevision: 1,
       state: 'ready',
       promptReady: true,
     });
@@ -123,6 +124,7 @@ describe('terminalStore', () => {
       sessionId: 'transport-1',
       terminalSessionId: 'terminal-1',
       terminalGeneration: 2,
+      integrationStateRevision: 2,
       state: 'degraded',
       promptReady: false,
       reason: 'unsupportedShell',
@@ -130,6 +132,79 @@ describe('terminalStore', () => {
     expect(useTerminalStore.getState().sessions[0]).toMatchObject({
       integrationState: 'degraded',
       integrationReason: 'unsupportedShell',
+      integrationStateRevision: 2,
+      promptReady: false,
+    });
+  });
+
+  it('ignores stale prompt readiness from an older integration event', () => {
+    useTerminalStore.getState().addSession({
+      sessionId: 'transport-1',
+      terminalSessionId: 'terminal-1',
+      terminalGeneration: 2,
+      title: 'zsh',
+      host: 'local',
+      port: 0,
+      username: 'user',
+    });
+
+    useTerminalStore.getState().setIntegrationState({
+      sessionId: 'transport-1',
+      terminalSessionId: 'terminal-1',
+      terminalGeneration: 2,
+      integrationStateRevision: 8,
+      state: 'ready',
+      promptReady: true,
+    });
+    useTerminalStore.getState().setIntegrationState({
+      sessionId: 'transport-1',
+      terminalSessionId: 'terminal-1',
+      terminalGeneration: 2,
+      integrationStateRevision: 7,
+      state: 'ready',
+      promptReady: false,
+    });
+
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      integrationState: 'ready',
+      integrationStateRevision: 8,
+      promptReady: true,
+    });
+  });
+
+  it('rejects a duplicate revision even when it carries a different presentation', () => {
+    useTerminalStore.getState().addSession({
+      sessionId: 'transport-1',
+      terminalSessionId: 'terminal-1',
+      terminalGeneration: 2,
+      title: 'zsh',
+      host: 'local',
+      port: 0,
+      username: 'user',
+    });
+    const store = useTerminalStore.getState();
+    store.setIntegrationState({
+      sessionId: 'transport-1',
+      terminalSessionId: 'terminal-1',
+      terminalGeneration: 2,
+      integrationStateRevision: 9,
+      state: 'unavailable',
+      promptReady: false,
+      reason: 'controlChannelClosed',
+    });
+    store.setIntegrationState({
+      sessionId: 'transport-1',
+      terminalSessionId: 'terminal-1',
+      terminalGeneration: 2,
+      integrationStateRevision: 9,
+      state: 'ready',
+      promptReady: true,
+    });
+
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      integrationState: 'unavailable',
+      integrationReason: 'controlChannelClosed',
+      integrationStateRevision: 9,
       promptReady: false,
     });
   });
