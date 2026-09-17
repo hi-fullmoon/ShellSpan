@@ -1,6 +1,6 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeploymentWorkflowCenter } from '../deployment-workflow-center';
 import type {
   DeploymentNodeTypeCatalog,
@@ -114,8 +114,56 @@ const workflow: DeploymentWorkflowRecord = {
   updatedAt: 2,
 };
 
+let workspaceResize: ((width: number) => void) | null = null;
+
+class DeploymentResizeObserverMock implements ResizeObserver {
+  readonly callback: ResizeObserverCallback;
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+  }
+
+  disconnect(): void {}
+
+  observe(target: Element): void {
+    if (target.getAttribute('data-testid') === 'deployment-design-workspace') {
+      workspaceResize = (width) => this.callback([
+        {
+          target,
+          contentRect: {
+            width,
+            height: 640,
+            x: 0,
+            y: 0,
+            top: 0,
+            right: width,
+            bottom: 640,
+            left: 0,
+            toJSON: () => ({}),
+          },
+        } as ResizeObserverEntry,
+      ], this);
+    }
+    if (target.getAttribute('data-slot') === 'scroll-area-viewport') {
+      Object.defineProperty(target, 'getAnimations', {
+        configurable: true,
+        value: () => [],
+      });
+    }
+  }
+
+  unobserve(): void {}
+}
+
+function resizeWorkspace(width: number): void {
+  if (!workspaceResize) throw new Error('Deployment workspace ResizeObserver was not registered');
+  act(() => workspaceResize?.(width));
+}
+
 describe('DeploymentWorkflowCenter', () => {
   beforeEach(() => {
+    workspaceResize = null;
+    vi.stubGlobal('ResizeObserver', DeploymentResizeObserverMock);
     useDeploymentWorkflowStore.getState().reset();
     useDeploymentWorkflowRunStore.getState().reset();
     useDeploymentWorkflowRunStore.setState({ workflowId: workflow.id });
@@ -141,28 +189,82 @@ describe('DeploymentWorkflowCenter', () => {
     useToastStore.setState({ toasts: [] });
   });
 
-  it('renders wide canvas and narrow topology from the same nodes with readable binding labels', () => {
-    const { container } = render(<DeploymentWorkflowCenter />);
-    const canvas = screen.getByTestId('deployment-workflow-canvas');
-    const topology = screen.getByTestId('deployment-topology-list');
-    expect(canvas.querySelectorAll('[data-node-id]')).toHaveLength(2);
-    expect(topology.querySelectorAll('[data-topology-node-id]')).toHaveLength(2);
-    expect(topology.className).toContain('@min-[48rem]:hidden');
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
-    const sourceBinding = screen.getAllByLabelText('deployment.editor.port.source')[0];
+  it('renders mutually exclusive canvas and narrow topology surfaces from the same binding data', () => {
+    render(<DeploymentWorkflowCenter />);
+    const canvas = screen.getByTestId('deployment-workflow-canvas');
+    expect(canvas.querySelectorAll('[data-node-id]')).toHaveLength(2);
+    expect(canvas.querySelectorAll('[data-edge-id]')).toHaveLength(1);
+    expect(canvas.querySelector('[data-edge-id]')).toMatchObject({
+      dataset: {
+        sourceNodeId: 'source',
+        sourcePort: 'source',
+        targetNodeId: 'build',
+        targetPort: 'source',
+      },
+    });
+    expect(screen.queryByTestId('deployment-topology-list')).not.toBeInTheDocument();
+
+    resizeWorkspace(428);
+
+    expect(screen.queryByTestId('deployment-workflow-canvas')).not.toBeInTheDocument();
+    const topology = screen.getByTestId('deployment-topology-list');
+    expect(topology.querySelectorAll('[data-topology-node-id]')).toHaveLength(2);
+
+    const sourceBinding = within(topology).getByLabelText('deployment.editor.port.source');
     expect(sourceBinding).toHaveTextContent('Freeze source');
     expect(sourceBinding).not.toHaveTextContent('source|source');
   });
 
-  it('places the primary node action in CardAction and exposes medium-width drawers', async () => {
+  it('builds a card-free three-pane workspace with accessible resize handles and a fixed status bar', () => {
     render(<DeploymentWorkflowCenter />);
-    const remove = screen.getByRole('button', { name: 'deployment.editor.removeNode' });
-    expect(remove.closest('[data-slot="card-action"]')).not.toBeNull();
-    expect(remove.closest('[data-slot="card-header"]')).not.toBeNull();
+    const workspace = screen.getByTestId('deployment-design-workspace');
+    expect(workspace.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
+    expect(workspace).toHaveAttribute('data-layout', 'wide');
+    expect(screen.getByTestId('deployment-workspace-wide')).toBeInTheDocument();
+    expect(workspace.querySelectorAll('[data-panel]')).toHaveLength(3);
+    expect(within(workspace).getAllByRole('separator')).toHaveLength(2);
+    expect(within(workspace).getByRole('separator', { name: 'deployment.editor.resize.workflows' })).toBeInTheDocument();
+    expect(within(workspace).getByRole('separator', { name: 'deployment.editor.resize.inspector' })).toBeInTheDocument();
+    expect(screen.getByTestId('deployment-validation-status')).toHaveClass('shrink-0', 'border-t');
 
-    fireEvent.click(screen.getByRole('button', { name: 'deployment.editor.nodeLibrary' }));
+    const toolbar = screen.getByTestId('deployment-workflow-toolbar');
+    expect(toolbar).toHaveClass('flex-nowrap');
+    expect(within(toolbar).getByRole('tab', { name: 'deployment.editor.tab.design' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('keeps every deployment center tab free of Card DOM', () => {
+    for (const initialTab of ['design', 'prepare', 'runs', 'versions'] as const) {
+      const view = render(<DeploymentWorkflowCenter initialTab={initialTab} />);
+      expect(view.container.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
+  it('exposes searchable grouped drawers with a fixed title, scrolling body, and focus return', async () => {
+    render(<DeploymentWorkflowCenter />);
+    resizeWorkspace(858);
+
+    const trigger = screen.getByRole('button', { name: 'deployment.editor.nodeLibrary' });
+    trigger.focus();
+    fireEvent.click(trigger);
     expect(await screen.findByRole('heading', { name: 'deployment.editor.nodeLibrary' })).toBeInTheDocument();
-    expect(document.querySelector('[data-slot="drawer-content"]')).toHaveClass('min-h-0');
+    const drawer = document.querySelector('[data-slot="drawer-content"]');
+    expect(drawer).toHaveClass('min-h-0', 'overflow-hidden');
+    expect(drawer?.querySelector('[data-slot="drawer-header"]')).toHaveClass('shrink-0');
+    expect(drawer?.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
+    expect(screen.getByRole('heading', { name: 'deployment.editor.category.source' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'deployment.editor.category.build' })).toBeInTheDocument();
+
+    const search = screen.getByRole('textbox', { name: 'deployment.editor.searchNodes' });
+    fireEvent.change(search, { target: { value: 'not-present' } });
+    expect(screen.getByText('deployment.editor.noNodeSearchResults')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 
   it('deduplicates save toasts under repeated notice delivery', async () => {
@@ -207,7 +309,12 @@ describe('DeploymentWorkflowCenter', () => {
     fireEvent.keyDown(source!, { key: 'Enter' });
     expect(useDeploymentWorkflowStore.getState().selectedNodeId).toBe('source');
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'deployment.editor.configure' })[0]);
+    resizeWorkspace(428);
+    const configure = screen.getAllByRole('button', { name: 'deployment.editor.configure' })[0]!;
+    fireEvent.click(configure);
     expect(screen.getByRole('heading', { name: 'deployment.editor.configuration' })).toBeInTheDocument();
+    expect(screen.getByTestId('deployment-node-config').querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    return waitFor(() => expect(configure).toHaveFocus());
   });
 });

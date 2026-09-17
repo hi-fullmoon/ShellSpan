@@ -2,8 +2,48 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/geist';
+@import '@xyflow/react/dist/base.css' layer(components);
 
 @custom-variant dark (&:is([data-theme="dark"] *));
+
+.deployment-workflow-flow {
+  --xy-edge-stroke-default: var(--border);
+  --xy-edge-stroke-selected-default: var(--primary);
+  --xy-connectionline-stroke-default: var(--primary);
+  --xy-handle-background-color-default: var(--muted-foreground);
+  --xy-minimap-background-color-default: var(--background);
+  --xy-minimap-mask-background-color-default: color-mix(in srgb, var(--background) 72%, transparent);
+  --xy-minimap-node-background-color-default: var(--muted);
+  --xy-minimap-node-stroke-color-default: var(--border);
+  --xy-background-pattern-dots-color-default: var(--border);
+  --xy-selection-background-color-default: color-mix(in srgb, var(--primary) 10%, transparent);
+  --xy-selection-border-default: 1px dotted var(--primary);
+}
+
+.deployment-workflow-flow .react-flow__controls-button {
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.deployment-workflow-flow .react-flow__controls-button:last-child {
+  border-bottom: 0;
+}
+
+.deployment-workflow-flow .react-flow__controls-button:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.deployment-workflow-flow .react-flow__handle.connectingto.valid {
+  border-color: var(--primary);
+  background: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 20%, transparent);
+}
+
+.deployment-workflow-flow .react-flow__handle.connectingto:not(.valid) {
+  opacity: 0.35;
+}
 
 /* File completion uses the popover surface directly, without a nested card. */
 .ai-completion-popup:has(> [data-file-completion]) {

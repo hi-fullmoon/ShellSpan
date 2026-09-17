@@ -4,6 +4,8 @@
 > 实施方式：严格串行；每个阶段使用独立 Codex 会话  
 > 兼容策略：不实现 旧版 兼容编译、旧运行渲染、旧产物适配或历史数据迁移
 
+> 后续专项：工作流正式上线后的 React Flow 图编辑器与无 Card 本地部署 UI 重构，按 [`deployment-workflow-xyflow-ui-refactor-plan.md`](./deployment-workflow-xyflow-ui-refactor-plan.md) 的六个独立会话阶段实施。本文件的阶段 4–6 与既有验收证据保留为初次交付历史，不作为后续 UI 结构的约束。
+
 ## 1. 实施原则
 
 1. 工作流 是唯一的新部署模型。新增代码不得继续扩展固定 Docker Compose 表单协议。
