@@ -17,6 +17,7 @@ export interface TerminalSession {
   terminalGeneration?: number;
   integrationState?: TerminalBrokerIntegrationState;
   integrationReason?: string;
+  promptReady?: boolean;
   title: string;
   host: string;
   port: number;
@@ -31,9 +32,6 @@ export interface TerminalSession {
   pendingConnection?: boolean;
   /** Ephemeral predecessor used to keep split layout stable while a connection id changes. */
   replacesSessionId?: string;
-  /** Ephemeral dedicated Agent SSH PTY; excluded from workspace persistence. */
-  agentOwned?: boolean;
-  agentSourceSessionId?: string;
 }
 
 export interface PendingTerminalConnection {
@@ -90,8 +88,6 @@ interface TerminalState {
       insertAfterId?: string;
       pinned?: boolean;
       color?: string;
-      agentOwned?: boolean;
-      agentSourceSessionId?: string;
       replacesSessionId?: string;
     },
   ) => void;
@@ -237,8 +233,6 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         profileId,
         pinned: options?.pinned,
         color: options?.color,
-        agentOwned: options?.agentOwned,
-        agentSourceSessionId: options?.agentSourceSessionId,
         replacesSessionId: options?.replacesSessionId,
       };
 
@@ -317,8 +311,6 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         profileId,
         pinned: old.pinned,
         color: old.color,
-        agentOwned: old.agentOwned,
-        agentSourceSessionId: old.agentSourceSessionId,
         reconnecting: true,
         replacesSessionId: oldSessionId,
       };
@@ -399,12 +391,14 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         if (
           session.integrationState === event.state
           && session.integrationReason === event.reason
+          && session.promptReady === event.promptReady
         ) return session;
         changed = true;
         return {
           ...session,
           integrationState: event.state,
           integrationReason: event.reason,
+          promptReady: event.promptReady,
         };
       });
       return changed ? { sessions } : state;

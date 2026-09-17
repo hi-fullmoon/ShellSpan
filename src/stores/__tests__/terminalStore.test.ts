@@ -115,6 +115,7 @@ describe('terminalStore', () => {
       terminalSessionId: 'terminal-1',
       terminalGeneration: 1,
       state: 'ready',
+      promptReady: true,
     });
     expect(useTerminalStore.getState().sessions[0]?.integrationState).toBeUndefined();
 
@@ -123,11 +124,13 @@ describe('terminalStore', () => {
       terminalSessionId: 'terminal-1',
       terminalGeneration: 2,
       state: 'degraded',
+      promptReady: false,
       reason: 'unsupportedShell',
     });
     expect(useTerminalStore.getState().sessions[0]).toMatchObject({
       integrationState: 'degraded',
       integrationReason: 'unsupportedShell',
+      promptReady: false,
     });
   });
 
