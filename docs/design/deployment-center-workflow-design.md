@@ -2,7 +2,7 @@
 
 > 状态：Draft  
 > 适用范围：ShellSpan 本地部署中心  
-> 目标版本：Deployment Workflow v3  
+> 目标版本：Deployment Workflow
 > 最后更新：2026-09-17
 
 ## 1. 结论
@@ -17,7 +17,7 @@
 4. **语义定义与画布布局分离。** 移动节点只修改布局，不改变工作流语义修订，也不使已生成的审批计划失效；节点、连线或参数变化才产生新的语义修订。
 5. **运行前必须编译和冻结。** 工作流修订、源码快照、目标身份、产物摘要、节点版本、节点参数、固定副作用和补偿动作都进入不可变计划及审批摘要。
 6. **回滚不是把 DAG 倒着执行。** 每个有副作用的节点由 runtime 声明固定、类型化的补偿行为；同一次运行中的自动恢复仅使用审批时冻结的上一版本，人工回滚则创建新的运行并重新审批。
-7. **兼容现有实现。** 现有 v1/v2 Docker Compose 工作流通过兼容编译器映射成内部 DAG；历史运行、审批摘要和事件不重写。
+7. **生产入口仅使用当前工作流。** 不提供旧版兼容编译、历史读取或混合执行；旧数据库记录保留但不读取、不转换、不自动删除。
 
 首个可交付版本应同时提供两套模板：
 
@@ -110,7 +110,7 @@ ShellSpan 不直接复制它们的 YAML 或任意脚本能力，因为桌面端�
 - 运行视图可查看每个节点的状态、耗时、重试、有限日志和证据；
 - 保留当前不可变审批、目标冻结、内容校验、取消、恢复和审计语义；
 - 新节点能够在不修改工作流核心调度器的前提下注册；
-- 旧 Docker Compose 工作流和历史运行继续可读、可审计；
+- 生产部署入口、新运行和审计只读取 工作流 表与 工作流 协议；旧数据库内容原样保留但不进入产品入口；
 - 宽窄工作台、AI 面板挤压场景下都可正常使用。
 
 ### 4.2 非目标
@@ -189,18 +189,18 @@ interface WorkflowNodeDefinition {
 
 ```ts
 type DeploymentPortType =
-  | 'source.snapshot/v1'
-  | 'artifact.bundle/v2'
-  | 'target.snapshot/v1'
-  | 'release.candidate/v1'
-  | 'transfer.receipt/v1'
-  | 'release.receipt/v1'
-  | 'activation.receipt/v1'
-  | 'verification.evidence/v1'
-  | 'control.approval/v1'
-  | 'scalar.string/v1'
-  | 'scalar.boolean/v1'
-  | 'scalar.integer/v1';
+  | 'source.snapshot'
+  | 'artifact.bundle'
+  | 'target.snapshot'
+  | 'release.candidate'
+  | 'transfer.receipt'
+  | 'release.receipt'
+  | 'activation.receipt'
+  | 'verification.evidence'
+  | 'control.approval'
+  | 'scalar.string'
+  | 'scalar.boolean'
+  | 'scalar.integer';
 ```
 
 约束如下：
@@ -211,12 +211,12 @@ type DeploymentPortType =
 - 句柄不能被用户编辑成路径；
 - 端口类型相同不代表任意消费者都可接受，消费者还要校验 Artifact 的 `role` 和 `mediaType`。
 
-## 6. 工作流定义 v3
+## 6. 工作流定义 工作流
 
 ### 6.1 顶层结构
 
 ```ts
-interface DeploymentWorkflowDefinitionV3 {
+interface DeploymentWorkflowDefinition {
   schemaVersion: 3;
   targets: Array<{
     id: string;
@@ -250,7 +250,7 @@ interface DeploymentWorkflowDefinitionV3 {
 画布布局单独保存：
 
 ```ts
-interface DeploymentWorkflowLayoutV1 {
+interface DeploymentWorkflowLayout {
   schemaVersion: 1;
   nodes: Record<string, { x: number; y: number; collapsed?: boolean }>;
   groups: Array<{ id: string; title: string; nodeIds: string[] }>;
@@ -293,7 +293,7 @@ type NodeCondition =
 Artifact Bundle 是一个带 manifest 的不可变发布输入。其结构借鉴 OCI Descriptor，但保持 ShellSpan 的本地存储和审批语义：
 
 ```ts
-interface ArtifactDescriptorV1 {
+interface ArtifactDescriptor {
   name: string;
   role: 'application' | 'deployment-config' | 'metadata' | 'sbom' | 'signature' | 'auxiliary';
   mediaType: string;
@@ -307,7 +307,7 @@ interface ArtifactDescriptorV1 {
   annotations?: Readonly<Record<string, string>>;
 }
 
-interface ArtifactBundleManifestV2 {
+interface ArtifactBundleManifest {
   schemaVersion: 2;
   artifactType: string;
   source: {
@@ -315,7 +315,7 @@ interface ArtifactBundleManifestV2 {
     dirty: boolean;
     snapshotDigest: `sha256:${string}`;
   };
-  components: ArtifactDescriptorV1[];
+  components: ArtifactDescriptor[];
   producer: {
     nodeType: string;
     nodeTypeVersion: number;
@@ -324,8 +324,8 @@ interface ArtifactBundleManifestV2 {
   annotations: Readonly<Record<string, string>>;
 }
 
-interface ArtifactHandleV2 {
-  artifactReference: `deployment-artifact-v2:sha256:${string}`;
+interface ArtifactHandle {
+  artifactReference: `deployment-artifact:sha256:${string}`;
   manifestDigest: `sha256:${string}`;
   contentDigest: `sha256:${string}`;
 }
@@ -339,9 +339,9 @@ interface ArtifactHandleV2 {
 
 | 内容 | 推荐 mediaType | 典型生产节点 | 典型消费节点 |
 | --- | --- | --- | --- |
-| 静态文件树 | `application/vnd.shellspan.file-tree.v1.tar+zstd` | `artifact.collect@1` | `release.prepare-files@1` |
-| Docker/OCI 镜像归档 | `application/vnd.oci.image.layer.v1.tar` | `build.docker-buildx@2` | `runtime.load-image@1` |
-| Compose 配置 | `application/vnd.shellspan.compose.v1+yaml` | `artifact.bundle-compose@1` | `deploy.compose@2` |
+| 静态文件树 | `application/vnd.shellspan.file-tree.tar+zstd` | `artifact.collect@1` | `release.prepare-files@1` |
+| Docker/OCI 镜像归档 | `application/vnd.shellspan.oci-image.tar` | `build.docker-buildx@2` | `runtime.load-image@1` |
+| Compose 配置 | `application/vnd.shellspan.compose+yaml` | `artifact.bundle-compose@1` | `deploy.compose@2` |
 | 单个二进制 | `application/octet-stream` | `artifact.collect@1` | 后续 `deploy.binary-service@1` |
 | 通用 zip | `application/zip` | `artifact.import@1` | 与显式声明兼容的解包节点 |
 | SBOM | `application/spdx+json` 或 `application/vnd.cyclonedx+json` | 后续扫描节点 | 审批与审计，不直接部署 |
@@ -367,7 +367,7 @@ interface ArtifactHandleV2 {
 首版继续使用应用数据目录中的本地 CAS：
 
 ```text
-deployment-artifacts-v2/
+deployment-artifacts/
   manifests/sha256/<digest>.json
   blobs/sha256/<digest>
   leases/<run-id>/<artifact-digest>
@@ -452,6 +452,7 @@ type EffectClass =
 | `release.create-candidate@1` | 本地 | Bundle + target snapshot | `ReleaseCandidate` | pure |
 | `control.approval@1` | native UI | candidate + preflight | approval token | control |
 | `transfer.sftp@2` | 远端 | Bundle + approval | `TransferReceipt` | remoteWrite |
+| `release.prepare-compose@1` | 远端 | Compose transfer receipt | `ReleaseReceipt` | remoteWrite |
 | `release.prepare-files@1` | 远端 | file-tree receipt | `ReleaseReceipt` | remoteWrite |
 | `runtime.load-image@1` | 远端 | image receipt | image evidence | remoteWrite |
 | `deploy.compose@2` | 远端 | image/config evidence | deployment receipt | serviceControl |
@@ -466,7 +467,7 @@ type EffectClass =
 `build.package-script@1` 用于“源码内已有前端项目，需要先生成 dist”的场景。它不是任意命令节点，配置只允许：
 
 ```ts
-interface PackageScriptBuildConfigV1 {
+interface PackageScriptBuildConfig {
   packageManager: 'pnpm' | 'npm' | 'yarn' | 'bun';
   workingDirectory: string;
   installMode: 'frozen' | 'skip';
@@ -658,7 +659,7 @@ flowchart LR
   L --> M[提交当前版本]
 ```
 
-该模板由现有 v2 流程映射而来，继续保留：
+该模板源自旧固定 Docker Compose 流程，继续保留：
 
 - `linux/amd64` / `linux/arm64` 平台冻结；
 - Buildx 镜像身份校验；
@@ -909,81 +910,30 @@ interface DeploymentNodeProgressEvent {
 
 首版只强制摘要，不承诺签名信任链。后续增加签名验证时，应作为独立 `verify.signature` 节点和审批证据，不改变 Artifact 的内容身份。
 
-## 17. 兼容与迁移
+## 17. 切换与数据保留
 
-### 17.1 v1/v2 兼容编译
+### 17.1 工作流 唯一入口
 
-不批量重写已有定义。读取旧工作流时，兼容层在内存中映射为：
-
-```text
-source.snapshot
-  → build.docker-buildx
-  → artifact.bundle-compose
-  → target.preflight
-  → release.create-candidate
-  → control.approval
-  → transfer.sftp
-  → release.prepare
-  → runtime.load-image
-  → deploy.compose
-  → verify.http?
-  → proxy.nginx-reload?
-  → release.commit
-```
-
-- 旧工作流可继续运行原协议，也可在编辑时显式“升级为节点工作流”；
-- 升级创建新的 v3 revision，不覆盖旧 JSON；
-- 历史 run 保持 legacy renderer，不重算 plan digest；
-- 旧 Artifact v1 只由旧执行器消费，不伪装成 v2 Bundle；
-- 新运行如果使用 v3，必须全程使用 v3 plan、Artifact 和 receipt，避免半链路混用。
+- 部署中心、命令面板、主机部署入口、前端 store、类型化 IPC 和 native command 注册只使用 工作流；
+- 不实现 旧版 定义转换、历史 renderer、Artifact 适配或旧运行恢复；
+- 旧部署记录继续随 schema 存在，物理表改名为 `deployment_legacy_*`；生产代码不查询、转换或删除它们；
+- 工作流运行必须全程使用同一编译计划、Artifact Bundle、receipt 和 reconciliation，不能半链路混用；
+- 清理旧表或用户旧数据必须另行获得明确授权，不属于本设计的切换动作。
 
 ### 17.2 上线门禁
 
-建议增加独立 restart-scoped gate，例如 `SHELLSPAN_DEPLOYMENT_WORKFLOW_V3`：
+建议增加独立 restart-scoped gate，例如 `SHELLSPAN_DEPLOYMENT_WORKFLOW`：
 
-- 关闭时禁止创建/修改/执行 v3；
-- 只读查看、取消、恢复、审计和旧版运行不受影响；
+- 关闭时禁止创建/修改/执行 工作流；
+- 工作流 只读查看、取消、恢复和审计不受影响；
 - 无效环境值 fail closed；
 - 关闭 gate 不能使正在运行的工作流失去取消和恢复能力。
 
 ## 18. 分阶段实施
 
-### 阶段 0：协议与编译器
+实施以 [`deployment-center-workflow-implementation-plan.md`](./deployment-center-workflow-implementation-plan.md) 的七个严格串行阶段为准：协议/编译器、持久化/CAS、Docker Compose、静态站点、编辑器、运行与回滚体验、可靠性与最终切换。阶段 6 完成后生产入口只注册 工作流。
 
-- 固化 v3 schema、端口类型、Artifact Bundle v2 和 Node Registry；
-- 实现纯函数图校验和 canonical digest；
-- 实现 v1/v2 到内部 DAG 的兼容编译；
-- 不改变当前执行行为。
-
-### 阶段 1：Docker Compose 等价迁移
-
-- 用 v3 Run Coordinator 驱动现有 Buildx、preflight、approval、transfer 和 RemoteRunner；
-- 新增节点级 attempt、事件和运行图；
-- 现有 deployment e2e 必须保持通过；
-- 新旧计划、审批和恢复结果做差异测试。
-
-### 阶段 2：静态站点 MVP
-
-- 实现 `build.package-script`、确定性 file-tree、`artifact.collect`；
-- 实现文件 Release 准备、原子 `current` 切换、HTTP 验证和固定恢复；
-- 提供“静态站点”模板与窄屏列表编辑器；
-- 增加 Linux SSH/SFTP 真实集成测试。
-
-### 阶段 3：产物中心与导入
-
-- Artifact Drawer/页面、引用和保留状态；
-- 安全的本地文件导入节点；
-- zip/tar、单二进制等更多类型；
-- 明确的手工回滚版本选择。
-
-### 阶段 4：扩展部署目标
-
-- 固定 systemd service 节点；
-- OCI Registry/S3 artifact provider；
-- 多主机串行/批次部署；
-- 签名和 SBOM 策略。
-
-Kubernetes 或任意插件执行器应作为独立产品阶段评审，不能借“自定义节点”绕过 native 安全模型。
+systemd、外部 Artifact Provider、多主机、签名策略、Kubernetes、Nomad 和任意插件执行器均是明确延期项；后续也必须经过 native registry、不可变计划、人工审批、receipt 和 reconciliation，不能借“自定义节点”形成旁路。
 
 ## 19. 验收标准
 
@@ -1033,7 +983,7 @@ Kubernetes 或任意插件执行器应作为独立产品阶段评审，不能借
 - executor：每个节点 validate/plan/execute/reconcile/compensate 契约测试；
 - repository：不可变 revision、attempt、event、receipt 和迁移测试；
 - frontend：可读 label、节点连接、CardAction、响应式列表、Toast 去重测试；
-- e2e：Docker Compose 回归、静态 `dist` 发布、失败恢复、崩溃恢复和审计导出。
+- e2e：Docker Compose、静态 `dist`、失败恢复、断网未知态、崩溃/重启恢复、审计导出和人工回滚。
 
 ## 20. 主要风险与对策
 
@@ -1048,11 +998,11 @@ Kubernetes 或任意插件执行器应作为独立产品阶段评审，不能借
 | dist 发布原地覆盖导致半发布 | 版本目录 + 原子 `current` 切换；不支持时阻止运行 |
 | Artifact 占用磁盘 | 引用/lease/保留策略；首版不自动删除已发布 Release |
 | 布局调整频繁使审批失效 | semantic revision 与 layout revision 分离 |
-| 兼容层永久拖累实现 | 旧协议只读/原执行器隔离；编辑时显式升级；新旧 Artifact 不混用 |
+| 最终切换误读或删除旧数据 | 生产代码只查询 工作流 表；旧表保留且无自动清理；删除数据需独立授权 |
 
 ## 21. 需要在实现前冻结的产品决策
 
-以下建议作为 v3 的冻结结论，而不是在开发阶段反复变化：
+以下建议作为 工作流 的冻结结论，而不是在开发阶段反复变化：
 
 1. 工作流是部署领域 DAG，不提供任意命令节点；
 2. 首版恰好一个审批节点，一个运行只作用于一个 target；
@@ -1060,7 +1010,7 @@ Kubernetes 或任意插件执行器应作为独立产品阶段评审，不能借
 4. 静态站点只支持版本目录 + 原子 `current` 切换；
 5. 自动恢复是 runtime 策略，不是用户自由绘制的失败分支；
 6. layout revision 不参与 plan digest；
-7. v1/v2 历史数据不重写，新旧 Artifact 不混用；
+7. 旧版 历史数据不重写，新旧 Artifact 不混用；
 8. Docker Compose 与静态站点必须共用 compiler、scheduler、approval 和 ledger，不能形成两套部署中心。
 
 这组约束可以让产品在支持 `dist` 和其他产物的同时，仍保持当前 ShellSpan 最有价值的特征：执行过程可理解、变更可审批、结果可验证、失败可恢复、历史可审计。
