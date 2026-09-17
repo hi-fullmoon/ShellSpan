@@ -100,52 +100,6 @@ describe('terminal workspace serialization', () => {
     expect(parsed.layout).toEqual(layout);
   });
 
-  it('never persists a dedicated Agent SSH PTY or its split-layout identity', () => {
-    const sessions: TerminalSession[] = [
-      {
-        sessionId: 'user-remote',
-        title: 'Production',
-        host: 'prod.example.com',
-        port: 22,
-        username: 'alice',
-        status: 'connected',
-        profileId: 'profile-1',
-      },
-      {
-        sessionId: 'agent-remote',
-        title: 'Production',
-        host: 'prod.example.com',
-        port: 22,
-        username: 'alice',
-        status: 'connected',
-        profileId: 'profile-1',
-        agentOwned: true,
-        agentSourceSessionId: 'user-remote',
-      },
-    ];
-    const layout: TerminalSplitState = {
-      kind: 'split',
-      orientation: 'horizontal',
-      first: {
-        kind: 'group',
-        id: 'first',
-        sessionIds: ['user-remote'],
-        activeSessionId: 'user-remote',
-      },
-      second: {
-        kind: 'group',
-        id: 'second',
-        sessionIds: ['agent-remote'],
-        activeSessionId: 'agent-remote',
-      },
-    };
-
-    const persisted = JSON.parse(serializeTerminalWorkspace(sessions, layout));
-    expect(persisted.sessions.map((session: { sessionId: string }) => session.sessionId))
-      .toEqual(['user-remote']);
-    expect(JSON.stringify(persisted.layout)).not.toContain('agent-remote');
-  });
-
   it('ignores corrupt and invalid workspace entries', () => {
     expect(parseTerminalWorkspace('not-json')).toEqual({ sessions: [], layout: null });
     expect(parseTerminalWorkspace(JSON.stringify({

@@ -12,10 +12,12 @@ const translations = vi.hoisted<Record<string, string>>(() => ({
   'agent.executionSurface.v1.visibleCommand': 'Visible command',
   'agent.executionSurface.v1.state.initializing': 'Initializing',
   'agent.executionSurface.v1.state.ready': 'Ready',
+  'agent.executionSurface.v1.state.busy': 'Terminal busy',
   'agent.executionSurface.v1.state.unavailable': 'Unavailable',
   'agent.executionSurface.v1.state.directFallback': 'Direct fallback',
   'agent.executionSurface.v1.initializingDescription': 'Real-terminal command support is initializing. Use Direct for now.',
   'agent.executionSurface.v1.readyDescription': 'Runs visibly with cooperative shell lifecycle. Use Direct for security-sensitive or untrusted code.',
+  'agent.executionSurface.v1.busyDescription': 'This terminal is running a foreground program. Wait for the prompt to return, or use Direct.',
   'agent.executionSurface.v1.unavailableDescription': 'Real-terminal command support is unavailable for this terminal. Choose Direct instead.',
   'agent.executionSurface.v1.directFallbackDescription': 'The runtime fell back to Direct because real-terminal command support could not be used.',
 }));
@@ -33,6 +35,7 @@ describe('AgentExecutionSurfaceSelector', () => {
   it.each([
     ['initializing', 'Initializing', 'Real-terminal command support is initializing. Use Direct for now.'],
     ['ready', 'Ready', 'Runs visibly with cooperative shell lifecycle. Use Direct for security-sensitive or untrusted code.'],
+    ['busy', 'Terminal busy', 'This terminal is running a foreground program. Wait for the prompt to return, or use Direct.'],
     ['unavailable', 'Unavailable', 'Real-terminal command support is unavailable for this terminal. Choose Direct instead.'],
   ] as const)(
     'presents the real-terminal %s state without changing the stored surface',

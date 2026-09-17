@@ -33,6 +33,9 @@ export function AiWorkspaceController({
   const activeTerminalIntegrationState = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === state.activeSessionId,
   )?.integrationState);
+  const activeTerminalPromptReady = useTerminalStore((state) => state.sessions.find(
+    (candidate) => candidate.sessionId === state.activeSessionId,
+  )?.promptReady);
   const session = controller.view?.snapshot.value;
   const configuringContinuation = controller.historicalContinuationAvailable;
   const existingSessionLocked = !configuringContinuation
@@ -58,7 +61,9 @@ export function AiWorkspaceController({
     ));
   const realTerminalState = activeTerminalStatus === 'connected'
     ? activeTerminalIntegrationState === 'ready'
-      ? 'ready'
+      ? activeTerminalPromptReady
+        ? 'ready'
+        : 'busy'
       : activeTerminalIntegrationState === 'initializing'
         ? 'initializing'
       : activeTerminalIntegrationState === 'unavailable'

@@ -57,19 +57,6 @@ describe('TerminalTabBar', () => {
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
   });
 
-  it('identifies a dedicated Agent SSH PTY without changing ordinary tab behavior', () => {
-    useTerminalStore.getState().addSession(
-      { sessionId: 'agent-ssh', title: 'Production', host: 'h', port: 22, username: 'u' },
-      'profile-1',
-      { agentOwned: true, agentSourceSessionId: 'user-ssh' },
-    );
-    render(<TerminalTabBar />);
-
-    const tab = screen.getByRole('tab', { name: 'terminal.tab.agentPtyLabel' });
-    expect(tab).toHaveAttribute('data-agent-owned', 'true');
-    expect(within(tab).getByText('terminal.tab.agentPtyBadge')).toBeInTheDocument();
-  });
-
   it('renders a connection placeholder as a busy tab without tab actions', () => {
     useTerminalStore.getState().beginConnectionAttempt({
       title: 'Pending Server', host: 'h', port: 22, username: 'u',

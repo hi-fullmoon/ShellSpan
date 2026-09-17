@@ -25,7 +25,7 @@ describe('terminal surface semantics', () => {
     });
   });
 
-  it.each(['initializing', 'ready', 'unavailable'] as const)(
+  it.each(['initializing', 'ready', 'busy', 'unavailable'] as const)(
     'keeps an ordinary Direct selection ordinary while real-terminal state is %s',
     (realTerminalState) => {
       expect(resolveTerminalSurfacePresentation('direct', realTerminalState)).toEqual({

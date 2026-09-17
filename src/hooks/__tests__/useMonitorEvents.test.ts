@@ -55,40 +55,26 @@ describe('useMonitorEvents port-forward lifecycle', () => {
     expect(stopOwner).toHaveBeenNthCalledWith(2, 'terminal:session-2');
   });
 
-  it('maps a backend-created Agent SSH PTY to an ephemeral ordinary terminal tab', async () => {
+  it('does not listen for backend-created Agent SSH PTYs or add tabs across repeated turns', async () => {
     const handlers = new Map<string, (event: { payload: Record<string, unknown> }) => void>();
     listen.mockImplementation(async (eventName, callback) => {
       handlers.set(eventName, callback);
       return vi.fn();
     });
+    useTerminalStore.getState().addSession({
+      sessionId: 'user-ssh-1',
+      title: 'Production',
+      host: 'prod.example.com',
+      port: 22,
+      username: 'alice',
+    }, 'profile-1');
 
     renderHook(() => useMonitorEvents());
-    await waitFor(() => {
-      expect(handlers.get('terminal-agent-remote-session-created')).toBeDefined();
-    });
-    act(() => {
-      handlers.get('terminal-agent-remote-session-created')?.({
-        payload: {
-          summary: {
-            sessionId: 'agent-pty-1',
-            title: 'Production',
-            host: 'prod.example.com',
-            port: 22,
-            username: 'alice',
-            terminalSessionId: 'terminal-agent-1',
-            terminalGeneration: 1,
-          },
-          profileId: 'profile-1',
-          sourceSessionId: 'user-ssh-1',
-        },
-      });
-    });
+    await waitFor(() => expect(handlers.get('ssh-closed')).toBeDefined());
 
-    expect(useTerminalStore.getState().sessions).toContainEqual(expect.objectContaining({
-      sessionId: 'agent-pty-1',
-      agentOwned: true,
-      agentSourceSessionId: 'user-ssh-1',
-      terminalGeneration: 1,
-    }));
+    expect(handlers.get('terminal-agent-remote-session-created')).toBeUndefined();
+    expect(listen).toHaveBeenCalledTimes(1);
+    expect(useTerminalStore.getState().sessions.map((session) => session.sessionId))
+      .toEqual(['user-ssh-1']);
   });
 });

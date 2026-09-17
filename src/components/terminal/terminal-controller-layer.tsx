@@ -67,6 +67,8 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
   }>();
   const turnSurfaces = new Map<string, { sessionId: string; operationId: string; turnId?: string }>();
   const currentTurns = new Map<string, string>();
+  const pendingTurnBindings = new Map<string, Promise<void>>();
+  const fencedTurns = new Map<string, string | undefined>();
   const pendingTurnStops = new Map<string, {
     operationId: string;
     timer: ReturnType<typeof setTimeout>;
@@ -174,37 +176,101 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     }, TAKEOVER_CONFIRMATION_TIMEOUT_MS);
     pendingStop = { operationId, timer };
     pendingTurnStops.set(agentSessionId, pendingStop);
-    void invokeTakeoverAgentTerminal({
-      sessionId,
-      agentSessionId,
-      operationId,
-    }).catch((error) => {
-      logger.warn(`Terminal takeover failed ${operationId}`, error);
-    }).then(() => invokeInterruptAgentRuntime({ sessionId: agentSessionId })).then(() => {
+    void (async () => {
+      let backendFenced = false;
+      try {
+        backendFenced = await invokeTakeoverAgentTerminal({
+          sessionId,
+          agentSessionId,
+          operationId,
+        });
+      } catch (error) {
+        logger.warn(`Terminal takeover failed ${operationId}`, error);
+      }
       if (pendingTurnStops.get(agentSessionId) !== pendingStop) return;
-      clearTurn(agentSessionId);
-    }).catch((error) => {
-      if (pendingTurnStops.get(agentSessionId) !== pendingStop) return;
-      clearTimeout(pendingStop.timer);
-      pendingTurnStops.delete(agentSessionId);
-      agentTerminalLeaseState.update(sessionId, operationId, (current) => ({
-        ...current,
-        takeoverRequested: false,
-        takeoverFailed: true,
-      }));
-      logger.warn(`Failed to cancel Agent turn ${agentSessionId}`, error);
-    });
+
+      if (backendFenced) {
+        fencedTurns.set(agentSessionId, currentTurns.get(agentSessionId));
+        clearTurn(agentSessionId);
+        void invokeInterruptAgentRuntime({ sessionId: agentSessionId }).catch((error) => {
+          logger.warn(`Failed to stop taken-over Agent turn ${agentSessionId}`, error);
+        });
+        return;
+      }
+
+      try {
+        await invokeInterruptAgentRuntime({ sessionId: agentSessionId });
+        if (pendingTurnStops.get(agentSessionId) !== pendingStop) return;
+        fencedTurns.set(agentSessionId, currentTurns.get(agentSessionId));
+        clearTurn(agentSessionId);
+      } catch (error) {
+        if (pendingTurnStops.get(agentSessionId) !== pendingStop) return;
+        clearTimeout(pendingStop.timer);
+        pendingTurnStops.delete(agentSessionId);
+        agentTerminalLeaseState.update(sessionId, operationId, (current) => ({
+          ...current,
+          takeoverRequested: false,
+          takeoverFailed: true,
+        }));
+        logger.warn(`Failed to cancel Agent turn ${agentSessionId}`, error);
+      }
+    })();
   };
 
   return {
     async handle(lease) {
       if (disposed) return;
+      if (lease.state === 'acquired') {
+        await pendingTurnBindings.get(lease.agentSessionId);
+        if (disposed) return;
+      }
+      if (fencedTurns.has(lease.agentSessionId)) {
+        if (lease.state === 'acquired') {
+          try {
+            await invokeAgentTerminalLeaseReady({
+              sessionId: lease.sessionId,
+              agentSessionId: lease.agentSessionId,
+              operationId: lease.operationId,
+              terminalConnected: false,
+              outputListenerReady: false,
+              hasPendingUserInput: false,
+              hasUnverifiedUserSubmission: false,
+              hasCredentialPrompt: false,
+            });
+          } catch (error) {
+            logger.warn(`Failed to reject fenced Agent terminal lease ${lease.operationId}`, error);
+          }
+        }
+        return;
+      }
       if (lease.state === 'released') {
         const active = activeLeases.get(lease.sessionId);
         if (active?.lease.operationId === lease.operationId) {
           // A command ending does not end the Agent turn. Keep the same input
           // suppression until TurnEnd (or an explicit confirmed takeover).
           cleanup(active, true, true);
+        }
+        return;
+      }
+
+      const frozenSurface = turnSurfaces.get(lease.agentSessionId);
+      if (
+        currentTurns.has(lease.agentSessionId)
+        && (!frozenSurface || frozenSurface.sessionId !== lease.sessionId)
+      ) {
+        try {
+          await invokeAgentTerminalLeaseReady({
+            sessionId: lease.sessionId,
+            agentSessionId: lease.agentSessionId,
+            operationId: lease.operationId,
+            terminalConnected: false,
+            outputListenerReady: false,
+            hasPendingUserInput: false,
+            hasUnverifiedUserSubmission: false,
+            hasCredentialPrompt: false,
+          });
+        } catch (error) {
+          logger.warn(`Failed to reject lease outside the frozen terminal ${lease.operationId}`, error);
         }
         return;
       }
@@ -235,7 +301,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       const turnStartedAtUnixMs = previousView?.agentSessionId === lease.agentSessionId
         ? previousView.acquiredAtUnixMs
         : lease.acquiredAtUnixMs;
-      const previousSurface = turnSurfaces.get(lease.agentSessionId);
+      const previousSurface = frozenSurface ?? turnSurfaces.get(lease.agentSessionId);
       if (
         previousSurface
         && (
@@ -255,7 +321,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       };
       activeLeases.set(lease.sessionId, active);
       turnSurfaces.set(lease.agentSessionId, {
-        sessionId: lease.sessionId,
+        sessionId: frozenSurface?.sessionId ?? lease.sessionId,
         operationId: lease.operationId,
         ...(currentTurns.get(lease.agentSessionId)
           ? { turnId: currentTurns.get(lease.agentSessionId) }
@@ -329,6 +395,10 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     handleSession(event) {
       if (disposed) return;
       if (event.type === 'turn/start' && event.turnId) {
+        if (fencedTurns.has(event.sessionId)) {
+          if (fencedTurns.get(event.sessionId) === event.turnId) return;
+          fencedTurns.delete(event.sessionId);
+        }
         const currentTurn = currentTurns.get(event.sessionId);
         const surface = turnSurfaces.get(event.sessionId);
         if (currentTurn && currentTurn !== event.turnId) clearTurn(event.sessionId);
@@ -337,7 +407,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         }
         currentTurns.set(event.sessionId, event.turnId);
         const turnId = event.turnId;
-        void invokeGetAgentRuntimeSession({ sessionId: event.sessionId }).then((snapshot) => {
+        const binding = invokeGetAgentRuntimeSession({ sessionId: event.sessionId }).then((snapshot) => {
           if (disposed || currentTurns.get(event.sessionId) !== turnId) return;
           if (snapshot.header.executionSurface !== 'boundTerminal') return;
           const sessionId = snapshot.header.target?.sessionId;
@@ -381,6 +451,12 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         }).catch((error) => {
           logger.warn(`Failed to bind Agent turn terminal ${event.sessionId}`, error);
         });
+        pendingTurnBindings.set(event.sessionId, binding);
+        void binding.then(() => {
+          if (pendingTurnBindings.get(event.sessionId) === binding) {
+            pendingTurnBindings.delete(event.sessionId);
+          }
+        });
         return;
       }
       if (event.type === 'turn/end') {
@@ -390,12 +466,14 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         }
         if (!event.turnId || currentTurns.get(event.sessionId) === event.turnId) {
           currentTurns.delete(event.sessionId);
+          fencedTurns.delete(event.sessionId);
         }
         return;
       }
       if (event.type === 'session/ended' || event.type === 'session/resumed') {
         clearTurn(event.sessionId);
         currentTurns.delete(event.sessionId);
+        fencedTurns.delete(event.sessionId);
       }
     },
 
@@ -412,6 +490,8 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       retainedInputs.clear();
       turnSurfaces.clear();
       currentTurns.clear();
+      pendingTurnBindings.clear();
+      fencedTurns.clear();
       for (const pending of pendingTurnStops.values()) clearTimeout(pending.timer);
       pendingTurnStops.clear();
     },
@@ -495,31 +575,23 @@ export const TerminalControllerLayer: React.FC = () => {
             const integrated = snapshot.session;
             if (!integrated) return;
             const remoteRolloutMissing = integrated.transportKind === 'sshPty'
-              && Boolean(integrated.agentPtyOwner)
-              && !snapshot.remoteAgentPtyRollout.enabled;
-            const remoteVisibleCommandAvailable = integrated.transportKind === 'sshPty'
-              && !integrated.agentPtyOwner
-              && integrated.integrationReason === 'dedicatedAgentPtyRequired'
-              && snapshot.remoteAgentPtyRollout.enabled;
+              && !snapshot.remoteBoundTerminalRollout.enabled;
             const executionRolloutMissing = !snapshot.terminalExecuteRollout.enabled
               || remoteRolloutMissing;
             setIntegrationState({
               sessionId: session.sessionId,
               terminalSessionId: integrated.terminalSessionId,
               terminalGeneration: integrated.terminalGeneration,
-              state: remoteVisibleCommandAvailable
-                ? 'ready'
-                : integrated.integrationState === 'ready' && executionRolloutMissing
+              state: integrated.integrationState === 'ready' && executionRolloutMissing
+                ? 'unavailable'
+                : integrated.integrationState === 'degraded'
                   ? 'unavailable'
-                  : integrated.integrationState === 'degraded'
-                    ? 'unavailable'
-                    : integrated.integrationState,
+                  : integrated.integrationState,
+              promptReady: integrated.promptReady,
               shell: integrated.integrationShell,
-              reason: remoteVisibleCommandAvailable
-                ? undefined
-                : integrated.integrationState === 'ready' && executionRolloutMissing
-                  ? remoteRolloutMissing ? 'remoteAgentPtyDisabled' : 'terminalExecuteDisabled'
-                  : integrated.integrationReason,
+              reason: integrated.integrationState === 'ready' && executionRolloutMissing
+                ? remoteRolloutMissing ? 'remoteBoundTerminalDisabled' : 'terminalExecuteDisabled'
+                : integrated.integrationReason,
             });
           }).catch((error) => {
             logger.warn(`Failed to read terminal integration state ${session.sessionId}`, error);
