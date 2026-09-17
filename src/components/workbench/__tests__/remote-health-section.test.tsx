@@ -132,10 +132,18 @@ describe('RemoteHealthSection authorization', () => {
 
     const collectingButton = screen.getByRole('button', { name: 'remoteHealth.collecting' });
     const cancelButton = screen.getByRole('button', { name: 'common.cancel' });
-    const sectionActions = collectingButton.closest('[data-slot="remote-health-section-actions"]');
+    const sectionActions = collectingButton.closest<HTMLElement>(
+      '[data-slot="remote-health-section-actions"]',
+    );
+    const collectionActions = collectingButton.closest<HTMLElement>(
+      '[data-slot="remote-health-collection-actions"]',
+    );
 
     expect(sectionActions).toBeInTheDocument();
-    expect(sectionActions).toContainElement(cancelButton);
+    expect(collectionActions).toBeInTheDocument();
+    expect(collectionActions).toHaveClass('flex', 'shrink-0', 'flex-nowrap');
+    expect(collectionActions).toContainElement(cancelButton);
+    expect(sectionActions).toContainElement(collectionActions);
     expect(cancelButton.closest('[data-slot="remote-health-actions"]')).toBeNull();
 
     fireEvent.click(cancelButton);
