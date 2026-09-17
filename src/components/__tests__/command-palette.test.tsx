@@ -14,6 +14,7 @@ import { useProfileStore } from '@/stores/profileStore';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { ConnectionProfile, SftpBookmarkRow } from '@/types';
+import { buildDeploymentTemplate } from '@/lib/deployment/editor';
 import type { DeploymentWorkflowRecord } from '@/lib/deployment/types';
 
 const { invokeListSftpBookmarks } = vi.hoisted(() => ({
@@ -70,30 +71,24 @@ const terminalSession = {
   profileId: profile.id,
 };
 
+const workflowTemplate = buildDeploymentTemplate(
+  'dockerCompose',
+  { connectionProfileId: profile.id, remoteRoot: '/srv/payments' },
+  (typeName) => typeName,
+);
+
 const workflow: DeploymentWorkflowRecord = {
   id: 'workflow-api',
   name: 'Payments API',
-  connectionProfileId: profile.id,
+  archived: false,
   revision: 3,
   enabled: true,
+  definitionDigest: `sha256:${'a'.repeat(64)}`,
+  layoutRevision: 1,
+  layout: workflowTemplate.layout,
   createdAt: 1,
   updatedAt: 3,
-  definition: {
-    schemaVersion: 2,
-    sourceDirectory: '/workspace/payments',
-    build: {
-      context: '.',
-      dockerfile: 'Dockerfile',
-      platform: 'linux/amd64',
-      imageRepository: 'example.test/payments',
-      compression: 'zstd',
-    },
-    target: { connectionProfileId: profile.id, remoteRoot: '/srv/payments' },
-    compose: { projectName: 'payments', files: ['compose.yaml'], services: ['api'], pullBeforeUp: true },
-    healthCheck: null,
-    reloadNginxAfterHealthy: false,
-    releasesToKeep: 3,
-  },
+  definition: workflowTemplate.definition,
 };
 
 function buildOptions(

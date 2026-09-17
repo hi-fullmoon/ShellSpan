@@ -40,7 +40,6 @@ import {
   usePortForwardStore,
 } from '@/stores/portForwardStore';
 import { usePortForwardEvents } from '@/hooks/usePortForwardEvents';
-import { DeploymentExperience } from '@/components/deployment-experience';
 const logger = createLogger('app');
 
 interface AppSectionsProps {
@@ -242,7 +241,6 @@ export const App: React.FC = () => {
             onRequestExit={requestUserExit}
           />
         </MainContent>
-        <DeploymentExperience />
         <AiPanel />
       </div>
 

@@ -31,8 +31,8 @@ import {
 import { useKeychainStore } from '@/stores/keychainStore';
 import { createLogger } from '@/lib/logger';
 import { useRemoteHealthStore } from '@/stores/remoteHealthStore';
-import { useDeploymentStore } from '@/stores/deploymentStore';
-import DeploymentCenter from './deployment-center';
+import { useDeploymentWorkflowStore } from '@/stores/deploymentWorkflowStore';
+import { DeploymentWorkflowCenter } from './deployment-workflow-center';
 
 const logger = createLogger('connection-import');
 
@@ -169,7 +169,7 @@ const Workbench: React.FC<WorkbenchProps> = ({
   }, [setActiveTab]);
 
   const openDeployments = useCallback((profile: ConnectionProfile): void => {
-    useDeploymentStore.getState().setProfileFilter(profile.id);
+    useDeploymentWorkflowStore.getState().setProfileFilter(profile.id);
     setActiveTab('deployments');
   }, [setActiveTab]);
 
@@ -287,7 +287,7 @@ const Workbench: React.FC<WorkbenchProps> = ({
           )}
           {activeTab === 'keychain' && <KeychainPanel />}
           {activeTab === 'monitor' && <MonitorPanel />}
-          {activeTab === 'deployments' && <DeploymentCenter />}
+          {activeTab === 'deployments' && <DeploymentWorkflowCenter />}
           {activeTab === 'logs' && <LogPanel />}
         </div>
       </div>
