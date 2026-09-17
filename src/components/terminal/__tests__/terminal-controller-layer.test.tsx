@@ -210,6 +210,7 @@ describe('TerminalControllerLayer', () => {
         sessionId: 's1',
         terminalSessionId: 'terminal-1',
         terminalGeneration: 2,
+        integrationStateRevision: 4,
         state: 'ready',
         promptReady: true,
         shell: 'zsh',
@@ -231,6 +232,8 @@ describe('TerminalControllerLayer', () => {
         transportKind: 'sshPty',
         integrationState: 'degraded',
         integrationReason: 'dedicatedAgentPtyRequired',
+        integrationEventSequence: 3,
+        integrationStateRevision: 4,
         promptReady: false,
       },
     } as Awaited<ReturnType<typeof invokeGetTerminalBrokerSnapshot>>);

@@ -17,6 +17,7 @@ export interface TerminalSession {
   terminalGeneration?: number;
   integrationState?: TerminalBrokerIntegrationState;
   integrationReason?: string;
+  integrationStateRevision?: number;
   promptReady?: boolean;
   title: string;
   host: string;
@@ -388,16 +389,27 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           && (session.terminalSessionId !== event.terminalSessionId
             || session.terminalGeneration !== event.terminalGeneration)
         ) return session;
+        const sameTerminalGeneration = session.terminalSessionId === event.terminalSessionId
+          && session.terminalGeneration === event.terminalGeneration;
+        if (
+          sameTerminalGeneration
+          && session.integrationStateRevision !== undefined
+          && event.integrationStateRevision <= session.integrationStateRevision
+        ) return session;
         if (
           session.integrationState === event.state
           && session.integrationReason === event.reason
+          && session.integrationStateRevision === event.integrationStateRevision
           && session.promptReady === event.promptReady
         ) return session;
         changed = true;
         return {
           ...session,
+          terminalSessionId: event.terminalSessionId,
+          terminalGeneration: event.terminalGeneration,
           integrationState: event.state,
           integrationReason: event.reason,
+          integrationStateRevision: event.integrationStateRevision,
           promptReady: event.promptReady,
         };
       });

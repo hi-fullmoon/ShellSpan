@@ -173,8 +173,14 @@ only after `promptEnd` for the current generation and false before command
 submission, while a foreground command is active, and after invalidation.
 `integrationState = ready` without `promptReady = true` is a busy terminal, not
 an executable boundary. The read-only snapshot and integration-state IPC event
-MUST serialize this field so presentation cannot infer readiness from prompt
-text or integration state alone.
+MUST serialize this field and a monotonic `integrationStateRevision`. The Broker
+MUST advance that revision for every presentation-relevant state change, including
+integration registration, lifecycle events, command submission, degradation,
+channel closure, unavailability, and generation invalidation. Consumers MUST
+accept only a newer revision from the same terminal generation so presentation
+cannot regress when notifications arrive out of order. `integrationEventSequence`
+remains the control-channel lifecycle cursor and MUST NOT be used as the UI state
+revision because a replacement integration channel may restart that cursor.
 
 ### Threat model and security boundary
 

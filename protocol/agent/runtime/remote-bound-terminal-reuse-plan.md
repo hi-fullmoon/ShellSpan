@@ -196,8 +196,11 @@ AND generation is current
 | 集成 degraded/unavailable/invalidated | 不可用 | 保持普通终端可用，提示改用 Direct。 |
 | SSH 断开 | 已断开 | 禁止所有终端执行，走现有重连/恢复流程。 |
 
-`TerminalIntegrationStateEvent` 需要增加 `promptReady`；Terminal Store 需要保存该字段。当前仅传播
-`integrationState` 会把“集成 ready 但正在运行前台程序”错误展示为可执行。
+`TerminalIntegrationStateEvent` 需要增加 `promptReady` 和对所有展示状态变化单调递增的
+`integrationStateRevision`；Terminal Store 需要保存这些字段，并只接受同一终端代际中更大的
+revision。`integrationEventSequence` 仅表示控制通道生命周期游标，替换集成通道时可以重新开始，
+不能用于 UI 乱序过滤。当前仅传播 `integrationState` 会把“集成 ready 但正在运行前台程序”错误
+展示为可执行。
 
 UI 复用现有执行面选择器、终端租约提示条、Button、Badge 和 Tooltip，不新增自定义基础控件。
 新增的“终端忙碌”文案必须同时更新中英文 locale。
@@ -322,7 +325,7 @@ UI 复用现有执行面选择器、终端租约提示条、Button、Badge 和 T
 工作项：
 
 - 删除 `dedicatedAgentPtyRequired -> ready` 的伪映射。
-- 传播并保存 `promptReady`。
+- 传播并保存 `promptReady` 与 `integrationStateRevision`，忽略同一代际中的旧 revision。
 - 增加“终端忙碌”展示状态和双语文案。
 - 让 turn guard 和 Command lease 始终绑定源终端。
 - 删除 Agent Remote Terminal 监听、Store 字段、标签 Badge 和相关文案。
@@ -490,4 +493,3 @@ IPC、真实终端标签、lease 事件或 reconnect transport，不能替代上
 5. 删除专用 Agent SSH 终端的后端、事件、Store 和标签路径。
 6. 更新 feature flag、协议和测试矩阵。
 7. 运行完整验证，并实际检查代表性窗口下的终端标签、占用提示和接管行为。
-

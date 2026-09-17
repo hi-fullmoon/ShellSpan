@@ -582,6 +582,7 @@ export const TerminalControllerLayer: React.FC = () => {
               sessionId: session.sessionId,
               terminalSessionId: integrated.terminalSessionId,
               terminalGeneration: integrated.terminalGeneration,
+              integrationStateRevision: integrated.integrationStateRevision,
               state: integrated.integrationState === 'ready' && executionRolloutMissing
                 ? 'unavailable'
                 : integrated.integrationState === 'degraded'
