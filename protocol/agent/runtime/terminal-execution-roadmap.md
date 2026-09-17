@@ -1,6 +1,6 @@
 # Terminal Execution Roadmap
 
-Status: active  
+Status: active; remote bound-terminal reuse automated and real-SSH Stage 7 gates passed, native representative-window validation blocked
 Owner: ShellSpan Agent Runtime  
 Objective: replace the legacy wrapped visible-command path with three explicit capabilities: reliable direct execution, real visible command execution in a PTY, and interactive terminal operation.
 
@@ -50,6 +50,7 @@ These are three runtime capabilities but only two user-facing surface choices. I
 | 4. Remote real terminal | `01a0a461-d04c-7d33-ba24-d2d314c773d8`; continuations `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`, `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d`, `01a0a500-3512-7be2-9516-7bfc9813ed66` | **complete — PASS** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |
 | 5. Interactive operation | `01a0a566-6a29-74a3-945e-cc310a46cecd`; macOS continuation (2026-09-16) | **complete — PASS (Windows + macOS local)** | [Windows evidence](./terminal-execution-phase-5-acceptance.md) and [macOS evidence](./terminal-execution-phase-5-macos-acceptance.md) |
 | 6. Rollout and legacy removal | Windows and macOS rollout continuations (2026-09-16) | **complete — PASS (Windows + macOS local)** | [Windows evidence](./terminal-execution-phase-6-acceptance.md) and [macOS evidence](./terminal-execution-phase-6-macos-acceptance.md) |
+| Remote bound-terminal reuse revision | implementation stages 1–7 (2026-09-17) | **automated + real-SSH PASS; native-window BLOCKED** | [Implementation plan](./remote-bound-terminal-reuse-plan.md) and the current-code gate in [test matrix](./terminal-execution-test-matrix.md) |
 
 ## Phase 0: protocol and baseline
 
@@ -148,6 +149,10 @@ large-output capture. The previous Phase 3 Windows waiver is closed.
 
 ## Phase 4: remote real terminal
 
+The deliverables and PASS statement below are historical evidence for the first
+remote release. The 2026-09-17 remote reuse revision supersedes its production
+topology without rewriting that acceptance record.
+
 Deliverables:
 
 - A dedicated Agent SSH channel using `pty-req` and an interactive shell, surfaced as an ordinary terminal tab/pane.
@@ -173,6 +178,28 @@ integration + execute. Remote interactive tools remain independently
 default-off. The previously
 separate native Windows prerequisite was closed by the 2026-09-16 consolidated
 Windows gate recorded in the Phase 5 evidence.
+
+### Current remote bound-terminal revision
+
+Remote `boundTerminal` now reuses the frozen target `sessionId`'s current user
+SSH PTY. Integration is prepared during ordinary SSH startup; `promptReady`,
+generation identity, active-command state, and lease ownership are revalidated
+before input. The turn guard covers the whole Agent turn, while each command has
+an operation lease. There is no implicit Direct fallback and no dedicated Agent
+SSH terminal creation, event, tab, store field, or reconnect map.
+
+Disabling `terminal_remote_bound_terminal_v1` stops new remote visible-command
+routing, makes in-flight commands uncertain, revokes Agent lease/turn
+protection, and leaves the user SSH transport connected. The authoritative
+environment key is `SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1`; the read-only
+IPC field is `remoteBoundTerminalRollout`; rollout state is not persisted.
+The 2026-09-17 Stage 7 full repository/native and isolated Bash/Zsh SSH gates
+pass. Representative native-window checks for tab count, lease messaging,
+takeover, and reconnect remain blocked because the available computer-use
+runtime has no configured `@oai/sky` Trusted RPC or native app/window binding.
+The existing Vite visual fixture rendered the bound-terminal idle, running, and
+unavailable presentations at 1200×760 and 1600×1000 as non-equivalent Web
+evidence; it does not close the native-window requirement.
 
 ## Phase 5: interactive terminal operation
 
@@ -234,9 +261,11 @@ release performance rounds pass. The independent macOS gate passes native
 bash/zsh Broker, visible-command, interactive-operation, Direct, full serial
 Rust, and two release performance rounds; macOS local routing is now
 default-on and wrapper-free. Phase 6 is **PASS for the Windows and macOS local
-delivery scopes**. Remote visible commands are also default-on for Windows and
-macOS desktop hosts using the passed Phase 4 SSH path. Linux rollout, remote
-interactive tools, and cross-platform legacy removal remain deferred.
+delivery scopes**. Remote visible commands are default-on for Windows and macOS
+desktop hosts through the current user-SSH bound-terminal path. Linux rollout
+and remote interactive tools remain deferred. The remote reuse revision's full
+Stage 7 native representative-window validation remains pending and is not
+implied by the historical Phase 6 local acceptance.
 
 ## Session handoff contract
 

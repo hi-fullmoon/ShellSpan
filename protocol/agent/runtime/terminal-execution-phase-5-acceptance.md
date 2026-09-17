@@ -10,6 +10,15 @@ Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
 
 Matrix: [Terminal Execution Platform Test Matrix](./terminal-execution-test-matrix.md)
 
+## Subsequent revision — 2026-09-17
+
+This document preserves the Phase 5 results exactly as accepted. The later
+remote bound-terminal reuse revision changed remote target identity from the
+then-dedicated Agent SSH terminal to the frozen user SSH PTY. Its current
+turn-guard, prompt-readiness, no-fallback, rollout, and test requirements live
+in the linked normative documents; no result below is rewritten or promoted as
+evidence for the revised remote topology.
+
 ## Scope and final gate
 
 This record covers Phase 5 interactive terminal operation. It adds a headless

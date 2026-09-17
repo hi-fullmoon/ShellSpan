@@ -1,7 +1,7 @@
 # 远程可视命令复用当前终端实施方案
 
-状态：Proposed  
-更新时间：2026-09-16（Asia/Shanghai）  
+状态：阶段 1–7 代码、完整门禁和真实 SSH fixture 已通过；原生 Tauri 窄/宽窗口验收受 computer-use Trusted RPC 未配置阻断，尚未最终完成
+更新时间：2026-09-17（Asia/Shanghai）
 范围：远程 SSH 终端、Agent `boundTerminal` 执行面、终端 Broker、前端终端租约与状态展示
 
 ## 1. 背景
@@ -441,18 +441,45 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 只有全部满足以下条件才能视为完成：
 
-- [ ] 远程可视命令只写入当前用户 SSH PTY。
-- [ ] 发送问题和执行多条命令不会增加终端标签数量。
-- [ ] 用户与 Agent 的 cwd、环境变量和 alias 在同一 Shell 中双向共享。
-- [ ] Agent turn 全程保护用户输入，接管后可靠 fencing。
-- [ ] Prompt busy 时不写入任何字节。
-- [ ] 集成失败时普通 SSH 终端仍可正常连接和使用。
-- [ ] 专用 Agent SSH 终端生产路径和前端事件路径已删除或不可达。
-- [ ] Direct、安全策略、审批、取消、审计和脱敏行为无回归。
-- [ ] 断连或 generation 变化不会自动重放命令。
-- [ ] Bash/Zsh 启动兼容性测试通过。
-- [ ] 前端双语、状态展示和相关回归测试通过。
-- [ ] 聚焦测试、完整前端测试、构建和 Rust 测试通过。
+- [x] 远程可视命令只写入当前用户 SSH PTY。
+- [x] 发送问题和执行多条命令不会增加终端标签数量。
+- [x] 用户与 Agent 的 cwd、环境变量和 alias 在同一 Shell 中双向共享。
+- [x] Agent turn 全程保护用户输入，接管后可靠 fencing。
+- [x] Prompt busy 时不写入任何字节。
+- [x] 集成失败时普通 SSH 终端仍可正常连接和使用。
+- [x] 专用 Agent SSH 终端生产路径和前端事件路径已删除或不可达。
+- [x] Direct、安全策略、审批、取消、审计和脱敏行为无回归。
+- [x] 断连或 generation 变化不会自动重放命令。
+- [x] Bash/Zsh 启动兼容性测试通过。
+- [x] 前端双语、状态展示和相关回归测试通过。
+- [x] 聚焦测试、完整前端测试、构建和 Rust 测试通过。
+- [ ] 在原生 Tauri 窄/宽窗口中完成标签数量、状态展示、租约/接管与断连重连实测。
+
+阶段 7 于 2026-09-17 完成了 11.4 的自动化矩阵。两个指定前端文件分别
+通过 28/28 与 7/7；Terminal Broker 通过 29 项、忽略 2 项宿主专用用例；
+Agent Runtime 通过 325 项、忽略 7 项外部 fixture；完整前端通过 206 个文件、
+1884 项测试（另 1 个文件/1 项测试跳过），`pnpm build` 通过；完整 Rust
+通过 832 项、忽略 41 项，5 个 `petdex_contract_probe` 也通过。格式、Rust
+include、AI 样式和 LLM catalog 门禁全部通过。首次完整 Rust 运行暴露了一个
+与本方案无关但会阻断全量门禁的 Windows artifact durability 缺陷：只读句柄
+`sync_all()` 返回 `os error 5`。将归档以可写句柄打开后，受影响的 5 项聚焦
+测试和完整 Rust 均通过。
+
+同日的真实隔离 SSH gate 一次通过。Bash/Zsh 普通用户 PTY 验证了启动文件
+兼容、同一 Shell 的 cwd/env/alias/function 双向共享、Prompt busy 零写入、
+takeover fencing、断连不重放；unsupported shell、no-SFTP、控制通道失败和
+prepare 后失败均回退到可用普通 Shell，Direct SSH exec 也保持通过。
+
+原生开发应用和隔离 SSH fixture 已实际启动，Tauri 日志显示 ShellSpan 主窗口
+完成初始化。但 computer-use 的 `@oai/sky` 初始化后，`list_apps()` 返回
+`Trusted RPC service is not configured: sky`，当前运行时也没有原生 app/window
+绑定，因此不能检查原生窗口、调整其尺寸或操作真实终端。安全替代证据包括：
+8 个相关前端文件共 170 项回归通过，TerminalPane 的租约条/接管/断连重连
+共 38 项通过；仓库已有 `aiComposerVisual` Vite 页面在 1200×760 和
+1600×1000 Web 视口中实际渲染，并通过其既有 `composerTest` 夹具显示了
+绑定当前终端的空闲、进行中/停止和不可用状态，相关标题与 composer 控件仍
+存在于渲染树中。该 Web 结果不包含原生 Tauri
+IPC、真实终端标签、lease 事件或 reconnect transport，不能替代上面的未完成项。
 
 ## 15. 建议实施顺序
 

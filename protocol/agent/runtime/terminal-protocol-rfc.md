@@ -1,6 +1,6 @@
 # RFC: Terminal Session Protocol v1
 
-Status: accepted Phase 0 contract; explicitly amended for the cooperative-shell threat model on 2026-09-15; owner: ShellSpan Agent Runtime.
+Status: accepted Phase 0 contract; amended for the cooperative-shell threat model on 2026-09-15 and remote bound-terminal reuse on 2026-09-17; owner: ShellSpan Agent Runtime.
 
 Roadmap: [Terminal Execution Roadmap](./terminal-execution-roadmap.md)
 
@@ -31,7 +31,8 @@ normative.
 - Persisting terminal scrollback or raw sensitive output in the Agent event log.
 - Inferring command boundaries from prompt text, regular expressions, idle
   time, terminal title, or display contents.
-- Taking over an arbitrary user-owned remote shell in the first remote release.
+- Attaching an arbitrary remote shell that is not the frozen `boundTerminal`
+  target selected by the user.
 - Selecting the concrete shell-integration injection technique. The technique
   must meet this RFC's trust properties before it can be enabled.
 - Treating a visible terminal, its interactive shell, or shell integration as a
@@ -167,6 +168,14 @@ The capabilities are `promptLifecycle`, `commandLifecycle`, `exactCommandLine`,
 five. A missing capability MUST result in `degraded` or `unavailable`; it MUST
 NOT be presented as a real visible terminal.
 
+The Broker derives `promptReady` from the accepted lifecycle: it becomes true
+only after `promptEnd` for the current generation and false before command
+submission, while a foreground command is active, and after invalidation.
+`integrationState = ready` without `promptReady = true` is a busy terminal, not
+an executable boundary. The read-only snapshot and integration-state IPC event
+MUST serialize this field so presentation cannot infer readiness from prompt
+text or integration state alone.
+
 ### Threat model and security boundary
 
 TSP/1 uses a **generation-bound isolated control plane** and
@@ -271,6 +280,13 @@ the shell-appropriate Enter key sequence. It does not add `/bin/sh -c`, nested
 PowerShell, lifecycle wrappers, or a synthetic `[Agent]` echo. Normal terminal
 input echo, if enabled, remains part of raw output.
 
+For a remote `boundTerminal` operation, the frozen target `sessionId` MUST
+resolve directly to the current user SSH transport, terminal session, and
+generation at preparation, after approval, before lease acquisition, and
+immediately before PTY write. It MUST NOT resolve through an Agent-owned remote
+terminal map, create another SSH PTY, or silently switch to Direct when the
+target is unavailable or busy.
+
 `commandStart` moves `submitted` to `running`. A matching, accepted cooperative
 `commandEnd`
 moves the command to `completed` and supplies the exit code and final working
@@ -326,6 +342,13 @@ Acquisition fails if there is pending or unverified user input, a credential or
 host-key prompt, another Agent owner, a disconnected terminal, or an unready
 output listener. Lease changes increment `revision` and emit an `acquired` or
 `released` frame.
+
+For `boundTerminal`, a turn guard protects the frozen source terminal from
+Agent `turn/start` until `turn/end`, cancellation, failure, session closure,
+rollout rollback, or user takeover. Individual commands still acquire their own
+operation-bound leases. Releasing a command lease between tool calls does not
+release the turn guard. After takeover, the remainder of that turn is fenced:
+no later Agent input may reacquire ownership or reach the transport.
 
 System input is not an owner and has no general bypass. It must name the current
 lease and operation and is limited to broker-defined control actions such as an
@@ -398,10 +421,19 @@ execution behavior.
 On Windows and macOS hosts, absent trusted configuration enables `terminal_broker_v1`,
 `terminal_shell_integration_v1`, `terminal_execute_v1`, and
 `terminal_interactive_tools_v1` for local ConPTY/PTY generations, plus
-`terminal_remote_agent_pty_v1` for remote visible commands. Remote interactive
+`terminal_remote_bound_terminal_v1` for remote visible commands. Remote interactive
 publication additionally requires the independently absent-off
 `terminal_remote_interactive_tools_v1` flag. Linux keeps the new-path flags
 absent-off.
+
+The authoritative remote environment variable is
+`SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1`; the read-only Broker snapshot
+serializes its decision as `remoteBoundTerminalRollout`. The decision is
+process-lifetime state and MUST NOT be persisted or exposed through a mutation
+IPC. Disabling it stops new remote visible-command routing, makes active
+incomplete commands uncertain, revokes Agent leases and turn guards, and keeps
+the user's SSH transport open. A later new connection or reconnect uses the
+ordinary shell startup path. Rollback MUST NOT restore a dedicated Agent PTY.
 
 `exec_command.channel` accepts only `direct`. Visible commands use
 `terminal_execute`; the former `pty` wrapper contract, marker parser, and
@@ -484,56 +516,39 @@ Unsupported shells degrade explicitly. PowerShell code follows the same
 cooperative contract, but native readiness evidence remains missing under the
 recorded Windows waiver.
 
-## Phase 4 remote integration profile
+## Remote bound-terminal integration profile
 
-The first remote release supports only a **dedicated Agent SSH PTY**. Its SSH
-transport is independently authenticated from the frozen profile and requests
-`xterm-256color` with the visible geometry. After bounded SFTP inspection of
-the account's declared shell, an SSH exec request `exec`-replaces the server's
-setup shell with that same bash/zsh executable in interactive mode and points
-its normal startup mechanism at the prepared integration source. The resulting
-process is the one persistent interactive shell and is registered as an
-ordinary terminal tab/pane. A user-owned SSH terminal remains a distinct transport and cannot be
-adopted as, reconnected into, or routed to remote `terminal_execute`.
+The current remote profile supersedes the original Phase 4 dedicated-Agent-PTY
+design. A remote `boundTerminal` target is the user's current SSH PTY identified
+by the frozen Agent target `sessionId`. `terminal_execute` writes to that same
+transport and generation, so user and Agent observe one cwd, environment,
+alias/function set, history configuration, prompt, input stream, and output
+stream. Repeated questions or commands MUST NOT create another terminal tab.
 
-`terminal_remote_agent_pty_v1` is default-on for Windows and macOS desktop hosts,
-default-off on Linux, and depends on effective broker, shell-integration, and
-terminal-execute flags. The backend freezes routing for
-the operation before dispatch. It creates or reconnects the dedicated channel
-only after the prepared authorization has been issued; no bootstrap or command
-byte is written to its PTY before that decision. Security-sensitive,
-destructive, external-side-effecting, or `lifecycleTrust = directRequired`
-requests never create or use this channel and continue through Direct SSH exec.
+When the remote rollout is enabled, ordinary SSH connection startup attempts to
+prepare the bash/zsh integration source, private mode-`0700` temporary root,
+mode-`0600` control endpoint, and isolated control channel before starting the
+user shell. Startup MUST preserve the supported shell's normal profile/rc/login
+semantics, TERM, geometry, locale, interactive flags, prompt, and history, and
+MUST NOT source user startup files twice. The integration bootstrap is not
+typed into the PTY. Control bytes remain separate from the authoritative
+`ssh-data:<transportSessionId>` raw-output stream.
 
-For POSIX remote accounts the candidate reads a bounded `/etc/passwd` entry over
-SFTP to identify the configured login shell. Bash and zsh are supported. An
-unsupported shell is `unavailable`; setup/control failure is `degraded`; a
-closed generation is `invalidated`. The runtime creates a random mode-`0700`
-remote temporary root, a mode-`0600` integration source, and a mode-`0600`
-FIFO. A second SSH session channel drains that FIFO as the isolated cooperative
-control plane. The path is installed into non-exported interactive-shell state,
-ordinary foreground children inherit neither its writer nor a control file
-descriptor. The private bootstrap path is carried only in the SSH exec request,
-not written to PTY input, so shell line editors cannot echo it into raw output.
-No Agent operation input is accepted until the startup control events establish
-ready prompt lifecycle. Cleanup
-removes the remote files at generation shutdown. As in the local profile,
-deliberate same-UID path discovery or in-shell hook tampering is out of scope.
+Unsupported shells, unavailable SFTP, unreadable shell metadata, temporary-file
+failure, or control-channel failure MUST clean up partial integration resources
+and continue by starting an ordinary usable SSH shell. The generation reports
+visible commands `unavailable`; it does not fail the SSH connection, open a
+replacement terminal, or silently route the requested visible command to
+Direct. Direct remains available only when explicitly selected or forced by the
+existing sensitive/effect/lifecycle-trust policy.
 
-The main SSH PTY data channel remains authoritative raw output: every byte is
-observed by the Broker before UTF-8 display decoding, and the frontend sees the
-same existing `ssh-data:<transportSessionId>` stream. Remote control bytes are
-never mixed into this path, while malformed control data invalidates lifecycle
-acceptance and is drained until close so a degraded shell is not blocked.
-Resize continues through `request_pty_size` and updates the Broker geometry only
-after transport admission.
-
-Disconnect closes the old generation, releases its lease, invalidates its
-integration, and settles every operation without an already accepted end as
-`uncertain`. Reconnect uses only the latest matching Agent-owned predecessor,
-increments the terminal generation, and bootstraps a fresh control identity.
-Old raw data, control events, input, and completion are rejected. The runtime
-does not retain command input for replay and every terminal result keeps
+The production paths that created, published, mapped, or decorated a dedicated
+Agent SSH PTY, including its frontend creation event and persisted UI fields,
+are removed. Reconnect replaces only the user's transport, advances the terminal
+generation, and reinitializes integration when the rollout is enabled; a
+connection created while it is disabled follows the ordinary shell path. Old
+raw frames, control events, leases, input, and completion are rejected, active
+incomplete commands settle `uncertain`, and every result remains
 `noAutoReplay: true`.
 
 ## Review disposition

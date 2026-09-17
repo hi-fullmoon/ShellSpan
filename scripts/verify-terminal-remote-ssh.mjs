@@ -11,6 +11,7 @@ const fixtureEnvironment = {
   SHELLSPAN_E2E_SSH_FIXTURE: '1',
   SHELLSPAN_E2E_SSH_HOST: '127.0.0.1',
   SHELLSPAN_E2E_SSH_PORT: '22222',
+  SHELLSPAN_E2E_SSH_NO_SFTP_PORT: '22224',
   SHELLSPAN_E2E_SSH_USERNAME: 'shellspan',
   SHELLSPAN_E2E_SSH_PASSWORD: 'shellspan-e2e',
 };
@@ -50,9 +51,22 @@ try {
   run(docker, ['build', '-t', 'shellspan-ssh-e2e:local', 'tests/ssh-e2e']);
   run(docker, [...compose, 'up', '-d', '--wait']);
   fixtureStarted = true;
-  cargoTest('session::tests::remote_agent_ssh_pty_bash_phase4_acceptance', ['--ignored', '--exact']);
-  cargoTest('session::tests::remote_agent_ssh_pty_zsh_phase4_state_smoke', ['--ignored', '--exact']);
-  cargoTest('session::tests::remote_agent_ssh_pty_unsupported_shell_is_unavailable', ['--ignored', '--exact']);
+  cargoTest(
+    'session::tests::ordinary_ssh_bash_prepares_integration_with_compatible_startup',
+    ['--ignored', '--exact'],
+  );
+  cargoTest(
+    'session::tests::ordinary_ssh_zsh_prepares_integration_with_compatible_startup',
+    ['--ignored', '--exact'],
+  );
+  cargoTest(
+    'session::tests::remote_control_failure_cleans_files_without_blocking_the_user_shell',
+    ['--ignored', '--exact'],
+  );
+  cargoTest('session::tests::remote_bound_terminal_bash_reuses_source_shell_acceptance', ['--ignored', '--exact']);
+  cargoTest('session::tests::remote_bound_terminal_zsh_reuses_source_shell_smoke', ['--ignored', '--exact']);
+  cargoTest('session::tests::ordinary_ssh_unsupported_shell_is_unavailable_without_a_second_transport', ['--ignored', '--exact']);
+  cargoTest('session::tests::ordinary_ssh_without_sftp_falls_back_to_a_usable_shell', ['--ignored', '--exact']);
   cargoTest(
     'session::tests::remote_integration_scope_cleans_resources_after_post_prepare_failure',
     ['--ignored', '--exact'],
@@ -62,7 +76,7 @@ try {
     ['--ignored', '--exact'],
   );
   console.log(
-    '\nPhase 4 isolated SSH gate completed with real bash/zsh PTYs, post-prepare cleanup, and Direct SSH exec.',
+    '\nIsolated SSH gate completed with shared ordinary bash/zsh PTYs, startup compatibility, cleanup, and Direct SSH exec.',
   );
 } finally {
   if (fixtureStarted) run(docker, [...compose, 'down']);

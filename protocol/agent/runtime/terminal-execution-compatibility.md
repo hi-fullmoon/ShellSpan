@@ -1,6 +1,6 @@
 # Terminal Execution Compatibility and Rollout Plan
 
-Status: Phase 6 Windows and macOS local rollout accepted; updated 2026-09-16.
+Status: Phase 6 Windows and macOS local rollout accepted; remote bound-terminal reuse implemented through migration stage 6 on 2026-09-17, with final cross-platform/window validation pending.
 
 Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
 
@@ -52,26 +52,27 @@ phase listed below; Phase 0 only reserves their names and behavior.
 | `terminal_broker_v1` | 2 | on for Windows and macOS local; off elsewhere | none | Creates broker session records and fans raw bytes to bounded consumers without rewriting display bytes. | Disable dependent flags before the broker for new local generations. Close active broker generations; unresolved operations become uncertain. Deferred platforms report visible commands unavailable. |
 | `terminal_shell_integration_v1` | 3 | on for Windows and macOS local; off elsewhere | `terminal_broker_v1` | Installs supported local cooperative shell integration with a generation-bound control plane. Unsupported or failed initialization degrades explicitly. | Stop new integration bootstrap and mark affected generations degraded. Invalidate active integration; any command lacking accepted completion becomes uncertain. |
 | `terminal_execute_v1` | 3 | on for Windows and macOS local; off elsewhere | broker + ready cooperative shell integration | Routes eligible non-security-sensitive visible commands to wrapper-free `terminal_execute`. Effect policy and `lifecycleTrust = directRequired` force Direct where cooperative evidence is insufficient. | Stop routing new calls. Existing calls finish on their chosen path or become uncertain; never replay. Rolled-out local platforms offer explicit Direct instead of reviving the wrapper. |
-| `terminal_remote_agent_pty_v1` | 4 | on for Windows and macOS desktop hosts; off on Linux | broker + shell integration + terminal execute | Opens a dedicated Agent SSH PTY and bootstraps remote integration for wrapper-free visible commands. | Stop opening new Agent PTYs and close idle flagged channels. Active incomplete operations become uncertain. Preserve ordinary user SSH terminals and Direct SSH exec. |
-| `terminal_interactive_tools_v1` | 5 | on for Windows and macOS local; off elsewhere | broker + shell integration; remote Agent PTY and remote-interactive flags for remote targets | Publishes terminal input/key/snapshot/wait tools and the headless screen model. | Remove tools from new model requests, revoke Agent leases, and reject later Agent input. Reconcile any operation without accepted completion; user ownership remains available. |
-| `terminal_remote_interactive_tools_v1` | 5 | off | interactive tools + remote Agent PTY | Separately admits screen observation and interactive input for remote Agent SSH PTYs after the SSH Phase 5 gate passes. It does not gate visible commands. | Remove remote interactive tools from new model requests and reject later remote interactive input without disabling remote visible commands. |
+| `terminal_remote_bound_terminal_v1` | remote reuse stage 6 | on for Windows and macOS desktop hosts; off on Linux | broker + shell integration + terminal execute | Prepares integration while opening an ordinary user SSH PTY and routes remote `boundTerminal` visible commands to that frozen source transport and generation. | Stop new remote visible-command routing; make active incomplete commands uncertain; revoke Agent leases and turn guards; keep the user SSH transport open. Later new/reconnected sessions use an ordinary shell. Never restore a dedicated Agent PTY. |
+| `terminal_interactive_tools_v1` | 5 | on for Windows and macOS local; off elsewhere | broker + shell integration; remote bound-terminal and remote-interactive flags for remote targets | Publishes terminal input/key/snapshot/wait tools and the headless screen model. | Remove tools from new model requests, revoke Agent leases, and reject later Agent input. Reconcile any operation without accepted completion; user ownership remains available. |
+| `terminal_remote_interactive_tools_v1` | 5 | off | interactive tools + remote bound-terminal | Separately admits screen observation and interactive input for the frozen user SSH PTY after the SSH Phase 5 gate passes. It does not gate visible commands. | Remove remote interactive tools from new model requests and reject later remote interactive input without disabling remote visible commands. |
 
 ## Flag evaluation and dependency rules
 
 Phase 2 implements `terminal_broker_v1` as the backend-only process environment
 decision `SHELLSPAN_TERMINAL_BROKER_V1`. Phase 3 adds the same trusted parsing
 for `SHELLSPAN_TERMINAL_SHELL_INTEGRATION_V1` and
-`SHELLSPAN_TERMINAL_EXECUTE_V1`. Phase 4 adds
-`SHELLSPAN_TERMINAL_REMOTE_AGENT_PTY_V1`, and Phase 5 adds
+`SHELLSPAN_TERMINAL_EXECUTE_V1`. The remote reuse migration uses
+`SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1`, and Phase 5 adds
 `SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1` and
 `SHELLSPAN_TERMINAL_REMOTE_INTERACTIVE_TOOLS_V1`, through the same parser. On
 Windows and macOS, an absent value is on for broker, integration, execute,
-remote Agent PTY, and local interactive tools; on Linux those absent values
+remote bound-terminal routing, and local interactive tools; on Linux those absent values
 remain off. Remote interactive tools are absent-off on every platform. Accepted enabled values are `1`, `true`, and `on`,
 and accepted disabled values are `0`, `false`, and `off`. Effective execute
 routing requires both broker and integration. The decisions and all broker
 records are ephemeral, are excluded from terminal workspace and Agent Session
-persistence, and have no frontend mutation IPC. A rollback affects only later
+persistence, and have no frontend mutation IPC. The read-only Broker snapshot
+serializes the remote decision as `remoteBoundTerminalRollout`. A rollback affects only later
 routing; an active operation finishes on its frozen path or becomes uncertain
 and is never replayed through another route. Disabling the broker closes active
 broker generations with `brokerShutdown`.
@@ -89,22 +90,30 @@ same-process reconnect can advance its generation. Successful reconnect drops
 all superseded transport identities. Raw replay and capture bytes are cleared
 when a generation closes.
 
-The Phase 4 remote flag is effective only when broker, shell integration, and
-terminal execute are all effective. A remote visible-command routing decision
-is frozen before approval/dispatch. After approval, the runtime may create or
-reconnect one independently authenticated, Agent-owned SSH PTY for the frozen
-`(Agent Session, target)`; it never converts or silently borrows the user-owned
-target SSH terminal. Bootstrap and command input both use that dedicated PTY.
-Its ordinary frontend tab is ephemeral and excluded from terminal-workspace
-persistence. Disabling the flag makes active incomplete commands uncertain and
-closes registered Agent PTYs during runtime reconciliation; no command is
-rerouted or replayed through Direct.
+The remote bound-terminal flag is effective only when broker, shell integration,
+and terminal execute are all effective. A remote visible-command decision is
+frozen before approval/dispatch and directly resolves the Agent target
+`sessionId` to the current user SSH transport, terminal session, and generation.
+Preparation, post-approval validation, lease acquisition, and the final PTY
+write all revalidate that identity. Shell integration is attempted during the
+ordinary SSH connection startup; failure starts a normal usable shell and marks
+visible commands unavailable. No alternate terminal is created and no implicit
+Direct fallback is permitted.
+
+Readiness requires `integrationState = ready`, `promptReady = true`, no active
+command, the current generation, and user lease ownership before Agent
+acquisition. The frontend turn guard protects the same source terminal from
+`turn/start` through `turn/end`; per-command leases do not shorten that guard.
+Takeover restores user ownership and fences every later Agent input for the
+turn. Disabling the flag makes active incomplete commands uncertain, revokes
+remote Agent leases and turn guards, and keeps the user's SSH transport open.
+New connections and reconnects then use the ordinary shell startup path.
 
 The Phase 5 interactive flag is effective only when broker and shell integration
-are effective. Remote targets additionally require both the Phase 4 remote Agent
-PTY flag and the independently default-off remote-interactive flag, and use only
-the dedicated Agent-owned SSH terminal; interactive tools
-never attach to an arbitrary user-owned remote terminal. The flag controls
+are effective. Remote targets additionally require both the remote bound-terminal
+flag and the independently default-off remote-interactive flag, and use only
+the frozen source SSH terminal; interactive tools never attach to an unrelated
+remote terminal. The flag controls
 headless screen-model creation and model publication of `read_terminal`,
 `write_terminal_input`, and `wait_terminal`. Disabling it removes those tools
 from later model requests, revokes active Agent terminal leases, and rejects
@@ -124,7 +133,7 @@ the transient observation, so a resumed task must read the current screen again.
 - Backend routing state is authoritative; frontend flags control presentation
   only and cannot grant execution capability.
 - Rollback order is the reverse dependency order: remote interactive tools,
-  interactive tools, remote PTY, terminal execute, shell integration, then
+  interactive tools, remote bound-terminal routing, terminal execute, shell integration, then
   broker.
 - Emergency rollback keeps Direct enabled and marks visible commands unavailable.
 - An active command is never migrated between old and new paths after dispatch.
@@ -137,6 +146,12 @@ visible-command operations either use cooperative `terminal_execute` or fail
 with `TERMINAL_VISIBLE_COMMAND_UNAVAILABLE`. Persisted `direct` and
 `boundTerminal` surface values remain readable because they describe the user
 selection, not the removed execution mechanism.
+
+The dedicated Agent SSH terminal production path is also removed: there is no
+candidate/promotion map, remote-session-created event, Agent-owned terminal tab,
+or terminal workspace field to restore. Existing persisted
+`executionSurface = boundTerminal` values now select the frozen user terminal;
+they do not authorize rebinding an old Agent Session to a replacement transport.
 
 ## Phase 6 counters
 
