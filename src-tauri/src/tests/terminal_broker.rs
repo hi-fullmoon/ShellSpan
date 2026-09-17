@@ -1,19 +1,16 @@
     use super::*;
     use crate::terminal_screen::TerminalScreenBuffer;
 
-    fn attach_ready_agent_ssh_transport(
+    fn attach_ready_user_ssh_transport(
         broker: &TerminalSessionBroker,
         transport_session_id: &str,
-        predecessor_transport_session_id: Option<&str>,
-        geometry: TerminalGeometry,
-        owner: TerminalAgentPtyOwner,
     ) -> TerminalBrokerAttachment {
-        broker
-            .attach_agent_ssh_candidate_transport(
+        let attachment = broker
+            .attach_transport(
                 transport_session_id,
-                predecessor_transport_session_id,
-                geometry,
-                owner,
+                None,
+                TerminalTransportKind::SshPty,
+                TerminalGeometry::new(100, 30),
             )
             .unwrap()
             .unwrap();
@@ -30,7 +27,7 @@
                 shell: TerminalShellKind::Bash,
             },
             TerminalIntegrationControlEvent::PromptStart {
-                cwd: "/home".into(),
+                cwd: "/home/tester".into(),
             },
             TerminalIntegrationControlEvent::PromptEnd,
         ] {
@@ -38,13 +35,7 @@
                 .accept_integration_event(transport_session_id, &integration_id, event)
                 .unwrap();
         }
-        broker
-            .promote_agent_ssh_candidate_transport(
-                transport_session_id,
-                predecessor_transport_session_id,
-                Ok,
-            )
-            .unwrap()
+        attachment
     }
 
     #[cfg(unix)]
@@ -125,8 +116,8 @@
         });
 
         let input = format!(
-                    "printf 'SHELLSPAN_{label}_RAW_BEGIN:'; printf '\\377'; printf ':\\033[31mred\\033[0m:'; printf '\\346\\261\\211'; printf ':END'; exit\n"
-                );
+                        "printf 'SHELLSPAN_{label}_RAW_BEGIN:'; printf '\\377'; printf ':\\033[31mred\\033[0m:'; printf '\\346\\261\\211'; printf ':END'; exit\n"
+                    );
         broker
             .admit_terminal_input(
                 "shell-transport",
@@ -559,15 +550,15 @@
             cfg!(any(target_os = "macos", target_os = "windows"))
         );
         assert_eq!(
-            snapshot.remote_agent_pty_rollout.name,
-            TERMINAL_REMOTE_AGENT_PTY_FLAG_NAME
+            snapshot.remote_bound_terminal_rollout.name,
+            TERMINAL_REMOTE_BOUND_TERMINAL_FLAG_NAME
         );
         assert_eq!(
-            snapshot.remote_agent_pty_rollout.enabled,
+            snapshot.remote_bound_terminal_rollout.enabled,
             cfg!(any(target_os = "macos", target_os = "windows"))
         );
         assert_eq!(
-            snapshot.remote_agent_pty_rollout.default_enabled,
+            snapshot.remote_bound_terminal_rollout.default_enabled,
             cfg!(any(target_os = "macos", target_os = "windows"))
         );
         assert_eq!(
@@ -590,18 +581,9 @@
         assert!(!snapshot.remote_interactive_tools_rollout.default_enabled);
         assert!(!snapshot.shell_integration_rollout.persisted);
         assert!(!snapshot.terminal_execute_rollout.persisted);
-        assert!(!snapshot.remote_agent_pty_rollout.persisted);
+        assert!(!snapshot.remote_bound_terminal_rollout.persisted);
         assert!(!snapshot.interactive_tools_rollout.persisted);
         assert!(!snapshot.remote_interactive_tools_rollout.persisted);
-        assert_eq!(
-            broker.remote_agent_pty_new_operation_route().unwrap(),
-            if cfg!(any(target_os = "macos", target_os = "windows")) {
-                TerminalVisibleCommandRoute::TerminalExecute
-            } else {
-                TerminalVisibleCommandRoute::Unavailable
-            },
-            "remote visible command rollout is independent from remote interactive tools"
-        );
         assert_eq!(
             broker
                 .attach_transport(
@@ -647,6 +629,58 @@
             .observe_raw_output("rollback-transport", b"display remains available")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn remote_bound_terminal_environment_prefers_authoritative_name_and_reads_legacy_only_when_absent(
+    ) {
+        let mut authoritative_reads = Vec::new();
+        let authoritative = trusted_rollout_value_with_legacy_alias_reader(
+            TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE,
+            TERMINAL_REMOTE_BOUND_TERMINAL_LEGACY_ENVIRONMENT_VARIABLE,
+            false,
+            |name| {
+                authoritative_reads.push(name.to_string());
+                if name == TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE {
+                    Ok("off".into())
+                } else {
+                    panic!("the legacy alias must not be read when the authoritative value exists")
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            authoritative,
+            (false, TerminalBrokerRolloutSource::Environment)
+        );
+        assert_eq!(
+            authoritative_reads,
+            vec![TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE]
+        );
+
+        let mut fallback_reads = Vec::new();
+        let fallback = trusted_rollout_value_with_legacy_alias_reader(
+            TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE,
+            TERMINAL_REMOTE_BOUND_TERMINAL_LEGACY_ENVIRONMENT_VARIABLE,
+            false,
+            |name| {
+                fallback_reads.push(name.to_string());
+                if name == TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE {
+                    Err(std::env::VarError::NotPresent)
+                } else {
+                    Ok("on".into())
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(fallback, (true, TerminalBrokerRolloutSource::Environment));
+        assert_eq!(
+            fallback_reads,
+            vec![
+                TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE,
+                TERMINAL_REMOTE_BOUND_TERMINAL_LEGACY_ENVIRONMENT_VARIABLE,
+            ]
+        );
     }
 
     #[cfg(target_os = "windows")]
@@ -708,11 +742,6 @@
             TerminalVisibleCommandRoute::Unavailable,
             "Windows local rollback must make visible commands unavailable"
         );
-        assert_eq!(
-            broker.remote_agent_pty_new_operation_route().unwrap(),
-            TerminalVisibleCommandRoute::Unavailable,
-            "remote rollback must make visible commands unavailable"
-        );
     }
 
     #[cfg(target_os = "macos")]
@@ -773,11 +802,6 @@
             broker.visible_command_route("macos-local").unwrap(),
             TerminalVisibleCommandRoute::Unavailable,
             "macOS local rollback must make visible commands unavailable"
-        );
-        assert_eq!(
-            broker.remote_agent_pty_new_operation_route().unwrap(),
-            TerminalVisibleCommandRoute::Unavailable,
-            "remote rollback must make visible commands unavailable"
         );
     }
 
@@ -893,9 +917,12 @@
                 TerminalBrokerRolloutSource::Test,
             )
             .unwrap();
-        assert_eq!(
-            broker.remote_agent_pty_new_operation_route().unwrap(),
-            TerminalVisibleCommandRoute::Unavailable
+        assert!(
+            !broker
+                .snapshot(None)
+                .unwrap()
+                .remote_bound_terminal_rollout
+                .enabled
         );
 
         let snapshot = broker.snapshot(Some("counter-transport")).unwrap();
@@ -1309,6 +1336,8 @@
         assert!(!json.contains("owner_id"));
         assert!(json.contains("captureByteCount"));
         assert!(json.contains("terminal_broker_v1"));
+        assert!(json.contains("remoteBoundTerminalRollout"));
+        assert!(json.contains("terminal_remote_bound_terminal_v1"));
     }
 
     #[test]
@@ -1736,84 +1765,271 @@
     }
 
     #[test]
-    fn remote_rollout_admits_only_dedicated_agent_ssh_pty_and_reconnects_generation_safely() {
+    fn remote_rollout_rejects_unintegrated_ssh_and_keeps_reconnect_generation_safe() {
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
+        let first = broker
+            .attach_transport(
+                "user-ssh-1",
+                None,
+                TerminalTransportKind::SshPty,
+                TerminalGeometry::new(80, 24),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            broker.remote_visible_command_route("user-ssh-1").unwrap(),
+            TerminalVisibleCommandRoute::Unavailable,
+            "an ordinary SSH terminal is unavailable until its integration reaches a Prompt boundary"
+        );
+
+        broker.mark_output_ready("user-ssh-1").unwrap();
+        broker
+            .close_transport(
+                "user-ssh-1",
+                TerminalGenerationCloseReason::TransportDisconnected,
+            )
+            .unwrap();
+        let second = broker
+            .attach_transport(
+                "user-ssh-2",
+                Some("user-ssh-1"),
+                TerminalTransportKind::SshPty,
+                TerminalGeometry::new(100, 30),
+            )
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(second.terminal_session_id, first.terminal_session_id);
+        assert_eq!(second.terminal_generation, first.terminal_generation + 1);
+        assert_eq!(broker.metadata_counts().2, 0);
+        assert!(broker.observe_raw_output("user-ssh-1", b"stale").is_err());
+    }
+
+    #[test]
+    fn ready_user_ssh_transport_is_the_remote_visible_command_route() {
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
+        attach_ready_user_ssh_transport(&broker, "user-ssh");
+
+        assert_eq!(
+            broker.remote_visible_command_route("user-ssh").unwrap(),
+            TerminalVisibleCommandRoute::TerminalExecute,
+            "a ready ordinary SSH transport must be the boundTerminal execution target"
+        );
+    }
+
+    #[test]
+    fn ready_user_ssh_transport_runs_a_command_under_an_agent_lease() {
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
+        attach_ready_user_ssh_transport(&broker, "user-ssh");
+        let lease = broker
+            .acquire_agent_lease("user-ssh", "agent-session-1", "task-1", "operation-1")
+            .unwrap()
+            .unwrap();
+
+        let operation = broker
+                .begin_command("user-ssh", "operation-1", "printf source-shell")
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "ordinary SSH transport rejected terminal_execute after acquiring its Agent lease: {error}"
+                    )
+                });
+        assert_eq!(
+            broker.remote_visible_command_route("user-ssh").unwrap(),
+            TerminalVisibleCommandRoute::Unavailable,
+            "an active command must make the shared source terminal busy"
+        );
+        broker
+            .accept_integration_event(
+                "user-ssh",
+                "integration-user-ssh",
+                TerminalIntegrationControlEvent::CommandStart {
+                    command_line: "printf source-shell".into(),
+                    cwd: "/home/tester".into(),
+                },
+            )
+            .unwrap();
+        broker
+            .observe_raw_output("user-ssh", b"source-shell")
+            .unwrap();
+        broker
+            .accept_integration_event(
+                "user-ssh",
+                "integration-user-ssh",
+                TerminalIntegrationControlEvent::CommandEnd {
+                    exit_code: 0,
+                    cwd: "/home/tester".into(),
+                },
+            )
+            .unwrap();
+
+        let snapshot = operation.snapshot().unwrap();
+        assert_eq!(snapshot.state, TerminalCommandState::Completed);
+        assert_eq!(snapshot.exit_code, Some(0));
+        assert_eq!(snapshot.combined_output, "source-shell");
+        broker
+            .retire_command("user-ssh", &snapshot.command_id)
+            .unwrap();
+        assert!(broker
+            .release_agent_lease("user-ssh", "agent-session-1", "task-1", "operation-1",)
+            .unwrap());
+        assert!(!lease.lease_id.is_empty());
+    }
+
+    #[test]
+    fn ordinary_ssh_route_rejects_prompt_busy_and_non_user_lease_states() {
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
+        attach_ready_user_ssh_transport(&broker, "user-ssh");
+        broker
+            .accept_integration_event(
+                "user-ssh",
+                "integration-user-ssh",
+                TerminalIntegrationControlEvent::PromptStart {
+                    cwd: "/home/tester".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            broker.remote_visible_command_route("user-ssh").unwrap(),
+            TerminalVisibleCommandRoute::Unavailable
+        );
+        assert!(broker
+            .acquire_agent_lease("user-ssh", "agent-session-1", "task-1", "operation-busy")
+            .unwrap_err()
+            .starts_with("TERMINAL_VISIBLE_COMMAND_BUSY"));
+        broker
+            .accept_integration_event(
+                "user-ssh",
+                "integration-user-ssh",
+                TerminalIntegrationControlEvent::PromptEnd,
+            )
+            .unwrap();
+        broker
+            .acquire_agent_lease("user-ssh", "agent-session-1", "task-1", "operation-1")
+            .unwrap();
+        assert_eq!(
+            broker.remote_visible_command_route("user-ssh").unwrap(),
+            TerminalVisibleCommandRoute::Unavailable,
+            "route admission requires the current Broker lease owner to remain the user"
+        );
+    }
+
+    #[test]
+    fn ordinary_ssh_route_rejects_failed_integration() {
         let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
         broker
             .attach_transport(
                 "user-ssh",
                 None,
                 TerminalTransportKind::SshPty,
-                TerminalGeometry::new(80, 24),
+                TerminalGeometry::new(100, 30),
             )
+            .unwrap();
+        broker
+            .mark_integration_unavailable("user-ssh", TerminalShellKind::Bash, "fixtureUnavailable")
             .unwrap();
         assert_eq!(
             broker.remote_visible_command_route("user-ssh").unwrap(),
-            TerminalVisibleCommandRoute::Unavailable,
-            "a user-owned SSH terminal must never become the Phase 4 terminal_execute target"
+            TerminalVisibleCommandRoute::Unavailable
         );
+    }
 
-        let owner = TerminalAgentPtyOwner {
-            agent_session_id: "agent-session-1".into(),
-            target_id: "target-1".into(),
-            source_transport_session_id: "user-ssh".into(),
-        };
-        let first = attach_ready_agent_ssh_transport(
-            &broker,
-            "agent-ssh-1",
-            None,
-            TerminalGeometry::new(100, 30),
-            owner.clone(),
-        );
-        broker.mark_output_ready("agent-ssh-1").unwrap();
-        let lease = broker
-            .acquire_agent_lease("agent-ssh-1", "agent-session-1", "task-1", "operation-1")
-            .unwrap()
+    #[test]
+    fn remote_rollout_disable_keeps_user_transport_open_and_makes_inflight_uncertain() {
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
+        attach_ready_user_ssh_transport(&broker, "user-ssh");
+        broker
+            .acquire_agent_lease("user-ssh", "agent-session-1", "task-1", "operation-1")
             .unwrap();
         let operation = broker
-            .begin_command("agent-ssh-1", "operation-1", "printf remote")
+            .begin_command("user-ssh", "operation-1", "side-effect")
             .unwrap();
+
         broker
+            .apply_trusted_rollout(
+                true,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+                true,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+                false,
+                TerminalBrokerRolloutSource::Test,
+            )
+            .unwrap();
+
+        assert_eq!(
+            operation.snapshot().unwrap().state,
+            TerminalCommandState::Uncertain
+        );
+        assert_eq!(
+            broker.remote_visible_command_route("user-ssh").unwrap(),
+            TerminalVisibleCommandRoute::Unavailable
+        );
+        let snapshot = broker.snapshot(Some("user-ssh")).unwrap().session.unwrap();
+        assert!(
+            snapshot.open,
+            "rollout disable must not close the user SSH transport"
+        );
+        assert_eq!(snapshot.close_reason, None);
+        assert!(matches!(
+            snapshot.lease.unwrap().owner,
+            TerminalLeaseOwner::User { .. }
+        ));
+        assert!(broker
             .admit_terminal_input(
-                "agent-ssh-1",
+                "user-ssh",
                 TerminalBrokerInputSource::Agent {
                     agent_session_id: "agent-session-1".into(),
                     task_id: "task-1".into(),
                     operation_id: "operation-1".into(),
                 },
                 TerminalInputKind::Text,
-                b"printf remote\n",
-                || Ok(()),
+                b"must-not-write\n",
+                || panic!("rollout-disabled Agent input must not reach the user transport"),
             )
+            .unwrap_err()
+            .starts_with("TERMINAL_VISIBLE_COMMAND_UNAVAILABLE"));
+        broker
+            .observe_raw_output("user-ssh", b"user transport remains usable")
             .unwrap();
-        assert!(!lease.lease_id.is_empty());
+    }
 
+    #[test]
+    fn ordinary_ssh_disconnect_marks_inflight_uncertain_and_rejects_stale_input() {
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
+        attach_ready_user_ssh_transport(&broker, "user-ssh");
+        broker
+            .acquire_agent_lease("user-ssh", "agent-session-1", "task-1", "operation-1")
+            .unwrap();
+        let operation = broker
+            .begin_command("user-ssh", "operation-1", "side-effect")
+            .unwrap();
         broker
             .close_transport(
-                "agent-ssh-1",
+                "user-ssh",
                 TerminalGenerationCloseReason::TransportDisconnected,
             )
             .unwrap();
+
         assert_eq!(
             operation.snapshot().unwrap().state,
             TerminalCommandState::Uncertain
         );
-        let second = attach_ready_agent_ssh_transport(
-            &broker,
-            "agent-ssh-2",
-            Some("agent-ssh-1"),
-            TerminalGeometry::new(100, 30),
-            owner,
-        );
-        assert_eq!(second.terminal_session_id, first.terminal_session_id);
-        assert_eq!(second.terminal_generation, first.terminal_generation + 1);
-        assert_eq!(broker.metadata_counts().2, 0);
-        assert!(broker.observe_raw_output("agent-ssh-1", b"stale").is_err());
         assert!(broker
-            .attach_transport(
-                "user-takeover",
-                Some("agent-ssh-2"),
-                TerminalTransportKind::SshPty,
-                TerminalGeometry::new(80, 24),
+            .admit_terminal_input(
+                "user-ssh",
+                TerminalBrokerInputSource::Agent {
+                    agent_session_id: "agent-session-1".into(),
+                    task_id: "task-1".into(),
+                    operation_id: "operation-1".into(),
+                },
+                TerminalInputKind::Text,
+                b"must-not-replay\n",
+                || panic!("stale Agent input must not reach the disconnected transport"),
             )
             .is_err());
     }
@@ -1822,243 +2038,23 @@
     fn remote_visible_commands_do_not_publish_unaccepted_interactive_tools() {
         let broker = TerminalSessionBroker::phase5_enabled_for_test(4_096);
         let rollout = broker.snapshot(None).unwrap();
-        assert!(rollout.remote_agent_pty_rollout.enabled);
+        assert!(rollout.remote_bound_terminal_rollout.enabled);
         assert!(rollout.interactive_tools_rollout.enabled);
         assert!(!rollout.remote_interactive_tools_rollout.enabled);
 
-        let owner = TerminalAgentPtyOwner {
-            agent_session_id: "agent-session-visible-only".into(),
-            target_id: "target-visible-only".into(),
-            source_transport_session_id: "user-ssh-visible-only".into(),
-        };
-        attach_ready_agent_ssh_transport(
-            &broker,
-            "agent-ssh-visible-only",
-            None,
-            TerminalGeometry::new(100, 30),
-            owner,
-        );
-        broker.mark_output_ready("agent-ssh-visible-only").unwrap();
+        attach_ready_user_ssh_transport(&broker, "user-ssh-visible-only");
+        broker.mark_output_ready("user-ssh-visible-only").unwrap();
 
         assert_eq!(
             broker
-                .remote_visible_command_route("agent-ssh-visible-only")
+                .remote_visible_command_route("user-ssh-visible-only")
                 .unwrap(),
             TerminalVisibleCommandRoute::TerminalExecute
         );
         assert_eq!(
-            broker
-                .screen_snapshot("agent-ssh-visible-only")
-                .unwrap_err(),
+            broker.screen_snapshot("user-ssh-visible-only").unwrap_err(),
             "TERMINAL_SCREEN_UNAVAILABLE"
         );
-    }
-
-    #[test]
-    fn agent_ssh_candidate_failure_keeps_predecessor_current_and_abort_removes_candidate() {
-        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
-        let owner = TerminalAgentPtyOwner {
-            agent_session_id: "agent-session-1".into(),
-            target_id: "target-1".into(),
-            source_transport_session_id: "user-ssh".into(),
-        };
-        let predecessor = attach_ready_agent_ssh_transport(
-            &broker,
-            "agent-ssh-1",
-            None,
-            TerminalGeometry::new(100, 30),
-            owner.clone(),
-        );
-        broker
-            .observe_raw_output("agent-ssh-1", b"before-candidate")
-            .unwrap();
-        let predecessor_before = broker
-            .snapshot(Some("agent-ssh-1"))
-            .unwrap()
-            .session
-            .unwrap();
-
-        let provisional = broker
-            .attach_agent_ssh_candidate_transport(
-                "agent-ssh-2",
-                Some("agent-ssh-1"),
-                TerminalGeometry::new(120, 40),
-                owner,
-            )
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            broker
-                .promote_agent_ssh_candidate_transport("agent-ssh-2", Some("agent-ssh-1"), Ok,)
-                .unwrap_err(),
-            "TERMINAL_BROKER_AGENT_SSH_CANDIDATE_NOT_READY"
-        );
-        broker
-            .observe_raw_output("agent-ssh-1", b"not-replaced-before-ready")
-            .unwrap();
-        broker
-            .register_integration_channel(
-                "agent-ssh-2",
-                "candidate-integration-2",
-                TerminalShellKind::Bash,
-            )
-            .unwrap();
-        for event in [
-            TerminalIntegrationControlEvent::Ready {
-                shell: TerminalShellKind::Bash,
-            },
-            TerminalIntegrationControlEvent::PromptStart {
-                cwd: "/home".into(),
-            },
-            TerminalIntegrationControlEvent::PromptEnd,
-        ] {
-            broker
-                .accept_integration_event("agent-ssh-2", "candidate-integration-2", event)
-                .unwrap();
-        }
-        assert_ne!(
-            provisional.terminal_session_id,
-            predecessor.terminal_session_id
-        );
-        assert_eq!(provisional.terminal_generation, 1);
-        let predecessor_during_candidate = broker
-            .snapshot(Some("agent-ssh-1"))
-            .unwrap()
-            .session
-            .unwrap();
-        assert_eq!(
-            predecessor_during_candidate.terminal_session_id,
-            predecessor_before.terminal_session_id
-        );
-        assert_eq!(
-            predecessor_during_candidate.terminal_generation,
-            predecessor_before.terminal_generation
-        );
-        assert!(predecessor_during_candidate.open);
-        broker
-            .observe_raw_output("agent-ssh-1", b"still-current")
-            .unwrap();
-
-        assert_eq!(
-            broker
-                .promote_agent_ssh_candidate_transport(
-                    "agent-ssh-2",
-                    Some("agent-ssh-1"),
-                    |_| Err::<(), _>("publication failed".to_string()),
-                )
-                .unwrap_err(),
-            "publication failed"
-        );
-        broker
-            .observe_raw_output("agent-ssh-1", b"restored-without-reconnect")
-            .unwrap();
-        assert!(broker
-            .snapshot(Some("agent-ssh-2"))
-            .unwrap()
-            .session
-            .is_some());
-        assert!(broker
-            .abort_agent_ssh_candidate_transport("agent-ssh-2")
-            .unwrap());
-        assert!(broker
-            .snapshot(Some("agent-ssh-2"))
-            .unwrap()
-            .session
-            .is_none());
-    }
-
-    #[test]
-    fn concurrent_agent_ssh_candidate_promotion_has_one_expected_predecessor_winner() {
-        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
-        let owner = TerminalAgentPtyOwner {
-            agent_session_id: "agent-session-1".into(),
-            target_id: "target-1".into(),
-            source_transport_session_id: "user-ssh".into(),
-        };
-        let predecessor = attach_ready_agent_ssh_transport(
-            &broker,
-            "agent-ssh-1",
-            None,
-            TerminalGeometry::new(100, 30),
-            owner.clone(),
-        );
-        for candidate in ["agent-ssh-2", "agent-ssh-3"] {
-            broker
-                .attach_agent_ssh_candidate_transport(
-                    candidate,
-                    Some("agent-ssh-1"),
-                    TerminalGeometry::new(120, 40),
-                    owner.clone(),
-                )
-                .unwrap();
-            let integration = format!("integration-{candidate}");
-            broker
-                .register_integration_channel(candidate, &integration, TerminalShellKind::Bash)
-                .unwrap();
-            for event in [
-                TerminalIntegrationControlEvent::Ready {
-                    shell: TerminalShellKind::Bash,
-                },
-                TerminalIntegrationControlEvent::PromptStart {
-                    cwd: "/home".into(),
-                },
-                TerminalIntegrationControlEvent::PromptEnd,
-            ] {
-                broker
-                    .accept_integration_event(candidate, &integration, event)
-                    .unwrap();
-            }
-        }
-
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
-        let contenders = ["agent-ssh-2", "agent-ssh-3"]
-            .into_iter()
-            .map(|candidate| {
-                let broker = broker.clone();
-                let barrier = barrier.clone();
-                std::thread::spawn(move || {
-                    barrier.wait();
-                    (
-                        candidate,
-                        broker.promote_agent_ssh_candidate_transport(
-                            candidate,
-                            Some("agent-ssh-1"),
-                            Ok,
-                        ),
-                    )
-                })
-            })
-            .collect::<Vec<_>>();
-        barrier.wait();
-        let results = contenders
-            .into_iter()
-            .map(|contender| contender.join().unwrap())
-            .collect::<Vec<_>>();
-        let winners = results
-            .iter()
-            .filter_map(|(candidate, result)| result.as_ref().ok().map(|value| (*candidate, value)))
-            .collect::<Vec<_>>();
-        let failures = results
-            .iter()
-            .filter_map(|(candidate, result)| {
-                result.as_ref().err().map(|error| (*candidate, error))
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(winners.len(), 1, "exactly one candidate must promote");
-        assert_eq!(failures.len(), 1, "the stale candidate must be rejected");
-        let (winner, promoted) = winners[0];
-        let (loser, failure) = failures[0];
-        assert_eq!(
-            promoted.terminal_session_id,
-            predecessor.terminal_session_id
-        );
-        assert_eq!(promoted.terminal_generation, 2);
-        assert!(broker.observe_raw_output("agent-ssh-1", b"stale").is_err());
-        assert!(failure.starts_with("TERMINAL_BROKER_PREDECESSOR_NOT_FOUND"));
-        assert!(broker.abort_agent_ssh_candidate_transport(loser).unwrap());
-        broker
-            .observe_raw_output(winner, b"winner-current")
-            .unwrap();
     }
 
     #[test]

@@ -59,18 +59,25 @@ struct RemoteSshShellIntegration {
     accept_events: bool,
 }
 
+struct RemoteLoginShellIdentity {
+    shell: TerminalShellKind,
+    executable: String,
+    home_directory: String,
+}
+
 impl RemoteSshShellIntegration {
     fn prepare(session: &Session, username: &str) -> Result<Self, String> {
-        let (shell, shell_executable) = detect_remote_login_shell_identity(session, username)?;
+        let identity = detect_remote_login_shell_identity(session, username)?;
+        let shell = identity.shell;
         if !matches!(shell, TerminalShellKind::Bash | TerminalShellKind::Zsh) {
             return Err("TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL".into());
         }
         let suffix = Uuid::new_v4().simple().to_string();
-        let remote_root = format!("/tmp/.shellspan-agent-terminal-{suffix}");
-        let bootstrap_path = if shell == TerminalShellKind::Zsh {
-            format!("{remote_root}/.zshrc")
-        } else {
-            format!("{remote_root}/integration")
+        let remote_root = format!("/tmp/.shellspan-terminal-integration-{suffix}");
+        let bootstrap_path = match shell {
+            TerminalShellKind::Bash => format!("{remote_root}/.bash_profile"),
+            TerminalShellKind::Zsh => format!("{remote_root}/.zshrc"),
+            _ => unreachable!("unsupported shells return before integration setup"),
         };
         let fifo_path = format!("{remote_root}/control");
         let sftp = session
@@ -79,7 +86,7 @@ impl RemoteSshShellIntegration {
         sftp.mkdir(Path::new(&remote_root), 0o700)
             .map_err(|error| format!("failed to create remote integration root: {error}"))?;
         let setup = (|| {
-            let source = remote_posix_bootstrap(shell, &fifo_path)?;
+            let source = remote_posix_bootstrap(shell, &fifo_path, &identity.home_directory)?;
             let mut remote = sftp
                 .create(Path::new(&bootstrap_path))
                 .map_err(|error| format!("failed to create remote integration script: {error}"))?;
@@ -109,13 +116,20 @@ impl RemoteSshShellIntegration {
                     let mut remote = sftp.create(Path::new(&path)).map_err(|error| {
                         format!("failed to create remote zsh integration startup file: {error}")
                     })?;
-                    remote
-                        .write_all(
-                            format!("[[ -r {user_path} ]] && source {user_path}\n").as_bytes(),
-                        )
-                        .map_err(|error| {
-                            format!("failed to upload remote zsh integration startup file: {error}")
-                        })?;
+                    // OpenSSH runs an exec request through the account's Zsh
+                    // as `zsh -c`, and Zsh always reads the user's .zshenv for
+                    // that parent process. Exported environment changes are
+                    // inherited by the integrated login shell. Sourcing it
+                    // again from the temporary ZDOTDIR would duplicate side
+                    // effects, unlike a normal SSH shell request.
+                    let startup = if name == ".zshenv" {
+                        ": # user .zshenv already loaded by the OpenSSH exec parent\n".to_string()
+                    } else {
+                        format!("[[ -r {user_path} ]] && source {user_path}\n")
+                    };
+                    remote.write_all(startup.as_bytes()).map_err(|error| {
+                        format!("failed to upload remote zsh integration startup file: {error}")
+                    })?;
                     drop(remote);
                     sftp.setstat(
                         Path::new(&path),
@@ -162,7 +176,7 @@ impl RemoteSshShellIntegration {
         Ok(Self {
             integration_id: format!("integration-{}", Uuid::new_v4()),
             shell,
-            shell_executable,
+            shell_executable: identity.executable,
             remote_root,
             bootstrap_path,
             fifo_path,
@@ -174,31 +188,16 @@ impl RemoteSshShellIntegration {
     }
 
     fn start_shell(&self, shell_channel: &mut Channel) -> Result<(), String> {
-        let command = match self.shell {
-            TerminalShellKind::Bash => format!(
-                "exec {} --noprofile --rcfile {} -i",
-                quote_remote_posix(&self.shell_executable),
-                quote_remote_posix(&self.bootstrap_path)
-            ),
-            TerminalShellKind::Zsh => format!(
-                "exec env ZDOTDIR={} {} -il",
-                quote_remote_posix(&self.remote_root),
-                quote_remote_posix(&self.shell_executable)
-            ),
-            _ => return Err("TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL".into()),
-        };
+        let command =
+            remote_integrated_shell_command(self.shell, &self.shell_executable, &self.remote_root)?;
         shell_channel
             .exec(&command)
             .map_err(|error| format!("failed to start integrated remote shell: {error}"))
     }
 
-    fn close(mut self, session: &Session) {
-        self.active = false;
-        let _ = self.control.send_eof();
-        let _ = self.control.close();
+    fn cleanup_files(&mut self, session: &Session) {
         session.set_blocking(true);
-        let sftp = session.sftp();
-        if let Ok(sftp) = sftp {
+        if let Ok(sftp) = session.sftp() {
             cleanup_remote_integration_files(
                 &sftp,
                 &self.remote_root,
@@ -206,6 +205,22 @@ impl RemoteSshShellIntegration {
                 &self.fifo_path,
             );
         }
+    }
+
+    fn disable_after_control_failure(&mut self, session: &Session) {
+        self.active = false;
+        self.accept_events = false;
+        let _ = self.control.send_eof();
+        let _ = self.control.close();
+        self.cleanup_files(session);
+        session.set_blocking(false);
+    }
+
+    fn close(mut self, session: &Session) {
+        self.active = false;
+        let _ = self.control.send_eof();
+        let _ = self.control.close();
+        self.cleanup_files(session);
     }
 }
 
@@ -227,13 +242,33 @@ fn detect_remote_login_shell(
     session: &Session,
     username: &str,
 ) -> Result<TerminalShellKind, String> {
-    detect_remote_login_shell_identity(session, username).map(|(shell, _)| shell)
+    detect_remote_login_shell_identity(session, username).map(|identity| identity.shell)
+}
+
+fn remote_integrated_shell_command(
+    shell: TerminalShellKind,
+    shell_executable: &str,
+    remote_root: &str,
+) -> Result<String, String> {
+    match shell {
+        TerminalShellKind::Bash => Ok(format!(
+            "exec env HOME={} {} -il",
+            quote_remote_posix(remote_root),
+            quote_remote_posix(shell_executable)
+        )),
+        TerminalShellKind::Zsh => Ok(format!(
+            "exec env ZDOTDIR={} {} -il",
+            quote_remote_posix(remote_root),
+            quote_remote_posix(shell_executable)
+        )),
+        _ => Err("TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL".into()),
+    }
 }
 
 fn detect_remote_login_shell_identity(
     session: &Session,
     username: &str,
-) -> Result<(TerminalShellKind, String), String> {
+) -> Result<RemoteLoginShellIdentity, String> {
     let sftp = session
         .sftp()
         .map_err(|error| format!("failed to inspect remote login shell: {error}"))?;
@@ -247,13 +282,27 @@ fn detect_remote_login_shell_identity(
     if contents.len() > 1_048_576 {
         return Err("remote account database exceeds the integration inspection limit".into());
     }
+    parse_remote_login_shell_identity(&contents, username)
+}
+
+fn parse_remote_login_shell_identity(
+    contents: &str,
+    username: &str,
+) -> Result<RemoteLoginShellIdentity, String> {
     let prefix = format!("{username}:");
-    let shell = contents
+    let fields = contents
         .lines()
         .find(|line| line.starts_with(&prefix))
-        .and_then(|line| line.rsplit(':').next())
+        .map(|line| line.split(':').collect::<Vec<_>>())
         .ok_or_else(|| "remote login shell identity is unavailable".to_string())?;
-    Ok((TerminalShellKind::detect(shell), shell.to_string()))
+    if fields.len() != 7 || fields[5].is_empty() || fields[6].is_empty() {
+        return Err("remote login shell identity is invalid".into());
+    }
+    Ok(RemoteLoginShellIdentity {
+        shell: TerminalShellKind::detect(fields[6]),
+        executable: fields[6].to_string(),
+        home_directory: fields[5].to_string(),
+    })
 }
 
 fn run_ssh_setup_command(session: &Session, command: &str) -> Result<(), String> {
@@ -343,6 +392,46 @@ impl SessionWakeSource {
     }
 }
 
+fn open_remote_pty_channel(
+    session: &Session,
+    request: &SessionCreateRequest,
+    session_id: &str,
+) -> Result<Channel, ConnectionError> {
+    let mut channel = session.channel_session().map_err(|error| {
+        error!("Failed to open SSH channel session_id={session_id}: {error}");
+        ConnectionError::Other {
+            message: format!("failed to open ssh channel: {error}"),
+        }
+    })?;
+    let setup = (|| {
+        channel
+            .request_pty(
+                "xterm-256color",
+                None,
+                Some((request.terminal_cols, request.terminal_rows, 0, 0)),
+            )
+            .map_err(|error| {
+                error!("Failed to allocate PTY session_id={session_id}: {error}");
+                ConnectionError::Other {
+                    message: format!("failed to allocate PTY: {error}"),
+                }
+            })?;
+        channel
+            .handle_extended_data(ExtendedData::Merge)
+            .map_err(|error| {
+                error!("Failed to configure extended-data mode session_id={session_id}: {error}");
+                ConnectionError::Other {
+                    message: format!("failed to configure extended-data mode: {error}"),
+                }
+            })?;
+        Ok(())
+    })();
+    if setup.is_err() {
+        graceful_shutdown(&mut channel);
+    }
+    setup.map(|()| channel)
+}
+
 pub(crate) fn run_ssh_session<
     A: FnOnce() -> Result<(), String> + Send,
     C: FnOnce() -> Result<(), String> + Send,
@@ -354,7 +443,7 @@ pub(crate) fn run_ssh_session<
     wake: SessionWakeSource,
     output_ready: Arc<AtomicBool>,
     output_paused: Arc<AtomicBool>,
-    bootstrap_agent_integration: bool,
+    bootstrap_remote_integration: bool,
     on_broker_attached: A,
     on_connected: C,
 ) -> Result<Option<String>, ConnectionError> {
@@ -450,7 +539,7 @@ pub(crate) fn run_ssh_session<
         }
     };
 
-    let (mut remote_integration, remote_integration_error) = if bootstrap_agent_integration {
+    let (mut remote_integration, remote_integration_error) = if bootstrap_remote_integration {
         match RemoteSshShellIntegration::prepare(&session, &request.username) {
             Ok(integration) => (Some(integration), None),
             Err(error) => (None, Some(error)),
@@ -460,74 +549,79 @@ pub(crate) fn run_ssh_session<
     };
 
     with_remote_integration_cleanup(&session, &mut remote_integration, |remote_integration| {
-        let mut channel = session.channel_session().map_err(|error| {
-            error!("Failed to open SSH channel session_id={session_id}: {error}");
-            ConnectionError::Other {
-                message: format!("failed to open ssh channel: {error}"),
-            }
-        })?;
+        let mut channel = open_remote_pty_channel(&session, request, session_id)?;
         with_failure_cleanup(
             &mut channel,
             |channel| {
-                channel
-                    .request_pty(
-                        "xterm-256color",
-                        None,
-                        Some((request.terminal_cols, request.terminal_rows, 0, 0)),
-                    )
-                    .map_err(|error| {
-                        error!("Failed to allocate PTY session_id={session_id}: {error}");
-                        ConnectionError::Other {
-                            message: format!("failed to allocate PTY: {error}"),
+                let mut integration_failure = remote_integration_error.as_deref().map(|message| {
+                    if message == "TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL" {
+                        (TerminalShellKind::Unsupported, "unsupportedRemoteShell")
+                    } else {
+                        (
+                            detect_remote_login_shell(&session, &request.username)
+                                .unwrap_or(TerminalShellKind::Unsupported),
+                            "remoteBootstrapFailed",
+                        )
+                    }
+                });
+
+                if let Some(integration) = remote_integration.as_ref() {
+                    if let Err(message) = integration.start_shell(channel) {
+                        warn!(
+                            "Integrated remote shell startup failed; using ordinary SSH shell session_id={session_id}"
+                        );
+                        let shell = integration.shell;
+                        if let Some(integration) = remote_integration.take() {
+                            integration.close(&session);
                         }
+                        graceful_shutdown(channel);
+                        *channel = open_remote_pty_channel(&session, request, session_id)?;
+                        integration_failure = Some((shell, "remoteIntegratedShellStartFailed"));
+                        channel.shell().map_err(|error| ConnectionError::Other {
+                            message: format!(
+                                "failed to start ordinary remote shell after integration fallback: {error}; integrated startup: {message}"
+                            ),
+                        })?;
+                    }
+                } else {
+                    channel.shell().map_err(|error| ConnectionError::Other {
+                        message: format!("failed to start remote shell: {error}"),
                     })?;
-                channel
-                    .handle_extended_data(ExtendedData::Merge)
-                    .map_err(|error| {
-                        error!(
-                        "Failed to configure extended-data mode session_id={session_id}: {error}"
-                    );
-                        ConnectionError::Other {
-                            message: format!("failed to configure extended-data mode: {error}"),
-                        }
-                    })?;
-                let shell_start = match remote_integration.as_ref() {
-                    Some(integration) => integration.start_shell(channel),
-                    None => channel
-                        .shell()
-                        .map_err(|error| format!("failed to start remote shell: {error}")),
-                };
-                if let Err(message) = shell_start {
-                    error!("Failed to start remote shell session_id={session_id}: {message}");
-                    return Err(ConnectionError::Other { message });
                 }
 
-                // Register a replacement as a non-current Broker candidate. The
-                // predecessor remains usable while the new shell proves readiness.
+                // Register a replacement only after its SSH shell starts. The
+                // predecessor remains usable if startup fails before attachment.
                 on_broker_attached().map_err(|message| ConnectionError::Other { message })?;
                 let runtime = app
                     .try_state::<crate::agent_runtime::AgentRuntime>()
                     .ok_or_else(|| ConnectionError::Other {
                         message: "terminal integration runtime is unavailable".into(),
                     })?;
+
                 if let Some(integration) = remote_integration.as_ref() {
-                    runtime
+                    if runtime
                         .register_terminal_integration_channel(
                             session_id,
                             &integration.integration_id,
                             integration.shell,
                         )
-                        .map_err(|message| ConnectionError::Other { message })?;
-                    crate::commands::publish_terminal_integration_state(app, session_id)
-                        .map_err(|message| ConnectionError::Other { message })?;
-                } else if let Some(message) = remote_integration_error.as_deref() {
-                    let shell = detect_remote_login_shell(&session, &request.username)
-                        .unwrap_or(TerminalShellKind::Unsupported);
-                    let reason = if message == "TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL" {
-                        "unsupportedRemoteShell"
+                        .is_err()
+                    {
+                        integration_failure =
+                            Some((integration.shell, "remoteControlRegistrationFailed"));
+                        // The login shell is already compatible and running.
+                        // Removing the FIFO makes its hooks disable themselves
+                        // without sourcing startup files or MOTD a second time.
+                        if let Some(integration) = remote_integration.take() {
+                            integration.close(&session);
+                        }
                     } else {
-                        "remoteBootstrapFailed"
-                    };
+                        crate::commands::publish_terminal_integration_state(app, session_id)
+                            .map_err(|message| ConnectionError::Other { message })?;
+                    }
+                }
+
+                if let Some((shell, reason)) = integration_failure {
                     if reason == "unsupportedRemoteShell" {
                         runtime
                             .mark_terminal_integration_unavailable(session_id, shell, reason)
@@ -656,6 +750,7 @@ fn coalesce_session_commands(commands: Vec<SessionCommand>) -> Vec<SessionComman
 fn drain_remote_integration_control(
     app: &AppHandle,
     session_id: &str,
+    session: &Session,
     integration: &mut RemoteSshShellIntegration,
 ) -> Result<bool, String> {
     let mut made_progress = false;
@@ -670,7 +765,6 @@ fn drain_remote_integration_control(
                         );
                     }
                 }
-                integration.active = false;
                 if let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() {
                     let _ = runtime.terminal_integration_channel_closed(
                         session_id,
@@ -679,6 +773,7 @@ fn drain_remote_integration_control(
                     );
                     crate::commands::emit_terminal_integration_state(app, session_id);
                 }
+                integration.disable_after_control_failure(session);
                 return Ok(true);
             }
             Ok(0) => return Ok(made_progress),
@@ -703,6 +798,7 @@ fn drain_remote_integration_control(
                         log::warn!(
                             "Remote integration control rejected session_id={session_id}: {error}"
                         );
+                        integration.disable_after_control_failure(session);
                         return Ok(true);
                     }
                 };
@@ -725,6 +821,7 @@ fn drain_remote_integration_control(
                         log::warn!(
                             "Remote integration event rejected session_id={session_id}: {error}"
                         );
+                        integration.disable_after_control_failure(session);
                         return Ok(true);
                     }
                     crate::commands::emit_terminal_integration_state(app, session_id);
@@ -734,7 +831,6 @@ fn drain_remote_integration_control(
                 return Ok(made_progress)
             }
             Err(error) => {
-                integration.active = false;
                 if let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() {
                     let _ = runtime.terminal_integration_channel_closed(
                         session_id,
@@ -744,6 +840,7 @@ fn drain_remote_integration_control(
                     crate::commands::emit_terminal_integration_state(app, session_id);
                 }
                 log::warn!("Remote integration control failed session_id={session_id}: {error}");
+                integration.disable_after_control_failure(session);
                 return Ok(true);
             }
         }
@@ -822,7 +919,8 @@ fn session_loop_inner(
 
         if let Some(integration) = remote_integration.as_deref_mut() {
             if integration.active {
-                made_progress |= drain_remote_integration_control(app, session_id, integration)?;
+                made_progress |=
+                    drain_remote_integration_control(app, session_id, session, integration)?;
             }
         }
 

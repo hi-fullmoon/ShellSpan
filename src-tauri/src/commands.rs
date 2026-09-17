@@ -4,9 +4,8 @@ use crate::directory_request_registry::{
     DirectoryRequestRegistry, DIRECTORY_REQUEST_SUPERSEDED_MESSAGE,
 };
 use crate::models::{
-    AgentRemoteTerminalOwner, ClosedReasonKind, ConnectionPreflightRequest,
-    ConnectionPreflightResult, CopyLocalPathsRequest, CopyRemotePathRequest,
-    CopyRemoteToRemoteRequest, CreateRemoteEntryRequest, CreateSessionError,
+    ClosedReasonKind, ConnectionPreflightRequest, ConnectionPreflightResult, CopyLocalPathsRequest,
+    CopyRemotePathRequest, CopyRemoteToRemoteRequest, CreateRemoteEntryRequest, CreateSessionError,
     DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult,
     KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing, LocalFileEntry, LogFileInfo,
     ManagedSession, OpenRemoteFileRequest, PortForwardStartRequest, PreflightCancellationRegistry,
@@ -164,36 +163,22 @@ fn visible_command_integration_presentation(
     state: crate::terminal_broker::TerminalIntegrationState,
     reason: Option<&str>,
     transport_kind: crate::terminal_broker::TerminalTransportKind,
-    agent_owned: bool,
     terminal_execute_enabled: bool,
-    remote_agent_pty_enabled: bool,
+    remote_bound_terminal_enabled: bool,
 ) -> (
     crate::terminal_broker::TerminalIntegrationState,
     Option<String>,
 ) {
-    let user_ssh_ready = transport_kind == crate::terminal_broker::TerminalTransportKind::SshPty
-        && !agent_owned
-        && state == crate::terminal_broker::TerminalIntegrationState::Degraded
-        && reason == Some("dedicatedAgentPtyRequired")
-        && remote_agent_pty_enabled;
-    if user_ssh_ready {
-        return (
-            crate::terminal_broker::TerminalIntegrationState::Ready,
-            None,
-        );
-    }
-
     let remote_rollout_missing = transport_kind
         == crate::terminal_broker::TerminalTransportKind::SshPty
-        && agent_owned
-        && !remote_agent_pty_enabled;
+        && !remote_bound_terminal_enabled;
     if state == crate::terminal_broker::TerminalIntegrationState::Ready
         && (!terminal_execute_enabled || remote_rollout_missing)
     {
         return (
             crate::terminal_broker::TerminalIntegrationState::Unavailable,
             Some(if remote_rollout_missing {
-                "remoteAgentPtyDisabled".to_string()
+                "remoteBoundTerminalDisabled".to_string()
             } else {
                 "terminalExecuteDisabled".to_string()
             }),
@@ -225,15 +210,15 @@ pub(crate) fn publish_terminal_integration_state(
         session.integration_state,
         session.integration_reason.as_deref(),
         session.transport_kind,
-        session.agent_pty_owner.is_some(),
         snapshot.terminal_execute_rollout.enabled,
-        snapshot.remote_agent_pty_rollout.enabled,
+        snapshot.remote_bound_terminal_rollout.enabled,
     );
     let event = crate::terminal_broker::TerminalIntegrationStateEvent {
         session_id: session_id.to_string(),
         terminal_session_id: session.terminal_session_id,
         terminal_generation: session.terminal_generation,
         state,
+        prompt_ready: session.prompt_ready,
         shell: session.integration_shell,
         reason,
     };
@@ -391,7 +376,6 @@ async fn create_remote_terminal_session(
         pool.clone(),
         connection_request,
         Some(connection_result_tx),
-        None,
     );
 
     let connection_result = match tauri::async_runtime::spawn_blocking(move || {
@@ -477,272 +461,6 @@ async fn create_remote_terminal_session(
             Err(create_error)
         }
     }
-}
-
-pub(crate) const AGENT_REMOTE_TERMINAL_CREATED_EVENT: &str =
-    "terminal-agent-remote-session-created";
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AgentRemoteTerminalCreatedEvent {
-    pub(crate) summary: SessionSummary,
-    pub(crate) profile_id: String,
-    pub(crate) source_session_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) replaces_session_id: Option<String>,
-}
-
-pub(crate) struct AgentRemoteTerminalCandidate {
-    summary: SessionSummary,
-    profile_id: String,
-    owner: AgentRemoteTerminalOwner,
-    predecessor_session_id: Option<String>,
-}
-
-impl AgentRemoteTerminalCandidate {
-    pub(crate) fn session_id(&self) -> &str {
-        &self.summary.session_id
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn create_agent_remote_terminal_blocking(
-    app: &AppHandle,
-    state: &SessionManager,
-    pool: &SftpPool,
-    connection: RemoteConnectionRequest,
-    title: String,
-    profile_id: String,
-    owner: AgentRemoteTerminalOwner,
-    predecessor_session_id: Option<String>,
-    cols: u32,
-    rows: u32,
-    cancellation: &tokio_util::sync::CancellationToken,
-    _approval: &crate::agent_runtime::ApprovedAgentRemoteTerminalBootstrap,
-) -> Result<AgentRemoteTerminalCandidate, String> {
-    validate_connection_fields(&connection.host, &connection.username)?;
-    let rollout = app
-        .try_state::<crate::agent_runtime::AgentRuntime>()
-        .ok_or_else(|| "terminal broker runtime is unavailable".to_string())?
-        .terminal_broker_snapshot(None)?;
-    if !rollout.remote_agent_pty_rollout.enabled {
-        return Err("TERMINAL_REMOTE_AGENT_PTY_DISABLED".into());
-    }
-
-    let session_id = Uuid::new_v4().to_string();
-    let request = SessionCreateRequest {
-        operation_id: Some(format!("agent-remote-terminal-{}", Uuid::new_v4().simple())),
-        name: title.clone(),
-        host: connection.host.clone(),
-        port: connection.port,
-        username: connection.username.clone(),
-        auth_method: connection.auth_method,
-        password: connection.password.clone(),
-        keychain_key_id: connection.keychain_key_id.clone(),
-        private_key_data: connection.private_key_data.clone(),
-        passphrase: connection.passphrase.clone(),
-        terminal_cols: cols.max(1),
-        terminal_rows: rows.max(1),
-        jump_host: connection.jump_host.clone(),
-        replaces_session_id: predecessor_session_id.clone(),
-    };
-    let summary = SessionSummary {
-        session_id: session_id.clone(),
-        title,
-        host: connection.host.clone(),
-        port: connection.port,
-        username: connection.username.clone(),
-        terminal_session_id: None,
-        terminal_generation: None,
-    };
-    let (tx, rx) = mpsc::channel::<SessionCommand>();
-    let (connection_result_tx, connection_result_rx) =
-        mpsc::channel::<Result<(), CreateSessionError>>();
-    let (waker, wake_source) = session_wake_pair()
-        .map_err(|error| format!("failed to create Agent SSH wake channel: {error}"))?;
-    let output_ready = Arc::new(AtomicBool::new(false));
-    let output_paused = Arc::new(AtomicBool::new(false));
-    state.insert_agent_remote(
-        session_id.clone(),
-        ManagedSession {
-            sender: SessionCommandSender::Standard(tx),
-            waker: Some(waker),
-            output_state_sender: None,
-            status: StatusEvent {
-                session_id: session_id.clone(),
-                status: SessionStatus::Connecting,
-                message: Some("connecting".to_string()),
-            },
-            output_ready: output_ready.clone(),
-            output_paused: output_paused.clone(),
-            terminal_kind: SessionTerminalKind::Remote,
-            identity: SessionIdentity {
-                title: summary.title.clone(),
-                host: summary.host.clone(),
-                port: summary.port,
-                username: summary.username.clone(),
-            },
-        },
-        owner.clone(),
-    )?;
-
-    let mut candidate = AgentRemoteTerminalCandidate {
-        summary,
-        profile_id,
-        owner: owner.clone(),
-        predecessor_session_id,
-    };
-
-    spawn_ssh_thread(
-        app.clone(),
-        session_id.clone(),
-        request,
-        rx,
-        wake_source,
-        output_ready,
-        output_paused,
-        pool.clone(),
-        connection,
-        Some(connection_result_tx),
-        Some(owner),
-    );
-
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let result = loop {
-        if cancellation.is_cancelled() {
-            let cleanup_errors = abort_agent_remote_terminal_candidate(app, state, &candidate);
-            return Err(attachment_failure_message(
-                "Agent remote terminal creation was cancelled before attachment",
-                cleanup_errors,
-            ));
-        }
-        let now = Instant::now();
-        if now >= deadline {
-            let cleanup_errors = abort_agent_remote_terminal_candidate(app, state, &candidate);
-            return Err(attachment_failure_message(
-                "timed out before Agent SSH PTY attachment completed",
-                cleanup_errors,
-            ));
-        }
-        match connection_result_rx.recv_timeout(
-            deadline
-                .saturating_duration_since(now)
-                .min(Duration::from_millis(25)),
-        ) {
-            Ok(result) => break result,
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let cleanup_errors = abort_agent_remote_terminal_candidate(app, state, &candidate);
-                return Err(attachment_failure_message(
-                    "Agent SSH PTY worker stopped before attachment",
-                    cleanup_errors,
-                ));
-            }
-        }
-    };
-    if let Err(error) = result {
-        let primary = match error {
-            CreateSessionError::HostKeyUnknown { host, port, .. } => {
-                format!("host key for {host}:{port} is not known")
-            }
-            CreateSessionError::HostKeyMismatch { host, port, .. } => {
-                format!("host key for {host}:{port} changed")
-            }
-            CreateSessionError::Other { message } => message,
-        };
-        let cleanup_errors = abort_agent_remote_terminal_candidate(app, state, &candidate);
-        return Err(attachment_failure_message(&primary, cleanup_errors));
-    }
-    let attachment = match app
-        .try_state::<crate::agent_runtime::AgentRuntime>()
-        .ok_or_else(|| "terminal broker runtime is unavailable".to_string())
-        .and_then(|runtime| runtime.terminal_broker_attachment(&session_id))
-        .and_then(|attachment| {
-            attachment
-                .ok_or_else(|| "Agent SSH PTY connected without a broker attachment".to_string())
-        }) {
-        Ok(attachment) => attachment,
-        Err(error) => {
-            let cleanup_errors = abort_agent_remote_terminal_candidate(app, state, &candidate);
-            return Err(attachment_failure_message(&error, cleanup_errors));
-        }
-    };
-    candidate.summary.terminal_session_id = Some(attachment.terminal_session_id);
-    candidate.summary.terminal_generation = Some(attachment.terminal_generation);
-    Ok(candidate)
-}
-
-pub(crate) fn publish_agent_remote_terminal_candidate(
-    app: &AppHandle,
-    state: &SessionManager,
-    candidate: &AgentRemoteTerminalCandidate,
-) -> Result<SessionSummary, String> {
-    let runtime = app
-        .try_state::<crate::agent_runtime::AgentRuntime>()
-        .ok_or_else(|| "terminal broker runtime is unavailable".to_string())?;
-    runtime.promote_agent_ssh_terminal_broker_candidate(
-        candidate.session_id(),
-        candidate.predecessor_session_id.as_deref(),
-        |attachment| {
-            let mut summary = candidate.summary.clone();
-            summary.terminal_session_id = Some(attachment.terminal_session_id);
-            summary.terminal_generation = Some(attachment.terminal_generation);
-            let event = AgentRemoteTerminalCreatedEvent {
-                summary: summary.clone(),
-                profile_id: candidate.profile_id.clone(),
-                source_session_id: candidate.owner.source_session_id.clone(),
-                replaces_session_id: candidate.predecessor_session_id.clone(),
-            };
-            let (summary, predecessor_close_error) = state.publish_agent_remote(
-                candidate.session_id(),
-                candidate.predecessor_session_id.as_deref(),
-                || {
-                    app.emit(AGENT_REMOTE_TERMINAL_CREATED_EVENT, event)
-                        .map_err(|error| {
-                            format!("failed to publish Agent remote terminal: {error}")
-                        })?;
-                    Ok(summary)
-                },
-            )?;
-            if let Some(error) = predecessor_close_error {
-                warn!(
-                    "Agent remote predecessor transport was already unavailable session_id={}: {error}",
-                    candidate
-                        .predecessor_session_id
-                        .as_deref()
-                        .unwrap_or("none")
-                );
-            }
-            Ok(summary)
-        },
-    )
-}
-
-pub(crate) fn abort_agent_remote_terminal_candidate(
-    app: &AppHandle,
-    state: &SessionManager,
-    candidate: &AgentRemoteTerminalCandidate,
-) -> Vec<String> {
-    let mut cleanup_errors = Vec::new();
-    match app.try_state::<crate::agent_runtime::AgentRuntime>() {
-        Some(runtime) => {
-            if let Err(error) = runtime.terminal_closed(candidate.session_id()) {
-                cleanup_errors.push(format!("failed to clean Agent terminal lease: {error}"));
-            }
-            if let Err(error) =
-                runtime.abort_agent_ssh_terminal_broker_candidate(candidate.session_id())
-            {
-                cleanup_errors.push(format!(
-                    "failed to abort terminal broker candidate: {error}"
-                ));
-            }
-        }
-        None => cleanup_errors.push("terminal broker runtime is unavailable".to_string()),
-    }
-    if let Err(error) = state.close(candidate.session_id()) {
-        cleanup_errors.push(format!("failed to close Agent SSH candidate: {error}"));
-    }
-    cleanup_errors
 }
 
 #[tauri::command]
@@ -3272,6 +2990,10 @@ struct PoolInvalidationGuard<'a> {
     connection_request: &'a RemoteConnectionRequest,
 }
 
+fn should_prepare_remote_integration(remote_rollout_enabled: bool) -> bool {
+    remote_rollout_enabled
+}
+
 impl<'a> Drop for PoolInvalidationGuard<'a> {
     fn drop(&mut self) {
         self.pool.invalidate(self.connection_request);
@@ -3289,7 +3011,6 @@ pub(crate) fn spawn_ssh_thread(
     pool: SftpPool,
     connection_request: RemoteConnectionRequest,
     connection_result_tx: Option<std::sync::mpsc::Sender<Result<(), CreateSessionError>>>,
-    agent_owner: Option<AgentRemoteTerminalOwner>,
 ) {
     thread::spawn(move || {
         debug!("Spawned SSH worker session_id={session_id}");
@@ -3312,7 +3033,12 @@ pub(crate) fn spawn_ssh_thread(
             request.terminal_cols,
             request.terminal_rows,
         );
-        let broker_agent_owner = agent_owner.clone();
+        let bootstrap_remote_integration = should_prepare_remote_integration(
+            app.try_state::<crate::agent_runtime::AgentRuntime>()
+                .and_then(|runtime| runtime.terminal_broker_snapshot(None).ok())
+                .is_some_and(|snapshot| snapshot.remote_bound_terminal_rollout.enabled),
+        );
+        let broker_bootstrap_remote_integration = bootstrap_remote_integration;
         let on_broker_attached = move || {
             broker_app
                 .try_state::<SessionManager>()
@@ -3331,39 +3057,25 @@ pub(crate) fn spawn_ssh_thread(
                 .ok_or_else(|| {
                     attachment_failure_message("terminal broker runtime is unavailable", Vec::new())
                 })?;
-            if let Some(owner) = broker_agent_owner {
-                runtime
-                    .attach_agent_ssh_terminal_broker_candidate(
-                        &broker_session_id,
-                        predecessor_session_id.as_deref(),
-                        broker_geometry,
-                        crate::terminal_broker::TerminalAgentPtyOwner {
-                            agent_session_id: owner.agent_session_id,
-                            target_id: owner.target_id,
-                            source_transport_session_id: owner.source_session_id,
-                        },
-                    )
-                    .map_err(|error| attachment_failure_message(&error, Vec::new()))?;
-            } else {
-                runtime
-                    .attach_terminal_broker_transport(
-                        &broker_session_id,
-                        predecessor_session_id.as_deref(),
-                        crate::terminal_broker::TerminalTransportKind::SshPty,
-                        broker_geometry,
-                    )
-                    .map_err(|error| attachment_failure_message(&error, Vec::new()))?;
-                if runtime
+            runtime
+                .attach_terminal_broker_transport(
+                    &broker_session_id,
+                    predecessor_session_id.as_deref(),
+                    crate::terminal_broker::TerminalTransportKind::SshPty,
+                    broker_geometry,
+                )
+                .map_err(|error| attachment_failure_message(&error, Vec::new()))?;
+            if !broker_bootstrap_remote_integration
+                && runtime
                     .terminal_shell_integration_enabled()
                     .unwrap_or(false)
-                {
-                    let _ = runtime.mark_terminal_integration_degraded(
-                        &broker_session_id,
-                        TerminalShellKind::Unsupported,
-                        "dedicatedAgentPtyRequired",
-                    );
-                    emit_terminal_integration_state(&broker_app, &broker_session_id);
-                }
+            {
+                let _ = runtime.mark_terminal_integration_unavailable(
+                    &broker_session_id,
+                    TerminalShellKind::Unsupported,
+                    "remoteBoundTerminalDisabled",
+                );
+                emit_terminal_integration_state(&broker_app, &broker_session_id);
             }
             Ok(())
         };
@@ -3381,7 +3093,7 @@ pub(crate) fn spawn_ssh_thread(
             wake,
             output_ready,
             output_paused,
-            agent_owner.is_some(),
+            bootstrap_remote_integration,
             on_broker_attached,
             on_connected,
         );

@@ -1,10 +1,11 @@
+    #[cfg(unix)]
+    use super::rollback_local_broker_attachment_failure;
     use super::{
         collect_local_output_batch, configure_local_terminal_environment, detect_key_type,
-        expand_home_path, remove_failed_session_registration,
-        rollback_local_broker_attachment_failure, should_release_local_startup_output,
-        visible_command_integration_presentation, wait_for_local_worker_activity,
-        LocalWorkerActivity, LOCAL_OUTPUT_DRAIN_BUDGET, LOCAL_OUTPUT_QUEUE_CAPACITY,
-        LOCAL_OUTPUT_READY_TIMEOUT,
+        expand_home_path, remove_failed_session_registration, should_prepare_remote_integration,
+        should_release_local_startup_output, visible_command_integration_presentation,
+        wait_for_local_worker_activity, LocalWorkerActivity, LOCAL_OUTPUT_DRAIN_BUDGET,
+        LOCAL_OUTPUT_QUEUE_CAPACITY, LOCAL_OUTPUT_READY_TIMEOUT,
     };
     use crate::models::{
         ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, SessionManager,
@@ -22,32 +23,39 @@
     use std::thread;
 
     #[test]
-    fn user_ssh_visible_command_presentation_is_binary() {
+    fn ordinary_ssh_prepares_integration_only_for_the_remote_rollout() {
+        assert!(should_prepare_remote_integration(true));
+        assert!(!should_prepare_remote_integration(false));
+    }
+
+    #[test]
+    fn user_ssh_visible_command_presentation_requires_real_integration_readiness() {
         use crate::terminal_broker::{TerminalIntegrationState, TerminalTransportKind};
 
         assert_eq!(
             visible_command_integration_presentation(
-                TerminalIntegrationState::Degraded,
-                Some("dedicatedAgentPtyRequired"),
+                TerminalIntegrationState::Unavailable,
+                Some("remoteBoundTerminalDisabled"),
                 TerminalTransportKind::SshPty,
-                false,
                 true,
                 true,
             ),
-            (TerminalIntegrationState::Ready, None)
+            (
+                TerminalIntegrationState::Unavailable,
+                Some("remoteBoundTerminalDisabled".into())
+            )
         );
         assert_eq!(
             visible_command_integration_presentation(
-                TerminalIntegrationState::Degraded,
-                Some("dedicatedAgentPtyRequired"),
+                TerminalIntegrationState::Ready,
+                None,
                 TerminalTransportKind::SshPty,
-                false,
                 true,
                 false,
             ),
             (
                 TerminalIntegrationState::Unavailable,
-                Some("dedicatedAgentPtyRequired".into())
+                Some("remoteBoundTerminalDisabled".into())
             )
         );
     }

@@ -124,7 +124,7 @@
     #[cfg(unix)]
     #[test]
     fn posix_bootstraps_use_shell_hooks_and_a_non_inherited_fifo() {
-        let bash = bash_bootstrap(Path::new("/private/control"), true);
+        let bash = bash_bootstrap(Path::new("/private/control"), true, true);
         let zsh = zsh_bootstrap(Path::new("/private/control"), true, false);
         assert!(bash.contains("trap '__shellspan_preexec' DEBUG"));
         assert!(bash.contains("READLINE_LINE"));
@@ -137,6 +137,40 @@
             assert!(!script.contains("[Agent]"));
             assert!(!script.contains("/bin/sh -c"));
         }
+    }
+
+    #[test]
+    fn remote_bash_bootstrap_restores_home_without_reloading_system_profile() {
+        let script = remote_posix_bootstrap(
+            TerminalShellKind::Bash,
+            "/tmp/private/control",
+            "/home/fixture user's",
+        )
+        .unwrap();
+
+        assert!(script.starts_with("HOME='/home/fixture user'\"'\"'s'\nexport HOME\n"));
+        assert!(script.contains("source \"$HOME/.bash_profile\""));
+        assert!(script.contains("source \"$HOME/.bash_login\""));
+        assert!(script.contains("source \"$HOME/.profile\""));
+        assert!(
+            !script.contains("source /etc/profile"),
+            "bash -l loads /etc/profile before the private .bash_profile"
+        );
+    }
+
+    #[test]
+    fn remote_zsh_bootstrap_leaves_login_file_order_to_zdotdir() {
+        let script = remote_posix_bootstrap(
+            TerminalShellKind::Zsh,
+            "/tmp/private/control",
+            "/home/fixture",
+        )
+        .unwrap();
+
+        assert!(script.starts_with("[[ -r \"$HOME/.zshrc\" ]]"));
+        assert!(script.contains("unset ZDOTDIR"));
+        assert!(!script.contains(".zprofile"));
+        assert!(!script.contains(".zlogin"));
     }
 
     #[cfg(unix)]

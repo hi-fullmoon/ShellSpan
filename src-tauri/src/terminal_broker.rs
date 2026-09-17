@@ -22,10 +22,13 @@ pub(crate) const TERMINAL_EXECUTE_FLAG_NAME: &str = "terminal_execute_v1";
 pub(crate) const TERMINAL_EXECUTE_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_TERMINAL_EXECUTE_V1";
 pub(crate) const TERMINAL_EXECUTE_DEFAULT_ENABLED: bool =
     cfg!(any(target_os = "macos", target_os = "windows"));
-pub(crate) const TERMINAL_REMOTE_AGENT_PTY_FLAG_NAME: &str = "terminal_remote_agent_pty_v1";
-pub(crate) const TERMINAL_REMOTE_AGENT_PTY_ENVIRONMENT_VARIABLE: &str =
+pub(crate) const TERMINAL_REMOTE_BOUND_TERMINAL_FLAG_NAME: &str =
+    "terminal_remote_bound_terminal_v1";
+pub(crate) const TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE: &str =
+    "SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1";
+const TERMINAL_REMOTE_BOUND_TERMINAL_LEGACY_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_REMOTE_AGENT_PTY_V1";
-pub(crate) const TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED: bool =
+pub(crate) const TERMINAL_REMOTE_BOUND_TERMINAL_DEFAULT_ENABLED: bool =
     cfg!(any(target_os = "macos", target_os = "windows"));
 pub(crate) const TERMINAL_INTERACTIVE_TOOLS_FLAG_NAME: &str = "terminal_interactive_tools_v1";
 pub(crate) const TERMINAL_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE: &str =
@@ -170,14 +173,6 @@ pub(crate) struct TerminalBrokerAttachment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct TerminalAgentPtyOwner {
-    pub(crate) agent_session_id: String,
-    pub(crate) target_id: String,
-    pub(crate) source_transport_session_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -250,8 +245,6 @@ pub(crate) struct TerminalBrokerSessionSnapshot {
     pub(crate) terminal_generation: u64,
     pub(crate) transport_session_id: String,
     pub(crate) transport_kind: TerminalTransportKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) agent_pty_owner: Option<TerminalAgentPtyOwner>,
     pub(crate) geometry: TerminalGeometry,
     pub(crate) next_output_sequence: u64,
     pub(crate) next_byte_offset: u64,
@@ -293,7 +286,7 @@ pub(crate) struct TerminalBrokerSnapshot {
     pub(crate) rollout: TerminalBrokerRolloutDecision,
     pub(crate) shell_integration_rollout: TerminalFeatureRolloutDecision,
     pub(crate) terminal_execute_rollout: TerminalFeatureRolloutDecision,
-    pub(crate) remote_agent_pty_rollout: TerminalFeatureRolloutDecision,
+    pub(crate) remote_bound_terminal_rollout: TerminalFeatureRolloutDecision,
     pub(crate) interactive_tools_rollout: TerminalFeatureRolloutDecision,
     pub(crate) remote_interactive_tools_rollout: TerminalFeatureRolloutDecision,
     pub(crate) counters: TerminalRolloutCountersSnapshot,
@@ -387,6 +380,7 @@ pub(crate) struct TerminalIntegrationStateEvent {
     pub(crate) terminal_session_id: String,
     pub(crate) terminal_generation: u64,
     pub(crate) state: TerminalIntegrationState,
+    pub(crate) prompt_ready: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) shell: Option<TerminalShellKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -766,14 +760,6 @@ struct TransportAttachment {
 }
 
 #[derive(Debug, Clone)]
-struct AgentSshTransportCandidate {
-    expected_predecessor_transport_session_id: Option<String>,
-    provisional_terminal_session_id: String,
-    promoted_terminal_session_id: String,
-    promoted_terminal_generation: u64,
-}
-
-#[derive(Debug, Clone)]
 struct SubscriberState {
     status: TerminalSubscriberStatus,
     next_sequence: u64,
@@ -871,7 +857,6 @@ struct SessionRecord {
     terminal_generation: u64,
     transport_session_id: String,
     transport_kind: TerminalTransportKind,
-    agent_pty_owner: Option<TerminalAgentPtyOwner>,
     geometry: TerminalGeometry,
     next_output_sequence: u64,
     next_byte_offset: u64,
@@ -905,7 +890,6 @@ impl SessionRecord {
         terminal_generation: u64,
         transport_session_id: String,
         transport_kind: TerminalTransportKind,
-        agent_pty_owner: Option<TerminalAgentPtyOwner>,
         geometry: TerminalGeometry,
         interactive_tools_enabled: bool,
     ) -> Self {
@@ -914,7 +898,6 @@ impl SessionRecord {
             terminal_generation,
             transport_session_id,
             transport_kind,
-            agent_pty_owner,
             geometry,
             next_output_sequence: 1,
             next_byte_offset: 0,
@@ -973,7 +956,6 @@ impl SessionRecord {
             terminal_generation: self.terminal_generation,
             transport_session_id: self.transport_session_id.clone(),
             transport_kind: self.transport_kind,
-            agent_pty_owner: self.agent_pty_owner.clone(),
             geometry: self.geometry,
             next_output_sequence: self.next_output_sequence,
             next_byte_offset: self.next_byte_offset,
@@ -1024,12 +1006,11 @@ struct BrokerState {
     rollout: TerminalBrokerRolloutDecision,
     shell_integration_rollout: TerminalFeatureRolloutDecision,
     terminal_execute_rollout: TerminalFeatureRolloutDecision,
-    remote_agent_pty_rollout: TerminalFeatureRolloutDecision,
+    remote_bound_terminal_rollout: TerminalFeatureRolloutDecision,
     interactive_tools_rollout: TerminalFeatureRolloutDecision,
     remote_interactive_tools_rollout: TerminalFeatureRolloutDecision,
     sessions: HashMap<String, SessionRecord>,
     transports: HashMap<String, TransportAttachment>,
-    agent_ssh_candidates: HashMap<String, AgentSshTransportCandidate>,
     closed_session_order: VecDeque<String>,
 }
 
@@ -1053,15 +1034,15 @@ impl Default for BrokerState {
                 TerminalBrokerRolloutSource::Default,
                 "stopNewRoutingNeverReplayInflightCommands",
             ),
-            remote_agent_pty_rollout: TerminalFeatureRolloutDecision::new(
-                TERMINAL_REMOTE_AGENT_PTY_FLAG_NAME,
-                TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED,
-                TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED,
+            remote_bound_terminal_rollout: TerminalFeatureRolloutDecision::new(
+                TERMINAL_REMOTE_BOUND_TERMINAL_FLAG_NAME,
+                TERMINAL_REMOTE_BOUND_TERMINAL_DEFAULT_ENABLED,
+                TERMINAL_REMOTE_BOUND_TERMINAL_DEFAULT_ENABLED,
                 rollout.enabled
                     && TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED
                     && TERMINAL_EXECUTE_DEFAULT_ENABLED,
                 TerminalBrokerRolloutSource::Default,
-                "closeIdleAgentPtysAndMarkIncompleteCommandsUncertain",
+                "releaseAgentLeasesAndMarkIncompleteCommandsUncertain",
             ),
             interactive_tools_rollout: TerminalFeatureRolloutDecision::new(
                 TERMINAL_INTERACTIVE_TOOLS_FLAG_NAME,
@@ -1077,7 +1058,7 @@ impl Default for BrokerState {
                 TERMINAL_REMOTE_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
                 rollout.enabled
                     && TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED
-                    && TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED
+                    && TERMINAL_REMOTE_BOUND_TERMINAL_DEFAULT_ENABLED
                     && TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
                 TerminalBrokerRolloutSource::Default,
                 "removeRemoteToolsRevokeAgentLeasesAndRejectLaterInput",
@@ -1085,7 +1066,6 @@ impl Default for BrokerState {
             rollout,
             sessions: HashMap::new(),
             transports: HashMap::new(),
-            agent_ssh_candidates: HashMap::new(),
             closed_session_order: VecDeque::new(),
         }
     }
@@ -1133,6 +1113,24 @@ impl TerminalSessionBroker {
         broker
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_remote_visible_rollout_for_test(&self, enabled: bool) -> Result<(), String> {
+        self.apply_trusted_rollout(
+            true,
+            TerminalBrokerRolloutSource::Test,
+            true,
+            TerminalBrokerRolloutSource::Test,
+            true,
+            TerminalBrokerRolloutSource::Test,
+            enabled,
+            TerminalBrokerRolloutSource::Test,
+            false,
+            TerminalBrokerRolloutSource::Test,
+            false,
+            TerminalBrokerRolloutSource::Test,
+        )
+    }
+
     pub(crate) fn configure_from_trusted_environment(&self) -> Result<(), String> {
         let (broker, broker_source) = trusted_rollout_value(
             TERMINAL_BROKER_ENVIRONMENT_VARIABLE,
@@ -1146,10 +1144,12 @@ impl TerminalSessionBroker {
             TERMINAL_EXECUTE_ENVIRONMENT_VARIABLE,
             TERMINAL_EXECUTE_DEFAULT_ENABLED,
         )?;
-        let (remote_agent_pty, remote_agent_pty_source) = trusted_rollout_value(
-            TERMINAL_REMOTE_AGENT_PTY_ENVIRONMENT_VARIABLE,
-            TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED,
-        )?;
+        let (remote_bound_terminal, remote_bound_terminal_source) =
+            trusted_rollout_value_with_legacy_alias(
+                TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE,
+                TERMINAL_REMOTE_BOUND_TERMINAL_LEGACY_ENVIRONMENT_VARIABLE,
+                TERMINAL_REMOTE_BOUND_TERMINAL_DEFAULT_ENABLED,
+            )?;
         let (interactive_tools, interactive_tools_source) = trusted_rollout_value(
             TERMINAL_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE,
             TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
@@ -1165,8 +1165,8 @@ impl TerminalSessionBroker {
             integration_source,
             execute,
             execute_source,
-            remote_agent_pty,
-            remote_agent_pty_source,
+            remote_bound_terminal,
+            remote_bound_terminal_source,
             interactive_tools,
             interactive_tools_source,
             remote_interactive_tools,
@@ -1183,8 +1183,8 @@ impl TerminalSessionBroker {
         integration_source: TerminalBrokerRolloutSource,
         execute: bool,
         execute_source: TerminalBrokerRolloutSource,
-        remote_agent_pty: bool,
-        remote_agent_pty_source: TerminalBrokerRolloutSource,
+        remote_bound_terminal: bool,
+        remote_bound_terminal_source: TerminalBrokerRolloutSource,
         interactive_tools: bool,
         interactive_tools_source: TerminalBrokerRolloutSource,
         remote_interactive_tools: bool,
@@ -1210,19 +1210,28 @@ impl TerminalSessionBroker {
                     );
                 }
             }
-        } else if state.remote_agent_pty_rollout.enabled
-            && !(broker && integration && execute && remote_agent_pty)
+        } else if state.remote_bound_terminal_rollout.enabled
+            && !(broker && integration && execute && remote_bound_terminal)
         {
-            for record in state
-                .sessions
-                .values_mut()
-                .filter(|record| record.open && record.agent_pty_owner.is_some())
-            {
+            for record in state.sessions.values_mut().filter(|record| {
+                record.open && record.transport_kind == TerminalTransportKind::SshPty
+            }) {
                 if let Some(command) = &record.active_command {
                     settle_command_uncertain(
                         command,
                         record.next_output_sequence.saturating_sub(1),
                     );
+                }
+                let agent_lease_revision = record.lease.as_ref().and_then(|lease| {
+                    matches!(lease.owner, TerminalLeaseOwner::Agent { .. })
+                        .then_some(lease.revision)
+                });
+                if let Some(revision) = agent_lease_revision {
+                    let revision = revision.checked_add(1).ok_or_else(counter_exhausted)?;
+                    if revision > JAVASCRIPT_MAX_SAFE_INTEGER {
+                        return Err(counter_exhausted());
+                    }
+                    record.lease = Some(user_lease(revision));
                 }
             }
         }
@@ -1247,13 +1256,13 @@ impl TerminalSessionBroker {
             execute_source,
             "stopNewRoutingNeverReplayInflightCommands",
         );
-        state.remote_agent_pty_rollout = TerminalFeatureRolloutDecision::new(
-            TERMINAL_REMOTE_AGENT_PTY_FLAG_NAME,
-            remote_agent_pty,
-            TERMINAL_REMOTE_AGENT_PTY_DEFAULT_ENABLED,
+        state.remote_bound_terminal_rollout = TerminalFeatureRolloutDecision::new(
+            TERMINAL_REMOTE_BOUND_TERMINAL_FLAG_NAME,
+            remote_bound_terminal,
+            TERMINAL_REMOTE_BOUND_TERMINAL_DEFAULT_ENABLED,
             broker && integration && execute,
-            remote_agent_pty_source,
-            "closeIdleAgentPtysAndMarkIncompleteCommandsUncertain",
+            remote_bound_terminal_source,
+            "releaseAgentLeasesAndMarkIncompleteCommandsUncertain",
         );
         state.interactive_tools_rollout = TerminalFeatureRolloutDecision::new(
             TERMINAL_INTERACTIVE_TOOLS_FLAG_NAME,
@@ -1267,7 +1276,7 @@ impl TerminalSessionBroker {
             TERMINAL_REMOTE_INTERACTIVE_TOOLS_FLAG_NAME,
             remote_interactive_tools,
             TERMINAL_REMOTE_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
-            broker && integration && execute && remote_agent_pty && interactive_tools,
+            broker && integration && execute && remote_bound_terminal && interactive_tools,
             remote_interactive_tools_source,
             "removeRemoteToolsRevokeAgentLeasesAndRejectLaterInput",
         );
@@ -1308,333 +1317,10 @@ impl TerminalSessionBroker {
         transport_kind: TerminalTransportKind,
         geometry: TerminalGeometry,
     ) -> Result<Option<TerminalBrokerAttachment>, String> {
-        self.attach_transport_with_owner(
-            transport_session_id,
-            predecessor_transport_session_id,
-            transport_kind,
-            geometry,
-            None,
-        )
-    }
-
-    pub(crate) fn attach_agent_ssh_candidate_transport(
-        &self,
-        transport_session_id: &str,
-        predecessor_transport_session_id: Option<&str>,
-        geometry: TerminalGeometry,
-        owner: TerminalAgentPtyOwner,
-    ) -> Result<Option<TerminalBrokerAttachment>, String> {
-        validate_identifier(&owner.agent_session_id, "Agent Session id")?;
-        validate_identifier(&owner.target_id, "target id")?;
-        validate_identifier(
-            &owner.source_transport_session_id,
-            "source transport session id",
-        )?;
-        let enabled = self.lock()?.remote_agent_pty_rollout.enabled;
-        if !enabled {
-            return Err("TERMINAL_REMOTE_AGENT_PTY_DISABLED".into());
-        }
-        validate_identifier(transport_session_id, "transport session id")?;
-        let mut state = self.lock()?;
-        if state
-            .transports
-            .get(transport_session_id)
-            .is_some_and(|attachment| attachment.active)
-            || state
-                .agent_ssh_candidates
-                .contains_key(transport_session_id)
-        {
-            return Err("TERMINAL_BROKER_TRANSPORT_ALREADY_ATTACHED".into());
-        }
-
-        let (promoted_terminal_session_id, promoted_terminal_generation) =
-            match predecessor_transport_session_id {
-                Some(predecessor_transport_session_id) => {
-                    let predecessor = state
-                        .transports
-                        .get(predecessor_transport_session_id)
-                        .cloned()
-                        .ok_or_else(|| "TERMINAL_BROKER_PREDECESSOR_NOT_FOUND".to_string())?;
-                    let record = state
-                        .sessions
-                        .get(&predecessor.terminal_session_id)
-                        .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
-                    if record.agent_pty_owner.as_ref() != Some(&owner) {
-                        return Err("TERMINAL_BROKER_PREDECESSOR_OWNERSHIP_MISMATCH".into());
-                    }
-                    if record.terminal_generation != predecessor.terminal_generation
-                        || record.transport_session_id != predecessor_transport_session_id
-                    {
-                        return Err("TERMINAL_BROKER_STALE_PREDECESSOR".into());
-                    }
-                    let next_generation = predecessor
-                        .terminal_generation
-                        .checked_add(1)
-                        .ok_or_else(counter_exhausted)?;
-                    if next_generation > JAVASCRIPT_MAX_SAFE_INTEGER {
-                        return Err(counter_exhausted());
-                    }
-                    (predecessor.terminal_session_id, next_generation)
-                }
-                None => (format!("terminal-{}", Uuid::new_v4()), 1),
-            };
-        let provisional_terminal_session_id = if predecessor_transport_session_id.is_some() {
-            format!("terminal-candidate-{}", Uuid::new_v4())
-        } else {
-            promoted_terminal_session_id.clone()
-        };
-        let provisional_generation = 1;
-        let interactive_tools_enabled = effective_interactive_tools_for_transport(
-            &state,
-            TerminalTransportKind::SshPty,
-            Some(&owner),
-        );
-        let record = SessionRecord::open(
-            provisional_terminal_session_id.clone(),
-            provisional_generation,
-            transport_session_id.to_string(),
-            TerminalTransportKind::SshPty,
-            Some(owner),
-            geometry,
-            interactive_tools_enabled,
-        );
-        state
-            .sessions
-            .insert(provisional_terminal_session_id.clone(), record);
-        state.transports.insert(
-            transport_session_id.to_string(),
-            TransportAttachment {
-                terminal_session_id: provisional_terminal_session_id.clone(),
-                terminal_generation: provisional_generation,
-                active: true,
-            },
-        );
-        state.agent_ssh_candidates.insert(
-            transport_session_id.to_string(),
-            AgentSshTransportCandidate {
-                expected_predecessor_transport_session_id: predecessor_transport_session_id
-                    .map(str::to_string),
-                provisional_terminal_session_id: provisional_terminal_session_id.clone(),
-                promoted_terminal_session_id,
-                promoted_terminal_generation,
-            },
-        );
-        Ok(Some(TerminalBrokerAttachment {
-            terminal_session_id: provisional_terminal_session_id,
-            terminal_generation: provisional_generation,
-        }))
-    }
-
-    pub(crate) fn promote_agent_ssh_candidate_transport<T>(
-        &self,
-        transport_session_id: &str,
-        expected_predecessor_transport_session_id: Option<&str>,
-        publish: impl FnOnce(TerminalBrokerAttachment) -> Result<T, String>,
-    ) -> Result<T, String> {
-        self.promote_agent_ssh_candidate_transport_inner(
-            transport_session_id,
-            expected_predecessor_transport_session_id,
-            true,
-            publish,
-        )
-    }
-
-    fn promote_agent_ssh_candidate_transport_inner<T>(
-        &self,
-        transport_session_id: &str,
-        expected_predecessor_transport_session_id: Option<&str>,
-        require_ready: bool,
-        publish: impl FnOnce(TerminalBrokerAttachment) -> Result<T, String>,
-    ) -> Result<T, String> {
-        validate_identifier(transport_session_id, "transport session id")?;
-        let mut state = self.lock()?;
-        let candidate = state
-            .agent_ssh_candidates
-            .get(transport_session_id)
-            .cloned()
-            .ok_or_else(|| "TERMINAL_BROKER_AGENT_SSH_CANDIDATE_NOT_FOUND".to_string())?;
-        if candidate
-            .expected_predecessor_transport_session_id
-            .as_deref()
-            != expected_predecessor_transport_session_id
-        {
-            return Err("TERMINAL_BROKER_STALE_PREDECESSOR".into());
-        }
-        let candidate_attachment = state
-            .transports
-            .get(transport_session_id)
-            .cloned()
-            .ok_or_else(|| "TERMINAL_BROKER_TRANSPORT_NOT_FOUND".to_string())?;
-        if !candidate_attachment.active
-            || candidate_attachment.terminal_session_id != candidate.provisional_terminal_session_id
-        {
-            return Err("TERMINAL_BROKER_STALE_GENERATION".into());
-        }
-        let candidate_record = state
-            .sessions
-            .get(&candidate.provisional_terminal_session_id)
-            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
-        if !candidate_record.open
-            || candidate_record.transport_session_id != transport_session_id
-            || candidate_record.active_command.is_some()
-        {
-            return Err("TERMINAL_BROKER_AGENT_SSH_CANDIDATE_NOT_QUIESCENT".into());
-        }
-        if require_ready
-            && (candidate_record.integration_state != TerminalIntegrationState::Ready
-                || !candidate_record.prompt_ready)
-        {
-            return Err("TERMINAL_BROKER_AGENT_SSH_CANDIDATE_NOT_READY".into());
-        }
-
-        let attachment = TerminalBrokerAttachment {
-            terminal_session_id: candidate.promoted_terminal_session_id.clone(),
-            terminal_generation: candidate.promoted_terminal_generation,
-        };
-        let Some(predecessor_transport_session_id) = expected_predecessor_transport_session_id
-        else {
-            let published = publish(attachment)?;
-            state.agent_ssh_candidates.remove(transport_session_id);
-            return Ok(published);
-        };
-
-        let predecessor_attachment = state
-            .transports
-            .get(predecessor_transport_session_id)
-            .cloned()
-            .ok_or_else(|| "TERMINAL_BROKER_PREDECESSOR_NOT_FOUND".to_string())?;
-        let predecessor_record = state
-            .sessions
-            .get(&predecessor_attachment.terminal_session_id)
-            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
-        if predecessor_record.agent_pty_owner != candidate_record.agent_pty_owner {
-            return Err("TERMINAL_BROKER_PREDECESSOR_OWNERSHIP_MISMATCH".into());
-        }
-        if predecessor_attachment.terminal_session_id != candidate.promoted_terminal_session_id
-            || predecessor_attachment
-                .terminal_generation
-                .checked_add(1)
-                .ok_or_else(counter_exhausted)?
-                != candidate.promoted_terminal_generation
-            || predecessor_record.terminal_generation != predecessor_attachment.terminal_generation
-            || predecessor_record.transport_session_id != predecessor_transport_session_id
-        {
-            return Err("TERMINAL_BROKER_STALE_PREDECESSOR".into());
-        }
-
-        let replaced_transport_ids = state
-            .transports
-            .iter()
-            .filter(|(candidate_transport_id, attachment)| {
-                candidate_transport_id.as_str() != transport_session_id
-                    && attachment.terminal_session_id == candidate.promoted_terminal_session_id
-            })
-            .map(|(transport_id, _)| transport_id.clone())
-            .collect::<Vec<_>>();
-        let replaced_transports = replaced_transport_ids
-            .into_iter()
-            .filter_map(|transport_id| {
-                state
-                    .transports
-                    .remove(&transport_id)
-                    .map(|attachment| (transport_id, attachment))
-            })
-            .collect::<Vec<_>>();
-        let mut predecessor_record = state
-            .sessions
-            .remove(&candidate.promoted_terminal_session_id)
-            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
-        let mut promoted = state
-            .sessions
-            .remove(&candidate.provisional_terminal_session_id)
-            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
-        promoted.terminal_session_id = candidate.promoted_terminal_session_id.clone();
-        promoted.terminal_generation = candidate.promoted_terminal_generation;
-        for frame in &mut promoted.replay {
-            frame.terminal_session_id = candidate.promoted_terminal_session_id.clone();
-            frame.terminal_generation = candidate.promoted_terminal_generation;
-        }
-        state
-            .sessions
-            .insert(candidate.promoted_terminal_session_id.clone(), promoted);
-        state.transports.insert(
-            transport_session_id.to_string(),
-            TransportAttachment {
-                terminal_session_id: candidate.promoted_terminal_session_id.clone(),
-                terminal_generation: candidate.promoted_terminal_generation,
-                active: true,
-            },
-        );
-
-        match publish(attachment) {
-            Ok(published) => {
-                state.agent_ssh_candidates.remove(transport_session_id);
-                state
-                    .closed_session_order
-                    .retain(|closed_id| closed_id != &candidate.promoted_terminal_session_id);
-                predecessor_record.close(TerminalGenerationCloseReason::Replaced);
-                Ok(published)
-            }
-            Err(error) => {
-                let mut staged = state
-                    .sessions
-                    .remove(&candidate.promoted_terminal_session_id)
-                    .expect("promoted Agent SSH candidate remains registered during publication");
-                staged.terminal_session_id = candidate.provisional_terminal_session_id.clone();
-                staged.terminal_generation = candidate_attachment.terminal_generation;
-                for frame in &mut staged.replay {
-                    frame.terminal_session_id = candidate.provisional_terminal_session_id.clone();
-                    frame.terminal_generation = candidate_attachment.terminal_generation;
-                }
-                state
-                    .sessions
-                    .insert(candidate.provisional_terminal_session_id, staged);
-                state
-                    .transports
-                    .insert(transport_session_id.to_string(), candidate_attachment);
-                state
-                    .sessions
-                    .insert(candidate.promoted_terminal_session_id, predecessor_record);
-                state.transports.extend(replaced_transports);
-                Err(error)
-            }
-        }
-    }
-
-    pub(crate) fn abort_agent_ssh_candidate_transport(
-        &self,
-        transport_session_id: &str,
-    ) -> Result<bool, String> {
-        validate_identifier(transport_session_id, "transport session id")?;
-        let mut state = self.lock()?;
-        let Some(candidate) = state.agent_ssh_candidates.remove(transport_session_id) else {
-            return Ok(false);
-        };
-        state.transports.remove(transport_session_id);
-        if let Some(mut record) = state
-            .sessions
-            .remove(&candidate.provisional_terminal_session_id)
-        {
-            record.close(TerminalGenerationCloseReason::BrokerShutdown);
-        }
-        Ok(true)
-    }
-
-    fn attach_transport_with_owner(
-        &self,
-        transport_session_id: &str,
-        predecessor_transport_session_id: Option<&str>,
-        transport_kind: TerminalTransportKind,
-        geometry: TerminalGeometry,
-        agent_pty_owner: Option<TerminalAgentPtyOwner>,
-    ) -> Result<Option<TerminalBrokerAttachment>, String> {
         validate_identifier(transport_session_id, "transport session id")?;
         let mut state = self.lock()?;
         if !state.rollout.enabled {
             return Ok(None);
-        }
-        if agent_pty_owner.is_some() && !state.remote_agent_pty_rollout.enabled {
-            return Err("TERMINAL_REMOTE_AGENT_PTY_DISABLED".into());
         }
         if state
             .transports
@@ -1662,9 +1348,6 @@ impl TerminalSessionBroker {
                     .sessions
                     .get_mut(&predecessor.terminal_session_id)
                     .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
-                if record.agent_pty_owner != agent_pty_owner {
-                    return Err("TERMINAL_BROKER_PREDECESSOR_OWNERSHIP_MISMATCH".into());
-                }
                 if record.terminal_generation != predecessor.terminal_generation {
                     return Err("TERMINAL_BROKER_STALE_PREDECESSOR".into());
                 }
@@ -1695,17 +1378,13 @@ impl TerminalSessionBroker {
         state
             .closed_session_order
             .retain(|closed_id| closed_id != &terminal_session_id);
-        let interactive_tools_enabled = effective_interactive_tools_for_transport(
-            &state,
-            transport_kind,
-            agent_pty_owner.as_ref(),
-        );
+        let interactive_tools_enabled =
+            effective_interactive_tools_for_transport(&state, transport_kind);
         let record = SessionRecord::open(
             terminal_session_id.clone(),
             terminal_generation,
             transport_session_id.to_string(),
             transport_kind,
-            agent_pty_owner,
             geometry,
             interactive_tools_enabled,
         );
@@ -1992,11 +1671,14 @@ impl TerminalSessionBroker {
             if let Ok(attachment) = current_attachment(&state, transport_session_id) {
                 if let Some(record) = state.sessions.get(&attachment.terminal_session_id) {
                     let transport_eligible = record.transport_kind != TerminalTransportKind::SshPty
-                        || (state.remote_agent_pty_rollout.enabled
-                            && record.agent_pty_owner.is_some());
+                        || state.remote_bound_terminal_rollout.enabled;
                     if transport_eligible
                         && record.integration_state == TerminalIntegrationState::Ready
                         && record.prompt_ready
+                        && record.active_command.is_none()
+                        && record.lease.as_ref().is_some_and(|lease| {
+                            matches!(lease.owner, TerminalLeaseOwner::User { .. })
+                        })
                     {
                         return Ok(TerminalVisibleCommandRoute::TerminalExecute);
                     }
@@ -2004,17 +1686,6 @@ impl TerminalSessionBroker {
             }
         }
         Ok(TerminalVisibleCommandRoute::Unavailable)
-    }
-
-    pub(crate) fn remote_agent_pty_new_operation_route(
-        &self,
-    ) -> Result<TerminalVisibleCommandRoute, String> {
-        let state = self.lock()?;
-        if state.remote_agent_pty_rollout.enabled {
-            Ok(TerminalVisibleCommandRoute::TerminalExecute)
-        } else {
-            Ok(TerminalVisibleCommandRoute::Unavailable)
-        }
     }
 
     pub(crate) fn register_integration_channel(
@@ -2228,13 +1899,12 @@ impl TerminalSessionBroker {
         if !state.terminal_execute_rollout.enabled {
             return Err("TERMINAL_EXECUTE_DISABLED".into());
         }
-        let remote_agent_pty_enabled = state.remote_agent_pty_rollout.enabled;
+        let remote_visible_command_enabled = state.remote_bound_terminal_rollout.enabled;
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
-        if record.transport_kind == TerminalTransportKind::SshPty {
-            if !remote_agent_pty_enabled || record.agent_pty_owner.is_none() {
-                return Err("TERMINAL_EXECUTE_REQUIRES_DEDICATED_AGENT_SSH_PTY".into());
-            }
+        if record.transport_kind == TerminalTransportKind::SshPty && !remote_visible_command_enabled
+        {
+            return Err("TERMINAL_VISIBLE_COMMAND_UNAVAILABLE".into());
         }
         if record.integration_state != TerminalIntegrationState::Ready || !record.prompt_ready {
             return Err("TERMINAL_INTEGRATION_NOT_READY".into());
@@ -2254,17 +1924,6 @@ impl TerminalSessionBroker {
             } if expected == operation_id
         ) {
             return Err("TERMINAL_BROKER_LEASE_IDENTITY_MISMATCH".into());
-        }
-        if let Some(owner) = &record.agent_pty_owner {
-            if !matches!(
-                &lease.owner,
-                TerminalLeaseOwner::Agent {
-                    agent_session_id,
-                    ..
-                } if agent_session_id == &owner.agent_session_id
-            ) {
-                return Err("TERMINAL_AGENT_PTY_OWNER_MISMATCH".into());
-            }
         }
         let operation = Arc::new(TerminalCommandOperation::new(
             record.terminal_session_id.clone(),
@@ -2333,8 +1992,19 @@ impl TerminalSessionBroker {
         if !state.rollout.enabled {
             return Ok(None);
         }
+        let remote_visible_command_enabled = state.remote_bound_terminal_rollout.enabled;
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        if record.transport_kind == TerminalTransportKind::SshPty {
+            if !remote_visible_command_enabled
+                || record.integration_state != TerminalIntegrationState::Ready
+            {
+                return Err("TERMINAL_VISIBLE_COMMAND_UNAVAILABLE".into());
+            }
+            if !record.prompt_ready || record.active_command.is_some() {
+                return Err("TERMINAL_VISIBLE_COMMAND_BUSY".into());
+            }
+        }
         let current = record
             .lease
             .as_ref()
@@ -2419,8 +2089,25 @@ impl TerminalSessionBroker {
             write()?;
             return Ok(None);
         }
+        let remote_visible_command_enabled = state.remote_bound_terminal_rollout.enabled;
+        let terminal_execute_enabled = state.terminal_execute_rollout.enabled;
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        if !matches!(&source, TerminalBrokerInputSource::User)
+            && record.transport_kind == TerminalTransportKind::SshPty
+            && !remote_visible_command_enabled
+        {
+            return Err("TERMINAL_VISIBLE_COMMAND_UNAVAILABLE".into());
+        }
+        if record.active_command.is_some() && !terminal_execute_enabled {
+            return Err("TERMINAL_EXECUTE_DISABLED".into());
+        }
+        if !matches!(&source, TerminalBrokerInputSource::User)
+            && record.transport_kind == TerminalTransportKind::SshPty
+            && record.integration_state != TerminalIntegrationState::Ready
+        {
+            return Err("TERMINAL_INTEGRATION_NOT_READY".into());
+        }
         let lease = record
             .lease
             .as_ref()
@@ -2466,7 +2153,7 @@ impl TerminalSessionBroker {
             rollout: state.rollout.clone(),
             shell_integration_rollout: state.shell_integration_rollout.clone(),
             terminal_execute_rollout: state.terminal_execute_rollout.clone(),
-            remote_agent_pty_rollout: state.remote_agent_pty_rollout.clone(),
+            remote_bound_terminal_rollout: state.remote_bound_terminal_rollout.clone(),
             interactive_tools_rollout: state.interactive_tools_rollout.clone(),
             remote_interactive_tools_rollout: state.remote_interactive_tools_rollout.clone(),
             counters: self.counters.snapshot(),
@@ -2843,13 +2530,11 @@ fn remember_closed_session(
 fn effective_interactive_tools_for_transport(
     state: &BrokerState,
     transport_kind: TerminalTransportKind,
-    agent_pty_owner: Option<&TerminalAgentPtyOwner>,
 ) -> bool {
     state.interactive_tools_rollout.enabled
         && (transport_kind != TerminalTransportKind::SshPty
-            || (state.remote_agent_pty_rollout.enabled
-                && state.remote_interactive_tools_rollout.enabled
-                && agent_pty_owner.is_some()))
+            || (state.remote_bound_terminal_rollout.enabled
+                && state.remote_interactive_tools_rollout.enabled))
 }
 
 fn current_attachment<'a>(
@@ -3292,7 +2977,53 @@ fn trusted_rollout_value(
     environment_variable: &str,
     default_enabled: bool,
 ) -> Result<(bool, TerminalBrokerRolloutSource), String> {
-    match std::env::var(environment_variable) {
+    rollout_value_from_environment_result(
+        environment_variable,
+        std::env::var(environment_variable),
+        default_enabled,
+    )
+}
+
+fn trusted_rollout_value_with_legacy_alias(
+    environment_variable: &str,
+    legacy_environment_variable: &str,
+    default_enabled: bool,
+) -> Result<(bool, TerminalBrokerRolloutSource), String> {
+    trusted_rollout_value_with_legacy_alias_reader(
+        environment_variable,
+        legacy_environment_variable,
+        default_enabled,
+        |name| std::env::var(name),
+    )
+}
+
+fn trusted_rollout_value_with_legacy_alias_reader<F>(
+    environment_variable: &str,
+    legacy_environment_variable: &str,
+    default_enabled: bool,
+    mut read: F,
+) -> Result<(bool, TerminalBrokerRolloutSource), String>
+where
+    F: FnMut(&str) -> Result<String, std::env::VarError>,
+{
+    match read(environment_variable) {
+        Err(std::env::VarError::NotPresent) => rollout_value_from_environment_result(
+            legacy_environment_variable,
+            read(legacy_environment_variable),
+            default_enabled,
+        ),
+        result => {
+            rollout_value_from_environment_result(environment_variable, result, default_enabled)
+        }
+    }
+}
+
+fn rollout_value_from_environment_result(
+    environment_variable: &str,
+    value: Result<String, std::env::VarError>,
+    default_enabled: bool,
+) -> Result<(bool, TerminalBrokerRolloutSource), String> {
+    match value {
         Ok(value) => Ok((
             parse_rollout_value(&value).ok_or_else(|| {
                 format!("{environment_variable} must be one of 1, 0, true, false, on, or off")

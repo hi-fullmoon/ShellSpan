@@ -601,6 +601,16 @@ describe('connection request serialization', () => {
         mode: 'cooperative',
         rollback: 'disableDependentFlagsThenCloseBrokerGenerations',
       },
+      remoteBoundTerminalRollout: {
+        name: 'terminal_remote_bound_terminal_v1',
+        enabled: true,
+        requested: true,
+        defaultEnabled: true,
+        prerequisiteSatisfied: true,
+        source: 'environment',
+        persisted: false,
+        rollback: 'releaseAgentLeasesAndMarkIncompleteCommandsUncertain',
+      },
       counters: {
         integrationReady: 3,
         lifecycleMatched: 12,
@@ -618,6 +628,11 @@ describe('connection request serialization', () => {
     const snapshot = await invokeGetTerminalBrokerSnapshot('transport-1');
 
     expect(snapshot.rollout.enabled).toBe(false);
+    expect(snapshot.remoteBoundTerminalRollout).toEqual(expect.objectContaining({
+      name: 'terminal_remote_bound_terminal_v1',
+      enabled: true,
+      persisted: false,
+    }));
     expect(snapshot.counters).toEqual(expect.objectContaining({
       integrationReady: 3,
       transportLatencySamples: 8,
