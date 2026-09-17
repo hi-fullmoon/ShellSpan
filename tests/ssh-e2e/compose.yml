@@ -17,3 +17,16 @@ services:
       interval: 1s
       timeout: 3s
       retries: 30
+  no-sftp:
+    image: shellspan-ssh-e2e:local
+    command:
+      - sh
+      - -c
+      - ssh-keygen -A || exit $$?; exec /usr/sbin/sshd -D -e -f /etc/ssh/sshd_no_sftp_config
+    ports:
+      - "127.0.0.1:22224:22"
+    healthcheck:
+      test: ["CMD", "ssh-keyscan", "-p", "22", "127.0.0.1"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
