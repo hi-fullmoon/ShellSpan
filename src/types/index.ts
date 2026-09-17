@@ -292,8 +292,8 @@ export interface TerminalBrokerSnapshot {
     name: 'terminal_execute_v1';
     defaultEnabled: boolean;
   };
-  remoteAgentPtyRollout: TerminalFeatureRolloutDecision & {
-    name: 'terminal_remote_agent_pty_v1';
+  remoteBoundTerminalRollout: TerminalFeatureRolloutDecision & {
+    name: 'terminal_remote_bound_terminal_v1';
     defaultEnabled: boolean;
   };
   interactiveToolsRollout: TerminalFeatureRolloutDecision & {
@@ -333,15 +333,9 @@ export interface TerminalIntegrationStateEvent {
   terminalSessionId: string;
   terminalGeneration: number;
   state: TerminalBrokerIntegrationState;
+  promptReady: boolean;
   shell?: TerminalBrokerSessionSnapshot['integrationShell'];
   reason?: string;
-}
-
-export interface AgentRemoteTerminalCreatedEvent {
-  summary: SessionSummary;
-  profileId: string;
-  sourceSessionId: string;
-  replacesSessionId?: string;
 }
 
 export interface RemoteConnectionRequest {

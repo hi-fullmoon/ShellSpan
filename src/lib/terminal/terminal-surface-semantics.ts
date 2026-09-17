@@ -4,6 +4,7 @@ import type { SessionStatus } from '@/types';
 export type RealTerminalPresentationState =
   | 'initializing'
   | 'ready'
+  | 'busy'
   | 'unavailable';
 
 export type TerminalSurfacePresentationState =
@@ -29,7 +30,7 @@ export interface TerminalSurfacePresentation {
  */
 export function terminalConnectionPresentationState(
   status: SessionStatus | undefined,
-): Exclude<RealTerminalPresentationState, 'ready'> {
+): Exclude<RealTerminalPresentationState, 'ready' | 'busy'> {
   switch (status) {
     case 'connecting':
       return 'initializing';
