@@ -1,5 +1,0 @@
-services:
-  web:
-    image: shellspan/deployment-e2e:placeholder
-    ports:
-      - "80:8080"

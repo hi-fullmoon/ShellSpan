@@ -257,6 +257,9 @@ pub fn run() {
             let home_dir = app.path().home_dir()?;
             let shellspan_dir = shellspan_data_dir(&home_dir);
             let database = db::Database::open(&shellspan_dir.join("shellspan-v1.db"))?;
+            let deployment_runtime =
+                deployment::DeploymentWorkflowRuntime::initialize(&shellspan_dir)
+                    .map_err(std::io::Error::other)?;
             let credentials = keychain::CredentialManager::new();
             app.manage(petdex::PetdexAdapter::new(home_dir));
             app.manage(credentials.clone());
@@ -264,6 +267,9 @@ pub fn run() {
                 .map_err(std::io::Error::other)?;
             app.manage(llm::runtime::LlmRuntime { routes });
             app.manage(database);
+            app.manage(deployment_runtime);
+            deployment::commands::start_deployment_workflow_recovery(app.handle())
+                .map_err(std::io::Error::other)?;
             let runtime = app.state::<agent_runtime::AgentRuntime>();
             agent_runtime::configure_runtime(app.handle(), &runtime)?;
             runtime.configure_credentials(credentials)?;
@@ -431,39 +437,29 @@ pub fn run() {
             commands::list_recent_profiles,
             commands::touch_recent_profile,
             commands::remove_recent_profile,
+            deployment::commands::deployment_workflow_capabilities,
+            deployment::commands::list_deployment_node_types,
+            deployment::commands::validate_deployment_workflow,
             deployment::commands::list_deployment_workflows,
-            deployment::commands::deployment_runtime_capabilities,
             deployment::commands::get_deployment_workflow,
             deployment::commands::create_deployment_workflow,
+            deployment::commands::create_static_site_deployment_workflow,
             deployment::commands::update_deployment_workflow,
-            deployment::commands::delete_deployment_workflow,
+            deployment::commands::update_deployment_workflow_layout,
+            deployment::commands::archive_deployment_workflow,
+            deployment::commands::prepare_deployment_run,
+            deployment::commands::approve_deployment_run,
+            deployment::commands::start_deployment_run,
+            deployment::commands::cancel_deployment_run,
+            deployment::commands::reconcile_deployment_run,
             deployment::commands::list_deployment_runs,
-            deployment::commands::list_deployment_run_page,
-            deployment::commands::get_deployment_run,
             deployment::commands::get_deployment_run_detail,
-            deployment::commands::export_deployment_run_audit,
             deployment::commands::list_deployment_run_events,
-            deployment::commands::list_deployment_run_events_before,
-            deployment::commands::claim_deployment_notifications,
-            deployment::commands::show_deployment_notification,
-            deployment::commands::deployment_startup_recovery,
-            deployment::commands::deployment_reconciliation_binding,
-            deployment::commands::deployment_reconcile,
-            deployment::commands::deployment_cancel_reconciliation_observation,
-            deployment::commands::create_deployment_plan,
-            deployment::commands::get_deployment_plan,
-            deployment::commands::request_deployment_approval,
-            deployment::commands::approve_deployment_plan,
-            deployment::commands::reject_deployment_plan,
-            deployment::commands::deployment_artifact_source_snapshot,
-            deployment::commands::deployment_build_artifact,
-            deployment::commands::deployment_cancel_artifact_build,
-            deployment::commands::deployment_transfer_artifact,
-            deployment::commands::deployment_cancel_artifact_transfer,
-            deployment::commands::deployment_run_remote,
-            deployment::commands::deployment_cancel_remote_runner,
-            deployment::commands::deployment_preflight,
-            deployment::commands::deployment_cancel_preflight,
+            deployment::commands::list_deployment_releases,
+            deployment::commands::list_deployment_run_nodes,
+            deployment::commands::list_deployment_node_attempts,
+            deployment::commands::inspect_deployment_artifact,
+            deployment::commands::export_deployment_run_audit,
             commands::list_sftp_bookmarks,
             commands::add_sftp_bookmark,
             commands::remove_sftp_bookmark,

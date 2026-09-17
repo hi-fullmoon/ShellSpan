@@ -57,22 +57,9 @@ try {
   run(docker, [...compose, 'up', '-d', '--wait']);
   fixtureStarted = true;
   buildFixtureImage('fixture-healthy', 200);
-  buildFixtureImage('fixture-unhealthy', 503);
-  const tags = [
-    ['fixture-healthy', 'fixture-nginx-fail'],
-    ['fixture-healthy', 'fixture-nginx-success'],
-    ['fixture-healthy', 'fixture-mismatch'],
-    ['fixture-healthy', 'fixture-cancel'],
-    ['fixture-healthy', 'fixture-lock'],
-    ['fixture-unhealthy', 'fixture-unhealthy-rollback-fail'],
-  ];
-  for (const [source, target] of tags) {
-    run(docker, ['tag', `shellspan/deployment-e2e:${source}`, `shellspan/deployment-e2e:${target}`]);
-  }
   run(docker, [
     'save', '--output', imageArchive,
-    ...['fixture-healthy', 'fixture-unhealthy', ...tags.map(([, target]) => target)]
-      .map((tag) => `shellspan/deployment-e2e:${tag}`),
+    'shellspan/deployment-e2e:fixture-healthy',
   ]);
   const environment = {
     ...process.env,
@@ -83,13 +70,25 @@ try {
     SHELLSPAN_E2E_SSH_PASSWORD: 'shellspan-deployment-e2e',
     SHELLSPAN_DEPLOYMENT_E2E_ROOT: '/srv/shellspan-deployment',
     SHELLSPAN_DEPLOYMENT_E2E_IMAGE_ARCHIVE: imageArchive,
-    SHELLSPAN_DEPLOYMENT_E2E_COMPOSE: path.join(repositoryRoot, 'tests/deployment-e2e/app/compose.yaml'),
   };
   run(cargo, [
     'test', '--locked', '--manifest-path', 'src-tauri/Cargo.toml',
     'isolated_deployment_', '--lib', '--', '--ignored', '--nocapture', '--test-threads=1',
   ], { env: environment });
-  console.log('\nDeployment Phase 8 isolated SSH, SFTP, detached runner, and DinD gate passed.');
+  for (const suite of [
+    'deployment::run_coordinator::tests',
+    'deployment::artifact_cas::tests',
+    'deployment::repository::tests',
+    'deployment::runtime::tests',
+    'deployment::audit::tests',
+    'deployment::security::tests',
+  ]) {
+    run(cargo, [
+      'test', '--locked', '--manifest-path', 'src-tauri/Cargo.toml',
+      suite, '--lib', '--', '--test-threads=1',
+    ], { env: environment });
+  }
+  console.log('\nDeployment Workflow Docker Compose, static site, recovery, audit, rollback, lock, disk, and CAS gate passed.');
 } finally {
   if (fixtureStarted) run(docker, [...compose, 'down', '--volumes']);
   for (const file of [imageArchive]) {
