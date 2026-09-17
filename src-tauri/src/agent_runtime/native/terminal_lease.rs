@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -61,6 +61,7 @@ pub(crate) enum TerminalLeaseError {
     OwnerMismatch,
     OperationMismatch,
     UserInputBlocked,
+    TakenOver,
     AlreadyTerminal,
     Unavailable,
 }
@@ -73,6 +74,7 @@ impl TerminalLeaseError {
             Self::OwnerMismatch => "TERMINAL_LEASE_OWNER_MISMATCH",
             Self::OperationMismatch => "TERMINAL_LEASE_OPERATION_MISMATCH",
             Self::UserInputBlocked => "TERMINAL_INPUT_BLOCKED_BY_AGENT",
+            Self::TakenOver => "TERMINAL_LEASE_TAKEN_OVER",
             Self::AlreadyTerminal => "TERMINAL_LEASE_ALREADY_TERMINAL",
             Self::Unavailable => "TERMINAL_LEASE_UNAVAILABLE",
         }
@@ -87,6 +89,7 @@ impl fmt::Display for TerminalLeaseError {
             Self::OwnerMismatch => "Agent Session or task does not own the terminal lease",
             Self::OperationMismatch => "operation does not own the terminal lease",
             Self::UserInputBlocked => "user input is blocked while an Agent owns the terminal",
+            Self::TakenOver => "the user took over this terminal for the current Agent turn",
             Self::AlreadyTerminal => "the terminal operation already reached a terminal state",
             Self::Unavailable => "terminal lease state is unavailable",
         };
@@ -126,6 +129,7 @@ type LeasePublisher = Arc<dyn Fn(&AgentTerminalLeaseEvent) + Send + Sync>;
 pub(crate) struct TerminalLeaseManager {
     leases: Arc<Mutex<HashMap<String, LeaseRecord>>>,
     turn_guards: Arc<Mutex<HashMap<String, String>>>,
+    taken_over: Arc<Mutex<HashSet<(String, String)>>>,
     changed: Arc<Condvar>,
     publisher: Arc<Mutex<Option<LeasePublisher>>>,
     broker: TerminalSessionBroker,
@@ -136,6 +140,7 @@ impl Default for TerminalLeaseManager {
         Self {
             leases: Arc::new(Mutex::new(HashMap::new())),
             turn_guards: Arc::new(Mutex::new(HashMap::new())),
+            taken_over: Arc::new(Mutex::new(HashSet::new())),
             changed: Arc::new(Condvar::new()),
             publisher: Arc::new(Mutex::new(None)),
             broker: TerminalSessionBroker::default(),
@@ -156,6 +161,14 @@ impl TerminalLeaseManager {
         session_id: &str,
         agent_session_id: &str,
     ) -> Result<(), String> {
+        if self
+            .taken_over
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+            .contains(&(session_id.to_string(), agent_session_id.to_string()))
+        {
+            return Err(TerminalLeaseError::TakenOver.to_string());
+        }
         let mut turn_guards = self
             .turn_guards
             .lock()
@@ -204,6 +217,13 @@ impl TerminalLeaseManager {
             acquired_at_unix_ms: super::current_unix_ms(),
         };
         {
+            let taken_over = self
+                .taken_over
+                .lock()
+                .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+            if taken_over.contains(&(session_id.to_string(), agent_session_id.to_string())) {
+                return Err(TerminalLeaseError::TakenOver.to_string());
+            }
             // The guard survives individual command leases until TurnEnd.
             // Acquire it before the lease mutex, matching the User write path.
             let mut turn_guards = self
@@ -324,6 +344,52 @@ impl TerminalLeaseManager {
             self.changed.notify_all();
             log_release(&lease, reason);
             self.publish(released_event(lease, reason));
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub(crate) fn release_after_takeover(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+        operation_id: &str,
+    ) -> Result<bool, String> {
+        let lease = {
+            let mut taken_over = self
+                .taken_over
+                .lock()
+                .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+            let mut turn_guards = self
+                .turn_guards
+                .lock()
+                .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+            let mut leases = self
+                .leases
+                .lock()
+                .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+            let Some(record) = leases.get(session_id) else {
+                return Ok(false);
+            };
+            validate_owner(&record.lease, agent_session_id, Some(task_id), operation_id)?;
+            self.broker
+                .release_agent_lease(session_id, agent_session_id, task_id, operation_id)?;
+            let lease = leases.remove(session_id).map(|record| record.lease);
+            if turn_guards
+                .get(session_id)
+                .is_some_and(|owner| owner == agent_session_id)
+            {
+                turn_guards.remove(session_id);
+            }
+            taken_over.insert((session_id.to_string(), agent_session_id.to_string()));
+            lease
+        };
+        if let Some(lease) = lease {
+            self.changed.notify_all();
+            log_release(&lease, TerminalLeaseReleaseReason::TakenOver);
+            self.publish(released_event(lease, TerminalLeaseReleaseReason::TakenOver));
             Ok(true)
         } else {
             Ok(false)
@@ -528,6 +594,10 @@ impl TerminalLeaseManager {
     }
 
     pub(crate) fn release_turn(&self, agent_session_id: &str) -> Result<(), String> {
+        self.taken_over
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+            .retain(|(_, agent)| agent != agent_session_id);
         self.turn_guards
             .lock()
             .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
@@ -549,6 +619,24 @@ impl TerminalLeaseManager {
             .lock()
             .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
             .contains_key(session_id))
+    }
+
+    pub(crate) fn protected_session_ids(&self) -> Result<Vec<String>, String> {
+        let mut session_ids = self
+            .turn_guards
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+            .keys()
+            .cloned()
+            .collect::<HashSet<_>>();
+        session_ids.extend(
+            self.leases
+                .lock()
+                .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+                .keys()
+                .cloned(),
+        );
+        Ok(session_ids.into_iter().collect())
     }
 
     #[cfg(test)]

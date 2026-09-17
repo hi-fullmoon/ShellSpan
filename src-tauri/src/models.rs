@@ -907,20 +907,6 @@ pub(crate) struct ManagedSession {
     pub(crate) identity: SessionIdentity,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AgentRemoteTerminalOwner {
-    pub(crate) agent_session_id: String,
-    pub(crate) target_id: String,
-    pub(crate) source_session_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AgentRemoteTerminalBinding {
-    pub(crate) session_id: String,
-    pub(crate) owner: AgentRemoteTerminalOwner,
-    pub(crate) state: SessionTargetState,
-}
-
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SessionTargetState {
@@ -932,8 +918,6 @@ pub(crate) struct SessionTargetState {
 #[derive(Default)]
 struct SessionRegistry {
     sessions: HashMap<String, ManagedSession>,
-    agent_remote_owners: HashMap<String, AgentRemoteTerminalOwner>,
-    latest_agent_remote: HashMap<(String, String), String>,
 }
 
 #[derive(Clone, Default)]
@@ -1687,156 +1671,6 @@ impl SessionManager {
         Ok(())
     }
 
-    pub(crate) fn insert_agent_remote(
-        &self,
-        session_id: String,
-        managed: ManagedSession,
-        owner: AgentRemoteTerminalOwner,
-    ) -> Result<(), String> {
-        let mut guard = self
-            .registry
-            .lock()
-            .map_err(|_| "session registry poisoned".to_string())?;
-        if guard.sessions.contains_key(&session_id)
-            || guard.agent_remote_owners.contains_key(&session_id)
-        {
-            return Err(format!("session {session_id} is already registered"));
-        }
-        guard.agent_remote_owners.insert(session_id.clone(), owner);
-        guard.sessions.insert(session_id, managed);
-        Ok(())
-    }
-
-    pub(crate) fn publish_agent_remote<T>(
-        &self,
-        session_id: &str,
-        expected_predecessor_session_id: Option<&str>,
-        publish: impl FnOnce() -> Result<T, String>,
-    ) -> Result<(T, Option<String>), String> {
-        let mut guard = self
-            .registry
-            .lock()
-            .map_err(|_| "session registry poisoned".to_string())?;
-        let owner = guard
-            .agent_remote_owners
-            .get(session_id)
-            .cloned()
-            .ok_or_else(|| format!("session {session_id} is not an Agent remote terminal"))?;
-        let managed = guard
-            .sessions
-            .get(session_id)
-            .ok_or_else(|| format!("session {session_id} not found"))?;
-        if managed.terminal_kind != SessionTerminalKind::Remote
-            || managed.status.status != SessionStatus::Connected
-        {
-            return Err("Agent remote terminal candidate is not connected".into());
-        }
-        let key = (owner.agent_session_id, owner.target_id);
-        if expected_predecessor_session_id == Some(session_id) {
-            return Err("Agent remote terminal cannot replace itself".into());
-        }
-        if guard.latest_agent_remote.get(&key).map(String::as_str)
-            != expected_predecessor_session_id
-        {
-            return Err("Agent remote terminal predecessor changed before promotion".into());
-        }
-        if let Some(predecessor_session_id) = expected_predecessor_session_id {
-            let predecessor_owner = guard
-                .agent_remote_owners
-                .get(predecessor_session_id)
-                .ok_or_else(|| "Agent remote terminal predecessor owner disappeared".to_string())?;
-            if predecessor_owner.agent_session_id != key.0
-                || predecessor_owner.target_id != key.1
-                || !guard.sessions.contains_key(predecessor_session_id)
-            {
-                return Err("Agent remote terminal predecessor is inconsistent".into());
-            }
-        }
-        guard
-            .latest_agent_remote
-            .insert(key.clone(), session_id.to_string());
-
-        let published = match publish() {
-            Ok(published) => published,
-            Err(error) => {
-                match expected_predecessor_session_id {
-                    Some(predecessor_session_id) => {
-                        guard
-                            .latest_agent_remote
-                            .insert(key, predecessor_session_id.to_string());
-                    }
-                    None => {
-                        guard.latest_agent_remote.remove(&key);
-                    }
-                }
-                return Err(error);
-            }
-        };
-
-        let predecessor_close_error = expected_predecessor_session_id.and_then(|predecessor| {
-            let close_error = guard.sessions.get(predecessor).and_then(|managed| {
-                enqueue_session_command(managed, SessionCommand::Close, predecessor).err()
-            });
-            guard.sessions.remove(predecessor);
-            remove_agent_remote_registration(&mut guard, predecessor);
-            close_error
-        });
-        Ok((published, predecessor_close_error))
-    }
-
-    pub(crate) fn agent_remote_terminal(
-        &self,
-        agent_session_id: &str,
-        target_id: &str,
-    ) -> Result<Option<AgentRemoteTerminalBinding>, String> {
-        let guard = self
-            .registry
-            .lock()
-            .map_err(|_| "session registry poisoned".to_string())?;
-        let key = (agent_session_id.to_string(), target_id.to_string());
-        let Some(session_id) = guard.latest_agent_remote.get(&key) else {
-            return Ok(None);
-        };
-        let owner = guard
-            .agent_remote_owners
-            .get(session_id)
-            .cloned()
-            .ok_or_else(|| "Agent remote terminal owner registry is inconsistent".to_string())?;
-        let managed = guard
-            .sessions
-            .get(session_id)
-            .ok_or_else(|| "Agent remote terminal session registry is inconsistent".to_string())?;
-        Ok(Some(AgentRemoteTerminalBinding {
-            session_id: session_id.clone(),
-            owner,
-            state: SessionTargetState {
-                terminal_kind: managed.terminal_kind,
-                identity: managed.identity.clone(),
-                status: managed.status.status,
-            },
-        }))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn agent_remote_owner(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<AgentRemoteTerminalOwner>, String> {
-        let guard = self
-            .registry
-            .lock()
-            .map_err(|_| "session registry poisoned".to_string())?;
-        Ok(guard.agent_remote_owners.get(session_id).cloned())
-    }
-
-    pub(crate) fn agent_remote_session_ids(&self) -> Result<Vec<String>, String> {
-        let guard = self
-            .registry
-            .lock()
-            .map_err(|_| "session registry poisoned".to_string())?;
-        Ok(guard.agent_remote_owners.keys().cloned().collect())
-    }
-
     /// Raw terminal input sink. Production callers must authorize a typed
     /// `TerminalInputSource` through the Agent Runtime before reaching here.
     pub(crate) fn write_session_input(&self, session_id: &str, data: String) -> Result<(), String> {
@@ -1878,7 +1712,6 @@ impl SessionManager {
                     .map_err(|error| error.to_string())
             });
         guard.sessions.remove(session_id);
-        remove_agent_remote_registration(&mut guard, session_id);
         send_result
     }
 
@@ -1957,21 +1790,16 @@ impl SessionManager {
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
         guard.sessions.remove(session_id);
-        remove_agent_remote_registration(&mut guard, session_id);
         Ok(())
     }
-}
 
-fn remove_agent_remote_registration(registry: &mut SessionRegistry, session_id: &str) {
-    if let Some(owner) = registry.agent_remote_owners.remove(session_id) {
-        let key = (owner.agent_session_id, owner.target_id);
-        if registry
-            .latest_agent_remote
-            .get(&key)
-            .is_some_and(|latest| latest == session_id)
-        {
-            registry.latest_agent_remote.remove(&key);
-        }
+    #[cfg(test)]
+    pub(crate) fn session_count(&self) -> Result<usize, String> {
+        let guard = self
+            .registry
+            .lock()
+            .map_err(|_| "session registry poisoned".to_string())?;
+        Ok(guard.sessions.len())
     }
 }
 
@@ -2005,15 +1833,12 @@ impl ManagedSession {
 #[cfg(test)]
 mod session_manager_tests {
     use super::{
-        AgentRemoteTerminalOwner, ManagedSession, SessionCommand, SessionCommandSender,
-        SessionIdentity, SessionManager, SessionStatus, SessionTerminalKind, StatusEvent,
+        ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, SessionManager,
+        SessionStatus, SessionTerminalKind, StatusEvent,
     };
     use crossbeam_channel::{bounded, unbounded, Receiver, Sender as EventSender};
     use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
     use std::sync::Arc;
-
-    use crate::terminal_broker::{TerminalAgentPtyOwner, TerminalGeometry, TerminalSessionBroker};
-    use crate::terminal_integration::{TerminalIntegrationControlEvent, TerminalShellKind};
 
     fn managed_session(sender: EventSender<SessionCommand>) -> ManagedSession {
         ManagedSession {
@@ -2045,50 +1870,6 @@ mod session_manager_tests {
                 SessionCommand::Resize { .. } | SessionCommand::Close => None,
             })
             .collect()
-    }
-
-    fn attach_ready_agent_ssh_transport(
-        broker: &TerminalSessionBroker,
-        transport_session_id: &str,
-        predecessor_transport_session_id: Option<&str>,
-        owner: TerminalAgentPtyOwner,
-    ) {
-        broker
-            .attach_agent_ssh_candidate_transport(
-                transport_session_id,
-                predecessor_transport_session_id,
-                TerminalGeometry::new(100, 30),
-                owner,
-            )
-            .unwrap();
-        let integration_id = format!("integration-{transport_session_id}");
-        broker
-            .register_integration_channel(
-                transport_session_id,
-                &integration_id,
-                TerminalShellKind::Bash,
-            )
-            .unwrap();
-        for event in [
-            TerminalIntegrationControlEvent::Ready {
-                shell: TerminalShellKind::Bash,
-            },
-            TerminalIntegrationControlEvent::PromptStart {
-                cwd: "/home".into(),
-            },
-            TerminalIntegrationControlEvent::PromptEnd,
-        ] {
-            broker
-                .accept_integration_event(transport_session_id, &integration_id, event)
-                .unwrap();
-        }
-        broker
-            .promote_agent_ssh_candidate_transport(
-                transport_session_id,
-                predecessor_transport_session_id,
-                Ok,
-            )
-            .unwrap();
     }
 
     #[test]
@@ -2159,261 +1940,6 @@ mod session_manager_tests {
         ));
         assert!(matches!(receiver.recv().unwrap(), SessionCommand::Close));
         assert!(manager.status("local-1").is_err());
-    }
-
-    #[test]
-    fn agent_remote_binding_promotes_only_connected_candidates_and_preserves_predecessor() {
-        let manager = SessionManager::default();
-        let owner = AgentRemoteTerminalOwner {
-            agent_session_id: "agent-1".into(),
-            target_id: "target-1".into(),
-            source_session_id: "user-ssh".into(),
-        };
-        let (first_sender, _first_receiver) = unbounded();
-        let mut first = managed_session(first_sender);
-        first.terminal_kind = SessionTerminalKind::Remote;
-        first.status.status = SessionStatus::Connected;
-        manager
-            .insert_agent_remote("agent-ssh-1".into(), first, owner.clone())
-            .unwrap();
-        manager
-            .publish_agent_remote("agent-ssh-1", None, || Ok(()))
-            .unwrap();
-
-        let (candidate_sender, candidate_receiver) = unbounded();
-        let mut candidate = managed_session(candidate_sender);
-        candidate.terminal_kind = SessionTerminalKind::Remote;
-        manager
-            .insert_agent_remote("agent-ssh-2".into(), candidate, owner)
-            .unwrap();
-        assert_eq!(
-            manager
-                .agent_remote_terminal("agent-1", "target-1")
-                .unwrap()
-                .unwrap()
-                .session_id,
-            "agent-ssh-1"
-        );
-        manager.close("agent-ssh-2").unwrap();
-        assert!(matches!(
-            candidate_receiver.recv().unwrap(),
-            SessionCommand::Close
-        ));
-        assert_eq!(
-            manager
-                .agent_remote_terminal("agent-1", "target-1")
-                .unwrap()
-                .unwrap()
-                .session_id,
-            "agent-ssh-1"
-        );
-    }
-
-    #[test]
-    fn agent_remote_replacement_promotion_is_atomic_and_closes_only_after_success() {
-        let manager = SessionManager::default();
-        let owner = AgentRemoteTerminalOwner {
-            agent_session_id: "agent-1".into(),
-            target_id: "target-1".into(),
-            source_session_id: "user-ssh".into(),
-        };
-        let (predecessor_sender, predecessor_receiver) = unbounded();
-        let mut predecessor = managed_session(predecessor_sender);
-        predecessor.terminal_kind = SessionTerminalKind::Remote;
-        predecessor.status.status = SessionStatus::Connected;
-        manager
-            .insert_agent_remote("agent-ssh-1".into(), predecessor, owner.clone())
-            .unwrap();
-        manager
-            .publish_agent_remote("agent-ssh-1", None, || Ok(()))
-            .unwrap();
-
-        let (candidate_sender, _candidate_receiver) = unbounded();
-        let mut candidate = managed_session(candidate_sender);
-        candidate.terminal_kind = SessionTerminalKind::Remote;
-        candidate.status.status = SessionStatus::Connected;
-        manager
-            .insert_agent_remote("agent-ssh-2".into(), candidate, owner)
-            .unwrap();
-
-        assert_eq!(
-            manager
-                .publish_agent_remote("agent-ssh-2", Some("wrong-predecessor"), || Ok(()))
-                .unwrap_err(),
-            "Agent remote terminal predecessor changed before promotion"
-        );
-        assert_eq!(
-            manager
-                .agent_remote_terminal("agent-1", "target-1")
-                .unwrap()
-                .unwrap()
-                .session_id,
-            "agent-ssh-1"
-        );
-
-        manager
-            .publish_agent_remote("agent-ssh-2", Some("agent-ssh-1"), || Ok(()))
-            .unwrap();
-        assert!(matches!(
-            predecessor_receiver.recv().unwrap(),
-            SessionCommand::Close
-        ));
-        assert!(manager.status("agent-ssh-1").is_err());
-        assert!(manager.agent_remote_owner("agent-ssh-1").unwrap().is_none());
-        assert_eq!(
-            manager
-                .agent_remote_terminal("agent-1", "target-1")
-                .unwrap()
-                .unwrap()
-                .session_id,
-            "agent-ssh-2"
-        );
-    }
-
-    #[test]
-    fn failed_agent_remote_publication_can_restore_usable_predecessor() {
-        let manager = SessionManager::default();
-        let owner = AgentRemoteTerminalOwner {
-            agent_session_id: "agent-1".into(),
-            target_id: "target-1".into(),
-            source_session_id: "user-ssh".into(),
-        };
-        let (predecessor_sender, predecessor_receiver) = unbounded();
-        let mut predecessor = managed_session(predecessor_sender);
-        predecessor.terminal_kind = SessionTerminalKind::Remote;
-        predecessor.status.status = SessionStatus::Connected;
-        manager
-            .insert_agent_remote("agent-ssh-1".into(), predecessor, owner.clone())
-            .unwrap();
-        manager
-            .publish_agent_remote("agent-ssh-1", None, || Ok(()))
-            .unwrap();
-
-        let (candidate_sender, candidate_receiver) = unbounded();
-        let mut candidate = managed_session(candidate_sender);
-        candidate.terminal_kind = SessionTerminalKind::Remote;
-        candidate.status.status = SessionStatus::Connected;
-        manager
-            .insert_agent_remote("agent-ssh-2".into(), candidate, owner)
-            .unwrap();
-        assert_eq!(
-            manager
-                .publish_agent_remote("agent-ssh-2", Some("agent-ssh-1"), || {
-                    Err::<(), _>("publish failed".to_string())
-                })
-                .unwrap_err(),
-            "publish failed"
-        );
-        manager.close("agent-ssh-2").unwrap();
-
-        assert!(matches!(
-            candidate_receiver.recv().unwrap(),
-            SessionCommand::Close
-        ));
-        assert!(predecessor_receiver.try_recv().is_err());
-        assert_eq!(
-            manager
-                .agent_remote_terminal("agent-1", "target-1")
-                .unwrap()
-                .unwrap()
-                .session_id,
-            "agent-ssh-1"
-        );
-        assert_eq!(
-            manager.status("agent-ssh-1").unwrap().status,
-            SessionStatus::Connected
-        );
-    }
-
-    #[test]
-    fn broker_and_session_publication_failure_restore_the_same_predecessor() {
-        let manager = SessionManager::default();
-        let owner = AgentRemoteTerminalOwner {
-            agent_session_id: "agent-1".into(),
-            target_id: "target-1".into(),
-            source_session_id: "user-ssh".into(),
-        };
-        let (predecessor_sender, predecessor_receiver) = unbounded();
-        let mut predecessor = managed_session(predecessor_sender);
-        predecessor.terminal_kind = SessionTerminalKind::Remote;
-        predecessor.status.status = SessionStatus::Connected;
-        manager
-            .insert_agent_remote("agent-ssh-1".into(), predecessor, owner.clone())
-            .unwrap();
-        manager
-            .publish_agent_remote("agent-ssh-1", None, || Ok(()))
-            .unwrap();
-        let (candidate_sender, _candidate_receiver) = unbounded();
-        let mut candidate = managed_session(candidate_sender);
-        candidate.terminal_kind = SessionTerminalKind::Remote;
-        candidate.status.status = SessionStatus::Connected;
-        manager
-            .insert_agent_remote("agent-ssh-2".into(), candidate, owner)
-            .unwrap();
-
-        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
-        let broker_owner = TerminalAgentPtyOwner {
-            agent_session_id: "agent-1".into(),
-            target_id: "target-1".into(),
-            source_transport_session_id: "user-ssh".into(),
-        };
-        attach_ready_agent_ssh_transport(&broker, "agent-ssh-1", None, broker_owner.clone());
-        broker
-            .attach_agent_ssh_candidate_transport(
-                "agent-ssh-2",
-                Some("agent-ssh-1"),
-                TerminalGeometry::new(120, 40),
-                broker_owner,
-            )
-            .unwrap();
-        broker
-            .register_integration_channel(
-                "agent-ssh-2",
-                "candidate-integration",
-                TerminalShellKind::Bash,
-            )
-            .unwrap();
-        for event in [
-            TerminalIntegrationControlEvent::Ready {
-                shell: TerminalShellKind::Bash,
-            },
-            TerminalIntegrationControlEvent::PromptStart {
-                cwd: "/home".into(),
-            },
-            TerminalIntegrationControlEvent::PromptEnd,
-        ] {
-            broker
-                .accept_integration_event("agent-ssh-2", "candidate-integration", event)
-                .unwrap();
-        }
-
-        assert_eq!(
-            broker
-                .promote_agent_ssh_candidate_transport("agent-ssh-2", Some("agent-ssh-1"), |_| {
-                    manager
-                        .publish_agent_remote("agent-ssh-2", Some("agent-ssh-1"), || {
-                            Err::<(), _>("event publication failed".to_string())
-                        })
-                        .map(|(published, _)| published)
-                },)
-                .unwrap_err(),
-            "event publication failed"
-        );
-        assert_eq!(
-            manager
-                .agent_remote_terminal("agent-1", "target-1")
-                .unwrap()
-                .unwrap()
-                .session_id,
-            "agent-ssh-1"
-        );
-        assert!(predecessor_receiver.try_recv().is_err());
-        broker
-            .observe_raw_output("agent-ssh-1", b"predecessor-remains-current")
-            .unwrap();
-        assert!(broker
-            .abort_agent_ssh_candidate_transport("agent-ssh-2")
-            .unwrap());
     }
 }
 #[cfg(test)]

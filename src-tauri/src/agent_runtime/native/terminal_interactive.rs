@@ -17,6 +17,12 @@ use super::{TerminalInputSource, TerminalLeaseManager, TerminalLeaseReleaseReaso
 
 const FRONTEND_READY_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TerminalInteractiveValidationStage {
+    BeforeLease,
+    BeforeWrite,
+}
+
 #[derive(Debug, Clone)]
 struct TerminalInteractiveRegistration {
     agent_session_id: String,
@@ -66,6 +72,7 @@ impl TerminalInteractiveRegistry {
             .contains_key(session_id))
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn write(
         &self,
@@ -77,6 +84,31 @@ impl TerminalInteractiveRegistry {
         text: Option<&str>,
         key: Option<TerminalKeyNative>,
     ) -> Result<TerminalInteractiveWriteResult, String> {
+        self.write_with_revalidation(
+            sessions,
+            session_id,
+            agent_session_id,
+            task_id,
+            input_kind,
+            text,
+            key,
+            |_| Ok(()),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn write_with_revalidation(
+        &self,
+        sessions: &SessionManager,
+        session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+        input_kind: TerminalInteractiveInputKindNative,
+        text: Option<&str>,
+        key: Option<TerminalKeyNative>,
+        mut revalidate: impl FnMut(TerminalInteractiveValidationStage) -> Result<(), String>,
+    ) -> Result<TerminalInteractiveWriteResult, String> {
+        revalidate(TerminalInteractiveValidationStage::BeforeLease)?;
         let registration =
             self.ensure_operation(sessions, session_id, agent_session_id, task_id)?;
         let snapshot = self.broker.screen_snapshot(session_id)?;
@@ -123,6 +155,21 @@ impl TerminalInteractiveRegistry {
                 "interrupt",
             ),
         };
+        if let Err(error) = revalidate(TerminalInteractiveValidationStage::BeforeWrite) {
+            let _ = self.leases.release(
+                session_id,
+                &registration.agent_session_id,
+                &registration.task_id,
+                &registration.operation_id,
+                TerminalLeaseReleaseReason::Failed,
+            );
+            self.state
+                .lock()
+                .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?
+                .active
+                .remove(session_id);
+            return Err(error);
+        }
         let receipt = self
             .leases
             .write_with_kind(
@@ -184,12 +231,11 @@ impl TerminalInteractiveRegistry {
                 operation_id: Some(operation_id),
             },
         );
-        self.leases.release(
+        self.leases.release_after_takeover(
             session_id,
             &registration.agent_session_id,
             &registration.task_id,
             &registration.operation_id,
-            TerminalLeaseReleaseReason::TakenOver,
         )?;
         let mut state = self
             .state

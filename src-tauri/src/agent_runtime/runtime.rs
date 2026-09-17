@@ -511,6 +511,7 @@ impl AgentRuntime {
     }
 
     pub(crate) fn configure_native(&self, app: tauri::AppHandle) -> Result<(), String> {
+        self.native_engine.reconcile_remote_visible_rollout()?;
         let emitter = app.clone();
         self.native_engine
             .set_terminal_lease_publisher(Arc::new(move |event| {
@@ -554,44 +555,6 @@ impl AgentRuntime {
             transport_kind,
             geometry,
         )
-    }
-
-    pub(crate) fn attach_agent_ssh_terminal_broker_candidate(
-        &self,
-        transport_session_id: &str,
-        predecessor_transport_session_id: Option<&str>,
-        geometry: crate::terminal_broker::TerminalGeometry,
-        owner: crate::terminal_broker::TerminalAgentPtyOwner,
-    ) -> Result<Option<crate::terminal_broker::TerminalBrokerAttachment>, String> {
-        self.native_engine
-            .attach_agent_ssh_terminal_broker_candidate(
-                transport_session_id,
-                predecessor_transport_session_id,
-                geometry,
-                owner,
-            )
-    }
-
-    pub(crate) fn promote_agent_ssh_terminal_broker_candidate<T>(
-        &self,
-        transport_session_id: &str,
-        expected_predecessor_transport_session_id: Option<&str>,
-        publish: impl FnOnce(crate::terminal_broker::TerminalBrokerAttachment) -> Result<T, String>,
-    ) -> Result<T, String> {
-        self.native_engine
-            .promote_agent_ssh_terminal_broker_candidate(
-                transport_session_id,
-                expected_predecessor_transport_session_id,
-                publish,
-            )
-    }
-
-    pub(crate) fn abort_agent_ssh_terminal_broker_candidate(
-        &self,
-        transport_session_id: &str,
-    ) -> Result<bool, String> {
-        self.native_engine
-            .abort_agent_ssh_terminal_broker_candidate(transport_session_id)
     }
 
     pub(crate) fn terminal_broker_attachment(
