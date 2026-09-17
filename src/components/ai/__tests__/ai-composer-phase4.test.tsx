@@ -20,12 +20,10 @@ function Harness({
   initial,
   onSubmitGesture = vi.fn(),
   onStop = vi.fn(),
-  onRetry = vi.fn(),
 }: {
   initial: AiComposerState;
   onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   onStop?: () => void;
-  onRetry?: (id: string) => void;
 }): React.ReactNode {
   const [state, setState] = useState(initial);
   return (
@@ -41,8 +39,6 @@ function Harness({
         onDraftChange={(draft) => setState((current) => ({ ...current, draft }))}
         onSubmitGesture={onSubmitGesture}
         onStop={onStop}
-        onRetryFailedDraft={onRetry}
-        onDismissError={() => setState((current) => ({ ...current, lastError: null }))}
       />
     </div>
   );
@@ -118,21 +114,6 @@ describe('AiComposerSeat Phase 4 behavior', () => {
       onContinueOnReconnectedTerminal={continueTask} />);
     await user.click(screen.getByRole('button', { name: 'Continue in reconnected terminal' }));
     expect(continueTask).toHaveBeenCalledOnce();
-  });
-
-  it('presents action errors as a compact inline notice', async () => {
-    const user = userEvent.setup();
-    const error = { kind: 'unknown' as const, message: 'Model selection requires an active root session', retryable: false };
-    render(<Harness initial={createAiComposerState({ lastError: error })} />);
-
-    const notice = screen.getByRole('alert');
-    expect(notice).toHaveAttribute('data-size', 'xs');
-    expect(notice).toHaveClass('bg-destructive/5', 'items-center');
-    expect(screen.getByText('Action failed')).toHaveClass('sr-only');
-    expect(screen.getByText(error.message)).toBeVisible();
-
-    await user.click(screen.getByRole('button', { name: 'Dismiss error' }));
-    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('adds pasted images once without submitting the message', () => {
@@ -380,18 +361,4 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(screen.getAllByRole('button', { name: /edit|remove/i })).toHaveLength(2);
   });
 
-  it('shows a retry entry without replacing the current draft', async () => {
-    const user = userEvent.setup();
-    const retry = vi.fn();
-    const error = { kind: 'offline' as const, message: 'Provider disconnected', retryable: true };
-    render(<Harness initial={createAiComposerState({
-      phase: 'error', draft: 'new input', lastError: error,
-      failedDrafts: [{ id: 'failed-1', content: 'failed input', mode: 'nextTurn', error }],
-    })} onRetry={retry} />);
-    expect(screen.getByRole('textbox').textContent).toBe('new input');
-    expect(screen.getByText('failed input')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(retry).toHaveBeenCalledWith('failed-1');
-    expect(screen.getByRole('textbox').textContent).toBe('new input');
-  });
 });

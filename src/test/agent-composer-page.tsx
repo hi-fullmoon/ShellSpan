@@ -19,6 +19,7 @@ interface ComposerScene {
   status: AiSessionStatus;
   hero: boolean;
   terminal: boolean;
+  errorMessage?: string | null;
   unavailableReason?: string | null;
   needsRoot?: boolean;
   targetLabel?: string;
@@ -32,7 +33,10 @@ const listFiles = async () => ({
 });
 
 function ComposerPage({ mode }: { readonly mode: 'ask' | 'agent' }) {
-  const [scene, setScene] = useState<ComposerScene>({ draft: '', owner: 'A', status: 'idle', hero: false, terminal: false });
+  const errorMessage = new URLSearchParams(location.search).get('error');
+  const [scene, setScene] = useState<ComposerScene>({
+    draft: '', owner: 'A', status: 'idle', hero: false, terminal: false, errorMessage,
+  });
   const [stops, setStops] = useState(0);
   Object.assign(window, {
     composerTest: { update: (patch: Partial<ComposerScene>) => setScene(current => ({ ...current, ...patch })) },
@@ -45,13 +49,17 @@ function ComposerPage({ mode }: { readonly mode: 'ask' | 'agent' }) {
       scope={mode === 'ask' ? 'workbench' : 'terminal'} canStartAgent={!scene.unavailableReason}
       agentUnavailableReason={scene.unavailableReason}
       composerState={createAiComposerState({ sessionId: scene.hero ? null : scene.owner, draft: scene.draft,
-        runtimeStatus: scene.status, phase: scene.phase, terminal: scene.terminal })}
+        runtimeStatus: scene.status, phase: scene.phase, terminal: scene.terminal,
+        lastError: scene.errorMessage
+          ? { kind: 'unknown', message: scene.errorMessage, retryable: true }
+          : null })}
       skillsScopeKey={scene.owner}
       skillsNeedsRoot={scene.needsRoot}
       projectTargetLabel={scene.targetLabel}
       onDraftChange={draft => setScene(current => ({ ...current, draft }))}
       onNewSession={() => setScene(current => ({ ...current, owner: `${current.owner}-new`, draft: '', hero: true, status: 'idle', terminal: false }))}
       onSubmitGesture={() => setScene(current => ({ ...current, draft: '', status: 'running', hero: false }))}
+      onDismissError={() => setScene(current => ({ ...current, errorMessage: null }))}
       onStop={() => setStops(current => current + 1)}
       onListSkills={listSkills} onListFileReferences={listFiles}
       modelLabel="deepseek-v4"

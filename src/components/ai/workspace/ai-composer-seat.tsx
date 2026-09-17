@@ -12,7 +12,6 @@ import {
   RotateCcwIcon,
   ShieldCheckIcon,
   SquareIcon,
-  XIcon,
 } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -46,7 +45,6 @@ import { questionKey } from '@/types/agent-question';
 import { AiContextMeter } from './ai-context-meter';
 import { AiQueueDock } from './ai-queue-dock';
 import { AiTaskStrip } from './ai-task-strip';
-import { AiErrorNotice } from './ai-error-notice';
 import type { AiQueueMutationState } from './use-ai-session-controller';
 
 export interface AiComposerSeatProps {
@@ -99,8 +97,6 @@ export interface AiComposerSeatProps {
   readonly onResumeQueueItem?: (item: AiInboxItem) => void;
   readonly onReorderQueueLane?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
   readonly onRetryQueueMutation?: () => void;
-  readonly onRetryFailedDraft?: (failedDraftId: string) => void;
-  readonly onDismissError?: () => void;
   readonly onOpenModel?: () => void;
   readonly onApprove?: () => void;
   readonly onReject?: () => void;
@@ -153,8 +149,6 @@ export function AiComposerSeat({
   onResumeQueueItem,
   onReorderQueueLane,
   onRetryQueueMutation,
-  onRetryFailedDraft,
-  onDismissError,
   onOpenModel,
   onApprove,
   onReject,
@@ -285,43 +279,6 @@ export function AiComposerSeat({
             <AlertDescription>{t('ai.workspace.approvalPhase5')}</AlertDescription>
           </Alert>
         )}
-        {composerState?.lastError && (
-          <AiErrorNotice
-            title={t('ai.workspace.recovery.title')}
-            action={onDismissError && (
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label={t('ai.workspace.recovery.dismiss')}
-                onClick={onDismissError}
-              >
-                <XIcon />
-              </Button>
-            )}
-          >
-            {composerState.lastError.message}
-          </AiErrorNotice>
-        )}
-        {composerState?.failedDrafts.map((failed) => (
-          <AiErrorNotice
-            key={failed.id}
-            title={t('ai.workspace.recovery.title')}
-            label={t('ai.workspace.failedDraft')}
-            action={(
-              <Button
-                variant="ghost"
-                size="xs"
-                disabled={submitting || !failed.error.retryable}
-                onClick={() => onRetryFailedDraft?.(failed.id)}
-              >
-                <RotateCcwIcon data-icon="inline-start" />
-                {t('common.retry')}
-              </Button>
-            )}
-          >
-            {failed.content}
-          </AiErrorNotice>
-        ))}
       </div>
       {stopping && <Alert size="sm" variant="subtle" role="status"><AlertDescription>{t('ai.workspace.stopping')}</AlertDescription></Alert>}
       {completion.dialog}

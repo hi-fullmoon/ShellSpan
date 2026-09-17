@@ -1210,6 +1210,40 @@ describe('AiWorkspaceController', () => {
     );
   });
 
+  it('re-enables the execution surface trigger when a completed answer returns the Agent to idle', async () => {
+    connectedTerminal();
+    const running = runningAgentView();
+    const idle: AiSessionView = {
+      ...running,
+      status: 'idle',
+      summary: { ...running.summary, status: 'idle' },
+      snapshot: {
+        kind: 'agent',
+        value: { ...running.snapshot.value, status: 'idle' },
+      },
+    };
+    let publish: ((view: AiSessionView) => void) | undefined;
+    const agent = adapter({
+      list: vi.fn(async () => ({ sessions: [running.summary] })),
+      open: vi.fn(async () => running),
+      subscribe: vi.fn((_sessionId, listener) => {
+        publish = listener;
+        return () => undefined;
+      }),
+    });
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+
+    const direct = await screen.findByRole('button', { name: 'Command execution: Direct' });
+    expect(direct).toBeDisabled();
+    act(() => publish?.(idle));
+    await waitFor(() => expect(direct).toBeEnabled());
+
+    await userEvent.click(direct);
+    const visibleCommand = await screen.findByRole('menuitemradio', { name: 'Visible command' });
+    expect(visibleCommand).toHaveTextContent('Ready');
+    expect(visibleCommand).not.toHaveAttribute('aria-disabled');
+  });
+
   it('submits the active SSH welcome output as a bounded, redacted terminal snapshot', async () => {
     const first = { sessionId: 'terminal-first', title: 'First', host: 'first.test', port: 22, username: 'tester', status: 'connected' as const };
     const second = { sessionId: 'terminal-second', title: 'Second', host: 'second.test', port: 22, username: 'tester', status: 'connected' as const };
