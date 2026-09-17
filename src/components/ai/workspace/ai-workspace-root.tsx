@@ -24,6 +24,7 @@ import { AiSessionBrowser } from './ai-session-browser';
 import { AiToolDetails } from './ai-tool-details';
 import { AiArtifactDetails } from './ai-artifact-details';
 import type { AiQueueMutationState } from './use-ai-session-controller';
+import { AiWorkspaceErrorNotices } from './ai-workspace-error-notices';
 
 export interface AiWorkspaceSubmitInput {
   readonly content: string;
@@ -372,6 +373,14 @@ export function AiWorkspaceRoot({
         onNewSession={onNewSession && canStartAgent ? onNewSession : undefined}
       />
 
+      <AiWorkspaceErrorNotices
+        composerState={activeComposerState}
+        submitting={activeComposerState?.phase === 'submitting'
+          || (surfaceMode === 'agent' && imageBusy)}
+        onRetryFailedDraft={readOnlySession ? undefined : onRetryFailedDraft}
+        onDismissError={onDismissError}
+      />
+
       <div
         data-slot="ai-workspace-body"
         className="ai-workspace-body relative flex min-h-0 min-w-0 flex-1 flex-col"
@@ -460,8 +469,6 @@ export function AiWorkspaceRoot({
           onResumeQueueItem={surfaceMode === 'agent' && !readOnlySession ? onResumeQueueItem : undefined}
           onReorderQueueLane={surfaceMode === 'agent' && !readOnlySession ? onReorderQueueLane : undefined}
           onRetryQueueMutation={surfaceMode === 'agent' && !readOnlySession ? onRetryQueueMutation : undefined}
-          onRetryFailedDraft={readOnlySession ? undefined : onRetryFailedDraft}
-          onDismissError={onDismissError}
           onOpenModel={onOpenModel}
           onApprove={surfaceMode === 'agent' && !readOnlySession ? onApprove : undefined}
           onReject={surfaceMode === 'agent' && !readOnlySession ? onReject : undefined}

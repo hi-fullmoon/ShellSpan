@@ -118,6 +118,59 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(container.querySelector('[data-slot="ai-workspace-content"]')).not.toHaveAttribute('aria-busy', 'true');
   });
 
+  it('places dismissible operation errors below the header instead of beside the composer', async () => {
+    const user = userEvent.setup();
+    const error = {
+      kind: 'unknown' as const,
+      message: 'Committed Agent event 56 changed after publication',
+      retryable: true,
+    };
+    const retry = vi.fn();
+
+    function ErrorWorkspace(): React.ReactNode {
+      const [composerState, setComposerState] = useState(createAiComposerState({
+        phase: 'error',
+        draft: 'new input',
+        lastError: error,
+        failedDrafts: [{ id: 'failed-1', content: 'failed input', mode: 'nextTurn', error }],
+      }));
+      return (
+        <AiWorkspaceRoot
+          view={null}
+          scope="workbench"
+          composerState={composerState}
+          onRetryFailedDraft={retry}
+          onDismissError={() => setComposerState((current) => ({ ...current, lastError: null }))}
+        />
+      );
+    }
+
+    const { container } = render(<ErrorWorkspace />);
+    const header = container.querySelector<HTMLElement>('[data-slot="ai-workspace-header"]');
+    const notices = container.querySelector<HTMLElement>('[data-slot="ai-workspace-error-notices"]');
+    const body = container.querySelector<HTMLElement>('[data-slot="ai-workspace-body"]');
+    const composer = container.querySelector<HTMLElement>('[data-slot="ai-composer-seat"]');
+    if (!header || !notices || !body || !composer) throw new Error('Expected the complete workspace layout');
+
+    expect(notices).toBeVisible();
+    expect(header.compareDocumentPosition(notices) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notices.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(composer).not.toContainElement(notices);
+    const operationError = screen.getByText(error.message).closest('[role="alert"]');
+    expect(operationError).toHaveAttribute('data-size', 'xs');
+    expect(operationError).toHaveClass('bg-destructive/5', 'items-center');
+    expect(screen.getAllByText('Action failed')[0]).toHaveClass('sr-only');
+    expect(screen.getByRole('textbox').textContent).toBe('new input');
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(retry).toHaveBeenCalledWith('failed-1');
+    expect(screen.getByRole('textbox').textContent).toBe('new input');
+
+    await user.click(screen.getByRole('button', { name: 'Dismiss error' }));
+    expect(screen.queryByText(error.message)).toBeNull();
+    expect(screen.getByText('failed input')).toBeVisible();
+  });
+
   it('opens history over the conversation and preserves its draft and expanded process when dismissed', async () => {
     const user = userEvent.setup();
     const base = agentView();
