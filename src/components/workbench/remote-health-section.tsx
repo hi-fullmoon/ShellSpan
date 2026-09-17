@@ -229,35 +229,40 @@ export function RemoteHealthSection(): React.JSX.Element {
                     <RemoteHealthStatusBadge status={statuses.overall} />
                   </>
                 )}
-                <Button
-                  size="sm"
-                  onClick={() => setAuthorizationProfileId(selectedProfile.id)}
-                  disabled={busy}
+                <div
+                  data-slot="remote-health-collection-actions"
+                  className="flex shrink-0 flex-nowrap items-center gap-1.5"
                 >
-                  {busy
-                    ? <Spinner data-icon="inline-start" aria-hidden="true" />
-                    : <ShieldCheckIcon data-icon="inline-start" />}
-                  {entry?.phase === 'preparing'
-                    ? t('remoteHealth.preparing')
-                    : entry?.phase === 'collecting' || entry?.phase === 'cancelling'
-                      ? t('remoteHealth.collecting')
-                      : remoteSnapshot
-                        ? t('remoteHealth.collectAgain')
-                        : t('remoteHealth.collect')}
-                </Button>
-                {(entry?.phase === 'collecting' || entry?.phase === 'cancelling') && (
                   <Button
-                    variant="outline"
                     size="sm"
-                    onClick={() => void cancel(selectedProfile.id)}
-                    disabled={entry.phase === 'cancelling'}
+                    onClick={() => setAuthorizationProfileId(selectedProfile.id)}
+                    disabled={busy}
                   >
-                    <SquareIcon data-icon="inline-start" />
-                    {entry.phase === 'cancelling'
-                      ? t('remoteHealth.cancelling')
-                      : t('common.cancel')}
+                    {busy
+                      ? <Spinner data-icon="inline-start" aria-hidden="true" />
+                      : <ShieldCheckIcon data-icon="inline-start" />}
+                    {entry?.phase === 'preparing'
+                      ? t('remoteHealth.preparing')
+                      : entry?.phase === 'collecting' || entry?.phase === 'cancelling'
+                        ? t('remoteHealth.collecting')
+                        : remoteSnapshot
+                          ? t('remoteHealth.collectAgain')
+                          : t('remoteHealth.collect')}
                   </Button>
-                )}
+                  {(entry?.phase === 'collecting' || entry?.phase === 'cancelling') && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void cancel(selectedProfile.id)}
+                      disabled={entry.phase === 'cancelling'}
+                    >
+                      <SquareIcon data-icon="inline-start" />
+                      {entry.phase === 'cancelling'
+                        ? t('remoteHealth.cancelling')
+                        : t('common.cancel')}
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardAction>
           )}

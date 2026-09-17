@@ -518,8 +518,90 @@ fn collect_blocking(
     }
 }
 
+fn collect_with_timeout(
+    request: RemoteHealthSnapshotRequest,
+    known_hosts_path: String,
+    cancel_flag: Arc<AtomicBool>,
+) -> RemoteHealthSnapshotResult {
+    let worker_request = request.clone();
+    let worker_cancel_flag = cancel_flag.clone();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let outcome = collect_blocking(worker_request, known_hosts_path, worker_cancel_flag);
+        let _ = sender.send(outcome);
+    });
+
+    let started_at = Instant::now();
+    let timeout = Duration::from_millis(request.timeout_ms);
+    let outcome = loop {
+        if cancelled(&cancel_flag) {
+            break CollectionOutcome::Cancelled;
+        }
+        let elapsed = started_at.elapsed();
+        if elapsed >= timeout {
+            cancel_flag.store(true, Ordering::SeqCst);
+            break CollectionOutcome::Failed("__timeout__".to_string());
+        }
+        let wait = WORKER_POLL_INTERVAL.min(timeout.saturating_sub(elapsed));
+        match receiver.recv_timeout(wait) {
+            Ok(outcome) => break outcome,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                break CollectionOutcome::Failed(
+                    "remote health collection worker stopped unexpectedly".to_string(),
+                )
+            }
+        }
+    };
+
+    match outcome {
+        CollectionOutcome::Success(snapshot) => result(
+            &request,
+            RemoteHealthResultStatus::Success,
+            Some(*snapshot),
+            None,
+        ),
+        CollectionOutcome::Cancelled => result(
+            &request,
+            RemoteHealthResultStatus::Cancelled,
+            None,
+            Some("remote health collection was cancelled".to_string()),
+        ),
+        CollectionOutcome::Unsupported(error) => result(
+            &request,
+            RemoteHealthResultStatus::Unsupported,
+            None,
+            Some(error),
+        ),
+        CollectionOutcome::Failed(error) if error == "__timeout__" => result(
+            &request,
+            RemoteHealthResultStatus::TimedOut,
+            None,
+            Some(format!(
+                "remote health collection timed out after {} ms",
+                request.timeout_ms
+            )),
+        ),
+        CollectionOutcome::Failed(error) => result(
+            &request,
+            RemoteHealthResultStatus::Failed,
+            None,
+            Some(error),
+        ),
+    }
+}
+
+async fn run_collection_task<F>(task: F) -> Result<RemoteHealthSnapshotResult, String>
+where
+    F: FnOnce() -> RemoteHealthSnapshotResult + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| format!("failed to join remote health collection task: {error}"))
+}
+
 #[tauri::command]
-pub(crate) fn collect_remote_health_snapshot(
+pub(crate) async fn collect_remote_health_snapshot(
     app: AppHandle,
     credentials: State<'_, crate::keychain::CredentialManager>,
     cancellations: State<'_, RemoteHealthCancellationRegistry>,
@@ -602,73 +684,13 @@ pub(crate) fn collect_remote_health_snapshot(
             ))
         }
     };
-    let worker_request = request.clone();
-    let worker_cancel_flag = cancel_flag.clone();
-    let (sender, receiver) = mpsc::sync_channel(1);
-    std::thread::spawn(move || {
-        let outcome = collect_blocking(worker_request, known_hosts_path, worker_cancel_flag);
-        let _ = sender.send(outcome);
-    });
-
-    let started_at = Instant::now();
-    let timeout = Duration::from_millis(request.timeout_ms);
-    let outcome = loop {
-        if cancelled(&cancel_flag) {
-            break CollectionOutcome::Cancelled;
-        }
-        let elapsed = started_at.elapsed();
-        if elapsed >= timeout {
-            cancel_flag.store(true, Ordering::SeqCst);
-            break CollectionOutcome::Failed("__timeout__".to_string());
-        }
-        let wait = WORKER_POLL_INTERVAL.min(timeout.saturating_sub(elapsed));
-        match receiver.recv_timeout(wait) {
-            Ok(outcome) => break outcome,
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                break CollectionOutcome::Failed(
-                    "remote health collection worker stopped unexpectedly".to_string(),
-                )
-            }
-        }
-    };
-    let _ = cancellations.remove(&request.operation_id);
-
-    Ok(match outcome {
-        CollectionOutcome::Success(snapshot) => result(
-            &request,
-            RemoteHealthResultStatus::Success,
-            Some(*snapshot),
-            None,
-        ),
-        CollectionOutcome::Cancelled => result(
-            &request,
-            RemoteHealthResultStatus::Cancelled,
-            None,
-            Some("remote health collection was cancelled".to_string()),
-        ),
-        CollectionOutcome::Unsupported(error) => result(
-            &request,
-            RemoteHealthResultStatus::Unsupported,
-            None,
-            Some(error),
-        ),
-        CollectionOutcome::Failed(error) if error == "__timeout__" => result(
-            &request,
-            RemoteHealthResultStatus::TimedOut,
-            None,
-            Some(format!(
-                "remote health collection timed out after {} ms",
-                request.timeout_ms
-            )),
-        ),
-        CollectionOutcome::Failed(error) => result(
-            &request,
-            RemoteHealthResultStatus::Failed,
-            None,
-            Some(error),
-        ),
-    })
+    let operation_id = request.operation_id.clone();
+    let collection =
+        run_collection_task(move || collect_with_timeout(request, known_hosts_path, cancel_flag))
+            .await;
+    // Always release the operation id, including when the blocking task panics.
+    let _ = cancellations.remove(&operation_id);
+    collection
 }
 
 #[tauri::command]
@@ -840,6 +862,39 @@ TB_DISK=1000000 250000 750000 25% /\n";
         let flag = Arc::new(AtomicBool::new(true));
         let outcome = collect_blocking(request(true), "unused".to_string(), flag);
         assert!(matches!(outcome, CollectionOutcome::Cancelled));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn collection_wait_does_not_block_the_async_runtime() {
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_finished = finished.clone();
+        let worker_request = request(true);
+        let collection = run_collection_task(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            worker_finished.store(true, Ordering::SeqCst);
+            result(
+                &worker_request,
+                RemoteHealthResultStatus::Cancelled,
+                None,
+                Some("test collection finished".to_string()),
+            )
+        });
+        let runtime_probe = async {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            !finished.load(Ordering::SeqCst)
+        };
+
+        let (collection_result, runtime_remained_responsive) =
+            tokio::join!(collection, runtime_probe);
+
+        assert!(
+            runtime_remained_responsive,
+            "remote health collection blocked the async runtime thread"
+        );
+        assert_eq!(
+            collection_result.expect("join collection task").status,
+            RemoteHealthResultStatus::Cancelled
+        );
     }
 
     #[test]
