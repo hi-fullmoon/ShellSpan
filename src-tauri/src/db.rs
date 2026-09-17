@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 6;
+const CURRENT_SCHEMA_VERSION: i32 = 10;
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
@@ -44,7 +44,7 @@ CREATE TABLE schema_version (
 );
 ";
 
-const SCHEMA_V1: &str = "
+const SCHEMA_INITIAL: &str = "
 CREATE TABLE profiles (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -106,7 +106,7 @@ CREATE TABLE key_credentials (
 );
 ";
 
-const SCHEMA_V2: &str = "
+const SCHEMA_LEGACY_DEPLOYMENT: &str = "
 CREATE TABLE deployment_workflows (
     id TEXT PRIMARY KEY
         CHECK(length(id) BETWEEN 1 AND 128 AND id = trim(id)),
@@ -247,7 +247,7 @@ BEGIN
 END;
 ";
 
-const SCHEMA_V3: &str = "
+const SCHEMA_LEGACY_PLAN_GUARDS: &str = "
 CREATE INDEX deployment_runs_approval_digest_idx
     ON deployment_runs(approval_digest, created_at DESC);
 
@@ -294,7 +294,7 @@ BEGIN
 END;
 ";
 
-const SCHEMA_V4: &str = "
+const SCHEMA_LEGACY_RUNTIME: &str = "
 CREATE TABLE deployment_transfer_receipts (
     operation_id TEXT PRIMARY KEY
         CHECK(length(operation_id) BETWEEN 1 AND 128 AND operation_id = trim(operation_id)),
@@ -332,7 +332,7 @@ BEGIN
 END;
 ";
 
-const SCHEMA_V5: &str = "
+const SCHEMA_LEGACY_RECONCILIATION: &str = "
 DROP TRIGGER deployment_runs_status_transition_guard;
 
 CREATE TRIGGER deployment_runs_status_transition_guard
@@ -364,7 +364,7 @@ BEGIN
 END;
 ";
 
-const SCHEMA_V6: &str = "
+const SCHEMA_LEGACY_HISTORY_NOTIFICATIONS: &str = "
 CREATE TABLE deployment_notification_receipts (
     run_id TEXT NOT NULL,
     event_sequence INTEGER NOT NULL CHECK(event_sequence >= 1),
@@ -427,36 +427,552 @@ WHERE last_event_sequence >= 1
   );
 ";
 
+const SCHEMA_DEPLOYMENT_WORKFLOW_FOUNDATION: &str = r#"
+CREATE TABLE deployment_current_workflows (
+    id TEXT PRIMARY KEY
+        CHECK(length(id) BETWEEN 1 AND 128 AND id = trim(id)),
+    name TEXT NOT NULL
+        CHECK(length(CAST(name AS BLOB)) BETWEEN 1 AND 200 AND name = trim(name)),
+    enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
+    archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0, 1)),
+    head_revision INTEGER NOT NULL CHECK(head_revision >= 1),
+    head_layout_revision INTEGER NOT NULL DEFAULT 0 CHECK(head_layout_revision >= 0),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(updated_at >= created_at),
+    CHECK(archived = 0 OR enabled = 0)
+);
+
+CREATE TABLE deployment_current_workflow_revisions (
+    workflow_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    schema_version INTEGER NOT NULL CHECK(schema_version = 3),
+    definition_json TEXT NOT NULL
+        CHECK(length(CAST(definition_json AS BLOB)) BETWEEN 2 AND 262144)
+        CHECK(json_valid(definition_json) AND json_type(definition_json) = 'object'),
+    definition_digest TEXT NOT NULL
+        CHECK(length(definition_digest) = 71 AND definition_digest LIKE 'sha256:%')
+        CHECK(substr(definition_digest, 8) = lower(substr(definition_digest, 8)))
+        CHECK(substr(definition_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    PRIMARY KEY (workflow_id, revision),
+    UNIQUE (workflow_id, definition_digest, revision),
+    FOREIGN KEY (workflow_id) REFERENCES deployment_current_workflows(id) ON DELETE CASCADE
+);
+
+CREATE TABLE deployment_current_workflow_layouts (
+    workflow_id TEXT NOT NULL,
+    layout_revision INTEGER NOT NULL CHECK(layout_revision >= 1),
+    schema_version INTEGER NOT NULL CHECK(schema_version = 1),
+    layout_json TEXT NOT NULL
+        CHECK(length(CAST(layout_json AS BLOB)) BETWEEN 2 AND 131072)
+        CHECK(json_valid(layout_json) AND json_type(layout_json) = 'object'),
+    layout_digest TEXT NOT NULL
+        CHECK(length(layout_digest) = 71 AND layout_digest LIKE 'sha256:%')
+        CHECK(substr(layout_digest, 8) = lower(substr(layout_digest, 8)))
+        CHECK(substr(layout_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    PRIMARY KEY (workflow_id, layout_revision),
+    FOREIGN KEY (workflow_id) REFERENCES deployment_current_workflows(id) ON DELETE CASCADE
+);
+
+CREATE TABLE deployment_current_runs (
+    id TEXT PRIMARY KEY
+        CHECK(length(id) BETWEEN 1 AND 128 AND id = trim(id)),
+    workflow_id TEXT NOT NULL,
+    workflow_revision INTEGER NOT NULL CHECK(workflow_revision >= 1),
+    operation_kind TEXT NOT NULL CHECK(operation_kind IN ('deploy', 'rollback')),
+    trigger_kind TEXT NOT NULL
+        CHECK(trigger_kind IN ('manual', 'agent', 'quick_action', 'recovery')),
+    status TEXT NOT NULL
+        CHECK(status IN (
+            'planned', 'awaiting_approval', 'approved', 'reconciling',
+            'in_progress', 'verifying', 'succeeded', 'cancel_requested',
+            'canceled', 'failed', 'state_unknown'
+        )),
+    definition_digest TEXT NOT NULL
+        CHECK(length(definition_digest) = 71 AND definition_digest LIKE 'sha256:%'),
+    plan_digest TEXT NOT NULL UNIQUE
+        CHECK(length(plan_digest) = 71 AND plan_digest LIKE 'sha256:%'),
+    plan_json TEXT NOT NULL
+        CHECK(length(CAST(plan_json AS BLOB)) BETWEEN 2 AND 524288)
+        CHECK(json_valid(plan_json) AND json_type(plan_json) = 'object'),
+    approval_summary_json TEXT
+        CHECK(approval_summary_json IS NULL OR (
+            length(CAST(approval_summary_json AS BLOB)) BETWEEN 2 AND 65536
+            AND json_valid(approval_summary_json)
+            AND json_type(approval_summary_json) = 'object'
+        )),
+    last_event_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_event_sequence >= 0),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(updated_at >= created_at),
+    started_at INTEGER CHECK(started_at IS NULL OR started_at >= created_at),
+    finished_at INTEGER CHECK(finished_at IS NULL OR finished_at >= created_at),
+    FOREIGN KEY (workflow_id, workflow_revision)
+        REFERENCES deployment_current_workflow_revisions(workflow_id, revision) ON DELETE RESTRICT
+);
+
+CREATE TABLE deployment_current_run_nodes (
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    node_type TEXT NOT NULL,
+    node_type_version INTEGER NOT NULL CHECK(node_type_version >= 1),
+    status TEXT NOT NULL
+        CHECK(status IN (
+            'pending', 'ready', 'running', 'awaiting_approval', 'succeeded',
+            'skipped', 'retry_waiting', 'cancel_requested', 'canceled', 'failed',
+            'state_unknown', 'compensating', 'compensated'
+        )),
+    last_attempt INTEGER NOT NULL DEFAULT 0 CHECK(last_attempt >= 0),
+    output_summary_json TEXT
+        CHECK(output_summary_json IS NULL OR (
+            length(CAST(output_summary_json AS BLOB)) BETWEEN 2 AND 65536
+            AND json_valid(output_summary_json)
+            AND json_type(output_summary_json) = 'object'
+        )),
+    started_at INTEGER,
+    finished_at INTEGER,
+    updated_at INTEGER NOT NULL CHECK(updated_at >= 0),
+    PRIMARY KEY (run_id, node_id),
+    FOREIGN KEY (run_id) REFERENCES deployment_current_runs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE deployment_current_node_attempts (
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    attempt INTEGER NOT NULL CHECK(attempt >= 1),
+    schema_version INTEGER NOT NULL CHECK(schema_version = 1),
+    node_type TEXT NOT NULL,
+    node_type_version INTEGER NOT NULL CHECK(node_type_version >= 1),
+    executor_version TEXT NOT NULL CHECK(length(executor_version) BETWEEN 1 AND 128),
+    idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 256),
+    status TEXT NOT NULL
+        CHECK(status IN (
+            'pending', 'running', 'succeeded', 'failed', 'canceled',
+            'state_unknown', 'compensated'
+        )),
+    failure_category TEXT CHECK(failure_category IS NULL OR length(failure_category) <= 128),
+    started_at INTEGER,
+    finished_at INTEGER,
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(updated_at >= created_at),
+    PRIMARY KEY (run_id, node_id, attempt),
+    UNIQUE (idempotency_key),
+    FOREIGN KEY (run_id, node_id)
+        REFERENCES deployment_current_run_nodes(run_id, node_id) ON DELETE CASCADE
+);
+
+CREATE TABLE deployment_current_artifacts (
+    artifact_reference TEXT PRIMARY KEY
+        CHECK(length(artifact_reference) = 91 AND artifact_reference LIKE 'deployment-artifact:sha256:%'),
+    manifest_digest TEXT NOT NULL UNIQUE
+        CHECK(length(manifest_digest) = 71 AND manifest_digest LIKE 'sha256:%'),
+    content_digest TEXT NOT NULL
+        CHECK(length(content_digest) = 71 AND content_digest LIKE 'sha256:%'),
+    artifact_type TEXT NOT NULL CHECK(length(artifact_type) BETWEEN 1 AND 128),
+    manifest_json TEXT NOT NULL
+        CHECK(length(CAST(manifest_json AS BLOB)) BETWEEN 2 AND 262144)
+        CHECK(json_valid(manifest_json) AND json_type(manifest_json) = 'object'),
+    component_count INTEGER NOT NULL CHECK(component_count BETWEEN 1 AND 64),
+    total_size INTEGER NOT NULL CHECK(total_size >= 0),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    verified_at INTEGER NOT NULL CHECK(verified_at >= created_at)
+);
+
+CREATE TABLE deployment_current_run_outputs (
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    output_name TEXT NOT NULL CHECK(length(output_name) BETWEEN 1 AND 64),
+    output_kind TEXT NOT NULL CHECK(output_kind IN ('scalar', 'artifact', 'receipt', 'evidence')),
+    value_json TEXT NOT NULL
+        CHECK(length(CAST(value_json AS BLOB)) BETWEEN 1 AND 65536)
+        CHECK(json_valid(value_json)),
+    value_digest TEXT NOT NULL
+        CHECK(length(value_digest) = 71 AND value_digest LIKE 'sha256:%'),
+    artifact_reference TEXT,
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    PRIMARY KEY (run_id, node_id, output_name),
+    FOREIGN KEY (run_id, node_id)
+        REFERENCES deployment_current_run_nodes(run_id, node_id) ON DELETE CASCADE,
+    FOREIGN KEY (artifact_reference)
+        REFERENCES deployment_current_artifacts(artifact_reference) ON DELETE RESTRICT,
+    CHECK((output_kind = 'artifact') = (artifact_reference IS NOT NULL))
+);
+
+CREATE TABLE deployment_current_artifact_refs (
+    id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 128),
+    artifact_reference TEXT NOT NULL,
+    workflow_id TEXT,
+    run_id TEXT,
+    node_id TEXT,
+    ref_kind TEXT NOT NULL
+        CHECK(ref_kind IN ('run', 'node', 'release_current', 'release_previous', 'audit')),
+    owner_id TEXT NOT NULL CHECK(length(owner_id) BETWEEN 1 AND 256),
+    lease_active INTEGER NOT NULL DEFAULT 0 CHECK(lease_active IN (0, 1)),
+    retain_until INTEGER CHECK(retain_until IS NULL OR retain_until >= 0),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(updated_at >= created_at),
+    UNIQUE (artifact_reference, ref_kind, owner_id),
+    FOREIGN KEY (artifact_reference)
+        REFERENCES deployment_current_artifacts(artifact_reference) ON DELETE RESTRICT,
+    FOREIGN KEY (workflow_id) REFERENCES deployment_current_workflows(id) ON DELETE RESTRICT,
+    FOREIGN KEY (run_id) REFERENCES deployment_current_runs(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE deployment_current_effect_receipts (
+    operation_id TEXT PRIMARY KEY CHECK(length(operation_id) BETWEEN 1 AND 128),
+    schema_version INTEGER NOT NULL CHECK(schema_version = 1),
+    receipt_type TEXT NOT NULL CHECK(length(receipt_type) BETWEEN 1 AND 128),
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    attempt INTEGER NOT NULL CHECK(attempt >= 1),
+    target_id TEXT NOT NULL CHECK(length(target_id) BETWEEN 1 AND 64),
+    plan_digest TEXT NOT NULL
+        CHECK(length(plan_digest) = 71 AND plan_digest LIKE 'sha256:%'),
+    payload_digest TEXT NOT NULL
+        CHECK(length(payload_digest) = 71 AND payload_digest LIKE 'sha256:%'),
+    receipt_json TEXT NOT NULL
+        CHECK(length(CAST(receipt_json AS BLOB)) BETWEEN 2 AND 65536)
+        CHECK(json_valid(receipt_json) AND json_type(receipt_json) = 'object'),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    UNIQUE (run_id, node_id, attempt, receipt_type),
+    FOREIGN KEY (run_id, node_id, attempt)
+        REFERENCES deployment_current_node_attempts(run_id, node_id, attempt) ON DELETE RESTRICT
+);
+
+CREATE TABLE deployment_current_run_events (
+    run_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK(sequence >= 1),
+    node_id TEXT,
+    attempt INTEGER CHECK(attempt IS NULL OR attempt >= 1),
+    event_kind TEXT NOT NULL CHECK(length(event_kind) BETWEEN 1 AND 128),
+    status TEXT CHECK(status IS NULL OR length(status) BETWEEN 1 AND 64),
+    summary_key TEXT NOT NULL CHECK(length(summary_key) BETWEEN 1 AND 256),
+    payload_json TEXT
+        CHECK(payload_json IS NULL OR (
+            length(CAST(payload_json AS BLOB)) BETWEEN 2 AND 65536
+            AND json_valid(payload_json)
+            AND json_type(payload_json) = 'object'
+        )),
+    recorded_at INTEGER NOT NULL CHECK(recorded_at >= 0),
+    PRIMARY KEY (run_id, sequence),
+    FOREIGN KEY (run_id) REFERENCES deployment_current_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX deployment_current_workflows_page_idx
+    ON deployment_current_workflows(archived, updated_at DESC, id DESC);
+CREATE INDEX deployment_current_runs_workflow_idx
+    ON deployment_current_runs(workflow_id, created_at DESC, id DESC);
+CREATE INDEX deployment_current_runs_status_idx
+    ON deployment_current_runs(status, updated_at DESC);
+CREATE INDEX deployment_current_run_nodes_status_idx
+    ON deployment_current_run_nodes(run_id, status, node_id);
+CREATE INDEX deployment_current_attempts_page_idx
+    ON deployment_current_node_attempts(run_id, node_id, attempt DESC);
+CREATE INDEX deployment_current_artifact_refs_projection_idx
+    ON deployment_current_artifact_refs(artifact_reference, lease_active, ref_kind, retain_until);
+CREATE INDEX deployment_current_events_page_idx
+    ON deployment_current_run_events(run_id, sequence DESC);
+
+CREATE TRIGGER deployment_current_workflow_revisions_immutable
+BEFORE UPDATE ON deployment_current_workflow_revisions
+BEGIN
+    SELECT RAISE(ABORT, 'deployment workflow revisions are immutable');
+END;
+
+CREATE TRIGGER deployment_current_workflow_layouts_immutable
+BEFORE UPDATE ON deployment_current_workflow_layouts
+BEGIN
+    SELECT RAISE(ABORT, 'deployment workflow layouts are immutable');
+END;
+
+CREATE TRIGGER deployment_current_runs_identity_immutable
+BEFORE UPDATE OF workflow_id, workflow_revision, operation_kind, trigger_kind,
+                 definition_digest, plan_digest, plan_json
+ON deployment_current_runs
+BEGIN
+    SELECT RAISE(ABORT, 'deployment run identity is immutable');
+END;
+
+CREATE TRIGGER deployment_current_run_nodes_identity_immutable
+BEFORE UPDATE OF run_id, node_id, node_type, node_type_version
+ON deployment_current_run_nodes
+BEGIN
+    SELECT RAISE(ABORT, 'deployment run node identity is immutable');
+END;
+
+CREATE TRIGGER deployment_current_attempts_identity_immutable
+BEFORE UPDATE OF run_id, node_id, attempt, schema_version, node_type,
+                 node_type_version, executor_version, idempotency_key, created_at
+ON deployment_current_node_attempts
+BEGIN
+    SELECT RAISE(ABORT, 'deployment node attempt identity is immutable');
+END;
+
+CREATE TRIGGER deployment_current_outputs_immutable
+BEFORE UPDATE ON deployment_current_run_outputs
+BEGIN
+    SELECT RAISE(ABORT, 'deployment run outputs are immutable');
+END;
+
+CREATE TRIGGER deployment_current_artifacts_identity_immutable
+BEFORE UPDATE OF artifact_reference, manifest_digest, content_digest, artifact_type,
+                 manifest_json, component_count, total_size, created_at
+ON deployment_current_artifacts
+BEGIN
+    SELECT RAISE(ABORT, 'deployment artifact identity is immutable');
+END;
+
+CREATE TRIGGER deployment_current_artifact_refs_identity_immutable
+BEFORE UPDATE OF id, artifact_reference, workflow_id, run_id, node_id,
+                 ref_kind, owner_id, created_at
+ON deployment_current_artifact_refs
+BEGIN
+    SELECT RAISE(ABORT, 'deployment artifact reference identity is immutable');
+END;
+
+CREATE TRIGGER deployment_current_receipts_immutable
+BEFORE UPDATE ON deployment_current_effect_receipts
+BEGIN
+    SELECT RAISE(ABORT, 'deployment effect receipts are immutable');
+END;
+
+CREATE TRIGGER deployment_current_events_sequence_guard
+BEFORE INSERT ON deployment_current_run_events
+FOR EACH ROW
+WHEN NEW.sequence <> COALESCE(
+    (SELECT MAX(sequence) + 1 FROM deployment_current_run_events WHERE run_id = NEW.run_id),
+    1
+)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment event sequence must be contiguous');
+END;
+
+CREATE TRIGGER deployment_current_events_advance_sequence
+AFTER INSERT ON deployment_current_run_events
+FOR EACH ROW
+BEGIN
+    UPDATE deployment_current_runs
+    SET last_event_sequence = NEW.sequence,
+        updated_at = MAX(updated_at, NEW.recorded_at)
+    WHERE id = NEW.run_id;
+END;
+
+CREATE TRIGGER deployment_current_events_immutable
+BEFORE UPDATE ON deployment_current_run_events
+BEGIN
+    SELECT RAISE(ABORT, 'deployment run events are immutable');
+END;
+
+CREATE TRIGGER deployment_current_events_no_direct_delete
+BEFORE DELETE ON deployment_current_run_events
+WHEN EXISTS (SELECT 1 FROM deployment_current_runs WHERE id = OLD.run_id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment events may only be deleted with their run');
+END;
+
+CREATE TRIGGER deployment_current_runs_no_direct_delete
+BEFORE DELETE ON deployment_current_runs
+WHEN EXISTS (SELECT 1 FROM deployment_current_workflows WHERE id = OLD.workflow_id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment runs may only be deleted with their workflow');
+END;
+
+CREATE TRIGGER deployment_current_workflows_protect_references
+BEFORE DELETE ON deployment_current_workflows
+WHEN EXISTS (SELECT 1 FROM deployment_current_runs WHERE workflow_id = OLD.id)
+  OR EXISTS (SELECT 1 FROM deployment_current_artifact_refs WHERE workflow_id = OLD.id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment workflow has durable references and must be archived');
+END;
+"#;
+
+const SCHEMA_DEPLOYMENT_WORKFLOW_INTEGRITY_GUARDS: &str = r#"
+CREATE TRIGGER deployment_current_runs_digest_guard
+BEFORE INSERT ON deployment_current_runs
+WHEN substr(NEW.definition_digest, 8) <> lower(substr(NEW.definition_digest, 8))
+  OR substr(NEW.definition_digest, 8) GLOB '*[^0-9a-f]*'
+  OR substr(NEW.plan_digest, 8) <> lower(substr(NEW.plan_digest, 8))
+  OR substr(NEW.plan_digest, 8) GLOB '*[^0-9a-f]*'
+BEGIN
+    SELECT RAISE(ABORT, 'deployment run digest is invalid');
+END;
+
+CREATE TRIGGER deployment_current_artifacts_digest_guard
+BEFORE INSERT ON deployment_current_artifacts
+WHEN NEW.artifact_reference <> ('deployment-artifact:' || NEW.manifest_digest)
+  OR substr(NEW.manifest_digest, 8) <> lower(substr(NEW.manifest_digest, 8))
+  OR substr(NEW.manifest_digest, 8) GLOB '*[^0-9a-f]*'
+  OR substr(NEW.content_digest, 8) <> lower(substr(NEW.content_digest, 8))
+  OR substr(NEW.content_digest, 8) GLOB '*[^0-9a-f]*'
+BEGIN
+    SELECT RAISE(ABORT, 'deployment artifact identity is invalid');
+END;
+
+CREATE TRIGGER deployment_current_outputs_digest_guard
+BEFORE INSERT ON deployment_current_run_outputs
+WHEN substr(NEW.value_digest, 8) <> lower(substr(NEW.value_digest, 8))
+  OR substr(NEW.value_digest, 8) GLOB '*[^0-9a-f]*'
+BEGIN
+    SELECT RAISE(ABORT, 'deployment output digest is invalid');
+END;
+
+CREATE TRIGGER deployment_current_receipts_binding_guard
+BEFORE INSERT ON deployment_current_effect_receipts
+WHEN substr(NEW.plan_digest, 8) <> lower(substr(NEW.plan_digest, 8))
+  OR substr(NEW.plan_digest, 8) GLOB '*[^0-9a-f]*'
+  OR substr(NEW.payload_digest, 8) <> lower(substr(NEW.payload_digest, 8))
+  OR substr(NEW.payload_digest, 8) GLOB '*[^0-9a-f]*'
+  OR NEW.plan_digest <> (SELECT plan_digest FROM deployment_current_runs WHERE id = NEW.run_id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment receipt binding is invalid');
+END;
+
+CREATE TRIGGER deployment_current_attempts_sequence_guard
+BEFORE INSERT ON deployment_current_node_attempts
+WHEN NEW.attempt <> COALESCE(
+    (SELECT MAX(attempt) + 1 FROM deployment_current_node_attempts
+     WHERE run_id = NEW.run_id AND node_id = NEW.node_id),
+    1
+)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment attempt sequence must be contiguous');
+END;
+
+CREATE TRIGGER deployment_current_workflow_revisions_no_direct_delete
+BEFORE DELETE ON deployment_current_workflow_revisions
+WHEN EXISTS (SELECT 1 FROM deployment_current_workflows WHERE id = OLD.workflow_id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment workflow revisions may only be deleted with their workflow');
+END;
+
+CREATE TRIGGER deployment_current_workflow_layouts_no_direct_delete
+BEFORE DELETE ON deployment_current_workflow_layouts
+WHEN EXISTS (SELECT 1 FROM deployment_current_workflows WHERE id = OLD.workflow_id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment workflow layouts may only be deleted with their workflow');
+END;
+
+CREATE TRIGGER deployment_current_run_nodes_no_direct_delete
+BEFORE DELETE ON deployment_current_run_nodes
+WHEN EXISTS (SELECT 1 FROM deployment_current_runs WHERE id = OLD.run_id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment run nodes may only be deleted with their run');
+END;
+
+CREATE TRIGGER deployment_current_attempts_no_direct_delete
+BEFORE DELETE ON deployment_current_node_attempts
+WHEN EXISTS (
+    SELECT 1 FROM deployment_current_run_nodes
+    WHERE run_id = OLD.run_id AND node_id = OLD.node_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment attempts may only be deleted with their run node');
+END;
+
+CREATE TRIGGER deployment_current_outputs_no_direct_delete
+BEFORE DELETE ON deployment_current_run_outputs
+WHEN EXISTS (
+    SELECT 1 FROM deployment_current_run_nodes
+    WHERE run_id = OLD.run_id AND node_id = OLD.node_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment outputs may only be deleted with their run node');
+END;
+
+CREATE TRIGGER deployment_current_receipts_no_direct_delete
+BEFORE DELETE ON deployment_current_effect_receipts
+WHEN EXISTS (SELECT 1 FROM deployment_current_runs WHERE id = OLD.run_id)
+BEGIN
+    SELECT RAISE(ABORT, 'deployment receipts may only be deleted with their run');
+END;
+"#;
+
+const SCHEMA_DEPLOYMENT_WORKFLOW_PROFILE_GUARD: &str = r#"
+CREATE TRIGGER deployment_current_profiles_protect_current_workflows
+BEFORE DELETE ON profiles
+WHEN EXISTS (
+    SELECT 1
+    FROM deployment_current_workflows w
+    JOIN deployment_current_workflow_revisions r
+      ON r.workflow_id = w.id AND r.revision = w.head_revision,
+         json_each(r.definition_json, '$.targets') target
+    WHERE json_extract(target.value, '$.connectionProfileId') = OLD.id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'profile is referenced by a deployment workflow');
+END;
+"#;
+
+const SCHEMA_DEPLOYMENT_WORKFLOW_CANONICAL_NAMES: &str = r#"
+ALTER TABLE deployment_workflows RENAME TO deployment_legacy_workflows;
+ALTER TABLE deployment_runs RENAME TO deployment_legacy_runs;
+ALTER TABLE deployment_run_events RENAME TO deployment_legacy_run_events;
+ALTER TABLE deployment_transfer_receipts RENAME TO deployment_legacy_transfer_receipts;
+ALTER TABLE deployment_notification_receipts RENAME TO deployment_legacy_notification_receipts;
+
+ALTER TABLE deployment_current_workflows RENAME TO deployment_workflows;
+ALTER TABLE deployment_current_workflow_revisions RENAME TO deployment_workflow_revisions;
+ALTER TABLE deployment_current_workflow_layouts RENAME TO deployment_workflow_layouts;
+ALTER TABLE deployment_current_runs RENAME TO deployment_runs;
+ALTER TABLE deployment_current_run_nodes RENAME TO deployment_run_nodes;
+ALTER TABLE deployment_current_node_attempts RENAME TO deployment_node_attempts;
+ALTER TABLE deployment_current_run_outputs RENAME TO deployment_run_outputs;
+ALTER TABLE deployment_current_artifacts RENAME TO deployment_artifacts;
+ALTER TABLE deployment_current_artifact_refs RENAME TO deployment_artifact_refs;
+ALTER TABLE deployment_current_effect_receipts RENAME TO deployment_effect_receipts;
+ALTER TABLE deployment_current_run_events RENAME TO deployment_run_events;
+"#;
+
 const MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         version: 1,
         name: "initial_schema",
-        sql: SCHEMA_V1,
+        sql: SCHEMA_INITIAL,
     },
     SchemaMigration {
         version: 2,
         name: "deployment_foundation",
-        sql: SCHEMA_V2,
+        sql: SCHEMA_LEGACY_DEPLOYMENT,
     },
     SchemaMigration {
         version: 3,
         name: "deployment_plan_guards",
-        sql: SCHEMA_V3,
+        sql: SCHEMA_LEGACY_PLAN_GUARDS,
     },
     SchemaMigration {
         version: 4,
         name: "deployment_phase5_runtime",
-        sql: SCHEMA_V4,
+        sql: SCHEMA_LEGACY_RUNTIME,
     },
     SchemaMigration {
         version: 5,
         name: "deployment_phase6_reconciliation",
-        sql: SCHEMA_V5,
+        sql: SCHEMA_LEGACY_RECONCILIATION,
     },
     SchemaMigration {
         version: 6,
         name: "deployment_phase7_history_notifications",
-        sql: SCHEMA_V6,
+        sql: SCHEMA_LEGACY_HISTORY_NOTIFICATIONS,
+    },
+    SchemaMigration {
+        version: 7,
+        name: "deployment_workflow_foundation",
+        sql: SCHEMA_DEPLOYMENT_WORKFLOW_FOUNDATION,
+    },
+    SchemaMigration {
+        version: 8,
+        name: "deployment_workflow_integrity_guards",
+        sql: SCHEMA_DEPLOYMENT_WORKFLOW_INTEGRITY_GUARDS,
+    },
+    SchemaMigration {
+        version: 9,
+        name: "deployment_workflow_profile_guard",
+        sql: SCHEMA_DEPLOYMENT_WORKFLOW_PROFILE_GUARD,
+    },
+    SchemaMigration {
+        version: 10,
+        name: "deployment_workflow_canonical_names",
+        sql: SCHEMA_DEPLOYMENT_WORKFLOW_CANONICAL_NAMES,
     },
 ];
 
@@ -1339,6 +1855,6 @@ pub(crate) fn current_timestamp_ms() -> i64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     include!("tests/db.rs");
 }

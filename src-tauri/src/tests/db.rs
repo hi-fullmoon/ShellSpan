@@ -1,7 +1,7 @@
 use super::*;
 use crate::models::{ProfileAuthMethod, ProfileRow, SftpBookmarkRow};
 
-fn test_db() -> Database {
+pub(crate) fn test_db() -> Database {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
     let db = Database {
@@ -53,6 +53,10 @@ fn initializes_empty_database_to_current_schema() {
             (4, "deployment_phase5_runtime".to_string()),
             (5, "deployment_phase6_reconciliation".to_string()),
             (6, "deployment_phase7_history_notifications".to_string()),
+            (7, "deployment_workflow_foundation".to_string()),
+            (8, "deployment_workflow_integrity_guards".to_string()),
+            (9, "deployment_workflow_profile_guard".to_string()),
+            (10, "deployment_workflow_canonical_names".to_string()),
         ]
     );
 
@@ -76,9 +80,37 @@ fn initializes_empty_database_to_current_schema() {
         .unwrap();
     conn.execute("SELECT 1 FROM deployment_run_events LIMIT 0", [])
         .unwrap();
-    conn.execute("SELECT 1 FROM deployment_transfer_receipts LIMIT 0", [])
+    conn.execute("SELECT 1 FROM deployment_legacy_workflows LIMIT 0", [])
         .unwrap();
-    conn.execute("SELECT 1 FROM deployment_notification_receipts LIMIT 0", [])
+    conn.execute("SELECT 1 FROM deployment_legacy_runs LIMIT 0", [])
+        .unwrap();
+    conn.execute("SELECT 1 FROM deployment_legacy_run_events LIMIT 0", [])
+        .unwrap();
+    conn.execute(
+        "SELECT 1 FROM deployment_legacy_transfer_receipts LIMIT 0",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "SELECT 1 FROM deployment_legacy_notification_receipts LIMIT 0",
+        [],
+    )
+    .unwrap();
+    conn.execute("SELECT 1 FROM deployment_workflow_revisions LIMIT 0", [])
+        .unwrap();
+    conn.execute("SELECT 1 FROM deployment_workflow_layouts LIMIT 0", [])
+        .unwrap();
+    conn.execute("SELECT 1 FROM deployment_run_nodes LIMIT 0", [])
+        .unwrap();
+    conn.execute("SELECT 1 FROM deployment_node_attempts LIMIT 0", [])
+        .unwrap();
+    conn.execute("SELECT 1 FROM deployment_run_outputs LIMIT 0", [])
+        .unwrap();
+    conn.execute("SELECT 1 FROM deployment_artifacts LIMIT 0", [])
+        .unwrap();
+    conn.execute("SELECT 1 FROM deployment_artifact_refs LIMIT 0", [])
+        .unwrap();
+    conn.execute("SELECT 1 FROM deployment_effect_receipts LIMIT 0", [])
         .unwrap();
     let operation_history_table_count: i32 = conn
         .query_row(
@@ -106,7 +138,7 @@ fn initializes_empty_database_to_current_schema() {
 }
 
 #[test]
-fn upgrades_existing_v1_database_to_current_schema_without_losing_data() {
+fn upgrades_existing_database_to_current_schema_without_losing_data() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
     conn.execute_batch(
@@ -116,7 +148,7 @@ fn upgrades_existing_v1_database_to_current_schema_without_losing_data() {
             );",
     )
     .unwrap();
-    conn.execute_batch(SCHEMA_V1).unwrap();
+    conn.execute_batch(SCHEMA_INITIAL).unwrap();
     conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
         .unwrap();
     conn.execute(
@@ -160,6 +192,78 @@ fn upgrades_existing_v1_database_to_current_schema_without_losing_data() {
     );
     conn.execute("SELECT 1 FROM deployment_workflows LIMIT 0", [])
         .unwrap();
+    conn.execute("SELECT 1 FROM deployment_legacy_workflows LIMIT 0", [])
+        .unwrap();
+}
+
+#[test]
+fn canonical_name_migration_preserves_legacy_and_current_deployment_rows() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+    conn.execute_batch(SCHEMA_VERSION_TABLE).unwrap();
+    for migration in MIGRATIONS.iter().take(9) {
+        apply_schema_migration(&mut conn, migration).unwrap();
+    }
+
+    conn.execute(
+        "INSERT INTO profiles (
+            id, name, host, port, username, auth_method, created_at, updated_at
+         ) VALUES ('profile-rename', 'Rename', 'example.com', 22, 'alice', 'password', 1, 1)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO deployment_workflows (
+            id, name, connection_profile_id, revision, definition_version,
+            definition_json, created_at, updated_at
+         ) VALUES ('legacy-workflow', 'Legacy', 'profile-rename', 1, 1, '{}', 2, 2)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO deployment_current_workflows (
+            id, name, enabled, archived, head_revision, head_layout_revision,
+            created_at, updated_at
+         ) VALUES ('current-workflow', 'Current', 1, 0, 1, 0, 3, 3)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO deployment_current_workflow_revisions (
+            workflow_id, revision, schema_version, definition_json,
+            definition_digest, created_at
+         ) VALUES ('current-workflow', 1, 3, '{}', ?1, 3)",
+        [format!("sha256:{}", "a".repeat(64))],
+    )
+    .unwrap();
+
+    apply_schema_migration(&mut conn, &MIGRATIONS[9]).unwrap();
+
+    assert_eq!(
+        conn.query_row(
+            "SELECT name FROM deployment_legacy_workflows WHERE id = 'legacy-workflow'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
+        "Legacy"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT name FROM deployment_workflows WHERE id = 'current-workflow'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
+        "Current"
+    );
+    assert_eq!(
+        conn.query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+            row.get::<_, i32>(0)
+        })
+        .unwrap(),
+        10
+    );
 }
 
 #[test]
@@ -183,14 +287,14 @@ fn repeated_open_is_idempotent() {
             |row| row.get::<_, i32>(0),
         )
         .unwrap(),
-        5
+        16
     );
 }
 
 #[test]
 fn rejects_higher_database_schema_without_modifying_it() {
     let conn = Connection::open_in_memory().unwrap();
-    conn.execute_batch("CREATE TABLE schema_version (version INTEGER PRIMARY KEY); INSERT INTO schema_version (version) VALUES (7);").unwrap();
+    conn.execute_batch("CREATE TABLE schema_version (version INTEGER PRIMARY KEY); INSERT INTO schema_version (version) VALUES (11);").unwrap();
     let db = Database {
         conn: Arc::new(Mutex::new(conn)),
     };
@@ -200,7 +304,7 @@ fn rejects_higher_database_schema_without_modifying_it() {
     assert_eq!(
             error,
             format!(
-                "unsupported database schema version 7; latest supported version is {CURRENT_SCHEMA_VERSION}"
+                "unsupported database schema version 11; latest supported version is {CURRENT_SCHEMA_VERSION}"
             )
         );
     let conn = db.conn.lock().unwrap();
@@ -254,7 +358,7 @@ fn insert_deployment_fixture(conn: &Connection) {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO deployment_workflows (
+        "INSERT INTO deployment_legacy_workflows (
                 id, name, connection_profile_id, revision, definition_version,
                 definition_json, created_at, updated_at
              ) VALUES ('workflow-1', 'API', 'profile-1', 1, 1, '{}', 10, 10)",
@@ -262,7 +366,7 @@ fn insert_deployment_fixture(conn: &Connection) {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO deployment_runs (
+        "INSERT INTO deployment_legacy_runs (
                 id, workflow_id, workflow_revision, operation_kind, trigger_kind,
                 status, approval_summary_json, approval_digest, created_at, updated_at
              ) VALUES (
@@ -286,25 +390,25 @@ fn deployment_tables_enforce_references_bounds_and_known_values() {
         .is_err());
     assert!(conn
         .execute(
-            "UPDATE deployment_runs SET status = 'invented' WHERE id = 'run-1'",
+            "UPDATE deployment_legacy_runs SET status = 'invented' WHERE id = 'run-1'",
             [],
         )
         .is_err());
     assert!(conn
         .execute(
-            "UPDATE deployment_runs SET status = 'in_progress' WHERE id = 'run-1'",
+            "UPDATE deployment_legacy_runs SET status = 'in_progress' WHERE id = 'run-1'",
             [],
         )
         .is_err());
     assert!(conn
         .execute(
-            "UPDATE deployment_runs SET approval_digest = ?1 WHERE id = 'run-1'",
+            "UPDATE deployment_legacy_runs SET approval_digest = ?1 WHERE id = 'run-1'",
             ["f".repeat(64)],
         )
         .is_err());
     assert!(conn
         .execute(
-            "INSERT INTO deployment_runs (
+            "INSERT INTO deployment_legacy_runs (
                     id, workflow_id, workflow_revision, operation_kind, trigger_kind,
                     status, approval_summary_json, approval_digest, created_at, updated_at
                  ) VALUES (
@@ -317,13 +421,13 @@ fn deployment_tables_enforce_references_bounds_and_known_values() {
         .is_err());
     assert!(conn
         .execute(
-            "UPDATE deployment_workflows SET definition_json = 'not-json' WHERE id = 'workflow-1'",
+            "UPDATE deployment_legacy_workflows SET definition_json = 'not-json' WHERE id = 'workflow-1'",
             [],
         )
         .is_err());
     assert!(conn
         .execute(
-            "INSERT INTO deployment_run_events (
+            "INSERT INTO deployment_legacy_run_events (
                     run_id, sequence, event_kind, summary, recorded_at
                  ) VALUES ('run-1', 1, 'status_changed', ?1, 21)",
             ["x".repeat(4097)],
@@ -337,7 +441,7 @@ fn deployment_events_are_contiguous_immutable_and_cascade_with_workflow() {
     let conn = db.conn.lock().unwrap();
     insert_deployment_fixture(&conn);
     conn.execute(
-        "INSERT INTO deployment_run_events (
+        "INSERT INTO deployment_legacy_run_events (
                 run_id, sequence, event_kind, status, summary, recorded_at
              ) VALUES ('run-1', 1, 'run_created', 'planned', 'Run created', 21)",
         [],
@@ -345,14 +449,14 @@ fn deployment_events_are_contiguous_immutable_and_cascade_with_workflow() {
     .unwrap();
     assert!(conn
         .execute(
-            "INSERT INTO deployment_run_events (
+            "INSERT INTO deployment_legacy_run_events (
                     run_id, sequence, event_kind, summary, recorded_at
                  ) VALUES ('run-1', 3, 'status_changed', 'Skipped sequence', 22)",
             [],
         )
         .is_err());
     conn.execute(
-        "INSERT INTO deployment_run_events (
+        "INSERT INTO deployment_legacy_run_events (
                 run_id, sequence, event_kind, status, summary, recorded_at
              ) VALUES (
                 'run-1', 2, 'approval_requested', 'awaiting_approval',
@@ -363,7 +467,7 @@ fn deployment_events_are_contiguous_immutable_and_cascade_with_workflow() {
     .unwrap();
     assert_eq!(
         conn.query_row(
-            "SELECT last_event_sequence FROM deployment_runs WHERE id = 'run-1'",
+            "SELECT last_event_sequence FROM deployment_legacy_runs WHERE id = 'run-1'",
             [],
             |row| row.get::<_, i32>(0),
         )
@@ -372,21 +476,21 @@ fn deployment_events_are_contiguous_immutable_and_cascade_with_workflow() {
     );
     assert!(conn
             .execute(
-                "UPDATE deployment_run_events SET summary = 'Changed' WHERE run_id = 'run-1' AND sequence = 1",
+                "UPDATE deployment_legacy_run_events SET summary = 'Changed' WHERE run_id = 'run-1' AND sequence = 1",
                 [],
             )
             .is_err());
     assert!(conn
         .execute(
-            "DELETE FROM deployment_run_events WHERE run_id = 'run-1' AND sequence = 1",
+            "DELETE FROM deployment_legacy_run_events WHERE run_id = 'run-1' AND sequence = 1",
             [],
         )
         .is_err());
     assert!(conn
-        .execute("DELETE FROM deployment_runs WHERE id = 'run-1'", [],)
+        .execute("DELETE FROM deployment_legacy_runs WHERE id = 'run-1'", [],)
         .is_err());
     conn.execute(
-        "INSERT INTO deployment_runs (
+        "INSERT INTO deployment_legacy_runs (
                 id, workflow_id, workflow_revision, source_run_id, operation_kind, trigger_kind,
                 status, approval_summary_json, approval_digest, created_at, updated_at
              ) VALUES (
@@ -399,21 +503,23 @@ fn deployment_events_are_contiguous_immutable_and_cascade_with_workflow() {
     .unwrap();
 
     conn.execute(
-        "DELETE FROM deployment_workflows WHERE id = 'workflow-1'",
+        "DELETE FROM deployment_legacy_workflows WHERE id = 'workflow-1'",
         [],
     )
     .unwrap();
     assert_eq!(
-        conn.query_row("SELECT COUNT(*) FROM deployment_runs", [], |row| {
+        conn.query_row("SELECT COUNT(*) FROM deployment_legacy_runs", [], |row| {
             row.get::<_, i32>(0)
         })
         .unwrap(),
         0
     );
     assert_eq!(
-        conn.query_row("SELECT COUNT(*) FROM deployment_run_events", [], |row| {
-            row.get::<_, i32>(0)
-        })
+        conn.query_row(
+            "SELECT COUNT(*) FROM deployment_legacy_run_events",
+            [],
+            |row| { row.get::<_, i32>(0) }
+        )
         .unwrap(),
         0
     );

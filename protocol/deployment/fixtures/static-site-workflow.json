@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 3,
+  "targets": [
+    {
+      "id": "production",
+      "connectionProfileId": "profile-production",
+      "remoteRoot": "/srv/www/example"
+    }
+  ],
+  "parameters": [],
+  "nodes": [
+    {
+      "id": "source",
+      "type": "source.snapshot",
+      "typeVersion": 1,
+      "displayName": "Freeze source",
+      "inputs": {},
+      "config": { "sourceRef": "workspace" },
+      "timeoutSeconds": 60,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "build",
+      "type": "build.package-script",
+      "typeVersion": 1,
+      "displayName": "Build static site",
+      "inputs": { "source": { "fromNodeId": "source", "fromPort": "source" } },
+      "config": {
+        "packageManager": "pnpm",
+        "workingDirectory": ".",
+        "installMode": "frozen",
+        "scriptName": "build",
+        "outputDirectory": "dist",
+        "environmentRefs": []
+      },
+      "timeoutSeconds": 1800,
+      "retry": { "maxAttempts": 2, "initialBackoffSeconds": 2, "maxBackoffSeconds": 10 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "preflight",
+      "type": "target.preflight",
+      "typeVersion": 2,
+      "displayName": "Check production target",
+      "inputs": { "bundle": { "fromNodeId": "build", "fromPort": "bundle" } },
+      "config": {
+        "targetId": "production",
+        "requiredCapabilities": ["sftp", "atomicSymlink", "http"]
+      },
+      "timeoutSeconds": 120,
+      "retry": { "maxAttempts": 2, "initialBackoffSeconds": 2, "maxBackoffSeconds": 10 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "candidate",
+      "type": "release.create-candidate",
+      "typeVersion": 1,
+      "displayName": "Create release candidate",
+      "inputs": {
+        "bundle": { "fromNodeId": "build", "fromPort": "bundle" },
+        "target": { "fromNodeId": "preflight", "fromPort": "target" }
+      },
+      "config": { "targetId": "production", "strategy": "staticFiles" },
+      "timeoutSeconds": 30,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "approval",
+      "type": "control.approval",
+      "typeVersion": 1,
+      "displayName": "Approve production release",
+      "inputs": {
+        "candidate": { "fromNodeId": "candidate", "fromPort": "candidate" },
+        "target": { "fromNodeId": "preflight", "fromPort": "target" }
+      },
+      "config": { "targetId": "production" },
+      "timeoutSeconds": 3600,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "transfer",
+      "type": "transfer.sftp",
+      "typeVersion": 2,
+      "displayName": "Transfer artifact",
+      "inputs": {
+        "bundle": { "fromNodeId": "build", "fromPort": "bundle" },
+        "approval": { "fromNodeId": "approval", "fromPort": "approval" }
+      },
+      "config": { "targetId": "production" },
+      "timeoutSeconds": 1800,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "prepare",
+      "type": "release.prepare-files",
+      "typeVersion": 1,
+      "displayName": "Prepare immutable release",
+      "inputs": { "transfer": { "fromNodeId": "transfer", "fromPort": "transfer" } },
+      "config": { "targetId": "production" },
+      "timeoutSeconds": 600,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "switch",
+      "type": "deploy.static-switch",
+      "typeVersion": 1,
+      "displayName": "Switch current release",
+      "inputs": { "release": { "fromNodeId": "prepare", "fromPort": "release" } },
+      "config": { "targetId": "production", "linkName": "current" },
+      "timeoutSeconds": 120,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "verify",
+      "type": "verify.http",
+      "typeVersion": 2,
+      "displayName": "Verify website",
+      "inputs": { "activation": { "fromNodeId": "switch", "fromPort": "activation" } },
+      "config": {
+        "targetId": "production",
+        "scheme": "https",
+        "port": 443,
+        "path": "/healthz",
+        "expectedStatuses": [200]
+      },
+      "timeoutSeconds": 120,
+      "retry": { "maxAttempts": 3, "initialBackoffSeconds": 2, "maxBackoffSeconds": 10 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "commit",
+      "type": "release.commit",
+      "typeVersion": 1,
+      "displayName": "Commit active release",
+      "inputs": { "evidence": { "fromNodeId": "verify", "fromPort": "evidence" } },
+      "config": { "targetId": "production" },
+      "timeoutSeconds": 60,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    }
+  ],
+  "outputs": {
+    "activeRelease": { "fromNodeId": "commit", "fromPort": "activeRelease" },
+    "verification": { "fromNodeId": "verify", "fromPort": "evidence" }
+  },
+  "policy": {
+    "failFast": true,
+    "maxParallelLocalNodes": 4,
+    "releasesToKeep": 5,
+    "automaticRestore": true
+  }
+}

@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 3,
+  "targets": [
+    {
+      "id": "production",
+      "connectionProfileId": "profile-production",
+      "remoteRoot": "/srv/apps/example"
+    }
+  ],
+  "parameters": [],
+  "nodes": [
+    {
+      "id": "source",
+      "type": "source.snapshot",
+      "typeVersion": 1,
+      "displayName": "Freeze source",
+      "inputs": {},
+      "config": { "sourceRef": "workspace" },
+      "timeoutSeconds": 60,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "image",
+      "type": "build.docker-buildx",
+      "typeVersion": 2,
+      "displayName": "Build container image",
+      "inputs": { "source": { "fromNodeId": "source", "fromPort": "source" } },
+      "config": {
+        "context": ".",
+        "dockerfile": "Dockerfile",
+        "platform": "linux/amd64",
+        "imageRepository": "example/web"
+      },
+      "timeoutSeconds": 3600,
+      "retry": { "maxAttempts": 2, "initialBackoffSeconds": 2, "maxBackoffSeconds": 10 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "bundle",
+      "type": "artifact.bundle-compose",
+      "typeVersion": 1,
+      "displayName": "Bind Compose configuration",
+      "inputs": {
+        "imageBundle": { "fromNodeId": "image", "fromPort": "bundle" },
+        "source": { "fromNodeId": "source", "fromPort": "source" }
+      },
+      "config": {
+        "composeFiles": ["compose.yml"],
+        "projectName": "example",
+        "services": ["web"]
+      },
+      "timeoutSeconds": 60,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "preflight",
+      "type": "target.preflight",
+      "typeVersion": 2,
+      "displayName": "Check production target",
+      "inputs": { "bundle": { "fromNodeId": "bundle", "fromPort": "bundle" } },
+      "config": {
+        "targetId": "production",
+        "requiredCapabilities": ["sftp", "docker", "compose", "http"]
+      },
+      "timeoutSeconds": 120,
+      "retry": { "maxAttempts": 2, "initialBackoffSeconds": 2, "maxBackoffSeconds": 10 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "candidate",
+      "type": "release.create-candidate",
+      "typeVersion": 1,
+      "displayName": "Create release candidate",
+      "inputs": {
+        "bundle": { "fromNodeId": "bundle", "fromPort": "bundle" },
+        "target": { "fromNodeId": "preflight", "fromPort": "target" }
+      },
+      "config": { "targetId": "production", "strategy": "dockerCompose" },
+      "timeoutSeconds": 30,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "approval",
+      "type": "control.approval",
+      "typeVersion": 1,
+      "displayName": "Approve production release",
+      "inputs": {
+        "candidate": { "fromNodeId": "candidate", "fromPort": "candidate" },
+        "target": { "fromNodeId": "preflight", "fromPort": "target" }
+      },
+      "config": { "targetId": "production" },
+      "timeoutSeconds": 3600,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "transfer",
+      "type": "transfer.sftp",
+      "typeVersion": 2,
+      "displayName": "Transfer release bundle",
+      "inputs": {
+        "bundle": { "fromNodeId": "bundle", "fromPort": "bundle" },
+        "approval": { "fromNodeId": "approval", "fromPort": "approval" }
+      },
+      "config": { "targetId": "production" },
+      "timeoutSeconds": 1800,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "prepare",
+      "type": "release.prepare-compose",
+      "typeVersion": 1,
+      "displayName": "Prepare Compose release",
+      "inputs": { "transfer": { "fromNodeId": "transfer", "fromPort": "transfer" } },
+      "config": { "targetId": "production" },
+      "timeoutSeconds": 300,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "load",
+      "type": "runtime.load-image",
+      "typeVersion": 1,
+      "displayName": "Load container image",
+      "inputs": { "release": { "fromNodeId": "prepare", "fromPort": "release" } },
+      "config": { "targetId": "production" },
+      "timeoutSeconds": 900,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "deploy",
+      "type": "deploy.compose",
+      "typeVersion": 2,
+      "displayName": "Deploy Compose project",
+      "inputs": { "image": { "fromNodeId": "load", "fromPort": "image" } },
+      "config": {
+        "targetId": "production",
+        "projectName": "example",
+        "services": ["web"],
+        "pullPolicy": "never"
+      },
+      "timeoutSeconds": 900,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "verify",
+      "type": "verify.http",
+      "typeVersion": 2,
+      "displayName": "Verify application",
+      "inputs": { "activation": { "fromNodeId": "deploy", "fromPort": "activation" } },
+      "config": {
+        "targetId": "production",
+        "scheme": "https",
+        "port": 443,
+        "path": "/healthz",
+        "expectedStatuses": [200]
+      },
+      "timeoutSeconds": 120,
+      "retry": { "maxAttempts": 3, "initialBackoffSeconds": 2, "maxBackoffSeconds": 10 },
+      "runWhen": "allSucceeded"
+    },
+    {
+      "id": "commit",
+      "type": "release.commit",
+      "typeVersion": 1,
+      "displayName": "Commit active release",
+      "inputs": { "evidence": { "fromNodeId": "verify", "fromPort": "evidence" } },
+      "config": { "targetId": "production" },
+      "timeoutSeconds": 60,
+      "retry": { "maxAttempts": 1, "initialBackoffSeconds": 0, "maxBackoffSeconds": 0 },
+      "runWhen": "allSucceeded"
+    }
+  ],
+  "outputs": {
+    "activeRelease": { "fromNodeId": "commit", "fromPort": "activeRelease" },
+    "verification": { "fromNodeId": "verify", "fromPort": "evidence" }
+  },
+  "policy": {
+    "failFast": true,
+    "maxParallelLocalNodes": 4,
+    "releasesToKeep": 5,
+    "automaticRestore": true
+  }
+}

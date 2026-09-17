@@ -1,113 +1,774 @@
-use super::approval_service::{
-    approve_deployment_plan as approve_plan, reject_deployment_plan as reject_plan,
-    request_deployment_approval as request_approval,
+use super::artifact_cas::ArtifactBundleProjection;
+use super::audit::{
+    build_deployment_audit_document, save_deployment_audit_document, DeploymentAuditExportResult,
 };
-use super::artifact::{
-    build_deployment_artifact, snapshot_deployment_artifact_source, ARTIFACT_PROGRESS_EVENT,
+use super::compiler::compile_workflow_definition;
+use super::docker_compose_executor::{
+    docker_compose_executor_registry, NativeDockerComposeBackend,
 };
-use super::artifact_transfer::{
-    transfer_deployment_artifact, valid_artifact_transfer_operation_id,
-    ARTIFACT_TRANSFER_PROGRESS_EVENT,
+use super::node_registry::DeploymentNodeRegistry;
+use super::repository::{
+    CreateDeploymentWorkflowInput, DeploymentArtifactReferenceRecord, DeploymentArtifactRetention,
+    DeploymentNodeAttemptPage, DeploymentReleaseRecord, DeploymentRunEventPage,
+    DeploymentRunNodeRecord, DeploymentRunOutputKind, DeploymentRunRecord, DeploymentRunStatus,
+    DeploymentWorkflowLayoutRecord, DeploymentWorkflowPage, DeploymentWorkflowRecord,
+    UpdateDeploymentWorkflowInput, UpdateDeploymentWorkflowLayoutInput,
 };
-use super::audit::{build_deployment_audit_document, save_deployment_audit_document};
-use super::planner::{create_deployment_plan as create_plan, get_deployment_plan as get_plan};
-use super::preflight::{run_deployment_preflight, valid_preflight_operation_id};
-use super::remote_runner::{
-    cancel_deployment_reconciliation_observation, get_deployment_reconciliation_binding,
-    list_deployment_startup_recovery, reconcile_deployment_run, run_deployment_remote_runner,
-    valid_remote_runner_operation_id, REMOTE_RUNNER_PROGRESS_EVENT,
+use super::run_coordinator::{
+    approve_run, begin_start_run, cancel_run, execute_approved_run, prepare_run_observed,
+    reconcile_run, verify_pre_start_frozen_inputs, PreparationProgress, PrepareRunRequest,
 };
-use super::repository::DeploymentEventWrite;
-use super::{
-    DeploymentApprovalDecisionRequest, DeploymentApprovalRequest, DeploymentArtifactBuildRequest,
-    DeploymentArtifactBuildResult, DeploymentArtifactSourceSnapshotRequest,
-    DeploymentArtifactTransferRequest, DeploymentArtifactTransferResult,
-    DeploymentAuditExportResult, DeploymentEventKind, DeploymentFrozenSourceRevision,
-    DeploymentNotificationReceipt, DeploymentPlanCreateInput, DeploymentPreflightRequest,
-    DeploymentPreflightResult, DeploymentReconciliationBinding, DeploymentReconciliationRequest,
-    DeploymentReconciliationResult, DeploymentRemoteRunnerCancelRequest,
-    DeploymentRemoteRunnerRequest, DeploymentRemoteRunnerResult, DeploymentRunDetail,
-    DeploymentRunEventPage, DeploymentRunEventRecord, DeploymentRunPage, DeploymentRunRecord,
-    DeploymentRunStatus, DeploymentStartupRecoveryResult, DeploymentStoredPlanRecord,
-    DeploymentWorkflowCreate, DeploymentWorkflowRecord, DeploymentWorkflowUpdate,
+use super::runtime::{
+    DeploymentWorkflowAdmission, DeploymentWorkflowCapabilities, DeploymentWorkflowRuntime,
 };
-use crate::db::Database;
-use crate::execution::{ExecutionCancellationErrorKind, ExecutionCancellationRegistry};
+use super::validation_error::WorkflowValidationError;
+use super::workflow_schema::{
+    ArtifactBundleManifest, ArtifactHandle, CompiledRunPlanDraft, DeploymentWorkflowDefinition,
+    EffectReceipt, FrozenReleaseIdentity, ImmutableRunPlan, ScalarValue, WorkflowRunOperationKind,
+    WorkflowRunTriggerKind,
+};
+use crate::db::{current_timestamp_ms, Database};
+use crate::execution::ExecutionCancellationRegistry;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-pub(crate) const DEPLOYMENT_NOTIFICATION_OPEN_EVENT: &str = "deployment-notification-open";
-const DEPLOYMENT_ROLLOUT_ENV: &str = "SHELLSPAN_DEPLOYMENT_CENTER_V1";
-const DEPLOYMENT_DEFAULT_ENABLED: bool = true;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ValidateDeploymentWorkflowInput {
+    pub definition: DeploymentWorkflowDefinition,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CreateStaticSiteDeploymentWorkflowInput {
+    pub name: String,
+    pub connection_profile_id: String,
+    pub remote_root: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkflowValidationResult {
+    pub valid: bool,
+    pub errors: Vec<WorkflowValidationError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compiled: Option<CompiledRunPlanDraft>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PrepareDeploymentRunInput {
+    pub workflow_id: String,
+    pub workflow_revision: u64,
+    pub operation_kind: WorkflowRunOperationKind,
+    pub trigger_kind: WorkflowRunTriggerKind,
+    #[serde(default)]
+    pub parameters: BTreeMap<String, ScalarValue>,
+    #[serde(default)]
+    pub rollback_release_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DeploymentRunPlanBindingInput {
+    pub run_id: String,
+    pub plan_digest: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum DeploymentApprovalSource {
+    ManualUi,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DeploymentApprovalBindingInput {
+    pub run_id: String,
+    pub plan_digest: String,
+    pub approval_source: DeploymentApprovalSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DeploymentRunIdInput {
+    pub run_id: String,
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DeploymentRuntimeCapabilities {
-    schema_version: u32,
-    admissions_enabled: bool,
-    default_enabled: bool,
-    flag_name: &'static str,
-    source: &'static str,
-    read_only_recovery_available: bool,
-    automatic_release_cleanup: bool,
+pub(crate) struct DeploymentPrepareResult {
+    pub run_id: String,
+    pub plan_digest: String,
+    pub expires_at: i64,
 }
 
-fn deployment_rollout(value: Option<&str>) -> (bool, &'static str) {
-    match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
-        None => (DEPLOYMENT_DEFAULT_ENABLED, "default"),
-        Some("1" | "true" | "on" | "enabled") => (true, "environment"),
-        Some("0" | "false" | "off" | "disabled") => (false, "environment"),
-        Some(_) => (false, "invalidEnvironment"),
-    }
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeploymentRunProjection {
+    pub run_id: String,
+    pub status: String,
+    pub plan_digest: String,
 }
 
-fn deployment_capabilities() -> DeploymentRuntimeCapabilities {
-    let configured = std::env::var(DEPLOYMENT_ROLLOUT_ENV).ok();
-    let (admissions_enabled, source) = deployment_rollout(configured.as_deref());
-    DeploymentRuntimeCapabilities {
-        schema_version: 1,
-        admissions_enabled,
-        default_enabled: DEPLOYMENT_DEFAULT_ENABLED,
-        flag_name: DEPLOYMENT_ROLLOUT_ENV,
-        source,
-        read_only_recovery_available: true,
-        automatic_release_cleanup: false,
-    }
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeploymentReconciliationResult {
+    pub run_id: String,
+    pub status: String,
+    pub evidence_complete: bool,
 }
 
-fn ensure_deployment_admissions_enabled() -> Result<(), String> {
-    if deployment_capabilities().admissions_enabled {
-        Ok(())
-    } else {
-        Err("DEPLOYMENT_ADMISSIONS_DISABLED".into())
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeploymentArtifactInspection {
+    pub handle: ArtifactHandle,
+    pub manifest: ArtifactBundleManifest,
+    pub component_count: u32,
+    pub total_size: u64,
+    pub retention: DeploymentArtifactRetention,
+    pub references: Vec<DeploymentArtifactReferenceRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeploymentRunSummary {
+    pub run_id: String,
+    pub workflow_id: String,
+    pub workflow_revision: u64,
+    pub operation_kind: WorkflowRunOperationKind,
+    pub trigger_kind: WorkflowRunTriggerKind,
+    pub status: String,
+    pub plan_digest: String,
+    pub target_release: FrozenReleaseIdentity,
+    pub artifact_references: Vec<String>,
+    pub expires_at: i64,
+    pub expired: bool,
+    pub plan_drifted: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub started_at: Option<i64>,
+    pub finished_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeploymentRunPage {
+    pub items: Vec<DeploymentRunSummary>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeploymentRunOutputProjection {
+    pub node_id: String,
+    pub output_name: String,
+    pub output_kind: String,
+    pub value: serde_json::Value,
+    pub artifact_reference: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeploymentRunDetail {
+    pub summary: DeploymentRunSummary,
+    pub approval_summary: Option<serde_json::Value>,
+    pub outputs: Vec<DeploymentRunOutputProjection>,
+    pub receipts: Vec<EffectReceipt>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeploymentNodeProgressEvent {
+    pub operation_id: String,
+    pub run_id: String,
+    pub node_id: String,
+    pub attempt: u32,
+    pub sequence: u32,
+    pub phase: String,
+    pub completed: u32,
+    pub total: u32,
+    pub unit: String,
+    pub summary_key: String,
+}
+
+fn native_executors(
+    app: &AppHandle,
+    database: Database,
+    credentials: crate::keychain::CredentialManager,
+    cancellations: ExecutionCancellationRegistry,
+    runtime: &DeploymentWorkflowRuntime,
+) -> Result<super::node_executor::DeploymentNodeExecutorRegistry, String> {
+    let known_hosts_path = crate::known_hosts::known_hosts_path(app)?;
+    let source_root = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let backend = NativeDockerComposeBackend::new(
+        app.clone(),
+        database,
+        credentials,
+        cancellations,
+        known_hosts_path,
+        source_root,
+        runtime.artifacts().clone(),
+    )?;
+    docker_compose_executor_registry(Arc::new(backend))
+}
+
+fn run_summary(
+    database: &Database,
+    run: &DeploymentRunRecord,
+) -> Result<DeploymentRunSummary, String> {
+    let plan: ImmutableRunPlan = serde_json::from_value(run.plan.clone())
+        .map_err(|_| "DEPLOYMENT_WORKFLOW_STORED_PLAN_INVALID".to_string())?;
+    let head = database.get_deployment_workflow(&run.workflow_id)?;
+    let plan_drifted = head.as_ref().is_none_or(|workflow| {
+        workflow.archived
+            || !workflow.enabled
+            || workflow.revision != run.workflow_revision
+            || workflow.definition_digest != run.definition_digest
+    });
+    Ok(DeploymentRunSummary {
+        run_id: run.id.clone(),
+        workflow_id: run.workflow_id.clone(),
+        workflow_revision: run.workflow_revision,
+        operation_kind: run.operation_kind,
+        trigger_kind: run.trigger_kind,
+        status: run.status.as_str().to_string(),
+        plan_digest: run.plan_digest.clone(),
+        target_release: plan.target_release,
+        artifact_references: plan
+            .artifacts
+            .into_iter()
+            .map(|artifact| artifact.artifact_reference)
+            .collect(),
+        expires_at: plan.expires_at,
+        expired: current_timestamp_ms() > plan.expires_at,
+        plan_drifted,
+        created_at: run.created_at,
+        updated_at: run.updated_at,
+        started_at: run.started_at,
+        finished_at: run.finished_at,
+    })
+}
+
+pub(crate) fn start_deployment_workflow_recovery(app: &AppHandle) -> Result<(), String> {
+    let database = app.state::<Database>().inner().clone();
+    let runtime = app.state::<DeploymentWorkflowRuntime>().inner().clone();
+    let credentials = app
+        .state::<crate::keychain::CredentialManager>()
+        .inner()
+        .clone();
+    let cancellations = app.state::<ExecutionCancellationRegistry>().inner().clone();
+    let candidates = database.list_unfinished_deployment_runs()?;
+    if candidates.is_empty() {
+        return Ok(());
     }
+    let executors = native_executors(app, database.clone(), credentials, cancellations, &runtime)?;
+    tauri::async_runtime::spawn(async move {
+        for candidate in candidates {
+            if !matches!(
+                candidate.status,
+                DeploymentRunStatus::InProgress
+                    | DeploymentRunStatus::Verifying
+                    | DeploymentRunStatus::CancelRequested
+                    | DeploymentRunStatus::Reconciling
+                    | DeploymentRunStatus::StateUnknown
+            ) {
+                continue;
+            }
+            if let Err(error) = reconcile_run(&database, &runtime, &executors, &candidate.id).await
+            {
+                log::error!(
+                    "deployment startup reconciliation failed for {}: {}",
+                    candidate.id,
+                    error
+                );
+            }
+        }
+    });
+    Ok(())
 }
 
 #[tauri::command]
-pub(crate) fn deployment_runtime_capabilities() -> DeploymentRuntimeCapabilities {
-    deployment_capabilities()
+pub(crate) fn deployment_workflow_capabilities(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+) -> DeploymentWorkflowCapabilities {
+    runtime.capabilities()
+}
+
+#[tauri::command]
+pub(crate) fn list_deployment_node_types(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+) -> Result<super::node_registry::DeploymentNodeTypeCatalog, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    Ok(DeploymentNodeRegistry::mvp().catalog())
+}
+
+#[tauri::command]
+pub(crate) fn validate_deployment_workflow(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    input: ValidateDeploymentWorkflowInput,
+) -> Result<WorkflowValidationResult, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    Ok(
+        match compile_workflow_definition(&input.definition, &DeploymentNodeRegistry::mvp()) {
+            Ok(compiled) => WorkflowValidationResult {
+                valid: true,
+                errors: Vec::new(),
+                compiled: Some(compiled),
+            },
+            Err(errors) => WorkflowValidationResult {
+                valid: false,
+                errors: errors.errors,
+                compiled: None,
+            },
+        },
+    )
+}
+
+#[tauri::command]
+pub(crate) fn list_deployment_workflows(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    cursor: Option<String>,
+    limit: u32,
+    include_archived: bool,
+) -> Result<DeploymentWorkflowPage, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    database.list_deployment_workflows(cursor.as_deref(), limit, include_archived)
+}
+
+#[tauri::command]
+pub(crate) fn get_deployment_workflow(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    id: String,
+) -> Result<Option<DeploymentWorkflowRecord>, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    database.get_deployment_workflow(&id)
+}
+
+#[tauri::command]
+pub(crate) fn create_deployment_workflow(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    input: CreateDeploymentWorkflowInput,
+) -> Result<DeploymentWorkflowRecord, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Mutating)?;
+    database.create_deployment_workflow(&input)
+}
+
+#[tauri::command]
+pub(crate) fn create_static_site_deployment_workflow(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    input: CreateStaticSiteDeploymentWorkflowInput,
+) -> Result<DeploymentWorkflowRecord, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Mutating)?;
+    let (definition, layout) = super::static_site_template::static_site_template(
+        &input.connection_profile_id,
+        &input.remote_root,
+    )?;
+    database.create_deployment_workflow(&CreateDeploymentWorkflowInput {
+        name: input.name,
+        definition,
+        layout: Some(layout),
+        enabled: input.enabled,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn update_deployment_workflow(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    id: String,
+    expected_revision: u64,
+    input: UpdateDeploymentWorkflowInput,
+) -> Result<DeploymentWorkflowRecord, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Mutating)?;
+    database.update_deployment_workflow(&id, expected_revision, &input)
+}
+
+#[tauri::command]
+pub(crate) fn update_deployment_workflow_layout(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    id: String,
+    expected_layout_revision: u64,
+    input: UpdateDeploymentWorkflowLayoutInput,
+) -> Result<DeploymentWorkflowLayoutRecord, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Mutating)?;
+    database.update_deployment_workflow_layout(&id, expected_layout_revision, &input)
+}
+
+#[tauri::command]
+pub(crate) fn archive_deployment_workflow(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    id: String,
+    expected_revision: u64,
+) -> Result<(), String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Mutating)?;
+    database.archive_deployment_workflow(&id, expected_revision)
+}
+
+#[tauri::command]
+pub(crate) async fn prepare_deployment_run(
+    app: AppHandle,
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    cancellations: State<'_, ExecutionCancellationRegistry>,
+    input: PrepareDeploymentRunInput,
+) -> Result<DeploymentPrepareResult, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Mutating)?;
+    let executors = native_executors(
+        &app,
+        database.inner().clone(),
+        credentials.inner().clone(),
+        cancellations.inner().clone(),
+        &runtime,
+    )?;
+    let run_id = format!("run-{}", uuid::Uuid::new_v4());
+    app.emit(
+        "deployment-prepare-started",
+        serde_json::json!({ "runId": run_id }),
+    )
+    .map_err(|error| format!("failed to emit deployment preparation identity: {error}"))?;
+    let request = PrepareRunRequest {
+        run_id,
+        workflow_id: input.workflow_id,
+        workflow_revision: input.workflow_revision,
+        operation_kind: input.operation_kind,
+        trigger_kind: input.trigger_kind,
+        parameters: input.parameters,
+    };
+    let rollback_release_id = match (request.operation_kind, input.rollback_release_id) {
+        (WorkflowRunOperationKind::Deploy, None) => None,
+        (WorkflowRunOperationKind::Rollback, Some(release_id)) => Some(release_id),
+        _ => return Err("DEPLOYMENT_WORKFLOW_INVALID_ROLLBACK_SELECTION".into()),
+    };
+    let progress_app = app.clone();
+    let progress_sequence = Arc::new(AtomicU32::new(0));
+    let observer = {
+        let progress_sequence = progress_sequence.clone();
+        Arc::new(move |progress: PreparationProgress| {
+            let sequence = progress_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+            let event = DeploymentNodeProgressEvent {
+                operation_id: progress.run_id.clone(),
+                run_id: progress.run_id,
+                node_id: progress.node_id,
+                attempt: 1,
+                sequence,
+                phase: progress.status.clone(),
+                completed: progress.completed,
+                total: progress.total,
+                unit: "steps".into(),
+                summary_key: format!("deployment.prepare.{}", progress.status),
+            };
+            if let Err(error) = progress_app.emit("deployment-node-progress", event) {
+                log::warn!("failed to emit deployment preparation progress: {error}");
+            }
+        })
+    };
+    let prepared = prepare_run_observed(
+        &database,
+        &runtime,
+        &executors,
+        request,
+        rollback_release_id,
+        observer,
+    )
+    .await?;
+    Ok(DeploymentPrepareResult {
+        run_id: prepared.run_id,
+        plan_digest: prepared.plan_digest,
+        expires_at: prepared.expires_at,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn approve_deployment_run(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    input: DeploymentApprovalBindingInput,
+) -> Result<DeploymentRunProjection, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Mutating)?;
+    if input.approval_source != DeploymentApprovalSource::ManualUi {
+        return Err("DEPLOYMENT_WORKFLOW_MANUAL_APPROVAL_REQUIRED".into());
+    }
+    let projection = approve_run(&database, &runtime, &input.run_id, &input.plan_digest)?;
+    Ok(DeploymentRunProjection {
+        run_id: projection.run_id,
+        status: projection.status,
+        plan_digest: projection.plan_digest,
+    })
+}
+
+#[tauri::command]
+pub(crate) async fn start_deployment_run(
+    app: AppHandle,
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    cancellations: State<'_, ExecutionCancellationRegistry>,
+    input: DeploymentRunPlanBindingInput,
+) -> Result<DeploymentRunProjection, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Mutating)?;
+    let database = database.inner().clone();
+    let runtime = runtime.inner().clone();
+    let executors = native_executors(
+        &app,
+        database.clone(),
+        credentials.inner().clone(),
+        cancellations.inner().clone(),
+        &runtime,
+    )?;
+    verify_pre_start_frozen_inputs(
+        &database,
+        &runtime,
+        &executors,
+        &input.run_id,
+        &input.plan_digest,
+    )
+    .await?;
+    let (projection, cancellation) =
+        begin_start_run(&database, &runtime, &input.run_id, &input.plan_digest)?;
+    let run_id = input.run_id;
+    let plan_digest = input.plan_digest;
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = execute_approved_run(
+            database.clone(),
+            runtime.clone(),
+            executors,
+            run_id.clone(),
+            plan_digest,
+            cancellation,
+        )
+        .await
+        {
+            log::error!("deployment coordinator stopped for {run_id}: {error}");
+            if let Ok(Some(run)) = database.get_deployment_run(&run_id) {
+                if matches!(
+                    run.status,
+                    DeploymentRunStatus::InProgress
+                        | DeploymentRunStatus::Verifying
+                        | DeploymentRunStatus::CancelRequested
+                        | DeploymentRunStatus::Reconciling
+                ) {
+                    let now = current_timestamp_ms();
+                    let _ = database.transition_deployment_run(
+                        &run_id,
+                        run.status,
+                        DeploymentRunStatus::StateUnknown,
+                        None,
+                        "deployment.run.coordinatorStopped",
+                        Some(&serde_json::json!({ "requiresReadOnlyReconciliation": true })),
+                        None,
+                        None,
+                        now,
+                    );
+                }
+            }
+            runtime.finish_run(&run_id);
+        }
+    });
+    Ok(DeploymentRunProjection {
+        run_id: projection.run_id,
+        status: projection.status,
+        plan_digest: projection.plan_digest,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn cancel_deployment_run(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    input: DeploymentRunIdInput,
+) -> Result<(), String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Continuity)?;
+    if database.get_deployment_run(&input.run_id)?.is_none() {
+        return if runtime.cancel_run(&input.run_id)? {
+            Ok(())
+        } else {
+            Err("DEPLOYMENT_WORKFLOW_RUN_NOT_FOUND".into())
+        };
+    }
+    cancel_run(&database, &runtime, &input.run_id)
+}
+
+#[tauri::command]
+pub(crate) async fn reconcile_deployment_run(
+    app: AppHandle,
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    cancellations: State<'_, ExecutionCancellationRegistry>,
+    input: DeploymentRunIdInput,
+) -> Result<DeploymentReconciliationResult, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Continuity)?;
+    let executors = native_executors(
+        &app,
+        database.inner().clone(),
+        credentials.inner().clone(),
+        cancellations.inner().clone(),
+        &runtime,
+    )?;
+    let projection = reconcile_run(&database, &runtime, &executors, &input.run_id).await?;
+    Ok(DeploymentReconciliationResult {
+        run_id: projection.run_id,
+        status: projection.status,
+        evidence_complete: projection.evidence_complete,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn list_deployment_runs(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    workflow_id: String,
+    cursor: Option<String>,
+    limit: u32,
+) -> Result<DeploymentRunPage, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    let page = database.list_deployment_runs(&workflow_id, cursor.as_deref(), limit)?;
+    let items = page
+        .items
+        .iter()
+        .map(|run| run_summary(&database, run))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(DeploymentRunPage {
+        items,
+        next_cursor: page.next_cursor,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn get_deployment_run_detail(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    run_id: String,
+) -> Result<Option<DeploymentRunDetail>, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    let Some(run) = database.get_deployment_run(&run_id)? else {
+        return Ok(None);
+    };
+    let summary = run_summary(&database, &run)?;
+    let outputs = database
+        .list_deployment_run_outputs(&run_id)?
+        .into_iter()
+        .map(|output| DeploymentRunOutputProjection {
+            node_id: output.node_id,
+            output_name: output.output_name,
+            output_kind: match output.output_kind {
+                DeploymentRunOutputKind::Scalar => "scalar",
+                DeploymentRunOutputKind::Artifact => "artifact",
+                DeploymentRunOutputKind::Receipt => "receipt",
+                DeploymentRunOutputKind::Evidence => "evidence",
+            }
+            .into(),
+            value: output.value,
+            artifact_reference: output.artifact_reference,
+            created_at: output.created_at,
+        })
+        .collect();
+    Ok(Some(DeploymentRunDetail {
+        summary,
+        approval_summary: run.approval_summary,
+        outputs,
+        receipts: database.list_deployment_effect_receipts(&run_id)?,
+    }))
+}
+
+#[tauri::command]
+pub(crate) fn list_deployment_run_events(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    run_id: String,
+    before_sequence: Option<u32>,
+    limit: u32,
+) -> Result<DeploymentRunEventPage, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    database.list_deployment_run_events(&run_id, before_sequence, limit)
+}
+
+#[tauri::command]
+pub(crate) fn list_deployment_releases(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    workflow_id: String,
+) -> Result<Vec<DeploymentReleaseRecord>, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    database.list_deployment_releases(&workflow_id)
+}
+
+#[tauri::command]
+pub(crate) fn list_deployment_run_nodes(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    run_id: String,
+) -> Result<Vec<DeploymentRunNodeRecord>, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    database.list_deployment_run_nodes(&run_id)
+}
+
+#[tauri::command]
+pub(crate) fn list_deployment_node_attempts(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    run_id: String,
+    node_id: String,
+    before_attempt: Option<u32>,
+    limit: u32,
+) -> Result<DeploymentNodeAttemptPage, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    database.list_deployment_node_attempts(&run_id, &node_id, before_attempt, limit)
+}
+
+#[tauri::command]
+pub(crate) fn inspect_deployment_artifact(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    artifact_reference: String,
+) -> Result<DeploymentArtifactInspection, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    let handle = database
+        .get_deployment_artifact_handle(&artifact_reference)?
+        .ok_or_else(|| "DEPLOYMENT_ARTIFACT_NOT_FOUND".to_string())?;
+    let ArtifactBundleProjection {
+        handle,
+        manifest,
+        component_count,
+        total_size,
+    } = runtime.artifacts().inspect(&handle)?;
+    let retention =
+        database.deployment_artifact_retention(&artifact_reference, current_timestamp_ms())?;
+    let references = database.list_deployment_artifact_references(&artifact_reference)?;
+    Ok(DeploymentArtifactInspection {
+        handle,
+        manifest,
+        component_count,
+        total_size,
+        retention,
+        references,
+    })
 }
 
 #[tauri::command]
 pub(crate) async fn export_deployment_run_audit(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
     database: State<'_, Database>,
     run_id: String,
 ) -> Result<DeploymentAuditExportResult, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Continuity)?;
     let database = database.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let document = build_deployment_audit_document(&database, &run_id)?;
-        let safe_run_name = document
-            .run_id
-            .chars()
-            .map(|character| {
-                if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
-                    character
-                } else {
-                    '_'
-                }
-            })
-            .collect::<String>();
-        let file_name = format!("shellspan-deployment-{safe_run_name}.audit.json");
+        let file_name = format!("shellspan-deployment-{}.audit.json", document.run_id);
         let destination = rfd::FileDialog::new()
             .set_title("Export deployment audit")
             .set_file_name(&file_name)
@@ -120,7 +781,7 @@ pub(crate) async fn export_deployment_run_audit(
             false
         };
         Ok(DeploymentAuditExportResult {
-            schema_version: 1,
+            schema_version: 3,
             run_id: document.run_id,
             saved,
             bytes: document.bytes.len() as u64,
@@ -128,540 +789,82 @@ pub(crate) async fn export_deployment_run_audit(
         })
     })
     .await
-    .map_err(|_| "deployment audit export worker stopped unexpectedly".to_string())?
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct DeploymentNotificationDisplayRequest {
-    run_id: String,
-    title: String,
-    body: String,
-    open_label: String,
-}
-
-fn artifact_staging_root(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let home = app.path().home_dir().map_err(|error| error.to_string())?;
-    Ok(crate::shellspan_data_dir(&home)
-        .join("deployment-runtime")
-        .join("artifacts-v1"))
-}
-
-#[tauri::command]
-pub(crate) fn list_deployment_workflows(
-    database: State<'_, Database>,
-) -> Result<Vec<DeploymentWorkflowRecord>, String> {
-    database.list_deployment_workflows()
-}
-
-#[tauri::command]
-pub(crate) fn get_deployment_workflow(
-    database: State<'_, Database>,
-    id: String,
-) -> Result<Option<DeploymentWorkflowRecord>, String> {
-    database.get_deployment_workflow(&id)
-}
-
-#[tauri::command]
-pub(crate) fn create_deployment_workflow(
-    database: State<'_, Database>,
-    input: DeploymentWorkflowCreate,
-) -> Result<DeploymentWorkflowRecord, String> {
-    ensure_deployment_admissions_enabled()?;
-    let id = format!("workflow-{}", uuid::Uuid::new_v4());
-    database.create_deployment_workflow(&id, &input)
-}
-
-#[tauri::command]
-pub(crate) fn update_deployment_workflow(
-    database: State<'_, Database>,
-    id: String,
-    input: DeploymentWorkflowUpdate,
-) -> Result<DeploymentWorkflowRecord, String> {
-    ensure_deployment_admissions_enabled()?;
-    database.update_deployment_workflow(&id, &input)
-}
-
-#[tauri::command]
-pub(crate) fn delete_deployment_workflow(
-    database: State<'_, Database>,
-    id: String,
-    expected_revision: u32,
-) -> Result<(), String> {
-    ensure_deployment_admissions_enabled()?;
-    database.delete_deployment_workflow(&id, expected_revision)
-}
-
-#[tauri::command]
-pub(crate) fn create_deployment_plan(
-    database: State<'_, Database>,
-    input: DeploymentPlanCreateInput,
-) -> Result<DeploymentStoredPlanRecord, String> {
-    ensure_deployment_admissions_enabled()?;
-    create_plan(&database, input)
-}
-
-#[tauri::command]
-pub(crate) fn get_deployment_plan(
-    database: State<'_, Database>,
-    plan_id: String,
-) -> Result<DeploymentStoredPlanRecord, String> {
-    get_plan(&database, &plan_id)
-}
-
-#[tauri::command]
-pub(crate) fn request_deployment_approval(
-    database: State<'_, Database>,
-    input: DeploymentApprovalRequest,
-) -> Result<DeploymentStoredPlanRecord, String> {
-    ensure_deployment_admissions_enabled()?;
-    request_approval(&database, input)
-}
-
-#[tauri::command]
-pub(crate) async fn approve_deployment_plan(
-    app: AppHandle,
-    database: State<'_, Database>,
-    credentials: State<'_, crate::keychain::CredentialManager>,
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    input: DeploymentApprovalDecisionRequest,
-) -> Result<DeploymentStoredPlanRecord, String> {
-    ensure_deployment_admissions_enabled()?;
-    let known_hosts_path = crate::known_hosts::known_hosts_path(&app)?;
-    let staging_root = artifact_staging_root(&app)?;
-    let database = database.inner().clone();
-    let credentials = credentials.inner().clone();
-    let cancellations = cancellations.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        approve_plan(
-            &database,
-            &credentials,
-            &cancellations,
-            &known_hosts_path,
-            &staging_root,
-            input,
-        )
-    })
-    .await
-    .map_err(|_| "deployment approval worker stopped unexpectedly".to_string())?
-}
-
-#[tauri::command]
-pub(crate) fn reject_deployment_plan(
-    database: State<'_, Database>,
-    input: DeploymentApprovalDecisionRequest,
-) -> Result<DeploymentStoredPlanRecord, String> {
-    reject_plan(&database, input)
-}
-
-#[tauri::command]
-pub(crate) async fn deployment_artifact_source_snapshot(
-    database: State<'_, Database>,
-    input: DeploymentArtifactSourceSnapshotRequest,
-) -> Result<DeploymentFrozenSourceRevision, String> {
-    let database = database.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        snapshot_deployment_artifact_source(&database, input)
-    })
-    .await
-    .map_err(|_| "deployment artifact source worker stopped unexpectedly".to_string())?
-}
-
-#[tauri::command]
-pub(crate) async fn deployment_build_artifact(
-    app: AppHandle,
-    database: State<'_, Database>,
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    input: DeploymentArtifactBuildRequest,
-) -> Result<DeploymentArtifactBuildResult, String> {
-    ensure_deployment_admissions_enabled()?;
-    let staging_root = artifact_staging_root(&app)?;
-    let database = database.inner().clone();
-    let cancellations = cancellations.inner().clone();
-    let event_app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        build_deployment_artifact(
-            &database,
-            &cancellations,
-            &staging_root,
-            input,
-            &mut |progress| {
-                let _ = event_app.emit(ARTIFACT_PROGRESS_EVENT, progress);
-            },
-        )
-    })
-    .await
-    .map_err(|_| "deployment artifact build worker stopped unexpectedly".to_string())
-}
-
-#[tauri::command]
-pub(crate) fn deployment_cancel_artifact_build(
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    operation_id: String,
-) -> Result<bool, String> {
-    if !operation_id.starts_with("deployment-artifact-build:")
-        || !crate::execution::valid_operation_id(&operation_id)
-    {
-        return Err("deployment artifact build operation ID is invalid".to_string());
-    }
-    match cancellations.cancel(&operation_id) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind == ExecutionCancellationErrorKind::OperationNotFound => Ok(false),
-        Err(error) => Err(error.to_string()),
-    }
-}
-
-#[tauri::command]
-pub(crate) async fn deployment_transfer_artifact(
-    app: AppHandle,
-    database: State<'_, Database>,
-    credentials: State<'_, crate::keychain::CredentialManager>,
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    input: DeploymentArtifactTransferRequest,
-) -> Result<DeploymentArtifactTransferResult, String> {
-    ensure_deployment_admissions_enabled()?;
-    let known_hosts_path = crate::known_hosts::known_hosts_path(&app)?;
-    let staging_root = artifact_staging_root(&app)?;
-    let database = database.inner().clone();
-    let credentials = credentials.inner().clone();
-    let cancellations = cancellations.inner().clone();
-    let event_app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        transfer_deployment_artifact(
-            &database,
-            &credentials,
-            &cancellations,
-            &known_hosts_path,
-            &staging_root,
-            input,
-            &mut |progress| {
-                let _ = event_app.emit(ARTIFACT_TRANSFER_PROGRESS_EVENT, progress);
-            },
-        )
-    })
-    .await
-    .map_err(|_| "deployment artifact transfer worker stopped unexpectedly".to_string())
-}
-
-#[tauri::command]
-pub(crate) fn deployment_cancel_artifact_transfer(
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    operation_id: String,
-) -> Result<bool, String> {
-    if !valid_artifact_transfer_operation_id(&operation_id) {
-        return Err("deployment artifact transfer operation ID is invalid".to_string());
-    }
-    match cancellations.cancel(&operation_id) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind == ExecutionCancellationErrorKind::OperationNotFound => Ok(false),
-        Err(error) => Err(error.to_string()),
-    }
-}
-
-#[tauri::command]
-pub(crate) async fn deployment_run_remote(
-    app: AppHandle,
-    database: State<'_, Database>,
-    credentials: State<'_, crate::keychain::CredentialManager>,
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    input: DeploymentRemoteRunnerRequest,
-) -> Result<DeploymentRemoteRunnerResult, String> {
-    ensure_deployment_admissions_enabled()?;
-    let known_hosts_path = crate::known_hosts::known_hosts_path(&app)?;
-    let staging_root = artifact_staging_root(&app)?;
-    let database = database.inner().clone();
-    let credentials = credentials.inner().clone();
-    let cancellations = cancellations.inner().clone();
-    let event_app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        run_deployment_remote_runner(
-            &database,
-            &credentials,
-            &cancellations,
-            &known_hosts_path,
-            &staging_root,
-            input,
-            &mut |progress| {
-                let _ = event_app.emit(REMOTE_RUNNER_PROGRESS_EVENT, progress);
-            },
-        )
-    })
-    .await
-    .map_err(|_| "deployment remote runner worker stopped unexpectedly".to_string())
-}
-
-#[tauri::command]
-pub(crate) fn deployment_cancel_remote_runner(
-    database: State<'_, Database>,
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    input: DeploymentRemoteRunnerCancelRequest,
-) -> Result<bool, String> {
-    if !valid_remote_runner_operation_id(&input.operation_id)
-        || input.plan_id != format!("plan-{}", input.plan_digest)
-    {
-        return Err("deployment remote runner cancellation request is invalid".into());
-    }
-    let run = database
-        .get_deployment_run(&input.run_id)?
-        .ok_or_else(|| "DEPLOYMENT_RUN_NOT_FOUND".to_string())?;
-    if run.approval_digest != input.plan_digest
-        || !matches!(
-            run.status,
-            DeploymentRunStatus::InProgress | DeploymentRunStatus::Verifying
-        )
-    {
-        return Err("deployment remote runner cancellation binding changed".into());
-    }
-    match cancellations.cancel(&input.operation_id) {
-        Ok(()) => {}
-        Err(error) if error.kind == ExecutionCancellationErrorKind::OperationNotFound => {
-            return Ok(false)
-        }
-        Err(error) => return Err(error.to_string()),
-    }
-    database.transition_deployment_run_atomic(
-        &run.id,
-        run.last_event_sequence,
-        run.status,
-        DeploymentRunStatus::CancelRequested,
-        &DeploymentEventWrite {
-            event_kind: DeploymentEventKind::CancellationRequested,
-            status: Some(DeploymentRunStatus::CancelRequested),
-            summary: "User requested stop and automatic restore at the next safe boundary".into(),
-            payload: Some(serde_json::json!({
-                "operationId": input.operation_id,
-                "planId": input.plan_id,
-                "planDigest": input.plan_digest,
-            })),
-        },
-    )?;
-    Ok(true)
-}
-
-#[tauri::command]
-pub(crate) async fn deployment_preflight(
-    app: AppHandle,
-    database: State<'_, Database>,
-    credentials: State<'_, crate::keychain::CredentialManager>,
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    input: DeploymentPreflightRequest,
-) -> Result<DeploymentPreflightResult, String> {
-    ensure_deployment_admissions_enabled()?;
-    let known_hosts_path = crate::known_hosts::known_hosts_path(&app)?;
-    let staging_root = artifact_staging_root(&app)?;
-    let database = database.inner().clone();
-    let credentials = credentials.inner().clone();
-    let cancellations = cancellations.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        run_deployment_preflight(
-            &database,
-            &credentials,
-            &cancellations,
-            &known_hosts_path,
-            &staging_root,
-            input,
-        )
-    })
-    .await
-    .map_err(|_| "deployment preflight worker stopped unexpectedly".to_string())
-}
-
-#[tauri::command]
-pub(crate) fn deployment_cancel_preflight(
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    operation_id: String,
-) -> Result<bool, String> {
-    if !valid_preflight_operation_id(&operation_id) {
-        return Err("deployment preflight operation ID is invalid".to_string());
-    }
-    match cancellations.cancel(&operation_id) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind == ExecutionCancellationErrorKind::OperationNotFound => Ok(false),
-        Err(error) => Err(error.to_string()),
-    }
-}
-
-#[tauri::command]
-pub(crate) fn list_deployment_runs(
-    database: State<'_, Database>,
-    workflow_id: Option<String>,
-    limit: u32,
-) -> Result<Vec<DeploymentRunRecord>, String> {
-    database.list_deployment_runs(workflow_id.as_deref(), limit)
-}
-
-#[tauri::command]
-pub(crate) fn list_deployment_run_page(
-    database: State<'_, Database>,
-    workflow_id: Option<String>,
-    cursor: Option<String>,
-    limit: u32,
-) -> Result<DeploymentRunPage, String> {
-    database.list_deployment_run_page(workflow_id.as_deref(), cursor.as_deref(), limit)
-}
-
-#[tauri::command]
-pub(crate) fn get_deployment_run(
-    database: State<'_, Database>,
-    id: String,
-) -> Result<Option<DeploymentRunRecord>, String> {
-    database.get_deployment_run(&id)
-}
-
-#[tauri::command]
-pub(crate) fn get_deployment_run_detail(
-    database: State<'_, Database>,
-    id: String,
-    event_limit: u32,
-) -> Result<Option<DeploymentRunDetail>, String> {
-    database.get_deployment_run_detail(&id, event_limit)
-}
-
-#[tauri::command]
-pub(crate) fn list_deployment_run_events(
-    database: State<'_, Database>,
-    run_id: String,
-    after_sequence: u32,
-    limit: u32,
-) -> Result<Vec<DeploymentRunEventRecord>, String> {
-    database.list_deployment_run_events(&run_id, after_sequence, limit)
-}
-
-#[tauri::command]
-pub(crate) fn list_deployment_run_events_before(
-    database: State<'_, Database>,
-    run_id: String,
-    before_sequence: u32,
-    limit: u32,
-) -> Result<DeploymentRunEventPage, String> {
-    database.list_deployment_run_events_before(&run_id, before_sequence, limit)
-}
-
-#[tauri::command]
-pub(crate) fn claim_deployment_notifications(
-    database: State<'_, Database>,
-    limit: u32,
-) -> Result<Vec<DeploymentNotificationReceipt>, String> {
-    database.claim_deployment_notifications(limit)
-}
-
-#[tauri::command]
-pub(crate) fn show_deployment_notification(
-    app: AppHandle,
-    input: DeploymentNotificationDisplayRequest,
-) -> Result<(), String> {
-    super::validate_identifier("deployment notification run id", &input.run_id, 128)
-        .map_err(|error| error.to_string())?;
-    super::validate_text("deployment notification title", &input.title, 200)
-        .map_err(|error| error.to_string())?;
-    super::validate_text("deployment notification body", &input.body, 1024)
-        .map_err(|error| error.to_string())?;
-    super::validate_text("deployment notification action", &input.open_label, 80)
-        .map_err(|error| error.to_string())?;
-    if crate::runbook::contains_secret_literal(&input.title)
-        || crate::runbook::contains_secret_literal(&input.body)
-        || crate::runbook::contains_secret_literal(&input.open_label)
-    {
-        return Err("deployment notification content is unsafe".into());
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let application = if tauri::is_dev() {
-            "com.apple.Terminal"
-        } else {
-            app.config().identifier.as_str()
-        };
-        let _ = notify_rust::set_application(application);
-    }
-
-    let mut notification = notify_rust::Notification::new();
-    notification
-        .appname(app.config().product_name.as_deref().unwrap_or("ShellSpan"))
-        .summary(&input.title)
-        .body(&input.body)
-        .action("default", &input.open_label);
-    let handle = notification
-        .show()
-        .map_err(|error| format!("failed to show deployment notification: {error}"))?;
-    let run_id = input.run_id;
-    std::thread::spawn(move || {
-        handle.wait_for_action(|action| {
-            if action == "__closed" {
-                return;
-            }
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-            let _ = app.emit(DEPLOYMENT_NOTIFICATION_OPEN_EVENT, &run_id);
-        });
-    });
-    Ok(())
-}
-
-#[tauri::command]
-pub(crate) fn deployment_startup_recovery(
-    database: State<'_, Database>,
-) -> Result<DeploymentStartupRecoveryResult, String> {
-    list_deployment_startup_recovery(&database)
-}
-
-#[tauri::command]
-pub(crate) fn deployment_reconciliation_binding(
-    database: State<'_, Database>,
-    run_id: String,
-) -> Result<DeploymentReconciliationBinding, String> {
-    get_deployment_reconciliation_binding(&database, &run_id)
-}
-
-#[tauri::command]
-pub(crate) async fn deployment_reconcile(
-    app: AppHandle,
-    database: State<'_, Database>,
-    credentials: State<'_, crate::keychain::CredentialManager>,
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    input: DeploymentReconciliationRequest,
-) -> Result<DeploymentReconciliationResult, String> {
-    let known_hosts_path = crate::known_hosts::known_hosts_path(&app)?;
-    let staging_root = artifact_staging_root(&app)?;
-    let database = database.inner().clone();
-    let credentials = credentials.inner().clone();
-    let cancellations = cancellations.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        reconcile_deployment_run(
-            &database,
-            &credentials,
-            &cancellations,
-            &known_hosts_path,
-            &staging_root,
-            input,
-        )
-    })
-    .await
-    .map_err(|_| "deployment reconciliation worker stopped unexpectedly".to_string())?
-}
-
-#[tauri::command]
-pub(crate) fn deployment_cancel_reconciliation_observation(
-    cancellations: State<'_, ExecutionCancellationRegistry>,
-    operation_id: String,
-) -> Result<bool, String> {
-    cancel_deployment_reconciliation_observation(&cancellations, &operation_id)
+    .map_err(|_| "DEPLOYMENT_WORKFLOW_AUDIT_WORKER_STOPPED".to_string())?
 }
 
 #[cfg(test)]
-mod rollout_tests {
+mod tests {
     use super::*;
 
     #[test]
-    fn deployment_rollout_is_default_on_and_invalid_values_fail_closed() {
-        assert_eq!(deployment_rollout(None), (true, "default"));
-        assert_eq!(deployment_rollout(Some(" true ")), (true, "environment"));
-        assert_eq!(deployment_rollout(Some("0")), (false, "environment"));
-        assert_eq!(
-            deployment_rollout(Some("surprise")),
-            (false, "invalidEnvironment")
+    fn command_surface_contains_no_effectful_single_node_bypass() {
+        let source = include_str!("commands.rs");
+        for forbidden in [
+            "execute_deployment_node",
+            "run_deployment_node",
+            "transfer_deployment_node",
+            "switch_deployment_node",
+        ] {
+            assert!(!source.contains(&format!("fn {forbidden}")));
+        }
+        assert!(source.contains("fn prepare_deployment_run"));
+        assert!(source.contains("fn start_deployment_run"));
+        let removed_stub = ["coordinator", "unavailable"].join("_");
+        assert!(!source.contains(&removed_stub));
+        assert!(source.contains("prepare_run("));
+        assert!(source.contains("approve_run("));
+        assert!(source.contains("begin_start_run("));
+        assert!(source.contains("cancel_run("));
+        assert!(source.contains("reconcile_run("));
+        assert!(source.contains("deployment-node-progress"));
+        let registration = include_str!("../lib.rs");
+        for command in [
+            "list_deployment_node_types",
+            "validate_deployment_workflow",
+            "create_deployment_workflow",
+            "update_deployment_workflow",
+            "update_deployment_workflow_layout",
+            "prepare_deployment_run",
+            "approve_deployment_run",
+            "start_deployment_run",
+            "cancel_deployment_run",
+            "reconcile_deployment_run",
+            "list_deployment_runs",
+            "get_deployment_run_detail",
+            "list_deployment_run_events",
+            "list_deployment_releases",
+            "list_deployment_run_nodes",
+            "list_deployment_node_attempts",
+            "inspect_deployment_artifact",
+            "export_deployment_run_audit",
+        ] {
+            assert!(registration.contains(&format!("commands::{command}")));
+        }
+    }
+
+    #[test]
+    fn approval_authority_is_manual_ui_only_and_not_exposed_to_quick_actions() {
+        let digest = format!("sha256:{}", "a".repeat(64));
+        assert!(
+            serde_json::from_value::<DeploymentApprovalBindingInput>(serde_json::json!({
+                "runId": "run",
+                "planDigest": digest,
+                "approvalSource": "manualUi",
+            }))
+            .is_ok()
         );
+        for forbidden in ["agent", "quickAction", "recovery"] {
+            assert!(
+                serde_json::from_value::<DeploymentApprovalBindingInput>(serde_json::json!({
+                    "runId": "run",
+                    "planDigest": format!("sha256:{}", "a".repeat(64)),
+                    "approvalSource": forbidden,
+                }))
+                .is_err()
+            );
+        }
+        let quick_actions = include_str!("../../../src/lib/host/host-quick-actions.ts");
+        assert!(!quick_actions.contains("approve_deployment_run"));
+        assert!(!quick_actions.contains("invokeApproveDeploymentRun"));
     }
 }
