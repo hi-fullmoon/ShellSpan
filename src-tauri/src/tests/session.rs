@@ -230,6 +230,57 @@
         assert!(!is_retryable_channel_error_kind(ErrorKind::BrokenPipe));
     }
 
+    #[test]
+    fn remote_login_identity_preserves_home_and_shell_from_passwd() {
+        let identity = parse_remote_login_shell_identity(
+            "root:x:0:0:root:/root:/bin/sh\nfixture:x:1000:1000::/srv/fixture home:/usr/bin/bash\n",
+            "fixture",
+        )
+        .unwrap();
+
+        assert_eq!(identity.shell, TerminalShellKind::Bash);
+        assert_eq!(identity.executable, "/usr/bin/bash");
+        assert_eq!(identity.home_directory, "/srv/fixture home");
+    }
+
+    #[test]
+    fn remote_login_identity_rejects_missing_or_incomplete_accounts() {
+        for (contents, username) in [
+            ("fixture:x:1000:1000::/home/fixture\n", "fixture"),
+            ("other:x:1000:1000::/home/other:/bin/bash\n", "fixture"),
+        ] {
+            assert!(parse_remote_login_shell_identity(contents, username).is_err());
+        }
+    }
+
+    #[test]
+    fn integrated_remote_shell_commands_preserve_login_and_interactive_flags() {
+        assert_eq!(
+            remote_integrated_shell_command(
+                TerminalShellKind::Bash,
+                "/bin/bash",
+                "/tmp/.shellspan-terminal-integration-fixture",
+            )
+            .unwrap(),
+            "exec env HOME='/tmp/.shellspan-terminal-integration-fixture' '/bin/bash' -il"
+        );
+        assert_eq!(
+            remote_integrated_shell_command(
+                TerminalShellKind::Zsh,
+                "/bin/zsh",
+                "/tmp/.shellspan-terminal-integration-fixture",
+            )
+            .unwrap(),
+            "exec env ZDOTDIR='/tmp/.shellspan-terminal-integration-fixture' '/bin/zsh' -il"
+        );
+        assert!(remote_integrated_shell_command(
+            TerminalShellKind::Unsupported,
+            "/bin/sh",
+            "/tmp/.shellspan-terminal-integration-fixture",
+        )
+        .is_err());
+    }
+
     struct RemoteFixtureTerminal {
         _known_hosts: tempfile::TempDir,
         session: Session,
@@ -238,7 +289,7 @@
         broker: crate::terminal_broker::TerminalSessionBroker,
         transport_id: String,
         integration_id: String,
-        owner: crate::terminal_broker::TerminalAgentPtyOwner,
+        agent_session_id: String,
         display: Vec<u8>,
     }
 
@@ -281,19 +332,14 @@
             integration
                 .start_shell(&mut shell_channel)
                 .expect("start integrated interactive SSH shell");
-            let owner = crate::terminal_broker::TerminalAgentPtyOwner {
-                agent_session_id: "fixture-agent-session".into(),
-                target_id: "fixture-target".into(),
-                source_transport_session_id: "fixture-user-owned".into(),
-            };
             broker
-                .attach_agent_ssh_candidate_transport(
+                .attach_transport(
                     transport_id,
                     predecessor,
+                    crate::terminal_broker::TerminalTransportKind::SshPty,
                     TerminalGeometry::new(100, 30),
-                    owner.clone(),
                 )
-                .expect("attach dedicated Agent SSH PTY");
+                .expect("attach ordinary SSH PTY");
             broker
                 .mark_output_ready(transport_id)
                 .expect("mark fixture display ready");
@@ -309,7 +355,7 @@
                 broker,
                 transport_id: transport_id.into(),
                 integration_id,
-                owner,
+                agent_session_id: "fixture-agent-session".into(),
                 display: Vec::new(),
             };
             fixture.pump_until(Duration::from_secs(8), |snapshot| {
@@ -318,10 +364,14 @@
                     && snapshot.prompt_ready
             });
             fixture
-                .broker
-                .promote_agent_ssh_candidate_transport(transport_id, predecessor, Ok)
-                .expect("promote ready dedicated Agent SSH PTY");
-            fixture
+        }
+
+        fn connect_user_owned(
+            username: &str,
+            transport_id: &str,
+            broker: crate::terminal_broker::TerminalSessionBroker,
+        ) -> Self {
+            Self::connect(username, transport_id, None, broker)
         }
 
         fn pump_once(&mut self) -> bool {
@@ -408,7 +458,7 @@
             self.broker
                 .acquire_agent_lease(
                     &self.transport_id,
-                    &self.owner.agent_session_id,
+                    &self.agent_session_id,
                     "fixture-task",
                     operation_id,
                 )
@@ -431,7 +481,7 @@
                 .admit_terminal_input(
                     &transport_id,
                     TerminalBrokerInputSource::Agent {
-                        agent_session_id: self.owner.agent_session_id.clone(),
+                        agent_session_id: self.agent_session_id.clone(),
                         task_id: "fixture-task".into(),
                         operation_id: operation_id.into(),
                     },
@@ -468,12 +518,35 @@
             self.broker
                 .release_agent_lease(
                     &self.transport_id,
-                    &self.owner.agent_session_id,
+                    &self.agent_session_id,
                     "fixture-task",
                     operation_id,
                 )
                 .expect("release remote Agent lease");
             snapshot
+        }
+
+        fn execute_user_command(&mut self, command: &str) -> String {
+            let display_start = self.display.len();
+            let event_sequence = self
+                .broker
+                .snapshot(Some(&self.transport_id))
+                .unwrap()
+                .session
+                .unwrap()
+                .integration_event_sequence;
+            let input = format!("{command}\n");
+            write_all_nonblocking(&self.session, &mut self.shell_channel, input.as_bytes())
+                .expect("write user command to ordinary SSH PTY");
+            self.pump_until(Duration::from_secs(8), |snapshot| {
+                snapshot.prompt_ready && snapshot.integration_event_sequence > event_sequence
+            });
+            let drain_deadline = Instant::now() + Duration::from_millis(50);
+            while Instant::now() < drain_deadline {
+                self.pump_once();
+                thread::sleep(Duration::from_millis(2));
+            }
+            String::from_utf8_lossy(&self.display[display_start..]).into_owned()
         }
 
         fn interrupt(
@@ -533,104 +606,200 @@
         }
     }
 
-    fn open_user_owned_fixture_shell() -> (tempfile::TempDir, Session, Channel) {
-        let connection = crate::execution::fixture::isolated_ssh_connection();
-        let (known_hosts, known_hosts_path) =
-            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
-        let session = crate::connection::open_authenticated_session(
-            crate::connection::connect_tcp_stream(&connection.host, connection.port)
-                .expect("connect user-owned SSH fixture"),
-            &connection.username,
-            connection.auth_method,
-            connection.password.as_deref(),
-            connection.private_key_data.as_deref(),
-            connection.passphrase.as_deref(),
-            &connection.host,
-            connection.port,
-            Some(&known_hosts_path),
-        )
-        .expect("authenticate user-owned SSH fixture");
-        let mut channel = session
-            .channel_session()
-            .expect("open user-owned SSH channel");
-        channel
-            .request_pty("xterm-256color", None, Some((80, 24, 0, 0)))
-            .expect("request user-owned SSH PTY");
-        channel.shell().expect("start user-owned interactive shell");
-        (known_hosts, session, channel)
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn ordinary_ssh_bash_prepares_integration_with_compatible_startup() {
+        let broker = crate::terminal_broker::TerminalSessionBroker::phase4_enabled_for_test(4096);
+        let mut terminal =
+            RemoteFixtureTerminal::connect_user_owned("shellspan", "fixture-user-bash", broker);
+        let snapshot = terminal
+            .broker
+            .snapshot(Some("fixture-user-bash"))
+            .unwrap()
+            .session
+            .unwrap();
+        assert_eq!(
+            snapshot.integration_state,
+            crate::terminal_broker::TerminalIntegrationState::Ready
+        );
+        assert!(snapshot.prompt_ready);
+        let startup_display = String::from_utf8_lossy(&terminal.display);
+        assert_eq!(
+            startup_display
+                .matches("shellspan-bash-login-marker")
+                .count(),
+            1
+        );
+
+        let compatibility = terminal.execute_user_command(
+            r#"printf '__bash_compat__%s|%s|%s|%s|%s|%s|%s|%s__' "$HOME" "$TERM" "$(stty size)" "$-" "$LANG" "$SHELLSPAN_BASH_PROFILE_COUNT" "$SHELLSPAN_BASH_RC_COUNT" "$SHELLSPAN_BASH_PROFILE_ORDER"; shopt -q login_shell && printf '__bash_login__'; shellspan_fixture_alias; shellspan_fixture_function"#,
+        );
+        assert!(compatibility.contains(
+            "__bash_compat__/home/shellspan|xterm-256color|30 100|himBHs|C.UTF-8|1|1|:bash_profile:bashrc__"
+        ), "unexpected Bash compatibility output: {compatibility:?}");
+        assert!(compatibility.contains("__bash_login__"));
+        assert!(compatibility.contains("bash-alias-readybash-function-ready"));
+
+        let history = terminal.execute_user_command("builtin history | tail -n 8");
+        assert!(history.contains("shellspan-bash-history-ready"));
     }
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
-    fn remote_agent_ssh_pty_bash_phase4_acceptance() {
+    fn ordinary_ssh_zsh_prepares_integration_with_compatible_startup() {
+        let broker = crate::terminal_broker::TerminalSessionBroker::phase4_enabled_for_test(4096);
+        let mut terminal =
+            RemoteFixtureTerminal::connect_user_owned("shellspan-zsh", "fixture-user-zsh", broker);
+        let snapshot = terminal
+            .broker
+            .snapshot(Some("fixture-user-zsh"))
+            .unwrap()
+            .session
+            .unwrap();
+        assert_eq!(
+            snapshot.integration_state,
+            crate::terminal_broker::TerminalIntegrationState::Ready
+        );
+        assert!(snapshot.prompt_ready);
+        let startup_display = String::from_utf8_lossy(&terminal.display);
+        assert_eq!(
+            startup_display
+                .matches("shellspan-zsh-login-marker")
+                .count(),
+            1
+        );
+
+        let compatibility = terminal.execute_user_command(
+            r#"printf '__zsh_compat__%s|%s|%s|%s|%s|%s|%s|%s|%s__' "$HOME" "$TERM" "$(stty size)" "$options[interactive]" "$options[login]" "$LANG" "$SHELLSPAN_ZSHENV_COUNT" "$SHELLSPAN_ZPROFILE_COUNT:$SHELLSPAN_ZSHRC_COUNT:$SHELLSPAN_ZLOGIN_COUNT" "$SHELLSPAN_ZSH_PROFILE_ORDER"; shellspan_fixture_alias; shellspan_fixture_function; [[ -z ${ZDOTDIR+x} ]] && printf '__zdotdir_unset__'"#,
+        );
+        assert!(compatibility.contains(
+            "__zsh_compat__/home/shellspan-zsh|xterm-256color|30 100|on|on|C.UTF-8|1|1:1:1|:zshenv:zprofile:zshrc:zlogin__"
+        ), "unexpected Zsh compatibility output: {compatibility:?}");
+        assert!(compatibility.contains("zsh-alias-readyzsh-function-ready"));
+        assert!(compatibility.contains("__zdotdir_unset__"));
+
+        let history = terminal.execute_user_command("fc -l -8");
+        assert!(history.contains("shellspan-zsh-history-ready"));
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn remote_control_failure_cleans_files_without_blocking_the_user_shell() {
+        let broker = crate::terminal_broker::TerminalSessionBroker::phase4_enabled_for_test(4096);
+        let mut terminal = RemoteFixtureTerminal::connect_user_owned(
+            "shellspan",
+            "fixture-control-failure",
+            broker,
+        );
+        let remote_root = terminal
+            .integration
+            .as_ref()
+            .expect("remote integration is active")
+            .remote_root
+            .clone();
+        let integration_id = terminal.integration_id.clone();
+        terminal
+            .integration
+            .as_mut()
+            .unwrap()
+            .disable_after_control_failure(&terminal.session);
+        terminal
+            .broker
+            .integration_channel_closed(
+                &terminal.transport_id,
+                &integration_id,
+                "remoteControlChannelFailed",
+            )
+            .unwrap();
+        terminal.session.set_blocking(true);
+        let resources_removed = terminal
+            .session
+            .sftp()
+            .unwrap()
+            .stat(Path::new(&remote_root))
+            .is_err();
+        terminal.session.set_blocking(false);
+        assert!(resources_removed);
+
+        write_all_nonblocking(
+            &terminal.session,
+            &mut terminal.shell_channel,
+            b"printf 'control-%s' fallback-alive\n",
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && !String::from_utf8_lossy(&terminal.display).contains("control-fallback-alive")
+        {
+            terminal.pump_once();
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(String::from_utf8_lossy(&terminal.display).contains("control-fallback-alive"));
+        let snapshot = terminal
+            .broker
+            .snapshot(Some(&terminal.transport_id))
+            .unwrap()
+            .session
+            .unwrap();
+        assert_eq!(
+            snapshot.integration_state,
+            crate::terminal_broker::TerminalIntegrationState::Degraded
+        );
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn remote_bound_terminal_bash_reuses_source_shell_acceptance() {
         use crate::terminal_broker::{
             TerminalCommandRequestedSettlement, TerminalCommandState, TerminalGeometry,
-            TerminalTransportKind, TerminalVisibleCommandRoute,
+            TerminalVisibleCommandRoute,
         };
 
         let broker = crate::terminal_broker::TerminalSessionBroker::phase4_enabled_for_test(4096);
-        let (_user_known_hosts, user_session, mut user_channel) = open_user_owned_fixture_shell();
-        user_channel
-            .write_all(b"export SHELLSPAN_USER_ONLY=user-shell-preserved\n")
-            .unwrap();
-        user_channel.flush().unwrap();
-        broker
-            .attach_transport(
-                "fixture-user-owned",
-                None,
-                TerminalTransportKind::SshPty,
-                TerminalGeometry::new(80, 24),
-            )
+        let mut terminal =
+            RemoteFixtureTerminal::connect("shellspan", "fixture-user-ssh-1", None, broker.clone());
+        let initial_snapshot = broker
+            .snapshot(Some("fixture-user-ssh-1"))
+            .unwrap()
+            .session
             .unwrap();
         assert_eq!(
             broker
-                .remote_visible_command_route("fixture-user-owned")
-                .unwrap(),
-            TerminalVisibleCommandRoute::Unavailable
-        );
-        let mut terminal = RemoteFixtureTerminal::connect(
-            "shellspan",
-            "fixture-agent-ssh-1",
-            None,
-            broker.clone(),
-        );
-        assert_eq!(
-            broker
-                .remote_visible_command_route("fixture-agent-ssh-1")
+                .remote_visible_command_route("fixture-user-ssh-1")
                 .unwrap(),
             TerminalVisibleCommandRoute::TerminalExecute
         );
-        user_session.set_blocking(false);
+
+        let user_setup = terminal.execute_user_command(
+            "export SHELLSPAN_USER_ONLY=user-shell-preserved; alias ss_user_alias='printf user-alias-preserved'; cd /tmp",
+        );
+        assert!(!user_setup.contains("not found"));
+        let shared_user_state = terminal.execute(
+            "bound-user-state",
+            "printf 'env=%s cwd=%s ' \"$SHELLSPAN_USER_ONLY\" \"$PWD\"; ss_user_alias",
+        );
+        assert_eq!(shared_user_state.exit_code, Some(0));
+        assert!(shared_user_state
+            .combined_output
+            .contains("env=user-shell-preserved cwd=/tmp user-alias-preserved"));
 
         let interactive = terminal.execute(
-            "phase4-interactive-shell",
+            "bound-interactive-shell",
             "case $- in *i*) printf interactive-bash;; *) false;; esac",
         );
         assert_eq!(interactive.exit_code, Some(0));
         assert!(interactive.combined_output.contains("interactive-bash"));
 
-        let cd = terminal.execute("phase4-cd", "cd /tmp");
-        assert_eq!(cd.state, TerminalCommandState::Completed);
-        assert_eq!(cd.cwd.as_deref(), Some("/tmp"));
-        let export = terminal.execute("phase4-export", "export SHELLSPAN_PHASE4=preserved");
-        assert_eq!(export.exit_code, Some(0));
-        let value = terminal.execute("phase4-value", "printf 'env=%s' \"$SHELLSPAN_PHASE4\"");
-        assert!(value.combined_output.contains("env=preserved"));
         terminal.execute(
-            "phase4-alias-set",
-            "alias ss_phase4_alias='printf alias-preserved'",
+            "bound-agent-state",
+            "export SHELLSPAN_AGENT_ONLY=agent-shell-preserved; alias ss_agent_alias='printf agent-alias-preserved'; ss_agent_fn() { printf agent-function-preserved; }; cd /var/tmp",
         );
-        let alias = terminal.execute("phase4-alias-use", "ss_phase4_alias");
-        assert!(alias.combined_output.contains("alias-preserved"));
-        terminal.execute(
-            "phase4-function-set",
-            "ss_phase4_fn() { printf function-preserved; }",
+        let shared_agent_state = terminal.execute_user_command(
+            "printf 'env=%s cwd=%s ' \"$SHELLSPAN_AGENT_ONLY\" \"$PWD\"; ss_agent_alias; ss_agent_fn",
         );
-        let function = terminal.execute("phase4-function-use", "ss_phase4_fn");
-        assert!(function.combined_output.contains("function-preserved"));
-        terminal.execute("phase4-option-set", "set -o noclobber");
-        let option = terminal.execute("phase4-option-use", "set -o | grep '^noclobber' ");
-        assert!(option.combined_output.contains("on"));
+        assert!(shared_agent_state.contains(
+            "env=agent-shell-preserved cwd=/var/tmp agent-alias-preservedagent-function-preserved"
+        ));
 
         let remote_root = terminal
             .integration
@@ -638,24 +807,24 @@
             .expect("remote integration stays active")
             .remote_root
             .clone();
-        let child = terminal.execute("phase4-child-boundary", "env; ls -l /proc/$$/fd");
+        let child = terminal.execute("bound-child-boundary", "env; ls -l /proc/$$/fd");
         assert!(!child.combined_output.contains(&remote_root));
         assert!(!String::from_utf8_lossy(&terminal.display).contains(&remote_root));
 
         let forged = terminal.execute(
-            "phase4-raw-forge",
+            "bound-raw-forge",
             "python3 -c 'import os; os.write(1, bytes([69,0,55,55,0,47,116,109,112,0]))'",
         );
         assert_eq!(forged.exit_code, Some(0));
         assert_ne!(forged.exit_code, Some(77));
 
         let display_before_large = terminal.display.len();
-        let large = terminal.execute("phase4-large-output", "python3 -c 'print(chr(88)*20000)'");
+        let large = terminal.execute("bound-large-output", "python3 -c 'print(chr(88)*20000)'");
         assert!(large.capture_truncated);
         assert!(terminal.display.len().saturating_sub(display_before_large) > 20_000);
 
         let exact = terminal.execute(
-            "phase4-exact",
+            "bound-exact",
             "tput setaf 2; printf 'remote-终端'; tput sgr0; false",
         );
         assert_eq!(
@@ -663,39 +832,30 @@
             "tput setaf 2; printf 'remote-终端'; tput sgr0; false"
         );
         assert_eq!(exact.exit_code, Some(1));
-        assert_eq!(exact.cwd.as_deref(), Some("/tmp"));
+        assert_eq!(exact.cwd.as_deref(), Some("/var/tmp"));
         assert!(String::from_utf8_lossy(&terminal.display).contains("remote-终端"));
 
         resize_pty_nonblocking(&terminal.session, &mut terminal.shell_channel, 132, 41)
             .expect("propagate SSH PTY resize through the production helper");
         broker
-            .resize("fixture-agent-ssh-1", TerminalGeometry::new(132, 41))
+            .resize("fixture-user-ssh-1", TerminalGeometry::new(132, 41))
             .unwrap();
-        let resize = terminal.execute("phase4-resize", "stty size");
+        let resize = terminal.execute("bound-resize", "stty size");
         assert!(resize.combined_output.contains("41 132"));
-        assert_eq!(
-            broker
-                .snapshot(Some("fixture-agent-ssh-1"))
-                .unwrap()
-                .session
-                .unwrap()
-                .geometry,
-            TerminalGeometry::new(132, 41)
-        );
 
         for (id, requested, expected) in [
             (
-                "phase4-cancel",
+                "bound-cancel",
                 TerminalCommandRequestedSettlement::Cancelled,
                 TerminalCommandState::Cancelled,
             ),
             (
-                "phase4-timeout",
+                "bound-timeout",
                 TerminalCommandRequestedSettlement::TimedOut,
                 TerminalCommandState::TimedOut,
             ),
             (
-                "phase4-takeover",
+                "bound-takeover",
                 TerminalCommandRequestedSettlement::TakenOver,
                 TerminalCommandState::TakenOver,
             ),
@@ -712,7 +872,7 @@
                 .broker
                 .release_agent_lease(
                     &terminal.transport_id,
-                    &terminal.owner.agent_session_id,
+                    &terminal.agent_session_id,
                     "fixture-task",
                     id,
                 )
@@ -725,7 +885,7 @@
                     .admit_terminal_input(
                         &terminal.transport_id,
                         crate::terminal_broker::TerminalBrokerInputSource::Agent {
-                            agent_session_id: terminal.owner.agent_session_id.clone(),
+                            agent_session_id: terminal.agent_session_id.clone(),
                             task_id: "fixture-task".into(),
                             operation_id: id.into(),
                         },
@@ -741,33 +901,9 @@
             }
         }
 
-        write_all_nonblocking(
-            &user_session,
-            &mut user_channel,
-            b"printf '%s' \"$SHELLSPAN_USER_ONLY\"\n",
-        )
-        .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let mut user_output = Vec::new();
-        let mut buffer = [0_u8; 1024];
-        while Instant::now() < deadline
-            && !String::from_utf8_lossy(&user_output).contains("user-shell-preserved")
-        {
-            match user_channel.read(&mut buffer) {
-                Ok(read) if read > 0 => user_output.extend_from_slice(&buffer[..read]),
-                Ok(_) => thread::sleep(Duration::from_millis(5)),
-                Err(error) if is_retryable_channel_error_kind(error.kind()) => {
-                    thread::sleep(Duration::from_millis(5));
-                }
-                Err(error) => panic!("user-owned SSH output failed: {error}"),
-            }
-        }
-        assert!(String::from_utf8_lossy(&user_output).contains("user-shell-preserved"));
-        assert!(!String::from_utf8_lossy(&terminal.display).contains("user-shell-preserved"));
-
         let side_effect = terminal.begin(
-            "phase4-disconnect",
-            "printf 'once\\n' >> /tmp/shellspan-phase4-side-effect; sleep 30",
+            "bound-disconnect",
+            "printf 'once\\n' >> /tmp/shellspan-bound-side-effect; sleep 30",
         );
         terminal.pump_until(Duration::from_secs(5), |_| {
             side_effect.snapshot().unwrap().state == TerminalCommandState::Running
@@ -782,23 +918,26 @@
 
         let mut reconnected = RemoteFixtureTerminal::connect(
             "shellspan",
-            "fixture-agent-ssh-2",
-            Some("fixture-agent-ssh-1"),
+            "fixture-user-ssh-2",
+            Some("fixture-user-ssh-1"),
             broker.clone(),
         );
-        let generation = broker
-            .snapshot(Some("fixture-agent-ssh-2"))
+        let reconnected_snapshot = broker
+            .snapshot(Some("fixture-user-ssh-2"))
             .unwrap()
             .session
-            .unwrap()
-            .terminal_generation;
-        assert_eq!(generation, 2);
+            .unwrap();
+        assert_eq!(
+            reconnected_snapshot.terminal_session_id,
+            initial_snapshot.terminal_session_id
+        );
+        assert_eq!(reconnected_snapshot.terminal_generation, 2);
         assert!(broker
-            .observe_raw_output("fixture-agent-ssh-1", b"stale")
+            .observe_raw_output("fixture-user-ssh-1", b"stale")
             .is_err());
         let count = reconnected.execute(
-            "phase4-reconcile",
-            "wc -l < /tmp/shellspan-phase4-side-effect; rm -f /tmp/shellspan-phase4-side-effect",
+            "bound-reconcile",
+            "wc -l < /tmp/shellspan-bound-side-effect; rm -f /tmp/shellspan-bound-side-effect",
         );
         assert!(count.combined_output.contains('1'));
         assert!(count.no_auto_replay);
@@ -806,29 +945,32 @@
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
-    fn remote_agent_ssh_pty_zsh_phase4_state_smoke() {
+    fn remote_bound_terminal_zsh_reuses_source_shell_smoke() {
         let broker = crate::terminal_broker::TerminalSessionBroker::phase4_enabled_for_test(4096);
         let mut terminal =
-            RemoteFixtureTerminal::connect("shellspan-zsh", "fixture-agent-zsh", None, broker);
+            RemoteFixtureTerminal::connect("shellspan-zsh", "fixture-user-zsh-bound", None, broker);
+        let user_setup = terminal.execute_user_command(
+            "export SHELLSPAN_ZSH_USER=from-user; alias ss_zsh_user='printf zsh-user-alias'",
+        );
+        assert!(!user_setup.contains("not found"));
         let interactive = terminal.execute(
             "zsh-interactive-shell",
-            "[[ -o interactive ]] && printf interactive-zsh",
+            "[[ -o interactive ]] && printf '%s:' \"$SHELLSPAN_ZSH_USER\"; ss_zsh_user",
         );
         assert_eq!(interactive.exit_code, Some(0));
-        assert!(interactive.combined_output.contains("interactive-zsh"));
+        assert!(interactive
+            .combined_output
+            .contains("from-user:zsh-user-alias"));
         terminal.execute("zsh-export", "export SHELLSPAN_ZSH_PHASE4=kept");
         terminal.execute("zsh-alias-set", "alias ss_zsh_phase4='printf zsh-alias'");
-        let value = terminal.execute(
-            "zsh-state",
-            "printf '%s:' \"$SHELLSPAN_ZSH_PHASE4\"; ss_zsh_phase4",
-        );
-        assert_eq!(value.exit_code, Some(0));
-        assert!(value.combined_output.contains("kept:zsh-alias"));
+        let value =
+            terminal.execute_user_command("printf '%s:' \"$SHELLSPAN_ZSH_PHASE4\"; ss_zsh_phase4");
+        assert!(value.contains("kept:zsh-alias"));
     }
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
-    fn remote_agent_ssh_pty_unsupported_shell_is_unavailable() {
+    fn ordinary_ssh_unsupported_shell_is_unavailable_without_a_second_transport() {
         let mut connection = crate::execution::fixture::isolated_ssh_connection();
         connection.username = "shellspan-sh".into();
         let (_known_hosts, known_hosts_path) =
@@ -856,28 +998,56 @@
             Some("TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL")
         );
 
+        let mut ordinary_shell = session.channel_session().unwrap();
+        ordinary_shell
+            .request_pty("xterm-256color", None, Some((80, 24, 0, 0)))
+            .unwrap();
+        ordinary_shell.shell().unwrap();
+        session.set_blocking(false);
+        write_all_nonblocking(
+            &session,
+            &mut ordinary_shell,
+            b"printf 'unsupported-%s' fallback-ready\n",
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut output = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        while Instant::now() < deadline
+            && !String::from_utf8_lossy(&output).contains("unsupported-fallback-ready")
+        {
+            match ordinary_shell.read(&mut buffer) {
+                Ok(read) if read > 0 => output.extend_from_slice(&buffer[..read]),
+                Ok(_) => thread::sleep(Duration::from_millis(5)),
+                Err(error) if is_retryable_channel_error_kind(error.kind()) => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("ordinary unsupported-shell fallback failed: {error}"),
+            }
+        }
+        assert!(String::from_utf8_lossy(&output).contains("unsupported-fallback-ready"));
+        let _ = ordinary_shell.send_eof();
+        let _ = ordinary_shell.close();
+        session.set_blocking(true);
+
         let broker = crate::terminal_broker::TerminalSessionBroker::phase4_enabled_for_test(64);
         broker
-            .attach_agent_ssh_candidate_transport(
-                "fixture-agent-unsupported",
+            .attach_transport(
+                "fixture-user-unsupported",
                 None,
+                crate::terminal_broker::TerminalTransportKind::SshPty,
                 crate::terminal_broker::TerminalGeometry::new(80, 24),
-                crate::terminal_broker::TerminalAgentPtyOwner {
-                    agent_session_id: "fixture-agent-session".into(),
-                    target_id: "fixture-target".into(),
-                    source_transport_session_id: "fixture-user-owned".into(),
-                },
             )
             .unwrap();
         broker
             .mark_integration_unavailable(
-                "fixture-agent-unsupported",
+                "fixture-user-unsupported",
                 TerminalShellKind::Unsupported,
                 "unsupportedRemoteShell",
             )
             .unwrap();
         let snapshot = broker
-            .snapshot(Some("fixture-agent-unsupported"))
+            .snapshot(Some("fixture-user-unsupported"))
             .unwrap()
             .session
             .unwrap();
@@ -886,12 +1056,77 @@
             crate::terminal_broker::TerminalIntegrationState::Unavailable
         );
         assert!(snapshot.integration_capabilities.is_empty());
-        assert!(broker
-            .promote_agent_ssh_candidate_transport("fixture-agent-unsupported", None, Ok,)
-            .is_err());
-        assert!(broker
-            .abort_agent_ssh_candidate_transport("fixture-agent-unsupported")
-            .unwrap());
+        assert_eq!(
+            broker
+                .remote_visible_command_route("fixture-user-unsupported")
+                .unwrap(),
+            crate::terminal_broker::TerminalVisibleCommandRoute::Unavailable
+        );
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn ordinary_ssh_without_sftp_falls_back_to_a_usable_shell() {
+        let mut connection = crate::execution::fixture::isolated_ssh_connection();
+        connection.port = std::env::var("SHELLSPAN_E2E_SSH_NO_SFTP_PORT")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(22_224);
+        let (_known_hosts, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let session = crate::connection::open_authenticated_session(
+            crate::connection::connect_tcp_stream(&connection.host, connection.port).unwrap(),
+            &connection.username,
+            connection.auth_method,
+            connection.password.as_deref(),
+            connection.private_key_data.as_deref(),
+            connection.passphrase.as_deref(),
+            &connection.host,
+            connection.port,
+            Some(&known_hosts_path),
+        )
+        .unwrap();
+        let prepare_error = match RemoteSshShellIntegration::prepare(&session, &connection.username)
+        {
+            Ok(_) => panic!("the no-SFTP fixture unexpectedly prepared integration"),
+            Err(error) => error,
+        };
+        assert!(
+            prepare_error.contains("SFTP") || prepare_error.contains("remote login shell"),
+            "unexpected no-SFTP preparation error: {prepare_error}"
+        );
+
+        let mut ordinary_shell = session.channel_session().unwrap();
+        ordinary_shell
+            .request_pty("xterm-256color", None, Some((80, 24, 0, 0)))
+            .unwrap();
+        ordinary_shell.shell().unwrap();
+        session.set_blocking(false);
+        write_all_nonblocking(
+            &session,
+            &mut ordinary_shell,
+            b"printf 'sftp-%s' fallback-ready\n",
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut output = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        while Instant::now() < deadline
+            && !String::from_utf8_lossy(&output).contains("sftp-fallback-ready")
+        {
+            match ordinary_shell.read(&mut buffer) {
+                Ok(read) if read > 0 => output.extend_from_slice(&buffer[..read]),
+                Ok(_) => thread::sleep(Duration::from_millis(5)),
+                Err(error) if is_retryable_channel_error_kind(error.kind()) => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("no-SFTP ordinary shell fallback failed: {error}"),
+            }
+        }
+        assert!(String::from_utf8_lossy(&output).contains("sftp-fallback-ready"));
+        session.set_blocking(true);
+        let _ = ordinary_shell.send_eof();
+        let _ = ordinary_shell.close();
     }
 
     #[test]
@@ -915,6 +1150,8 @@
         let integration = RemoteSshShellIntegration::prepare(&session, &connection.username)
             .expect("prepare scoped remote integration resources");
         let remote_root = integration.remote_root.clone();
+        assert!(remote_root.contains("/.shellspan-terminal-integration-"));
+        assert!(!remote_root.contains("agent-terminal"));
         let mut integration = Some(integration);
 
         let error = with_remote_integration_cleanup(&session, &mut integration, |_| {

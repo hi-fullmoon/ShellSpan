@@ -1,5 +1,7 @@
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::io::Write;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -419,7 +421,7 @@ fn write_posix_bootstrap(
     match shell {
         TerminalShellKind::Bash => {
             let path = root.join("shellspan-bashrc");
-            fs::write(&path, bash_bootstrap(fifo_path, true))
+            fs::write(&path, bash_bootstrap(fifo_path, true, true))
                 .map_err(|error| format!("failed to write bash integration: {error}"))?;
             Ok(path)
         }
@@ -447,11 +449,20 @@ fn write_posix_bootstrap(
     }
 }
 
-fn bash_bootstrap(fifo_path: &Path, source_login_profile: bool) -> String {
+fn bash_bootstrap(
+    fifo_path: &Path,
+    source_system_profile: bool,
+    source_login_profile: bool,
+) -> String {
     let fifo_path = quote_posix(fifo_path.to_string_lossy().as_ref());
-    let login_profile = if source_login_profile {
+    let system_profile = if source_system_profile {
         r#"[[ -r /etc/profile ]] && source /etc/profile
-if [[ -r "$HOME/.bash_profile" ]]; then
+"#
+    } else {
+        ""
+    };
+    let login_profile = if source_login_profile {
+        r#"if [[ -r "$HOME/.bash_profile" ]]; then
   source "$HOME/.bash_profile"
 elif [[ -r "$HOME/.bash_login" ]]; then
   source "$HOME/.bash_login"
@@ -463,13 +474,18 @@ fi
         ""
     };
     format!(
-        r#"{login_profile}__shellspan_control_path={fifo_path}
+        r#"{system_profile}{login_profile}__shellspan_control_path={fifo_path}
+__shellspan_integration_active=1
 __shellspan_command_active=0
 __shellspan_prompt_ready=0
 __shellspan_pending_line=
 __shellspan_previous_prompt_command=${{PROMPT_COMMAND-}}
 __shellspan_emit() {{
-  builtin printf '%s\0' "$@" >"$__shellspan_control_path"
+  [[ $__shellspan_integration_active -eq 1 ]] || return 0
+  builtin printf '%s\0' "$@" 2>/dev/null >"$__shellspan_control_path" || {{
+    __shellspan_integration_active=0
+    return 0
+  }}
 }}
 __shellspan_prompt_cycle() {{
   local __shellspan_status=$?
@@ -559,9 +575,14 @@ add-zle-hook-widget line-init __shellspan_line_init
     };
     format!(
         r#"{user_rc}typeset -gr __shellspan_control_path={fifo_path}
+typeset -gi __shellspan_integration_active=1
 typeset -gi __shellspan_command_active=0
 __shellspan_emit() {{
-  builtin printf '%s\0' "$@" >"$__shellspan_control_path"
+  (( __shellspan_integration_active )) || return 0
+  builtin printf '%s\0' "$@" 2>/dev/null >"$__shellspan_control_path" || {{
+    __shellspan_integration_active=0
+    return 0
+  }}
 }}
 __shellspan_precmd() {{
   local __shellspan_status=$?
@@ -592,10 +613,15 @@ __shellspan_emit R zsh
 pub(crate) fn remote_posix_bootstrap(
     shell: TerminalShellKind,
     fifo_path: &str,
+    home_directory: &str,
 ) -> Result<String, String> {
     let path = Path::new(fifo_path);
     match shell {
-        TerminalShellKind::Bash => Ok(bash_bootstrap(path, true)),
+        TerminalShellKind::Bash => Ok(format!(
+            "HOME={}\nexport HOME\n{}",
+            quote_posix(home_directory),
+            bash_bootstrap(path, false, true)
+        )),
         TerminalShellKind::Zsh => Ok(zsh_bootstrap(path, true, true)),
         _ => Err("TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL".into()),
     }
