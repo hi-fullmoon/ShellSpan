@@ -65,6 +65,12 @@ function messageItemId(child: React.ReactNode, index: number): string {
     ?? (child.key === null ? String(index) : String(child.key));
 }
 
+function messageItemClassName(child: React.ReactNode): string | undefined {
+  return React.isValidElement<{ scrollItemClassName?: string }>(child)
+    ? child.props.scrollItemClassName
+    : undefined;
+}
+
 export const MessageScroller: React.FC<MessageScrollerProps> = (props) => {
   const openingAnchor = useRef(props.initialAnchor);
   const restoreToEnd = openingAnchor.current?.atBottom === true;
@@ -110,7 +116,8 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     const itemKey = React.isValidElement(child) && child.key !== null ? child.key : index;
     const messageId = messageItemId(child, index);
     return (
-      <MessageScrollerItem key={itemKey} messageId={messageId} scrollAnchor={wantsScrollAnchor(child)}>
+      <MessageScrollerItem key={itemKey} messageId={messageId} scrollAnchor={wantsScrollAnchor(child)}
+        className={messageItemClassName(child)}>
         {child}
       </MessageScrollerItem>
     );

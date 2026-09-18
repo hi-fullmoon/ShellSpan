@@ -305,24 +305,13 @@ export function AiComposerSeat({
       />}
       {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
       {waitingQuestion && !pendingQuestion && <Alert><AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle><AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription></Alert>}
-      {waitingApproval && pendingApproval && (
-        <AiApprovalPanel
-          approval={{
-            ...pendingApproval,
-            arguments: approvalArguments ?? pendingApproval.arguments,
-          }}
-          decision={approvalDecision}
-          error={approvalError}
-          argumentsLoading={approvalArgumentsLoading}
-          argumentsError={approvalArgumentsError}
-          onApprove={() => onApprove?.()}
-          onReject={() => onReject?.()}
-          onOpenDetails={() => onOpenApprovalDetails?.()}
-        />
-      )}
       {
         <div ref={completionAnchor} className="ai-composer-input-anchor relative min-w-0">
-          <InputGroup className="h-auto flex-col items-stretch gap-3 overflow-hidden pt-2.5" data-composer-card="" onClick={event => {
+          <InputGroup className={cn(
+            'h-auto flex-col items-stretch gap-3 overflow-hidden',
+            phase === 'hero' ? 'pt-1.5' : 'pt-2.5',
+            waitingApproval && pendingApproval && 'invisible',
+          )} data-composer-card="" aria-hidden={waitingApproval && pendingApproval ? true : undefined} onClick={event => {
             if (event.target === event.currentTarget) completion.editor.current?.focus();
           }}>
             <AiComposerEditor
@@ -523,6 +512,26 @@ export function AiComposerSeat({
               </div>
             </InputGroupAddon>
           </InputGroup>
+          {waitingApproval && pendingApproval && (
+            <div
+              data-slot="ai-approval-overlay"
+              className="absolute inset-x-0 bottom-0"
+            >
+              <AiApprovalPanel
+                approval={{
+                  ...pendingApproval,
+                  arguments: approvalArguments ?? pendingApproval.arguments,
+                }}
+                decision={approvalDecision}
+                error={approvalError}
+                argumentsLoading={approvalArgumentsLoading}
+                argumentsError={approvalArgumentsError}
+                onApprove={() => onApprove?.()}
+                onReject={() => onReject?.()}
+                onOpenDetails={() => onOpenApprovalDetails?.()}
+              />
+            </div>
+          )}
           <AiCompletionPopover anchor={completionAnchor} onDismiss={() => {
             skillCompletion.dismiss();
             completion.dismiss();

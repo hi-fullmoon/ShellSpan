@@ -71,12 +71,17 @@ export function AiWorkspaceController({
           ? 'unavailable'
           : 'unavailable'
     : terminalConnectionPresentationState(activeTerminalStatus);
+  const imageDraftVisible = Boolean(
+    controller.imageDraft.draft?.images.length || controller.imageDraft.pendingFiles.length,
+  );
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
   return (
     <AiWorkspaceRoot
       mode={scope === 'workbench' ? 'ask' : 'agent'}
       view={controller.view}
-      imageControls={controller.imageDraft.draft?.images.length || controller.imageDraft.busy || controller.imageDraft.locked || controller.imageDraft.error ? <AiImageDraftControls state={controller.imageDraft} selection={controller.selectedProvider} /> : null}
+      imageControls={imageDraftVisible
+        ? <AiImageDraftControls state={controller.imageDraft} selection={controller.selectedProvider} />
+        : null}
       onPasteImages={controller.canStartAgent ? controller.imageDraft.add : undefined}
       hasImages={Boolean(controller.imageDraft.draft?.images.length)}
       imageBusy={controller.imageDraft.busy}
