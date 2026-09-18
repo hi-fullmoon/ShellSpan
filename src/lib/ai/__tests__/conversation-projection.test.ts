@@ -192,6 +192,20 @@ describe('AI Phase 3 chat projection', () => {
     });
   });
 
+  it('keeps recorded tool identity and the settled result summary', () => {
+    const nodes = projectAgentChatNodes(agentSessionBaselineScenarios['single-tool'].events);
+    const tool = processChild(nodes, 'tool');
+
+    expect(tool).toMatchObject({
+      name: 'run_terminal_command',
+      nativeName: 'run_terminal_command',
+      title: 'Check service health',
+      summary: 'active',
+      state: 'succeeded',
+      output: { exitCode: 0, output: 'active' },
+    });
+  });
+
   it('preserves prompt changes and subsequent reversions', () => {
     const changes = { systemPrompt: 'Updated execution policy.' };
     const events = [requestHeader(0), requestHeader(1, changes), requestHeader(2)];
