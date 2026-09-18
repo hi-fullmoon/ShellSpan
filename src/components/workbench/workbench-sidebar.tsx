@@ -19,10 +19,8 @@ import {
 import type { SettingsSection, WorkbenchTab } from '@/types';
 import { useUpdateStore } from '@/stores/updateStore';
 import { useAppStore } from '@/stores/appStore';
-import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import {
   ActivityIcon,
-  CloudUploadIcon,
   ChevronUpIcon,
   FileTextIcon,
   InfoIcon,
@@ -109,10 +107,6 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
   const checkingForUpdates = updatePhase === 'checking';
   const downloadingUpdate = updatePhase === 'update_available' || updatePhase === 'downloading';
   const updateBusy = checkingForUpdates || downloadingUpdate;
-  const deploymentAttentionCount = useDeploymentWorkflowRunStore(
-    (state) => state.runs.filter((run) => run.status === 'state_unknown').length,
-  );
-
   const items: MenuItem[] = [
     {
       key: 'connections',
@@ -123,12 +117,6 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
       key: 'keychain',
       label: t('workbench.keychain.title'),
       icon: KeyRoundIcon,
-    },
-    {
-      key: 'deployments',
-      label: t('deployment.title'),
-      icon: CloudUploadIcon,
-      badge: deploymentAttentionCount,
     },
     {
       key: 'knownHosts',
