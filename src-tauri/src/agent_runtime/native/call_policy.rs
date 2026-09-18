@@ -2,7 +2,8 @@
 use crate::agent_runtime::{
     AgentEffectKindNative, AgentNetworkDestinationNative, AgentObservedEffectNative,
     AgentToolCallNative, ApplyPatchArgumentsNative, ListDirectoryArgumentsNative,
-    ReadFileArgumentsNative, SearchTextArgumentsNative, TransferFileArgumentsNative,
+    ProbeHttpArgumentsNative, ReadFileArgumentsNative, SearchTextArgumentsNative,
+    TransferFileArgumentsNative, WriteFileArgumentsNative,
 };
 use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +40,11 @@ pub(crate) fn inspect_call_policy_scope_native(
                 .map_err(|_| "search_text policy arguments were invalid".to_string())?
                 .path,
         ],
+        "write_file" => vec![
+            serde_json::from_value::<WriteFileArgumentsNative>(call.arguments.clone())
+                .map_err(|_| "write_file policy arguments were invalid".to_string())?
+                .path,
+        ],
         "apply_patch" => {
             serde_json::from_value::<ApplyPatchArgumentsNative>(call.arguments.clone())
                 .map_err(|_| "apply_patch policy arguments were invalid".to_string())?
@@ -60,11 +66,24 @@ pub(crate) fn inspect_call_policy_scope_native(
             .unwrap_or_default(),
         _ => Vec::new(),
     };
+    let network_destinations = match call.tool_name.as_str() {
+        "probe_http" => {
+            let arguments =
+                serde_json::from_value::<ProbeHttpArgumentsNative>(call.arguments.clone())
+                    .map_err(|_| "probe_http policy arguments were invalid".to_string())?;
+            vec![AgentNetworkDestinationNative {
+                protocol: "http".into(),
+                host: "127.0.0.1".into(),
+                port: arguments.port,
+            }]
+        }
+        _ => Vec::new(),
+    };
     let sensitive_path_count = paths.iter().filter(|p| path_is_sensitive_native(p)).count();
     let critical_path_count = paths.iter().filter(|p| path_is_critical_native(p)).count();
     Ok(CallPolicyScopeNative {
         paths,
-        network_destinations: Vec::new(),
+        network_destinations,
         sensitive_path_count,
         critical_path_count,
         unknown_write: matches!(
@@ -171,7 +190,7 @@ mod tests {
             AgentEffectKindNative::ExternalSideEffect,
         ] {
             assert!(
-                enforce_native_call_policy_native(&call, &effect(kind), &scope)
+                enforce_native_call_policy_native(&call, &effect(kind), &scope,)
                     .unwrap_err()
                     .contains("requires Direct execution")
             );
@@ -179,6 +198,51 @@ mod tests {
         assert!(enforce_native_call_policy_native(
             &call,
             &effect(AgentEffectKindNative::StateChange),
+            &scope,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn unscoped_direct_network_egress_is_rejected() {
+        let mut call = terminal_call();
+        call.tool_name = "exec_command".into();
+        call.arguments = json!({
+            "command": "curl http://127.0.0.1:18765/",
+            "explanation": "verify a loopback service"
+        });
+        let scope = inspect_call_policy_scope_native(&call).unwrap();
+        let effect = effect(AgentEffectKindNative::ExternalSideEffect);
+        assert_eq!(
+            enforce_native_call_policy_native(&call, &effect, &scope),
+            Err("native policy rejects unscoped command network egress".into())
+        );
+    }
+
+    #[test]
+    fn structured_http_probe_has_exact_loopback_scope() {
+        let mut call = terminal_call();
+        call.tool_name = "probe_http".into();
+        call.arguments = json!({
+            "method": "get",
+            "port": 18765,
+            "path": "/index.html",
+            "timeoutMs": 2_000,
+            "maxBytes": 65_536
+        });
+        let scope = inspect_call_policy_scope_native(&call).unwrap();
+        assert_eq!(
+            scope.network_destinations,
+            [AgentNetworkDestinationNative {
+                protocol: "http".into(),
+                host: "127.0.0.1".into(),
+                port: 18765,
+            }]
+        );
+        assert!(!scope.unknown_network_egress);
+        assert!(enforce_native_call_policy_native(
+            &call,
+            &effect(AgentEffectKindNative::ExternalSideEffect),
             &scope,
         )
         .is_ok());

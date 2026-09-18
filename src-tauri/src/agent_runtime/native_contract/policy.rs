@@ -4,10 +4,11 @@ use super::types::{
     AgentEffectKindNative, AgentObservedEffectNative, AgentRequestNative, AgentTargetKindNative,
     AgentToolCallNative, AgentToolTargetNative, ApplyPatchArgumentsNative,
     ExecCommandArgumentsNative, KillProcessArgumentsNative, ListDirectoryArgumentsNative,
-    ReadFileArgumentsNative, ReadTerminalArgumentsNative, SearchTextArgumentsNative,
-    TerminalExecuteArgumentsNative, TerminalInteractiveInputKindNative,
+    ProbeHttpArgumentsNative, ReadFileArgumentsNative, ReadTerminalArgumentsNative,
+    SearchTextArgumentsNative, TerminalExecuteArgumentsNative, TerminalInteractiveInputKindNative,
     TransferFileArgumentsNative, WaitProcessArgumentsNative, WaitTerminalArgumentsNative,
-    WriteStdinArgumentsNative, WriteTerminalInputArgumentsNative, NATIVE_TOOL_CONTRACT_VERSION,
+    WriteFileArgumentsNative, WriteFilePreconditionNative, WriteStdinArgumentsNative,
+    WriteTerminalInputArgumentsNative, MAX_WRITE_FILE_CONTENT_BYTES, NATIVE_TOOL_CONTRACT_VERSION,
 };
 
 pub enum AgentToolEffectModeNative {
@@ -45,7 +46,7 @@ const EXEC_EFFECTS: &[AgentEffectKindNative] = &[
     AgentEffectKindNative::ExternalSideEffect,
 ];
 
-pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 13] = [
+pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 15] = [
     AgentToolDescriptorNative {
         name: "exec_command",
         target_kinds: LOCAL_REMOTE,
@@ -57,6 +58,12 @@ pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 13] = [
         target_kinds: LOCAL_REMOTE,
         effect_mode: AgentToolEffectModeNative::NativeClassifier,
         allowed_effects: EXEC_EFFECTS,
+    },
+    AgentToolDescriptorNative {
+        name: "probe_http",
+        target_kinds: LOCAL_REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: &[AgentEffectKindNative::ExternalSideEffect],
     },
     AgentToolDescriptorNative {
         name: "read_terminal",
@@ -111,6 +118,12 @@ pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 13] = [
         target_kinds: LOCAL_REMOTE,
         effect_mode: AgentToolEffectModeNative::Fixed,
         allowed_effects: SENSITIVE_READ,
+    },
+    AgentToolDescriptorNative {
+        name: "write_file",
+        target_kinds: LOCAL_REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: STATE_CHANGE,
     },
     AgentToolDescriptorNative {
         name: "apply_patch",
@@ -431,6 +444,40 @@ pub fn validate_tool_arguments_native(
                 return Err("invalid terminal_execute arguments".into());
             }
         }
+        "probe_http" => {
+            let value = decode_arguments::<ProbeHttpArgumentsNative>(arguments)?;
+            if value.port == 0
+                || value.path.is_empty()
+                || value.path.len() > 4_096
+                || !value.path.starts_with('/')
+                || value.path.chars().any(char::is_control)
+                || value.body.as_ref().is_some_and(|body| body.len() > 65_536)
+                || value.content_type.as_ref().is_some_and(|content_type| {
+                    content_type.is_empty()
+                        || content_type.len() > 256
+                        || !content_type.is_ascii()
+                        || content_type.chars().any(char::is_control)
+                })
+                || value
+                    .timeout_ms
+                    .is_some_and(|timeout| timeout == 0 || timeout > 30_000)
+                || value
+                    .max_bytes
+                    .is_some_and(|limit| limit == 0 || limit > 131_072)
+            {
+                return Err("invalid probe_http arguments".into());
+            }
+            let url = url::Url::parse(&format!("http://127.0.0.1:{}{}", value.port, value.path))
+                .map_err(|_| "invalid probe_http path".to_string())?;
+            if url.host_str() != Some("127.0.0.1")
+                || url.port_or_known_default() != Some(value.port)
+                || url.fragment().is_some()
+                || !url.username().is_empty()
+                || url.password().is_some()
+            {
+                return Err("invalid probe_http path".into());
+            }
+        }
         "read_terminal" => {
             decode_arguments::<ReadTerminalArgumentsNative>(arguments)?;
         }
@@ -571,6 +618,23 @@ pub fn validate_tool_arguments_native(
                 return Err("invalid search_text arguments".into());
             }
         }
+        "write_file" => {
+            let value = decode_arguments::<WriteFileArgumentsNative>(arguments)?;
+            validate_path(&value.path)?;
+            if !write_file_content_is_valid(&value.content) {
+                return Err("invalid write_file content".into());
+            }
+            match value.precondition {
+                WriteFilePreconditionNative::MustNotExist(precondition)
+                    if precondition.must_not_exist => {}
+                WriteFilePreconditionNative::MatchSha256(precondition) => {
+                    validate_sha256(&precondition.sha256)?;
+                }
+                WriteFilePreconditionNative::MustNotExist(_) => {
+                    return Err("write_file mustNotExist precondition must be true".into());
+                }
+            }
+        }
         "apply_patch" => {
             let value = decode_arguments::<ApplyPatchArgumentsNative>(arguments)?;
             if value.patch.is_empty()
@@ -638,6 +702,13 @@ fn validate_sha256(value: &str) -> Result<(), String> {
     } else {
         Err("invalid sha256".into())
     }
+}
+
+fn write_file_content_is_valid(value: &str) -> bool {
+    value.len() <= MAX_WRITE_FILE_CONTENT_BYTES
+        && !value
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
 }
 
 fn target_shape_is_valid(target: &AgentToolTargetNative) -> bool {
@@ -729,6 +800,130 @@ fn request_targets_are_coherent(request: &AgentRequestNative) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn http_probe_arguments_cannot_select_a_host_or_escape_bounds() {
+        assert!(validate_tool_arguments_native(
+            "probe_http",
+            &json!({
+                "method": "get",
+                "port": 18765,
+                "path": "/index.html?detail=1",
+                "timeoutMs": 2_000,
+                "maxBytes": 65_536
+            }),
+        )
+        .is_ok());
+        assert!(validate_tool_arguments_native(
+            "probe_http",
+            &json!({ "method": "head", "port": 80, "path": "/health" }),
+        )
+        .is_ok());
+        assert!(validate_tool_arguments_native(
+            "probe_http",
+            &json!({
+                "method": "get",
+                "port": 18765,
+                "path": "/search",
+                "body": "query",
+                "contentType": "text/plain"
+            }),
+        )
+        .is_ok());
+        assert!(validate_tool_arguments_native(
+            "probe_http",
+            &json!({
+                "method": "post",
+                "port": 18765,
+                "path": "/api",
+                "body": "{\"title\":\"test\"}",
+                "contentType": "application/json"
+            }),
+        )
+        .is_ok());
+        assert!(validate_tool_arguments_native(
+            "probe_http",
+            &json!({ "method": "delete", "port": 18765, "path": "/api/2" }),
+        )
+        .is_ok());
+        for arguments in [
+            json!({ "method": "get", "port": 0, "path": "/" }),
+            json!({ "method": "post", "port": 18765, "path": "/", "contentType": "text/plain\r\nX-Leak: yes" }),
+            json!({ "method": "get", "port": 18765, "path": "https://example.test/" }),
+            json!({ "method": "get", "port": 18765, "path": "/ok#fragment" }),
+            json!({ "method": "get", "port": 18765, "path": "/ok\r\nHost: example.test" }),
+            json!({ "method": "get", "port": 18765, "path": "/", "maxBytes": 131_073 }),
+            json!({ "method": "get", "port": 18765, "path": "/", "host": "example.test" }),
+        ] {
+            assert!(
+                validate_tool_arguments_native("probe_http", &arguments).is_err(),
+                "unexpectedly accepted {arguments}"
+            );
+        }
+    }
+
+    #[test]
+    fn write_file_arguments_require_an_exact_creation_or_digest_precondition() {
+        assert!(validate_tool_arguments_native(
+            "write_file",
+            &json!({
+                "path": "page.html",
+                "content": "",
+                "precondition": { "mustNotExist": true }
+            }),
+        )
+        .is_ok());
+        assert!(validate_tool_arguments_native(
+            "write_file",
+            &json!({
+                "path": "page.html",
+                "content": "x".repeat(MAX_WRITE_FILE_CONTENT_BYTES),
+                "precondition": { "mustNotExist": true }
+            }),
+        )
+        .is_ok());
+        assert!(validate_tool_arguments_native(
+            "write_file",
+            &json!({
+                "path": "page.html",
+                "content": "replacement",
+                "precondition": { "sha256": "0".repeat(64) }
+            }),
+        )
+        .is_ok());
+        for arguments in [
+            json!({
+                "path": "page.html",
+                "content": "content",
+                "precondition": { "mustNotExist": false }
+            }),
+            json!({
+                "path": "page.html",
+                "content": "content",
+                "precondition": { "sha256": "invalid" }
+            }),
+            json!({
+                "path": "page.html",
+                "content": "content",
+                "precondition": { "mustNotExist": true, "sha256": "0".repeat(64) }
+            }),
+            json!({
+                "path": "page.html",
+                "content": "x".repeat(MAX_WRITE_FILE_CONTENT_BYTES + 1),
+                "precondition": { "mustNotExist": true }
+            }),
+            json!({
+                "path": "page.html",
+                "content": "text\u{0001}",
+                "precondition": { "mustNotExist": true }
+            }),
+        ] {
+            assert!(
+                validate_tool_arguments_native("write_file", &arguments).is_err(),
+                "unexpectedly accepted {arguments}"
+            );
+        }
+    }
 
     #[test]
     fn interactive_terminal_arguments_are_bounded_and_shape_checked() {

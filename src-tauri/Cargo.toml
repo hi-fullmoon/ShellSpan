@@ -45,8 +45,12 @@ keyring-core = "1"
 sysinfo = "0.39"
 futures-util = "0.3"
 async-trait = "0.1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
-tokio = { version = "1", features = ["macros", "rt", "sync", "time", "test-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
+bytes = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time", "test-util"] }
 tokio-util = "0.7"
 httpdate = "1"
 tempfile = "3.14.0"

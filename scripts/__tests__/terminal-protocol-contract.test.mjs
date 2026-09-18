@@ -95,6 +95,39 @@ describe('terminal execution Phase 0 protocol contract', () => {
       expect(validateEvent(event), validator.errorsText(validateEvent.errors)).toBe(true);
     }
 
+    const replayArtifactEvent = {
+      version: 5,
+      sessionId: 'session-1',
+      seq: 8,
+      timeUnixMs: 1_000,
+      turnId: 'turn-1',
+      stepId: 'step-1',
+      type: 'assistant/message',
+      data: {
+        messageId: 'message-1',
+        content: [],
+        usage: {},
+        stopReason: 'stop',
+        interrupted: false,
+        replay: {
+          storage: 'artifact',
+          artifact: {
+            artifactId: 'artifact-0123456789abcdef0123456789abcdef',
+            kind: 'assistant-replay',
+            title: 'Private assistant replay metadata',
+            mediaType: 'application/vnd.shellspan.agent-replay+zstd',
+            sha256: '0'.repeat(64),
+            sizeBytes: 300_000,
+            sensitivity: 'internal',
+            createdAtUnixMs: 1_000,
+          },
+        },
+      },
+    };
+    expect(validateEvent(replayArtifactEvent), validator.errorsText(validateEvent.errors)).toBe(true);
+    replayArtifactEvent.data.replay.artifact.sha256 = 'invalid';
+    expect(validateEvent(replayArtifactEvent)).toBe(false);
+
     const invalidSurface = structuredClone(eventFixtures.at(-1));
     invalidSurface.data.surface = 'realTerminal';
     expect(validateEvent(invalidSurface)).toBe(false);
@@ -125,6 +158,41 @@ describe('terminal execution Phase 0 protocol contract', () => {
       kind: 'remote', targetId: 'target-1', sessionId: 'transport-1',
       profileId: 'profile-1', host: 'host', port: 22, username: 'user',
     } }), validator.errorsText(validateTool.errors)).toBe(true);
+
+    const probeCall = {
+      requestId: 'request-1',
+      callId: 'call-probe',
+      toolName: 'probe_http',
+      arguments: {
+        method: 'post',
+        port: 3000,
+        path: '/api',
+        body: '{"title":"test"}',
+        contentType: 'application/json',
+      },
+      target: { kind: 'local', targetId: 'target-1', sessionId: 'transport-1' },
+      capabilityId: 'capability-1',
+    };
+    expect(validateTool(probeCall), validator.errorsText(validateTool.errors)).toBe(true);
+    expect(validateTool({
+      ...probeCall,
+      arguments: {
+        method: 'get', port: 3000, path: '/search',
+        body: 'query', contentType: 'text/plain',
+      },
+    }), validator.errorsText(validateTool.errors)).toBe(true);
+    expect(validateTool({
+      ...probeCall,
+      arguments: { method: 'delete', port: 3000, path: '/api/1' },
+      target: {
+        kind: 'remote', targetId: 'target-1', sessionId: 'transport-1',
+        profileId: 'profile-1', host: 'host', port: 22, username: 'user',
+      },
+    }), validator.errorsText(validateTool.errors)).toBe(true);
+    expect(validateTool({
+      ...probeCall,
+      arguments: { ...probeCall.arguments, host: 'example.test' },
+    })).toBe(false);
     expect(validateTool({
       requestId: 'request-1',
       callId: 'call-1',
@@ -214,6 +282,77 @@ describe('terminal execution Phase 0 protocol contract', () => {
     }), validator.errorsText(validate.errors)).toBe(true);
   });
 
+  it('validates atomic write_file creation, replacement, and result contracts', async () => {
+    const schema = await readJson('tool-contract.schema.json');
+    const validator = new Ajv2020({ allErrors: true, strict: true });
+    const validate = validator.compile(schema);
+    const base = {
+      requestId: 'request-write',
+      callId: 'call-write',
+      toolName: 'write_file',
+      target: {
+        kind: 'local',
+        targetId: 'target-1',
+        sessionId: 'transport-1',
+        cwd: '/workspace',
+      },
+      capabilityId: 'capability-write',
+    };
+    expect(validate({
+      ...base,
+      arguments: {
+        path: 'page.html',
+        content: '',
+        precondition: { mustNotExist: true },
+      },
+    }), validator.errorsText(validate.errors)).toBe(true);
+    expect(validate({
+      ...base,
+      arguments: {
+        path: 'page.html',
+        content: 'replacement',
+        precondition: { sha256: '0'.repeat(64) },
+      },
+    }), validator.errorsText(validate.errors)).toBe(true);
+    expect(validate({
+      ...base,
+      arguments: {
+        path: 'page.html',
+        content: 'unsafe overwrite',
+        precondition: { mustNotExist: false },
+      },
+    })).toBe(false);
+    expect(validate({
+      ...base,
+      arguments: {
+        path: 'page.html',
+        content: 'preview',
+        precondition: { mustNotExist: true },
+        dryRun: true,
+      },
+    })).toBe(false);
+    expect(validate({
+      requestId: 'request-write',
+      callId: 'call-write',
+      toolName: 'write_file',
+      targetId: 'target-1',
+      status: 'completed',
+      summary: 'created and verified',
+      data: {
+        written: true,
+        operation: 'create',
+        path: '/workspace/page.html',
+        byteLength: 15,
+        afterSha256: '0'.repeat(64),
+        checkpointId: 'checkpoint-1',
+        verified: true,
+      },
+      artifacts: [],
+      effects: [],
+      truncated: false,
+    }), validator.errorsText(validate.errors)).toBe(true);
+  });
+
   it('reserves every migration flag with an explicit rollback rule', async () => {
     const compatibility = await readFile(
       path.join(protocolRoot, 'terminal-execution-compatibility.md'),
@@ -282,6 +421,11 @@ describe('terminal execution Phase 0 protocol contract', () => {
       targetKinds: ['local', 'remote'],
       retryPolicy: 'reconcileFirst',
       idempotency: 'conditional',
+    });
+    expect(manifest.tools.find(({ name }) => name === 'probe_http')).toMatchObject({
+      targetKinds: ['local', 'remote'],
+      requiredCapabilities: ['network.loopback.http'],
+      retryPolicy: 'never',
     });
   });
 

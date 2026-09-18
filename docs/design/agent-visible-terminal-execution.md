@@ -74,6 +74,14 @@ type AgentSessionPermissionMode =
 | `executionSurface` | shell 命令通过独立执行通道还是绑定终端 PTY 执行 |
 | `permissionMode` | 哪些副作用需要用户审批 |
 
+权限模式的审批语义必须保持一致：
+
+| `permissionMode` | 审批行为 |
+| --- | --- |
+| `requestApproval` | 每个原生工具调用都需要用户确认，包括只读检查 |
+| `scopedAutopilot` | 仅普通 `readOnly` 操作可自动执行；`sensitiveRead`、`stateChange`、`destructive` 和 `externalSideEffect` 均需确认 |
+| `operator` | 原生策略允许的操作无需逐次确认，但不会扩大冻结目标、工具范围或网络范围 |
+
 选择 `boundTerminal` 不得自动提高权限，也不得绕过现有风险分类和审批。
 
 ### 5.2 Session 级冻结
@@ -107,7 +115,7 @@ Agent 正在操作此终端                         [中断并接管]
 
 ### 6.1 当前公开工具使用独立执行通道
 
-`run_terminal_command` 在 native adapter 中被归一化为 `exec_command`，并固定写入：
+`run_terminal_command` 在 native adapter 中被归一化为 `exec_command`。普通前台命令写入：
 
 ```json
 {
@@ -118,6 +126,11 @@ Agent 正在操作此终端                         [中断并接管]
 ```
 
 因此当前命令不会进入已绑定的交互式终端。
+
+当模型显式传入 `background: true` 时，adapter 强制选择 Direct，返回绑定
+Session、任务和目标的 `proc-*` 句柄。后续输入、等待和终止分别通过
+`write_process_input`、`wait_process` 与 `kill_process` 完成；后台服务不得依赖
+shell 的 `$!`，并必须在验证结束后显式清理。
 
 ### 6.2 已存在 PTY 单命令协议
 
@@ -242,7 +255,7 @@ executionSurface == boundTerminal
 
 其他工具保持当前原生实现：
 
-- `read_file`、`list_directory`、`search_text`、`apply_patch` 继续使用结构化文件通道；
+- `read_file`、`list_directory`、`search_text`、`write_file`、`apply_patch` 继续使用结构化文件通道；
 - SFTP 和 MCP 继续使用各自的原生执行通道；
 - UI 可以在 Agent 时间线展示这些操作，但不得在终端中制造虚假的 shell 输入。
 

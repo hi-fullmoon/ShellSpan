@@ -77,6 +77,15 @@ and supersedes only the current macOS status, not the historical results below.
   `contentPersisted = false`; turn/session boundaries and restart discard the
   transient value. Raw terminal input and wait-search text is also excluded
   from durable Assistant, ToolCall, approval, replay, and result records.
+  Later model-history projection uses schema-valid omission markers for that
+  text and strips persistence-only receipt fields before adapter serialization.
+  While approval is pending, the UI may retrieve the exact arguments only from
+  the identity-bound in-memory pending-call registry so the user can review the
+  action; that preview never enters durable events or ordinary logs. Approval
+  remains disabled until the preview is loaded successfully, and control
+  characters are shown in an unambiguous escaped representation. Restart
+  cancels a requested or authorized-but-undispatched ephemeral call because its
+  private arguments are intentionally unavailable for reconstruction.
 - The rollout flag accepts the same trusted `1`/`true`/`on` and
   `0`/`false`/`off` values as prior backend flags. Absence is off.
 

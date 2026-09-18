@@ -76,11 +76,12 @@ pub(crate) fn assess_effect_native(
 
 fn classify_command_effect(command: &str) -> AgentEffectKindNative {
     let normalized = command.trim().to_ascii_lowercase();
-    let executable = normalized
-        .split_ascii_whitespace()
-        .next()
-        .unwrap_or_default()
-        .trim_matches(|character: char| matches!(character, '&' | '(' | ')' | ';'));
+    let executable = command_word_name(
+        normalized
+            .split_ascii_whitespace()
+            .next()
+            .unwrap_or_default(),
+    );
 
     const DESTRUCTIVE: [&str; 15] = [
         "rm",
@@ -142,21 +143,11 @@ fn classify_command_effect(command: &str) -> AgentEffectKindNative {
         "printf",
     ];
 
-    let command_words = normalized
-        .split(|character: char| {
-            character.is_ascii_whitespace()
-                || matches!(character, ';' | '|' | '&' | '(' | ')' | '{' | '}')
-        })
-        .map(|word| {
-            word.trim_matches(|character: char| {
-                matches!(character, '\'' | '"' | '`' | '$' | '.' | '/' | '\\')
-            })
-        })
-        .filter(|word| !word.is_empty())
-        .collect::<Vec<_>>();
-
-    if DESTRUCTIVE.contains(&executable)
-        || command_words.iter().any(|word| DESTRUCTIVE.contains(word))
+    let executable_names = command_executable_names(command);
+    if DESTRUCTIVE.contains(&executable.as_str())
+        || executable_names
+            .iter()
+            .any(|word| DESTRUCTIVE.contains(&word.as_str()))
         || normalized.contains(" remove-item ")
         || normalized.contains("clear-disk")
         || normalized.contains("initialize-disk")
@@ -171,15 +162,19 @@ fn classify_command_effect(command: &str) -> AgentEffectKindNative {
         AgentEffectKindNative::ReadOnly
     } else if is_plain_windows_discovery_command(&normalized) {
         AgentEffectKindNative::ReadOnly
-    } else if EXTERNAL.contains(&executable)
-        || command_words.iter().any(|word| EXTERNAL.contains(word))
-        || normalized.contains("http://")
-        || normalized.contains("https://")
-    {
+    } else if command_has_unscoped_inline_network_authority(&normalized, &executable_names) {
         AgentEffectKindNative::ExternalSideEffect
-    } else if SENSITIVE_READ.contains(&executable) && is_simple_shell_command(&normalized) {
+    } else if (SENSITIVE_READ.contains(&executable.as_str())
+        || executable_names
+            .iter()
+            .any(|word| SENSITIVE_READ.contains(&word.as_str())))
+        && is_simple_shell_command(&normalized)
+    {
         AgentEffectKindNative::SensitiveRead
-    } else if READ_ONLY.contains(&executable)
+    } else if (READ_ONLY.contains(&executable.as_str())
+        || executable_names
+            .iter()
+            .any(|word| READ_ONLY.contains(&word.as_str())))
         && is_simple_shell_command(&normalized)
         && !normalized.contains("restart")
         && !normalized.contains(" start ")
@@ -188,10 +183,200 @@ fn classify_command_effect(command: &str) -> AgentEffectKindNative {
         && !normalized.contains(" disable")
     {
         AgentEffectKindNative::ReadOnly
+    } else if EXTERNAL.contains(&executable.as_str())
+        || executable_names
+            .iter()
+            .any(|word| EXTERNAL.contains(&word.as_str()))
+        || normalized.contains("http://")
+        || normalized.contains("https://")
+    {
+        AgentEffectKindNative::ExternalSideEffect
     } else {
         // Unknown commands are never treated as reads. Native approval must
         // explicitly cover their state-changing effect before dispatch.
         AgentEffectKindNative::StateChange
+    }
+}
+
+fn command_word_name(word: &str) -> String {
+    let unquoted = word.trim_matches(|character: char| {
+        matches!(
+            character,
+            '\'' | '"' | '`' | '$' | '&' | '(' | ')' | ';' | '.' | '/' | '\\'
+        )
+    });
+    let basename = unquoted
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(unquoted)
+        .to_ascii_lowercase();
+    basename
+        .strip_suffix(".exe")
+        .unwrap_or(&basename)
+        .to_string()
+}
+
+fn command_executable_names(command: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for segment in command.split(|character: char| {
+        matches!(
+            character,
+            ';' | '|' | '&' | '(' | ')' | '{' | '}' | '\n' | '\r'
+        )
+    }) {
+        let words = segment
+            .split_ascii_whitespace()
+            .map(|word| {
+                word.trim_matches(|character: char| matches!(character, '\'' | '"' | '`' | '$'))
+            })
+            .filter(|word| !word.is_empty())
+            .collect::<Vec<_>>();
+        if words.is_empty() {
+            continue;
+        }
+        if let Some(index) = segment_executable_index(&words) {
+            let name = command_word_name(words[index]);
+            if !name.is_empty() {
+                names.push(name);
+            }
+        }
+        for (index, word) in words.iter().enumerate() {
+            let marker = word.to_ascii_lowercase();
+            let nested = if marker == "-exec" || marker == "-execdir" {
+                words.get(index + 1)
+            } else if marker == "-c"
+                && index > 0
+                && matches!(
+                    command_word_name(words[index - 1]).as_str(),
+                    "sh" | "bash" | "zsh" | "dash" | "ksh" | "cmd" | "powershell" | "pwsh"
+                )
+            {
+                words.get(index + 1)
+            } else {
+                None
+            };
+            if let Some(nested) = nested {
+                let name = command_word_name(nested);
+                if !name.is_empty() {
+                    names.push(name);
+                }
+            }
+        }
+    }
+    names
+}
+
+fn command_has_unscoped_inline_network_authority(
+    command: &str,
+    executable_names: &[String],
+) -> bool {
+    if command.contains("/dev/tcp/") || command.contains("/dev/udp/") {
+        return true;
+    }
+    let words = command
+        .split_ascii_whitespace()
+        .map(|word| word.trim_matches(|character: char| matches!(character, '\'' | '"')))
+        .collect::<Vec<_>>();
+    let has_flag = |flags: &[&str]| {
+        words.iter().any(|word| {
+            flags
+                .iter()
+                .any(|flag| word == flag || word.starts_with(&format!("{flag}=")))
+        })
+    };
+    executable_names.iter().any(|name| match name.as_str() {
+        "node" | "nodejs" | "bun" => has_flag(&["-e", "--eval", "-p", "--print"]),
+        "python" | "python2" | "python3" | "pypy" | "pypy3" => has_flag(&["-c"]),
+        "ruby" | "perl" | "lua" | "rscript" | "osascript" => has_flag(&["-e"]),
+        "php" => has_flag(&["-r"]),
+        "deno" => words.iter().any(|word| *word == "eval"),
+        "powershell" | "pwsh" => has_flag(&["-c", "-command", "-e", "-encodedcommand"]),
+        _ => false,
+    })
+}
+
+fn segment_executable_index(words: &[&str]) -> Option<usize> {
+    const WRAPPERS: &[&str] = &[
+        "command", "doas", "env", "exec", "nice", "nohup", "sudo", "time", "timeout", "watch",
+        "xargs",
+    ];
+    const SHELL_KEYWORDS: &[&str] = &["do", "else", "then"];
+    let mut index = 0;
+    loop {
+        let word = *words.get(index)?;
+        let name = command_word_name(word);
+        if SHELL_KEYWORDS.contains(&name.as_str()) {
+            index += 1;
+            continue;
+        }
+        if !WRAPPERS.contains(&name.as_str()) {
+            return Some(index);
+        }
+        let wrapper = name;
+        index += 1;
+        while let Some(candidate) = words.get(index) {
+            let normalized = candidate.to_ascii_lowercase();
+            if wrapper_option_takes_value(&wrapper, candidate) {
+                index += 2;
+            } else if normalized.starts_with('-') || normalized.contains('=') {
+                index += 1;
+            } else {
+                break;
+            }
+        }
+        if wrapper == "timeout" && words.get(index).is_some() {
+            index += 1;
+        }
+    }
+}
+
+fn wrapper_option_takes_value(wrapper: &str, option: &str) -> bool {
+    let long = option.to_ascii_lowercase();
+    match wrapper {
+        "sudo" | "doas" => matches!(
+            long.as_str(),
+            "-c" | "--chdir"
+                | "--close-from"
+                | "--command-timeout"
+                | "-g"
+                | "--group"
+                | "-h"
+                | "--host"
+                | "-p"
+                | "--prompt"
+                | "-r"
+                | "--role"
+                | "-t"
+                | "--type"
+                | "-u"
+                | "--user"
+        ),
+        "env" => {
+            matches!(option, "-C" | "-S" | "-u")
+                || matches!(long.as_str(), "--chdir" | "--split-string" | "--unset")
+        }
+        "nice" => option == "-n" || long == "--adjustment",
+        "timeout" => {
+            matches!(option, "-k" | "-s") || matches!(long.as_str(), "--kill-after" | "--signal")
+        }
+        "watch" => option == "-n" || long == "--interval",
+        "xargs" => {
+            matches!(
+                option,
+                "-a" | "-d" | "-E" | "-I" | "-L" | "-n" | "-P" | "-s"
+            ) || matches!(
+                long.as_str(),
+                "--arg-file"
+                    | "--delimiter"
+                    | "--eof"
+                    | "--replace"
+                    | "--max-lines"
+                    | "--max-args"
+                    | "--max-procs"
+                    | "--max-chars"
+            )
+        }
+        _ => false,
     }
 }
 
@@ -322,6 +507,25 @@ mod tests {
             classify_command_effect("curl https://example.test"),
             AgentEffectKindNative::ExternalSideEffect
         );
+        for command in [
+            "node -e \"require('http').get({host:'127.0.0.1',port:3000})\"",
+            "python3 -c \"import socket; socket.create_connection(('127.0.0.1', 3000))\"",
+            "bash -lc 'cat </dev/tcp/127.0.0.1/3000'",
+        ] {
+            assert_eq!(
+                classify_command_effect(command),
+                AgentEffectKindNative::ExternalSideEffect,
+                "{command} must not bypass structured network scope"
+            );
+        }
+        assert_eq!(
+            classify_command_effect("node --check server.js"),
+            AgentEffectKindNative::StateChange
+        );
+        assert_eq!(
+            classify_command_effect("node server.js"),
+            AgentEffectKindNative::StateChange
+        );
         assert_eq!(
             classify_command_effect("custom-maintenance-tool"),
             AgentEffectKindNative::StateChange
@@ -357,8 +561,12 @@ mod tests {
     fn security_sensitive_command_effects_require_direct_lifecycle_evidence() {
         for command in [
             "cat ~/.ssh/id_ed25519",
+            "/bin/cat ~/.ssh/id_ed25519",
             "rm -rf /tmp/example",
+            "/bin/rm -rf /tmp/example",
             "curl https://example.test",
+            "/usr/bin/curl 127.0.0.1:18765",
+            r"C:\Windows\System32\format.com D:",
         ] {
             assert!(
                 command_requires_direct_lifecycle_native(command),
@@ -369,6 +577,69 @@ mod tests {
             assert!(
                 !command_requires_direct_lifecycle_native(command),
                 "{command} must remain eligible for the stateful visible shell"
+            );
+        }
+    }
+
+    #[test]
+    fn absolute_executable_paths_preserve_effect_classification() {
+        for (command, expected) in [
+            ("/bin/ls -la", AgentEffectKindNative::ReadOnly),
+            ("/bin/cat /tmp/value", AgentEffectKindNative::SensitiveRead),
+            ("/bin/rm -rf /tmp/value", AgentEffectKindNative::Destructive),
+            (
+                "/usr/bin/curl 127.0.0.1:18765",
+                AgentEffectKindNative::ExternalSideEffect,
+            ),
+            (
+                r"C:\Windows\System32\format.com D:",
+                AgentEffectKindNative::Destructive,
+            ),
+        ] {
+            assert_eq!(
+                classify_command_effect(command),
+                expected,
+                "{command} must keep its basename policy"
+            );
+        }
+    }
+
+    #[test]
+    fn policy_names_ignore_argument_basenames_but_follow_command_entry_points() {
+        for command in [
+            "cat /tmp/curl",
+            "ls /opt/docker",
+            "echo /tmp/rm",
+            "printf https://example.test",
+            "echo curl",
+            "printf rm",
+            "grep docker config.txt",
+        ] {
+            assert_ne!(
+                classify_command_effect(command),
+                AgentEffectKindNative::ExternalSideEffect,
+                "{command} must not turn an argument into network authority"
+            );
+            assert_ne!(
+                classify_command_effect(command),
+                AgentEffectKindNative::Destructive,
+                "{command} must not turn an argument into a destructive executable"
+            );
+        }
+        for command in [
+            "sudo /bin/rm -rf /tmp/value",
+            "env DEMO=1 /usr/bin/curl 127.0.0.1:18765",
+            "sh -c '/bin/rm -rf /tmp/value'",
+            "find /tmp -exec /bin/rm {} ;",
+            "xargs -n 1 rm",
+            "xargs -p rm",
+            "xargs -P 2 rm",
+            "env -i /usr/bin/curl 127.0.0.1:18765",
+            "timeout 5 /bin/rm -rf /tmp/value",
+        ] {
+            assert!(
+                command_requires_direct_lifecycle_native(command),
+                "{command} must retain a security-sensitive executable boundary"
             );
         }
     }

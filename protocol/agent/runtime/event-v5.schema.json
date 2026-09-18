@@ -841,6 +841,9 @@
                         }
                       }
                     }
+                  },
+                  {
+                    "$ref": "#/$defs/replayArtifact"
                   }
                 ]
               }
@@ -1553,6 +1556,64 @@
           }
         }
       ]
+    },
+    "replayArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "storage",
+        "artifact"
+      ],
+      "properties": {
+        "storage": {
+          "const": "artifact"
+        },
+        "artifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifactId",
+            "kind",
+            "title",
+            "mediaType",
+            "sha256",
+            "sizeBytes",
+            "sensitivity",
+            "createdAtUnixMs"
+          ],
+          "properties": {
+            "artifactId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            },
+            "kind": {
+              "const": "assistant-replay"
+            },
+            "title": {
+              "const": "Private assistant replay metadata"
+            },
+            "mediaType": {
+              "const": "application/vnd.shellspan.agent-replay+zstd"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "sizeBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "sensitivity": {
+              "const": "internal"
+            },
+            "createdAtUnixMs": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
     },
     "modelDefinition": {
       "type": "object",

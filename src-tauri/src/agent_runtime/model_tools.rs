@@ -12,17 +12,76 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "run_terminal_command".into(),
-            description: "Request one command on the frozen host. A bound terminal preserves cooperative interactive-shell state, but ShellSpan routes sensitive, destructive, or external effects through Direct execution. Set lifecycleTrust to directRequired for adversarial or untrusted scripts, secrets, authorization checks, or any command that needs process-isolated lifecycle evidence. ShellSpan decides approval before dispatch; visible-terminal lifecycle is never security evidence or a sandbox.".into(),
+            description: "Run one single-line frozen-host command; split multi-stage work across tool calls. Set background=true to receive a native processHandle, then use wait_process or kill_process and always clean up long-running services. command/explanation limits are 8192/2048 UTF-8 bytes. Use probe_http for target-loopback HTTP instead of curl, wget, or an embedded network client. Use write_file up to 32 KiB or bounded apply_patch increments. Child Agents share limits; delegation does not bypass them. Set lifecycleTrust=directRequired for untrusted or sensitive lifecycle evidence. visible-terminal lifecycle is never security evidence or a sandbox.".into(),
             input_schema: object_schema(
                 &["command", "explanation"],
                 json!({
-                    "command": bounded_string(8192),
+                    "command": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 8192,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F]*$"
+                    },
                     "explanation": bounded_string(2048),
                     "lifecycleTrust": {
                         "type": "string",
                         "enum": ["cooperative", "directRequired"],
                         "default": "cooperative"
-                    }
+                    },
+                    "background": { "type": "boolean", "default": false },
+                    "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 3600000 }
+                }),
+            ),
+        },
+        ModelToolDefinition {
+            name: "write_process_input".into(),
+            description: "Write bounded stdin to a background process returned by run_terminal_command; set close=true to close stdin.".into(),
+            input_schema: object_schema(
+                &["processHandle", "input"],
+                json!({
+                    "processHandle": process_handle_schema(),
+                    "input": { "type": "string", "maxLength": 65536 },
+                    "close": { "type": "boolean" }
+                }),
+            ),
+        },
+        ModelToolDefinition {
+            name: "wait_process".into(),
+            description: "Wait boundedly for a background process and return its current lifecycle and output.".into(),
+            input_schema: object_schema(
+                &["processHandle"],
+                json!({
+                    "processHandle": process_handle_schema(),
+                    "timeoutMs": { "type": "integer", "minimum": 0, "maximum": 3600000 },
+                    "maxOutputBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 }
+                }),
+            ),
+        },
+        ModelToolDefinition {
+            name: "kill_process".into(),
+            description: "Terminate a background process returned by run_terminal_command and wait boundedly for its terminal state.".into(),
+            input_schema: object_schema(
+                &["processHandle", "signal"],
+                json!({
+                    "processHandle": process_handle_schema(),
+                    "signal": { "type": "string", "enum": ["interrupt", "terminate", "kill"] },
+                    "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
+                }),
+            ),
+        },
+        ModelToolDefinition {
+            name: "probe_http".into(),
+            description: "Send a bounded HTTP request to the frozen target's 127.0.0.1 only, including through the authenticated SSH target when remote. Proxies are ignored, redirects are not followed, and arbitrary headers are unavailable. Prefer this over network shell commands.".into(),
+            input_schema: object_schema(
+                &["method", "port", "path"],
+                json!({
+                    "method": { "type": "string", "enum": ["get", "head", "post", "put", "patch", "delete"] },
+                    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+                    "path": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F\\u007F]*$" },
+                    "body": { "type": "string", "maxLength": 65536 },
+                    "contentType": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[\\u0020-\\u007E]+$" },
+                    "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 30000 },
+                    "maxBytes": { "type": "integer", "minimum": 1, "maximum": 131072 }
                 }),
             ),
         },
@@ -70,8 +129,25 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
             ),
         },
         ModelToolDefinition {
+            name: "write_file".into(),
+            description: "Atomically create/replace UTF-8 up to 32 KiB. New: {mustNotExist:true}; replace: read_file first, then use its SHA-256. Empty content is valid; use apply_patch for increments.".into(),
+            input_schema: object_schema(
+                &["path", "content", "precondition"],
+                json!({
+                    "path": bounded_string(4096),
+                    "content": { "type": "string", "maxLength": super::MAX_WRITE_FILE_CONTENT_BYTES },
+                    "precondition": {
+                        "oneOf": [
+                            object_schema(&["mustNotExist"], json!({ "mustNotExist": { "const": true } })),
+                            object_schema(&["sha256"], json!({ "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }))
+                        ]
+                    }
+                }),
+            ),
+        },
+        ModelToolDefinition {
             name: "apply_patch".into(),
-            description: "Apply an exact digest-bound patch on the frozen target through ShellSpan's native runtime.".into(),
+            description: "Digest-bound incremental patch for one existing UTF-8 file. Use write_file to create or replace.".into(),
             input_schema: object_schema(
                 &["patch", "preconditions"],
                 json!({
@@ -122,11 +198,15 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "update_plan".into(),
-            description: "Replace the primary Session task plan with the next monotonic version. This records a Session event and never enters the native execution kernel. evidenceRefs may contain only exact IDs of already committed task evidence; omit them for evidence that does not exist yet.".into(),
+            description: "Replace the complete task plan. Use for multi-step work; send all steps, keep one inProgress, and mark a step completed as soon as it is done. planVersion is an optional next-version guard. evidenceRefs must name committed evidence. Records a Session event; never enters the native kernel.".into(),
             input_schema: object_schema(
-                &["planVersion", "steps"],
+                &["steps"],
                 json!({
-                    "planVersion": { "type": "integer", "minimum": 1 },
+                    "planVersion": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional next-version concurrency guard; omit to let ShellSpan assign it."
+                    },
                     "explanation": bounded_string(4096),
                     "steps": {
                         "type": "array",
@@ -344,6 +424,13 @@ fn identifier_schema() -> Value {
     })
 }
 
+fn process_handle_schema() -> Value {
+    json!({
+        "type": "string",
+        "pattern": "^proc-[0-9a-f]{32}$"
+    })
+}
+
 fn evidence_reference_schema() -> Value {
     json!({
         "type": "string",
@@ -373,9 +460,99 @@ mod tests {
             .into_iter()
             .find(|tool| tool.name == "update_plan")
             .expect("update_plan tool");
+        assert_eq!(tool.input_schema["required"], json!(["steps"]));
+        assert!(tool
+            .description
+            .contains("mark a step completed as soon as it is done"));
         let step = &tool.input_schema["properties"]["steps"]["items"]["properties"];
         assert_eq!(step["id"]["pattern"], "^[A-Za-z0-9_-]+$");
         assert_eq!(step["evidenceRefs"]["items"]["pattern"], "^[A-Za-z0-9_-]+$");
+    }
+
+    #[test]
+    fn file_write_guidance_keeps_large_content_out_of_terminal_commands() {
+        let tools = default_model_tools();
+        let terminal = tools
+            .iter()
+            .find(|tool| tool.name == "run_terminal_command")
+            .expect("terminal tool");
+        assert!(terminal.description.contains("8192"));
+        assert!(terminal.description.contains("UTF-8 bytes"));
+        assert!(terminal.description.contains("Use write_file"));
+        assert!(terminal.description.contains("delegation does not bypass"));
+        assert!(terminal.description.contains("single-line"));
+        assert!(terminal.description.contains("Use probe_http"));
+        assert!(terminal.description.contains("processHandle"));
+        assert!(terminal.description.contains("always clean up"));
+        assert_eq!(
+            terminal.input_schema["properties"]["command"]["pattern"],
+            "^[^\\u0000-\\u001F\\u007F]*$"
+        );
+        assert_eq!(
+            terminal.input_schema["properties"]["background"]["default"],
+            false
+        );
+
+        for name in ["write_process_input", "wait_process", "kill_process"] {
+            let process_tool = tools
+                .iter()
+                .find(|tool| tool.name == name)
+                .unwrap_or_else(|| panic!("missing {name}"));
+            assert_eq!(
+                process_tool.input_schema["properties"]["processHandle"]["pattern"],
+                "^proc-[0-9a-f]{32}$"
+            );
+        }
+
+        let write = tools
+            .iter()
+            .find(|tool| tool.name == "write_file")
+            .expect("write tool");
+        assert!(write.description.contains("mustNotExist"));
+        assert!(write.description.contains("read_file first"));
+        assert_eq!(
+            write.input_schema["required"],
+            json!(["path", "content", "precondition"])
+        );
+        assert_eq!(
+            write.input_schema["properties"]["content"]["maxLength"],
+            crate::agent_runtime::MAX_WRITE_FILE_CONTENT_BYTES
+        );
+        assert!(write.input_schema["properties"].get("dryRun").is_none());
+        assert_eq!(
+            write.input_schema["properties"]["precondition"]["oneOf"][0]["properties"]
+                ["mustNotExist"]["const"],
+            true
+        );
+
+        let patch = tools
+            .iter()
+            .find(|tool| tool.name == "apply_patch")
+            .expect("patch tool");
+        assert!(patch.description.contains("existing UTF-8 file"));
+        assert!(patch.description.contains("Use write_file"));
+    }
+
+    #[test]
+    fn http_probe_schema_exposes_only_bounded_target_loopback_request_fields() {
+        let tool = default_model_tools()
+            .into_iter()
+            .find(|tool| tool.name == "probe_http")
+            .expect("probe_http tool");
+        assert!(tool.description.contains("frozen target's 127.0.0.1"));
+        assert!(tool.description.contains("authenticated SSH target"));
+        assert!(tool.description.contains("redirects are not followed"));
+        assert_eq!(
+            tool.input_schema["required"],
+            json!(["method", "port", "path"])
+        );
+        assert_eq!(
+            tool.input_schema["properties"]["method"]["enum"],
+            json!(["get", "head", "post", "put", "patch", "delete"])
+        );
+        assert!(tool.input_schema["properties"].get("url").is_none());
+        assert!(tool.input_schema["properties"].get("headers").is_none());
+        assert_eq!(tool.input_schema["properties"]["body"]["maxLength"], 65_536);
     }
 
     #[test]

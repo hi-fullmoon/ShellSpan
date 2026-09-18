@@ -17,6 +17,7 @@ use crate::agent_runtime::{
     AgentToolCallNative, AgentToolTargetNative, ApplyPatchArgumentsNative, FileEncodingNative,
     ListDirectoryArgumentsNative, ReadFileArgumentsNative, SearchModeNative,
     SearchTextArgumentsNative, TransferDirectionNative, TransferFileArgumentsNative,
+    WriteFileArgumentsNative, WriteFilePreconditionNative, MAX_WRITE_FILE_CONTENT_BYTES,
 };
 use crate::connection::connect_sftp;
 use crate::db::Database;
@@ -35,6 +36,7 @@ const MAX_SEARCH_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_SEARCH_LINE_BYTES: usize = 4_096;
 const DEFAULT_TRANSFER_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TRANSFER_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_EXACT_DIFF_BYTES: usize = 240 * 1024;
 
 type ActiveFileOperationsNative = Arc<Mutex<HashMap<(String, String), Arc<AtomicBool>>>>;
 
@@ -139,6 +141,33 @@ pub(super) fn preview_file_call_native(
     known_hosts_path: &Path,
 ) -> Result<AgentCallPreviewNative, String> {
     match call.tool_name.as_str() {
+        "write_file" => {
+            let arguments: WriteFileArgumentsNative =
+                serde_json::from_value(call.arguments.clone())
+                    .map_err(|error| format!("invalid write_file arguments: {error}"))?;
+            let preview = compute_write_preview(
+                &call.target,
+                &arguments,
+                database,
+                credentials,
+                known_hosts_path,
+            )?;
+            Ok(AgentCallPreviewNative {
+                tool_name: call.tool_name.clone(),
+                target_id: call.target.target_id().to_string(),
+                summary: format!(
+                    "{} the exact reviewed UTF-8 file {}.",
+                    if preview.before.is_some() {
+                        "Replace"
+                    } else {
+                        "Create"
+                    },
+                    preview.path
+                ),
+                path: Some(preview.path),
+                diff: preview.diff,
+            })
+        }
         "apply_patch" => {
             let arguments: ApplyPatchArgumentsNative =
                 serde_json::from_value(call.arguments.clone())
@@ -200,6 +229,7 @@ pub(super) fn execute_file_tool_native(
         "read_file" => execute_read_file(&context, &operation),
         "list_directory" => execute_list_directory(&context, &operation),
         "search_text" => execute_search_text(&context, &operation),
+        "write_file" => execute_write_file(&context, &operation),
         "apply_patch" => execute_apply_patch(&context, &operation),
         "transfer_file" => execute_transfer_file(&context, &operation),
         _ => Err("tool has no native M2 file driver".into()),
@@ -387,6 +417,72 @@ fn execute_search_text(
         }),
         truncated,
         paths: vec![root],
+    })
+}
+
+fn execute_write_file(
+    context: &FileExecutionContextNative<'_>,
+    operation: &FileOperationGuardNative,
+) -> Result<FileToolOutputNative, String> {
+    operation.ensure_active()?;
+    let arguments: WriteFileArgumentsNative =
+        serde_json::from_value(context.call.arguments.clone())
+            .map_err(|error| format!("invalid write_file arguments: {error}"))?;
+    let preview = compute_write_preview(
+        &context.call.target,
+        &arguments,
+        context.database,
+        context.credentials,
+        context.known_hosts_path,
+    )?;
+    let operation_name = if preview.before.is_some() {
+        "replace"
+    } else {
+        "create"
+    };
+    let checkpoint = checkpoint_target_file(
+        context,
+        &preview.path,
+        preview.before.as_deref(),
+        preview.metadata.clone(),
+    )?;
+    operation.ensure_active()?;
+    write_target_file(
+        &context.call.target,
+        &preview.path,
+        &preview.after,
+        preview.before_sha256.as_deref(),
+        context.database,
+        context.credentials,
+        context.known_hosts_path,
+        operation,
+    )?;
+    let (_, verified, _) = read_target_file(
+        &context.call.target,
+        &preview.path,
+        context.database,
+        context.credentials,
+        context.known_hosts_path,
+        operation,
+        MAX_FILE_BYTES,
+    )?;
+    if sha256_hex(&verified) != preview.after_sha256 || verified != preview.after {
+        return Err("write_file write verification failed".into());
+    }
+    Ok(FileToolOutputNative {
+        summary: "Wrote, re-read, and verified the exact UTF-8 file.".into(),
+        data: json!({
+            "written": true,
+            "operation": operation_name,
+            "path": preview.path,
+            "byteLength": preview.after.len(),
+            "beforeSha256": preview.before_sha256,
+            "afterSha256": preview.after_sha256,
+            "checkpointId": checkpoint.checkpoint_id,
+            "verified": true
+        }),
+        truncated: false,
+        paths: vec![preview.path],
     })
 }
 
@@ -621,6 +717,96 @@ fn validate_overwrite_precondition(
 }
 
 #[derive(Clone)]
+struct WritePreviewNative {
+    path: String,
+    before: Option<Vec<u8>>,
+    after: Vec<u8>,
+    before_sha256: Option<String>,
+    after_sha256: String,
+    diff: Option<String>,
+    metadata: CheckpointOriginalMetadataNative,
+}
+
+fn compute_write_preview(
+    target: &AgentToolTargetNative,
+    arguments: &WriteFileArgumentsNative,
+    database: &Database,
+    credentials: &CredentialManager,
+    known_hosts_path: &Path,
+) -> Result<WritePreviewNative, String> {
+    let operation_registry = FileOperationRegistryNative::default();
+    let operation = operation_registry.begin("preview", "write-preview")?;
+    let (path, before, metadata) = read_write_destination(
+        target,
+        &arguments.path,
+        database,
+        credentials,
+        known_hosts_path,
+        &operation,
+    )?;
+    let before_sha256 = before.as_deref().map(sha256_hex);
+    match &arguments.precondition {
+        WriteFilePreconditionNative::MustNotExist(precondition) => {
+            if !precondition.must_not_exist {
+                return Err("write_file mustNotExist precondition must be true".into());
+            }
+            if before.is_some() {
+                return Err("write_file destination already exists".into());
+            }
+        }
+        WriteFilePreconditionNative::MatchSha256(precondition) => {
+            let Some(actual) = before_sha256.as_deref() else {
+                return Err("write_file destination does not exist".into());
+            };
+            if actual != precondition.sha256 {
+                return Err("write_file digest precondition failed".into());
+            }
+        }
+    }
+    if !write_file_content_is_valid(&arguments.content) {
+        return Err("write_file content failed native text bounds".into());
+    }
+    let before_text = match before.as_deref() {
+        Some(bytes) => std::str::from_utf8(bytes)
+            .map_err(|_| "write_file only replaces UTF-8 text files".to_string())?,
+        None => "",
+    };
+    if before.is_some() && before_text == arguments.content {
+        return Err("write_file produces no change".into());
+    }
+    let after = arguments.content.as_bytes().to_vec();
+    let exact_diff = diffy::create_patch(before_text, &arguments.content).to_string();
+    let diff = if exact_diff.trim().is_empty() {
+        if before.is_none() && after.is_empty() {
+            None
+        } else {
+            return Err("write_file produces no change".into());
+        }
+    } else {
+        if exact_diff.len() > MAX_EXACT_DIFF_BYTES {
+            return Err("write_file exact diff exceeds the native output limit".into());
+        }
+        Some(exact_diff)
+    };
+    Ok(WritePreviewNative {
+        path,
+        before,
+        after_sha256: sha256_hex(&after),
+        after,
+        before_sha256,
+        diff,
+        metadata,
+    })
+}
+
+fn write_file_content_is_valid(value: &str) -> bool {
+    value.len() <= MAX_WRITE_FILE_CONTENT_BYTES
+        && !value
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+}
+
+#[derive(Clone)]
 struct PatchPreviewNative {
     path: String,
     before: Vec<u8>,
@@ -671,7 +857,7 @@ fn compute_patch_preview(
     if diff.trim().is_empty() {
         return Err("apply_patch produces no change".into());
     }
-    if diff.len() > 240 * 1024 {
+    if diff.len() > MAX_EXACT_DIFF_BYTES {
         return Err("apply_patch exact diff exceeds the native output limit".into());
     }
     Ok(PatchPreviewNative {
@@ -715,6 +901,59 @@ fn checkpoint_target_file_with_kind(
         original,
         metadata,
     )
+}
+
+fn read_write_destination(
+    target: &AgentToolTargetNative,
+    requested_path: &str,
+    database: &Database,
+    credentials: &CredentialManager,
+    known_hosts_path: &Path,
+    operation: &FileOperationGuardNative,
+) -> Result<(String, Option<Vec<u8>>, CheckpointOriginalMetadataNative), String> {
+    match target {
+        AgentToolTargetNative::Local {
+            cwd: Some(root), ..
+        } => {
+            let root = canonical_local_root(Path::new(root))?;
+            let path = resolve_local_destination(&root, requested_path)?;
+            let before = read_local_optional(&path, MAX_FILE_BYTES, operation)?;
+            let metadata = local_metadata(&path)?;
+            Ok((path.to_string_lossy().to_string(), before, metadata))
+        }
+        AgentToolTargetNative::Remote {
+            root_path: Some(root),
+            ..
+        } => {
+            let connection = connection_for_remote_target(target, database, credentials)?;
+            let connected = connect_sftp(&connection, None, Some(known_hosts_path))
+                .map_err(|error| format!("native SFTP connection failed: {error:?}"))?;
+            let connected = connected
+                .lock()
+                .map_err(|_| "native SFTP connection is unavailable".to_string())?;
+            let root = resolve_remote_root(&connected.sftp, root)?;
+            let path = resolve_remote_path(&connected.sftp, &root, requested_path, true)?;
+            let metadata = match connected.sftp.lstat(Path::new(&path)) {
+                Ok(stat) => CheckpointOriginalMetadataNative {
+                    permissions: stat.perm,
+                    modified_unix_ms: stat.mtime.map(|value| value.saturating_mul(1_000)),
+                },
+                Err(error) if is_sftp_missing(&error) => {
+                    CheckpointOriginalMetadataNative::default()
+                }
+                Err(error) => return Err(format!("failed to inspect remote file: {error}")),
+            };
+            let before = read_remote_optional(&connected.sftp, &path, MAX_FILE_BYTES, operation)?;
+            Ok((path, before, metadata))
+        }
+        AgentToolTargetNative::Local { cwd: None, .. } => {
+            Err("local file tools require a frozen cwd root".into())
+        }
+        AgentToolTargetNative::Remote {
+            root_path: None, ..
+        } => Err("remote file tools require a frozen rootPath".into()),
+        _ => Err("file tool requires a local or remote target".into()),
+    }
 }
 
 fn read_target_file(
@@ -1913,5 +2152,192 @@ mod tests {
         )
         .unwrap();
         assert_eq!(fs::read(path).unwrap(), b"after");
+    }
+
+    #[test]
+    fn write_file_creates_and_replaces_large_utf8_content_with_exact_preconditions() {
+        let workspace = tempfile::tempdir().unwrap();
+        let runtime_root = tempfile::tempdir().unwrap();
+        let database = Database::open(&runtime_root.path().join("fixture.db")).unwrap();
+        let credentials = CredentialManager::in_memory_for_tests();
+        let known_hosts_path = runtime_root.path().join("known_hosts");
+        let checkpoints = CheckpointStoreNative::default();
+        let operations = FileOperationRegistryNative::default();
+        let target = AgentToolTargetNative::Local {
+            target_id: "local-target".into(),
+            session_id: "terminal".into(),
+            cwd: Some(workspace.path().to_string_lossy().to_string()),
+        };
+        let large_content = format!("<!doctype html>\n{}", "界".repeat(3_000));
+        assert!(large_content.len() > 8_192);
+        let create = AgentToolCallNative {
+            request_id: "request".into(),
+            call_id: "create".into(),
+            tool_name: "write_file".into(),
+            arguments: json!({
+                "path": "cool-css-effect.html",
+                "content": large_content,
+                "precondition": { "mustNotExist": true }
+            }),
+            target: target.clone(),
+            capability_id: "capability".into(),
+        };
+        let created = execute_file_tool_native(FileExecutionContextNative {
+            task_id: "task",
+            call: &create,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &known_hosts_path,
+            checkpoint_root: runtime_root.path(),
+            checkpoints: &checkpoints,
+            operations: &operations,
+        })
+        .unwrap();
+        let path = workspace.path().join("cool-css-effect.html");
+        let before = fs::read(&path).unwrap();
+        assert_eq!(
+            before.len(),
+            create.arguments["content"].as_str().unwrap().len()
+        );
+        assert_eq!(created.data["operation"], "create");
+        assert_eq!(created.data["verified"], true);
+
+        let replace = AgentToolCallNative {
+            request_id: "request".into(),
+            call_id: "replace".into(),
+            tool_name: "write_file".into(),
+            arguments: json!({
+                "path": "cool-css-effect.html",
+                "content": "replacement",
+                "precondition": { "sha256": sha256_hex(&before) }
+            }),
+            target: target.clone(),
+            capability_id: "capability".into(),
+        };
+        let replaced = execute_file_tool_native(FileExecutionContextNative {
+            task_id: "task",
+            call: &replace,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &known_hosts_path,
+            checkpoint_root: runtime_root.path(),
+            checkpoints: &checkpoints,
+            operations: &operations,
+        })
+        .unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "replacement");
+        assert_eq!(replaced.data["operation"], "replace");
+        assert_eq!(replaced.data["beforeSha256"], sha256_hex(&before));
+        assert!(replaced.data.get("diff").is_none());
+
+        let stale = AgentToolCallNative {
+            request_id: "request".into(),
+            call_id: "stale".into(),
+            tool_name: "write_file".into(),
+            arguments: json!({
+                "path": "cool-css-effect.html",
+                "content": "stale overwrite",
+                "precondition": { "sha256": "0".repeat(64) }
+            }),
+            target: target.clone(),
+            capability_id: "capability".into(),
+        };
+        let error = match execute_file_tool_native(FileExecutionContextNative {
+            task_id: "task",
+            call: &stale,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &known_hosts_path,
+            checkpoint_root: runtime_root.path(),
+            checkpoints: &checkpoints,
+            operations: &operations,
+        }) {
+            Ok(_) => panic!("stale digest unexpectedly replaced an existing file"),
+            Err(error) => error,
+        };
+        assert_eq!(error, "write_file digest precondition failed");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "replacement");
+
+        let empty_create = AgentToolCallNative {
+            request_id: "request".into(),
+            call_id: "empty-create".into(),
+            tool_name: "write_file".into(),
+            arguments: json!({
+                "path": "empty.txt",
+                "content": "",
+                "precondition": { "mustNotExist": true }
+            }),
+            target: target.clone(),
+            capability_id: "capability".into(),
+        };
+        let empty_created = execute_file_tool_native(FileExecutionContextNative {
+            task_id: "task",
+            call: &empty_create,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &known_hosts_path,
+            checkpoint_root: runtime_root.path(),
+            checkpoints: &checkpoints,
+            operations: &operations,
+        })
+        .unwrap();
+        assert_eq!(empty_created.data["written"], true);
+        assert_eq!(empty_created.data["byteLength"], 0);
+        assert_eq!(fs::read(workspace.path().join("empty.txt")).unwrap(), b"");
+
+        let conflict = AgentToolCallNative {
+            request_id: "request".into(),
+            call_id: "conflict".into(),
+            tool_name: "write_file".into(),
+            arguments: json!({
+                "path": "cool-css-effect.html",
+                "content": "must not overwrite",
+                "precondition": { "mustNotExist": true }
+            }),
+            target: target.clone(),
+            capability_id: "capability".into(),
+        };
+        let error = match execute_file_tool_native(FileExecutionContextNative {
+            task_id: "task",
+            call: &conflict,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &known_hosts_path,
+            checkpoint_root: runtime_root.path(),
+            checkpoints: &checkpoints,
+            operations: &operations,
+        }) {
+            Ok(_) => panic!("mustNotExist unexpectedly replaced an existing file"),
+            Err(error) => error,
+        };
+        assert_eq!(error, "write_file destination already exists");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "replacement");
+
+        let truncate = AgentToolCallNative {
+            request_id: "request".into(),
+            call_id: "truncate".into(),
+            tool_name: "write_file".into(),
+            arguments: json!({
+                "path": "cool-css-effect.html",
+                "content": "",
+                "precondition": { "sha256": sha256_hex(b"replacement") }
+            }),
+            target,
+            capability_id: "capability".into(),
+        };
+        let truncated = execute_file_tool_native(FileExecutionContextNative {
+            task_id: "task",
+            call: &truncate,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &known_hosts_path,
+            checkpoint_root: runtime_root.path(),
+            checkpoints: &checkpoints,
+            operations: &operations,
+        })
+        .unwrap();
+        assert_eq!(truncated.data["operation"], "replace");
+        assert_eq!(truncated.data["byteLength"], 0);
+        assert_eq!(fs::read(path).unwrap(), b"");
     }
 }

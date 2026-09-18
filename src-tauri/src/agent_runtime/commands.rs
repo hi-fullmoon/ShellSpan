@@ -500,6 +500,16 @@ pub(crate) async fn agent_runtime_reject_tool(
 }
 
 #[tauri::command]
+pub(crate) fn agent_runtime_get_pending_approval_arguments(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentToolDecisionInput,
+) -> Result<Option<serde_json::Value>, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.pending_approval_arguments(&input)
+}
+
+#[tauri::command]
 pub(crate) fn agent_runtime_get_session(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,

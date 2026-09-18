@@ -273,6 +273,56 @@ pub(crate) use crate::llm::replay::ReplayEnvelopeV5;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentReplayArtifact {
+    pub(crate) storage: AgentReplayStorage,
+    pub(crate) artifact: super::AgentArtifactMetadata,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AgentReplayStorage {
+    Artifact,
+}
+
+/// Existing inline replay remains readable. Large replay envelopes use a
+/// content-addressed claim check instead of growing the event; older runtimes
+/// are not expected to read claim-check records.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(untagged)]
+pub(crate) enum AgentStoredReplay {
+    Inline(ReplayEnvelopeV5),
+    Artifact(AgentReplayArtifact),
+}
+
+impl AgentStoredReplay {
+    pub(crate) fn inline(envelope: ReplayEnvelopeV5) -> Self {
+        Self::Inline(envelope)
+    }
+
+    pub(crate) fn artifact(metadata: super::AgentArtifactMetadata) -> Self {
+        Self::Artifact(AgentReplayArtifact {
+            storage: AgentReplayStorage::Artifact,
+            artifact: metadata,
+        })
+    }
+
+    pub(crate) fn inline_envelope(&self) -> Option<&ReplayEnvelopeV5> {
+        match self {
+            Self::Inline(envelope) => Some(envelope),
+            Self::Artifact(_) => None,
+        }
+    }
+
+    pub(crate) fn artifact_metadata(&self) -> Option<&super::AgentArtifactMetadata> {
+        match self {
+            Self::Inline(_) => None,
+            Self::Artifact(reference) => Some(&reference.artifact),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentSubagentSession {
     pub(crate) descriptor_id: String,
     pub(crate) parent_task_id: String,
@@ -686,7 +736,7 @@ pub(crate) enum AgentSessionEventPayload {
         stop_reason: AgentStopReason,
         interrupted: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        replay: Option<ReplayEnvelopeV5>,
+        replay: Option<AgentStoredReplay>,
     },
     #[serde(rename = "request/header")]
     RequestHeader {

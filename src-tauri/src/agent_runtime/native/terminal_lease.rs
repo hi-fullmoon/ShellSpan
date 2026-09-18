@@ -110,6 +110,11 @@ pub(crate) enum TerminalInputSource<'a> {
     },
 }
 
+enum TerminalInputPayload {
+    Text(String),
+    Binary(Vec<u8>),
+}
+
 #[derive(Debug, Clone)]
 struct LeaseRecord {
     lease: AgentTerminalLease,
@@ -535,11 +540,45 @@ impl TerminalLeaseManager {
             .map(|_| ())
     }
 
+    pub(crate) fn write_binary(
+        &self,
+        sessions: &SessionManager,
+        session_id: &str,
+        bytes: Vec<u8>,
+        source: TerminalInputSource<'_>,
+    ) -> Result<(), String> {
+        self.write_payload_with_kind(
+            sessions,
+            session_id,
+            TerminalInputPayload::Binary(bytes),
+            source,
+            TerminalInputKind::Binary,
+        )
+        .map(|_| ())
+    }
+
     pub(crate) fn write_with_kind(
         &self,
         sessions: &SessionManager,
         session_id: &str,
         data: String,
+        source: TerminalInputSource<'_>,
+        input_kind: TerminalInputKind,
+    ) -> Result<Option<crate::terminal_broker::TerminalInputReceipt>, String> {
+        self.write_payload_with_kind(
+            sessions,
+            session_id,
+            TerminalInputPayload::Text(data),
+            source,
+            input_kind,
+        )
+    }
+
+    fn write_payload_with_kind(
+        &self,
+        sessions: &SessionManager,
+        session_id: &str,
+        payload: TerminalInputPayload,
         source: TerminalInputSource<'_>,
         input_kind: TerminalInputKind,
     ) -> Result<Option<crate::terminal_broker::TerminalInputReceipt>, String> {
@@ -586,11 +625,28 @@ impl TerminalLeaseManager {
         {
             return Err(TerminalLeaseError::OperationMismatch.to_string());
         }
-        let bytes = data.as_bytes().to_vec();
-        self.broker
-            .admit_terminal_input(session_id, broker_source, input_kind, &bytes, || {
-                sessions.write_session_input(session_id, data)
-            })
+        match payload {
+            TerminalInputPayload::Text(data) => {
+                let observed_bytes = data.as_bytes().to_vec();
+                self.broker.admit_terminal_input(
+                    session_id,
+                    broker_source,
+                    input_kind,
+                    &observed_bytes,
+                    || sessions.write_session_input(session_id, data),
+                )
+            }
+            TerminalInputPayload::Binary(bytes) => {
+                let observed_bytes = bytes.clone();
+                self.broker.admit_terminal_input(
+                    session_id,
+                    broker_source,
+                    input_kind,
+                    &observed_bytes,
+                    || sessions.write_session_bytes(session_id, bytes),
+                )
+            }
+        }
     }
 
     pub(crate) fn release_turn(&self, agent_session_id: &str) -> Result<(), String> {
