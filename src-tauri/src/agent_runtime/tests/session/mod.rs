@@ -657,6 +657,13 @@
             },
         )
         .unwrap();
+        let published = Arc::new(Mutex::new(Vec::new()));
+        let observed = Arc::clone(&published);
+        store
+            .set_publisher(Arc::new(move |event| {
+                observed.lock().unwrap().push(event.clone());
+            }))
+            .unwrap();
         store
             .append(
                 "session-1",
@@ -692,6 +699,18 @@
         assert!(!public.contains("private-response-id"));
         assert!(!public.contains("private-reasoning-signature"));
         assert!(!public.contains("providerItem"));
+        let public_event = store
+            .events_page(AgentSessionEventsRequest {
+                session_id: "session-1".into(),
+                cursor: Some(7),
+                limit: 1,
+            })
+            .unwrap()
+            .events
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(published.lock().unwrap().as_slice(), &[public_event]);
 
         let mut corrupt = store.all_events("session-1").unwrap();
         let replay = corrupt

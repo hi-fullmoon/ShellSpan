@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_runtime::{
+    normalize_terminal_target_lookup_error, terminal_target_unavailable,
     validate_agent_request_native, validate_tool_arguments_native,
     AgentCapabilityVerificationContextNative, AgentEffectKindNative, AgentObservedEffectNative,
     AgentPermissionModeNative, AgentPolicyEngineNative, AgentPolicyEvaluationNative,
@@ -917,12 +918,16 @@ impl NativeToolEngine {
     ) -> Result<(), String> {
         match target {
             AgentToolTargetNative::Local { session_id, .. } => {
-                let state = sessions.target_state(session_id)?;
+                let state = sessions
+                    .target_state(session_id)
+                    .map_err(|error| normalize_terminal_target_lookup_error(session_id, error))?;
                 if state.terminal_kind != SessionTerminalKind::Local
                     || state.status != SessionStatus::Connected
                     || state.identity.host != "local"
                 {
-                    return Err("local target no longer matches its frozen Session identity".into());
+                    return Err(terminal_target_unavailable(
+                        "the frozen local terminal is disconnected or its identity changed",
+                    ));
                 }
                 Ok(())
             }
@@ -934,26 +939,30 @@ impl NativeToolEngine {
                 username,
                 ..
             } => {
-                let state = sessions.target_state(session_id)?;
+                let state = sessions
+                    .target_state(session_id)
+                    .map_err(|error| normalize_terminal_target_lookup_error(session_id, error))?;
                 if state.terminal_kind != SessionTerminalKind::Remote
                     || state.status != SessionStatus::Connected
                     || state.identity.host != *host
                     || state.identity.port != *port
                     || state.identity.username != *username
                 {
-                    return Err(
-                        "remote target no longer matches its frozen Session identity".into(),
-                    );
+                    return Err(terminal_target_unavailable(
+                        "the frozen remote terminal is disconnected or its identity changed",
+                    ));
                 }
                 if let Some(profile_id) = profile_id {
-                    let profile = database
-                        .get_profile(profile_id)?
-                        .ok_or_else(|| "frozen remote profile was not found".to_string())?;
+                    let profile = database.get_profile(profile_id)?.ok_or_else(|| {
+                        terminal_target_unavailable("the frozen remote profile no longer exists")
+                    })?;
                     if profile.host != *host
                         || profile.port != *port
                         || profile.username != *username
                     {
-                        return Err("stored remote profile drifted from the frozen target".into());
+                        return Err(terminal_target_unavailable(
+                            "the stored remote profile no longer matches the frozen target",
+                        ));
                     }
                 }
                 Ok(())
@@ -983,12 +992,16 @@ impl NativeToolEngine {
     ) -> Result<String, String> {
         match target {
             AgentToolTargetNative::Local { session_id, .. } => {
-                let state = sessions.target_state(session_id)?;
+                let state = sessions
+                    .target_state(session_id)
+                    .map_err(|error| normalize_terminal_target_lookup_error(session_id, error))?;
                 if state.terminal_kind != SessionTerminalKind::Local
                     || state.status != SessionStatus::Connected
                     || state.identity.host != "local"
                 {
-                    return Err("local target no longer matches its frozen Session identity".into());
+                    return Err(terminal_target_unavailable(
+                        "the frozen local terminal is disconnected or its identity changed",
+                    ));
                 }
                 Ok(session_id.clone())
             }
@@ -999,16 +1012,18 @@ impl NativeToolEngine {
                 username,
                 ..
             } => {
-                let state = sessions.target_state(session_id)?;
+                let state = sessions
+                    .target_state(session_id)
+                    .map_err(|error| normalize_terminal_target_lookup_error(session_id, error))?;
                 if state.terminal_kind != SessionTerminalKind::Remote
                     || state.status != SessionStatus::Connected
                     || state.identity.host != *host
                     || state.identity.port != *port
                     || state.identity.username != *username
                 {
-                    return Err(
-                        "remote target no longer matches its frozen Session identity".into(),
-                    );
+                    return Err(terminal_target_unavailable(
+                        "the frozen remote terminal is disconnected or its identity changed",
+                    ));
                 }
                 Ok(session_id.clone())
             }
@@ -2489,7 +2504,7 @@ mod tests {
             .execute_terminal_command(&context, &call, &effect, &sessions, 1_000)
             .unwrap_err();
         assert!(
-            error.contains("frozen Session identity"),
+            crate::agent_runtime::is_terminal_target_unavailable(&error),
             "unexpected post-lease validation error: {error}"
         );
         assert!(

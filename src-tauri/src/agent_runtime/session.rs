@@ -4424,7 +4424,9 @@ fn current_unix_ms() -> u64 {
 fn publish_events(publisher: Option<EventPublisher>, events: &[AgentSessionEvent]) {
     if let Some(publisher) = publisher {
         for event in events {
-            publisher(event);
+            let mut public_event = event.clone();
+            crate::llm::replay::public_event_projection(&mut public_event);
+            publisher(&public_event);
         }
     }
 }

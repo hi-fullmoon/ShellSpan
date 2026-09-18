@@ -75,11 +75,11 @@ pub(crate) fn derive_surface(events: &[AgentSessionEvent]) -> Result<AgentSurfac
                     .ok()
                     .and_then(|index| events.get(index));
                 if !replaced_event.is_some_and(|candidate| {
-                    candidate.seq == *through
-                        && matches!(candidate.payload, AgentSessionEventPayload::TurnEnd { .. })
+                    candidate.seq == *through && is_completed_compaction_boundary(candidate)
                 }) {
                     return Err(
-                        "Agent compaction must replace through a complete Turn boundary".into(),
+                        "Agent compaction must replace through a completed Step or Turn boundary"
+                            .into(),
                     );
                 }
                 generation = *surface_generation;
@@ -113,11 +113,11 @@ pub(crate) fn derive_surface(events: &[AgentSessionEvent]) -> Result<AgentSurfac
                         .ok()
                         .and_then(|index| events.get(index));
                     if !replaced_event.is_some_and(|candidate| {
-                        candidate.seq == *through
-                            && matches!(candidate.payload, AgentSessionEventPayload::TurnEnd { .. })
+                        candidate.seq == *through && is_completed_compaction_boundary(candidate)
                     }) {
                         return Err(
-                            "failed Agent compaction did not reference a complete Turn".into()
+                            "failed Agent compaction did not reference a completed Step or Turn"
+                                .into(),
                         );
                     }
                 }
@@ -165,6 +165,13 @@ pub(crate) fn derive_surface(events: &[AgentSessionEvent]) -> Result<AgentSurfac
         replaced_through_seq,
         messages,
     })
+}
+
+fn is_completed_compaction_boundary(event: &AgentSessionEvent) -> bool {
+    matches!(
+        event.payload,
+        AgentSessionEventPayload::StepEnd { .. } | AgentSessionEventPayload::TurnEnd { .. }
+    )
 }
 
 pub(crate) fn surface_messages_after(

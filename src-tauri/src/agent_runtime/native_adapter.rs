@@ -20,9 +20,10 @@ use crate::models::{SessionManager, SessionStatus, SessionTerminalKind};
 use crate::terminal_broker::TerminalVisibleCommandRoute;
 
 use super::{
-    AgentSessionEffect, AgentSessionPermissionMode, AgentSessionTarget, AgentToolResultStatus,
-    NativeToolArtifact, NativeToolIdempotency, NativeToolPreparation, NativeToolRequest,
-    NativeToolResult, NativeToolRuntime, RecordedToolCall, DEFAULT_NATIVE_APPROVAL_TTL_MS,
+    normalize_terminal_target_lookup_error, terminal_target_unavailable, AgentSessionEffect,
+    AgentSessionPermissionMode, AgentSessionTarget, AgentToolResultStatus, NativeToolArtifact,
+    NativeToolIdempotency, NativeToolPreparation, NativeToolRequest, NativeToolResult,
+    NativeToolRuntime, RecordedToolCall, DEFAULT_NATIVE_APPROVAL_TTL_MS,
 };
 
 enum PreparedAuthorization {
@@ -261,6 +262,17 @@ impl NativeToolRuntime for NativeToolAdapter {
         {
             let route = match &target {
                 AgentToolTargetNative::Local { session_id, .. } => {
+                    let state = sessions.target_state(session_id).map_err(|error| {
+                        normalize_terminal_target_lookup_error(session_id, error)
+                    })?;
+                    if state.terminal_kind != SessionTerminalKind::Local
+                        || state.status != SessionStatus::Connected
+                        || state.identity.host != "local"
+                    {
+                        return Err(terminal_target_unavailable(
+                            "the frozen local terminal is disconnected or its identity changed",
+                        ));
+                    }
                     runtime.terminal_visible_command_route(session_id)?
                 }
                 AgentToolTargetNative::Remote {
@@ -270,16 +282,18 @@ impl NativeToolRuntime for NativeToolAdapter {
                     username,
                     ..
                 } => {
-                    let state = sessions.target_state(session_id)?;
+                    let state = sessions.target_state(session_id).map_err(|error| {
+                        normalize_terminal_target_lookup_error(session_id, error)
+                    })?;
                     if state.terminal_kind != SessionTerminalKind::Remote
                         || state.status != SessionStatus::Connected
                         || state.identity.host != *host
                         || state.identity.port != *port
                         || state.identity.username != *username
                     {
-                        return Err(
-                            "remote target no longer matches its frozen Session identity".into(),
-                        );
+                        return Err(terminal_target_unavailable(
+                            "the frozen remote terminal is disconnected or its identity changed",
+                        ));
                     }
                     runtime.terminal_remote_visible_command_route(session_id)?
                 }

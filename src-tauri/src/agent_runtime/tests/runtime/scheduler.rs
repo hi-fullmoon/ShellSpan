@@ -17,6 +17,7 @@ mod scheduler_tests {
         peak: AtomicUsize,
         mode: AtomicUsize,
         fail_prepare: Mutex<Option<String>>,
+        unavailable_prepare: Mutex<Option<String>>,
         worker_failure: Mutex<Option<String>>,
         tool_failure: Mutex<Option<String>>,
         invalid: AtomicBool,
@@ -37,6 +38,7 @@ mod scheduler_tests {
                     peak: AtomicUsize::new(0),
                     mode: AtomicUsize::new(0),
                     fail_prepare: Mutex::new(None),
+                    unavailable_prepare: Mutex::new(None),
                     worker_failure: Mutex::new(None),
                     tool_failure: Mutex::new(None),
                     invalid: AtomicBool::new(false),
@@ -62,6 +64,12 @@ mod scheduler_tests {
             self.preparations.lock().unwrap().push(id.clone());
             if self.fail_prepare.lock().unwrap().as_deref() == Some(&id) {
                 return Err("schema rejected test input".into());
+            }
+            if self.unavailable_prepare.lock().unwrap().as_deref() == Some(&id) {
+                return Err(
+                    "terminalTargetUnavailable: the bound terminal no longer exists; reconnect the terminal and continue in a new Agent session"
+                        .into(),
+                );
             }
             let mode = self.mode.load(Ordering::Acquire);
             let mut prepared = RecordingNativeRuntime::new(false).prepare(request)?;
@@ -740,6 +748,93 @@ mod scheduler_tests {
             );
             native.assert_clean();
         }
+    }
+
+    #[tokio::test]
+    async fn unavailable_frozen_terminal_stops_after_the_first_rejection() {
+        let (native, _rx) = GatedNative::new();
+        *native.unavailable_prepare.lock().unwrap() = Some("r0".into());
+        let (_root, runtime) = setup(
+            vec![
+                native_call("r0", "list_directory"),
+                native_call("r1", "list_directory"),
+            ],
+            native.clone(),
+            Some("1"),
+        );
+
+        start(&runtime, "terminal-gone");
+        idle(&runtime, "terminal-gone").await;
+
+        let snapshot = runtime.session("terminal-gone").unwrap();
+        assert!(snapshot.ended);
+        assert_eq!(snapshot.status, AgentSessionStatus::Failed);
+        assert_eq!(results(&runtime, "terminal-gone"), ["r0", "r1"]);
+        let events = all_events(&runtime, "terminal-gone");
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::ToolResult { call_id, summary, .. }
+                if call_id == "r0" && summary.starts_with("terminalTargetUnavailable:")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::ToolResult { call_id, data: Some(data), .. }
+                if call_id == "r1"
+                    && data.get("reason").and_then(serde_json::Value::as_str)
+                        == Some("terminalTargetUnavailable")
+        )));
+        assert_eq!(native.preparations.lock().unwrap().as_slice(), ["r0"]);
+        assert!(native.trace.lock().unwrap().is_empty());
+        native.assert_clean();
+    }
+
+    #[tokio::test]
+    async fn unavailable_frozen_terminal_while_approving_cancels_and_fails_the_session() {
+        let (native, _rx) = GatedNative::new();
+        let (_root, runtime) = setup(
+            vec![
+                native_call("approval", "list_directory"),
+                native_call("last", "list_directory"),
+            ],
+            native.clone(),
+            Some("1"),
+        );
+
+        start(&runtime, "approval-terminal-gone");
+        idle(&runtime, "approval-terminal-gone").await;
+        let decision = pending_approval(&runtime, "approval-terminal-gone");
+        *native.unavailable_prepare.lock().unwrap() = Some("approval".into());
+
+        let error = runtime.approve_tool(decision).await.unwrap_err();
+        assert!(error.starts_with("terminalTargetUnavailable:"));
+        let snapshot = runtime.session("approval-terminal-gone").unwrap();
+        assert!(snapshot.ended);
+        assert_eq!(snapshot.status, AgentSessionStatus::Failed);
+        assert_eq!(
+            results(&runtime, "approval-terminal-gone"),
+            ["approval", "last"]
+        );
+        let events = all_events(&runtime, "approval-terminal-gone");
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::ToolApproval { call_id, status, reason: Some(reason), .. }
+                if call_id == "approval"
+                    && *status == AgentToolApprovalStatus::Cancelled
+                    && reason.starts_with("terminalTargetUnavailable:")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::ToolResult { call_id, status, summary, .. }
+                if call_id == "approval"
+                    && *status == AgentToolResultStatus::Cancelled
+                    && summary.starts_with("terminalTargetUnavailable:")
+        )));
+        assert_eq!(
+            native.preparations.lock().unwrap().as_slice(),
+            ["approval", "approval"]
+        );
+        assert!(native.trace.lock().unwrap().is_empty());
+        native.assert_clean();
     }
 
     #[tokio::test]
