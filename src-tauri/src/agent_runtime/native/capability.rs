@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use hmac::{Hmac, Mac};
-use sha2_compat::Sha256;
+use hmac::{Hmac, KeyInit, Mac};
+use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::agent_runtime::{

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2_compat::{Digest, Sha256};
+use sha2::{Digest, Sha256};
 
 use super::{AgentInboxMessage, AgentMessageSourceKind, AgentSessionTarget};
 
@@ -18,7 +18,7 @@ pub(crate) const MAX_SKILLS: usize = 256;
 pub(crate) const MAX_SKILL_READ: usize = 8 * 1024 * 1024;
 
 pub(crate) fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 pub(crate) fn json_digest(value: &impl Serialize) -> String {
