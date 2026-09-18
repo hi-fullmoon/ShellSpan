@@ -293,6 +293,14 @@ immediately before PTY write. It MUST NOT resolve through an Agent-owned remote
 terminal map, create another SSH PTY, or silently switch to Direct when the
 target is unavailable or busy.
 
+If the frozen terminal Session no longer exists, is disconnected, or no longer
+matches its frozen identity, preparation reports `terminalTargetUnavailable`.
+The rejected call remains durable evidence, later calls from the same model
+step are recorded as not started, and the Agent Session fails immediately so a
+model cannot accumulate repeated failed probes against the stale target. A
+reconnect creates a new trust boundary and requires continuation in a new Agent
+Session; the old target is never rebound.
+
 `commandStart` moves `submitted` to `running`. A matching, accepted cooperative
 `commandEnd`
 moves the command to `completed` and supplies the exit code and final working
