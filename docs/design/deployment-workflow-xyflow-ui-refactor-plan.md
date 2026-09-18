@@ -1,6 +1,6 @@
 # Deployment Workflow 图编辑器与本地部署 UI 重构计划
 
-> 状态：Ready for implementation
+> 状态：Implemented（阶段 0–5 已完成）
 > 日期：2026-09-17
 > 实施方式：严格串行；每个阶段新建一个独立 Codex 会话窗口
 > 适用范围：ShellSpan 本地部署中心前端

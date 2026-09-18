@@ -1,6 +1,6 @@
 # 本地部署中心工作流化设计（通用产物）
 
-> 状态：Draft  
+> 状态：Implemented（Deployment Workflow 与 React Flow UI 重构已完成）
 > 适用范围：ShellSpan 本地部署中心  
 > 目标版本：Deployment Workflow
 > 最后更新：2026-09-17
