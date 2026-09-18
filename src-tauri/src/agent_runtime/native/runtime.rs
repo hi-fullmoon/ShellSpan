@@ -41,13 +41,14 @@ use super::{
     enforce_native_call_policy_native, execute_file_tool_native, execute_http_probe_native,
     execute_mcp_tool_native, inspect_call_policy_scope_native, load_mcp_server_native,
     preview_file_call_native, spawn_local_process_native, spawn_remote_process_native,
-    AgentCallPreviewNative, CapabilityIssueRequestNative, CheckpointStoreNative,
-    FileExecutionContextNative, FileOperationRegistryNative, IssuedCapabilityNative,
-    McpServerConfigNative, McpToolPolicyNative, NativeCapabilityStoreNative,
-    ProcessLifecycleNative, ProcessRegistryNative, ProcessSnapshotNative, RegisteredToolNative,
-    RemoteProcessStartNative, TerminalExecuteRegistry, TerminalExecuteValidationStage,
-    TerminalInputSource, TerminalInteractiveRegistry, TerminalInteractiveValidationStage,
-    TerminalLeaseManager, ToolRegistryErrorNative, ToolRegistryNative,
+    spawn_workspace_scoped_local_process_native, AgentCallPreviewNative,
+    CapabilityIssueRequestNative, CheckpointStoreNative, FileExecutionContextNative,
+    FileOperationRegistryNative, IssuedCapabilityNative, McpServerConfigNative,
+    McpToolPolicyNative, NativeCapabilityStoreNative, ProcessLifecycleNative,
+    ProcessRegistryNative, ProcessSnapshotNative, RegisteredToolNative, RemoteProcessStartNative,
+    TerminalExecuteRegistry, TerminalExecuteValidationStage, TerminalInputSource,
+    TerminalInteractiveRegistry, TerminalInteractiveValidationStage, TerminalLeaseManager,
+    ToolRegistryErrorNative, ToolRegistryNative,
 };
 
 pub(crate) const DEFAULT_CAPABILITY_TTL_MS: u64 = 120_000;
@@ -527,6 +528,7 @@ impl NativeToolEngine {
             context.request.permission_mode,
             effect.kind,
             scope.sensitive_path_count,
+            operator_call_is_scope_enforced(&call),
         );
         Ok(PreparedAuthorizationNative {
             native_prompt: native_prompt(&context, &call, &effect, &scope, &preview, ttl_ms),
@@ -1248,14 +1250,37 @@ impl NativeToolEngine {
         self.processes.ensure_capacity()?;
         validate_frozen_cwd(&call.target, arguments.cwd.as_deref())?;
         let process = match &call.target {
-            AgentToolTargetNative::Local { target_id, cwd, .. } => spawn_local_process_native(
-                context.request.task_id.clone(),
-                context.request.request_id.clone(),
-                target_id.clone(),
-                &arguments.command,
-                cwd.as_deref().map(Path::new),
-                timeout,
-            )?,
+            AgentToolTargetNative::Local { target_id, cwd, .. } => {
+                if context.request.permission_mode == AgentPermissionModeNative::Operator {
+                    match cwd.as_deref() {
+                        Some(root) => spawn_workspace_scoped_local_process_native(
+                            context.request.task_id.clone(),
+                            context.request.request_id.clone(),
+                            target_id.clone(),
+                            &arguments.command,
+                            Path::new(root),
+                            timeout,
+                        )?,
+                        None => spawn_local_process_native(
+                            context.request.task_id.clone(),
+                            context.request.request_id.clone(),
+                            target_id.clone(),
+                            &arguments.command,
+                            None,
+                            timeout,
+                        )?,
+                    }
+                } else {
+                    spawn_local_process_native(
+                        context.request.task_id.clone(),
+                        context.request.request_id.clone(),
+                        target_id.clone(),
+                        &arguments.command,
+                        cwd.as_deref().map(Path::new),
+                        timeout,
+                    )?
+                }
+            }
             AgentToolTargetNative::Remote { target_id, .. } => {
                 let connection = connection_for_remote_target(&call.target, database, credentials)?;
                 spawn_remote_process_native(RemoteProcessStartNative {
@@ -1941,6 +1966,7 @@ fn requires_native_confirmation(
     permission_mode: AgentPermissionModeNative,
     effect: AgentEffectKindNative,
     sensitive_path_count: usize,
+    operator_scope_enforced: bool,
 ) -> bool {
     match permission_mode {
         AgentPermissionModeNative::RequestApproval => true,
@@ -1954,7 +1980,18 @@ fn requires_native_confirmation(
                         | AgentEffectKindNative::ExternalSideEffect
                 )
         }
-        AgentPermissionModeNative::Operator => false,
+        AgentPermissionModeNative::Operator => !operator_scope_enforced,
+    }
+}
+
+fn operator_call_is_scope_enforced(call: &AgentToolCallNative) -> bool {
+    match call.tool_name.as_str() {
+        "exec_command" => matches!(
+            &call.target,
+            AgentToolTargetNative::Local { cwd: Some(root), .. } if !root.trim().is_empty()
+        ),
+        "terminal_execute" | "write_terminal_input" => false,
+        _ => true,
     }
 }
 
@@ -2073,26 +2110,31 @@ mod tests {
             AgentPermissionModeNative::RequestApproval,
             AgentEffectKindNative::ReadOnly,
             0,
+            true,
         ));
         assert!(requires_native_confirmation(
             AgentPermissionModeNative::ScopedAutopilot,
             AgentEffectKindNative::SensitiveRead,
             0,
+            true,
         ));
         assert!(requires_native_confirmation(
             AgentPermissionModeNative::ScopedAutopilot,
             AgentEffectKindNative::StateChange,
             0,
+            true,
         ));
         assert!(requires_native_confirmation(
             AgentPermissionModeNative::ScopedAutopilot,
             AgentEffectKindNative::ReadOnly,
             1,
+            true,
         ));
         assert!(!requires_native_confirmation(
             AgentPermissionModeNative::ScopedAutopilot,
             AgentEffectKindNative::ReadOnly,
             0,
+            true,
         ));
 
         for effect in [
@@ -2106,8 +2148,57 @@ mod tests {
                 AgentPermissionModeNative::Operator,
                 effect,
                 1,
+                true,
             ));
         }
+        assert!(requires_native_confirmation(
+            AgentPermissionModeNative::Operator,
+            AgentEffectKindNative::Destructive,
+            0,
+            false,
+        ));
+    }
+
+    #[test]
+    fn operator_only_skips_confirmation_for_scope_enforced_shell_calls() {
+        let scoped_local = AgentToolCallNative {
+            request_id: "request-scope".into(),
+            call_id: "call-scope".into(),
+            tool_name: "exec_command".into(),
+            arguments: json!({}),
+            target: AgentToolTargetNative::Local {
+                target_id: "target-local".into(),
+                session_id: "terminal-local".into(),
+                cwd: Some("/workspace".into()),
+            },
+            capability_id: "pending".into(),
+        };
+        assert!(operator_call_is_scope_enforced(&scoped_local));
+
+        let mut unrooted = scoped_local.clone();
+        unrooted.target = AgentToolTargetNative::Local {
+            target_id: "target-local".into(),
+            session_id: "terminal-local".into(),
+            cwd: None,
+        };
+        assert!(!operator_call_is_scope_enforced(&unrooted));
+
+        let mut remote = scoped_local.clone();
+        remote.target = AgentToolTargetNative::Remote {
+            target_id: "target-remote".into(),
+            session_id: "terminal-remote".into(),
+            profile_id: Some("profile-remote".into()),
+            host: "example.test".into(),
+            port: 22,
+            username: "tester".into(),
+            root_path: Some("/workspace".into()),
+            local_root: None,
+        };
+        assert!(!operator_call_is_scope_enforced(&remote));
+
+        let mut structured = scoped_local;
+        structured.tool_name = "write_file".into();
+        assert!(operator_call_is_scope_enforced(&structured));
     }
 
     #[test]
