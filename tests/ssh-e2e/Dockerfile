@@ -62,4 +62,4 @@ RUN chmod 0755 /usr/local/bin/shellspan-m6-service
 
 EXPOSE 22
 
-CMD ["sh", "-c", "ssh-keygen -A || exit $?; (while true; do printf 'shellspan-forward-ok\\n' | nc -l -p 18080; done) & exec /usr/sbin/sshd -D -e"]
+CMD ["sh", "-c", "ssh-keygen -A || exit $?; (while true; do printf 'shellspan-forward-ok\\n' | nc -l -p 18080; done) & python3 -m http.server 18081 --bind 127.0.0.1 --directory /tmp >/dev/null 2>&1 & exec /usr/sbin/sshd -D -e"]
