@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2_compat::{Digest, Sha256};
+use sha2::{Digest, Sha256};
 
 use super::{AgentSessionEvent, AgentSessionEventPayload};
 
@@ -94,10 +94,9 @@ pub(crate) fn is_same_submission(
     record: &QuestionRecord,
     input: &AnswerQuestionInput,
 ) -> Result<bool, String> {
-    let fingerprint = format!(
-        "{:x}",
-        Sha256::digest(serde_json::to_vec(input).map_err(|e| e.to_string())?)
-    );
+    let fingerprint = hex::encode(Sha256::digest(
+        serde_json::to_vec(input).map_err(|e| e.to_string())?,
+    ));
     Ok(record
         .answer
         .as_ref()
@@ -585,10 +584,9 @@ impl super::AgentToolPipeline {
         mut input: AnswerQuestionInput,
     ) -> Result<(), String> {
         input.validate()?;
-        let fingerprint = format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(&input).map_err(|e| e.to_string())?)
-        );
+        let fingerprint = hex::encode(Sha256::digest(
+            serde_json::to_vec(&input).map_err(|e| e.to_string())?,
+        ));
         let _gate = self
             .question_gate
             .lock()
