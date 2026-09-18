@@ -8,6 +8,7 @@ import { sessionProviderConfig } from '@/lib/ai/session-settings';
 import { isTopLevelAiSession, listAllAiSessions } from '@/lib/ai/session-list';
 import type { AiProviderConfig } from '@/types/ai';
 import { requireVision } from '@/lib/ai/vision-contract';
+import { loadResolvedModel } from '@/lib/ai/provider-contract';
 import { resolveAiSubmission } from '@/lib/ai/submission-policy';
 import {
   createAiComposerState,
@@ -173,7 +174,7 @@ export interface AiQueueMutationState {
   readonly conflict: boolean;
 }
 
-function runtimeTarget(session: TerminalSession): AgentSessionTarget {
+function runtimeTarget(session: TerminalSession, workspaceRoot?: string): AgentSessionTarget {
   const local = session.host === 'local' && session.port === 0;
   return {
     kind: local ? 'local' : 'remote',
@@ -182,7 +183,16 @@ function runtimeTarget(session: TerminalSession): AgentSessionTarget {
     label: session.title,
     ...(session.profileId ? { profileId: session.profileId } : {}),
     ...(local ? {} : { host: session.host, port: session.port, username: session.username }),
+    ...(workspaceRoot ? local ? { cwd: workspaceRoot } : { rootPath: workspaceRoot } : {}),
   };
+}
+
+function normalizedWorkspaceRoot(root: string | undefined): string | null {
+  const selectedRoot = root?.trim();
+  if (!selectedRoot
+    || !(/^(?:\/|[A-Za-z]:[\\/])/.test(selectedRoot))
+    || /[\x00-\x1f]/.test(selectedRoot)) return null;
+  return selectedRoot;
 }
 
 function permissionMode(mode: AgentPermissionMode): AgentSessionPermissionMode {
@@ -506,6 +516,7 @@ export function useAiSessionController({
 
   const createInput = useCallback((
     content: string,
+    workspaceRoot?: string,
   ): Extract<AiCreateSessionInput, { kind: 'agent' }> => {
     if (scope === 'workbench') {
       const sessionId = `ask-workbench-${operationId()}`;
@@ -541,7 +552,7 @@ export function useAiSessionController({
         sessionId,
         taskId: `task-${sessionId}`,
         goal: content,
-        target: runtimeTarget(activeTerminal),
+        target: runtimeTarget(activeTerminal, workspaceRoot),
         permissionMode: permissionMode(
           useAgentPermissionStore.getState().getMode(activeTerminal.sessionId),
         ),
@@ -556,22 +567,49 @@ export function useAiSessionController({
   const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}`;
   const projectEpoch = useRef({ key: projectKey });
   if (projectEpoch.current.key !== projectKey) projectEpoch.current = { key: projectKey };
+  const resolveProjectRoot = useCallback(async (root?: string): Promise<string | null> => {
+    const epoch = projectEpoch.current;
+    let selectedRoot = normalizedWorkspaceRoot(root);
+    if (!selectedRoot && scope === 'terminal' && activeTerminal?.status === 'connected') {
+      if (terminalDirectory.current?.epoch !== epoch) {
+        terminalDirectory.current = {
+          epoch,
+          promise: resolveTerminalDirectory(activeTerminal),
+        };
+      }
+      selectedRoot = normalizedWorkspaceRoot(await terminalDirectory.current.promise ?? undefined);
+    }
+    if (projectEpoch.current !== epoch) throw new Error('Cancelled');
+    return selectedRoot;
+  }, [activeTerminal, resolveTerminalDirectory, scope]);
+  const createInputWithFrozenLocalRoot = useCallback(async (
+    content: string,
+  ): Promise<Extract<AiCreateSessionInput, { kind: 'agent' }>> => {
+    const input = createInput(content);
+    const target = input.request.target;
+    if (target?.kind !== 'local' || input.request.permissionMode !== 'operator') return input;
+    const root = await resolveProjectRoot();
+    if (!root) {
+      throw new Error(t('ai.workspace.error.fullAccessRootRequired'));
+    }
+    return {
+      ...input,
+      request: {
+        ...input.request,
+        target: { ...target, cwd: root },
+      },
+    };
+  }, [createInput, resolveProjectRoot, t]);
   const ensureProjectSession = useCallback(async (root?: string): Promise<string> => {
     const epoch = projectEpoch.current;
     let sessionId = viewRef.current?.summary.id ?? openedSessionId;
     if (!sessionId) {
       if (!coldSkillSession.current) {
-        let selectedRoot = root?.trim();
-        if (!selectedRoot && scope === 'terminal' && activeTerminal?.status === 'connected') {
-          if (terminalDirectory.current?.epoch !== epoch) {
-            terminalDirectory.current = {
-              epoch,
-              promise: resolveTerminalDirectory(activeTerminal),
-            };
-          }
-          selectedRoot = (await terminalDirectory.current.promise)?.trim();
-        }
-        if (!selectedRoot || !(/^(?:\/|[A-Za-z]:[\\/])/.test(selectedRoot)) || /[\x00-\x1f]/.test(selectedRoot)) throw new Error(`RootRequired: ${t('ai.workspace.skills.absoluteRoot')}`);
+        const explicitRoot = root?.trim();
+        const selectedRoot = explicitRoot
+          ? normalizedWorkspaceRoot(explicitRoot)
+          : await resolveProjectRoot();
+        if (!selectedRoot) throw new Error(`RootRequired: ${t('ai.workspace.skills.absoluteRoot')}`);
         if (projectEpoch.current !== epoch) throw new Error('Cancelled');
         const concurrentSession = coldSkillSession.current as Promise<AiSessionView> | null;
         if (concurrentSession) {
@@ -580,9 +618,11 @@ export function useAiSessionController({
           return concurrentSessionId;
         }
         claimWorkspace();
-        const input = createInput(composerRef.current.draft.trim() || t('ai.workspace.skills.title'));
-        const target = input.request.target!;
-        coldSkillSession.current = adapter.create({ ...input, request: { ...input.request, target: { ...target, ...(target.kind === 'local' ? { cwd: selectedRoot } : { rootPath: selectedRoot }) } } });
+        const input = createInput(
+          composerRef.current.draft.trim() || t('ai.workspace.skills.title'),
+          selectedRoot,
+        );
+        coldSkillSession.current = adapter.create(input);
         setSkillRoot(selectedRoot);
       }
       const pending = coldSkillSession.current;
@@ -594,7 +634,7 @@ export function useAiSessionController({
     }
     if (projectEpoch.current !== epoch) throw new Error('Cancelled');
     return sessionId;
-  }, [activeTerminal, adapter, claimWorkspace, createInput, openedSessionId, resolveTerminalDirectory, scope, skillNavigation, t]);
+  }, [adapter, claimWorkspace, createInput, openedSessionId, resolveProjectRoot, skillNavigation, t]);
 
   const listSkills = useCallback(async (root?: string): Promise<import('@/types/agent-skill').SkillUserList> => {
     // Browsing bundled instructions must not create a cold Session or freeze a directory.
@@ -668,11 +708,12 @@ export function useAiSessionController({
           terminalContext,
         };
         const cold = payload.sessionId === null ? await coldSkillSession.current : null;
+        const create = payload.sessionId === null && !cold
+          ? await createInputWithFrozenLocalRoot(payload.content)
+          : undefined;
         const receipt = await adapter.submit(payload.sessionId ?? cold?.summary.id ?? null, {
           ...base,
-          ...(payload.sessionId === null && !cold
-            ? { create: createInput(payload.content) }
-            : {}),
+          ...(create ? { create } : {}),
         } satisfies AiSubmitInput<'agent'>);
         if (!isCurrent()) return;
         updateOptimistic((current) => current.map((item) => (
@@ -1047,15 +1088,17 @@ export function useAiSessionController({
     }
     // The prior transcript is context, not the new task. In particular, do not
     // carry its goal into the new session's success criteria.
-    const input = createInput(message);
     historicalContinuationPendingRef.current = true;
     setHistoricalContinuationBusy(true);
     setHistoricalContinuationError(null);
     const context = submissionContextRef.current;
-    void adapter.create({ ...input, request: {
-      ...input.request,
-      continuedFromSessionId: current.summary.id,
-    } }).then((created) => {
+    void createInputWithFrozenLocalRoot(message).then(input => adapter.create({
+      ...input,
+      request: {
+        ...input.request,
+        continuedFromSessionId: current.summary.id,
+      },
+    })).then((created) => {
       if (!mountedRef.current || submissionContextRef.current !== context
         || viewRef.current?.summary.id !== current.summary.id) return;
       const latestDraft = composerRef.current.draft;
@@ -1079,7 +1122,7 @@ export function useAiSessionController({
       historicalContinuationPendingRef.current = false;
       if (mountedRef.current) setHistoricalContinuationBusy(false);
     });
-  }, [activeTerminal?.sessionId, adapter, createInput, dispatch, imageDraft.draft?.images.length,
+  }, [activeTerminal?.sessionId, adapter, createInputWithFrozenLocalRoot, dispatch, imageDraft.draft?.images.length,
     historicalSources, navigationDraftKey, now, openSession, operationId, provider, t]);
 
   useEffect(() => {
@@ -1458,16 +1501,22 @@ export function useAiSessionController({
         let imageProvider: AiProviderConfig;
         try {
           imageProvider = currentProviderConfig();
-          requireVision(imageProvider);
         }
         catch (e) { imageDraft.reportError(String(e)); return; }
-        const terminalContext = captureTerminalContext(imageProvider, composer.sessionId);
         void imageDraft.send(async () => {
           const cold = await coldSkillSession.current;
           const sessionId = composer.sessionId ?? cold?.summary.id;
-          const create = sessionId ? undefined : createInput(composerRef.current.draft.trim() || t('ai.workspace.images.add'));
+          const create = sessionId ? undefined : await createInputWithFrozenLocalRoot(
+            composerRef.current.draft.trim() || t('ai.workspace.images.add'),
+          );
           return { id: operationId(), sessionId: sessionId ?? create!.request.sessionId, mode: decision.mode, create };
         }, async value => {
+          // Capability resolution can still be in flight when the user submits
+          // immediately after opening the panel. Await it instead of reporting
+          // MODEL_RESOLUTION_PENDING as a storage or connection failure.
+          await loadResolvedModel(imageProvider);
+          requireVision(imageProvider);
+          const terminalContext = captureTerminalContext(imageProvider, composer.sessionId);
           const op = value.operation!;
           if (op.create) {
             let existing: AiSessionView | null = null;

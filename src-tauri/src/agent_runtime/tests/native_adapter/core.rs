@@ -398,3 +398,30 @@
         .unwrap();
         assert_eq!(name, "terminal_execute");
     }
+
+    #[test]
+    fn rooted_local_operator_commands_are_forced_to_scoped_direct_execution() {
+        let target = target_native(&local_target()).unwrap();
+        let mut operator = request(
+            "run_terminal_command",
+            json!({
+                "command": "printf updated > result.txt",
+                "explanation": "write inside the frozen workspace"
+            }),
+        );
+        operator.permission_mode = AgentSessionPermissionMode::Operator;
+        operator.execution_surface = AgentExecutionSurface::BoundTerminal;
+
+        assert!(operator_command_requires_scoped_direct(&operator, &target));
+
+        let (name, arguments) = normalize_arguments(
+            &operator,
+            &target,
+            Some(TerminalVisibleCommandRoute::TerminalExecute),
+            true,
+        )
+        .unwrap();
+        assert_eq!(name, "exec_command");
+        assert_eq!(arguments["cwd"], "/workspace");
+        assert_eq!(arguments["channel"], "direct");
+    }

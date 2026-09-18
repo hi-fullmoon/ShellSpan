@@ -2120,7 +2120,7 @@
       "maxOutputTokens": 131072,
       "toolCalling": "supported",
       "textInput": "supported",
-      "imageInput": "unsupported",
+      "imageInput": "supported",
       "reasoning": [
         {
           "id": "off",
@@ -2145,6 +2145,12 @@
         "reasoningEncoding": "adaptive",
         "clearThinking": false,
         "defaultThinking": false
+      },
+      "vision": {
+        "maxRequestImages": 20,
+        "maxRequestImageBytes": 20971520,
+        "reservedTokensPerImage": 4096,
+        "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after immutable normalization; MiniMax M3 officially supports native image and video input. Image count and byte limits are ShellSpan safety limits, not provider-reported limits."
       }
     }
   },

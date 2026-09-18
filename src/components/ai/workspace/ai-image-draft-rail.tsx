@@ -17,7 +17,7 @@ function PendingImage({ file }: { file: File }) {
     setSource(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
-  return <AiImagePreview source={source} name={file.name}><Attachment orientation="vertical" className="ai-image-thumbnail isolate size-16 min-w-16 p-0" state="processing" aria-busy="true">
+  return <AiImagePreview source={source} name={file.name}><Attachment orientation="vertical" className="ai-image-thumbnail isolate size-16 min-w-16 has-data-[slot=attachment-media]:p-0" state="processing" aria-busy="true">
     <AttachmentMedia variant="image" className="ai-image-thumbnail-media size-full">
       <Skeleton className="absolute inset-0 size-full motion-reduce:animate-none" />
       {source && <img className="relative h-full" src={source} alt={file.name} />}
@@ -73,12 +73,12 @@ export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, erro
       {images.map((image, index) => {
         const source = `data:${image.mediaType};base64,${image.data}`;
         return <AiImagePreview key={`${index}:${image.name}`} source={source} name={image.name}>
-          <Attachment orientation="vertical" className="ai-image-thumbnail isolate size-16 min-w-16 p-0" state={error ? 'error' : 'done'}>
+          <Attachment orientation="vertical" className="ai-image-thumbnail isolate size-16 min-w-16 has-data-[slot=attachment-media]:p-0" state={error ? 'error' : 'done'}>
             <AttachmentMedia variant="image" className="ai-image-thumbnail-media size-full">
               <img className="h-full" src={source} alt={image.name} />
             </AttachmentMedia>
             <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open cursor-zoom-in" aria-label={`${t('ai.workspace.images.preview')} ${image.name}`} />} />
-            <AttachmentActions className="ai-image-thumbnail-actions top-0.75 right-0.75">
+            <AttachmentActions className="ai-image-thumbnail-actions group-data-[orientation=vertical]/attachment:top-0.75 group-data-[orientation=vertical]/attachment:right-0.75">
               <AttachmentAction variant="secondary" className="ai-image-thumbnail-remove size-5" aria-label={`${t('ai.workspace.images.remove')} ${image.name}`} disabled={busy || locked} onClick={() => onRemove(index)}><XIcon /></AttachmentAction>
             </AttachmentActions>
           </Attachment>

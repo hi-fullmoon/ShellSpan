@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker';
 import { AtomIcon } from 'lucide-react';
@@ -9,6 +10,43 @@ import {
   AiConversationNodeSeat,
   type AiConversationNodeRendererMap,
 } from './ai-conversation-node-seat';
+
+const AskThinkingIndicator = memo(function AskThinkingIndicator() {
+  const { t } = useI18n();
+  return (
+    <Marker
+      className="ai-turn-status inline-flex min-h-6.5 w-fit self-start items-center gap-2 whitespace-nowrap"
+      role="status"
+      aria-live="polite"
+      data-ai-thinking-indicator=""
+    >
+      <MarkerIcon>
+        <AtomIcon aria-hidden="true" />
+      </MarkerIcon>
+      <MarkerContent className="shimmer">{t('ai.thinking.inProgress')}</MarkerContent>
+    </Marker>
+  );
+});
+
+const AgentRunningIndicator = memo(function AgentRunningIndicator({
+  status,
+}: {
+  readonly status: AiSessionStatus;
+}) {
+  const { t } = useI18n();
+  return (
+    <Marker
+      className="ai-turn-status inline-flex min-h-6.5 w-fit self-start items-center gap-2 whitespace-nowrap"
+      role="status"
+      aria-live="polite"
+      data-ai-running-indicator=""
+    >
+      <MarkerContent className="shimmer">
+        {status === 'waiting' ? t('agent.session.status.waiting') : t('ai.workspace.processing')}
+      </MarkerContent>
+    </Marker>
+  );
+});
 
 function followKey(nodes: readonly AiConversationNode[], throughSeq: number | null): string {
   const last = nodes[nodes.length - 1];
@@ -102,34 +140,16 @@ export function AiConversation({
           renderers={renderers}
           scrollAnchor={node.kind === 'userMessage'}
           scrollItemId={conversationItemId(node)}
+          scrollItemClassName={node.kind === 'turnTail' ? '-ml-1' : undefined}
           onOpenTool={onOpenTool}
           onOpenArtifact={onOpenArtifact}
         />
       ))}
       {showAskThinking && (
-        <Marker
-          className="ai-turn-status inline-flex min-h-6.5 w-fit self-start items-center gap-2 whitespace-nowrap"
-          role="status"
-          aria-live="polite"
-          data-ai-thinking-indicator=""
-        >
-          <MarkerIcon>
-            <AtomIcon aria-hidden="true" />
-          </MarkerIcon>
-          <MarkerContent className="shimmer">{t('ai.thinking.inProgress')}</MarkerContent>
-        </Marker>
+        <AskThinkingIndicator key="ask-thinking-indicator" />
       )}
       {running && runningIndicator === 'agent' && (
-        <Marker
-          className="ai-turn-status inline-flex min-h-6.5 w-fit self-start items-center gap-2 whitespace-nowrap"
-          role="status"
-          aria-live="polite"
-          data-ai-running-indicator=""
-        >
-          <MarkerContent className="shimmer">
-            {status === 'waiting' ? t('agent.session.status.waiting') : t('ai.workspace.processing')}
-          </MarkerContent>
-        </Marker>
+        <AgentRunningIndicator key="agent-running-indicator" status={status} />
       )}
     </MessageScroller>
   );

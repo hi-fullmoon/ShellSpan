@@ -30,7 +30,8 @@ describe('AI details content sizing', () => {
     const node: AiConversationNodeOf<'tool'> = {
       ...baseNode,
       kind: 'tool', key: 'tool:command-output', callId: 'command-output',
-      name: 'run_terminal_command', summary: 'Command exited', state: 'succeeded',
+      name: 'run_terminal_command', nativeName: null, title: null,
+      summary: 'Command exited', state: 'succeeded',
       effect: 'readOnly', durationMs: 1, evidenceRefs: [],
       detailRef: { kind: 'agentTool', sessionId: baseNode.sessionId, callId: 'command-output' },
       input: { command: 'nginx -t' }, output: { stdout: output, exitCode: 0 }, error: null,
@@ -46,7 +47,8 @@ describe('AI details content sizing', () => {
     const node: AiConversationNodeOf<'tool'> = {
       ...baseNode,
       kind: 'tool', key: 'tool:long-command', callId: 'long-command',
-      name: 'run_terminal_command', summary: 'Command rejected', state: 'rejected',
+      name: 'run_terminal_command', nativeName: null, title: null,
+      summary: 'Command rejected', state: 'rejected',
       effect: 'unknown', durationMs: null, evidenceRefs: [],
       detailRef: { kind: 'agentTool', sessionId: baseNode.sessionId, callId: 'long-command' },
       input: { command: longValue }, output: longValue, error: null,

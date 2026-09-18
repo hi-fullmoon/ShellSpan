@@ -65,6 +65,12 @@ function messageItemId(child: React.ReactNode, index: number): string {
     ?? (child.key === null ? String(index) : String(child.key));
 }
 
+function messageItemClassName(child: React.ReactNode): string | undefined {
+  return React.isValidElement<{ scrollItemClassName?: string }>(child)
+    ? child.props.scrollItemClassName
+    : undefined;
+}
+
 export const MessageScroller: React.FC<MessageScrollerProps> = (props) => {
   const openingAnchor = useRef(props.initialAnchor);
   const restoreToEnd = openingAnchor.current?.atBottom === true;
@@ -110,7 +116,8 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     const itemKey = React.isValidElement(child) && child.key !== null ? child.key : index;
     const messageId = messageItemId(child, index);
     return (
-      <MessageScrollerItem key={itemKey} messageId={messageId} scrollAnchor={wantsScrollAnchor(child)}>
+      <MessageScrollerItem key={itemKey} messageId={messageId} scrollAnchor={wantsScrollAnchor(child)}
+        className={messageItemClassName(child)}>
         {child}
       </MessageScrollerItem>
     );
@@ -138,6 +145,14 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     // are already laid out and can be revealed immediately.
     if (restoredAnchorRef.current) setPositionReady(true);
   }, [cancelRestore, scrollToMessage, turnAnchorKey]);
+
+  useLayoutEffect(() => {
+    if (!turnAnchorKey || !restoredAnchorRef.current || !followingIntentRef.current) return;
+    // The primitive observes content growth, but its resize correction is
+    // deferred to the next animation frame. Apply committed stream revisions
+    // during layout so the live tail cannot paint once at the old scrollTop.
+    scrollToEnd();
+  }, [followKey, scrollToEnd, turnAnchorKey]);
 
   const handlePointerDown = useCallback(() => {
     interruptRestore();

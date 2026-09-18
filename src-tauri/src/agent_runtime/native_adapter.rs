@@ -294,7 +294,9 @@ impl NativeToolRuntime for NativeToolAdapter {
             return Ok(preparation);
         }
 
-        let direct_lifecycle_required = terminal_command_requires_direct_lifecycle(&request)?;
+        let operator_workspace_command = operator_command_requires_scoped_direct(&request, &target);
+        let direct_lifecycle_required =
+            operator_workspace_command || terminal_command_requires_direct_lifecycle(&request)?;
         let visible_route = if request.model_call.name == "run_terminal_command"
             && request.execution_surface == super::AgentExecutionSurface::BoundTerminal
             && !direct_lifecycle_required
@@ -776,6 +778,18 @@ fn terminal_command_requires_direct_lifecycle(request: &NativeToolRequest) -> Re
     Ok(arguments.background
         || arguments.lifecycle_trust == TerminalLifecycleTrust::DirectRequired
         || super::native::command_requires_direct_lifecycle_native(&arguments.command))
+}
+
+fn operator_command_requires_scoped_direct(
+    request: &NativeToolRequest,
+    target: &AgentToolTargetNative,
+) -> bool {
+    request.permission_mode == AgentSessionPermissionMode::Operator
+        && request.model_call.name == "run_terminal_command"
+        && matches!(
+            target,
+            AgentToolTargetNative::Local { cwd: Some(root), .. } if !root.trim().is_empty()
+        )
 }
 
 fn is_model_process_tool(name: &str) -> bool {

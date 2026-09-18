@@ -27,11 +27,22 @@ describe('ConfirmationDialog', () => {
 
     const dialog = screen.getByRole('alertdialog');
     const header = dialog.querySelector('[data-slot="alert-dialog-header"]');
+    const scrollArea = dialog.querySelector('[data-slot="scroll-area"]');
     const confirmButton = screen.getByRole('button', { name: 'Continue' });
     const cancelButton = screen.getByRole('button', { name: 'common.cancel' });
 
     expect(dialog).toHaveClass('max-w-sm', 'gap-0', 'overflow-hidden', 'p-0');
-    expect(header).toHaveClass('flex', 'flex-row', 'items-center', 'gap-3', 'border-b', 'px-4', 'py-3', 'text-left');
+    expect(header).toHaveClass(
+      'flex',
+      'flex-row',
+      'items-center',
+      'gap-3',
+      'border-b',
+      'px-4',
+      'py-3',
+      'text-left',
+    );
+    expect(scrollArea).toHaveClass('[&_[data-slot=scroll-area-viewport]]:max-h-[inherit]');
     expect(screen.getByRole('heading', { name: 'Confirm action' })).toHaveClass(
       'self-center',
       'flex-1',

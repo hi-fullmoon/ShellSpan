@@ -119,7 +119,7 @@ export function AgentPermissionSelector({
     ?? PERMISSION_OPTIONS[0];
   const CurrentIcon = current.icon;
   const triggerLabel = visibleMode === 'fullAccess'
-    ? composer ? current.composerLabel : 'agent.permission.fullAccessSelected'
+    ? 'agent.permission.fullAccessSelected'
     : composer ? current.composerLabel : current.label;
 
   useEffect(() => {

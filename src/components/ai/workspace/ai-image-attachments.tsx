@@ -46,7 +46,7 @@ function CommittedImage({ sessionId, image }: { sessionId: string; image: AgentI
     );
     return () => { alive = false; };
   }, [sessionId, image.sha256]);
-  return <AiImagePreview source={result.url} name={image.name}><Attachment orientation="vertical" className="ai-image-thumbnail" state={result.error ? 'error' : result.url ? 'done' : 'processing'}>
+  return <AiImagePreview source={result.url} name={image.name}><Attachment orientation="vertical" className="ai-image-thumbnail has-data-[slot=attachment-media]:p-0" state={result.error ? 'error' : result.url ? 'done' : 'processing'}>
     <AttachmentMedia variant="image" className="ai-image-thumbnail-media">
       {result.error ? <span role="status" className="p-1 text-center text-xs">{t(imageErrorKey(result.error))}</span>
         : result.url ? <img src={result.url} alt={image.name} />
