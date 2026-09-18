@@ -31,6 +31,9 @@ async function openPreview() {
 describe('chat image previews', () => {
   it('opens committed images, zooms within bounds, resets, closes with Escape, and restores focus', async () => {
     render(<AiCommittedImages sessionId="session-a" images={[image]} />);
+    const attachment = (await screen.findByRole('img', { name: image.name })).closest('[data-slot="attachment"]');
+    expect(attachment).toHaveClass('has-data-[slot=attachment-media]:p-0');
+    expect(attachment).not.toHaveClass('has-data-[slot=attachment-media]:p-2');
     const { dialog, trigger } = await openPreview();
     expect(preview).toHaveBeenCalledWith({ sessionId: 'session-a', sha256: image.sha256 });
     expect(within(dialog).getByRole('img')).toHaveAttribute('src', source);
@@ -85,6 +88,12 @@ describe('chat image previews', () => {
   it('reuses the preview for drafts without intercepting removal and handles image decode errors', async () => {
     const remove = vi.fn();
     render(<AiImageDraftRail images={[{ name: image.name, mediaType: 'image/png', data: 'aGVsbG8=' }]} busy={false} locked={false} error={false} onRemove={remove} />);
+    const attachment = screen.getByRole('img', { name: image.name }).closest('[data-slot="attachment"]');
+    expect(attachment).toHaveClass('has-data-[slot=attachment-media]:p-0');
+    expect(attachment).not.toHaveClass('has-data-[slot=attachment-media]:p-2');
+    const actions = screen.getByRole('button', { name: 'Remove image screenshot.png' }).closest('[data-slot="attachment-actions"]');
+    expect(actions).toHaveClass('group-data-[orientation=vertical]/attachment:top-0.75', 'group-data-[orientation=vertical]/attachment:right-0.75');
+    expect(actions).not.toHaveClass('group-data-[orientation=vertical]/attachment:top-3', 'group-data-[orientation=vertical]/attachment:right-3');
     const { dialog } = await openPreview();
     fireEvent.error(within(dialog).getByRole('img'));
     expect(within(dialog).getByRole('status')).toHaveTextContent('The image file is missing');

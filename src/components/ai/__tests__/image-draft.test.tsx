@@ -211,3 +211,13 @@ it.each(['k3', 'k3-256k'])('accepts %s images through the resolved Kimi connecti
     expect(() => requireVision(invalid)).toThrow('UNKNOWN_MODEL');
   }
 });
+
+it('accepts images through the resolved MiniMax M3 connection', async () => {
+  const provider = { id: 'minimax', profile: 'minimax' as const, kind: 'openAiCompatible' as const,
+    baseUrl: 'https://api.minimaxi.com/v1', model: 'MiniMax-M3', requiresApiKey: true };
+  const model = await loadResolvedModel(provider);
+
+  expect(model.imageInput).toBe('supported');
+  expect(model.vision).toMatchObject({ maxRequestImages: 20, reservedTokensPerImage: 4096 });
+  expect(() => requireVision(provider)).not.toThrow();
+});

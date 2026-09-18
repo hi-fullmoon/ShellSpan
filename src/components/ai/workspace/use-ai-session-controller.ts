@@ -8,6 +8,7 @@ import { sessionProviderConfig } from '@/lib/ai/session-settings';
 import { isTopLevelAiSession, listAllAiSessions } from '@/lib/ai/session-list';
 import type { AiProviderConfig } from '@/types/ai';
 import { requireVision } from '@/lib/ai/vision-contract';
+import { loadResolvedModel } from '@/lib/ai/provider-contract';
 import { resolveAiSubmission } from '@/lib/ai/submission-policy';
 import {
   createAiComposerState,
@@ -1445,16 +1446,20 @@ export function useAiSessionController({
         let imageProvider: AiProviderConfig;
         try {
           imageProvider = currentProviderConfig();
-          requireVision(imageProvider);
         }
         catch (e) { imageDraft.reportError(String(e)); return; }
-        const terminalContext = captureTerminalContext(imageProvider, composer.sessionId);
         void imageDraft.send(async () => {
           const cold = await coldSkillSession.current;
           const sessionId = composer.sessionId ?? cold?.summary.id;
           const create = sessionId ? undefined : createInput(composerRef.current.draft.trim() || t('ai.workspace.images.add'));
           return { id: operationId(), sessionId: sessionId ?? create!.request.sessionId, mode: decision.mode, create };
         }, async value => {
+          // Capability resolution can still be in flight when the user submits
+          // immediately after opening the panel. Await it instead of reporting
+          // MODEL_RESOLUTION_PENDING as a storage or connection failure.
+          await loadResolvedModel(imageProvider);
+          requireVision(imageProvider);
+          const terminalContext = captureTerminalContext(imageProvider, composer.sessionId);
           const op = value.operation!;
           if (op.create) {
             let existing: AiSessionView | null = null;

@@ -58,7 +58,12 @@ export const CompactAlertDialogBody: React.FC<React.ComponentProps<'div'>> = ({
   className,
   ...props
 }) => (
-  <ScrollArea className="min-h-0 max-h-[min(540px,calc(100vh-12rem))]">
+  <ScrollArea
+    className={cn(
+      'min-h-0 max-h-[min(540px,calc(100vh-12rem))]',
+      '[&_[data-slot=scroll-area-viewport]]:max-h-[inherit]',
+    )}
+  >
     <div
       className={cn('flex min-w-0 flex-col gap-3 px-4 py-3', className)}
       {...props}

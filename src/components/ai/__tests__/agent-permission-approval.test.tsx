@@ -17,6 +17,7 @@ vi.mock('@/hooks/useI18n', () => ({
       'agent.permission.requestApproval': '请求批准',
       'agent.permission.requestApprovalDescription': '执行每项 Agent 工具操作时始终询问。',
       'agent.permission.fullAccess': '完全访问权限',
+      'agent.permission.fullAccessSelected': '完全访问',
       'agent.permission.fullAccessDescription': '无需逐次批准即可执行原生策略允许的操作；目标和网络范围限制仍然生效。',
       'agent.permission.composer.fullAccess': '完全访问权限',
       'agent.permission.composer.fullAccessDescription': '无需逐次批准即可执行原生策略允许的操作；目标和网络范围限制仍然生效。',
@@ -88,6 +89,19 @@ describe('Agent permission selector', () => {
     expect(screen.getByText('仅对检测到的风险操作请求批准。')).toBeVisible();
     expect(screen.getByText('无需逐次批准即可执行原生策略允许的操作；目标和网络范围限制仍然生效。')).toBeVisible();
     expect(screen.queryByText('工作区内修改')).toBeNull();
+  });
+
+  it('shows the concise full-access label in the Composer trigger after selection', async () => {
+    const { container } = render(<AgentPermissionSelector sessionId="session-1" variant="composer" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'agent.permission.composerAria' }));
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /^完全访问权限/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '允许完全访问' }));
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-slot="agent-permission-trigger-content"]'))
+        .toHaveTextContent(/^完全访问$/);
+    });
   });
 
   it('switches to request-approval mode through the Composer menu', async () => {

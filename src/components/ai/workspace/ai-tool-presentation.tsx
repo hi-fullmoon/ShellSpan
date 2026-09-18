@@ -1,4 +1,5 @@
 import { useMemo, useState, type ComponentType } from 'react';
+import { parsePatch } from 'diff';
 import {
   BracesIcon,
   CheckIcon,
@@ -99,7 +100,7 @@ function outputText(node: ToolNode): string {
   return direct ?? stderr ?? formatToolValue(node.output);
 }
 
-export function classifyAiTool(name: string): AiToolVariant {
+function classifyAiToolName(name: string): AiToolVariant {
   const normalized = name.toLowerCase().replace(/[.\-]/gu, '_');
   if (/(web_search|web_fetch|http|browser|url)/u.test(normalized)) return 'web';
   if (/(grep|glob|search|find_files|find_text)/u.test(normalized)) return 'search';
@@ -109,6 +110,36 @@ export function classifyAiTool(name: string): AiToolVariant {
   if (/(run_code|python|javascript|typescript|execute_code)/u.test(normalized)) return 'code';
   if (/(terminal|shell|bash|pwsh|command|exec|ssh)/u.test(normalized)) return 'terminal';
   return 'generic';
+}
+
+const EXACT_TOOL_VARIANTS: Readonly<Record<string, AiToolVariant>> = {
+  apply_patch: 'edit',
+  exec_command: 'terminal',
+  kill_process: 'terminal',
+  list_directory: 'read',
+  probe_http: 'web',
+  read_file: 'read',
+  read_terminal: 'terminal',
+  run_terminal_command: 'terminal',
+  search_text: 'search',
+  terminal_execute: 'terminal',
+  wait_process: 'terminal',
+  wait_terminal: 'terminal',
+  write_file: 'write',
+  write_stdin: 'terminal',
+  write_terminal_input: 'terminal',
+};
+
+function normalizedToolName(name: string): string {
+  return name.toLowerCase().replace(/[.\-]/gu, '_');
+}
+
+export function classifyAiTool(name: string, nativeName?: string | null): AiToolVariant {
+  const exactPublicVariant = EXACT_TOOL_VARIANTS[normalizedToolName(name)];
+  if (exactPublicVariant) return exactPublicVariant;
+  const publicVariant = classifyAiToolName(name);
+  if (publicVariant !== 'generic' || !nativeName) return publicVariant;
+  return EXACT_TOOL_VARIANTS[normalizedToolName(nativeName)] ?? 'generic';
 }
 
 function iconFor(variant: AiToolVariant): ComponentType<React.SVGProps<SVGSVGElement>> {
@@ -129,9 +160,13 @@ function titleKey(variant: AiToolVariant): LocaleKey {
 }
 
 function toolSummary(node: ToolNode, variant: AiToolVariant): string {
-  if (node.error) return node.error.split('\n')[0] ?? node.error;
-  if (node.summary) return node.summary.split('\n')[0] ?? node.summary;
+  if (node.state === 'failed' || node.state === 'rejected') {
+    const failure = node.error ?? outputText(node);
+    if (failure) return failure.split('\n')[0] ?? failure;
+  }
   const input = asRecord(node.input);
+  const path = variant === 'write' || variant === 'edit' ? toolFilePath(node) : null;
+  if (path) return path.split('\n')[0] ?? path;
   const keys: Record<AiToolVariant, readonly string[]> = {
     terminal: ['description', 'explanation', 'command', 'cmd'],
     read: ['path', 'file_path', 'filePath', 'url'],
@@ -142,7 +177,22 @@ function toolSummary(node: ToolNode, variant: AiToolVariant): string {
     code: ['description', 'language'],
     generic: ['description', 'explanation', 'summary', 'intent'],
   };
-  return firstString(input, keys[variant])?.split('\n')[0] ?? node.name;
+  const inputSummary = firstString(input, keys[variant]);
+  return inputSummary?.split('\n')[0]
+    ?? (node.summary ? node.summary.split('\n')[0] : undefined)
+    ?? node.title
+    ?? node.name;
+}
+
+function toolTitle(
+  node: ToolNode,
+  variant: AiToolVariant,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  if (variant !== 'generic' || !node.title || node.title === node.name || node.title === node.nativeName) {
+    return t(titleKey(variant));
+  }
+  return node.title;
 }
 
 function CappedText({ text, maxLines = 8 }: { text: string; maxLines?: number }) {
@@ -333,22 +383,89 @@ interface DiffHunk {
   readonly newText: string;
 }
 
-function diffHunks(node: ToolNode): readonly DiffHunk[] {
+interface DiffModel {
+  readonly hunks: readonly DiffHunk[];
+  readonly totalsKnown: boolean;
+}
+
+function contentLines(text: string): readonly string[] {
+  if (text === '') return [];
+  return (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n');
+}
+
+function contentLineCount(text: string): number {
+  return contentLines(text).length;
+}
+
+function diffStat(node: ToolNode): string | null {
+  const model = diffModel(node);
+  if (!model.totalsKnown || model.hunks.length === 0) return null;
+  let added = 0;
+  let removed = 0;
+  for (const hunk of model.hunks) {
+    added += contentLineCount(hunk.newText);
+    if (hunk.oldText !== null) removed += contentLineCount(hunk.oldText);
+  }
+  return `+${added} -${removed}`;
+}
+
+function firstPath(values: unknown): string | null {
+  if (!Array.isArray(values)) return null;
+  for (const value of values) {
+    const path = firstString(asRecord(value), ['path', 'file_path', 'filePath']);
+    if (path) return path;
+  }
+  return null;
+}
+
+function toolFilePath(node: ToolNode): string | null {
+  const input = asRecord(node.input);
+  const output = asRecord(node.output);
+  return firstString(input, ['path', 'file_path', 'filePath'])
+    ?? firstString(output, ['path', 'file_path', 'filePath'])
+    ?? firstPath(input?.preconditions)
+    ?? firstPath(output?.files);
+}
+
+function structuredDiffHunks(node: ToolNode): readonly DiffHunk[] {
   const output = asRecord(node.output);
   const diffs = Array.isArray(output?.diffs) ? output.diffs : null;
-  if (diffs) {
-    return diffs.flatMap((value) => {
-      const hunk = asRecord(value);
-      const path = firstString(hunk, ['path', 'file_path']);
-      const oldText = hunk?.oldText ?? hunk?.old_string ?? null;
-      const newText = hunk?.newText ?? hunk?.new_string;
-      return path && (oldText === null || typeof oldText === 'string') && typeof newText === 'string'
-        ? [{ path, oldText, newText }]
-        : [];
-    });
-  }
+  if (!diffs) return [];
+  return diffs.flatMap((value) => {
+    const hunk = asRecord(value);
+    const path = firstString(hunk, ['path', 'file_path']);
+    const oldText = hunk?.oldText ?? hunk?.old_string ?? null;
+    const newText = hunk?.newText ?? hunk?.new_string;
+    return path && (oldText === null || typeof oldText === 'string') && typeof newText === 'string'
+      ? [{ path, oldText, newText }]
+      : [];
+  });
+}
+
+function unifiedDiffHunks(node: ToolNode): readonly DiffHunk[] {
   const input = asRecord(node.input);
-  const path = firstString(input, ['path', 'file_path', 'filePath']);
+  const output = asRecord(node.output);
+  const unifiedDiff = firstString(output, ['diff']) ?? firstString(input, ['patch']);
+  if (!unifiedDiff || unifiedDiff.length > DETAIL_LIMIT) return [];
+  try {
+    const fallbackPath = toolFilePath(node);
+    return parsePatch(unifiedDiff).flatMap((patch) => patch.hunks.map((hunk) => {
+      const removed = hunk.lines.flatMap((line) => line.startsWith('-') ? [line.slice(1)] : []);
+      const added = hunk.lines.flatMap((line) => line.startsWith('+') ? [line.slice(1)] : []);
+      return {
+        path: fallbackPath ?? patch.newFileName ?? patch.oldFileName ?? node.name,
+        oldText: removed.length > 0 ? removed.join('\n') : null,
+        newText: added.join('\n'),
+      };
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function directDiffHunks(node: ToolNode): readonly DiffHunk[] {
+  const input = asRecord(node.input);
+  const path = toolFilePath(node);
   const oldText = input?.old_string ?? input?.oldText ?? null;
   const newText = input?.new_string ?? input?.newText ?? input?.content;
   return path && (oldText === null || typeof oldText === 'string') && typeof newText === 'string'
@@ -356,8 +473,22 @@ function diffHunks(node: ToolNode): readonly DiffHunk[] {
     : [];
 }
 
+function diffModel(node: ToolNode): DiffModel {
+  const structured = structuredDiffHunks(node);
+  if (structured.length > 0) return { hunks: structured, totalsKnown: true };
+  const unified = unifiedDiffHunks(node);
+  if (unified.length > 0) return { hunks: unified, totalsKnown: true };
+  const direct = directDiffHunks(node);
+  const input = asRecord(node.input);
+  const output = asRecord(node.output);
+  const precondition = asRecord(input?.precondition);
+  const replacesUnknownContent = output?.operation === 'replace'
+    || typeof precondition?.sha256 === 'string';
+  return { hunks: direct, totalsKnown: direct.length > 0 && !replacesUnknownContent };
+}
+
 function DiffSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
-  const hunks = diffHunks(node);
+  const hunks = diffModel(node).hunks;
   if (hunks.length === 0) return <IoSurface node={node} compact={compact} />;
   return (
     <div className="ai-diff-block my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-px overflow-hidden" data-ai-tool-view="diff">
@@ -365,10 +496,11 @@ function DiffSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
         <section key={`${hunk.path}:${index}`}>
           <div className="ai-block-banner flex min-w-0 items-center gap-2 truncate px-3.5 py-[9px]">{hunk.path}</div>
           <pre className="ai-diff-body m-0 flex max-h-65 max-w-full flex-col overflow-auto px-3.5 py-3 whitespace-pre">
-            {hunk.oldText?.split('\n').slice(0, compact ? 8 : undefined).map((line, lineIndex) => (
+            {(hunk.oldText === null ? [] : contentLines(hunk.oldText))
+              .slice(0, compact ? 8 : undefined).map((line, lineIndex) => (
               <span key={`old-${lineIndex}`} data-diff="removed">- {line}</span>
             ))}
-            {hunk.newText.split('\n').slice(0, compact ? 8 : undefined).map((line, lineIndex) => (
+            {contentLines(hunk.newText).slice(0, compact ? 8 : undefined).map((line, lineIndex) => (
               <span key={`new-${lineIndex}`} data-diff="added">+ {line}</span>
             ))}
           </pre>
@@ -430,7 +562,7 @@ export function AiToolExpandedContent({
   readonly node: ToolNode;
   readonly compact?: boolean;
 }) {
-  const variant = classifyAiTool(node.name);
+  const variant = classifyAiTool(node.name, node.nativeName);
   switch (variant) {
     case 'terminal': return <TerminalSurface node={node} compact={compact} />;
     case 'read': return <ReadSurface node={node} compact={compact} />;
@@ -452,10 +584,12 @@ export function AiToolRow({
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const variant = classifyAiTool(node.name);
+  const variant = classifyAiTool(node.name, node.nativeName);
   const Icon = iconFor(variant);
   const stateKey = `ai.workspace.tool.${node.state}` as LocaleKey;
   const summary = toolSummary(node, variant);
+  const title = toolTitle(node, variant, t);
+  const changeStat = variant === 'write' || variant === 'edit' ? diffStat(node) : null;
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
@@ -471,7 +605,7 @@ export function AiToolRow({
               type="button"
               className={AI_TOOL_ROW_CLASS}
               data-ai-node-action=""
-              aria-label={`${t(titleKey(variant))}: ${summary}`}
+              aria-label={`${title}: ${summary}${changeStat ? ` ${changeStat}` : ''}`}
             />
           )}
         >
@@ -483,11 +617,15 @@ export function AiToolRow({
                 : <Icon />}
             <ChevronDownIcon className="ai-disclosure-chevron" />
           </span>
-          <span className={AI_DISCLOSURE_TITLE_CLASS}>{t(titleKey(variant))}</span>
+          <span className={AI_DISCLOSURE_TITLE_CLASS}>{title}</span>
           <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
-          <span className={AI_DISCLOSURE_SUMMARY_CLASS} data-error={node.state === 'failed' || undefined}>
+          <span
+            className={AI_DISCLOSURE_SUMMARY_CLASS}
+            data-error={node.state === 'failed' || node.state === 'rejected' || undefined}
+          >
             {summary}
           </span>
+          {changeStat && <span className="ai-tool-diff-stat ml-2 shrink-0 whitespace-nowrap">{changeStat}</span>}
           {node.durationMs !== null && (
             <span className="ai-tool-duration ml-2 shrink-0 whitespace-nowrap">{t('ai.workspace.durationMs', { duration: node.durationMs })}</span>
           )}

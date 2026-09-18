@@ -285,10 +285,13 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
       <ConfirmationDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
-        title={t('settings.ai.records.deleteTitle', { title: deleteTarget ? recordTitle(deleteTarget) : '' })}
-        description={t(deleteTarget && !deleteTarget.ended && !deleteTarget.archived
-          ? 'settings.ai.records.deleteActiveDescription'
-          : 'settings.ai.records.deleteDescription')}
+        title={t('settings.ai.records.deleteTitle')}
+        description={t(
+          deleteTarget && !deleteTarget.ended && !deleteTarget.archived
+            ? 'settings.ai.records.deleteActiveDescription'
+            : 'settings.ai.records.deleteDescription',
+          { title: deleteTarget ? recordTitle(deleteTarget) : '' },
+        )}
         confirmLabel={t('common.delete')}
         confirmVariant="destructive"
         media={<Trash2Icon />}
