@@ -21,9 +21,9 @@ use crate::terminal_broker::TerminalVisibleCommandRoute;
 
 use super::{
     normalize_terminal_target_lookup_error, terminal_target_unavailable, AgentSessionEffect,
-    AgentSessionPermissionMode, AgentSessionTarget, AgentToolResultStatus, NativeToolArtifact,
-    NativeToolIdempotency, NativeToolPreparation, NativeToolRequest, NativeToolResult,
-    NativeToolRuntime, RecordedToolCall, DEFAULT_NATIVE_APPROVAL_TTL_MS,
+    AgentSessionPermissionMode, AgentSessionTarget, AgentToolResultStatus, ModelToolCall,
+    NativeToolArtifact, NativeToolIdempotency, NativeToolPreparation, NativeToolRequest,
+    NativeToolResult, NativeToolRuntime, RecordedToolCall, DEFAULT_NATIVE_APPROVAL_TTL_MS,
 };
 
 enum PreparedAuthorization {
@@ -75,6 +75,38 @@ struct TerminalCommandArguments {
     explanation: String,
     #[serde(default)]
     lifecycle_trust: TerminalLifecycleTrust,
+    #[serde(default)]
+    background: bool,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WriteProcessInputArguments {
+    process_handle: String,
+    input: String,
+    #[serde(default)]
+    close: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WaitProcessModelArguments {
+    process_handle: String,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+    #[serde(default)]
+    max_output_bytes: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct KillProcessModelArguments {
+    process_handle: String,
+    signal: super::ProcessSignalNative,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
@@ -154,7 +186,9 @@ impl NativeToolRuntime for NativeToolAdapter {
         let credentials = self.app.state::<CredentialManager>();
         self.configure(runtime)?;
         let known_hosts_path = crate::known_hosts::known_hosts_path(&self.app)?;
-        let target = target_native(&request.target)?;
+        let owner_target = target_native(&request.target)?;
+        let target = process_target_for_model_call(&request.model_call, &owner_target)?
+            .unwrap_or_else(|| owner_target.clone());
         if matches!(
             request.model_call.name.as_str(),
             "read_terminal" | "write_terminal_input" | "wait_terminal"
@@ -167,6 +201,11 @@ impl NativeToolRuntime for NativeToolAdapter {
             return Err("TERMINAL_REMOTE_INTERACTIVE_TOOLS_DISABLED".into());
         }
         let native_request_id = stable_native_id("request", &request.session_id);
+        let frozen_targets = if matches!(target, AgentToolTargetNative::Process { .. }) {
+            vec![owner_target, target.clone()]
+        } else {
+            vec![target.clone()]
+        };
         let frozen_request = AgentRequestNative {
             contract_version: NATIVE_TOOL_CONTRACT_VERSION,
             request_id: native_request_id.clone(),
@@ -178,7 +217,7 @@ impl NativeToolRuntime for NativeToolAdapter {
             } else {
                 request.success_criteria.clone()
             },
-            targets: vec![target.clone()],
+            targets: frozen_targets,
             permission_mode: permission_mode_native(request.permission_mode),
         };
 
@@ -305,6 +344,7 @@ impl NativeToolRuntime for NativeToolAdapter {
         };
         let (native_name, arguments) =
             normalize_arguments(&request, &target, visible_route, direct_lifecycle_required)?;
+        let native_target_id = target.target_id().to_string();
         let internal_call_id = stable_native_id(
             "call",
             &format!(
@@ -339,7 +379,14 @@ impl NativeToolRuntime for NativeToolAdapter {
             provider_call_id: request.model_call.provider_call_id.clone(),
             name: request.model_call.name.clone(),
             native_name: Some(native_name.clone()),
-            arguments: recorded_native_arguments(&native_name, &prepared.call.arguments),
+            arguments: if is_model_process_tool(&request.model_call.name) {
+                super::model::recorded_tool_arguments(
+                    &request.model_call.name,
+                    &request.model_call.arguments,
+                )
+            } else {
+                recorded_native_arguments(&native_name, &prepared.call.arguments)
+            },
             title: Some(native_name.clone()),
             effect: Some(effect),
             target: Some(request.target.clone()),
@@ -376,7 +423,7 @@ impl NativeToolRuntime for NativeToolAdapter {
                     public_call_id: request.model_call.call_id,
                     public_name: request.model_call.name,
                     native_name,
-                    target_id: request.target.target_id,
+                    target_id: native_target_id,
                     effect,
                     started_at_unix_ms: current_unix_ms(),
                 },
@@ -564,40 +611,71 @@ fn normalize_arguments(
             serde_json::from_value(request.model_call.arguments.clone()).map_err(|error| {
                 format!("run_terminal_command schema rejected arguments: {error}")
             })?;
-        if arguments.command.trim().is_empty()
-            || arguments.command.len() > 8_192
-            || arguments.explanation.trim().is_empty()
-            || arguments.explanation.len() > 2_048
-        {
-            return Err("run_terminal_command schema rejected bounded string fields".into());
+        if arguments.command.trim().is_empty() {
+            return Err(
+                "run_terminal_command schema rejected command: it must not be empty".into(),
+            );
+        }
+        if arguments.command.chars().any(char::is_control) {
+            return Err("run_terminal_command schema rejected command: control characters and multiline commands are not allowed; split multi-stage work across tool calls and use probe_http for target-loopback HTTP".into());
+        }
+        if arguments.command.len() > 8_192 {
+            let recovery = match target {
+                AgentToolTargetNative::Local { cwd: Some(_), .. }
+                | AgentToolTargetNative::Remote {
+                    root_path: Some(_),
+                    ..
+                } => "suggestedTool=write_file; use write_file for files up to 32 KiB and bounded read_file plus apply_patch increments for larger files",
+                _ => "suggestedAction=split_bounded_commands; no native filesystem root is available, so split the operation across commands below the limit",
+            };
+            return Err(format!(
+                "run_terminal_command schema rejected command: {} UTF-8 bytes exceeds the 8192-byte maximum; {recovery}; child Agents have the same limit",
+                arguments.command.len(),
+            ));
+        }
+        if arguments.explanation.trim().is_empty() {
+            return Err(
+                "run_terminal_command schema rejected explanation: it must not be empty".into(),
+            );
+        }
+        if arguments.explanation.len() > 2_048 {
+            return Err(format!(
+                "run_terminal_command schema rejected explanation: {} UTF-8 bytes exceeds the 2048-byte maximum",
+                arguments.explanation.len()
+            ));
         }
         let cwd = match target {
             AgentToolTargetNative::Local { cwd, .. } => cwd.clone(),
             AgentToolTargetNative::Remote { .. } => None,
             _ => return Err("terminal command requires a frozen host target".into()),
         };
+        let timeout_ms = arguments.timeout_ms;
+        let background = arguments.background;
         return match request.execution_surface {
             super::AgentExecutionSurface::Direct => Ok((
                 "exec_command".into(),
-                json!({
+                omit_null_fields(json!({
                     "command": arguments.command,
                     "explanation": arguments.explanation,
                     "channel": "direct",
                     "cwd": cwd,
-                    "background": false,
-                    "elevated": false
-                }),
+                    "background": background,
+                    "elevated": false,
+                    "timeoutMs": timeout_ms
+                })),
             )),
-            super::AgentExecutionSurface::BoundTerminal if direct_lifecycle_required => Ok((
+            super::AgentExecutionSurface::BoundTerminal
+                if direct_lifecycle_required || background => Ok((
                 "exec_command".into(),
-                json!({
+                omit_null_fields(json!({
                     "command": arguments.command,
                     "explanation": arguments.explanation,
                     "channel": "direct",
                     "cwd": cwd,
-                    "background": false,
-                    "elevated": false
-                }),
+                    "background": background,
+                    "elevated": false,
+                    "timeoutMs": timeout_ms
+                })),
             )),
             super::AgentExecutionSurface::BoundTerminal => match visible_route
                 .unwrap_or(TerminalVisibleCommandRoute::Unavailable)
@@ -617,6 +695,42 @@ fn normalize_arguments(
         };
     }
     match request.model_call.name.as_str() {
+        "write_process_input" => {
+            let value = serde_json::from_value::<WriteProcessInputArguments>(
+                request.model_call.arguments.clone(),
+            )
+            .map_err(|error| format!("write_process_input schema rejected arguments: {error}"))?;
+            let _process_handle = value.process_handle;
+            Ok((
+                "write_stdin".into(),
+                omit_null_fields(json!({ "input": value.input, "close": value.close })),
+            ))
+        }
+        "wait_process" => {
+            let value = serde_json::from_value::<WaitProcessModelArguments>(
+                request.model_call.arguments.clone(),
+            )
+            .map_err(|error| format!("wait_process schema rejected arguments: {error}"))?;
+            let _process_handle = value.process_handle;
+            Ok((
+                "wait_process".into(),
+                omit_null_fields(json!({
+                    "timeoutMs": value.timeout_ms,
+                    "maxOutputBytes": value.max_output_bytes
+                })),
+            ))
+        }
+        "kill_process" => {
+            let value = serde_json::from_value::<KillProcessModelArguments>(
+                request.model_call.arguments.clone(),
+            )
+            .map_err(|error| format!("kill_process schema rejected arguments: {error}"))?;
+            let _process_handle = value.process_handle;
+            Ok((
+                "kill_process".into(),
+                omit_null_fields(json!({ "signal": value.signal, "timeoutMs": value.timeout_ms })),
+            ))
+        }
         "read_terminal" | "write_terminal_input" | "wait_terminal"
             if request.execution_surface != super::AgentExecutionSurface::BoundTerminal =>
         {
@@ -624,12 +738,14 @@ fn normalize_arguments(
         }
         "exec_command"
         | "terminal_execute"
+        | "probe_http"
         | "read_terminal"
         | "write_terminal_input"
         | "wait_terminal"
         | "read_file"
         | "list_directory"
         | "search_text"
+        | "write_file"
         | "apply_patch"
         | "transfer_file" => Ok((
             request.model_call.name.clone(),
@@ -643,6 +759,13 @@ fn recorded_native_arguments(tool_name: &str, arguments: &Value) -> Value {
     super::model::recorded_tool_arguments(tool_name, arguments)
 }
 
+fn omit_null_fields(mut value: Value) -> Value {
+    if let Value::Object(fields) = &mut value {
+        fields.retain(|_, value| !value.is_null());
+    }
+    value
+}
+
 fn terminal_command_requires_direct_lifecycle(request: &NativeToolRequest) -> Result<bool, String> {
     if request.model_call.name != "run_terminal_command" {
         return Ok(false);
@@ -650,10 +773,46 @@ fn terminal_command_requires_direct_lifecycle(request: &NativeToolRequest) -> Re
     let arguments: TerminalCommandArguments =
         serde_json::from_value(request.model_call.arguments.clone())
             .map_err(|error| format!("run_terminal_command schema rejected arguments: {error}"))?;
-    Ok(
-        arguments.lifecycle_trust == TerminalLifecycleTrust::DirectRequired
-            || super::native::command_requires_direct_lifecycle_native(&arguments.command),
+    Ok(arguments.background
+        || arguments.lifecycle_trust == TerminalLifecycleTrust::DirectRequired
+        || super::native::command_requires_direct_lifecycle_native(&arguments.command))
+}
+
+fn is_model_process_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "write_process_input" | "wait_process" | "kill_process"
     )
+}
+
+fn process_target_for_model_call(
+    call: &ModelToolCall,
+    owner: &AgentToolTargetNative,
+) -> Result<Option<AgentToolTargetNative>, String> {
+    if !is_model_process_tool(&call.name) {
+        return Ok(None);
+    }
+    if !matches!(
+        owner,
+        AgentToolTargetNative::Local { .. } | AgentToolTargetNative::Remote { .. }
+    ) {
+        return Err("process tools require a frozen host owner".into());
+    }
+    let process_handle = call
+        .arguments
+        .get("processHandle")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{} schema requires processHandle", call.name))?;
+    let suffix = process_handle
+        .strip_prefix("proc-")
+        .filter(|value| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| format!("{} schema rejected processHandle", call.name))?;
+    debug_assert_eq!(suffix.len(), 32);
+    Ok(Some(AgentToolTargetNative::Process {
+        target_id: format!("process-{process_handle}"),
+        owner_target_id: owner.target_id().to_string(),
+        process_handle: process_handle.to_string(),
+    }))
 }
 
 fn target_native(target: &AgentSessionTarget) -> Result<AgentToolTargetNative, String> {

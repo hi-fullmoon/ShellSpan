@@ -40,6 +40,8 @@ describe('Terminal Execution Phase 4 remote SSH contracts', () => {
     expect(runtime).toContain('AgentToolTargetNative::Remote');
     expect(JSON.parse(manifest).tools.find(({ name }) => name === 'terminal_execute'))
       .toMatchObject({ targetKinds: ['local', 'remote'] });
+    expect(JSON.parse(manifest).tools.find(({ name }) => name === 'probe_http'))
+      .toMatchObject({ targetKinds: ['local', 'remote'] });
   });
 
   it('runs real isolated SSH PTYs, unsupported-shell evidence, and Direct regression', async () => {
@@ -53,6 +55,7 @@ describe('Terminal Execution Phase 4 remote SSH contracts', () => {
     expect(runner).toContain("docker, ['build'");
     expect(runner).toContain('ordinary_ssh_bash_prepares_integration_with_compatible_startup');
     expect(runner).toContain('ordinary_ssh_zsh_prepares_integration_with_compatible_startup');
+    expect(runner).toContain('isolated_ssh_probe_reaches_only_the_remote_loopback_service');
     expect(runner).toContain('remote_control_failure_cleans_files_without_blocking_the_user_shell');
     expect(runner).toContain('remote_bound_terminal_bash_reuses_source_shell_acceptance');
     expect(runner).toContain('remote_bound_terminal_zsh_reuses_source_shell_smoke');

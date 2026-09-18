@@ -38,16 +38,16 @@ use crate::terminal_integration::{TerminalIntegrationControlEvent, TerminalShell
 
 use super::{
     assess_effect_native, configured_tool_policy_native, current_unix_ms,
-    enforce_native_call_policy_native, execute_file_tool_native, execute_mcp_tool_native,
-    inspect_call_policy_scope_native, load_mcp_server_native, preview_file_call_native,
-    spawn_local_process_native, spawn_remote_process_native, AgentCallPreviewNative,
-    CapabilityIssueRequestNative, CheckpointStoreNative, FileExecutionContextNative,
-    FileOperationRegistryNative, IssuedCapabilityNative, McpServerConfigNative,
-    McpToolPolicyNative, NativeCapabilityStoreNative, ProcessLifecycleNative,
-    ProcessRegistryNative, ProcessSnapshotNative, RegisteredToolNative, RemoteProcessStartNative,
-    TerminalExecuteRegistry, TerminalExecuteValidationStage, TerminalInputSource,
-    TerminalInteractiveRegistry, TerminalInteractiveValidationStage, TerminalLeaseManager,
-    ToolRegistryErrorNative, ToolRegistryNative,
+    enforce_native_call_policy_native, execute_file_tool_native, execute_http_probe_native,
+    execute_mcp_tool_native, inspect_call_policy_scope_native, load_mcp_server_native,
+    preview_file_call_native, spawn_local_process_native, spawn_remote_process_native,
+    AgentCallPreviewNative, CapabilityIssueRequestNative, CheckpointStoreNative,
+    FileExecutionContextNative, FileOperationRegistryNative, IssuedCapabilityNative,
+    McpServerConfigNative, McpToolPolicyNative, NativeCapabilityStoreNative,
+    ProcessLifecycleNative, ProcessRegistryNative, ProcessSnapshotNative, RegisteredToolNative,
+    RemoteProcessStartNative, TerminalExecuteRegistry, TerminalExecuteValidationStage,
+    TerminalInputSource, TerminalInteractiveRegistry, TerminalInteractiveValidationStage,
+    TerminalLeaseManager, ToolRegistryErrorNative, ToolRegistryNative,
 };
 
 pub(crate) const DEFAULT_CAPABILITY_TTL_MS: u64 = 120_000;
@@ -358,6 +358,16 @@ impl NativeToolEngine {
     ) -> Result<(), String> {
         self.terminal_leases
             .write(sessions, session_id, data, TerminalInputSource::User)
+    }
+
+    pub(crate) fn write_user_terminal_binary_input(
+        &self,
+        sessions: &SessionManager,
+        session_id: &str,
+        bytes: Vec<u8>,
+    ) -> Result<(), String> {
+        self.terminal_leases
+            .write_binary(sessions, session_id, bytes, TerminalInputSource::User)
     }
 
     pub(crate) fn acknowledge_terminal_lease_ready(
@@ -814,6 +824,45 @@ impl NativeToolEngine {
                 sessions,
                 tool.descriptor.default_timeout_ms,
             ),
+            "probe_http" => {
+                let remote_connection = match &call.target {
+                    AgentToolTargetNative::Remote { .. } => Some(connection_for_remote_target(
+                        &call.target,
+                        database,
+                        credentials,
+                    )?),
+                    AgentToolTargetNative::Local { .. } => None,
+                    _ => return Err("probe_http requires a frozen host target".into()),
+                };
+                match execute_http_probe_native(
+                    &call,
+                    remote_connection.as_ref(),
+                    known_hosts_path,
+                    cancellation,
+                ) {
+                    Ok(output) => Ok(completed_result(
+                        &context.request,
+                        &call,
+                        &effect,
+                        &output.summary,
+                        output.data,
+                        output.truncated,
+                    )),
+                    Err(error) if cancellation.is_cancelled() => Ok(AgentToolResultNative {
+                        request_id: context.request.request_id.clone(),
+                        call_id: call.call_id.clone(),
+                        tool_name: call.tool_name.clone(),
+                        target_id: call.target.target_id().to_string(),
+                        status: AgentToolResultStatusNative::Cancelled,
+                        summary: error,
+                        data: None,
+                        artifacts: Vec::new(),
+                        effects: vec![effect],
+                        truncated: Some(false),
+                    }),
+                    Err(error) => Err(error),
+                }
+            }
             "read_terminal" => self.read_terminal(context, &call, &effect, sessions),
             "write_terminal_input" => self.write_terminal_input(context, &call, &effect, sessions),
             "wait_terminal" => self.wait_terminal(
@@ -827,16 +876,15 @@ impl NativeToolEngine {
             "write_stdin" => self.write_process(context, &call, &effect),
             "wait_process" => self.wait_process(context, &call, &effect),
             "kill_process" => self.kill_process(context, &call, &effect),
-            "read_file" | "list_directory" | "search_text" | "apply_patch" | "transfer_file" => {
-                self.execute_file_tool(
-                    context,
-                    &call,
-                    &effect,
-                    database,
-                    credentials,
-                    known_hosts_path,
-                )
-            }
+            "read_file" | "list_directory" | "search_text" | "write_file" | "apply_patch"
+            | "transfer_file" => self.execute_file_tool(
+                context,
+                &call,
+                &effect,
+                database,
+                credentials,
+                known_hosts_path,
+            ),
             _ => Err("tool is outside the native execution kernel".into()),
         }
     }
@@ -1900,7 +1948,8 @@ fn requires_native_confirmation(
             sensitive_path_count > 0
                 || matches!(
                     effect,
-                    AgentEffectKindNative::StateChange
+                    AgentEffectKindNative::SensitiveRead
+                        | AgentEffectKindNative::StateChange
                         | AgentEffectKindNative::Destructive
                         | AgentEffectKindNative::ExternalSideEffect
                 )
@@ -2023,6 +2072,11 @@ mod tests {
         assert!(requires_native_confirmation(
             AgentPermissionModeNative::RequestApproval,
             AgentEffectKindNative::ReadOnly,
+            0,
+        ));
+        assert!(requires_native_confirmation(
+            AgentPermissionModeNative::ScopedAutopilot,
+            AgentEffectKindNative::SensitiveRead,
             0,
         ));
         assert!(requires_native_confirmation(

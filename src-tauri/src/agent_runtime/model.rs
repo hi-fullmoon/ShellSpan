@@ -61,7 +61,7 @@ impl ModelRequest {
                                         call_id: call.call_id.clone(),
                                         provider_call_id: None,
                                         name: call.name.clone(),
-                                        arguments: call.arguments.clone(),
+                                        arguments: model_history_tool_arguments(call),
                                     },
                                 }
                             }
@@ -69,7 +69,11 @@ impl ModelRequest {
                         .collect();
                     messages.push(ModelMessage::Assistant {
                         content,
-                        replay: replay.clone(),
+                        replay: replay
+                            .as_deref()
+                            .and_then(super::AgentStoredReplay::inline_envelope)
+                            .cloned()
+                            .map(Box::new),
                         native_replay: None,
                     });
                 }
@@ -305,6 +309,14 @@ pub(crate) fn recorded_tool_arguments(
             "contentPersisted": false,
         });
     }
+    if tool_name == "write_process_input" {
+        return serde_json::json!({
+            "processHandle": arguments.get("processHandle").and_then(serde_json::Value::as_str),
+            "close": arguments.get("close").and_then(serde_json::Value::as_bool),
+            "byteLength": arguments.get("input").and_then(serde_json::Value::as_str).map(str::len),
+            "contentPersisted": false,
+        });
+    }
     if tool_name == "wait_terminal" {
         if let Some(text) = arguments.get("text").and_then(serde_json::Value::as_str) {
             let mut recorded = arguments.as_object().cloned().unwrap_or_default();
@@ -323,6 +335,7 @@ pub(crate) fn tool_call_arguments_are_ephemeral(
     arguments: &serde_json::Value,
 ) -> bool {
     tool_name == "write_terminal_input"
+        || tool_name == "write_process_input"
         || (tool_name == "wait_terminal" && arguments.get("text").is_some())
 }
 
@@ -331,6 +344,7 @@ pub(crate) fn recorded_tool_call_omits_replay(call: &RecordedToolCall) -> bool {
         return false;
     };
     if arguments.contains_key("text")
+        || arguments.contains_key("input")
         || arguments
             .get("contentPersisted")
             .and_then(serde_json::Value::as_bool)
@@ -361,7 +375,108 @@ pub(crate) fn recorded_tool_call_omits_replay(call: &RecordedToolCall) -> bool {
                     .and_then(serde_json::Value::as_u64)
                     .is_some()
         }
+        "write_process_input" => {
+            arguments.len() == 4
+                && arguments
+                    .get("processHandle")
+                    .is_some_and(serde_json::Value::is_string)
+                && arguments
+                    .get("close")
+                    .is_some_and(|value| value.is_null() || value.is_boolean())
+                && arguments
+                    .get("byteLength")
+                    .is_some_and(|value| value.is_null() || value.as_u64().is_some())
+        }
         _ => false,
+    }
+}
+
+const OMITTED_TERMINAL_INPUT: &str = "[ephemeral terminal input omitted]";
+const OMITTED_TERMINAL_MATCH: &str = "[ephemeral terminal match text omitted]";
+const OMITTED_PROCESS_INPUT: &str = "[ephemeral process input omitted]";
+
+fn model_history_tool_arguments(call: &RecordedToolCall) -> serde_json::Value {
+    if !recorded_tool_call_omits_replay(call) {
+        return call.arguments.clone();
+    }
+    match call.name.as_str() {
+        "write_terminal_input" => {
+            let fallback = serde_json::json!({
+                "inputKind": "text",
+                "text": OMITTED_TERMINAL_INPUT,
+            });
+            let projected = match call
+                .arguments
+                .get("inputKind")
+                .and_then(serde_json::Value::as_str)
+            {
+                Some("key") => call
+                    .arguments
+                    .get("key")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|key| serde_json::json!({ "inputKind": "key", "key": key }))
+                    .unwrap_or_else(|| fallback.clone()),
+                Some("interrupt") => serde_json::json!({ "inputKind": "interrupt" }),
+                Some("paste") => serde_json::json!({
+                    "inputKind": "paste",
+                    "text": OMITTED_TERMINAL_INPUT,
+                }),
+                Some("text") | Some(_) | None => fallback.clone(),
+            };
+            validated_terminal_history_arguments("write_terminal_input", projected, fallback)
+        }
+        "wait_terminal" => {
+            let mut projected = serde_json::Map::new();
+            if let Some(arguments) = call.arguments.as_object() {
+                for key in [
+                    "afterScreenVersion",
+                    "afterOutputSequence",
+                    "afterLifecycleSequence",
+                    "caseSensitive",
+                    "idleMs",
+                    "timeoutMs",
+                ] {
+                    if let Some(value) = arguments.get(key) {
+                        projected.insert(key.into(), value.clone());
+                    }
+                }
+            }
+            projected.insert("text".into(), OMITTED_TERMINAL_MATCH.into());
+            let fallback = serde_json::json!({ "text": OMITTED_TERMINAL_MATCH });
+            validated_terminal_history_arguments(
+                "wait_terminal",
+                serde_json::Value::Object(projected),
+                fallback,
+            )
+        }
+        "write_process_input" => {
+            let mut projected = serde_json::Map::new();
+            if let Some(handle) = call.arguments.get("processHandle") {
+                projected.insert("processHandle".into(), handle.clone());
+            }
+            projected.insert("input".into(), OMITTED_PROCESS_INPUT.into());
+            if let Some(close) = call
+                .arguments
+                .get("close")
+                .and_then(serde_json::Value::as_bool)
+            {
+                projected.insert("close".into(), close.into());
+            }
+            serde_json::Value::Object(projected)
+        }
+        _ => call.arguments.clone(),
+    }
+}
+
+fn validated_terminal_history_arguments(
+    tool_name: &str,
+    arguments: serde_json::Value,
+    fallback: serde_json::Value,
+) -> serde_json::Value {
+    if super::validate_tool_arguments_native(tool_name, &arguments).is_ok() {
+        arguments
+    } else {
+        fallback
     }
 }
 
@@ -412,6 +527,173 @@ mod stage_c_tests {
         let mut unredacted_write = write;
         unredacted_write.arguments["text"] = "must-not-be-durable".into();
         assert!(!recorded_tool_call_omits_replay(&unredacted_write));
+    }
+
+    #[test]
+    fn process_input_is_ephemeral_but_keeps_its_handle_in_model_history() {
+        let call = recorded_tool_call(ModelToolCall {
+            call_id: "process-input".into(),
+            provider_call_id: None,
+            name: "write_process_input".into(),
+            arguments: serde_json::json!({
+                "processHandle": "proc-0123456789abcdef0123456789abcdef",
+                "input": "private-process-input",
+                "close": true,
+            }),
+        });
+        let encoded = serde_json::to_string(&call).unwrap();
+        assert!(!encoded.contains("private-process-input"));
+        assert!(recorded_tool_call_omits_replay(&call));
+        assert!(tool_call_arguments_are_ephemeral(
+            "write_process_input",
+            &serde_json::json!({ "input": "private-process-input" }),
+        ));
+        assert_eq!(
+            model_history_tool_arguments(&call),
+            serde_json::json!({
+                "processHandle": "proc-0123456789abcdef0123456789abcdef",
+                "input": OMITTED_PROCESS_INPUT,
+                "close": true,
+            })
+        );
+    }
+
+    #[test]
+    fn ephemeral_terminal_receipts_project_as_schema_safe_model_history() {
+        let write = recorded_tool_call(ModelToolCall {
+            call_id: "write".into(),
+            provider_call_id: None,
+            name: "write_terminal_input".into(),
+            arguments: serde_json::json!({
+                "inputKind": "paste",
+                "text": "private-terminal-input",
+            }),
+        });
+        let wait = recorded_tool_call(ModelToolCall {
+            call_id: "wait".into(),
+            provider_call_id: None,
+            name: "wait_terminal".into(),
+            arguments: serde_json::json!({
+                "text": "private-terminal-match",
+                "caseSensitive": true,
+                "timeoutMs": 1000,
+            }),
+        });
+        let invalid_key = recorded_tool_call(ModelToolCall {
+            call_id: "invalid-key".into(),
+            provider_call_id: None,
+            name: "write_terminal_input".into(),
+            arguments: serde_json::json!({
+                "inputKind": "key",
+                "key": "return",
+            }),
+        });
+        let polluted_wait = recorded_tool_call(ModelToolCall {
+            call_id: "polluted-wait".into(),
+            provider_call_id: None,
+            name: "wait_terminal".into(),
+            arguments: serde_json::json!({
+                "text": "private-polluted-match",
+                "byteLength": 24,
+                "timeoutMs": 70000,
+            }),
+        });
+        let surface = AgentSurfaceSnapshot {
+            generation: 1,
+            replaced_through_seq: None,
+            messages: vec![
+                AgentSurfaceMessage::Assistant {
+                    message_id: "assistant".into(),
+                    content: vec![
+                        AgentAssistantContentBlock::ToolCall {
+                            call: Box::new(write),
+                        },
+                        AgentAssistantContentBlock::ToolCall {
+                            call: Box::new(wait),
+                        },
+                        AgentAssistantContentBlock::ToolCall {
+                            call: Box::new(invalid_key),
+                        },
+                        AgentAssistantContentBlock::ToolCall {
+                            call: Box::new(polluted_wait),
+                        },
+                    ],
+                    interrupted: false,
+                    replay: None,
+                },
+                AgentSurfaceMessage::Tool {
+                    call_id: "write".into(),
+                    name: "write_terminal_input".into(),
+                    status: crate::agent_runtime::AgentToolResultStatus::Completed,
+                    content: "accepted".into(),
+                },
+                AgentSurfaceMessage::Tool {
+                    call_id: "wait".into(),
+                    name: "wait_terminal".into(),
+                    status: crate::agent_runtime::AgentToolResultStatus::Completed,
+                    content: "observed".into(),
+                },
+                AgentSurfaceMessage::Tool {
+                    call_id: "invalid-key".into(),
+                    name: "write_terminal_input".into(),
+                    status: crate::agent_runtime::AgentToolResultStatus::Rejected,
+                    content: "rejected".into(),
+                },
+                AgentSurfaceMessage::Tool {
+                    call_id: "polluted-wait".into(),
+                    name: "wait_terminal".into(),
+                    status: crate::agent_runtime::AgentToolResultStatus::Rejected,
+                    content: "rejected".into(),
+                },
+            ],
+        };
+
+        let request =
+            ModelRequest::from_surface("request".into(), &surface, "system".into(), Vec::new());
+        let ModelMessage::Assistant { content, .. } = &request.messages[0] else {
+            panic!("expected assistant history")
+        };
+        assert!(matches!(
+            &content[0],
+            ModelContentBlock::ToolCall { call }
+                if call.arguments == serde_json::json!({
+                    "inputKind": "paste",
+                    "text": OMITTED_TERMINAL_INPUT,
+                })
+        ));
+        assert!(matches!(
+            &content[1],
+            ModelContentBlock::ToolCall { call }
+                if call.arguments == serde_json::json!({
+                    "text": OMITTED_TERMINAL_MATCH,
+                    "caseSensitive": true,
+                    "timeoutMs": 1000,
+                })
+        ));
+        assert!(matches!(
+            &content[2],
+            ModelContentBlock::ToolCall { call }
+                if call.arguments == serde_json::json!({
+                    "inputKind": "text",
+                    "text": OMITTED_TERMINAL_INPUT,
+                })
+        ));
+        assert!(matches!(
+            &content[3],
+            ModelContentBlock::ToolCall { call }
+                if call.arguments == serde_json::json!({
+                    "text": OMITTED_TERMINAL_MATCH,
+                })
+        ));
+        let encoded = serde_json::to_string(&request.messages).unwrap();
+        assert!(!encoded.contains("private-terminal-input"));
+        assert!(!encoded.contains("private-terminal-match"));
+        assert!(!encoded.contains("private-polluted-match"));
+        assert!(!encoded.contains("\"return\""));
+        assert!(!encoded.contains("byteLength"));
+        assert!(!encoded.contains("contentPersisted"));
+        assert!(!encoded.contains("textProvided"));
+        assert!(!encoded.contains("textByteLength"));
     }
 
     #[test]

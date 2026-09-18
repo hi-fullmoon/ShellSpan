@@ -13,8 +13,12 @@ use crate::redaction::{redact_json_value, redact_sensitive_text};
 
 const MAX_ARTIFACT_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ARTIFACT_COUNT: usize = 2_048;
+const MAX_REPLAY_ARTIFACT_COUNT: usize = 32_768;
 const MAX_TOTAL_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
 const ARTIFACT_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1_000;
+pub(crate) const AGENT_REPLAY_ARTIFACT_KIND: &str = "assistant-replay";
+pub(crate) const AGENT_REPLAY_ARTIFACT_MEDIA_TYPE: &str =
+    "application/vnd.shellspan.agent-replay+zstd";
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +119,54 @@ impl AgentArtifactStore {
         )
     }
 
+    pub(crate) fn store_replay(
+        &self,
+        session_id: &str,
+        replay: &crate::llm::replay::ReplayEnvelopeV5,
+    ) -> Result<AgentArtifactMetadata, String> {
+        let bytes = serde_json::to_vec(replay)
+            .map_err(|error| format!("failed to encode Agent replay artifact: {error}"))?;
+        if bytes.len() as u64 > MAX_ARTIFACT_BYTES {
+            return Err("Agent replay artifact exceeds its decoded byte boundary".into());
+        }
+        let compressed = zstd::stream::encode_all(bytes.as_slice(), 3)
+            .map_err(|error| format!("failed to compress Agent replay artifact: {error}"))?;
+        self.store_bytes(
+            session_id,
+            AGENT_REPLAY_ARTIFACT_KIND,
+            "Private assistant replay metadata",
+            AGENT_REPLAY_ARTIFACT_MEDIA_TYPE,
+            &compressed,
+            AgentArtifactSensitivity::Internal,
+        )
+    }
+
+    pub(crate) fn retrieve_replay(
+        &self,
+        session_id: &str,
+        metadata: &AgentArtifactMetadata,
+    ) -> Result<crate::llm::replay::ReplayEnvelopeV5, String> {
+        validate_replay_metadata(metadata)?;
+        let limit = usize::try_from(metadata.size_bytes)
+            .map_err(|_| "Agent replay artifact size is not addressable".to_string())?;
+        let compressed = self.retrieve(session_id, metadata, limit)?;
+        if compressed.len() as u64 != metadata.size_bytes {
+            return Err("Agent replay artifact was not retrieved in full".into());
+        }
+        let decoder = zstd::stream::read::Decoder::new(compressed.as_slice())
+            .map_err(|error| format!("Agent replay artifact compression is invalid: {error}"))?;
+        let mut bytes = Vec::new();
+        decoder
+            .take(MAX_ARTIFACT_BYTES.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("failed to decode Agent replay artifact: {error}"))?;
+        if bytes.len() as u64 > MAX_ARTIFACT_BYTES {
+            return Err("Agent replay artifact exceeds its decoded byte boundary".into());
+        }
+        serde_json::from_slice(&bytes)
+            .map_err(|error| format!("Agent replay artifact is invalid: {error}"))
+    }
+
     #[cfg(test)]
     pub(crate) fn store_text(
         &self,
@@ -158,7 +210,12 @@ impl AgentArtifactStore {
         let session_root = root.join(session_id);
         prepare_private_directory(&session_root)?;
         let sha256 = sha256_hex(bytes);
-        let artifact_id = format!("artifact-{}", &sha256[..32]);
+        let prefix = if kind == AGENT_REPLAY_ARTIFACT_KIND {
+            "replay"
+        } else {
+            "artifact"
+        };
+        let artifact_id = format!("{prefix}-{}", &sha256[..32]);
         let path = session_root.join(format!("{artifact_id}.bin"));
         if path.exists() {
             let existing = read_bounded(&path, MAX_ARTIFACT_BYTES)?;
@@ -166,7 +223,7 @@ impl AgentArtifactStore {
                 return Err("existing Agent artifact failed content-address verification".into());
             }
         } else {
-            ensure_capacity(&root, bytes.len() as u64)?;
+            ensure_capacity(&root, bytes.len() as u64, kind)?;
             write_private_exclusive(&path, bytes)?;
             sync_parent(&path)?;
         }
@@ -313,6 +370,25 @@ impl AgentArtifactStore {
     }
 }
 
+pub(crate) fn validate_replay_metadata(metadata: &AgentArtifactMetadata) -> Result<(), String> {
+    validate_identifier(&metadata.artifact_id, "artifactId")?;
+    if metadata.kind != AGENT_REPLAY_ARTIFACT_KIND
+        || metadata.title != "Private assistant replay metadata"
+        || metadata.media_type != AGENT_REPLAY_ARTIFACT_MEDIA_TYPE
+        || metadata.sensitivity != AgentArtifactSensitivity::Internal
+        || metadata.size_bytes == 0
+        || metadata.size_bytes > MAX_ARTIFACT_BYTES
+        || metadata.sha256.len() != 64
+        || !metadata
+            .sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+    {
+        return Err("Agent replay artifact metadata is invalid".into());
+    }
+    Ok(())
+}
+
 fn prepare_private_directory(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path)
         .map_err(|error| format!("failed to create Agent artifact directory: {error}"))?;
@@ -366,16 +442,22 @@ fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn ensure_capacity(root: &Path, additional: u64) -> Result<(), String> {
-    let (count, bytes) = inspect_artifact_bounds(root)?;
-    if count >= MAX_ARTIFACT_COUNT || bytes.saturating_add(additional) > MAX_TOTAL_ARTIFACT_BYTES {
+fn ensure_capacity(root: &Path, additional: u64, kind: &str) -> Result<(), String> {
+    let (artifact_count, replay_count, bytes) = inspect_artifact_bounds(root)?;
+    let count_exhausted = if kind == AGENT_REPLAY_ARTIFACT_KIND {
+        replay_count >= MAX_REPLAY_ARTIFACT_COUNT
+    } else {
+        artifact_count >= MAX_ARTIFACT_COUNT
+    };
+    if count_exhausted || bytes.saturating_add(additional) > MAX_TOTAL_ARTIFACT_BYTES {
         return Err("Agent artifact store reached its lifecycle boundary".into());
     }
     Ok(())
 }
 
-fn inspect_artifact_bounds(root: &Path) -> Result<(usize, u64), String> {
-    let mut count = 0_usize;
+fn inspect_artifact_bounds(root: &Path) -> Result<(usize, usize, u64), String> {
+    let mut artifact_count = 0_usize;
+    let mut replay_count = 0_usize;
     let mut bytes = 0_u64;
     for session in fs::read_dir(root)
         .map_err(|error| format!("failed to inspect Agent artifact root: {error}"))?
@@ -399,14 +481,26 @@ fn inspect_artifact_bounds(root: &Path) -> Result<(usize, u64), String> {
             if metadata.file_type().is_symlink() || !metadata.is_file() {
                 return Err("Agent artifact storage contains an unsafe entry".into());
             }
-            count = count.saturating_add(1);
+            let replay = entry
+                .path()
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.starts_with("replay-"));
+            if replay {
+                replay_count = replay_count.saturating_add(1);
+            } else {
+                artifact_count = artifact_count.saturating_add(1);
+            }
             bytes = bytes.saturating_add(metadata.len());
-            if count > MAX_ARTIFACT_COUNT || bytes > MAX_TOTAL_ARTIFACT_BYTES {
+            if artifact_count > MAX_ARTIFACT_COUNT
+                || replay_count > MAX_REPLAY_ARTIFACT_COUNT
+                || bytes > MAX_TOTAL_ARTIFACT_BYTES
+            {
                 return Err("Agent artifact store exceeds its lifecycle boundary".into());
             }
         }
     }
-    Ok((count, bytes))
+    Ok((artifact_count, replay_count, bytes))
 }
 
 fn validate_identifier(value: &str, label: &str) -> Result<(), String> {

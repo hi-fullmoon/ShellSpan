@@ -27,6 +27,7 @@
       "enum": [
         "exec_command",
         "terminal_execute",
+        "probe_http",
         "read_terminal",
         "write_terminal_input",
         "wait_terminal",
@@ -36,6 +37,7 @@
         "read_file",
         "list_directory",
         "search_text",
+        "write_file",
         "apply_patch",
         "transfer_file"
       ]
@@ -181,6 +183,20 @@
         "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 3600000 }
       }
     },
+    "probeHttpArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "port", "path"],
+      "properties": {
+        "method": { "enum": ["get", "head", "post", "put", "patch", "delete"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "path": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F\\u007F]*$" },
+        "body": { "type": "string", "maxLength": 65536 },
+        "contentType": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[\\u0020-\\u007E]+$" },
+        "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 30000 },
+        "maxBytes": { "type": "integer", "minimum": 1, "maximum": 131072 }
+      }
+    },
     "readTerminalArguments": {
       "type": "object",
       "additionalProperties": false,
@@ -311,6 +327,38 @@
         "cursor": { "type": "string", "minLength": 1, "maxLength": 1024 }
       }
     },
+    "writeFileAbsentPrecondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mustNotExist"],
+      "properties": {
+        "mustNotExist": { "const": true }
+      }
+    },
+    "writeFileDigestPrecondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "writeFilePrecondition": {
+      "oneOf": [
+        { "$ref": "#/$defs/writeFileAbsentPrecondition" },
+        { "$ref": "#/$defs/writeFileDigestPrecondition" }
+      ]
+    },
+    "writeFileArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content", "precondition"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "content": { "type": "string", "maxLength": 32768 },
+        "precondition": { "$ref": "#/$defs/writeFilePrecondition" }
+      }
+    },
     "patchPrecondition": {
       "type": "object",
       "additionalProperties": false,
@@ -391,6 +439,21 @@
       ],
       "unevaluatedProperties": false
     },
+    "probeHttpCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        {
+          "type": "object",
+          "properties": {
+            "toolName": { "const": "probe_http" },
+            "arguments": { "$ref": "#/$defs/probeHttpArguments" },
+            "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/remoteTarget" }] }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
     "readTerminalCall": {
       "type": "object",
       "allOf": [
@@ -463,6 +526,14 @@
       ],
       "unevaluatedProperties": false
     },
+    "writeFileCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "write_file" }, "arguments": { "$ref": "#/$defs/writeFileArguments" }, "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/remoteTarget" }] } } }
+      ],
+      "unevaluatedProperties": false
+    },
     "applyPatchCall": {
       "type": "object",
       "allOf": [
@@ -483,6 +554,7 @@
       "oneOf": [
         { "$ref": "#/$defs/execCommandCall" },
         { "$ref": "#/$defs/terminalExecuteCall" },
+        { "$ref": "#/$defs/probeHttpCall" },
         { "$ref": "#/$defs/readTerminalCall" },
         { "$ref": "#/$defs/writeTerminalInputCall" },
         { "$ref": "#/$defs/waitTerminalCall" },
@@ -492,6 +564,7 @@
         { "$ref": "#/$defs/readFileCall" },
         { "$ref": "#/$defs/listDirectoryCall" },
         { "$ref": "#/$defs/searchTextCall" },
+        { "$ref": "#/$defs/writeFileCall" },
         { "$ref": "#/$defs/applyPatchCall" },
         { "$ref": "#/$defs/transferFileCall" }
       ]
@@ -510,6 +583,24 @@
         "processHandle": { "$ref": "#/$defs/identifier" },
         "durationMs": { "type": "integer", "minimum": 0 },
         "truncated": { "type": "boolean" }
+      }
+    },
+    "probeHttpResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "url", "status", "contentType", "contentLength", "body", "bodyEncoding", "bodyBytes", "truncated", "redirectsFollowed", "networkScope"],
+      "properties": {
+        "method": { "enum": ["get", "head", "post", "put", "patch", "delete"] },
+        "url": { "type": "string", "minLength": 1, "maxLength": 4160 },
+        "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "contentType": { "type": ["string", "null"], "maxLength": 1024 },
+        "contentLength": { "type": ["integer", "null"], "minimum": 0 },
+        "body": { "type": "string", "maxLength": 180000 },
+        "bodyEncoding": { "enum": ["utf8", "base64"] },
+        "bodyBytes": { "type": "integer", "minimum": 0, "maximum": 131072 },
+        "truncated": { "type": "boolean" },
+        "redirectsFollowed": { "const": false },
+        "networkScope": { "const": "targetLoopback" }
       }
     },
     "terminalExecuteResultData": {
@@ -726,6 +817,21 @@
         "untrusted": { "type": "boolean" }
       }
     },
+    "writeFileResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["written", "operation", "path", "byteLength", "afterSha256"],
+      "properties": {
+        "written": { "const": true },
+        "operation": { "enum": ["create", "replace"] },
+        "path": { "$ref": "#/$defs/path" },
+        "byteLength": { "type": "integer", "minimum": 0, "maximum": 32768 },
+        "beforeSha256": { "$ref": "#/$defs/sha256" },
+        "afterSha256": { "$ref": "#/$defs/sha256" },
+        "checkpointId": { "$ref": "#/$defs/identifier" },
+        "verified": { "type": "boolean" }
+      }
+    },
     "patchedFile": {
       "type": "object",
       "additionalProperties": false,
@@ -792,6 +898,7 @@
     },
     "execCommandResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "exec_command" }, "data": { "$ref": "#/$defs/execCommandResultData" } } }], "unevaluatedProperties": false },
     "terminalExecuteResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "terminal_execute" }, "data": { "$ref": "#/$defs/terminalExecuteResultData" } } }], "unevaluatedProperties": false },
+    "probeHttpResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "probe_http" }, "data": { "$ref": "#/$defs/probeHttpResultData" } } }], "unevaluatedProperties": false },
     "readTerminalResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "read_terminal" }, "data": { "$ref": "#/$defs/readTerminalResultData" } } }], "unevaluatedProperties": false },
     "writeTerminalInputResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "write_terminal_input" }, "data": { "$ref": "#/$defs/writeTerminalInputResultData" } } }], "unevaluatedProperties": false },
     "waitTerminalResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "wait_terminal" }, "data": { "$ref": "#/$defs/waitTerminalResultData" } } }], "unevaluatedProperties": false },
@@ -801,12 +908,14 @@
     "readFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "read_file" }, "data": { "$ref": "#/$defs/readFileResultData" } } }], "unevaluatedProperties": false },
     "listDirectoryResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "list_directory" }, "data": { "$ref": "#/$defs/listDirectoryResultData" } } }], "unevaluatedProperties": false },
     "searchTextResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "search_text" }, "data": { "$ref": "#/$defs/searchTextResultData" } } }], "unevaluatedProperties": false },
+    "writeFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "write_file" }, "data": { "$ref": "#/$defs/writeFileResultData" } } }], "unevaluatedProperties": false },
     "applyPatchResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "apply_patch" }, "data": { "$ref": "#/$defs/applyPatchResultData" } } }], "unevaluatedProperties": false },
     "transferFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "transfer_file" }, "data": { "$ref": "#/$defs/transferFileResultData" } } }], "unevaluatedProperties": false },
     "agentToolResult": {
       "oneOf": [
         { "$ref": "#/$defs/execCommandResult" },
         { "$ref": "#/$defs/terminalExecuteResult" },
+        { "$ref": "#/$defs/probeHttpResult" },
         { "$ref": "#/$defs/readTerminalResult" },
         { "$ref": "#/$defs/writeTerminalInputResult" },
         { "$ref": "#/$defs/waitTerminalResult" },
@@ -816,6 +925,7 @@
         { "$ref": "#/$defs/readFileResult" },
         { "$ref": "#/$defs/listDirectoryResult" },
         { "$ref": "#/$defs/searchTextResult" },
+        { "$ref": "#/$defs/writeFileResult" },
         { "$ref": "#/$defs/applyPatchResult" },
         { "$ref": "#/$defs/transferFileResult" }
       ]

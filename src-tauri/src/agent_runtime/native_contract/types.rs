@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const NATIVE_TOOL_CONTRACT_VERSION: u8 = 3;
+pub const MAX_WRITE_FILE_CONTENT_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -207,6 +208,33 @@ pub struct TerminalExecuteArgumentsNative {
     pub timeout_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum HttpProbeMethodNative {
+    Get,
+    Head,
+    Post,
+    Put,
+    Patch,
+    Delete,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProbeHttpArgumentsNative {
+    pub method: HttpProbeMethodNative,
+    pub port: u16,
+    pub path: String,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub content_type: Option<String>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub max_bytes: Option<u64>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReadTerminalArgumentsNative {}
@@ -355,6 +383,33 @@ pub struct SearchTextArgumentsNative {
     pub max_results: Option<u16>,
     #[serde(default)]
     pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WriteFileAbsentPreconditionNative {
+    pub must_not_exist: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WriteFileDigestPreconditionNative {
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum WriteFilePreconditionNative {
+    MustNotExist(WriteFileAbsentPreconditionNative),
+    MatchSha256(WriteFileDigestPreconditionNative),
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WriteFileArgumentsNative {
+    pub path: String,
+    pub content: String,
+    pub precondition: WriteFilePreconditionNative,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

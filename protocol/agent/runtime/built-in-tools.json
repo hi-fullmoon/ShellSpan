@@ -34,6 +34,22 @@
       "untrustedResultFields": ["/data/combinedOutput"]
     },
     {
+      "name": "probe_http",
+      "version": "1.0.0",
+      "targetKinds": ["local", "remote"],
+      "effectMode": "fixed",
+      "allowedEffects": ["externalSideEffect"],
+      "idempotency": "conditional",
+      "parallel": false,
+      "cancellable": false,
+      "retryPolicy": "never",
+      "defaultTimeoutMs": 5000,
+      "maxOutputBytes": 262144,
+      "maxConcurrency": 4,
+      "requiredCapabilities": ["network.loopback.http"],
+      "untrustedResultFields": ["/data/body"]
+    },
+    {
       "name": "read_terminal",
       "version": "1.0.0",
       "targetKinds": ["local", "remote"],
@@ -176,6 +192,22 @@
       "maxConcurrency": 4,
       "requiredCapabilities": ["filesystem.search"],
       "untrustedResultFields": ["/data/matches"]
+    },
+    {
+      "name": "write_file",
+      "version": "1.0.0",
+      "targetKinds": ["local", "remote"],
+      "effectMode": "fixed",
+      "allowedEffects": ["stateChange"],
+      "idempotency": "conditional",
+      "parallel": false,
+      "cancellable": true,
+      "retryPolicy": "reconcileFirst",
+      "defaultTimeoutMs": 60000,
+      "maxOutputBytes": 262144,
+      "maxConcurrency": 1,
+      "requiredCapabilities": ["filesystem.write"],
+      "untrustedResultFields": []
     },
     {
       "name": "apply_patch",

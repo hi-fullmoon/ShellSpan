@@ -54,6 +54,7 @@ import {
   invokeResizeSession,
   invokeSetSessionOutputPaused,
   invokeWriteSession,
+  invokeWriteSessionBytes,
 } from '@/lib/ipc/tauri';
 
 beforeEach(() => {
@@ -180,6 +181,18 @@ describe('terminal performance benchmark contract', () => {
 
     expect(result).toBe(nativePromise);
     await result;
+  });
+
+  it('keeps binary terminal input on the untracked hot path', async () => {
+    await invokeWriteSessionBytes('contract-input', new Uint8Array([0x1b, 0x80]));
+
+    expect(mocks.invoke).toHaveBeenCalledWith('write_session_bytes', {
+      sessionId: 'contract-input',
+      bytes: [0x1b, 0x80],
+    });
+    expect(mocks.debug).not.toHaveBeenCalled();
+    expect(mocks.error).not.toHaveBeenCalled();
+    expect(mocks.createOperationId).not.toHaveBeenCalled();
   });
 
   it('uses the same untracked path for repeated backpressure and resize controls', async () => {

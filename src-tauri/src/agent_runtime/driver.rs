@@ -18,6 +18,8 @@ use super::{
 #[cfg(test)]
 use super::{AgentInboxLane, AgentInboxMessage, AgentMessageSource};
 
+const DEFAULT_MAX_STEPS_PER_TURN: usize = 128;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AgentDriverConfig {
     pub(crate) max_steps_per_turn: Option<usize>,
@@ -36,7 +38,9 @@ pub(crate) struct AgentDriverConfig {
 impl Default for AgentDriverConfig {
     fn default() -> Self {
         Self {
-            max_steps_per_turn: Some(64),
+            // Root sessions treat this as a recoverable turn boundary, while
+            // delegated sessions keep their explicit hard per-turn budget.
+            max_steps_per_turn: Some(DEFAULT_MAX_STEPS_PER_TURN),
             max_turns_per_session: 64,
             max_identical_tool_steps: 6,
             max_model_tokens_per_session: 2_000_000,
@@ -239,15 +243,10 @@ async fn drive_agent_inner(
                 .max_steps_per_turn
                 .filter(|limit| step_index > *limit)
             {
-                let reason = format!("stepLimitExceeded: maximum {} Steps per Turn", limit);
+                let root_budget_boundary = entry.subagent.is_none();
+                let reason = step_budget_reason(limit, root_budget_boundary);
                 close_open_scope(sessions, entry, &reason)?;
-                if entry.subagent.is_none()
-                    && !sessions
-                        .snapshot(&entry.session_id)?
-                        .inbox
-                        .next_turn
-                        .is_empty()
-                {
+                if root_budget_boundary {
                     continue;
                 }
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
@@ -395,15 +394,10 @@ async fn drive_agent_inner(
                 .max_steps_per_turn
                 .filter(|limit| step_index >= *limit)
             {
-                let reason = format!("stepLimitExceeded: maximum {} Steps per Turn", limit);
+                let root_budget_boundary = entry.subagent.is_none();
+                let reason = step_budget_reason(limit, root_budget_boundary);
                 close_open_scope(sessions, entry, &reason)?;
-                if entry.subagent.is_none()
-                    && !sessions
-                        .snapshot(&entry.session_id)?
-                        .inbox
-                        .next_turn
-                        .is_empty()
-                {
+                if root_budget_boundary {
                     break;
                 }
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
@@ -457,6 +451,14 @@ async fn drive_agent_inner(
                 step_id: Some(current_step_id.clone()),
             }))?;
         }
+    }
+}
+
+fn step_budget_reason(limit: usize, recoverable: bool) -> String {
+    if recoverable {
+        format!("stepBudgetReached: maximum {} Steps per Turn", limit)
+    } else {
+        format!("stepLimitExceeded: maximum {} Steps per Turn", limit)
     }
 }
 
@@ -754,7 +756,7 @@ async fn run_step(
             tools
                 .skills
                 .republish_if_missing(&entry.session_id, turn_id, step_id)?;
-            let surface = sessions.snapshot(&entry.session_id)?.surface;
+            let surface = sessions.model_surface(&entry.session_id)?;
             let mut request = ModelRequest::from_surface(
                 request_id.clone(),
                 &surface,
@@ -1135,6 +1137,20 @@ async fn run_step(
                         } else {
                             None
                         };
+                    let network_window_expired = ordinary.is_none()
+                        && network_failure
+                        && attempt < max_attempts
+                        && recovery.is_none()
+                        && network_recovery_started_at.is_some_and(|started| {
+                            u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+                                >= config.network_recovery_window_ms
+                        });
+                    if network_window_expired {
+                        return Ok(StepSettlement::Failed(format!(
+                            "networkRecoveryTimeout: model network recovery window of {} ms expired",
+                            config.network_recovery_window_ms
+                        )));
+                    }
                     let wait_for_network = recovery.is_some();
                     if let Some(plan) = ordinary.or(recovery) {
                         pending_retry = Some(PendingRetry {
@@ -1561,18 +1577,49 @@ async fn commit_response(
             },
         })
         .collect();
+    let message_id = format!("message-{}", Uuid::new_v4().simple());
+    let mut assistant_payload = AgentSessionEventPayload::AssistantMessage {
+        message_id,
+        content,
+        usage,
+        stop_reason,
+        interrupted: false,
+        replay: (!has_ephemeral_tool_arguments)
+            .then(|| super::AgentStoredReplay::inline(replay.clone())),
+    };
+    if !super::event_payload_fits_storage_boundary(
+        &entry.session_id,
+        Some(turn_id),
+        Some(step_id),
+        &assistant_payload,
+    )? && !has_ephemeral_tool_arguments
+    {
+        let stored = tools.store_replay_artifact(&entry.session_id, &replay)?;
+        let AgentSessionEventPayload::AssistantMessage {
+            replay: destination,
+            ..
+        } = &mut assistant_payload
+        else {
+            unreachable!("assistant payload remains an assistant message");
+        };
+        *destination = Some(stored);
+    }
+    if !super::event_payload_fits_storage_boundary(
+        &entry.session_id,
+        Some(turn_id),
+        Some(step_id),
+        &assistant_payload,
+    )? {
+        return Err(
+            "assistantResponseTooLarge: assistant content exceeds the durable event boundary"
+                .into(),
+        );
+    }
     let mut payloads = vec![
         AgentScopedPayload {
             turn_id: Some(turn_id.to_string()),
             step_id: Some(step_id.to_string()),
-            payload: AgentSessionEventPayload::AssistantMessage {
-                message_id: format!("message-{}", Uuid::new_v4().simple()),
-                content,
-                usage,
-                stop_reason,
-                interrupted: false,
-                replay: (!has_ephemeral_tool_arguments).then_some(replay),
-            },
+            payload: assistant_payload,
         },
         AgentScopedPayload {
             turn_id: Some(turn_id.to_string()),

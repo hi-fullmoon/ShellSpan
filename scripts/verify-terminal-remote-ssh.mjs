@@ -75,8 +75,12 @@ try {
     'execution::fixture::isolated_ssh_sftp_end_to_end_reviewed_execution_uname',
     ['--ignored', '--exact'],
   );
+  cargoTest(
+    'agent_runtime::native::http_probe::tests::isolated_ssh_probe_reaches_only_the_remote_loopback_service',
+    ['--ignored', '--exact'],
+  );
   console.log(
-    '\nIsolated SSH gate completed with shared ordinary bash/zsh PTYs, startup compatibility, cleanup, and Direct SSH exec.',
+    '\nIsolated SSH gate completed with shared ordinary bash/zsh PTYs, startup compatibility, cleanup, Direct SSH exec, and scoped remote-loopback HTTP.',
   );
 } finally {
   if (fixtureStarted) run(docker, [...compose, 'down']);

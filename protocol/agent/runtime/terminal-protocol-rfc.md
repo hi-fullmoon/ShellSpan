@@ -419,11 +419,41 @@ depend on TSP/1 feature flags. A terminal generation MUST NOT be added to direct
 process handles, and disabling terminal migration flags MUST NOT change direct
 execution behavior.
 
+The model facade MAY request `run_terminal_command.background = true`; the
+adapter MUST force Direct and return its opaque `proc-*` handle. Model-facing
+`write_process_input`, `wait_process`, and `kill_process` calls MUST bind that
+handle to the same frozen Session, task, request, and owner target. Background
+service workflows MUST terminate the handle explicitly after verification.
+
+An `externalSideEffect` shell command with no structured network destination
+MUST be rejected in every permission mode. Permission controls whether an
+otherwise valid effect needs confirmation; it does not create network scope.
+`requestApproval` MUST require confirmation for every native tool call.
+`scopedAutopilot` MAY automatically execute only ordinary `readOnly` effects;
+`sensitiveRead`, `stateChange`, `destructive`, and `externalSideEffect` effects
+MUST require confirmation. `operator` MAY skip per-call confirmation, but MUST
+NOT broaden the frozen target, tool, filesystem, or network scope.
+Loopback HTTP verification uses the structured `probe_http` tool, which fixes
+the destination to the frozen local or SSH target's `127.0.0.1`, follows no
+redirects, exposes no arbitrary request headers, and enforces method, request
+body, one total deadline, and response-size bounds. Remote probes use an
+authenticated SSH direct-TCP channel connected to an internal preconnected
+socket pair; no discoverable local forwarding listener carries target data.
+They do not broaden shell network scope. Known external effects, including
+inline general-purpose interpreter execution, MUST NOT use `terminal_execute`.
+
 ## Privacy, logging, and audit
 
 - Raw output, screen content, command output, credentials, integration secrets,
   and nonces MUST NOT enter ordinary logs or rollout counters.
 - User-visible command text follows existing redaction and approval rules.
+- Exact ephemeral terminal input or wait-match text MAY be exposed to the
+  current approval UI only through an identity-bound in-memory lookup. It MUST
+  NOT be serialized into the Agent event log. The UI MUST fail closed while
+  this preview is missing or unavailable and MUST render control characters
+  unambiguously. A restart MUST cancel any such
+  requested or authorized-but-undispatched call instead of reconstructing or
+  replaying it from redacted metadata.
 - Audit records may contain opaque identities, state transitions, stable reason
   codes, counts, byte sizes, truncation, and latency buckets.
 - Integration readiness, degradation, lifecycle matching, uncertainty,
