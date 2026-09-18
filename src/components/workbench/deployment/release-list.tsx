@@ -41,10 +41,15 @@ import {
 
 export interface ReleaseListProps {
   workflow: DeploymentWorkflowRecord;
+  admissionsEnabled?: boolean;
   onOpenApproval: (trigger?: HTMLElement | null) => void;
 }
 
-export const ReleaseList: React.FC<ReleaseListProps> = ({ workflow, onOpenApproval }) => {
+export const ReleaseList: React.FC<ReleaseListProps> = ({
+  workflow,
+  admissionsEnabled = true,
+  onOpenApproval,
+}) => {
   const { t } = useI18n();
   const state = useDeploymentWorkflowRunStore();
   const [rollbackOpen, setRollbackOpen] = React.useState(false);
@@ -107,6 +112,7 @@ export const ReleaseList: React.FC<ReleaseListProps> = ({ workflow, onOpenApprov
                         <Button
                           variant="outline"
                           size="icon-sm"
+                          disabled={state.loading || state.preparing || state.action !== null}
                           onClick={() => void state.inspectArtifact(release.artifactReference).catch(() => undefined)}
                           aria-label={t('deployment.runtime.artifact.open')}
                         >
@@ -115,6 +121,10 @@ export const ReleaseList: React.FC<ReleaseListProps> = ({ workflow, onOpenApprov
                         {release.rollbackable && (
                           <Button
                             size="icon-sm"
+                            disabled={!admissionsEnabled
+                              || state.loading
+                              || state.preparing
+                              || state.action !== null}
                             onClick={(event) => openRollback(release.releaseId, event.currentTarget)}
                             aria-label={t('deployment.runtime.rollback.action')}
                             data-testid="deployment-open-rollback"
@@ -190,9 +200,16 @@ export const ReleaseList: React.FC<ReleaseListProps> = ({ workflow, onOpenApprov
           <DialogFooter className="shrink-0 border-t p-4">
             <Button variant="outline" onClick={() => setRollbackOpen(false)}>{t('common.cancel')}</Button>
             <Button
-              disabled={!selectedReleaseId || state.preparing}
+              disabled={!selectedReleaseId
+                || !admissionsEnabled
+                || state.loading
+                || state.preparing
+                || state.action !== null}
               onClick={() => void state.prepare(workflow, selectedReleaseId)
                 .then(() => {
+                  const latest = useDeploymentWorkflowRunStore.getState();
+                  if (latest.workflowId !== workflow.id
+                    || latest.detail?.summary.workflowId !== workflow.id) return;
                   setRollbackOpen(false);
                   onOpenApproval(rollbackReturnFocusRef.current);
                 })

@@ -81,7 +81,7 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
             variant="outline"
             size="sm"
             onClick={onValidate}
-            disabled={validating}
+            disabled={validating || saving}
             aria-label={t('deployment.editor.validate')}
             title={t('deployment.editor.validate')}
           >
@@ -95,7 +95,7 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
           variant="outline"
           size="sm"
           onClick={onRefresh}
-          disabled={loading}
+          disabled={loading || saving}
           aria-label={t('common.refresh')}
           title={t('common.refresh')}
         >

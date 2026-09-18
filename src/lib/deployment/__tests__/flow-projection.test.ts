@@ -162,4 +162,45 @@ describe('deployment flow projection', () => {
     expect(parseDeploymentFlowEdgeId('edge:not-enough-parts')).toBeNull();
     expect(parseDeploymentFlowEdgeId('not-a-deployment-edge')).toBeNull();
   });
+
+  it('projects the 64-node and 16-port limit deterministically within a bounded budget', () => {
+    const inputPorts = Array.from({ length: 16 }, (_, index) => ({
+      name: `input-${index}`,
+      portType: 'scalar.string' as const,
+      required: true,
+    }));
+    const outputPorts = Array.from({ length: 16 }, (_, index) => ({
+      name: `output-${index}`,
+      portType: 'scalar.string' as const,
+      required: false,
+    }));
+    const maximumCatalog: DeploymentNodeTypeCatalog = {
+      schemaVersion: 1,
+      nodes: [spec('maximum', { inputs: inputPorts, outputs: outputPorts })],
+    };
+    const maximumDefinition: DeploymentWorkflowDefinition = {
+      ...definition,
+      nodes: Array.from({ length: 64 }, (_, nodeIndex) => node(
+        `node-${nodeIndex}`,
+        'maximum',
+        nodeIndex === 0
+          ? {}
+          : Object.fromEntries(inputPorts.map((port, portIndex) => [port.name, {
+            fromNodeId: `node-${nodeIndex - 1}`,
+            fromPort: `output-${portIndex}`,
+          }])),
+      )),
+    };
+
+    const startedAt = performance.now();
+    const projected = projectDeploymentFlow(maximumDefinition, null, maximumCatalog, 'node-63');
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(projected.nodes).toHaveLength(64);
+    expect(projected.edges).toHaveLength(63 * 16);
+    expect(new Set(projected.edges.map((edge) => edge.id)).size).toBe(63 * 16);
+    expect(projected.nodes[63]?.selected).toBe(true);
+    expect(maximumDefinition).not.toHaveProperty('edges');
+    expect(elapsedMs).toBeLessThan(1_000);
+  });
 });

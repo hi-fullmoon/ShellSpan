@@ -107,6 +107,15 @@ const workflow: DeploymentWorkflowRecord = {
   updatedAt: 2,
 };
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   useDeploymentWorkflowRunStore.getState().reset();
@@ -170,5 +179,72 @@ describe('deployment workflow run store', () => {
     expect(state.runs.find((run) => run.runId === 'run-original')?.status).toBe('succeeded');
     expect(state.notice?.kind).toBe('rollbackPrepared');
     expect(state.notice?.id).toBeGreaterThan(0);
+  });
+
+  it('clears the previous run projection while a different run is loading', async () => {
+    const run1 = summary('run-1', 'in_progress');
+    const run2 = summary('run-2', 'succeeded');
+    const pendingDetail = deferred<DeploymentRunDetail>();
+    useDeploymentWorkflowRunStore.setState({
+      workflowId: workflow.id,
+      runs: [run1, run2],
+      selectedRunId: run1.runId,
+      detail: detail(run1),
+      nodes: [node],
+      events: [{
+        runId: run1.runId,
+        sequence: 1,
+        nodeId: node.nodeId,
+        attempt: 1,
+        eventKind: 'node.succeeded',
+        status: 'succeeded',
+        summaryKey: 'deployment.run.nodeSucceeded',
+        payload: {},
+        recordedAt: 1,
+      }],
+    });
+    mocks.detail.mockReturnValueOnce(pendingDetail.promise);
+
+    const loading = useDeploymentWorkflowRunStore.getState().selectRun(run2.runId);
+    expect(useDeploymentWorkflowRunStore.getState()).toMatchObject({
+      selectedRunId: run2.runId,
+      loading: true,
+      detail: null,
+      nodes: [],
+      events: [],
+    });
+
+    pendingDetail.resolve(detail(run2));
+    await loading;
+    expect(useDeploymentWorkflowRunStore.getState()).toMatchObject({
+      selectedRunId: run2.runId,
+      loading: false,
+    });
+    expect(useDeploymentWorkflowRunStore.getState().detail?.summary.runId).toBe(run2.runId);
+  });
+
+  it('retries starting an already approved run without approving it again', async () => {
+    const approved = summary('run-approved', 'approved');
+    const started = summary('run-approved', 'in_progress');
+    useDeploymentWorkflowRunStore.setState({
+      workflowId: workflow.id,
+      selectedRunId: approved.runId,
+      detail: detail(approved),
+    });
+    mocks.start.mockResolvedValue({
+      runId: approved.runId,
+      status: 'in_progress',
+      planDigest: approved.planDigest,
+    });
+    mocks.detail.mockResolvedValue(detail(started));
+
+    await useDeploymentWorkflowRunStore.getState().approveAndStart();
+
+    expect(mocks.approve).not.toHaveBeenCalled();
+    expect(mocks.start).toHaveBeenCalledWith({
+      runId: approved.runId,
+      planDigest: approved.planDigest,
+    });
+    expect(useDeploymentWorkflowRunStore.getState().notice?.kind).toBe('started');
   });
 });

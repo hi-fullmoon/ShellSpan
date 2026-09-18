@@ -180,6 +180,39 @@ afterEach(() => {
 });
 
 describe('DeploymentWorkflowRuntimeView', () => {
+  it('blocks prepare and approval admissions in read-only mode while keeping cancellation available', () => {
+    render(
+      <DeploymentWorkflowRuntimeView
+        kind="prepare"
+        workflow={workflow}
+        admissionsEnabled={false}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'deployment.runtime.prepare.action' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'deployment.runtime.reviewApproval' })).toBeDisabled();
+
+    const approved = runSummary({ status: 'approved' });
+    useDeploymentWorkflowRunStore.setState({
+      runs: [approved],
+      detail: {
+        summary: approved,
+        approvalSummary: approvalSummary(),
+        outputs: [],
+        receipts: [],
+      },
+    });
+    render(
+      <DeploymentWorkflowRuntimeView
+        kind="runs"
+        workflow={workflow}
+        admissionsEnabled={false}
+      />,
+    );
+    const approvalTriggers = screen.getAllByTestId('deployment-open-approval');
+    expect(approvalTriggers[approvalTriggers.length - 1]).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'common.cancel' })).toBeEnabled();
+  });
+
   it('groups approval by user meaning and keeps long content inside a fixed dialog chain', async () => {
     render(<DeploymentWorkflowRuntimeView kind="prepare" workflow={workflow} />);
     expect(screen.getByTestId('deployment-prepare-view').querySelector('[data-slot="card"]')).not.toBeInTheDocument();
@@ -235,6 +268,7 @@ describe('DeploymentWorkflowRuntimeView', () => {
     const runsView = screen.getByTestId('deployment-runs-view');
     expect(runsView.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
     expect(screen.getByLabelText('deployment.runtime.attempt.select')).toHaveTextContent('deployment.runtime.attemptNumber:1');
+    expect(screen.getByTestId('deployment-selected-attempt')).toHaveTextContent('native/v1');
     expect(screen.getByText('#2 · deployment.node.succeeded')).toBeInTheDocument();
     const trigger = screen.getByRole('button', { name: 'deployment.runtime.evidence.action' });
     trigger.focus();

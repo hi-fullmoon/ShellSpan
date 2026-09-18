@@ -7,6 +7,16 @@ import {
   PlusIcon,
 } from 'lucide-react';
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -65,6 +75,7 @@ import { WorkflowCanvas } from './deployment/workflow-canvas';
 import { WorkflowEditorToolbar } from './deployment/workflow-editor-toolbar';
 import { WorkflowListPane } from './deployment/workflow-list-pane';
 import { WorkflowTopologyList } from './deployment/workflow-topology-list';
+import { WorkflowSettingsDialog } from './deployment/workflow-settings-dialog';
 import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader } from './workbench-page';
 
 type Translate = (key: LocaleKey, values?: Record<string, string | number>) => string;
@@ -99,6 +110,8 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
     value: profile.id,
     label: readableDeploymentProfile(profile),
   })), [profiles]);
+  const normalizedRemoteRoot = remoteRoot.trim();
+  const validRemoteRoot = normalizedRemoteRoot.startsWith('/') && normalizedRemoteRoot !== '/';
 
   React.useEffect(() => {
     if (!open) return;
@@ -110,8 +123,8 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
 
   const submit = (event: React.FormEvent): void => {
     event.preventDefault();
-    if (!name.trim() || !profileId || !remoteRoot.startsWith('/') || remoteRoot === '/') return;
-    startTemplate(kind, name.trim(), profileId, remoteRoot.trim());
+    if (!name.trim() || !profileId || !validRemoteRoot) return;
+    startTemplate(kind, name.trim(), profileId, normalizedRemoteRoot);
     onOpenChange(false);
   };
 
@@ -204,7 +217,7 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
             </Button>
             <Button
               type="submit"
-              disabled={!name.trim() || !profileId || !remoteRoot.startsWith('/') || remoteRoot === '/'}
+              disabled={!name.trim() || !profileId || !validRemoteRoot}
             >
               <PlusIcon data-icon="inline-start" />
               {t('deployment.editor.template.use')}
@@ -270,7 +283,7 @@ const PlaceholderView: React.FC<{ kind: Exclude<DeploymentWorkflowTab, 'design'>
             {t(deploymentLocaleKey(`deployment.editor.placeholder.${kind}`))}
           </p>
         </div>
-        <Badge variant="secondary">{t('deployment.editor.placeholder.phase5')}</Badge>
+        <Badge variant="secondary">{t('deployment.editor.placeholder.empty')}</Badge>
       </header>
     </section>
   );
@@ -289,14 +302,18 @@ export const DeploymentWorkflowCenter: React.FC<{
   const [libraryOpen, setLibraryOpen] = React.useState(false);
   const [configOpen, setConfigOpen] = React.useState(false);
   const [issuesOpen, setIssuesOpen] = React.useState(false);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [pendingDiscardAction, setPendingDiscardAction] = React.useState<'create' | 'refresh' | null>(null);
   const [search, setSearch] = React.useState('');
   const [activeTab, setActiveTab] = React.useState<DeploymentWorkflowTab>(initialTab);
   const handledNoticeRef = React.useRef<number | null>(null);
   const handledErrorRef = React.useRef<string | null>(null);
   const handledRunNoticeRef = React.useRef<number | null>(null);
+  const handledRunErrorRef = React.useRef<string | null>(null);
   const workflowsTriggerRef = React.useRef<HTMLButtonElement>(null);
   const libraryTriggerRef = React.useRef<HTMLButtonElement>(null);
   const configTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const settingsTriggerRef = React.useRef<HTMLButtonElement>(null);
   const configFinalFocusRef = React.useRef<HTMLButtonElement>(null);
 
   React.useEffect(() => {
@@ -313,8 +330,11 @@ export const DeploymentWorkflowCenter: React.FC<{
     if (!state.notice || handledNoticeRef.current === state.notice.id) return;
     handledNoticeRef.current = state.notice.id;
     addToast(t(deploymentLocaleKey(`deployment.editor.toast.${state.notice.kind}`)), 'success');
+    if (state.notice.kind === 'saved' && state.draft?.id) {
+      void runState.refreshWorkflow(state.draft.id).catch(() => undefined);
+    }
     state.clearNotice();
-  }, [addToast, state, t]);
+  }, [addToast, runState, state, t]);
 
   React.useEffect(() => {
     const workflowId = state.draft?.id;
@@ -328,6 +348,18 @@ export const DeploymentWorkflowCenter: React.FC<{
     addToast(t(deploymentLocaleKey(`deployment.runtime.toast.${runState.notice.kind}`)), 'success');
     runState.clearNotice();
   }, [addToast, runState, t]);
+
+  React.useEffect(() => {
+    if (!runState.error) {
+      handledRunErrorRef.current = null;
+      return;
+    }
+    if (runState.errorContext === 'prepare' && activeTab === 'prepare') return;
+    if (handledRunErrorRef.current === runState.error) return;
+    handledRunErrorRef.current = runState.error;
+    addToast(t('deployment.runtime.error.generic'), 'error', 6_000);
+    runState.clearError();
+  }, [activeTab, addToast, runState, t]);
 
   React.useEffect(() => {
     if (!state.error) {
@@ -353,6 +385,7 @@ export const DeploymentWorkflowCenter: React.FC<{
     (node) => node.id === state.selectedNodeId,
   ) ?? null;
   const admissionsEnabled = state.capabilities?.admissionsEnabled === true;
+  const editable = admissionsEnabled && !state.saving;
   const dirty = state.semanticDirty || state.layoutDirty;
   const visibleWorkflows = state.profileFilterId
     ? state.workflows.filter((workflow) => workflow.definition.targets.some(
@@ -362,9 +395,44 @@ export const DeploymentWorkflowCenter: React.FC<{
 
   React.useEffect(() => {
     if (!state.initialized || visibleWorkflows.length === 0) return;
+    if (state.draft?.id === null) return;
+    if (dirty) return;
     if (visibleWorkflows.some((workflow) => workflow.id === state.selectedWorkflowId)) return;
     state.selectWorkflow(visibleWorkflows[0]!.id);
-  }, [state, visibleWorkflows]);
+  }, [dirty, state, visibleWorkflows]);
+
+  const requestCreate = (): void => {
+    if (dirty) {
+      setPendingDiscardAction('create');
+      return;
+    }
+    setTemplateOpen(true);
+  };
+
+  const requestRefresh = (): void => {
+    if (dirty) {
+      setPendingDiscardAction('refresh');
+      return;
+    }
+    void state.refresh().catch(() => undefined);
+  };
+
+  const closeDiscardDialog = (): void => {
+    setPendingDiscardAction(null);
+    state.clearPendingSelection();
+  };
+
+  const confirmDiscard = (): void => {
+    if (state.pendingSelectionId) {
+      state.confirmPendingSelection();
+      setWorkflowsOpen(false);
+    } else if (pendingDiscardAction === 'refresh') {
+      void state.refresh().catch(() => undefined);
+    } else if (pendingDiscardAction === 'create') {
+      setTemplateOpen(true);
+    }
+    setPendingDiscardAction(null);
+  };
 
   const openConfiguration = (id: string, trigger: HTMLButtonElement): void => {
     state.selectNode(id);
@@ -384,11 +452,13 @@ export const DeploymentWorkflowCenter: React.FC<{
       search={search}
       onSearchChange={setSearch}
       onSelect={state.selectWorkflow}
-      onCreate={() => setTemplateOpen(true)}
+      onCreate={requestCreate}
+      canCreate={editable}
+      selectionDisabled={state.saving}
     />
   );
   const inspector = draft && catalog
-    ? <NodeInspector draft={draft} node={selectedNode} catalog={catalog} />
+    ? <NodeInspector draft={draft} node={selectedNode} catalog={catalog} editable={editable} />
     : null;
 
   return (
@@ -427,7 +497,7 @@ export const DeploymentWorkflowCenter: React.FC<{
             title={t('deployment.editor.empty')}
             description={t('deployment.editor.emptyDescription')}
             action={(
-              <Button onClick={() => setTemplateOpen(true)} disabled={!admissionsEnabled}>
+              <Button onClick={requestCreate} disabled={!editable}>
                 <PlusIcon data-icon="inline-start" />
                 {t('deployment.editor.newWorkflow')}
               </Button>
@@ -444,11 +514,11 @@ export const DeploymentWorkflowCenter: React.FC<{
               loading={state.loading}
               saving={state.saving}
               validating={state.validating}
-              canCreate={admissionsEnabled && profiles.length > 0}
+              canCreate={editable && profiles.length > 0}
               canSave={admissionsEnabled && dirty}
               onOpenWorkflows={() => setWorkflowsOpen(true)}
-              onRefresh={() => void state.refresh().catch(() => undefined)}
-              onCreate={() => setTemplateOpen(true)}
+              onRefresh={requestRefresh}
+              onCreate={requestCreate}
               onSave={() => void state.saveDraft().catch(() => undefined)}
               onValidate={() => void validate()}
               workflowsTriggerRef={workflowsTriggerRef}
@@ -462,7 +532,7 @@ export const DeploymentWorkflowCenter: React.FC<{
                     catalog={catalog}
                     selectedNodeId={state.selectedNodeId}
                     issues={state.issues}
-                    editable={admissionsEnabled}
+                    editable={editable}
                   />
                 )}
                 inspector={inspector}
@@ -471,6 +541,7 @@ export const DeploymentWorkflowCenter: React.FC<{
                     draft={draft}
                     catalog={catalog}
                     issues={state.issues}
+                    editable={editable}
                     onConfigure={openConfiguration}
                   />
                 )}
@@ -487,13 +558,17 @@ export const DeploymentWorkflowCenter: React.FC<{
                   <WorkflowEditorToolbar
                     workflowName={draft.name}
                     layout={layout}
+                    enabled={draft.enabled}
+                    editable={editable}
                     onOpenLibrary={() => setLibraryOpen(true)}
+                    onOpenSettings={() => setSettingsOpen(true)}
                     onOpenInspector={() => {
                       configFinalFocusRef.current = configTriggerRef.current;
                       setConfigOpen(true);
                     }}
                     libraryTriggerRef={libraryTriggerRef}
                     inspectorTriggerRef={configTriggerRef}
+                    settingsTriggerRef={settingsTriggerRef}
                   />
                 )}
               />
@@ -506,18 +581,33 @@ export const DeploymentWorkflowCenter: React.FC<{
                     workflow={selectedRecord}
                     catalog={catalog}
                     semanticDirty={state.semanticDirty}
+                    admissionsEnabled={admissionsEnabled}
                   />
                 )
                 : <PlaceholderView kind="prepare" />}
             </TabsContent>
             <TabsContent value="runs" className="flex min-h-0 min-w-0 overflow-hidden">
               {selectedRecord
-                ? <DeploymentWorkflowRuntimeView kind="runs" workflow={selectedRecord} catalog={catalog} />
+                ? (
+                  <DeploymentWorkflowRuntimeView
+                    kind="runs"
+                    workflow={selectedRecord}
+                    catalog={catalog}
+                    admissionsEnabled={admissionsEnabled}
+                  />
+                )
                 : <PlaceholderView kind="runs" />}
             </TabsContent>
             <TabsContent value="versions" className="flex min-h-0 min-w-0 overflow-hidden">
               {selectedRecord
-                ? <DeploymentWorkflowRuntimeView kind="versions" workflow={selectedRecord} catalog={catalog} />
+                ? (
+                  <DeploymentWorkflowRuntimeView
+                    kind="versions"
+                    workflow={selectedRecord}
+                    catalog={catalog}
+                    admissionsEnabled={admissionsEnabled}
+                  />
+                )
                 : <PlaceholderView kind="versions" />}
             </TabsContent>
           </Tabs>
@@ -542,13 +632,14 @@ export const DeploymentWorkflowCenter: React.FC<{
                   search={search}
                   onSearchChange={setSearch}
                   onSelect={(id) => {
-                    state.selectWorkflow(id);
-                    setWorkflowsOpen(false);
+                    if (state.selectWorkflow(id)) setWorkflowsOpen(false);
                   }}
                   onCreate={() => {
                     setWorkflowsOpen(false);
-                    setTemplateOpen(true);
+                    requestCreate();
                   }}
+                  canCreate={editable}
+                  selectionDisabled={state.saving}
                   showHeader={false}
                 />
               </div>
@@ -558,11 +649,19 @@ export const DeploymentWorkflowCenter: React.FC<{
             open={libraryOpen}
             onOpenChange={setLibraryOpen}
             catalog={catalog}
+            editable={editable}
             finalFocusRef={libraryTriggerRef}
             onAdd={(spec) => {
               state.addNode(spec.typeName, spec.typeVersion);
               setLibraryOpen(false);
             }}
+          />
+          <WorkflowSettingsDialog
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            draft={draft}
+            editable={editable}
+            returnFocusRef={settingsTriggerRef}
           />
           <Drawer open={configOpen} onOpenChange={setConfigOpen}>
             <DrawerContent
@@ -608,6 +707,23 @@ export const DeploymentWorkflowCenter: React.FC<{
           </Dialog>
         </>
       )}
+      <AlertDialog
+        open={state.pendingSelectionId !== null || pendingDiscardAction !== null}
+        onOpenChange={(open) => { if (!open) closeDiscardDialog(); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('deployment.editor.discard.title')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('deployment.editor.discard.description')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDiscard}>
+              {t('deployment.editor.discard.action')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <DeploymentWorkflowRuntimeOverlays />
     </WorkbenchPage>
   );

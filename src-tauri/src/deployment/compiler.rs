@@ -1789,11 +1789,12 @@ mod tests {
         let second = compile_value(&reordered).unwrap();
         assert_eq!(first.plan_digest, second.plan_digest);
 
-        let reordered_keys = STATIC_SITE.replace(
+        let normalized_static_site = STATIC_SITE.replace("\r\n", "\n");
+        let reordered_keys = normalized_static_site.replace(
             "\"packageManager\": \"pnpm\",\n        \"workingDirectory\": \".\",\n        \"installMode\": \"frozen\"",
             "\"installMode\": \"frozen\",\n        \"workingDirectory\": \".\",\n        \"packageManager\": \"pnpm\"",
         );
-        assert_ne!(reordered_keys, STATIC_SITE);
+        assert_ne!(reordered_keys, normalized_static_site);
         assert_eq!(
             first.plan_digest,
             compile_workflow_json(&reordered_keys, &registry())

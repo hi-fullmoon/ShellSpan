@@ -69,9 +69,12 @@ interface DeploymentWorkflowStoreState {
   notice: DeploymentEditorNotice | null;
   profileFilterId: string | null;
   requestedTab: 'design' | 'prepare' | 'runs' | 'versions' | null;
+  pendingSelectionId: string | null;
   initialize: () => Promise<void>;
   refresh: () => Promise<void>;
-  selectWorkflow: (id: string) => void;
+  selectWorkflow: (id: string) => boolean;
+  confirmPendingSelection: () => void;
+  clearPendingSelection: () => void;
   setProfileFilter: (profileId: string | null) => void;
   requestTab: (tab: 'design' | 'prepare' | 'runs' | 'versions') => void;
   clearRequestedTab: () => void;
@@ -173,6 +176,7 @@ const initialState = {
   notice: null,
   profileFilterId: null,
   requestedTab: null,
+  pendingSelectionId: null,
 };
 
 export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((set, get) => ({
@@ -200,6 +204,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
         loading: false,
         semanticDirty: false,
         layoutDirty: false,
+        pendingSelectionId: null,
       });
     } catch (error) {
       set({ loading: false, initialized: true, error: getErrorMessage(error) });
@@ -207,6 +212,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
     }
   },
   refresh: async () => {
+    if (get().saving) return;
     set({ loading: true, error: null });
     try {
       const page = await invokeListDeploymentWorkflows(null, 100, false);
@@ -221,6 +227,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
         loading: false,
         semanticDirty: false,
         layoutDirty: false,
+        pendingSelectionId: null,
       });
     } catch (error) {
       set({ loading: false, error: getErrorMessage(error) });
@@ -228,8 +235,15 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
     }
   },
   selectWorkflow: (id) => {
-    const record = get().workflows.find((item) => item.id === id);
-    if (!record) return;
+    const state = get();
+    if (state.saving) return false;
+    if (state.selectedWorkflowId === id && state.draft?.id === id) return true;
+    const record = state.workflows.find((item) => item.id === id);
+    if (!record) return false;
+    if (state.semanticDirty || state.layoutDirty) {
+      set({ pendingSelectionId: id });
+      return false;
+    }
     const draft = cloneRecord(record);
     set({
       selectedWorkflowId: id,
@@ -239,12 +253,35 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
       layoutDirty: false,
       issues: localIssues(draft, get().catalog),
       error: null,
+      pendingSelectionId: null,
+    });
+    return true;
+  },
+  confirmPendingSelection: () => {
+    const id = get().pendingSelectionId;
+    const record = id ? get().workflows.find((item) => item.id === id) : null;
+    if (!record) {
+      set({ pendingSelectionId: null });
+      return;
+    }
+    const draft = cloneRecord(record);
+    set({
+      selectedWorkflowId: record.id,
+      selectedNodeId: record.definition.nodes[0]?.id ?? null,
+      draft,
+      semanticDirty: false,
+      layoutDirty: false,
+      issues: localIssues(draft, get().catalog),
+      error: null,
+      pendingSelectionId: null,
     });
   },
+  clearPendingSelection: () => set({ pendingSelectionId: null }),
   setProfileFilter: (profileFilterId) => set({ profileFilterId }),
   requestTab: (requestedTab) => set({ requestedTab }),
   clearRequestedTab: () => set({ requestedTab: null }),
   startTemplate: (kind, name, connectionProfileId, remoteRoot) => {
+    if (get().saving) return;
     const catalog = get().catalog;
     const { definition, layout } = buildDeploymentTemplate(
       kind,
@@ -269,12 +306,13 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
       layoutDirty: true,
       issues: localIssues(draft, catalog),
       error: null,
+      pendingSelectionId: null,
     });
   },
   selectNode: (id) => set({ selectedNodeId: id }),
   updateWorkflowMeta: (input) => {
     const draft = get().draft;
-    if (!draft) return;
+    if (!draft || get().saving) return;
     const next = { ...draft, ...input };
     set({ draft: next, semanticDirty: true, issues: localIssues(next, get().catalog) });
   },
@@ -283,7 +321,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
     const spec = catalog?.nodes.find(
       (item) => item.typeName === typeName && item.typeVersion === typeVersion,
     );
-    if (!draft || !spec) return;
+    if (!draft || !spec || get().saving) return;
     const created = createNodeFromCatalog(
       spec,
       draft.definition.nodes,
@@ -315,7 +353,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
   },
   removeNode: (id) => {
     const draft = get().draft;
-    if (!draft) return;
+    if (!draft || get().saving) return;
     const nodes = draft.definition.nodes
       .filter((item) => item.id !== id)
       .map((item) => ({
@@ -346,7 +384,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
   },
   updateNode: (id, input) => {
     const draft = get().draft;
-    if (!draft) return;
+    if (!draft || get().saving) return;
     const next = {
       ...draft,
       definition: {
@@ -358,7 +396,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
   },
   updateNodeConfig: (id, name, value) => {
     const draft = get().draft;
-    if (!draft) return;
+    if (!draft || get().saving) return;
     const next = {
       ...draft,
       definition: {
@@ -372,7 +410,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
   },
   connectInput: (targetNodeId, targetPort, binding) => {
     const draft = get().draft;
-    if (!draft) return;
+    if (!draft || get().saving) return;
     const next = {
       ...draft,
       definition: {
@@ -391,7 +429,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
   disconnectInput: (targetNodeId, targetPort) => {
     const draft = get().draft;
     const targetNode = draft?.definition.nodes.find((item) => item.id === targetNodeId);
-    if (!draft || !targetNode?.inputs[targetPort]) return;
+    if (!draft || !targetNode?.inputs[targetPort] || get().saving) return;
     const next: DeploymentWorkflowDraft = {
       ...draft,
       definition: {
@@ -414,7 +452,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
     binding,
   ) => {
     const draft = get().draft;
-    if (!draft) return;
+    if (!draft || get().saving) return;
     let changed = false;
     const nodes = draft.definition.nodes.map((item) => {
       if (item.id !== previousTargetNodeId && item.id !== targetNodeId) return item;
@@ -444,7 +482,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
   moveNode: (id, x, y) => get().moveNodes([{ id, x, y }]),
   moveNodes: (changes) => {
     const draft = get().draft;
-    if (!draft) return;
+    if (!draft || get().saving) return;
     const nodeIds = new Set(draft.definition.nodes.map((item) => item.id));
     const validChanges = new Map(changes
       .filter((change) => nodeIds.has(change.id)
@@ -519,6 +557,18 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
               definition: draft.definition,
               enabled: draft.enabled,
             });
+          const semanticDraft: DeploymentWorkflowDraft = {
+            ...draft,
+            name: record.name,
+            enabled: record.enabled,
+            revision: record.revision,
+            definition: structuredClone(record.definition),
+          };
+          set({
+            workflows: replaceWorkflow(get().workflows, record),
+            draft: semanticDraft,
+            semanticDirty: false,
+          });
         } else {
           const existing = state.workflows.find((item) => item.id === draft.id);
           if (!existing) throw new Error('DEPLOYMENT_WORKFLOW_NOT_FOUND');
@@ -532,6 +582,18 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
             { layout: draft.layout },
           );
           record = { ...record, layoutRevision: layoutRecord.layoutRevision, layout: layoutRecord.layout };
+          const currentDraft = get().draft;
+          if (currentDraft?.id === draft.id) {
+            set({
+              workflows: replaceWorkflow(get().workflows, record),
+              draft: {
+                ...currentDraft,
+                layoutRevision: layoutRecord.layoutRevision,
+                layout: structuredClone(layoutRecord.layout),
+              },
+              layoutDirty: false,
+            });
+          }
         }
       }
       const workflows = replaceWorkflow(get().workflows, record);

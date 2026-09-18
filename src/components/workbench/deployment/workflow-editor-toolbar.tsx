@@ -1,5 +1,6 @@
 import React from 'react';
-import { LibraryIcon, PanelRightIcon } from 'lucide-react';
+import { LibraryIcon, PanelRightIcon, Settings2Icon } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
 import type { DeploymentWorkspaceLayout } from './deployment-workspace-shell';
@@ -7,19 +8,27 @@ import type { DeploymentWorkspaceLayout } from './deployment-workspace-shell';
 export interface WorkflowEditorToolbarProps {
   workflowName: string;
   layout: DeploymentWorkspaceLayout;
+  enabled: boolean;
+  editable: boolean;
   onOpenLibrary: () => void;
   onOpenInspector: () => void;
+  onOpenSettings: () => void;
   libraryTriggerRef?: React.Ref<HTMLButtonElement>;
   inspectorTriggerRef?: React.Ref<HTMLButtonElement>;
+  settingsTriggerRef?: React.Ref<HTMLButtonElement>;
 }
 
 export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
   workflowName,
   layout,
+  enabled,
+  editable,
   onOpenLibrary,
   onOpenInspector,
+  onOpenSettings,
   libraryTriggerRef,
   inspectorTriggerRef,
+  settingsTriggerRef,
 }) => {
   const { t } = useI18n();
   return (
@@ -28,7 +37,12 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
       data-testid="deployment-editor-toolbar"
     >
       <div className="min-w-0 flex-1">
-        <h2 className="truncate text-sm font-medium">{workflowName}</h2>
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="truncate text-sm font-medium">{workflowName}</h2>
+          <Badge variant={enabled ? 'secondary' : 'outline'} size="sm">
+            {t(enabled ? 'deployment.editor.enabled' : 'deployment.editor.disabled')}
+          </Badge>
+        </div>
         <p className="hidden truncate text-xs text-muted-foreground @min-[60rem]:block">
           {t('deployment.editor.canvasDescription')}
         </p>
@@ -39,10 +53,22 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
           size="icon-sm"
           variant="outline"
           onClick={onOpenLibrary}
+          disabled={!editable}
           aria-label={t('deployment.editor.nodeLibrary')}
           title={t('deployment.editor.nodeLibrary')}
         >
           <LibraryIcon data-icon="inline-start" />
+        </Button>
+        <Button
+          ref={settingsTriggerRef}
+          size="icon-sm"
+          variant="outline"
+          onClick={onOpenSettings}
+          disabled={!editable}
+          aria-label={t('deployment.editor.settings')}
+          title={t('deployment.editor.settings')}
+        >
+          <Settings2Icon data-icon="inline-start" />
         </Button>
         {layout !== 'wide' && (
           <Button
