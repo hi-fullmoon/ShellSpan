@@ -134,7 +134,7 @@ export function AiQuestionPanel({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
+            size="icon-sm"
             aria-label={t(
               collapsed
                 ? 'ai.workspace.question.expand'
@@ -148,7 +148,7 @@ export function AiQuestionPanel({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
+            size="icon-sm"
             aria-label={t('common.close')}
             onClick={() => setCollapsed(true)}
           >
@@ -282,7 +282,7 @@ export function AiQuestionPanel({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-sm"
                 aria-label={t('ai.workspace.question.previous')}
                 disabled={pending || currentIndex === 0}
                 onClick={() => setCurrentIndex((index) => index - 1)}
@@ -295,7 +295,7 @@ export function AiQuestionPanel({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-sm"
                 aria-label={t('ai.workspace.question.next')}
                 disabled={pending || currentIndex === question.questions.length - 1}
                 onClick={() => setCurrentIndex((index) => index + 1)}

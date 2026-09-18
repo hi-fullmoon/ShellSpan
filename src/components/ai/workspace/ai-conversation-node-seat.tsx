@@ -516,7 +516,10 @@ function TurnProcessDisclosure({
               type="button"
               variant="plain"
               size="sm"
-              className={cn(AI_DISCLOSURE_ROW_CLASS, 'ai-turn-process-trigger')}
+              className={cn(
+                AI_DISCLOSURE_ROW_CLASS,
+                'ai-turn-process-trigger h-auto min-h-6 px-0 py-1',
+              )}
               aria-label={label}
               aria-expanded={open}
             />
@@ -533,8 +536,9 @@ function TurnProcessDisclosure({
             </>
           )}
         </CollapsibleTrigger>
+        <Separator className="ai-turn-process-separator" />
         <CollapsibleContent>
-          <div className="ai-turn-process-body ml-[7px] flex w-[calc(100%-7px)] min-w-0 max-w-full flex-col gap-1.5 box-border pt-1.5 pr-0 pb-0.5 pl-[15px]">
+          <div className="ai-turn-process-body flex w-full min-w-0 max-w-full flex-col gap-1.5 box-border pt-1.5 pr-0 pb-0.5">
             {node.children.map((child) => (
               <div
                 key={child.key}
