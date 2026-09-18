@@ -162,6 +162,7 @@ async function invokeLogged<T>(
 
 type TerminalHotPathCommand =
   | 'write_session'
+  | 'write_session_bytes'
   | 'set_session_output_paused'
   | 'resize_session';
 
@@ -239,6 +240,13 @@ export async function invokeGetTerminalBrokerSnapshot(
 
 export function invokeWriteSession(sessionId: string, data: string): Promise<void> {
   return invokeTerminalHotPath('write_session', { sessionId, data });
+}
+
+export function invokeWriteSessionBytes(sessionId: string, bytes: Uint8Array): Promise<void> {
+  return invokeTerminalHotPath('write_session_bytes', {
+    sessionId,
+    bytes: Array.from(bytes),
+  });
 }
 
 export async function invokeGetSessionStatus(sessionId: string): Promise<StatusEvent> {
@@ -445,6 +453,12 @@ export async function invokeRejectAgentRuntimeTool(
   input: AgentRuntimeToolDecisionInput,
 ): Promise<AgentSessionSnapshot> {
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_reject_tool', { input });
+}
+
+export async function invokeGetPendingAgentRuntimeApprovalArguments(
+  input: AgentRuntimeToolDecisionInput,
+): Promise<unknown | null> {
+  return invokeLogged<unknown | null>('agent_runtime_get_pending_approval_arguments', { input });
 }
 
 export async function invokeGetAgentRuntimeSession(

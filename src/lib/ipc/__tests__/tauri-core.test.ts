@@ -30,6 +30,7 @@ import {
   invokeStoreKeyCredential,
   invokeTakeoverAgentTerminal,
   invokeTrustHost,
+  invokeWriteSessionBytes,
 } from '@/lib/ipc/tauri';
 import type { ConnectionProfile } from '@/types';
 
@@ -157,6 +158,19 @@ describe('Agent terminal lease control serialization', () => {
     await expect(invokeTakeoverAgentTerminal(input)).resolves.toBe(true);
     expect(invokeMock).toHaveBeenNthCalledWith(1, 'agent_runtime_terminal_lease_ready', { input });
     expect(invokeMock).toHaveBeenNthCalledWith(2, 'agent_runtime_takeover_terminal', { input });
+  });
+});
+
+describe('terminal binary input serialization', () => {
+  it('preserves byte values instead of UTF-8 encoding the binary string', async () => {
+    invokeMock.mockResolvedValue(undefined);
+
+    await invokeWriteSessionBytes('terminal-1', new Uint8Array([0x1b, 0x5b, 0x80, 0xff]));
+
+    expect(invokeMock).toHaveBeenCalledWith('write_session_bytes', {
+      sessionId: 'terminal-1',
+      bytes: [0x1b, 0x5b, 0x80, 0xff],
+    });
   });
 });
 
