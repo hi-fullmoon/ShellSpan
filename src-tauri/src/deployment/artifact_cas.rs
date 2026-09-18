@@ -30,6 +30,7 @@ pub(crate) struct ArtifactBundleProjection {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[cfg(test)]
 pub(crate) struct ArtifactCleanupResult {
     pub removed_manifests: u32,
     pub removed_blobs: u32,
@@ -439,6 +440,7 @@ impl DeploymentArtifactCas {
         Ok(())
     }
 
+    #[cfg(test)]
     fn leased_manifest_digests(&self) -> Result<BTreeSet<String>, String> {
         let mut digests = BTreeSet::new();
         for run_entry in fs::read_dir(self.lease_directory())
@@ -476,6 +478,7 @@ impl DeploymentArtifactCas {
         Ok(digests)
     }
 
+    #[cfg(test)]
     pub(crate) fn cleanup(
         &self,
         retained_manifest_digests: &BTreeSet<String>,

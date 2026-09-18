@@ -35,6 +35,7 @@ struct PlanDigestPayload<'a> {
     policy: &'a super::workflow_schema::WorkflowPolicy,
 }
 
+#[cfg(test)]
 pub(crate) fn compile_workflow_json(
     json: &str,
     registry: &DeploymentNodeRegistry,

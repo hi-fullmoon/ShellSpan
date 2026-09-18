@@ -612,6 +612,7 @@ fn record_artifact(
     })
 }
 
+#[cfg(test)]
 pub(crate) async fn prepare_run(
     database: &Database,
     runtime: &DeploymentWorkflowRuntime,
@@ -621,6 +622,7 @@ pub(crate) async fn prepare_run(
     prepare_run_internal(database, runtime, executors, request, None, None).await
 }
 
+#[cfg(test)]
 pub(crate) async fn prepare_rollback_run(
     database: &Database,
     runtime: &DeploymentWorkflowRuntime,
