@@ -139,6 +139,14 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     if (restoredAnchorRef.current) setPositionReady(true);
   }, [cancelRestore, scrollToMessage, turnAnchorKey]);
 
+  useLayoutEffect(() => {
+    if (!turnAnchorKey || !restoredAnchorRef.current || !followingIntentRef.current) return;
+    // The primitive observes content growth, but its resize correction is
+    // deferred to the next animation frame. Apply committed stream revisions
+    // during layout so the live tail cannot paint once at the old scrollTop.
+    scrollToEnd();
+  }, [followKey, scrollToEnd, turnAnchorKey]);
+
   const handlePointerDown = useCallback(() => {
     interruptRestore();
     pointerScrollStartRef.current = viewportRef.current?.scrollTop ?? null;

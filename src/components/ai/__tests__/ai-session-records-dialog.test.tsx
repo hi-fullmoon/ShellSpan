@@ -143,8 +143,14 @@ describe('AI conversation record management', () => {
       name: 'settings.ai.records.deleteNamed Old terminal conversation',
     }));
     expect(mocks.delete).not.toHaveBeenCalled();
-    expect(screen.getByText('settings.ai.records.deleteActiveDescription')).toBeInTheDocument();
     const dialog = screen.getByRole('alertdialog');
+    const header = dialog.querySelector('[data-slot="alert-dialog-header"]');
+    const description = screen.getByText(
+      'settings.ai.records.deleteActiveDescription Old terminal conversation',
+    );
+    expect(screen.getByRole('heading', { name: 'settings.ai.records.deleteTitle' })).toBeInTheDocument();
+    expect(header).not.toHaveTextContent('Old terminal conversation');
+    expect(description.closest('[data-slot="scroll-area"]')).toBeInTheDocument();
     expect(dialog.querySelector('.lucide-trash-2')).toBeInTheDocument();
     expect(dialog.querySelector('[data-slot="alert-dialog-media"]')).toHaveClass(
       'bg-destructive/10',

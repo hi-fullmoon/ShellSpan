@@ -486,8 +486,9 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
   });
 
   it('shows one Turn-level running indicator without exposing process children as top-level rows', () => {
-    const { container } = render(
-      <AiWorkspaceRoot view={runningHierarchyView()} scope="workbench" />,
+    const view = runningHierarchyView();
+    const { container, rerender } = render(
+      <AiWorkspaceRoot view={view} scope="workbench" />,
     );
 
     expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
@@ -498,6 +499,21 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(runningIndicator).toHaveTextContent('Working…');
     expect(runningIndicator?.querySelector('[data-slot="marker-icon"]')).toBeNull();
     expect(runningIndicator?.querySelector('[data-slot="marker-content"]')).toHaveClass('shimmer');
+
+    const finalNode = view.nodes[view.nodes.length - 1]!;
+    const appendedNode = {
+      ...finalNode,
+      key: 'test:additional-flow-node',
+      lastSeq: finalNode.lastSeq + 1,
+    };
+    rerender(
+      <AiWorkspaceRoot
+        view={{ ...view, nodes: [...view.nodes, appendedNode] }}
+        scope="workbench"
+      />,
+    );
+
+    expect(container.querySelector('[data-ai-running-indicator]')).toBe(runningIndicator);
   });
 
   it('keeps one stable top anchor while an optimistic Agent turn commits', async () => {

@@ -355,6 +355,47 @@ describe('MessageScroller', () => {
     expect(scrollTo).toHaveBeenCalled();
   });
 
+  it('corrects a followed stream revision during layout before the resize frame', async () => {
+    let followKey = 'streaming:1';
+    let height = 300;
+    let scrollTop = 200;
+    const thread = () => (
+      <MessageScroller
+        followKey={followKey}
+        turnAnchorKey="response"
+        initialAnchor={{ nodeKey: 'response', offset: 0, scrollTop: 200, atBottom: true }}
+      >
+        <ScrollAnchorRow key="response" id="response" scrollAnchor scrollItemId="response" />
+      </MessageScroller>
+    );
+    const { container, rerender } = render(thread());
+    const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
+    const item = container.querySelector<HTMLElement>('[data-slot="message-scroller-item"]')!;
+    const rect = (top: number, rectHeight: number) => ({
+      top, bottom: top + rectHeight, height: rectHeight, left: 0, right: 320, width: 320,
+      x: 0, y: top, toJSON: () => ({}),
+    });
+    const scrollTo = vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); });
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, get: () => height },
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollTo: { configurable: true, value: scrollTo },
+      getBoundingClientRect: { configurable: true, value: () => rect(0, 100) },
+    });
+    item.getBoundingClientRect = () => rect(-scrollTop, height);
+    await waitFor(() => expect(container.querySelector('[data-slot="message-scroller"]')).not.toHaveClass('invisible'));
+    fireEvent.scroll(viewport);
+    scrollTo.mockClear();
+
+    height = 400;
+    followKey = 'streaming:2';
+    rerender(thread());
+
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', top: 300 });
+    expect(scrollTop).toBe(300);
+  });
+
   it('anchors a new user turn near the top instead of chasing its streamed tail', async () => {
     let ids = ['first', 'second'];
     const thread = () => (

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -32,6 +32,8 @@ const tool: AiConversationNodeOf<'tool'> = {
   timestamp: '2026-09-03T00:00:00.000Z',
   callId: 'call-phase5',
   name: 'terminal.exec',
+  nativeName: 'exec_command',
+  title: null,
   summary: 'Restart nginx',
   state: 'approval',
   effect: 'stateChange',
@@ -181,10 +183,11 @@ describe('AI workspace Phase 5 workflows', () => {
     );
 
     expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
-    expect(screen.getByRole('group', { name: /Allow this command/ })).toBeVisible();
+    const approval = screen.getByRole('group', { name: /Allow this command/ });
+    expect(approval).toBeVisible();
     expect(screen.getByText(/will run on Production/)).toBeVisible();
     expect(screen.getByText('systemctl restart nginx')).toBeVisible();
-    expect(screen.getByText('Restart the web server to apply its new configuration.')).toBeVisible();
+    expect(within(approval).getByText('Restart the web server to apply its new configuration.')).toBeVisible();
     expect(screen.getByText('Modifies the system')).toBeVisible();
     expect(screen.queryByText('stateChange')).toBeNull();
     expect(screen.queryByText(/Native effect:/)).toBeNull();
@@ -325,7 +328,9 @@ describe('AI workspace Phase 5 workflows', () => {
     expect(container.querySelectorAll('[data-slot="ai-tool-details"]')).toHaveLength(1);
     expect(container.querySelectorAll('aside')).toHaveLength(0);
     await user.click(screen.getByRole('button', { name: 'Back' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Command: Restart nginx' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('button', {
+      name: 'Command: Restart the web server to apply its new configuration.',
+    })).toHaveFocus());
   });
 
   it('opens a failed nested command by its key when another step reused the call ID', async () => {
@@ -514,7 +519,9 @@ describe('AI workspace Phase 5 workflows', () => {
     );
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.getByRole('log', { name: 'AI conversation' })).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Command: Restart nginx' }));
+    await user.click(screen.getByRole('button', {
+      name: 'Command: Restart the web server to apply its new configuration.',
+    }));
     expect(screen.getByRole('button', { name: 'Open details for terminal.exec' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Open artifact Deployment report' })).toBeVisible();
   });

@@ -34,13 +34,15 @@ function toolNode(
     timestamp: '2026-09-03T00:00:00.000Z',
     callId: 'call-fixture',
     name: 'terminal.exec',
+    nativeName: 'exec_command',
+    title: null,
     summary: 'Run diagnostics',
     state: 'running',
     effect: 'readOnly',
     durationMs: null,
     detailRef: { kind: 'agentTool', sessionId: 'session-fixture', callId: 'call-fixture' },
     evidenceRefs: [],
-    input: { command: 'printf ready', cwd: '/srv/app' },
+    input: { command: 'printf ready', explanation: 'Run diagnostics', cwd: '/srv/app' },
     output: null,
     error: null,
     target: null,
@@ -105,10 +107,10 @@ describe('AiConversationNodeList', () => {
     const process = screen.getByRole('button', { name: 'Process complete' });
     expect(process).toHaveAttribute('aria-expanded', 'false');
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Command: active' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Command: Confirm nginx is active.' })).not.toBeInTheDocument();
     });
     fireEvent.click(process);
-    expect(await screen.findByRole('button', { name: 'Command: active' })).toBeVisible();
+    expect(await screen.findByRole('button', { name: /^Command:/ })).toBeVisible();
   });
 
   it('keeps lifecycle copy out of Conversation and terminal errors inside Turn Process', () => {
@@ -278,16 +280,123 @@ describe('AiConversationNodeList', () => {
   });
 
   it.each([
-    ['terminal.exec', 'terminal'],
-    ['read_file', 'read'],
-    ['search_text', 'search'],
-    ['web.fetch', 'web'],
-    ['apply_patch', 'edit'],
-    ['write_file', 'write'],
-    ['python', 'code'],
-    ['vendor.future_capability', 'generic'],
-  ] as const)('classifies %s with the %s presentation', (name, variant) => {
-    expect(classifyAiTool(name)).toBe(variant);
+    ['terminal.exec', null, 'terminal'],
+    ['read_terminal', null, 'terminal'],
+    ['write_terminal_input', null, 'terminal'],
+    ['write_stdin', null, 'terminal'],
+    ['read_file', null, 'read'],
+    ['search_text', null, 'search'],
+    ['web.fetch', null, 'web'],
+    ['apply_patch', null, 'edit'],
+    ['write_file', null, 'write'],
+    ['python', null, 'code'],
+    ['provider.tool', 'write_file', 'write'],
+    ['provider.tool', 'mcp::server::already_processed', 'generic'],
+    ['vendor.future_capability', null, 'generic'],
+  ] as const)('classifies %s with the %s native identity as %s', (name, nativeName, variant) => {
+    expect(classifyAiTool(name, nativeName)).toBe(variant);
+  });
+
+  it('uses real native file contracts for paths, diff totals, and replacement uncertainty', async () => {
+    const user = userEvent.setup();
+    const write = toolNode({
+      key: 'tool:write',
+      callId: 'call-write',
+      name: 'provider.tool',
+      nativeName: 'write_file',
+      title: 'write_file',
+      summary: 'write_file completed',
+      state: 'succeeded',
+      input: {
+        path: 'todo-app/package.json',
+        content: '{\n  "name": "todo-app"\n}\n',
+        precondition: { mustNotExist: true },
+      },
+      output: { written: true, operation: 'create', path: 'todo-app/package.json' },
+    });
+    const patch = [
+      '--- original',
+      '+++ modified',
+      '@@ -1,2 +1,3 @@',
+      '-old',
+      '+new',
+      ' kept',
+      '+extra',
+      '',
+    ].join('\n');
+    const edit = toolNode({
+      key: 'tool:edit',
+      callId: 'call-edit',
+      name: 'provider.tool',
+      nativeName: 'apply_patch',
+      title: 'apply_patch',
+      summary: 'Applied, re-read, and verified the exact native patch.',
+      state: 'succeeded',
+      input: {
+        patch,
+        preconditions: [{ path: 'todo-app/src/app.ts', sha256: 'a'.repeat(64) }],
+      },
+      output: {
+        applied: true,
+        diff: patch,
+        files: [{ path: 'todo-app/src/app.ts', beforeSha256: 'a'.repeat(64), afterSha256: 'b'.repeat(64) }],
+      },
+    });
+    const replace = toolNode({
+      key: 'tool:replace',
+      callId: 'call-replace',
+      name: 'write_file',
+      nativeName: 'write_file',
+      title: 'write_file',
+      summary: 'Wrote, re-read, and verified the exact UTF-8 file.',
+      state: 'succeeded',
+      input: {
+        path: 'todo-app/tsconfig.json',
+        content: '{\n  "strict": true\n}\n',
+        precondition: { sha256: 'c'.repeat(64) },
+      },
+      output: { written: true, operation: 'replace', path: 'todo-app/tsconfig.json' },
+    });
+    const generic = toolNode({
+      key: 'tool:orchestration',
+      callId: 'call-orchestration',
+      name: 'provider.future_tool',
+      nativeName: null,
+      title: 'Agent orchestration',
+      summary: 'Delegate repository inspection',
+      state: 'succeeded',
+      input: { description: 'Delegate repository inspection' },
+    });
+    const { container } = render(<AiConversationNodeList nodes={[write, edit, replace, generic]} />);
+
+    const writeSeat = container.querySelector('[data-ai-node-key="tool:write"]') as HTMLElement;
+    const writeRow = within(writeSeat).getByRole('button', {
+      name: 'Write: todo-app/package.json +3 -0',
+    });
+    expect(writeSeat.querySelector('[data-tool-variant="write"]')).toBeInTheDocument();
+    expect(writeRow).toHaveTextContent('Write');
+    expect(writeRow).toHaveTextContent('todo-app/package.json');
+    expect(writeRow.querySelector('.ai-tool-diff-stat')).toHaveTextContent('+3 -0');
+    expect(writeRow).not.toHaveTextContent('write_file completed');
+
+    const editSeat = container.querySelector('[data-ai-node-key="tool:edit"]') as HTMLElement;
+    const editRow = within(editSeat).getByRole('button', {
+      name: 'Edit: todo-app/src/app.ts +2 -1',
+    });
+    await user.click(editRow);
+    const diff = editSeat.querySelector('[data-ai-tool-view="diff"]') as HTMLElement;
+    expect(diff).toHaveTextContent('todo-app/src/app.ts');
+    expect(diff.querySelectorAll('[data-diff="removed"]')).toHaveLength(1);
+    expect(diff.querySelectorAll('[data-diff="added"]')).toHaveLength(2);
+
+    const replaceSeat = container.querySelector('[data-ai-node-key="tool:replace"]') as HTMLElement;
+    const replaceRow = within(replaceSeat).getByRole('button', {
+      name: 'Write: todo-app/tsconfig.json',
+    });
+    expect(replaceRow.querySelector('.ai-tool-diff-stat')).toBeNull();
+    expect(within(container.querySelector('[data-ai-node-key="tool:orchestration"]') as HTMLElement)
+      .getByRole('button', { name: 'Agent orchestration: Delegate repository inspection' }))
+      .toBeVisible();
   });
 
   it('covers running, completed, and failed tool rows, inline expansion, details, and fallback', async () => {
@@ -308,6 +417,7 @@ describe('AiConversationNodeList', () => {
       key: 'tool:future',
       callId: 'call-future',
       name: 'vendor.future_capability',
+      nativeName: null,
       summary: 'Provider rejected the call',
       state: 'failed',
       input: { opaque: true },
@@ -378,6 +488,7 @@ describe('AiConversationNodeList', () => {
       key: 'tool:narrow',
       callId: 'call-narrow',
       name: 'vendor.future_capability',
+      nativeName: null,
       summary: 'Unknown long payload',
       state: 'succeeded',
       input: { path: longValue },
