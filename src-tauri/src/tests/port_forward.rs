@@ -91,6 +91,22 @@
     }
 
     #[test]
+    fn scoped_forward_cancel_guard_cancels_every_armed_error_exit() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let _guard = ScopedForwardCancelGuard::new(Arc::clone(&cancel));
+        }
+        assert!(cancel.load(Ordering::SeqCst));
+
+        cancel.store(false, Ordering::SeqCst);
+        {
+            let mut guard = ScopedForwardCancelGuard::new(Arc::clone(&cancel));
+            guard.disarm();
+        }
+        assert!(!cancel.load(Ordering::SeqCst));
+    }
+
+    #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end_port_forward() {
         let host =
