@@ -655,6 +655,7 @@ fn command_snapshot(data: &TerminalCommandData) -> TerminalCommandSnapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TerminalInputKind {
     Text,
+    Binary,
     Key,
     Paste,
     Interrupt,

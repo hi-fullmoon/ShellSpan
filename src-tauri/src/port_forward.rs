@@ -440,6 +440,194 @@ struct ForwardSession {
     _jump: Option<ssh2::Session>,
 }
 
+pub(crate) struct ScopedLoopbackConnection {
+    stream: Option<TcpStream>,
+    cancel: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<Result<(), String>>>,
+    outcome: std::sync::mpsc::Receiver<Result<(), String>>,
+}
+
+impl ScopedLoopbackConnection {
+    pub(crate) fn take_stream(&mut self) -> Result<TcpStream, String> {
+        self.stream
+            .take()
+            .ok_or_else(|| "scoped loopback connection was already consumed".into())
+    }
+
+    pub(crate) fn finish(mut self, deadline: std::time::Instant) -> Result<(), String> {
+        drop(self.stream.take());
+        let remaining = remaining_scoped_forward_time(deadline)?;
+        let outcome = self
+            .outcome
+            .recv_timeout(remaining)
+            .map_err(|error| match error {
+                std::sync::mpsc::RecvTimeoutError::Timeout => {
+                    "target loopback SSH transport exceeded its total deadline".to_string()
+                }
+                std::sync::mpsc::RecvTimeoutError::Disconnected => {
+                    "target loopback SSH transport stopped without an outcome".to_string()
+                }
+            })?;
+        let worker = self
+            .worker
+            .take()
+            .ok_or_else(|| "target loopback SSH transport lost its worker handle".to_string())?;
+        worker
+            .join()
+            .map_err(|_| "target loopback SSH transport worker panicked".to_string())??;
+        outcome
+    }
+}
+
+impl Drop for ScopedLoopbackConnection {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::SeqCst);
+        drop(self.stream.take());
+        // A blocking SSH handshake cannot be interrupted portably. Detach the
+        // bounded worker rather than allowing Drop to exceed the tool deadline.
+        drop(self.worker.take());
+    }
+}
+
+pub(crate) fn open_scoped_loopback_connection(
+    connection: &RemoteConnectionRequest,
+    remote_port: u16,
+    known_hosts_path: &Path,
+    deadline: std::time::Instant,
+) -> Result<ScopedLoopbackConnection, String> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let worker_cancel = Arc::clone(&cancel);
+    let worker_connection = connection.clone();
+    let worker_known_hosts_path = known_hosts_path.to_path_buf();
+    let (stream_tx, stream_rx) = std::sync::mpsc::sync_channel(1);
+    let (outcome_tx, outcome_rx) = std::sync::mpsc::sync_channel(1);
+    let worker = thread::spawn(move || {
+        let mut stream_tx = Some(stream_tx);
+        let result = (|| {
+            let session = open_forward_session(
+                &worker_connection.host,
+                worker_connection.port,
+                &worker_connection.username,
+                worker_connection.auth_method,
+                worker_connection.password.as_deref(),
+                worker_connection.private_key_data.as_deref(),
+                worker_connection.passphrase.as_deref(),
+                worker_connection.jump_host.as_ref(),
+                &worker_known_hosts_path,
+            )?;
+            if worker_cancel.load(Ordering::SeqCst) {
+                return Err("scoped loopback connection was cancelled before SSH setup".into());
+            }
+            let channel = session
+                .target
+                .channel_direct_tcpip("127.0.0.1", remote_port, None)
+                .map_err(|error| {
+                    format!(
+                        "failed to open SSH channel to target loopback 127.0.0.1:{remote_port}: {error}"
+                    )
+                })?;
+            if worker_cancel.load(Ordering::SeqCst) {
+                return Err("scoped loopback connection was cancelled before bridging".into());
+            }
+            let (client, bridge) = connected_loopback_pair(deadline)?;
+            let remaining = remaining_scoped_forward_time(deadline)?;
+            bridge
+                .set_read_timeout(Some(remaining))
+                .map_err(|error| format!("failed to bound scoped transport reads: {error}"))?;
+            bridge
+                .set_write_timeout(Some(remaining))
+                .map_err(|error| format!("failed to bound scoped transport writes: {error}"))?;
+            if stream_tx
+                .take()
+                .expect("scoped stream sender exists")
+                .send(Ok(client))
+                .is_err()
+            {
+                return Err("scoped HTTP client stopped before receiving its transport".into());
+            }
+            bridge_single_connection(
+                channel,
+                bridge,
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(AtomicU64::new(0)),
+            )
+        })();
+        if let Err(error) = &result {
+            if let Some(sender) = stream_tx.take() {
+                let _ = sender.send(Err(error.clone()));
+            }
+        }
+        let _ = outcome_tx.send(result.clone());
+        result
+    });
+    let remaining = remaining_scoped_forward_time(deadline)?;
+    let stream = match stream_rx.recv_timeout(remaining) {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(error)) => {
+            return Err(format!(
+                "failed to establish target loopback SSH transport: {error}"
+            ))
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            cancel.store(true, Ordering::SeqCst);
+            drop(worker);
+            return Err("target loopback SSH setup exceeded its total deadline".into());
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            return Err("target loopback SSH setup stopped before returning a transport".into());
+        }
+    };
+    Ok(ScopedLoopbackConnection {
+        stream: Some(stream),
+        cancel,
+        worker: Some(worker),
+        outcome: outcome_rx,
+    })
+}
+
+fn connected_loopback_pair(deadline: std::time::Instant) -> Result<(TcpStream, TcpStream), String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("failed to bind internal loopback transport: {error}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("failed to configure internal loopback transport: {error}"))?;
+    let address = listener
+        .local_addr()
+        .map_err(|error| format!("failed to inspect internal loopback transport: {error}"))?;
+    let client = TcpStream::connect_timeout(&address, remaining_scoped_forward_time(deadline)?)
+        .map_err(|error| format!("failed to create internal loopback transport: {error}"))?;
+    let expected_peer = client
+        .local_addr()
+        .map_err(|error| format!("failed to identify internal loopback client: {error}"))?;
+    loop {
+        match listener.accept() {
+            Ok((bridge, peer)) if peer == expected_peer => {
+                bridge.set_nonblocking(false).map_err(|error| {
+                    format!("failed to configure internal loopback bridge: {error}")
+                })?;
+                return Ok((client, bridge));
+            }
+            Ok((_unexpected, _)) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                remaining_scoped_forward_time(deadline)?;
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => {
+                return Err(format!(
+                    "internal loopback transport accept failed: {error}"
+                ));
+            }
+        }
+    }
+}
+
+fn remaining_scoped_forward_time(deadline: std::time::Instant) -> Result<Duration, String> {
+    deadline
+        .checked_duration_since(std::time::Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| "target loopback SSH transport exceeded its total deadline".into())
+}
+
 fn open_forward_session(
     host: &str,
     port: u16,

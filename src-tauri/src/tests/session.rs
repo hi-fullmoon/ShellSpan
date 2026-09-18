@@ -153,6 +153,25 @@
     }
 
     #[test]
+    fn coalesce_session_commands_preserves_binary_write_boundaries() {
+        let commands = vec![
+            SessionCommand::Write("before".to_string()),
+            SessionCommand::WriteBytes(vec![0x1b, 0x80, 0xff]),
+            SessionCommand::Write("after".to_string()),
+        ];
+
+        let merged = coalesce_session_commands(commands);
+
+        assert_eq!(merged.len(), 3);
+        assert!(matches!(&merged[0], SessionCommand::Write(data) if data == "before"));
+        assert!(matches!(
+            &merged[1],
+            SessionCommand::WriteBytes(bytes) if bytes == &[0x1b, 0x80, 0xff]
+        ));
+        assert!(matches!(&merged[2], SessionCommand::Write(data) if data == "after"));
+    }
+
+    #[test]
     fn coalesce_session_commands_keeps_only_the_last_adjacent_resize() {
         let commands = vec![
             SessionCommand::Resize { cols: 80, rows: 24 },
