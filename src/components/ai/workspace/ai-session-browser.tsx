@@ -46,6 +46,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
+import { isTopLevelAiSession } from '@/lib/ai/session-list';
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
 import { AiRouteHeader } from './ai-route-header';
@@ -280,7 +281,8 @@ export function AiSessionBrowser({
   const visible = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase(locale);
     return sessions.filter((summary) => (
-      matches(summary, filter)
+      isTopLevelAiSession(summary, sessions)
+      && matches(summary, filter)
       && (
         normalizedQuery.length === 0
         || summary.title.toLocaleLowerCase(locale).includes(normalizedQuery)

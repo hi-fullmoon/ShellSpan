@@ -21,6 +21,8 @@ import type { ResolvedModel } from '@/lib/ai/provider-contract';
 import * as imageDraftModule from '@/components/ai/workspace/use-image-draft';
 import * as visionContract from '@/lib/ai/vision-contract';
 import { terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
+import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
+import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
 
 const provider = {
   id: 'provider-test',
@@ -136,7 +138,7 @@ it('allows changing model and permissions in a running conversation without chan
   await waitFor(() => expect(agent.selectModel).toHaveBeenCalledWith(view.summary.id, expect.objectContaining({ id: second.id })));
   expect(useAiSettingsStore.getState().defaultProviderId).toBe(provider.id);
   await user.click(screen.getByRole('button', { name: /Permission mode:/ }));
-  await user.click(await screen.findByRole('menuitemradio', { name: 'Full access' }));
+  await user.click(await screen.findByRole('menuitemradio', { name: /^Full access/ }));
   await user.click(await screen.findByRole('button', { name: 'Allow full access' }));
   await waitFor(() => expect(agent.setPermission).toHaveBeenCalledWith(view.summary.id, 'operator'));
   expect(useAgentPermissionStore.getState().getMode('terminal-1')).toBe('autoApproveReadOnly');
@@ -230,6 +232,107 @@ function runningAgentView(sessionId = 'agent-session-1', terminalId = 'terminal-
   };
 }
 
+it('keeps request-approval distinct from scoped read-only auto approval', async () => {
+  connectedTerminal();
+  const base = runningAgentView();
+  const view: AiSessionView = {
+    ...base,
+    snapshot: {
+      kind: 'agent',
+      value: {
+        ...base.snapshot.value,
+        header: { ...base.snapshot.value.header, permissionMode: 'requestApproval' },
+      },
+    },
+  };
+  const agent = adapter({
+    list: vi.fn(async () => ({ sessions: [view.summary] })),
+    open: vi.fn(async () => view),
+  });
+
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+  await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
+  expect(result.current.selectedPermission).toBe('requestApproval');
+});
+
+it('loads volatile arguments only for the currently pending approval', async () => {
+  connectedTerminal();
+  const base = runningAgentView();
+  const pendingApproval = {
+    sessionId: base.summary.id,
+    turnId: 'turn-1',
+    stepId: 'step-1',
+    requestId: 'request-1',
+    callId: 'call-input',
+    approvalId: 'approval-input',
+    risk: 'stateChange' as const,
+    prompt: null,
+    reason: null,
+    expiresAtUnixMs: 2_000,
+    toolName: 'write_terminal_input',
+    target: base.snapshot.value.header.target ?? null,
+    arguments: { inputKind: 'paste', contentPersisted: false },
+    effect: 'stateChange' as const,
+    evidenceRefs: [],
+  };
+  const view: AiSessionView = {
+    ...base,
+    status: 'waiting',
+    pendingApproval,
+  };
+  const loadApprovalArguments = vi.fn(async () => ({
+    inputKind: 'paste',
+    text: 'printf review-before-run',
+  }));
+  const agent = adapter({
+    list: vi.fn(async () => ({ sessions: [view.summary] })),
+    open: vi.fn(async () => view),
+    loadApprovalArguments,
+  });
+
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+  await waitFor(() => expect(result.current.approvalArguments).toEqual({
+    inputKind: 'paste',
+    text: 'printf review-before-run',
+  }));
+  expect(loadApprovalArguments).toHaveBeenCalledWith(pendingApproval);
+  expect(result.current.approvalArgumentsLoading).toBe(false);
+  expect(result.current.approvalArgumentsError).toBeNull();
+});
+
+it('keeps volatile approval fail-closed when its exact arguments cannot be loaded', async () => {
+  connectedTerminal();
+  const base = runningAgentView();
+  const pendingApproval = {
+    sessionId: base.summary.id,
+    turnId: 'turn-1', stepId: 'step-1', requestId: 'request-1',
+    callId: 'call-input', approvalId: 'approval-input',
+    risk: 'stateChange' as const, prompt: null, reason: null, expiresAtUnixMs: 2_000,
+    toolName: 'write_terminal_input', target: base.snapshot.value.header.target ?? null,
+    arguments: { inputKind: 'paste', contentPersisted: false },
+    effect: 'stateChange' as const, evidenceRefs: [],
+  };
+  const view: AiSessionView = { ...base, status: 'waiting', pendingApproval };
+  let rejectLoad: ((error: Error) => void) | undefined;
+  const loadApprovalArguments = vi.fn(() => new Promise<unknown>((_resolve, reject) => {
+    rejectLoad = reject;
+  }));
+  const agent = adapter({
+    list: vi.fn(async () => ({ sessions: [view.summary] })),
+    open: vi.fn(async () => view),
+    loadApprovalArguments,
+  });
+
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+  await waitFor(() => expect(result.current.approvalArgumentsLoading).toBe(true));
+  act(() => rejectLoad?.(new Error('preview transport failed')));
+  await waitFor(() => expect(result.current.approvalArgumentsError).toBe(
+    'The exact private arguments could not be loaded. Reject this call or stop the task; approval stays disabled.',
+  ));
+  expect(result.current.approvalArguments).toBeNull();
+  expect(result.current.approvalArgumentsLoading).toBe(false);
+});
+
 beforeEach(async () => {
   cleanup();
   useAppStore.setState({ locale: 'en-US' });
@@ -266,6 +369,45 @@ it.each(['cancelled', 'failed', 'completed'] as const)('allows follow-up input i
   act(() => result.current.setDraft('continue with these changes'));
   act(() => result.current.submit('keyboard'));
   await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(view.summary.id, expect.objectContaining({ content: 'continue with these changes', mode: 'nextTurn' })));
+});
+
+it('continues an idle conversation after its step budget boundary', async () => {
+  connectedTerminal();
+  const base = runningAgentView();
+  const events = agentSessionBaselineScenarios.hello.events.map((event) => (
+    event.type === 'turn/end'
+      ? { ...event, data: { reason: 'stepBudgetReached: maximum 128 Steps per Turn' } }
+      : event
+  ));
+  const view: AiSessionView = {
+    ...base,
+    status: 'idle',
+    summary: { ...base.summary, status: 'idle' },
+    snapshot: {
+      kind: 'agent',
+      value: { ...base.snapshot.value, status: 'idle' },
+    },
+    nodes: projectAgentChatNodes(events),
+  };
+  const agent = adapter({
+    open: vi.fn(async () => view),
+    submit: vi.fn(async (sessionId, input) => ({
+      sessionId: sessionId!, clientOperationId: input.clientOperationId, mode: input.mode,
+    })),
+  });
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+  act(() => result.current.openSession(view.summary));
+  await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
+
+  act(() => result.current.continueBudgetedTurn());
+
+  await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(
+    view.summary.id,
+    expect.objectContaining({
+      content: 'Continue the previous request from the work already completed. Verify any uncertain outcomes first and do not repeat completed operations.',
+      mode: 'nextTurn',
+    }),
+  ));
 });
 
 describe('session archive', () => {
@@ -696,7 +838,7 @@ describe('AiWorkspaceController', () => {
     await user.click(await screen.findByRole('menuitem', { name: /Model.*model-test/ }));
     await user.click(screen.getByRole('menuitemradio', { name: 'second-model' }));
     await user.click(permission);
-    await user.click(await screen.findByRole('menuitemradio', { name: 'Full access' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: /^Full access/ }));
     await user.click(await screen.findByRole('button', { name: 'Allow full access' }));
     await user.click(execution);
     await user.click(await screen.findByRole('menuitemradio', { name: 'Visible command' }));

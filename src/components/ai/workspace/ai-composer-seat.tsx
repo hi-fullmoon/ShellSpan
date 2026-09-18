@@ -80,12 +80,16 @@ export interface AiComposerSeatProps {
   readonly onAnswerQuestion?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
   readonly approvalDecision?: 'approve' | 'reject' | null;
   readonly approvalError?: string | null;
+  readonly approvalArguments?: unknown | null;
+  readonly approvalArgumentsLoading?: boolean;
+  readonly approvalArgumentsError?: string | null;
   readonly unavailableReason?: string | null;
   readonly onDraftChange?: (value: string) => void;
   readonly onSubmit?: (value: string) => void | Promise<void>;
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
-  readonly onRetryTurn?: () => void;
+  readonly onContinueBudgetedTurn?: () => void;
+  readonly budgetContinuationAvailable?: boolean;
   readonly onContinueOnReconnectedTerminal?: () => void;
   readonly historicalContinuationAvailable?: boolean;
   readonly historicalContinuationBusy?: boolean;
@@ -132,12 +136,16 @@ export function AiComposerSeat({
   projectTargetLabel,
   approvalDecision = null,
   approvalError = null,
+  approvalArguments = null,
+  approvalArgumentsLoading = false,
+  approvalArgumentsError = null,
   unavailableReason = null,
   onDraftChange,
   onSubmit,
   onSubmitGesture,
   onStop,
-  onRetryTurn,
+  onContinueBudgetedTurn,
+  budgetContinuationAvailable = false,
   onContinueOnReconnectedTerminal,
   historicalContinuationAvailable = false,
   historicalContinuationBusy = false,
@@ -172,9 +180,8 @@ export function AiComposerSeat({
   const stopPrimary = running && empty;
   const submitDisabled = terminal
     || stopping
-    || waitingQuestion
-    || waitingApproval
     || submitting
+    || (!stopPrimary && (waitingQuestion || waitingApproval))
     || (mode === 'ask' && running && !empty)
     || (stopPrimary
       ? onStop === undefined
@@ -239,7 +246,9 @@ export function AiComposerSeat({
       data-ai-mode={mode}
       className="ai-composer-seat relative mx-auto flex w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] shrink-0 flex-col gap-[var(--ai-composer-stack-gap)] px-[var(--ai-shell-clearance)] py-2"
     >
-      {mode === 'agent' && <AiTaskStrip steps={taskSteps} />}
+      {mode === 'agent' && (
+        <AiTaskStrip steps={taskSteps} active={status === 'running' || status === 'waiting'} />
+      )}
       <div className="ai-composer-notices flex min-w-0 flex-col gap-1.5 empty:hidden">
         {historicalContinuationAvailable && (
           <Alert variant="subtle" size="sm" role="status">
@@ -260,17 +269,17 @@ export function AiComposerSeat({
             {t('ai.workspace.continueOnReconnectedTerminal')}
           </Button>
         )}
-        {status === 'failed' && onRetryTurn && !terminal && (
+        {budgetContinuationAvailable && onContinueBudgetedTurn && !terminal && (
           <Button
             type="button"
             variant="secondary"
             size="sm"
             className="self-center rounded-full"
             disabled={stopping || submitting || unavailable}
-            onClick={onRetryTurn}
+            onClick={onContinueBudgetedTurn}
           >
             <RotateCcwIcon data-icon="inline-start" />
-            {t('ai.workspace.retryTurn')}
+            {t('ai.workspace.continueBudgetedTurn')}
           </Button>
         )}
         {waitingApproval && !pendingApproval && (
@@ -295,12 +304,17 @@ export function AiComposerSeat({
         onRetry={onRetryQueueMutation}
       />}
       {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
-      {waitingQuestion && !pendingQuestion && <Alert><AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle><AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>{onStop && <Button type="button" variant="outline" onClick={onStop}>{t('ai.workspace.stop')}</Button>}</Alert>}
+      {waitingQuestion && !pendingQuestion && <Alert><AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle><AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription></Alert>}
       {waitingApproval && pendingApproval && (
         <AiApprovalPanel
-          approval={pendingApproval}
+          approval={{
+            ...pendingApproval,
+            arguments: approvalArguments ?? pendingApproval.arguments,
+          }}
           decision={approvalDecision}
           error={approvalError}
+          argumentsLoading={approvalArgumentsLoading}
+          argumentsError={approvalArgumentsError}
           onApprove={() => onApprove?.()}
           onReject={() => onReject?.()}
           onOpenDetails={() => onOpenApprovalDetails?.()}

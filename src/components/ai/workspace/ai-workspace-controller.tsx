@@ -99,6 +99,9 @@ export function AiWorkspaceController({
       deletingSessionId={controller.deletingSessionId}
       approvalDecision={controller.approvalDecision}
       approvalError={controller.approvalError}
+      approvalArguments={controller.approvalArguments}
+      approvalArgumentsLoading={controller.approvalArgumentsLoading}
+      approvalArgumentsError={controller.approvalArgumentsError}
       loadingOlder={controller.loadingOlder}
       queueMutation={controller.queueMutation}
       renamingSessionId={controller.renamingSessionId}
@@ -140,7 +143,7 @@ export function AiWorkspaceController({
       onDraftChange={controller.setDraft}
       onSubmitGesture={controller.submit}
       onStop={controller.stop}
-      onRetryTurn={controller.retryTurn}
+      onContinueBudgetedTurn={controller.continueBudgetedTurn}
       onContinueOnReconnectedTerminal={controller.continueOnReconnectedTerminal ?? undefined}
       historicalContinuationAvailable={controller.historicalContinuationAvailable}
       historicalContinuationBusy={controller.historicalContinuationBusy}

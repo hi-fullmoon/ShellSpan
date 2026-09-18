@@ -20,12 +20,17 @@ function followKey(nodes: readonly AiConversationNode[], throughSeq: number | nu
   return `${throughSeq ?? 'uncommitted'}:${last?.key ?? 'empty'}:${last?.lastSeq ?? 0}:${contentRevision}`;
 }
 
+function conversationItemId(node: AiConversationNode): string {
+  return node.kind === 'userMessage'
+    ? `user:${node.clientSubmissionId ?? node.messageId}`
+    : node.key;
+}
+
 export interface AiConversationProps {
   readonly nodes: readonly AiConversationNode[];
   readonly renderers?: AiConversationNodeRendererMap;
   readonly runningIndicator?: 'agent' | 'ask' | 'none';
   readonly pending?: boolean;
-  readonly followUserSubmissions?: boolean;
   readonly status: AiSessionStatus;
   readonly throughSeq: number | null;
   readonly initialAnchor?: AiScrollAnchor;
@@ -42,7 +47,6 @@ export function AiConversation({
   renderers,
   runningIndicator = 'agent',
   pending = false,
-  followUserSubmissions = false,
   status,
   throughSeq,
   initialAnchor,
@@ -73,16 +77,13 @@ export function AiConversation({
     && runningIndicator === 'ask'
     && !visibleResponseStarted;
   const latestUser = latestUserIndex >= 0 ? nodes[latestUserIndex] : undefined;
-  // The optimistic and committed rows have different keys for the same submission.
-  const latestUserKey = latestUser?.kind === 'userMessage'
-    ? latestUser.clientSubmissionId ?? latestUser.messageId
-    : undefined;
+  const latestUserKey = latestUser ? conversationItemId(latestUser) : undefined;
   return (
     <MessageScroller
       className="min-h-0 flex-1"
       contentClassName="ai-conversation-content mx-auto min-w-0 w-[min(calc(100%-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)),var(--ai-chat-content-max-width))] gap-4 px-0 pt-5 pb-7"
       followKey={followKey(nodes, throughSeq)}
-      followEndKey={followUserSubmissions ? latestUserKey : undefined}
+      turnAnchorKey={latestUserKey}
       ariaLabel={t('ai.conversation')}
       initialAnchor={initialAnchor}
       onAnchorChange={onAnchorChange}
@@ -96,10 +97,11 @@ export function AiConversation({
       )}
       {nodes.map((node) => (
         <AiConversationNodeSeat
-          key={node.key}
+          key={conversationItemId(node)}
           node={node}
           renderers={renderers}
-          scrollAnchor={node.kind === 'userMessage' && !followUserSubmissions}
+          scrollAnchor={node.kind === 'userMessage'}
+          scrollItemId={conversationItemId(node)}
           onOpenTool={onOpenTool}
           onOpenArtifact={onOpenArtifact}
         />

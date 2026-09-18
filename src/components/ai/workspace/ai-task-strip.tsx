@@ -7,6 +7,7 @@ import {
   ListTodoIcon,
   LoaderCircleIcon,
   OctagonAlertIcon,
+  PauseCircleIcon,
 } from 'lucide-react';
 
 import {
@@ -19,16 +20,21 @@ import type { AgentSessionPlanStep } from '@/types/agent-session';
 
 export interface AiTaskStripProps {
   readonly steps: readonly AgentSessionPlanStep[];
+  readonly active?: boolean;
 }
 
-const TASK_STATUS_ORDER = ['completed', 'inProgress', 'pending', 'blocked', 'failed'] as const;
+type TaskDisplayStatus = AgentSessionPlanStep['status'] | 'paused';
 
-function TaskStatusIcon({ status }: { readonly status: AgentSessionPlanStep['status'] }): React.ReactNode {
+const TASK_STATUS_ORDER = ['completed', 'inProgress', 'paused', 'pending', 'blocked', 'failed'] as const;
+
+function TaskStatusIcon({ status }: { readonly status: TaskDisplayStatus }): React.ReactNode {
   switch (status) {
     case 'completed':
       return <CheckCircle2Icon data-status="completed" />;
     case 'inProgress':
       return <LoaderCircleIcon data-status="inProgress" />;
+    case 'paused':
+      return <PauseCircleIcon data-status="paused" />;
     case 'blocked':
     case 'failed':
       return <OctagonAlertIcon data-status={status} />;
@@ -38,13 +44,16 @@ function TaskStatusIcon({ status }: { readonly status: AgentSessionPlanStep['sta
 }
 
 /** Collapsible projection of real Agent Runtime plan steps. */
-export function AiTaskStrip({ steps }: AiTaskStripProps): React.ReactNode {
+export function AiTaskStrip({ steps, active = true }: AiTaskStripProps): React.ReactNode {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const progressId = useId();
   if (steps.length === 0) return null;
+  const displayStatus = (step: AgentSessionPlanStep): TaskDisplayStatus => (
+    step.status === 'inProgress' && !active ? 'paused' : step.status
+  );
   const progress = TASK_STATUS_ORDER.flatMap((status) => {
-    const count = steps.filter((step) => step.status === status).length;
+    const count = steps.filter((step) => displayStatus(step) === status).length;
     return count > 0 ? [t(`ai.workspace.tasks.${status}`, { count })] : [];
   }).join(' · ');
 
@@ -72,11 +81,11 @@ export function AiTaskStrip({ steps }: AiTaskStripProps): React.ReactNode {
       <CollapsibleContent>
         <ul className="ai-task-strip-list m-0 flex max-h-[180px] list-none flex-col gap-2 overflow-y-auto px-3 pt-0.5 pb-1.5">
           {steps.map((step) => (
-            <li className="flex min-h-5 min-w-0 shrink-0 items-center gap-2.5" key={step.id} data-status={step.status}>
+            <li className="flex min-h-5 min-w-0 shrink-0 items-center gap-2.5" key={step.id} data-status={displayStatus(step)}>
               <span className="ai-task-strip-status grid size-4 shrink-0 place-items-center" aria-hidden="true">
-                <TaskStatusIcon status={step.status} />
+                <TaskStatusIcon status={displayStatus(step)} />
               </span>
-              <span className="sr-only">{t(`ai.workspace.tasks.status.${step.status}`)}: </span>
+              <span className="sr-only">{t(`ai.workspace.tasks.status.${displayStatus(step)}`)}: </span>
               <span className="min-w-0 truncate">
                 {step.title}
               </span>

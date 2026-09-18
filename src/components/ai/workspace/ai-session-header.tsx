@@ -17,6 +17,7 @@ export interface AiSessionHeaderProps {
   readonly context: string;
   readonly status: AiSessionStatus;
   readonly mode?: 'ask' | 'agent';
+  readonly lineage?: React.ReactNode;
   readonly onClose?: () => void;
   readonly onHistory?: () => void;
   readonly historyOpen?: boolean;
@@ -30,6 +31,7 @@ export function AiSessionHeader({
   context,
   status,
   mode = 'agent',
+  lineage,
   onClose,
   onHistory,
   historyOpen = false,
@@ -57,7 +59,10 @@ export function AiSessionHeader({
           <span className="ai-session-status-dot absolute -right-0.5 -bottom-0.5 size-[7px] shrink-0" data-state={status} />
         </span>
         <span className="ai-session-heading flex min-w-0 flex-1 flex-col">
-          <h2 className="ai-session-title min-w-0 truncate">{title}</h2>
+          <span className="flex min-w-0 items-center gap-1">
+            <h2 className="ai-session-title min-w-0 truncate">{title}</h2>
+            {lineage}
+          </span>
           <span className="ai-session-context truncate">{context}</span>
         </span>
         <span className="sr-only">{statusLabel}</span>

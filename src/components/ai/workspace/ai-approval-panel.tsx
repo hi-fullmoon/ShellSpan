@@ -24,6 +24,8 @@ export interface AiApprovalPanelProps {
   readonly approval: AiPendingApproval;
   readonly decision: 'approve' | 'reject' | null;
   readonly error: string | null;
+  readonly argumentsLoading?: boolean;
+  readonly argumentsError?: string | null;
   readonly onApprove: () => void;
   readonly onReject: () => void;
   readonly onOpenDetails: () => void;
@@ -38,7 +40,12 @@ function targetLabel(approval: AiPendingApproval): string {
 function argumentString(approval: AiPendingApproval, key: string): string | null {
   if (!approval.arguments || typeof approval.arguments !== 'object' || Array.isArray(approval.arguments)) return null;
   const value = (approval.arguments as Record<string, unknown>)[key];
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function trimmedArgumentString(approval: AiPendingApproval, key: string): string | null {
+  const value = argumentString(approval, key)?.trim();
+  return value ? value : null;
 }
 
 function isMachinePrompt(value: string): boolean {
@@ -48,7 +55,7 @@ function isMachinePrompt(value: string): boolean {
 }
 
 function intentLabel(approval: AiPendingApproval): string | null {
-  const explanation = argumentString(approval, 'explanation');
+  const explanation = trimmedArgumentString(approval, 'explanation');
   if (explanation) return explanation;
   const prompt = approval.prompt?.trim();
   return prompt && !isMachinePrompt(prompt) ? prompt : null;
@@ -103,6 +110,8 @@ export function AiApprovalPanel({
   approval,
   decision,
   error,
+  argumentsLoading = false,
+  argumentsError = null,
   onApprove,
   onReject,
   onOpenDetails,
@@ -111,6 +120,43 @@ export function AiApprovalPanel({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const pending = decision !== null;
   const command = argumentString(approval, 'command');
+  const inputKind = argumentString(approval, 'inputKind');
+  const terminalInputText = approval.toolName === 'write_terminal_input'
+    ? argumentString(approval, 'text')
+    : null;
+  const terminalInput = terminalInputText !== null
+    ? JSON.stringify(terminalInputText)
+    : approval.toolName === 'write_terminal_input'
+      ? argumentString(approval, 'key')
+        ?? (inputKind === 'interrupt' ? inputKind : null)
+      : null;
+  const terminalMatchText = approval.toolName === 'wait_terminal'
+    ? argumentString(approval, 'text')
+    : null;
+  const terminalMatch = terminalMatchText === null ? null : JSON.stringify(terminalMatchText);
+  const argumentRecord = approval.arguments && typeof approval.arguments === 'object'
+    && !Array.isArray(approval.arguments)
+    ? approval.arguments as Record<string, unknown>
+    : null;
+  const volatileArgumentsRequired = argumentRecord?.contentPersisted === false && (
+    approval.toolName === 'write_terminal_input'
+      ? inputKind === 'text' || inputKind === 'paste'
+      : approval.toolName === 'wait_terminal' && argumentRecord.textProvided === true
+  );
+  const volatileArgumentsMissing = volatileArgumentsRequired
+    && (approval.toolName === 'write_terminal_input'
+      ? terminalInputText === null
+      : terminalMatchText === null);
+  const volatileArgumentsError = argumentsError
+    ?? (volatileArgumentsMissing && !argumentsLoading
+      ? t('ai.workspace.approval.previewUnavailable')
+      : null);
+  const exactValue = command ?? terminalInput ?? terminalMatch;
+  const exactValueLabel = command
+    ? 'ai.workspace.approval.command'
+    : terminalMatch
+      ? 'ai.workspace.approval.terminalMatch'
+      : 'ai.workspace.approval.terminalInput';
   const intent = intentLabel(approval);
   const titleKey = approvalTitleKey(approval, command);
   const descriptionKey = approvalDescriptionKey(approval, command);
@@ -154,13 +200,26 @@ export function AiApprovalPanel({
       </CardHeader>
 
       <CardContent className="flex min-w-0 flex-col gap-2 px-3 pb-2">
-        {command && (
+        {exactValue && (
           <div className="flex min-w-0 flex-col gap-1">
-            <p className="text-xs font-medium text-muted-foreground">{t('ai.workspace.approval.command')}</p>
+            <p className="text-xs font-medium text-muted-foreground">{t(exactValueLabel)}</p>
             <pre className="max-h-28 min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted px-2.5 py-2 font-mono text-xs leading-relaxed text-foreground">
-              <code>{command}</code>
+              <code>{exactValue}</code>
             </pre>
           </div>
+        )}
+
+        {volatileArgumentsMissing && argumentsLoading && !volatileArgumentsError && (
+          <Alert variant="subtle" size="sm" role="status">
+            <Spinner data-icon="inline-start" />
+            <AlertDescription>{t('ai.workspace.approval.previewLoading')}</AlertDescription>
+          </Alert>
+        )}
+
+        {volatileArgumentsError && (
+          <AiErrorNotice title={t('ai.workspace.approval.previewUnavailableTitle')}>
+            {volatileArgumentsError}
+          </AiErrorNotice>
         )}
 
         {intent && (
@@ -200,7 +259,7 @@ export function AiApprovalPanel({
           {decision === 'reject' && <Spinner data-icon="inline-start" />}
           {t('ai.workspace.approval.reject')}
         </Button>
-        <Button size="sm" variant="warning" disabled={pending} onClick={onApprove} aria-label={t('ai.workspace.approval.approveOnce')}>
+        <Button size="sm" variant="warning" disabled={pending || volatileArgumentsMissing} aria-busy={argumentsLoading || undefined} onClick={onApprove} aria-label={t('ai.workspace.approval.approveOnce')}>
           {decision === 'approve' && <Spinner data-icon="inline-start" />}
           {t('ai.workspace.approval.approveOnce')}
         </Button>

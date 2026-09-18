@@ -149,6 +149,152 @@ it('restores the latest conversation from the runtime ascending session list', a
   expect(result.current.view?.summary.id).toBe('newest');
 });
 
+it('does not auto-restore a subagent as a top-level conversation', async () => {
+  const parent = view('parent');
+  const childSummary = {
+    ...parent.summary,
+    id: 'child',
+    title: 'Delegated inspection',
+    updatedAt: '2026-09-06T00:00:00.000Z',
+    parentSessionId: parent.summary.id,
+    subagent: {
+      descriptorId: 'descriptor-child',
+      role: 'explorer',
+      continuable: false,
+      depth: 1,
+    },
+  };
+  const agent = adapter({
+    list: vi.fn(async () => ({ sessions: [parent.summary, childSummary] })),
+    open: vi.fn(async () => parent),
+  });
+
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+
+  await waitFor(() => expect(result.current.view?.summary.id).toBe(parent.summary.id));
+  expect(agent.open).toHaveBeenCalledWith(parent.summary.id);
+  expect(agent.open).not.toHaveBeenCalledWith(childSummary.id);
+});
+
+it('auto-restores an orphaned subagent when its parent no longer exists', async () => {
+  const child = view('orphan-child');
+  const orphan = {
+    ...child,
+    summary: {
+      ...child.summary,
+      parentSessionId: 'deleted-parent',
+      subagent: {
+        descriptorId: 'descriptor-orphan',
+        role: 'explorer',
+        continuable: false,
+        depth: 1,
+      },
+    },
+  };
+  const agent = adapter({
+    list: vi.fn(async () => ({ sessions: [orphan.summary] })),
+    open: vi.fn(async () => orphan),
+  });
+
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+
+  await waitFor(() => expect(result.current.view?.summary.id).toBe(orphan.summary.id));
+});
+
+it('allows human follow-up only for a continuable subagent', async () => {
+  const childBase = view('continuable-child');
+  const child: AiSessionView = {
+    ...childBase,
+    summary: {
+      ...childBase.summary,
+      parentSessionId: 'parent-session',
+      subagent: {
+        descriptorId: 'descriptor-child',
+        role: 'explorer',
+        continuable: true,
+        depth: 1,
+      },
+    },
+    snapshot: {
+      kind: 'agent',
+      value: {
+        ...childBase.snapshot.value,
+        header: {
+          ...childBase.snapshot.value.header,
+          parentSessionId: 'parent-session',
+          subagent: {
+            descriptorId: 'descriptor-child',
+            parentTaskId: 'parent-task',
+            role: 'explorer',
+            continuable: true,
+            depth: 1,
+            inheritance: { mode: 'blank' },
+            capabilityScope: { toolNames: ['read_file'], effects: ['readOnly'], targetIds: [] },
+            targetScope: [],
+            budget: {
+              maxStepsPerTurn: 8,
+              maxTurns: 4,
+              maxToolCalls: 16,
+              maxTokens: 8_192,
+              timeoutMs: 60_000,
+            },
+            provider: { routeId: providerA.id, modelId: providerA.model },
+          },
+        },
+      },
+    },
+  };
+  const agent = adapter({
+    list: vi.fn(async () => ({ sessions: [child.summary] })),
+    open: vi.fn(async () => child),
+    subscribe: vi.fn((_id, listener) => { listener(child); return () => undefined; }),
+  });
+  const continuation = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+
+  await waitFor(() => expect(continuation.result.current.view?.summary.id).toBe(child.summary.id));
+  expect(continuation.result.current.readOnlySession).toBe(false);
+  expect(continuation.result.current.composer.terminal).toBe(false);
+  act(() => {
+    continuation.result.current.setDraft('Continue the inspection.');
+    continuation.result.current.submit('primary');
+  });
+  await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(
+    child.summary.id,
+    expect.objectContaining({ content: 'Continue the inspection.' }),
+  ));
+  continuation.unmount();
+
+  const oneShot: AiSessionView = {
+    ...child,
+    summary: {
+      ...child.summary,
+      subagent: { ...child.summary.subagent!, continuable: false },
+    },
+    snapshot: {
+      kind: 'agent',
+      value: {
+        ...child.snapshot.value,
+        header: {
+          ...child.snapshot.value.header,
+          subagent: { ...child.snapshot.value.header.subagent!, continuable: false },
+        },
+      },
+    },
+  };
+  const oneShotAgent = adapter({
+    list: vi.fn(async () => ({ sessions: [oneShot.summary] })),
+    open: vi.fn(async () => oneShot),
+    subscribe: vi.fn((_id, listener) => { listener(oneShot); return () => undefined; }),
+  });
+  const record = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: oneShotAgent }));
+  await waitFor(() => expect(record.result.current.view?.summary.id).toBe(oneShot.summary.id));
+  expect(record.result.current.readOnlySession).toBe(true);
+  expect(record.result.current.composer.terminal).toBe(true);
+  expect(record.result.current.agentUnavailableReason).toBe(
+    'This is a one-shot subagent execution record and cannot accept follow-up messages.',
+  );
+});
+
 it('restores existing session drafts independently after panel unmounts on different terminals', async () => {
   const first = view('session-a');
   const second = { ...view('session-b'),

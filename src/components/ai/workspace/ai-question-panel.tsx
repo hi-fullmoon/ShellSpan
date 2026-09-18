@@ -394,18 +394,18 @@ export function AiQuestionHistory({
         <CollapsibleContent>
           <Card
             data-slot="ai-question-history"
-            className="ai-question-history-card mt-0.5 ml-[22px] gap-0 py-1.5"
+            className="ai-question-history-card mt-0.5 ml-[22px] h-fit shrink-0 gap-0 py-1.5"
             variant="outline"
           >
             <CardHeader className="sr-only">
               <CardTitle>{status}</CardTitle>
             </CardHeader>
-            <CardContent className="px-2.5">
-              <FieldGroup className="gap-2">
+            <CardContent className="flex-none px-2.5">
+              <FieldGroup className="ai-question-history-list grid auto-rows-max content-start gap-1">
                 {question.questions.map((q) => {
                   const answer = question.answers.find((a) => a.id === q.id);
                   return (
-                    <FieldSet className="gap-1" key={q.id}>
+                    <FieldSet className="ai-question-history-item flex-none gap-0" key={q.id}>
                       <FieldLegend className="mb-0">{q.question}</FieldLegend>
                       {answer && (
                         <FieldDescription>

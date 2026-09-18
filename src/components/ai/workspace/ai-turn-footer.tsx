@@ -99,12 +99,17 @@ export function AiTurnFooter({ node }: { readonly node: AiConversationNodeOf<'tu
     stats.cacheWriteTokens, stats.outputTokens, stats.reasoningTokens].some((value) => value !== null);
   const hasTiming = [node.durationMs, stats.modelDurationMs, stats.toolDurationMs,
     stats.averageTimeToFirstTokenMs, stats.tokensPerSecond].some((value) => value != null);
+  const stepBudgetReached = node.endReason.startsWith('stepBudgetReached:');
 
   return (
     <div className="ai-turn-tail min-w-0 max-w-full" data-status={node.status} data-stop-reason={node.stopReason ?? undefined}
       aria-label={t('ai.workspace.stats.label')}>
       {node.status === 'incomplete' && (
-        <Badge variant="secondary" className="mb-1">{t('ai.workspace.turnProcess.incomplete')}</Badge>
+        <Badge variant="secondary" className="mb-1">
+          {t(stepBudgetReached
+            ? 'ai.workspace.turnProcess.stepBudgetReached'
+            : 'ai.workspace.turnProcess.incomplete')}
+        </Badge>
       )}
       <MessageActions text={node.summaryText ?? ''} timestamp={node.timestamp} align="start"
         reveal="always"

@@ -96,4 +96,17 @@ describe('AI task strip', () => {
     rerender(<AiTaskStrip steps={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('keeps unfinished rows visible but stops their spinner after execution pauses', async () => {
+    const user = userEvent.setup();
+    render(<AiTaskStrip steps={referenceSteps} active={false} />);
+
+    expect(screen.getByRole('button')).toHaveAccessibleDescription('1 已暂停 · 4 待处理');
+    await user.click(screen.getByRole('button'));
+    const pausedRow = screen.getByText('检查服务状态').closest('li')!;
+    expect(pausedRow).toHaveAttribute('data-status', 'paused');
+    expect(within(pausedRow).getByText('已暂停:')).toBeInTheDocument();
+    expect(pausedRow.querySelector('[data-status="paused"]')).toBeInTheDocument();
+    expect(pausedRow.querySelector('[data-status="inProgress"]')).toBeNull();
+  });
 });
