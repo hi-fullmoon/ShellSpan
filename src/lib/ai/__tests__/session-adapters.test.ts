@@ -13,6 +13,7 @@ import {
   agentSessionSteerFixture,
   queuedSteerMessageFixture,
   agentSessionWaitingApprovalEventFixture,
+  sessionEvent,
 } from '@/test/fixtures/agent-session';
 import type {
   AgentSessionEvent,
@@ -73,6 +74,60 @@ it('projects model, permission, and execution surface changes over an older snap
   expect(view.activityNodes.some(node => node.kind === 'unknown')).toBe(false);
 });
 
+it('clears a stale snapshot plan when a newer turn starts', () => {
+  const persisted = snapshot();
+  const view = agentSessionView({
+    snapshot: {
+      ...persisted,
+      task: {
+        ...persisted.task,
+        plan: {
+          version: 1,
+          steps: [{ id: 'old', title: 'Old turn work', status: 'inProgress' }],
+        },
+      },
+    },
+    events: [
+      agentSessionEventFixture[0]!,
+      sessionEvent(1, { type: 'turn/start', turnId: 'turn-2' }),
+    ],
+    lastCommittedSeq: 1,
+    hasTerminalEvent: false,
+  });
+
+  expect(view.snapshot.value.task.plan).toBeUndefined();
+});
+
+it('keeps an unfinished current-turn plan available after the turn settles', () => {
+  const persisted = snapshot();
+  const view = agentSessionView({
+    snapshot: persisted,
+    events: [
+      agentSessionEventFixture[0]!,
+      sessionEvent(1, { type: 'turn/start', turnId: 'turn-1' }),
+      sessionEvent(2, {
+        type: 'task/plan',
+        turnId: 'turn-1',
+        data: {
+          version: 1,
+          steps: [{ id: 'old', title: 'Old turn work', status: 'inProgress' }],
+        },
+      }),
+      sessionEvent(3, {
+        type: 'turn/end',
+        turnId: 'turn-1',
+        data: { reason: 'incomplete' },
+      }),
+    ],
+    lastCommittedSeq: 3,
+    hasTerminalEvent: false,
+  });
+
+  expect(view.snapshot.value.task.plan?.steps).toEqual([
+    { id: 'old', title: 'Old turn work', status: 'inProgress' },
+  ]);
+});
+
 it.each(['direct', 'boundTerminal'] as const)(
   'loads the frozen %s value from a pre-surface-semantics persisted snapshot',
   (executionSurface) => {
@@ -101,6 +156,8 @@ function agentDependencies(
     followup: vi.fn(async () => snapshot()),
     steer: vi.fn(async () => snapshot()),
     stop: vi.fn(async () => snapshot()),
+    sendChildInput: vi.fn(async () => snapshot()),
+    cancelChild: vi.fn(async () => snapshot()),
     resume: vi.fn(async () => snapshot()),
     approve: vi.fn(async () => snapshot()),
     reject: vi.fn(async () => snapshot()),
@@ -144,6 +201,29 @@ function agentDependencies(
 }
 
 describe('AgentSessionAdapter', () => {
+  it('loads volatile approval arguments through the exact approval identity', async () => {
+    const dependencies = agentDependencies(agentSessionWaitingApprovalEventFixture);
+    const approvalArguments = vi.fn(async () => ({
+      inputKind: 'paste',
+      text: 'printf review-before-run',
+    }));
+    const adapter = createAgentSessionAdapter({ ...dependencies, approvalArguments });
+    const input = {
+      sessionId: 'session-fixture',
+      turnId: 'turn-01',
+      stepId: 'step-01',
+      requestId: 'request-1',
+      callId: 'call-health',
+      approvalId: 'approval-health',
+    };
+
+    await expect(adapter.loadApprovalArguments?.(input)).resolves.toEqual({
+      inputKind: 'paste',
+      text: 'printf review-before-run',
+    });
+    expect(approvalArguments).toHaveBeenCalledWith(input);
+  });
+
   it('lists reconnect history by login while retaining exact target filtering for auto-restore', async () => {
     const login = { kind: 'remote' as const, host: '175.178.66.45', port: 22, username: 'root' };
     const items = [
@@ -166,6 +246,190 @@ describe('AgentSessionAdapter', () => {
 
     expect((await adapter.list({ scopeKey, limit: 100 })).sessions.map((item) => item.id)).toEqual(['old', 'new']);
     expect((await adapter.list({ targetId: 'terminal-new', limit: 100 })).sessions.map((item) => item.id)).toEqual(['new']);
+  });
+
+  it('retains subagent lineage in list summaries and projects live child state', async () => {
+    const metadata = {
+      descriptorId: 'descriptor-child',
+      parentTaskId: 'task-fixture',
+      role: 'explorer' as const,
+      continuable: false,
+      depth: 1,
+      inheritance: { mode: 'blank' as const },
+      capabilityScope: { toolNames: ['read_file'], effects: ['readOnly' as const], targetIds: ['terminal-a'] },
+      targetScope: [],
+      budget: {
+        maxStepsPerTurn: 8,
+        maxTurns: 1,
+        maxToolCalls: 16,
+        maxTokens: 8_192,
+        timeoutMs: 60_000,
+      },
+      provider: { routeId: 'provider-test', modelId: 'model-test' },
+    };
+    const child = {
+      header: {
+        ...snapshot().header,
+        sessionId: 'session-child',
+        taskId: 'task-child',
+        goal: 'Inspect the existing page',
+        parentSessionId: 'session-fixture',
+        subagent: metadata,
+      },
+      status: 'running' as const,
+      ended: false,
+      archived: false,
+      eventCount: 2,
+      pendingTurns: 0,
+      pendingStepMessages: 0,
+    };
+    const events: AgentSessionEvent[] = [
+      agentSessionEventFixture[0]!,
+      sessionEvent(1, {
+        type: 'subagent/descriptor',
+        data: {
+          descriptorId: metadata.descriptorId,
+          childSessionId: child.header.sessionId,
+          parentSessionId: 'session-fixture',
+          parentTaskId: metadata.parentTaskId,
+          role: metadata.role,
+          continuable: metadata.continuable,
+          depth: metadata.depth,
+          inheritance: metadata.inheritance,
+          capabilityScope: metadata.capabilityScope,
+          targetScope: metadata.targetScope,
+          budget: metadata.budget,
+        },
+      }),
+    ];
+    const dependencies = agentDependencies(events);
+    const adapter = createAgentSessionAdapter({
+      ...dependencies,
+      list: vi.fn(async () => ({ sessions: [child], recoveryNotices: [] })),
+    });
+
+    expect((await adapter.list({ limit: 100 })).sessions[0]).toMatchObject({
+      id: 'session-child',
+      parentSessionId: 'session-fixture',
+      subagent: {
+        descriptorId: metadata.descriptorId,
+        role: metadata.role,
+        continuable: metadata.continuable,
+        depth: metadata.depth,
+      },
+    });
+    expect((await adapter.open('session-fixture')).subagents).toEqual([
+      expect.objectContaining({
+        sessionId: 'session-child',
+        parentSessionId: 'session-fixture',
+        descriptorId: 'descriptor-child',
+        role: 'explorer',
+        status: 'running',
+      }),
+    ]);
+    adapter.dispose();
+  });
+
+  it('submits and cancels a continuable child through its parent-owned commands', async () => {
+    const childSnapshot: AgentSessionSnapshot = {
+      ...snapshot(),
+      header: {
+        ...snapshot().header,
+        parentSessionId: 'parent-session',
+        subagent: {
+          descriptorId: 'descriptor-child',
+          parentTaskId: 'parent-task',
+          role: 'explorer',
+          continuable: true,
+          depth: 1,
+          inheritance: { mode: 'blank' },
+          capabilityScope: { toolNames: ['read_file'], effects: ['readOnly'], targetIds: [] },
+          targetScope: [],
+          budget: {
+            maxStepsPerTurn: 8,
+            maxTurns: 4,
+            maxToolCalls: 16,
+            maxTokens: 8_192,
+            timeoutMs: 60_000,
+          },
+          provider: { routeId: 'provider-test', modelId: 'model-test' },
+        },
+      },
+      status: 'idle',
+    };
+    let events: AgentSessionEvent[] = [sessionEvent(0, {
+      type: 'session/created',
+      data: {
+        taskId: childSnapshot.header.taskId,
+        goal: childSnapshot.header.goal,
+        parentSessionId: 'parent-session',
+        executionSurface: 'direct',
+        subagent: childSnapshot.header.subagent,
+      },
+    })];
+    const state = () => ({
+      snapshot: childSnapshot,
+      events,
+      lastCommittedSeq: events[events.length - 1]?.seq,
+      hasTerminalEvent: false,
+    });
+    const sendChildInput = vi.fn(async (request) => {
+      events = [...events, sessionEvent(1, {
+        type: 'agent/inbox/spliced',
+        data: {
+          operation: 'enqueued',
+          lane: 'nextTurn',
+          messages: [{
+            messageId: request.clientSubmissionId!,
+            clientSubmissionId: request.clientSubmissionId,
+            content: request.content,
+            source: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
+          }],
+        },
+      })];
+      return childSnapshot;
+    });
+    const base = agentDependencies(events);
+    const dependencies: AgentSessionAdapterDependencies = {
+      ...base,
+      sendChildInput,
+      client: () => ({
+        state,
+        onChange: () => () => undefined,
+        connect: async () => state(),
+        reconnect: async () => state(),
+        disconnect: vi.fn(),
+      }),
+    };
+    const adapter = createAgentSessionAdapter(dependencies);
+
+    await expect(adapter.submit(childSnapshot.header.sessionId, {
+      content: 'Continue the inspection.',
+      mode: 'nextTurn',
+      clientOperationId: 'child-followup',
+      provider,
+    })).resolves.toEqual({
+      sessionId: childSnapshot.header.sessionId,
+      clientOperationId: 'child-followup',
+      mode: 'nextTurn',
+    });
+    expect(sendChildInput).toHaveBeenCalledWith({
+      parentSessionId: 'parent-session',
+      childSessionId: childSnapshot.header.sessionId,
+      content: 'Continue the inspection.',
+      clientSubmissionId: 'child-followup',
+    });
+    expect((await adapter.open(childSnapshot.header.sessionId)).nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'userMessage', clientSubmissionId: 'child-followup' }),
+    ]));
+
+    await adapter.stop(childSnapshot.header.sessionId);
+    expect(dependencies.cancelChild).toHaveBeenCalledWith({
+      parentSessionId: 'parent-session',
+      childSessionId: childSnapshot.header.sessionId,
+    });
+    expect(dependencies.stop).not.toHaveBeenCalled();
+    adapter.dispose();
   });
 
   it('refreshes the existing Session after changing its execution surface', async () => {

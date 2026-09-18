@@ -64,6 +64,72 @@ describe('Agent committed Activity projection', () => {
     expect(activity.nodes).toEqual(projectAgentActivityNodes(agentSessionEventFixture));
   });
 
+  it('keeps a finished turn plan visible until the next turn starts', () => {
+    const events: AgentSessionEvent[] = [
+      sessionEvent(0, { type: 'turn/start', turnId: 'turn-1' }),
+      sessionEvent(1, {
+        type: 'task/plan',
+        turnId: 'turn-1',
+        data: {
+          version: 1,
+          steps: [{ id: 'inspect', title: 'Inspect target', status: 'completed' }],
+        },
+      }),
+      sessionEvent(2, {
+        type: 'turn/end',
+        turnId: 'turn-1',
+        data: { reason: 'completed' },
+      }),
+    ];
+
+    expect(projectAgentActivity(events).plan?.version).toBe(1);
+    events.push(sessionEvent(3, { type: 'turn/start', turnId: 'turn-2' }));
+    expect(projectAgentActivity(events).plan).toBeNull();
+  });
+
+  it('keeps an unfinished plan when its turn ends and treats a step budget as idle', () => {
+    const activity = projectAgentActivity([
+      sessionEvent(0, { type: 'turn/start', turnId: 'turn-1' }),
+      sessionEvent(1, {
+        type: 'task/plan',
+        turnId: 'turn-1',
+        data: {
+          version: 1,
+          steps: [{ id: 'inspect', title: 'Inspect target', status: 'inProgress' }],
+        },
+      }),
+      sessionEvent(2, {
+        type: 'turn/end',
+        turnId: 'turn-1',
+        data: { reason: 'stepBudgetReached: maximum 128 Steps per Turn' },
+      }),
+    ]);
+
+    expect(activity.plan?.steps).toEqual([
+      { id: 'inspect', title: 'Inspect target', status: 'inProgress' },
+    ]);
+    expect(activity.turns[0]).toMatchObject({ status: 'idle' });
+  });
+
+  it.each([
+    'noProgress: repeated tool calls',
+    'modelStreamTotalTimeout: provider stalled',
+    'networkRecoveryTimeout: provider stayed offline',
+    'taskTokenBudgetExceeded: budget exhausted',
+    'taskActiveTimeExceeded: budget exhausted',
+    'preStepRejected: policy denied the step',
+    'terminalTargetUnavailable: terminal changed',
+    'runtimeRestarted: an in-flight Model Step was not replayed',
+  ])('projects %s as failed activity', (reason) => {
+    const activity = projectAgentActivity([
+      sessionEvent(0, { type: 'turn/start', turnId: 'turn-failed' }),
+      sessionEvent(1, { type: 'turn/end', turnId: 'turn-failed', data: { reason } }),
+    ]);
+    expect(activity.turns[0]).toMatchObject({ status: 'failed', endReason: reason });
+    expect(activity.nodes.find((node) => node.kind === 'turn'))
+      .toMatchObject({ status: 'failed', detail: reason });
+  });
+
   it('keeps request header, context, usage and lifecycle in stable non-drifting categories', () => {
     const nodes = projectAgentActivityNodes(agentSessionAllEventFamiliesFixture);
     const request = nodes.find((node) => node.key === 'activity:request:request-1');
