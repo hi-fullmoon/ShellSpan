@@ -49,7 +49,10 @@ pub(crate) fn assemble_model_input(
             "Permission policy",
             permission_prompt(header.permission_mode),
         ),
-        ("Workspace policy", workspace_prompt(header.target.as_ref())),
+        (
+            "Workspace policy",
+            workspace_prompt(header.target.as_ref(), &tools),
+        ),
         ("Structured tools", tools_prompt(&tools)),
         ("Runtime capabilities", runtime_capabilities_prompt(header)),
     ];
@@ -82,13 +85,16 @@ pub(crate) fn assemble_model_input(
 
 fn permission_prompt(mode: Option<AgentSessionPermissionMode>) -> String {
     match mode.unwrap_or(AgentSessionPermissionMode::RequestApproval) {
-        AgentSessionPermissionMode::RequestApproval => "The Session is in request-approval mode. You may inspect through read-only tools, but ShellSpan must authorize state-changing, destructive, sensitive, or external effects before execution.".into(),
-        AgentSessionPermissionMode::ScopedAutopilot => "The Session is in scoped-autopilot mode. Use only effects and targets in the frozen capability scope. ShellSpan still enforces native policy and may require approval.".into(),
+        AgentSessionPermissionMode::RequestApproval => "The Session is in request-approval mode. ShellSpan requires user authorization before every native tool call, including read-only inspection.".into(),
+        AgentSessionPermissionMode::ScopedAutopilot => "The Session is in scoped-autopilot mode. Only ordinary read-only effects may run automatically; sensitive reads, state changes, destructive operations, and external side effects require approval. Use only effects and targets in the frozen capability scope.".into(),
         AgentSessionPermissionMode::Operator => "The Session is in operator mode. Use only the frozen target and structured tool scope; ShellSpan remains the authority for native validation and execution.".into(),
     }
 }
 
-fn workspace_prompt(target: Option<&AgentSessionTarget>) -> String {
+fn workspace_prompt(
+    target: Option<&AgentSessionTarget>,
+    tools: &[AgentRequestToolSchema],
+) -> String {
     match target {
         Some(target) => {
             let mut prompt = format!(
@@ -96,8 +102,13 @@ fn workspace_prompt(target: Option<&AgentSessionTarget>) -> String {
                 json_string(&target.kind),
                 json_string(&target.target_id),
             );
-            if matches!(target.kind.as_str(), "local" | "remote") && target_root(target).is_none() {
-                prompt.push_str(" No filesystem root is frozen for this Session, so native file tools are unavailable. Use run_terminal_command for directory inspection and filesystem work when it is supplied; determine the current directory through that terminal instead of guessing a path.");
+            let has_tool = |name: &str| tools.iter().any(|tool| tool.name == name);
+            if matches!(target.kind.as_str(), "local" | "remote") {
+                if target_root(target).is_none() {
+                    prompt.push_str(" No filesystem root is frozen for this Session, so native file tools are unavailable. Use run_terminal_command for directory inspection and filesystem work when it is supplied; determine the current directory through that terminal instead of guessing a path. Terminal commands are limited to 8192 UTF-8 bytes, so split large writes across bounded calls; delegating to a child Agent does not remove that limit.");
+                } else if has_tool("write_file") && has_tool("apply_patch") {
+                    prompt.push_str(" Native file tools are available. Use write_file for complete UTF-8 files up to 32 KiB; build larger files with read_file plus apply_patch in bounded increments. Never embed file contents in run_terminal_command.");
+                }
             }
             prompt
         }
@@ -120,7 +131,13 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
         "run_terminal_command" => {
             target.is_some_and(|target| matches!(target.kind.as_str(), "local" | "remote"))
         }
-        "read_file" | "list_directory" | "search_text" | "apply_patch" => {
+        "write_process_input" | "wait_process" | "kill_process" => {
+            target.is_some_and(|target| matches!(target.kind.as_str(), "local" | "remote"))
+        }
+        "probe_http" => target.is_some_and(|target| {
+            target.kind == "local" || (target.kind == "remote" && target.profile_id.is_some())
+        }),
+        "read_file" | "list_directory" | "search_text" | "write_file" | "apply_patch" => {
             target.and_then(target_root).is_some()
         }
         "transfer_file" => target.is_some_and(|target| {
@@ -361,10 +378,12 @@ mod tests {
         };
         let local = available(&header);
         assert!(local.contains(&"run_terminal_command".into()));
+        assert!(local.contains(&"probe_http".into()));
         for name in [
             "read_file",
             "list_directory",
             "search_text",
+            "write_file",
             "apply_patch",
             "transfer_file",
         ] {
@@ -373,7 +392,13 @@ mod tests {
 
         header.target.as_mut().unwrap().cwd = Some("/workspace".into());
         let local = available(&header);
-        for name in ["read_file", "list_directory", "search_text", "apply_patch"] {
+        for name in [
+            "read_file",
+            "list_directory",
+            "search_text",
+            "write_file",
+            "apply_patch",
+        ] {
             assert!(local.contains(&name.into()));
         }
         assert!(!local.contains(&"transfer_file".into()));
@@ -386,7 +411,10 @@ mod tests {
         header.target.as_mut().unwrap().root_path = Some("/remote/workspace".into());
         let remote = available(&header);
         assert!(remote.contains(&"list_directory".into()));
+        assert!(!remote.contains(&"probe_http".into()));
         assert!(!remote.contains(&"transfer_file".into()));
+        header.target.as_mut().unwrap().profile_id = Some("profile-remote".into());
+        assert!(available(&header).contains(&"probe_http".into()));
         header.target.as_mut().unwrap().local_root = Some("/workspace".into());
         assert!(available(&header).contains(&"transfer_file".into()));
 
@@ -394,9 +422,14 @@ mod tests {
         let without_target = available(&header);
         for name in [
             "run_terminal_command",
+            "write_process_input",
+            "wait_process",
+            "kill_process",
+            "probe_http",
             "read_file",
             "list_directory",
             "search_text",
+            "write_file",
             "apply_patch",
             "transfer_file",
         ] {
@@ -404,6 +437,37 @@ mod tests {
         }
         assert!(without_target.contains(&"update_plan".into()));
         assert!(without_target.contains(&crate::agent_runtime::user_questions::TOOL_NAME.into()));
+    }
+
+    #[test]
+    fn workspace_prompt_routes_large_file_writes_away_from_terminal_commands() {
+        let rooted = assemble_model_input(&header(), crate::agent_runtime::default_model_tools());
+        assert!(rooted
+            .system_prompt
+            .contains("Native file tools are available"));
+        assert!(rooted
+            .system_prompt
+            .contains("Use write_file for complete UTF-8 files"));
+        assert!(rooted
+            .system_prompt
+            .contains("read_file plus apply_patch in bounded increments"));
+
+        let read_only = assemble_model_input(&header(), tools());
+        assert!(!read_only
+            .system_prompt
+            .contains("Native file tools are available"));
+        assert!(!read_only.system_prompt.contains("Use write_file"));
+
+        let mut unrooted = header();
+        unrooted.target.as_mut().unwrap().cwd = None;
+        let unrooted = assemble_model_input(&unrooted, crate::agent_runtime::default_model_tools());
+        assert!(unrooted
+            .system_prompt
+            .contains("limited to 8192 UTF-8 bytes"));
+        assert!(unrooted.system_prompt.contains("split large writes"));
+        assert!(unrooted
+            .system_prompt
+            .contains("child Agent does not remove that limit"));
     }
 
     #[test]

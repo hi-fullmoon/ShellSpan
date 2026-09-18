@@ -148,6 +148,37 @@
     }
 
     #[test]
+    fn binary_user_input_preserves_bytes_and_respects_agent_ownership() {
+        let manager = disabled_broker_manager();
+        let (sessions, receiver) = sessions();
+        let bytes = vec![0x1b, 0x5b, 0x80, 0xff];
+
+        manager
+            .write_binary(
+                &sessions,
+                "terminal-1",
+                bytes.clone(),
+                TerminalInputSource::User,
+            )
+            .unwrap();
+        let SessionCommand::WriteBytes(received) = receiver.recv().unwrap() else {
+            panic!("expected binary terminal input");
+        };
+        assert_eq!(received, bytes);
+
+        acquire(&manager);
+        assert!(manager
+            .write_binary(
+                &sessions,
+                "terminal-1",
+                vec![0x1b, 0x4d],
+                TerminalInputSource::User,
+            )
+            .unwrap_err()
+            .starts_with("TERMINAL_INPUT_BLOCKED_BY_AGENT:"));
+    }
+
+    #[test]
     fn user_input_stays_blocked_between_commands_until_turn_end() {
         let manager = disabled_broker_manager();
         let (sessions, receiver) = sessions();
@@ -449,7 +480,9 @@
             .try_iter()
             .filter_map(|command| match command {
                 SessionCommand::Write(data) => Some(data),
-                SessionCommand::Resize { .. } | SessionCommand::Close => None,
+                SessionCommand::WriteBytes(_)
+                | SessionCommand::Resize { .. }
+                | SessionCommand::Close => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(writes, vec!["user", "agent", "\u{3}"]);

@@ -108,6 +108,133 @@
     }
 
     #[test]
+    fn terminal_alias_reports_actionable_utf8_byte_limit_errors() {
+        let target = target_native(&local_target()).unwrap();
+        let error = normalize_arguments(
+            &request(
+                "run_terminal_command",
+                json!({
+                    "command": "界".repeat(2_731),
+                    "explanation": "write generated content"
+                }),
+            ),
+            &target,
+            None,
+            false,
+        )
+        .unwrap_err();
+        assert!(error.contains("8193 UTF-8 bytes exceeds the 8192-byte maximum"));
+        assert!(error.contains("suggestedTool=write_file"));
+        assert!(error.contains("use write_file"));
+        assert!(error.contains("child Agents have the same limit"));
+
+        let mut unrooted_request = request(
+            "run_terminal_command",
+            json!({
+                "command": "x".repeat(8_193),
+                "explanation": "write generated content"
+            }),
+        );
+        unrooted_request.target = remote_target();
+        let unrooted_target = target_native(&unrooted_request.target).unwrap();
+        let error =
+            normalize_arguments(&unrooted_request, &unrooted_target, None, false).unwrap_err();
+        assert!(error.contains("suggestedAction=split_bounded_commands"));
+        assert!(!error.contains("suggestedTool=write_file"));
+
+        let error = normalize_arguments(
+            &request(
+                "run_terminal_command",
+                json!({
+                    "command": "pwd",
+                    "explanation": "界".repeat(683)
+                }),
+            ),
+            &target,
+            None,
+            false,
+        )
+        .unwrap_err();
+        assert!(error.contains("2049 UTF-8 bytes exceeds the 2048-byte maximum"));
+
+        let error = normalize_arguments(
+            &request(
+                "run_terminal_command",
+                json!({
+                    "command": "node server.js &\ncurl http://127.0.0.1:3000/api",
+                    "explanation": "start and verify"
+                }),
+            ),
+            &target,
+            None,
+            false,
+        )
+        .unwrap_err();
+        assert!(error.contains("multiline commands are not allowed"));
+        assert!(error.contains("split multi-stage work across tool calls"));
+        assert!(error.contains("use probe_http"));
+    }
+
+    #[test]
+    fn background_commands_and_process_tools_use_native_process_handles() {
+        let owner = target_native(&local_target()).unwrap();
+        let mut background = request(
+            "run_terminal_command",
+            json!({
+                "command": "node server.js",
+                "explanation": "start the test server",
+                "background": true,
+                "timeoutMs": 120_000
+            }),
+        );
+        background.execution_surface = AgentExecutionSurface::BoundTerminal;
+        assert!(terminal_command_requires_direct_lifecycle(&background).unwrap());
+        let (name, arguments) = normalize_arguments(&background, &owner, None, true).unwrap();
+        assert_eq!(name, "exec_command");
+        assert_eq!(arguments["background"], true);
+        assert_eq!(arguments["timeoutMs"], 120_000);
+
+        let handle = "proc-0123456789abcdef0123456789abcdef";
+        for (name, arguments, native_name, native_arguments) in [
+            (
+                "write_process_input",
+                json!({ "processHandle": handle, "input": "stop\n", "close": true }),
+                "write_stdin",
+                json!({ "input": "stop\n", "close": true }),
+            ),
+            (
+                "wait_process",
+                json!({ "processHandle": handle, "timeoutMs": 1_000 }),
+                "wait_process",
+                json!({ "timeoutMs": 1_000 }),
+            ),
+            (
+                "kill_process",
+                json!({ "processHandle": handle, "signal": "terminate" }),
+                "kill_process",
+                json!({ "signal": "terminate" }),
+            ),
+        ] {
+            let model_request = request(name, arguments);
+            let target = process_target_for_model_call(&model_request.model_call, &owner)
+                .unwrap()
+                .unwrap();
+            assert!(matches!(
+                &target,
+                AgentToolTargetNative::Process {
+                    owner_target_id,
+                    process_handle,
+                    ..
+                } if owner_target_id == "target-local" && process_handle == handle
+            ));
+            let (normalized_name, normalized_arguments) =
+                normalize_arguments(&model_request, &target, None, false).unwrap();
+            assert_eq!(normalized_name, native_name);
+            assert_eq!(normalized_arguments, native_arguments);
+        }
+    }
+
+    #[test]
     fn remote_visible_normalization_is_additive_and_direct_policy_still_wins() {
         let target = target_native(&remote_target()).unwrap();
         let mut visible = request(

@@ -1,5 +1,17 @@
     use super::*;
 
+    #[test]
+    fn root_and_delegated_step_budgets_have_distinct_settlements() {
+        assert_eq!(
+            AgentDriverConfig::default().max_steps_per_turn,
+            Some(DEFAULT_MAX_STEPS_PER_TURN)
+        );
+        assert!(
+            step_budget_reason(DEFAULT_MAX_STEPS_PER_TURN, true).starts_with("stepBudgetReached:")
+        );
+        assert!(step_budget_reason(4, false).starts_with("stepLimitExceeded:"));
+    }
+
     fn event(
         time_unix_ms: u64,
         payload: AgentSessionEventPayload,

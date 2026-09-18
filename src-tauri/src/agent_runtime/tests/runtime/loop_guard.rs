@@ -156,6 +156,41 @@ async fn alternating_tool_cycle_is_stopped_before_a_seventh_request() {
 }
 
 #[tokio::test]
+async fn primary_session_can_finish_after_more_than_sixty_four_productive_steps() {
+    let mut scripts = (0..65)
+        .map(|index| {
+            let mut call = repeated_read_call(index);
+            call.arguments = json!({ "path": format!("./entry-{index}") });
+            tool_response(vec![call])
+        })
+        .collect::<Vec<_>>();
+    scripts.push(reply("finished after the long tool run", &[]));
+    let model = FakeAdapter::new(scripts);
+    let native = RecordingNativeRuntime::new(false);
+    let (_root, runtime) =
+        configured_with_native(model.clone(), AgentDriverConfig::default(), native.clone());
+    let id = "productive-long-turn";
+    create(&runtime, id);
+    runtime
+        .followup(id, "initial".into(), "inspect many distinct entries".into())
+        .unwrap();
+    runtime.start(id, provider(), None).unwrap();
+    runtime.await_idle(id).await.unwrap();
+
+    assert_eq!(model.request_count(), 66);
+    assert_eq!(native.executions.load(Ordering::Acquire), 65);
+    assert_eq!(
+        runtime.session(id).unwrap().status,
+        AgentSessionStatus::Idle
+    );
+    assert!(!all_events(&runtime, id).iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
+            if reason.starts_with("stepLimitExceeded:")
+    )));
+}
+
+#[tokio::test]
 async fn queued_followup_survives_the_default_style_step_boundary() {
     let mut first = response("");
     first.finish_reason = ModelFinishReason::ToolCalls;
@@ -193,8 +228,9 @@ async fn queued_followup_survives_the_default_style_step_boundary() {
     );
     assert!(all_events(&runtime, id).iter().any(|event| matches!(
         &event.payload,
-        AgentSessionEventPayload::TurnEnd { reason } if reason.starts_with("stepLimitExceeded:")
+        AgentSessionEventPayload::TurnEnd { reason } if reason.starts_with("stepBudgetReached:")
     )));
+    assert!(!runtime.session(id).unwrap().ended);
 }
 
 #[tokio::test]
@@ -213,10 +249,11 @@ async fn unfinished_plan_gets_one_completion_check_then_stays_incomplete() {
     runtime.start(id, provider(), None).unwrap();
     runtime.await_idle(id).await.unwrap();
     assert_eq!(model.request_count(), 3);
-    assert_eq!(
-        runtime.session(id).unwrap().status,
-        AgentSessionStatus::Idle
-    );
+    let snapshot = runtime.session(id).unwrap();
+    assert_eq!(snapshot.status, AgentSessionStatus::Idle);
+    assert!(snapshot.task.plan.is_some_and(|plan| {
+        plan.steps[0].status == super::super::super::AgentPlanStepStatus::InProgress
+    }));
     assert!(all_events(&runtime, id).iter().any(|event| matches!(
         &event.payload,
         AgentSessionEventPayload::TurnEnd { reason } if reason == "incomplete"
@@ -248,6 +285,15 @@ async fn completion_check_allows_the_model_to_finish_the_plan() {
         runtime.session(id).unwrap().status,
         AgentSessionStatus::Idle
     );
+    assert!(runtime
+        .session(id)
+        .unwrap()
+        .task
+        .plan
+        .is_some_and(|plan| plan
+            .steps
+            .iter()
+            .all(|step| { step.status == super::super::super::AgentPlanStepStatus::Completed })));
     assert!(all_events(&runtime, id).iter().any(|event| matches!(
         &event.payload,
         AgentSessionEventPayload::TurnEnd { reason } if reason == "completed"

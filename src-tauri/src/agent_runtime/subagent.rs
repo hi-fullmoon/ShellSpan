@@ -44,6 +44,8 @@ pub(crate) struct AgentChildInputRequest {
     pub(crate) parent_session_id: String,
     pub(crate) child_session_id: String,
     pub(crate) content: String,
+    #[serde(default)]
+    pub(crate) client_submission_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -259,6 +261,7 @@ impl SubAgentManager {
             &request.parent_session_id,
             &request.child_session_id,
             request.content,
+            request.client_submission_id,
         )
         .await?;
         self.sessions.snapshot(&request.child_session_id)
@@ -935,6 +938,7 @@ impl SubAgentManager {
         parent_session_id: &str,
         child_session_id: &str,
         content: String,
+        client_submission_id: Option<String>,
     ) -> Result<(), String> {
         let child = self.ensure_owned_child(parent_session_id, child_session_id)?;
         if !child
@@ -954,10 +958,16 @@ impl SubAgentManager {
             AgentInboxLane::NextTurn,
             AgentInboxMessage {
                 images: Vec::new(),
-                message_id: format!("child-input-{}", Uuid::new_v4().simple()),
-                client_submission_id: None,
+                message_id: client_submission_id
+                    .clone()
+                    .unwrap_or_else(|| format!("child-input-{}", Uuid::new_v4().simple())),
+                client_submission_id: client_submission_id.clone(),
                 content,
-                source: AgentMessageSource::session_reference(parent_session_id.into()),
+                source: if client_submission_id.is_some() {
+                    AgentMessageSource::user()
+                } else {
+                    AgentMessageSource::session_reference(parent_session_id.into())
+                },
                 terminal_context: None,
             },
         )?;
@@ -1418,6 +1428,7 @@ impl OrchestrationToolRuntime for SubAgentManager {
                     &request.parent_session_id,
                     &arguments.child_session_id,
                     arguments.content,
+                    None,
                 )
                 .await?;
                 self.settle_spawn(&request, &arguments.child_session_id, true, cancellation)
@@ -1586,9 +1597,14 @@ fn delegated_scope(
         AgentSubagentRole::Operator => (
             &[
                 "run_terminal_command",
+                "write_process_input",
+                "wait_process",
+                "kill_process",
+                "probe_http",
                 "read_file",
                 "list_directory",
                 "search_text",
+                "write_file",
                 "apply_patch",
                 "transfer_file",
                 "inspect_child_agent",

@@ -687,6 +687,16 @@ impl AgentRuntime {
             .write_user_terminal_input(sessions, session_id, data)
     }
 
+    pub(crate) fn write_user_terminal_binary_input(
+        &self,
+        sessions: &crate::models::SessionManager,
+        session_id: &str,
+        bytes: Vec<u8>,
+    ) -> Result<(), String> {
+        self.native_engine
+            .write_user_terminal_binary_input(sessions, session_id, bytes)
+    }
+
     pub(crate) fn acknowledge_terminal_lease_ready(
         &self,
         session_id: &str,
@@ -1378,6 +1388,13 @@ impl AgentRuntime {
         self.decide_tool(input, AgentToolDecision::Reject).await
     }
 
+    pub(crate) fn pending_approval_arguments(
+        &self,
+        input: &AgentToolDecisionInput,
+    ) -> Result<Option<serde_json::Value>, String> {
+        self.tools.pending_approval_arguments(input)
+    }
+
     async fn decide_tool(
         &self,
         input: AgentToolDecisionInput,
@@ -1530,6 +1547,9 @@ impl AgentRuntime {
     fn reconcile_artifacts(&self) -> Result<(), String> {
         let mut referenced = HashSet::new();
         for session_id in self.sessions.session_ids()? {
+            let snapshot = self.sessions.snapshot(&session_id)?;
+            let writable = !snapshot.archived && !snapshot.ended && !snapshot.status.is_terminal();
+            let active_replay_artifacts = self.sessions.active_replay_artifact_ids(&session_id)?;
             let events = self.sessions.all_events(&session_id)?;
             let mut existing_evidence = events
                 .iter()
@@ -1541,29 +1561,39 @@ impl AgentRuntime {
                 })
                 .collect::<HashSet<_>>();
             for event in events {
-                let super::AgentSessionEventPayload::ContextArtifact {
-                    artifact_id,
-                    kind,
-                    title,
-                    size_bytes: Some(size_bytes),
-                    media_type: Some(media_type),
-                    sha256: Some(sha256),
-                    sensitivity: Some(sensitivity),
-                } = event.payload
-                else {
-                    continue;
+                let metadata = match &event.payload {
+                    super::AgentSessionEventPayload::ContextArtifact {
+                        artifact_id,
+                        kind,
+                        title,
+                        size_bytes: Some(size_bytes),
+                        media_type: Some(media_type),
+                        sha256: Some(sha256),
+                        sensitivity: Some(sensitivity),
+                    } => super::AgentArtifactMetadata {
+                        artifact_id: artifact_id.clone(),
+                        kind: kind.clone(),
+                        title: title.clone(),
+                        media_type: media_type.clone(),
+                        sha256: sha256.clone(),
+                        size_bytes: *size_bytes,
+                        sensitivity: *sensitivity,
+                        created_at_unix_ms: event.time_unix_ms,
+                    },
+                    super::AgentSessionEventPayload::AssistantMessage {
+                        replay:
+                            Some(super::AgentStoredReplay::Artifact(super::AgentReplayArtifact {
+                                artifact,
+                                ..
+                            })),
+                        ..
+                    } if active_replay_artifacts.contains(&artifact.artifact_id) => {
+                        artifact.clone()
+                    }
+                    _ => continue,
                 };
+                let artifact_id = metadata.artifact_id.clone();
                 referenced.insert((session_id.clone(), artifact_id.clone()));
-                let metadata = super::AgentArtifactMetadata {
-                    artifact_id: artifact_id.clone(),
-                    kind,
-                    title,
-                    media_type,
-                    sha256,
-                    size_bytes,
-                    sensitivity,
-                    created_at_unix_ms: event.time_unix_ms,
-                };
                 let integrity = self.artifacts.verify(&session_id, &metadata)?;
                 if integrity == super::AgentArtifactIntegrity::Verified {
                     continue;
@@ -1583,6 +1613,12 @@ impl AgentRuntime {
                     }
                     super::AgentArtifactIntegrity::Verified => unreachable!(),
                 };
+                if !writable {
+                    log::warn!(
+                        "Agent Session {session_id} has unavailable retained artifact {artifact_id}; historical viewing remains available"
+                    );
+                    continue;
+                }
                 self.sessions.append_batch(
                     &session_id,
                     vec![

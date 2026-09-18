@@ -394,9 +394,19 @@ struct AgentSessionStoreInner {
     append_failure: Option<fn(&AgentSessionEventPayload) -> bool>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct AgentSessionStore {
     inner: Arc<Mutex<AgentSessionStoreInner>>,
+    artifacts: super::AgentArtifactStore,
+}
+
+impl Default for AgentSessionStore {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(AgentSessionStoreInner::default())),
+            artifacts: super::AgentArtifactStore::default(),
+        }
+    }
 }
 
 impl AgentSessionStore {
@@ -406,6 +416,7 @@ impl AgentSessionStore {
     }
 
     pub(crate) fn configure(&self, app_data_root: PathBuf) -> Result<(), String> {
+        self.artifacts.configure(&app_data_root)?;
         let runtime_root = app_data_root.join("agent-runtime");
         // Conversation logs use only the current event namespace.
         let root = runtime_root.join("sessions-v5");
@@ -818,13 +829,22 @@ impl AgentSessionStore {
             .sessions
             .get(parent_session_id)
             .ok_or_else(|| "subagent parent Session was not found".to_string())?;
-        let prefix = parent
+        let prefix_end = parent
             .events
             .iter()
-            .take_while(|event| event.seq <= boundary)
-            .cloned()
-            .collect::<Vec<_>>();
-        Ok(Some(derive_surface(&prefix)?))
+            .position(|event| event.seq == boundary)
+            .ok_or_else(|| "subagent inheritance boundary was not found".to_string())?
+            .saturating_add(1);
+        let parent_session_id = parent.header.session_id.clone();
+        let (mut surface, resolutions) = plan_model_surface(&parent.events[..prefix_end])?;
+        drop(inner);
+        resolve_surface_replays(
+            &parent_session_id,
+            &self.artifacts,
+            &mut surface,
+            resolutions,
+        )?;
+        Ok(Some(surface))
     }
 
     pub(crate) fn child_session_ids(&self, parent_session_id: &str) -> Result<Vec<String>, String> {
@@ -1828,6 +1848,44 @@ impl AgentSessionStore {
             .snapshot()
     }
 
+    pub(crate) fn model_surface(&self, session_id: &str) -> Result<AgentSurfaceSnapshot, String> {
+        validate_identifier(session_id, "sessionId")?;
+        let inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| "Agent session was not found".to_string())?;
+        let (mut surface, resolutions) = plan_model_surface(&record.events)?;
+        drop(inner);
+        resolve_surface_replays(session_id, &self.artifacts, &mut surface, resolutions)?;
+        Ok(surface)
+    }
+
+    pub(crate) fn active_replay_artifact_ids(
+        &self,
+        session_id: &str,
+    ) -> Result<HashSet<String>, String> {
+        validate_identifier(session_id, "sessionId")?;
+        let inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| "Agent session was not found".to_string())?;
+        Ok(derive_surface(&record.events)?
+            .messages
+            .into_iter()
+            .filter_map(|message| match message {
+                AgentSurfaceMessage::Assistant {
+                    replay: Some(replay),
+                    ..
+                } => replay
+                    .artifact_metadata()
+                    .map(|metadata| metadata.artifact_id.clone()),
+                _ => None,
+            })
+            .collect())
+    }
+
     pub(crate) fn session_ids(&self) -> Result<Vec<String>, String> {
         let inner = self.lock_configured()?;
         let mut ids = inner.sessions.keys().cloned().collect::<Vec<_>>();
@@ -2519,51 +2577,13 @@ fn validate_event_transition(
                 }
                 return Ok(());
             }
-            let start = record.events.iter().rev().find_map(|previous| {
-                if previous.step_id != event.step_id {
-                    return None;
-                }
-                match &previous.payload {
-                    AgentSessionEventPayload::RequestStart {
-                        request_id,
-                        header_request_id,
-                        ..
-                    } => Some((request_id, header_request_id)),
-                    _ => None,
-                }
-            });
-            let Some((request_id, header_request_id)) = start else {
-                return Err("assistant message requires a committed request/start".into());
-            };
-            let header = record
-                .events
-                .iter()
-                .rev()
-                .find_map(|previous| match &previous.payload {
-                    AgentSessionEventPayload::RequestHeader {
-                        request_id,
-                        snapshot,
-                        snapshot_digest,
-                        ..
-                    } if request_id == header_request_id => {
-                        Some((snapshot, snapshot_digest.as_str()))
-                    }
-                    _ => None,
-                });
-            let Some((snapshot, snapshot_digest)) = header else {
-                return Err(
-                    "assistant replay requires its committed request/header snapshot".into(),
-                );
-            };
-            if snapshot.digest() != snapshot_digest {
-                return Err("assistant replay request snapshot digest mismatch".into());
-            }
             match replay {
-                Some(envelope @ crate::llm::replay::ReplayEnvelopeV5::Prepared { .. }) => {
-                    crate::llm::replay::validate_agent_envelope(
-                        envelope, content, snapshot, request_id,
-                    )
-                    .map_err(crate::llm::replay::replay_error_string)
+                Some(super::AgentStoredReplay::Inline(
+                    envelope @ crate::llm::replay::ReplayEnvelopeV5::Prepared { .. },
+                )) => validate_assistant_replay(&record.events, event, content, envelope),
+                Some(super::AgentStoredReplay::Artifact(reference)) => {
+                    validate_assistant_replay_context(&record.events, event)?;
+                    super::validate_replay_metadata(&reference.artifact)
                 }
                 None => {
                     // Interactive input/search text is intentionally absent from both
@@ -2698,6 +2718,58 @@ fn validate_event_transition(
         }
         _ => Ok(()),
     }
+}
+
+fn validate_assistant_replay(
+    previous_events: &[AgentSessionEvent],
+    event: &AgentSessionEvent,
+    content: &[AgentAssistantContentBlock],
+    envelope: &crate::llm::replay::ReplayEnvelopeV5,
+) -> Result<(), String> {
+    let (snapshot, request_id) = validate_assistant_replay_context(previous_events, event)?;
+    crate::llm::replay::validate_agent_envelope(envelope, content, snapshot, request_id)
+        .map_err(crate::llm::replay::replay_error_string)
+}
+
+fn validate_assistant_replay_context<'a>(
+    previous_events: &'a [AgentSessionEvent],
+    event: &AgentSessionEvent,
+) -> Result<(&'a crate::llm::runtime::RequestSnapshot, &'a str), String> {
+    let start = previous_events.iter().rev().find_map(|previous| {
+        if previous.step_id != event.step_id {
+            return None;
+        }
+        match &previous.payload {
+            AgentSessionEventPayload::RequestStart {
+                request_id,
+                header_request_id,
+                ..
+            } => Some((request_id, header_request_id)),
+            _ => None,
+        }
+    });
+    let Some((request_id, header_request_id)) = start else {
+        return Err("assistant message requires a committed request/start".into());
+    };
+    let header = previous_events
+        .iter()
+        .rev()
+        .find_map(|previous| match &previous.payload {
+            AgentSessionEventPayload::RequestHeader {
+                request_id,
+                snapshot,
+                snapshot_digest,
+                ..
+            } if request_id == header_request_id => Some((snapshot, snapshot_digest.as_str())),
+            _ => None,
+        });
+    let Some((snapshot, snapshot_digest)) = header else {
+        return Err("assistant replay requires its committed request/header snapshot".into());
+    };
+    if snapshot.digest() != snapshot_digest {
+        return Err("assistant replay request snapshot digest mismatch".into());
+    }
+    Ok((snapshot, request_id))
 }
 
 fn validate_tool_execution_transition(
@@ -3239,11 +3311,7 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
                             false,
                             MAX_AGENT_MESSAGE_BYTES,
                         )?;
-                        if matches!(
-                            replay,
-                            Some(crate::llm::replay::ReplayEnvelopeV5::Prepared { .. })
-                        ) && provider_item.is_some()
-                        {
+                        if replay.is_some() && provider_item.is_some() {
                             return Err(
                                 "prepared replay stores native reasoning only in its envelope"
                                     .into(),
@@ -3774,6 +3842,145 @@ fn same_terminal_login(old: &AgentSessionTarget, current: &AgentSessionTarget) -
     }
 }
 
+struct ReplayResolution {
+    message_id: String,
+    metadata: super::AgentArtifactMetadata,
+    request_id: String,
+    snapshot: crate::llm::runtime::RequestSnapshot,
+}
+
+fn plan_model_surface(
+    events: &[AgentSessionEvent],
+) -> Result<(AgentSurfaceSnapshot, Vec<ReplayResolution>), String> {
+    let surface = derive_surface(events)?;
+    let active_replays = surface
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            AgentSurfaceMessage::Assistant {
+                message_id,
+                replay: Some(replay),
+                ..
+            } if replay.artifact_metadata().is_some() => Some(message_id.clone()),
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+    if active_replays.is_empty() {
+        return Ok((surface, Vec::new()));
+    }
+
+    let mut headers = HashMap::new();
+    let mut starts = HashMap::new();
+    let mut resolutions = Vec::with_capacity(active_replays.len());
+    for event in events {
+        match &event.payload {
+            AgentSessionEventPayload::RequestHeader {
+                request_id,
+                snapshot,
+                snapshot_digest,
+                ..
+            } => {
+                headers.insert(request_id.as_str(), (snapshot, snapshot_digest.as_str()));
+            }
+            AgentSessionEventPayload::RequestStart {
+                request_id,
+                header_request_id,
+                ..
+            } => {
+                let (Some(turn_id), Some(step_id)) =
+                    (event.turn_id.as_deref(), event.step_id.as_deref())
+                else {
+                    return Err("request/start lost its Turn/Step scope".into());
+                };
+                starts.insert(
+                    (turn_id, step_id),
+                    (request_id.as_str(), header_request_id.as_str()),
+                );
+            }
+            AgentSessionEventPayload::AssistantMessage {
+                message_id,
+                replay: Some(replay),
+                ..
+            } if active_replays.contains(message_id) => {
+                let metadata = replay
+                    .artifact_metadata()
+                    .cloned()
+                    .ok_or_else(|| "active replay claim check lost its artifact".to_string())?;
+                let (Some(turn_id), Some(step_id)) =
+                    (event.turn_id.as_deref(), event.step_id.as_deref())
+                else {
+                    return Err("assistant replay lost its Turn/Step scope".into());
+                };
+                let (request_id, header_request_id) =
+                    starts.get(&(turn_id, step_id)).copied().ok_or_else(|| {
+                        "assistant replay requires a committed request/start".to_string()
+                    })?;
+                let (snapshot, snapshot_digest) =
+                    headers.get(header_request_id).copied().ok_or_else(|| {
+                        "assistant replay requires its committed request/header snapshot"
+                            .to_string()
+                    })?;
+                if snapshot.digest() != snapshot_digest {
+                    return Err("assistant replay request snapshot digest mismatch".into());
+                }
+                resolutions.push(ReplayResolution {
+                    message_id: message_id.clone(),
+                    metadata,
+                    request_id: request_id.to_string(),
+                    snapshot: snapshot.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+    if resolutions.len() != active_replays.len() {
+        return Err("Model Surface replay claim checks were incomplete".into());
+    }
+    Ok((surface, resolutions))
+}
+
+fn resolve_surface_replays(
+    session_id: &str,
+    artifacts: &super::AgentArtifactStore,
+    surface: &mut AgentSurfaceSnapshot,
+    resolutions: Vec<ReplayResolution>,
+) -> Result<(), String> {
+    let mut resolutions = resolutions
+        .into_iter()
+        .map(|resolution| (resolution.message_id.clone(), resolution))
+        .collect::<HashMap<_, _>>();
+    for message in &mut surface.messages {
+        let AgentSurfaceMessage::Assistant {
+            message_id,
+            content,
+            replay: Some(stored),
+            ..
+        } = message
+        else {
+            continue;
+        };
+        if stored.artifact_metadata().is_none() {
+            continue;
+        }
+        let resolution = resolutions
+            .remove(message_id)
+            .ok_or_else(|| "Agent replay artifact lost its assistant message".to_string())?;
+        let envelope = artifacts.retrieve_replay(session_id, &resolution.metadata)?;
+        crate::llm::replay::validate_agent_envelope(
+            &envelope,
+            content,
+            &resolution.snapshot,
+            &resolution.request_id,
+        )
+        .map_err(crate::llm::replay::replay_error_string)?;
+        *stored = Box::new(super::AgentStoredReplay::inline(envelope));
+    }
+    if !resolutions.is_empty() {
+        return Err("Agent replay artifacts were not present in the Model Surface".into());
+    }
+    Ok(())
+}
+
 fn utf8_tail(value: &str, max_bytes: usize) -> &str {
     if value.len() <= max_bytes {
         return value;
@@ -4177,6 +4384,25 @@ fn encoded_events(events: &[AgentSessionEvent]) -> Result<Vec<u8>, String> {
         batch.push(b'\n');
     }
     Ok(batch)
+}
+
+pub(crate) fn event_payload_fits_storage_boundary(
+    session_id: &str,
+    turn_id: Option<&str>,
+    step_id: Option<&str>,
+    payload: &AgentSessionEventPayload,
+) -> Result<bool, String> {
+    let event = AgentSessionEvent::new(
+        session_id.to_string(),
+        MAX_JS_SAFE_INTEGER,
+        MAX_JS_SAFE_INTEGER,
+        turn_id.map(str::to_string),
+        step_id.map(str::to_string),
+        payload.clone(),
+    );
+    serde_json::to_vec(&event)
+        .map(|encoded| encoded.len() <= MAX_SESSION_EVENT_BYTES)
+        .map_err(|error| format!("failed to measure Agent session event: {error}"))
 }
 
 fn write_new_log(

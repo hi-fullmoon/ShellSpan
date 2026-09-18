@@ -645,7 +645,7 @@ async fn skill_sensitive_complete_body_is_rejected_and_budget_blocks_oversized_f
             "password=super-sensitive-value".to_string(),
             32768,
         ),
-        ("budget", "long instruction ".repeat(4000), 8192),
+        ("budget", "long instruction ".repeat(4000), 16384),
     ] {
         let model = FakeAdapter::new(vec![reply("done", &[])]);
         let (_storage, runtime) = configured(model.clone());
@@ -676,7 +676,7 @@ async fn skill_sensitive_complete_body_is_rejected_and_budget_blocks_oversized_f
                 AgentSessionEventPayload::SkillStepPrepared { prepared } => Some(prepared),
                 _ => None,
             })
-            .unwrap();
+            .unwrap_or_else(|| panic!("{session} did not commit SkillStepPrepared"));
         if session == "redaction" {
             assert!(prepared.outcomes[0].loaded.is_none());
             assert!(prepared.outcomes[0]
