@@ -159,7 +159,7 @@ describe('AI workspace Phase 5 workflows', () => {
     expect(screen.getByText('Restart safely')).toBeVisible();
   });
 
-  it('shows approval above the editable Composer and exposes recoverable decisions', async () => {
+  it('overlays approval while preserving the Composer draft and exposes recoverable decisions', async () => {
     const user = userEvent.setup();
     const approve = vi.fn();
     const reject = vi.fn();
@@ -171,7 +171,7 @@ describe('AI workspace Phase 5 workflows', () => {
       sessionId: 'agent-phase5',
       draft: 'preserved draft',
     });
-    const { rerender } = render(
+    const { container, rerender } = render(
       <AiWorkspaceRoot
         view={agentView(pendingApproval)}
         scope="terminal"
@@ -182,8 +182,18 @@ describe('AI workspace Phase 5 workflows', () => {
       />,
     );
 
-    expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
+    const composerCard = container.querySelector<HTMLElement>('[data-composer-card]');
+    const composerEditor = container.querySelector<HTMLElement>('[data-composer-editor]');
+    expect(composerCard).toHaveClass('invisible');
+    expect(composerCard).toHaveAttribute('aria-hidden', 'true');
+    expect(composerEditor).toHaveAttribute('contenteditable', 'true');
+    expect(composerEditor).toHaveTextContent('preserved draft');
     const approval = screen.getByRole('group', { name: /Allow this command/ });
+    const overlay = approval.closest<HTMLElement>('[data-slot="ai-approval-overlay"]');
+    const composerAnchor = container.querySelector<HTMLElement>('.ai-composer-input-anchor');
+    expect(overlay).toHaveClass('absolute', 'inset-x-0', 'bottom-0');
+    expect(composerAnchor).toContainElement(overlay);
+    expect(composerAnchor).toContainElement(composerCard);
     expect(approval).toBeVisible();
     expect(screen.getByText(/will run on Production/)).toBeVisible();
     expect(screen.getByText('systemctl restart nginx')).toBeVisible();
@@ -205,7 +215,9 @@ describe('AI workspace Phase 5 workflows', () => {
         composerState={createAiComposerState({ ...composer, phase: 'running', runtimeStatus: 'running', waitingApproval: false })}
       />,
     );
+    expect(screen.getByRole('textbox')).toBeVisible();
     expect(screen.getByRole('textbox').textContent).toBe('preserved draft');
+    expect(container.querySelector('[data-composer-card]')).not.toHaveClass('invisible');
   });
 
   it('shows volatile terminal input in the approval without persisting it in the view', () => {

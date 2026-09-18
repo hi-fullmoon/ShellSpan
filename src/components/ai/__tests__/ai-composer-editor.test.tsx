@@ -9,6 +9,18 @@ import { createAiComposerState } from '@/lib/ai/composer-machine';
 beforeEach(async () => { await initI18n('en-US'); Element.prototype.scrollIntoView = vi.fn(); });
 afterEach(cleanup);
 
+describe('composer layout', () => {
+  it('gives the hero editor compact but visible top padding', () => {
+    const { container, rerender } = render(<AiComposerSeat phase="hero" status="idle" />);
+    const card = container.querySelector('[data-composer-card]');
+    expect(card).toHaveClass('pt-1.5');
+    expect(card).not.toHaveClass('pt-2.5');
+
+    rerender(<AiComposerSeat phase="active" status="idle" />);
+    expect(container.querySelector('[data-composer-card]')).toHaveClass('pt-2.5');
+  });
+});
+
 describe('rich composer commands', () => {
   it.each(['session', 'workspace'] as const)('isolates undo and redo when the %s changes', async kind => {
     const user = userEvent.setup();
