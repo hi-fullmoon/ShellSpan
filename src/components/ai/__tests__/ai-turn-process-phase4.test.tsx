@@ -98,6 +98,13 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(screen.getByRole('button', { name: 'System prompt' })).toHaveAttribute('aria-expanded', 'false');
     const process = screen.getByRole('button', { name: 'Process complete' });
     expect(process).toHaveAttribute('aria-expanded', 'false');
+    expect(process).toHaveClass('h-auto', 'min-h-6', 'px-0', 'py-1');
+    const processSeparator = container.querySelector<HTMLElement>(
+      '[data-slot="separator"].ai-turn-process-separator',
+    );
+    expect(processSeparator).toBeVisible();
+    expect(processSeparator?.parentElement).toHaveClass('ai-turn-process');
+    expect(processSeparator?.closest('[data-slot="collapsible-content"]')).toBeNull();
     expect(screen.getByText('Hello! How can I help?')).toBeVisible();
 
     await user.click(process);
@@ -111,9 +118,13 @@ describe('AI Phase 4 Turn Process renderer', () => {
       'var(--ds-transition-duration-slow), var(--ds-transition-duration)',
     );
     const processBody = container.querySelector<HTMLElement>('.ai-turn-process-body');
-    expect(processBody).toHaveClass('ml-[7px]', 'pl-[15px]');
+    expect(processBody).toHaveClass('w-full');
+    expect(processBody).not.toHaveClass('ml-[7px]');
+    expect(processBody).not.toHaveClass('ml-[22px]');
+    expect(processBody).not.toHaveClass('pl-[15px]');
+    expect(getComputedStyle(processBody!).borderLeftStyle).toBe('none');
     expect(getComputedStyle(process.querySelector('.ai-disclosure-leading')!).translate).toBe('0 1px');
-    expect(container.querySelector('.ai-turn-process-separator')).toBeNull();
+    expect(processSeparator).not.toHaveClass('ml-[22px]');
     const reasoning = screen.getByRole('button', {
       name: 'Reasoning Read the frozen context. Answer directly.',
     });

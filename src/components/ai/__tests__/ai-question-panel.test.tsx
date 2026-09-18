@@ -147,6 +147,38 @@ describe('Stage 6A question form', () => {
     expect(screen.getByRole('textbox')).toHaveValue('Keep this');
   });
 
+  it('keeps header actions compact while giving pagination arrows a readable size', () => {
+    render(
+      <AiQuestionPanel
+        question={{
+          ...question,
+          questions: [
+            question.questions[0],
+            {
+              id: 'second',
+              question: 'Which follow-up?',
+              multi_select: false,
+              options: [{ label: 'C' }],
+            },
+          ],
+        }}
+        onAnswer={vi.fn()}
+      />,
+    );
+
+    for (const name of ['Collapse question', 'Close']) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toHaveClass('size-8', '[&_svg]:size-3.5');
+      expect(button).not.toHaveClass('h-9', 'w-9');
+    }
+
+    for (const name of ['Previous question', 'Next question']) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toHaveClass('size-8', '[&_svg]:size-3.5');
+      expect(button).not.toHaveClass('size-6', 'h-9', 'w-9');
+    }
+  });
+
   it('keeps drafts separate across sessions, rejects blank/multibyte overflow and has collapsible read-only history', async () => {
     const user = userEvent.setup();
     const first = render(

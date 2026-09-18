@@ -22,10 +22,6 @@
   cursor: default;
 }
 
-.ai-turn-process-body {
-  border-left: 0.5px solid var(--dsw-alias-border-l2);
-}
-
 .ai-disclosure-leading {
   color: var(--dsw-alias-label-tertiary);
 }
