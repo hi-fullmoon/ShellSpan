@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+#[cfg(test)]
 pub(crate) const DEPLOYMENT_EXECUTOR_CONTRACT_VERSION: &str = "deployment-node-executor";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -130,6 +131,9 @@ pub(crate) enum NodeReconcileResult {
     NotStarted,
     SafeToRetry,
     Succeeded(NodeExecutionResult),
+    // Part of the executor contract even though the current built-in executor
+    // only reports retryable, successful, or unknown reconciliation outcomes.
+    #[allow(dead_code)]
     FailedDefinitely(NodeFailure),
     StateUnknown(String),
 }

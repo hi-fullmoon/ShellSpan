@@ -5,7 +5,7 @@
 
 use super::node_executor::NodeFailure;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -682,49 +682,6 @@ pub(crate) fn validate_zip_archive(path: &Path) -> Result<(), NodeFailure> {
         }
     }
     Ok(())
-}
-
-pub(crate) fn directory_inventory(
-    root: &Path,
-) -> Result<BTreeMap<String, FileTreeEntry>, NodeFailure> {
-    let mut sources = Vec::new();
-    let mut seen = BTreeSet::new();
-    let mut total = 0;
-    let cancellation = CancellationToken::new();
-    let mut children = fs::read_dir(root)
-        .map_err(|error| failure("artifactIo", error.to_string()))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| failure("artifactIo", error.to_string()))?;
-    children.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
-    for child in children {
-        scan_member(
-            &child.path(),
-            Path::new(&child.file_name()),
-            &mut sources,
-            &mut seen,
-            &mut total,
-            &cancellation,
-        )?;
-    }
-    let mut inventory = BTreeMap::new();
-    for source in sources {
-        let digest = if source.kind == FileTreeEntryKind::File {
-            Some(digest_file(&source.source)?.0)
-        } else {
-            None
-        };
-        inventory.insert(
-            source.archived_path.clone(),
-            FileTreeEntry {
-                path: source.archived_path,
-                kind: source.kind,
-                size: source.size,
-                mode: source.mode,
-                digest,
-            },
-        );
-    }
-    Ok(inventory)
 }
 
 #[cfg(test)]

@@ -77,6 +77,9 @@ pub(crate) struct CompensationSpec {
 pub(crate) enum ConfigFieldKind {
     String,
     Integer,
+    // Kept in the catalog wire vocabulary for descriptors that expose a
+    // boolean field; the current MVP descriptors do not need one yet.
+    #[allow(dead_code)]
     Boolean,
     Select,
     StringList,
@@ -147,6 +150,7 @@ pub(crate) struct DeploymentNodeTypeSpec {
 }
 
 impl DeploymentNodeTypeSpec {
+    #[cfg(test)]
     pub(crate) fn qualified_name(&self) -> String {
         format!("{}@{}", self.type_name, self.type_version)
     }
@@ -888,6 +892,7 @@ impl DeploymentNodeRegistry {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn nodes(&self) -> &[DeploymentNodeTypeSpec] {
         &self.nodes
     }
@@ -1361,9 +1366,11 @@ struct SourceSnapshotConfig {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PackageScriptConfig {
-    package_manager: PackageManager,
+    #[serde(rename = "packageManager")]
+    _package_manager: PackageManager,
     working_directory: String,
-    install_mode: InstallMode,
+    #[serde(rename = "installMode")]
+    _install_mode: InstallMode,
     script_name: String,
     output_directory: String,
     #[serde(default)]
@@ -1391,7 +1398,8 @@ enum InstallMode {
 struct DockerBuildxConfig {
     context: String,
     dockerfile: String,
-    platform: DockerPlatform,
+    #[serde(rename = "platform")]
+    _platform: DockerPlatform,
     image_repository: String,
 }
 
@@ -1450,7 +1458,8 @@ enum RequiredTargetCapability {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ReleaseCandidateConfig {
     target_id: String,
-    strategy: ReleaseStrategy,
+    #[serde(rename = "strategy")]
+    _strategy: ReleaseStrategy,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1473,7 +1482,8 @@ struct DeployComposeConfig {
     project_name: String,
     #[serde(default)]
     services: Vec<String>,
-    pull_policy: ComposePullPolicy,
+    #[serde(rename = "pullPolicy")]
+    _pull_policy: ComposePullPolicy,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1494,7 +1504,8 @@ struct StaticSwitchConfig {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct VerifyHttpConfig {
     target_id: String,
-    scheme: HttpScheme,
+    #[serde(rename = "scheme")]
+    _scheme: HttpScheme,
     port: u16,
     path: String,
     expected_statuses: Vec<u16>,
@@ -1510,7 +1521,8 @@ enum HttpScheme {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FinalizeNotifyConfig {
-    channel: NotifyChannel,
+    #[serde(rename = "channel")]
+    _channel: NotifyChannel,
     events: Vec<NotifyEvent>,
 }
 

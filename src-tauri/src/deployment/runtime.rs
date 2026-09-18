@@ -38,7 +38,7 @@ pub(crate) struct DeploymentWorkflowRuntime {
 
 fn parse_gate(value: Option<&str>) -> (bool, &'static str) {
     match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
-        None => (false, "defaultDisabled"),
+        None => (true, "defaultEnabled"),
         Some("1" | "true" | "on" | "enabled") => (true, "environment"),
         Some("0" | "false" | "off" | "disabled") => (false, "environment"),
         Some(_) => (false, "invalidEnvironment"),
@@ -47,17 +47,30 @@ fn parse_gate(value: Option<&str>) -> (bool, &'static str) {
 
 impl DeploymentWorkflowRuntime {
     pub(crate) fn initialize(shellspan_directory: &Path) -> Result<Self, String> {
-        let configured = std::env::var(DEPLOYMENT_WORKFLOW_GATE_ENV).ok();
-        Self::for_value(shellspan_directory, configured.as_deref())
+        let (admissions_enabled, source) = match std::env::var(DEPLOYMENT_WORKFLOW_GATE_ENV) {
+            Ok(configured) => parse_gate(Some(&configured)),
+            Err(std::env::VarError::NotPresent) => parse_gate(None),
+            Err(std::env::VarError::NotUnicode(_)) => (false, "invalidEnvironment"),
+        };
+        Self::for_gate_decision(shellspan_directory, admissions_enabled, source)
     }
 
+    #[cfg(test)]
     fn for_value(shellspan_directory: &Path, value: Option<&str>) -> Result<Self, String> {
         let (admissions_enabled, source) = parse_gate(value);
+        Self::for_gate_decision(shellspan_directory, admissions_enabled, source)
+    }
+
+    fn for_gate_decision(
+        shellspan_directory: &Path,
+        admissions_enabled: bool,
+        source: &'static str,
+    ) -> Result<Self, String> {
         Ok(Self {
             capabilities: DeploymentWorkflowCapabilities {
                 schema_version: 1,
                 admissions_enabled,
-                default_enabled: false,
+                default_enabled: true,
                 flag_name: DEPLOYMENT_WORKFLOW_GATE_ENV,
                 source,
                 read_only_available: true,
@@ -152,14 +165,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gate_is_default_off_and_invalid_values_fail_closed() {
+    fn gate_is_default_on_and_invalid_values_fail_closed() {
         let directory = tempfile::tempdir().unwrap();
         let missing = DeploymentWorkflowRuntime::for_value(directory.path(), None).unwrap();
-        assert!(!missing.capabilities().admissions_enabled);
-        assert_eq!(missing.capabilities().source, "defaultDisabled");
+        assert!(missing.capabilities().admissions_enabled);
+        assert!(missing.capabilities().default_enabled);
+        assert_eq!(missing.capabilities().source, "defaultEnabled");
         assert!(missing
             .ensure(DeploymentWorkflowAdmission::Mutating)
-            .is_err());
+            .is_ok());
 
         let invalid =
             DeploymentWorkflowRuntime::for_value(directory.path(), Some("sometimes")).unwrap();
@@ -178,6 +192,8 @@ mod tests {
 
         let disabled =
             DeploymentWorkflowRuntime::for_value(directory.path(), Some("false")).unwrap();
+        assert!(disabled.capabilities().default_enabled);
+        assert_eq!(disabled.capabilities().source, "environment");
         assert!(disabled
             .ensure(DeploymentWorkflowAdmission::ReadOnly)
             .is_ok());

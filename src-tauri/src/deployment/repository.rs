@@ -18,6 +18,7 @@ use crate::db::{current_timestamp_ms, Database};
 use rusqlite::{params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(test)]
 use std::collections::BTreeSet;
 
 const MAX_WORKFLOW_NAME_BYTES: usize = 200;
@@ -136,6 +137,7 @@ pub(crate) struct DeploymentRunEventPage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct DeploymentRunEventWrite {
     pub node_id: Option<String>,
     pub attempt: Option<u32>,
@@ -388,6 +390,9 @@ pub(crate) enum DeploymentRunNodeStatus {
     AwaitingApproval,
     Succeeded,
     Skipped,
+    // Reserved by the persisted status contract for schedulers that externalize
+    // retry backoff instead of waiting inside the active execution task.
+    #[allow(dead_code)]
     RetryWaiting,
     CancelRequested,
     Canceled,
@@ -472,9 +477,15 @@ pub(crate) struct DeploymentRunOutputWrite {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeploymentArtifactRefKind {
     Run,
+    // These ownership kinds are part of the retention schema. The current MVP
+    // creates only run and release references through typed write paths.
+    #[allow(dead_code)]
     Node,
+    #[allow(dead_code)]
     ReleaseCurrent,
+    #[allow(dead_code)]
     ReleasePrevious,
+    #[allow(dead_code)]
     Audit,
 }
 
@@ -2168,6 +2179,7 @@ impl Database {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn append_deployment_run_event(
         &self,
         run_id: &str,
@@ -2571,6 +2583,7 @@ impl Database {
             .find(|release| release.release_id == release_id))
     }
 
+    #[cfg(test)]
     pub(crate) fn protected_deployment_artifact_manifests(
         &self,
         now: i64,

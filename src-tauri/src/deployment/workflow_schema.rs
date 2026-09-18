@@ -482,6 +482,7 @@ pub(crate) enum NodeAttemptStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(dead_code)]
 pub(crate) struct NodeAttempt {
     pub schema_version: u32,
     pub run_id: String,
@@ -499,6 +500,7 @@ pub(crate) struct NodeAttempt {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub(crate) enum CompensationStatus {
     Pending,
     Running,
@@ -509,6 +511,7 @@ pub(crate) enum CompensationStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(dead_code)]
 pub(crate) struct CompensationRecord {
     pub schema_version: u32,
     pub run_id: String,
