@@ -456,9 +456,9 @@ export interface DeploymentCompensationRecord {
 export interface DeploymentWorkflowCapabilities {
   schemaVersion: 1;
   admissionsEnabled: boolean;
-  defaultEnabled: false;
+  defaultEnabled: true;
   flagName: 'SHELLSPAN_DEPLOYMENT_WORKFLOW';
-  source: 'defaultDisabled' | 'environment' | 'invalidEnvironment';
+  source: 'defaultEnabled' | 'environment' | 'invalidEnvironment';
   readOnlyAvailable: true;
   cancelRecoveryAuditAvailable: true;
   coordinatorAvailable: boolean;

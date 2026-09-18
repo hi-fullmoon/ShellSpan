@@ -19,6 +19,8 @@ export type DeploymentWorkflowTemplateKind =
   | 'prebuiltFiles'
   | 'blank';
 
+export const DEPLOYMENT_FLOW_CONTENT_PADDING = 36;
+
 export interface DeploymentEditorIssue {
   id: string;
   code: DeploymentWorkflowValidationCode | 'LOCAL_MISSING_INPUT' | 'LOCAL_UNKNOWN_NODE';
@@ -345,7 +347,10 @@ export function buildDeploymentTemplate(
     schemaVersion: 1,
     nodes: Object.fromEntries(nodes.map((item, index) => [
       item.id,
-      { x: (index % 4) * 280, y: Math.floor(index / 4) * 190 },
+      {
+        x: DEPLOYMENT_FLOW_CONTENT_PADDING + (index % 4) * 280,
+        y: DEPLOYMENT_FLOW_CONTENT_PADDING + Math.floor(index / 4) * 190,
+      },
     ])),
     groups: [],
   };

@@ -250,6 +250,8 @@ describe('WorkflowCanvas', () => {
       'deployment.editor.flow.canvasLabel:Website',
     );
     expect(screen.getAllByTestId('deployment-flow-node')).toHaveLength(2);
+    expect(screen.getAllByTestId('deployment-flow-node')[0]).toHaveClass('w-60');
+    expect(flowMock.props?.nodes?.[0]).toMatchObject({ initialWidth: 240, initialHeight: 160 });
     expect(screen.getByText('Build site')).toBeInTheDocument();
     expect(screen.getByText('deployment.editor.flow.issueCount:1')).toBeInTheDocument();
     expect(screen.getByText('deployment.editor.effect.localBuild')).toBeInTheDocument();

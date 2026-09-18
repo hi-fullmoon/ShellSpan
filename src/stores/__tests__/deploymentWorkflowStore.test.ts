@@ -69,8 +69,33 @@ describe('deploymentWorkflowStore', () => {
       expect(draft.definition.schemaVersion).toBe(3);
       expect(draft.definition).not.toHaveProperty('edges');
       if (kind === 'blank') expect(draft.definition.nodes).toHaveLength(0);
-      else expect(projectDeploymentEdges(draft.definition).length).toBeGreaterThan(0);
+      else {
+        expect(projectDeploymentEdges(draft.definition).length).toBeGreaterThan(0);
+        expect(Object.values(draft.layout.nodes).every(
+          (position) => position.x >= 36 && position.y >= 36,
+        )).toBe(true);
+      }
     }
+  });
+
+  it('preserves a matching profile filter and clears a mismatched one for a new template', () => {
+    useDeploymentWorkflowStore.getState().setProfileFilter('profile-1');
+    useDeploymentWorkflowStore.getState().startTemplate(
+      'blank',
+      'Matching target',
+      'profile-1',
+      '/srv/example',
+    );
+    expect(useDeploymentWorkflowStore.getState().profileFilterId).toBe('profile-1');
+
+    useDeploymentWorkflowStore.getState().setProfileFilter('profile-2');
+    useDeploymentWorkflowStore.getState().startTemplate(
+      'blank',
+      'Different target',
+      'profile-1',
+      '/srv/example',
+    );
+    expect(useDeploymentWorkflowStore.getState().profileFilterId).toBeNull();
   });
 
   it('creates a valid template through the high-level workflow IPC with its layout', async () => {
@@ -103,6 +128,10 @@ describe('deploymentWorkflowStore', () => {
     useDeploymentWorkflowStore.getState().addNode('source.snapshot', 1);
     useDeploymentWorkflowStore.getState().addNode('source.snapshot', 1);
     const [first, second] = useDeploymentWorkflowStore.getState().draft!.definition.nodes;
+    expect(useDeploymentWorkflowStore.getState().draft?.layout.nodes[first.id]).toEqual({
+      x: 36,
+      y: 36,
+    });
     useDeploymentWorkflowStore.getState().connectInput(second.id, 'source', { fromNodeId: first.id, fromPort: 'source' });
     expect(useDeploymentWorkflowStore.getState().draft!.definition.nodes[1].inputs.source).toEqual({
       fromNodeId: first.id,

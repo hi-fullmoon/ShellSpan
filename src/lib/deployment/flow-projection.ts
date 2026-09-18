@@ -11,6 +11,7 @@ import type {
   DeploymentWorkflowLayout,
   DeploymentWorkflowNode,
 } from '@/lib/deployment/types';
+import { DEPLOYMENT_FLOW_CONTENT_PADDING } from '@/lib/deployment/editor';
 
 const EDGE_ID_PREFIX = 'deployment-edge:';
 const FALLBACK_NODE_COLUMN_WIDTH = 280;
@@ -77,8 +78,8 @@ function catalogNodeFor(
 
 function fallbackPosition(index: number): { x: number; y: number } {
   return {
-    x: (index % FALLBACK_NODE_COLUMNS) * FALLBACK_NODE_COLUMN_WIDTH,
-    y: Math.floor(index / FALLBACK_NODE_COLUMNS) * FALLBACK_NODE_ROW_HEIGHT,
+    x: DEPLOYMENT_FLOW_CONTENT_PADDING + (index % FALLBACK_NODE_COLUMNS) * FALLBACK_NODE_COLUMN_WIDTH,
+    y: DEPLOYMENT_FLOW_CONTENT_PADDING + Math.floor(index / FALLBACK_NODE_COLUMNS) * FALLBACK_NODE_ROW_HEIGHT,
   };
 }
 

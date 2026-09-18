@@ -3,6 +3,7 @@ import { getErrorMessage } from '@/lib/error';
 import {
   buildDeploymentTemplate,
   createNodeFromCatalog,
+  DEPLOYMENT_FLOW_CONTENT_PADDING,
   localDeploymentEditorIssues,
   mapNativeValidationErrors,
   type DeploymentEditorIssue,
@@ -282,7 +283,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
   clearRequestedTab: () => set({ requestedTab: null }),
   startTemplate: (kind, name, connectionProfileId, remoteRoot) => {
     if (get().saving) return;
-    const catalog = get().catalog;
+    const { catalog, profileFilterId } = get();
     const { definition, layout } = buildDeploymentTemplate(
       kind,
       { connectionProfileId, remoteRoot },
@@ -299,6 +300,9 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
       templateKind: kind,
     };
     set({
+      profileFilterId: profileFilterId === connectionProfileId
+        ? profileFilterId
+        : null,
       selectedWorkflowId: null,
       selectedNodeId: definition.nodes[0]?.id ?? null,
       draft,
@@ -339,7 +343,10 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
         ...draft.layout,
         nodes: {
           ...draft.layout.nodes,
-          [added.id]: { x: (index % 4) * 280, y: Math.floor(index / 4) * 190 },
+          [added.id]: {
+            x: DEPLOYMENT_FLOW_CONTENT_PADDING + (index % 4) * 280,
+            y: DEPLOYMENT_FLOW_CONTENT_PADDING + Math.floor(index / 4) * 190,
+          },
         },
       },
     };

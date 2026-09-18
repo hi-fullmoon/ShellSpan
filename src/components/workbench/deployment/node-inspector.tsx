@@ -60,7 +60,7 @@ export const NodeInputFields: React.FC<NodeInputFieldsProps> = ({
   if (spec.inputs.length === 0) return null;
 
   return (
-    <FieldGroup>
+    <FieldGroup className="gap-3">
       {spec.inputs.map((input) => {
         const compatible = compatibleOutputBindings(definition, catalog, node.id, input.name);
         const options = [
@@ -97,6 +97,7 @@ export const NodeInputFields: React.FC<NodeInputFieldsProps> = ({
             >
               <SelectTrigger
                 id={`input-${node.id}-${input.name}`}
+                size="sm"
                 aria-invalid={input.required && !binding}
               >
                 <SelectValue />
@@ -165,7 +166,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
           disabled={!editable}
           onValueChange={(next) => update(node.id, field.name, next ?? '')}
         >
-          <SelectTrigger id={id}><SelectValue /></SelectTrigger>
+          <SelectTrigger id={id} size="sm"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectGroup>
               {options.map((option) => (
@@ -193,7 +194,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
           disabled={!editable}
           onValueChange={(next) => update(node.id, field.name, next ?? '')}
         >
-          <SelectTrigger id={id}><SelectValue /></SelectTrigger>
+          <SelectTrigger id={id} size="sm"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectGroup>
               {options.map((option) => (
@@ -257,6 +258,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
       <FieldLabel htmlFor={id}>{t(deploymentLocaleKey(field.labelKey))}</FieldLabel>
       <Input
         id={id}
+        className="h-8"
         type={field.kind === 'integer' ? 'number' : 'text'}
         min={field.minimum}
         max={field.maximum}
@@ -337,13 +339,14 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
         </Button>
       </header>
       <ScrollArea className="min-h-0 flex-1">
-        <FieldGroup className="p-3">
+        <FieldGroup className="gap-3 p-3">
           <Field>
             <FieldLabel htmlFor={`node-name-${node.id}`}>
               {t('deployment.editor.nodeName')}
             </FieldLabel>
             <Input
               id={`node-name-${node.id}`}
+              className="h-8"
               value={node.displayName}
               onChange={(event) => updateNode(node.id, { displayName: event.target.value })}
               disabled={!editable}
@@ -369,6 +372,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
             </FieldLabel>
             <Input
               id={`node-timeout-${node.id}`}
+              className="h-8"
               type="number"
               min={1}
               max={86_400}

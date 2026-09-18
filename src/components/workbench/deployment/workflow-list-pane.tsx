@@ -9,6 +9,7 @@ import { WorkbenchSearchInput } from '../workbench-page';
 
 export interface WorkflowListPaneProps {
   workflows: readonly DeploymentWorkflowRecord[];
+  draftName?: string | null;
   selectedWorkflowId: string | null;
   search: string;
   onSearchChange: (value: string) => void;
@@ -21,6 +22,7 @@ export interface WorkflowListPaneProps {
 
 export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
   workflows,
+  draftName = null,
   selectedWorkflowId,
   search,
   onSearchChange,
@@ -35,6 +37,10 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
   const visible = workflows.filter((workflow) => (
     workflow.name.toLocaleLowerCase().includes(normalizedSearch)
   ));
+  const draftVisible = Boolean(
+    draftName?.toLocaleLowerCase().includes(normalizedSearch),
+  );
+  const workflowCount = workflows.length + (draftName ? 1 : 0);
 
   return (
     <section
@@ -47,7 +53,7 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
           <div className="min-w-0">
             <h2 className="truncate text-sm font-medium">{t('deployment.editor.workflows')}</h2>
             <p className="truncate text-xs text-muted-foreground">
-              {t('deployment.editor.workflowCount', { count: workflows.length })}
+              {t('deployment.editor.workflowCount', { count: workflowCount })}
             </p>
           </div>
           <Button
@@ -74,21 +80,34 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-1 px-2 pb-2">
+          {draftVisible && draftName && (
+            <Button
+              variant="secondary"
+              className="h-auto min-w-0 justify-start py-1.5 disabled:opacity-100"
+              disabled
+              aria-current="page"
+            >
+              <span className="min-w-0 flex-1 truncate text-left">{draftName}</span>
+              <Badge variant="secondary" size="sm">
+                {t('deployment.editor.unsaved')}
+              </Badge>
+            </Button>
+          )}
           {visible.map((workflow) => (
             <Button
               key={workflow.id}
               variant={workflow.id === selectedWorkflowId ? 'secondary' : 'ghost'}
-              className="h-auto min-w-0 justify-start py-2"
+              className="h-auto min-w-0 justify-start py-1.5"
               onClick={() => onSelect(workflow.id)}
               disabled={selectionDisabled}
             >
               <span className="min-w-0 flex-1 truncate text-left">{workflow.name}</span>
-              <Badge variant="outline">
+              <Badge variant="outline" size="sm">
                 {t('deployment.editor.revision', { revision: workflow.revision })}
               </Badge>
             </Button>
           ))}
-          {visible.length === 0 && (
+          {!draftVisible && visible.length === 0 && (
             <p className="px-2 py-6 text-center text-xs text-muted-foreground">
               {t('deployment.editor.noSearchResults')}
             </p>

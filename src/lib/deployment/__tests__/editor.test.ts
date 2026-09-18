@@ -79,6 +79,10 @@ describe('deployment editor domain', () => {
     expect(blank.definition.nodes).toEqual([]);
     expect(staticSite.definition).not.toHaveProperty('edges');
     expect(projectDeploymentEdges(staticSite.definition)).toHaveLength(12);
+    expect(staticSite.layout.nodes.source).toMatchObject({ x: 36, y: 36 });
+    expect(Object.values(staticSite.layout.nodes).every(
+      (position) => position.x >= 36 && position.y >= 36,
+    )).toBe(true);
   });
 
   it('projects connections from inputs and offers only compatible readable sources', () => {
