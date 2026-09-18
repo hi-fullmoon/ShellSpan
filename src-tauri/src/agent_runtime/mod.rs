@@ -30,6 +30,26 @@ mod surface;
 mod tool_pipeline;
 mod user_questions;
 
+pub(crate) const TERMINAL_TARGET_UNAVAILABLE_PREFIX: &str = "terminalTargetUnavailable:";
+
+pub(crate) fn terminal_target_unavailable(reason: &str) -> String {
+    format!(
+        "{TERMINAL_TARGET_UNAVAILABLE_PREFIX} {reason}; reconnect the terminal and continue in a new Agent session"
+    )
+}
+
+pub(crate) fn normalize_terminal_target_lookup_error(session_id: &str, error: String) -> String {
+    if error == format!("session {session_id} not found") {
+        terminal_target_unavailable("the bound terminal no longer exists")
+    } else {
+        error
+    }
+}
+
+pub(crate) fn is_terminal_target_unavailable(error: &str) -> bool {
+    error.starts_with(TERMINAL_TARGET_UNAVAILABLE_PREFIX)
+}
+
 pub(crate) use artifact::*;
 pub(crate) use budget::*;
 pub(crate) use commands::*;
@@ -52,3 +72,27 @@ pub(crate) use session::*;
 pub(crate) use subagent::*;
 pub(crate) use surface::*;
 pub(crate) use tool_pipeline::*;
+
+#[cfg(test)]
+mod target_availability_tests {
+    use super::*;
+
+    #[test]
+    fn missing_bound_terminal_has_a_stable_terminal_failure() {
+        let error = normalize_terminal_target_lookup_error(
+            "terminal-1",
+            "session terminal-1 not found".into(),
+        );
+
+        assert!(is_terminal_target_unavailable(&error));
+        assert!(!error.contains("terminal-1"));
+        assert!(error.contains("continue in a new Agent session"));
+        assert_eq!(
+            normalize_terminal_target_lookup_error(
+                "terminal-1",
+                "session registry poisoned".into(),
+            ),
+            "session registry poisoned"
+        );
+    }
+}

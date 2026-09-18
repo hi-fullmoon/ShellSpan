@@ -210,8 +210,56 @@
             event(3, Some("turn-b"), None, AgentSessionEventPayload::TurnStart),
         ];
         assert_eq!(
-            select_complete_turn_prefix(&events, None, Some("turn-b"), &budget(), false).unwrap(),
+            select_complete_compaction_prefix(&events, None, Some("turn-b"), &budget(), false)
+                .unwrap(),
             Some(2)
+        );
+    }
+
+    #[tokio::test]
+    async fn selects_a_completed_step_inside_the_active_turn() {
+        let events = vec![
+            event(0, Some("turn"), None, AgentSessionEventPayload::TurnStart),
+            event(
+                1,
+                Some("turn"),
+                Some("step-1"),
+                AgentSessionEventPayload::StepStart,
+            ),
+            event(
+                2,
+                Some("turn"),
+                Some("step-1"),
+                AgentSessionEventPayload::UserMessage {
+                    message: AgentInboxMessage {
+                        images: Vec::new(),
+                        message_id: "message".into(),
+                        client_submission_id: None,
+                        content: "x".repeat(40_000),
+                        source: AgentMessageSource::user(),
+                        terminal_context: None,
+                    },
+                },
+            ),
+            event(
+                3,
+                Some("turn"),
+                Some("step-1"),
+                AgentSessionEventPayload::StepEnd {
+                    reason: "toolsCompleted".into(),
+                },
+            ),
+            event(
+                4,
+                Some("turn"),
+                Some("step-2"),
+                AgentSessionEventPayload::StepStart,
+            ),
+        ];
+        assert_eq!(
+            select_complete_compaction_prefix(&events, None, Some("turn"), &budget(), false)
+                .unwrap(),
+            Some(3)
         );
     }
 
@@ -260,7 +308,7 @@
             ),
         ];
         assert_eq!(
-            select_complete_turn_prefix(&events, None, None, &budget(), true).unwrap(),
+            select_complete_compaction_prefix(&events, None, None, &budget(), true).unwrap(),
             None
         );
         let _ = AgentToolResultStatus::Completed;
@@ -313,6 +361,139 @@
         ) -> Result<SummaryProposal, String> {
             Err("synthetic summarizer failure".into())
         }
+    }
+
+    struct UnavailableSemanticSummarizer;
+
+    #[async_trait::async_trait]
+    impl AgentCompactionSummarizer for UnavailableSemanticSummarizer {
+        async fn summarize(
+            &self,
+            _checkpoint: &StructuredCheckpoint,
+            _cancellation: &CancellationToken,
+        ) -> Result<SummaryProposal, String> {
+            Ok(SummaryProposal {
+                provenance: vec![serde_json::json!({"failure": "inputBudget"})],
+                failure: Some(
+                    "semantic summary unavailable (inputBudget); preserved current Surface".into(),
+                ),
+                ..SummaryProposal::default()
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn active_turn_uses_extractive_fallback_at_a_completed_step_boundary() {
+        let (_root, sessions, artifacts) = configured_session();
+        sessions
+            .append(
+                "session",
+                Some("turn-active".into()),
+                None,
+                AgentSessionEventPayload::TurnStart,
+            )
+            .unwrap();
+        sessions
+            .append(
+                "session",
+                Some("turn-active".into()),
+                Some("step-large".into()),
+                AgentSessionEventPayload::StepStart,
+            )
+            .unwrap();
+        sessions
+            .append(
+                "session",
+                Some("turn-active".into()),
+                Some("step-large".into()),
+                AgentSessionEventPayload::UserMessage {
+                    message: AgentInboxMessage {
+                        images: Vec::new(),
+                        message_id: "message-active".into(),
+                        client_submission_id: None,
+                        content: "continue the task".into(),
+                        source: AgentMessageSource::user(),
+                        terminal_context: None,
+                    },
+                },
+            )
+            .unwrap();
+        sessions
+            .append(
+                "session",
+                Some("turn-active".into()),
+                Some("step-large".into()),
+                AgentSessionEventPayload::UserMessage {
+                    message: AgentInboxMessage {
+                        images: Vec::new(),
+                        message_id: "message-large".into(),
+                        client_submission_id: None,
+                        content: "large model evidence ".repeat(5_000),
+                        source: AgentMessageSource::runtime("large test context".into()),
+                        terminal_context: None,
+                    },
+                },
+            )
+            .unwrap();
+        let boundary = sessions
+            .append(
+                "session",
+                Some("turn-active".into()),
+                Some("step-large".into()),
+                AgentSessionEventPayload::StepEnd {
+                    reason: "toolsCompleted".into(),
+                },
+            )
+            .unwrap()
+            .seq;
+        sessions
+            .append(
+                "session",
+                Some("turn-active".into()),
+                Some("step-current".into()),
+                AgentSessionEventPayload::StepStart,
+            )
+            .unwrap();
+
+        let oversized = surface_budget(&sessions);
+        assert!(oversized.requires_compaction());
+        let manager = AgentCompactionManager::with_summarizer(
+            sessions.clone(),
+            artifacts.clone(),
+            Arc::new(UnavailableSemanticSummarizer),
+        );
+        let outcome = manager
+            .compact(
+                "session",
+                "turn-active",
+                "step-current",
+                Some("turn-active"),
+                "providerContextTooLarge",
+                &oversized,
+                true,
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.replaced_through_seq, boundary);
+        let snapshot = sessions.snapshot("session").unwrap();
+        assert_eq!(snapshot.surface.generation, 1);
+        assert!(snapshot.surface.messages.iter().any(|message| matches!(
+            message,
+            AgentSurfaceMessage::User { content, .. }
+                if content.contains("bounded extractive fallback")
+        )));
+        let stored = artifacts
+            .retrieve("session", &outcome.artifact, 2 * 1024 * 1024)
+            .unwrap();
+        let stored: serde_json::Value = serde_json::from_slice(&stored).unwrap();
+        assert!(stored["summaryProvenance"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["fallback"] == "boundedExtractiveCheckpoint"
+                && item["boundary"] == "completedStep"));
     }
 
     #[tokio::test]

@@ -10,13 +10,13 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{
-    AgentActiveScope, AgentAfterToolContext, AgentAfterToolDecision, AgentArtifactStore,
-    AgentBeforeToolContext, AgentBeforeToolDecision, AgentEntry, AgentHookBus, AgentInboxLane,
-    AgentInboxMessage, AgentLifecyclePhase, AgentMessageSource, AgentPlanStep, AgentRecoveryState,
-    AgentRecoveryStatus, AgentScopedPayload, AgentSessionEffect, AgentSessionEventPayload,
-    AgentSessionStatus, AgentSessionStore, AgentSessionTarget, AgentToolApprovalStatus,
-    AgentToolExecutionStatus, AgentToolResultStatus, ModelMessage, ModelRequest, ModelToolCall,
-    RecordedToolCall,
+    is_terminal_target_unavailable, AgentActiveScope, AgentAfterToolContext,
+    AgentAfterToolDecision, AgentArtifactStore, AgentBeforeToolContext, AgentBeforeToolDecision,
+    AgentEntry, AgentHookBus, AgentInboxLane, AgentInboxMessage, AgentLifecyclePhase,
+    AgentMessageSource, AgentPlanStep, AgentRecoveryState, AgentRecoveryStatus, AgentScopedPayload,
+    AgentSessionEffect, AgentSessionEventPayload, AgentSessionStatus, AgentSessionStore,
+    AgentSessionTarget, AgentToolApprovalStatus, AgentToolExecutionStatus, AgentToolResultStatus,
+    ModelMessage, ModelRequest, ModelToolCall, RecordedToolCall,
 };
 
 pub(crate) const DEFAULT_NATIVE_APPROVAL_TTL_MS: u64 = 60_000;
@@ -779,6 +779,9 @@ impl AgentToolPipeline {
                                 committed += 1;
                             }
                             self.commit_prepare_failure(&request, &error)?;
+                            if is_terminal_target_unavailable(&error) {
+                                return Err(error);
+                            }
                             next += 1;
                             committed += 1;
                             continue;
@@ -905,7 +908,16 @@ impl AgentToolPipeline {
                         if !events.iter().any(|event| event.step_id.as_deref() == Some(step_id)
                             && matches!(&event.payload, AgentSessionEventPayload::ToolCall { call: accepted }
                                 if accepted.call_id == call.call_id))
-                            && self.commit_not_started(&request_for(call.clone()), "schedulerFailure").is_err()
+                            && self.commit_not_started(
+                                &request_for(call.clone()),
+                                if outcome.as_ref().is_err_and(|error| {
+                                    is_terminal_target_unavailable(error)
+                                }) {
+                                    "terminalTargetUnavailable"
+                                } else {
+                                    "schedulerFailure"
+                                },
+                            ).is_err()
                         {
                             break;
                         }
@@ -916,6 +928,7 @@ impl AgentToolPipeline {
         let settlement = match outcome {
             Ok(value) => value,
             Err(error) if error.starts_with("subagentToolBudgetExceeded:") => return Err(error),
+            Err(error) if is_terminal_target_unavailable(&error) => return Err(error),
             Err(error) => return Err(format!("toolSchedulerFailure: {error}")),
         };
         if settlement == ToolPipelineSettlement::Completed {
@@ -1739,6 +1752,9 @@ impl AgentToolPipeline {
                 artifacts: Vec::new(),
             };
         }
+        let terminal_target_failure = (result.status == AgentToolResultStatus::Failed
+            && is_terminal_target_unavailable(&result.summary))
+        .then(|| result.summary.clone());
         let ephemeral_terminal_content = split_terminal_observation_for_persistence(
             &request.model_call.name,
             result.status,
@@ -1881,6 +1897,9 @@ impl AgentToolPipeline {
                     content,
                 })?;
         }
+        if let Some(error) = terminal_target_failure {
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -1946,7 +1965,21 @@ impl AgentToolPipeline {
 
         // Recheck live native policy without running before_tool again or charging again.
         self.native.abandon(&pending.preparation.token);
-        let refreshed = self.prepare_native(&pending.request)?;
+        let refreshed = match self.prepare_native(&pending.request) {
+            Ok(refreshed) => refreshed,
+            Err(error) if is_terminal_target_unavailable(&error) => {
+                self.append_terminal_approval(
+                    &pending,
+                    AgentToolApprovalStatus::Cancelled,
+                    AgentToolResultStatus::Cancelled,
+                    &error,
+                )?;
+                self.commit_pending_not_started(&pending, "terminalTargetUnavailable")?;
+                self.terminate_terminal_target(entry, &error)?;
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
         let refreshed_lease = PreparedLease::new(self.native.clone(), &refreshed.token);
         self.ensure_capability(
             entry,
@@ -1990,7 +2023,13 @@ impl AgentToolPipeline {
             .get(&key)
             .is_some_and(|record| record.status == PendingStatus::Executing);
         if still_executing {
-            self.finish_native(&pending.request, &pending.preparation, result)?;
+            if let Err(error) = self.finish_native(&pending.request, &pending.preparation, result) {
+                if is_terminal_target_unavailable(&error) {
+                    self.commit_pending_not_started(&pending, "terminalTargetUnavailable")?;
+                    self.terminate_terminal_target(entry, &error)?;
+                }
+                return Err(error);
+            }
             self.changed.notify_waiters();
             self.continue_after_pending(entry, &pending).await?;
         }
@@ -2021,6 +2060,8 @@ impl AgentToolPipeline {
                     error.clone(),
                 )?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
+            } else if is_terminal_target_unavailable(error) {
+                self.terminate_terminal_target(entry, error)?;
             } else {
                 self.mark_scheduler_failure(entry, error)?;
             }
@@ -2069,6 +2110,33 @@ impl AgentToolPipeline {
             ],
         )?;
         Ok(())
+    }
+
+    fn commit_pending_not_started(
+        &self,
+        pending: &PendingTool,
+        reason: &str,
+    ) -> Result<(), String> {
+        for call in &pending.remaining_calls {
+            let mut request = pending.request.clone();
+            request.model_call = call.clone();
+            self.commit_not_started(&request, reason)?;
+        }
+        Ok(())
+    }
+
+    fn terminate_terminal_target(
+        &self,
+        entry: &Arc<AgentEntry>,
+        reason: &str,
+    ) -> Result<(), String> {
+        super::driver::close_open_scope(&self.sessions, entry, reason)?;
+        self.sessions.terminate(
+            &entry.session_id,
+            AgentSessionStatus::Failed,
+            reason.to_string(),
+        )?;
+        entry.set_phase(AgentLifecyclePhase::Stopping)
     }
 
     fn resume_after_tool(&self, entry: &Arc<AgentEntry>) -> Result<(), String> {
@@ -2507,7 +2575,21 @@ impl AgentToolPipeline {
             token: pending.preparation.token.clone(),
         };
         self.native.abandon(&pending.preparation.token);
-        let refreshed = self.prepare_native(&pending.request)?;
+        let refreshed = match self.prepare_native(&pending.request) {
+            Ok(refreshed) => refreshed,
+            Err(error) if is_terminal_target_unavailable(&error) => {
+                self.append_terminal_approval(
+                    &pending,
+                    AgentToolApprovalStatus::Cancelled,
+                    AgentToolResultStatus::Cancelled,
+                    &error,
+                )?;
+                self.commit_pending_not_started(&pending, "terminalTargetUnavailable")?;
+                self.terminate_terminal_target(entry, &error)?;
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
         let _lease = PreparedLease::new(self.native.clone(), &refreshed.token);
         if refreshed.call != pending.preparation.call {
             return Err("recovered authorization drifted before dispatch".into());
@@ -2528,7 +2610,13 @@ impl AgentToolPipeline {
         let result = self
             .execute_native(&pending.preparation, true, entry.cancellation())
             .await;
-        self.finish_native(&pending.request, &pending.preparation, result)?;
+        if let Err(error) = self.finish_native(&pending.request, &pending.preparation, result) {
+            if is_terminal_target_unavailable(&error) {
+                self.commit_pending_not_started(&pending, "terminalTargetUnavailable")?;
+                self.terminate_terminal_target(entry, &error)?;
+            }
+            return Err(error);
+        }
         self.pending
             .lock()
             .map_err(|_| "native approval registry is unavailable".to_string())?

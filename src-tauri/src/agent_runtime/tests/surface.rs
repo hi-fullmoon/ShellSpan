@@ -164,7 +164,7 @@
     }
 
     #[test]
-    fn compaction_replaces_only_model_surface_and_requires_a_turn_boundary() {
+    fn compaction_replaces_only_model_surface_at_a_completed_turn_boundary() {
         let events = vec![
             event(0, user("old", "old context")),
             event(
@@ -200,7 +200,42 @@
     }
 
     #[test]
-    fn compaction_rejects_generation_gaps_and_partial_turn_prefixes() {
+    fn compaction_accepts_a_completed_step_boundary() {
+        let events = vec![
+            event(0, user("old", "old context")),
+            event(
+                1,
+                AgentSessionEventPayload::StepEnd {
+                    reason: "toolsCompleted".into(),
+                },
+            ),
+            event(
+                2,
+                AgentSessionEventPayload::CompactionSummary {
+                    summary: "summary".into(),
+                    replaced_through_seq: 1,
+                    surface_generation: 1,
+                },
+            ),
+            event(3, user("new", "new context")),
+        ];
+
+        let surface = derive_surface(&events).unwrap();
+        assert_eq!(surface.generation, 1);
+        assert_eq!(surface.replaced_through_seq, Some(1));
+        assert_eq!(surface.messages.len(), 2);
+        assert!(matches!(
+            &surface.messages[0],
+            AgentSurfaceMessage::User { content, .. } if content == "summary"
+        ));
+        assert!(matches!(
+            &surface.messages[1],
+            AgentSurfaceMessage::User { content, .. } if content == "new context"
+        ));
+    }
+
+    #[test]
+    fn compaction_rejects_generation_gaps_and_partial_interaction_prefixes() {
         let gap = vec![
             event(
                 0,
