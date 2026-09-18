@@ -42,6 +42,7 @@ pub(crate) fn assemble_model_input(
     // A terminal identity alone does not establish a native filesystem root.
     // Advertise only tools that can operate on the immutable Session target.
     tools.retain(|tool| tool_available_on_target(&tool.name, header));
+    specialize_tools_for_target(&mut tools, header);
     let mut sections = vec![
         ("Identity", IDENTITY.to_string()),
         ("Execution and trust", EXECUTION_CONTRACT.to_string()),
@@ -131,9 +132,9 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
         "run_terminal_command" => {
             target.is_some_and(|target| matches!(target.kind.as_str(), "local" | "remote"))
         }
-        "write_process_input" | "wait_process" | "kill_process" => {
-            target.is_some_and(|target| matches!(target.kind.as_str(), "local" | "remote"))
-        }
+        "write_process_input" | "wait_process" | "kill_process" => target.is_some_and(|target| {
+            target.kind == "local" || (target.kind == "remote" && target.profile_id.is_some())
+        }),
         "probe_http" => target.is_some_and(|target| {
             target.kind == "local" || (target.kind == "remote" && target.profile_id.is_some())
         }),
@@ -153,6 +154,30 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
                 && target.is_some_and(|target| matches!(target.kind.as_str(), "local" | "remote"))
         }
         _ => true,
+    }
+}
+
+fn specialize_tools_for_target(tools: &mut [AgentRequestToolSchema], header: &AgentSessionHeader) {
+    let remote_without_profile = header
+        .target
+        .as_ref()
+        .is_some_and(|target| target.kind == "remote" && target.profile_id.is_none());
+    if !remote_without_profile {
+        return;
+    }
+    const BACKGROUND_GUIDANCE: &str = "Set background=true to receive a native processHandle, then use wait_process or kill_process and always clean up long-running services. ";
+    if let Some(command) = tools
+        .iter_mut()
+        .find(|tool| tool.name == "run_terminal_command")
+    {
+        if let Some(properties) = command
+            .input_schema
+            .get_mut("properties")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            properties.remove("background");
+        }
+        command.description = command.description.replace(BACKGROUND_GUIDANCE, "");
     }
 }
 
@@ -379,6 +404,9 @@ mod tests {
         let local = available(&header);
         assert!(local.contains(&"run_terminal_command".into()));
         assert!(local.contains(&"probe_http".into()));
+        for name in ["write_process_input", "wait_process", "kill_process"] {
+            assert!(local.contains(&name.into()));
+        }
         for name in [
             "read_file",
             "list_directory",
@@ -413,8 +441,40 @@ mod tests {
         assert!(remote.contains(&"list_directory".into()));
         assert!(!remote.contains(&"probe_http".into()));
         assert!(!remote.contains(&"transfer_file".into()));
+        for name in ["write_process_input", "wait_process", "kill_process"] {
+            assert!(!remote.contains(&name.into()));
+        }
+        let profileless =
+            assemble_model_input(&header, crate::agent_runtime::default_model_tools());
+        let profileless_command = profileless
+            .tools
+            .iter()
+            .find(|tool| tool.name == "run_terminal_command")
+            .unwrap();
+        assert!(profileless_command.input_schema["properties"]
+            .get("background")
+            .is_none());
+        assert!(!profileless_command.description.contains("background=true"));
         header.target.as_mut().unwrap().profile_id = Some("profile-remote".into());
-        assert!(available(&header).contains(&"probe_http".into()));
+        let remote_with_profile =
+            assemble_model_input(&header, crate::agent_runtime::default_model_tools());
+        let remote_with_profile_names = remote_with_profile
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(remote_with_profile_names.contains(&"probe_http"));
+        for name in ["write_process_input", "wait_process", "kill_process"] {
+            assert!(remote_with_profile_names.contains(&name));
+        }
+        let profiled_command = remote_with_profile
+            .tools
+            .iter()
+            .find(|tool| tool.name == "run_terminal_command")
+            .unwrap();
+        assert!(profiled_command.input_schema["properties"]
+            .get("background")
+            .is_some());
         header.target.as_mut().unwrap().local_root = Some("/workspace".into());
         assert!(available(&header).contains(&"transfer_file".into()));
 

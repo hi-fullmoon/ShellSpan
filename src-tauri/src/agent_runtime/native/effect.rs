@@ -115,6 +115,31 @@ fn classify_command_effect(command: &str) -> AgentEffectKindNative {
         "git",
         "docker",
     ];
+    const NETWORK_CAPABLE_RUNTIMES: &[&str] = &[
+        "bash",
+        "bun",
+        "cmd",
+        "dash",
+        "deno",
+        "ksh",
+        "lua",
+        "node",
+        "nodejs",
+        "osascript",
+        "perl",
+        "php",
+        "powershell",
+        "pwsh",
+        "pypy",
+        "pypy3",
+        "python",
+        "python2",
+        "python3",
+        "rscript",
+        "ruby",
+        "sh",
+        "zsh",
+    ];
     const SENSITIVE_READ: [&str; 8] = [
         "cat",
         "type",
@@ -162,8 +187,6 @@ fn classify_command_effect(command: &str) -> AgentEffectKindNative {
         AgentEffectKindNative::ReadOnly
     } else if is_plain_windows_discovery_command(&normalized) {
         AgentEffectKindNative::ReadOnly
-    } else if command_has_unscoped_inline_network_authority(&normalized, &executable_names) {
-        AgentEffectKindNative::ExternalSideEffect
     } else if (SENSITIVE_READ.contains(&executable.as_str())
         || executable_names
             .iter()
@@ -187,6 +210,12 @@ fn classify_command_effect(command: &str) -> AgentEffectKindNative {
         || executable_names
             .iter()
             .any(|word| EXTERNAL.contains(&word.as_str()))
+        || NETWORK_CAPABLE_RUNTIMES.contains(&executable.as_str())
+        || executable_names
+            .iter()
+            .any(|word| NETWORK_CAPABLE_RUNTIMES.contains(&word.as_str()))
+        || normalized.contains("/dev/tcp/")
+        || normalized.contains("/dev/udp/")
         || normalized.contains("http://")
         || normalized.contains("https://")
     {
@@ -264,35 +293,6 @@ fn command_executable_names(command: &str) -> Vec<String> {
         }
     }
     names
-}
-
-fn command_has_unscoped_inline_network_authority(
-    command: &str,
-    executable_names: &[String],
-) -> bool {
-    if command.contains("/dev/tcp/") || command.contains("/dev/udp/") {
-        return true;
-    }
-    let words = command
-        .split_ascii_whitespace()
-        .map(|word| word.trim_matches(|character: char| matches!(character, '\'' | '"')))
-        .collect::<Vec<_>>();
-    let has_flag = |flags: &[&str]| {
-        words.iter().any(|word| {
-            flags
-                .iter()
-                .any(|flag| word == flag || word.starts_with(&format!("{flag}=")))
-        })
-    };
-    executable_names.iter().any(|name| match name.as_str() {
-        "node" | "nodejs" | "bun" => has_flag(&["-e", "--eval", "-p", "--print"]),
-        "python" | "python2" | "python3" | "pypy" | "pypy3" => has_flag(&["-c"]),
-        "ruby" | "perl" | "lua" | "rscript" | "osascript" => has_flag(&["-e"]),
-        "php" => has_flag(&["-r"]),
-        "deno" => words.iter().any(|word| *word == "eval"),
-        "powershell" | "pwsh" => has_flag(&["-c", "-command", "-e", "-encodedcommand"]),
-        _ => false,
-    })
 }
 
 fn segment_executable_index(words: &[&str]) -> Option<usize> {
@@ -520,11 +520,11 @@ mod tests {
         }
         assert_eq!(
             classify_command_effect("node --check server.js"),
-            AgentEffectKindNative::StateChange
+            AgentEffectKindNative::ExternalSideEffect
         );
         assert_eq!(
             classify_command_effect("node server.js"),
-            AgentEffectKindNative::StateChange
+            AgentEffectKindNative::ExternalSideEffect
         );
         assert_eq!(
             classify_command_effect("custom-maintenance-tool"),

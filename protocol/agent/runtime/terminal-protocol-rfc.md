@@ -425,9 +425,11 @@ adapter MUST force Direct and return its opaque `proc-*` handle. Model-facing
 handle to the same frozen Session, task, request, and owner target. Background
 service workflows MUST terminate the handle explicitly after verification.
 
-An `externalSideEffect` shell command with no structured network destination
-MUST be rejected in every permission mode. Permission controls whether an
-otherwise valid effect needs confirmation; it does not create network scope.
+Shell execution is not a network sandbox and MUST NOT claim an enforced
+destination scope. Known network-capable commands and general-purpose runtimes
+are conservatively classified as `externalSideEffect`, forced to Direct, and
+subject to the current permission mode. Permission controls confirmation; it
+does not create network isolation or an exact destination scope.
 `requestApproval` MUST require confirmation for every native tool call.
 `scopedAutopilot` MAY automatically execute only ordinary `readOnly` effects;
 `sensitiveRead`, `stateChange`, `destructive`, and `externalSideEffect` effects
