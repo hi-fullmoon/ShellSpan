@@ -77,6 +77,20 @@
     }
 
     #[test]
+    fn scoped_loopback_pair_is_preconnected_and_bidirectional() {
+        let (mut client, mut bridge) =
+            connected_loopback_pair(std::time::Instant::now() + Duration::from_secs(1)).unwrap();
+        client.write_all(b"request").unwrap();
+        let mut request = [0_u8; 7];
+        bridge.read_exact(&mut request).unwrap();
+        assert_eq!(&request, b"request");
+        bridge.write_all(b"response").unwrap();
+        let mut response = [0_u8; 8];
+        client.read_exact(&mut response).unwrap();
+        assert_eq!(&response, b"response");
+    }
+
+    #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end_port_forward() {
         let host =

@@ -717,6 +717,15 @@ fn coalesce_session_commands(commands: Vec<SessionCommand>) -> Vec<SessionComman
                 }
                 pending_write.push_str(&data);
             }
+            SessionCommand::WriteBytes(bytes) => {
+                if let Some((cols, rows)) = pending_resize.take() {
+                    merged.push(SessionCommand::Resize { cols, rows });
+                }
+                if !pending_write.is_empty() {
+                    merged.push(SessionCommand::Write(std::mem::take(&mut pending_write)));
+                }
+                merged.push(SessionCommand::WriteBytes(bytes));
+            }
             SessionCommand::Resize { cols, rows } => {
                 if !pending_write.is_empty() {
                     merged.push(SessionCommand::Write(std::mem::take(&mut pending_write)));
@@ -953,6 +962,10 @@ fn session_loop_inner(
             match command {
                 SessionCommand::Write(data) => {
                     write_all_nonblocking(session, channel, data.as_bytes())?;
+                    made_progress = true;
+                }
+                SessionCommand::WriteBytes(bytes) => {
+                    write_all_nonblocking(session, channel, &bytes)?;
                     made_progress = true;
                 }
                 SessionCommand::Resize { cols, rows } => {
