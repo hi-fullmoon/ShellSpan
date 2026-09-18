@@ -447,6 +447,32 @@ pub(crate) struct ScopedLoopbackConnection {
     outcome: std::sync::mpsc::Receiver<Result<(), String>>,
 }
 
+struct ScopedForwardCancelGuard {
+    cancel: Arc<AtomicBool>,
+    armed: bool,
+}
+
+impl ScopedForwardCancelGuard {
+    fn new(cancel: Arc<AtomicBool>) -> Self {
+        Self {
+            cancel,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ScopedForwardCancelGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.cancel.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
 impl ScopedLoopbackConnection {
     pub(crate) fn take_stream(&mut self) -> Result<TcpStream, String> {
         self.stream
@@ -560,6 +586,7 @@ pub(crate) fn open_scoped_loopback_connection(
         let _ = outcome_tx.send(result.clone());
         result
     });
+    let mut cancel_guard = ScopedForwardCancelGuard::new(Arc::clone(&cancel));
     let remaining = remaining_scoped_forward_time(deadline)?;
     let stream = match stream_rx.recv_timeout(remaining) {
         Ok(Ok(stream)) => stream,
@@ -569,7 +596,6 @@ pub(crate) fn open_scoped_loopback_connection(
             ))
         }
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            cancel.store(true, Ordering::SeqCst);
             drop(worker);
             return Err("target loopback SSH setup exceeded its total deadline".into());
         }
@@ -577,12 +603,14 @@ pub(crate) fn open_scoped_loopback_connection(
             return Err("target loopback SSH setup stopped before returning a transport".into());
         }
     };
-    Ok(ScopedLoopbackConnection {
+    let connection = ScopedLoopbackConnection {
         stream: Some(stream),
         cancel,
         worker: Some(worker),
         outcome: outcome_rx,
-    })
+    };
+    cancel_guard.disarm();
+    Ok(connection)
 }
 
 fn connected_loopback_pair(deadline: std::time::Instant) -> Result<(TcpStream, TcpStream), String> {
