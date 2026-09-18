@@ -98,6 +98,100 @@ describe('useSftpConnectionOpener', () => {
     vi.mocked(ensureKeychainKeyForProfile).mockImplementation((p) => Promise.resolve(p));
   });
 
+  it('shows an active connection placeholder while the pooled connection warms', async () => {
+    let resolveWarmConnection!: () => void;
+    vi.mocked(invokeWarmRemoteConnection).mockImplementationOnce(() =>
+      new Promise<void>((resolve) => {
+        resolveWarmConnection = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useSftpConnectionOpener());
+    let opening!: Promise<void>;
+
+    act(() => {
+      opening = result.current.open(profile);
+    });
+
+    await waitFor(() => {
+      expect(useSftpStore.getState().connections[0]).toMatchObject({
+        title: 'Server',
+        pendingConnection: true,
+        remoteLoading: true,
+      });
+    });
+    expect(useAppStore.getState().activeSection).toBe('sftp');
+    expect(useSftpStore.getState().activeConnectionId).toBe(
+      useSftpStore.getState().connections[0]?.id,
+    );
+
+    await act(async () => {
+      resolveWarmConnection();
+      await opening;
+    });
+
+    expect(useSftpStore.getState().connections).toHaveLength(1);
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      title: 'Server',
+      pendingConnection: false,
+      remoteLoading: false,
+    });
+  });
+
+  it('marks an existing target pane as connecting before replacing its server', async () => {
+    useSftpStore.getState().addConnection(
+      {
+        sessionId: 'existing-session',
+        title: 'Existing server',
+        host: 'old.example.com',
+        port: 22,
+        username: 'old-user',
+      },
+      {
+        host: 'old.example.com',
+        port: 22,
+        username: 'old-user',
+        authMethod: 'password',
+      },
+      'old-profile',
+    );
+    const existingId = useSftpStore.getState().connections[0]!.id;
+    let resolveWarmConnection!: () => void;
+    vi.mocked(invokeWarmRemoteConnection).mockImplementationOnce(() =>
+      new Promise<void>((resolve) => {
+        resolveWarmConnection = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useSftpConnectionOpener());
+    let opening!: Promise<void>;
+
+    act(() => {
+      opening = result.current.open(profile, existingId, 'remote');
+    });
+
+    await waitFor(() => {
+      expect(useSftpStore.getState().connections[0]).toMatchObject({
+        id: existingId,
+        title: 'Existing server',
+        remoteLoading: true,
+        connectionAttemptIds: { remote: expect.any(String) },
+      });
+    });
+    expect(useSftpStore.getState().connections).toHaveLength(1);
+
+    await act(async () => {
+      resolveWarmConnection();
+      await opening;
+    });
+
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      id: existingId,
+      title: 'Server',
+      profileId: profile.id,
+      remoteLoading: false,
+      connection: { host: profile.host },
+    });
+  });
+
   it('opens a known direct host through one formal pooled connection attempt', async () => {
     const { result } = renderHook(() => useSftpConnectionOpener());
 

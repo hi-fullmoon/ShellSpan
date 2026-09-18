@@ -76,6 +76,17 @@ export interface SftpConnection {
   rightLocal?: boolean;
   splitRatio: number;
   restorePending?: Partial<Record<SftpSide, boolean>>;
+  connectionAttemptIds?: Partial<Record<SftpSide, string>>;
+  pendingConnection?: boolean;
+}
+
+export interface PendingSftpConnection {
+  title: string;
+  host: string;
+  port: number;
+  username: string;
+  profileId: string;
+  connection: RemoteConnectionRequest;
 }
 
 export interface SftpDirectoryListing {
@@ -134,6 +145,20 @@ interface SftpState {
     profileId?: string,
     options?: { insertAfterId?: string; pinned?: boolean },
   ) => void;
+  beginConnectionAttempt: (
+    pending: PendingSftpConnection,
+    targetConnectionId?: string,
+    targetSide?: SftpSide,
+    attemptId?: string,
+  ) => string;
+  resolveConnectionAttempt: (
+    attemptId: string,
+    summary: SessionSummary,
+    connection: RemoteConnectionRequest,
+    profileId: string,
+    initialDirectory?: string,
+  ) => string | null;
+  endConnectionAttempt: (attemptId: string) => void;
   addLocalConnection: () => void;
   addRestoredConnections: (
     tabs: SavedSftpTab[],
@@ -316,6 +341,152 @@ export const useSftpStore = create<SftpState>()((set) => ({
         activeConnectionId: id,
       };
     }),
+
+  beginConnectionAttempt: (
+    pending,
+    targetConnectionId,
+    targetSide = 'remote',
+    attemptId = `pending-${generateId()}`,
+  ) => {
+    set((state) => {
+      if (targetConnectionId) {
+        const target = state.connections.find((connection) => connection.id === targetConnectionId);
+        if (!target) return state;
+        return {
+          connections: updateConnection(state, targetConnectionId, (connection) => ({
+            ...connection,
+            connectionAttemptIds: {
+              ...connection.connectionAttemptIds,
+              [targetSide]: attemptId,
+            },
+            [getLoadingKey(targetSide)]: true,
+            [getErrorKey(targetSide)]: undefined,
+          })),
+          activeConnectionId: targetConnectionId,
+        };
+      }
+
+      activatePathOperationOwner(attemptId);
+      const connection = createDefaultConnection(
+        attemptId,
+        {
+          sessionId: attemptId,
+          title: pending.title,
+          host: pending.host,
+          port: pending.port,
+          username: pending.username,
+        },
+        pending.connection,
+        pending.profileId,
+      );
+      connection.sessionId = undefined;
+      connection.remoteLoading = true;
+      connection.connectionAttemptIds = { remote: attemptId };
+      connection.pendingConnection = true;
+      return {
+        connections: [...state.connections, connection],
+        activeConnectionId: attemptId,
+      };
+    });
+    return attemptId;
+  },
+
+  resolveConnectionAttempt: (
+    attemptId,
+    summary,
+    connectionRequest,
+    profileId,
+    initialDirectory,
+  ) => {
+    let resolvedConnectionId: string | null = null;
+    set((state) => {
+      const target = state.connections.find((connection) =>
+        connection.connectionAttemptIds?.local === attemptId
+        || connection.connectionAttemptIds?.remote === attemptId,
+      );
+      if (!target) return state;
+      const side: SftpSide = target.connectionAttemptIds?.local === attemptId
+        ? 'local'
+        : 'remote';
+      const wasRestored = target.restorePending?.[side] === true;
+      resolvedConnectionId = target.id;
+      return {
+        connections: updateConnection(state, target.id, (current) => ({
+          ...current,
+          ...(side === 'local'
+            ? {
+                leftSource: 'remote' as const,
+                leftConnection: connectionRequest,
+                leftTitle: summary.title,
+                leftProfileId: profileId,
+              }
+            : {
+                rightSource: 'remote' as const,
+                sessionId: summary.sessionId,
+                profileId,
+                title: summary.title,
+                connection: connectionRequest,
+              }),
+          localOnly: false,
+          rightLocal: side === 'remote' ? false : current.rightLocal,
+          [getPathKey(side)]: initialDirectory
+            ?? (wasRestored ? current[getPathKey(side)] : ''),
+          [getEntriesKey(side)]: [],
+          [getLoadingKey(side)]: false,
+          [getErrorKey(side)]: undefined,
+          [getPaneKey(side)]: createDefaultPaneState(),
+          pendingConnection: false,
+          connectionAttemptIds: {
+            ...current.connectionAttemptIds,
+            [side]: undefined,
+          },
+          restorePending: { ...current.restorePending, [side]: false },
+          remoteBookmarks: wasRestored
+            ? current.remoteBookmarks
+            : { ...current.remoteBookmarks, [side]: [] },
+          remoteClipboard:
+            current.remoteClipboard?.sourceSide === side
+              ? undefined
+              : current.remoteClipboard,
+        })),
+        activeConnectionId: target.id,
+      };
+    });
+    return resolvedConnectionId;
+  },
+
+  endConnectionAttempt: (attemptId) => {
+    set((state) => {
+      const target = state.connections.find((connection) =>
+        connection.connectionAttemptIds?.local === attemptId
+        || connection.connectionAttemptIds?.remote === attemptId,
+      );
+      if (!target) return state;
+      const side: SftpSide = target.connectionAttemptIds?.local === attemptId
+        ? 'local'
+        : 'remote';
+      if (target.pendingConnection) {
+        cancelQueuedPathOperationsForOwner(target.id);
+        const connections = state.connections.filter((connection) => connection.id !== target.id);
+        return {
+          connections,
+          activeConnectionId: state.activeConnectionId === target.id
+            ? connections[connections.length - 1]?.id ?? null
+            : state.activeConnectionId,
+        };
+      }
+      return {
+        connections: updateConnection(state, target.id, (connection) => ({
+          ...connection,
+          connectionAttemptIds: {
+            ...connection.connectionAttemptIds,
+            [side]: undefined,
+          },
+          [getLoadingKey(side)]: false,
+        })),
+      };
+    });
+  },
 
   addLocalConnection: () =>
     set((state) => {

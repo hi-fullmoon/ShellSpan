@@ -23,6 +23,7 @@ import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { countActiveTransfersForOwners, useTransferStore } from '@/stores/transferStore';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Spinner } from '@/components/ui/spinner';
 
 const DRAG_OVERLAY_CURSOR_GAP = 2;
 
@@ -61,6 +62,8 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       role="tab"
       tabIndex={0}
       aria-selected={active}
+      aria-busy={connection.pendingConnection || undefined}
+      aria-label={connection.title}
       data-sftp-tab={connection.id}
       // Activate on pointerdown (like browser tabs) instead of click: dnd-kit
       // swallows the click after any drag, so a trackpad tap that jitters past
@@ -71,6 +74,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       }}
       onContextMenu={(e) => {
         e.preventDefault();
+        if (connection.pendingConnection) return;
         onContextMenu(connection, e.clientX, e.clientY);
       }}
       onKeyDown={(e) => {
@@ -118,9 +122,12 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         />
       )}
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        {connection.pendingConnection && (
+          <Spinner className="size-3 text-app-warning" />
+        )}
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{connection.title}</span>
       </div>
-      {connection.pinned ? (
+      {!connection.pendingConnection && (connection.pinned ? (
         <button
           type="button"
           aria-label="unpin"
@@ -149,7 +156,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         >
           <XIcon className="h-3 w-3" strokeWidth={1.5} />
         </button>
-      )}
+      ))}
     </div>
   );
 };
@@ -179,7 +186,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: connection.id,
-    disabled: connection.pinned,
+    disabled: connection.pinned || connection.pendingConnection,
   });
 
   return (
@@ -444,6 +451,9 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   };
 
   const handleCloseConnection = (id: string): void => {
+    if (connections.some((connection) => connection.id === id && connection.pendingConnection)) {
+      return;
+    }
     setClosingConnectionId(id);
   };
 
@@ -476,7 +486,11 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
     return null;
   }
 
-  if (connections.length === 1 && sftpHideSingleTabBar) {
+  if (
+    connections.length === 1
+    && sftpHideSingleTabBar
+    && !connections[0]?.pendingConnection
+  ) {
     return null;
   }
 

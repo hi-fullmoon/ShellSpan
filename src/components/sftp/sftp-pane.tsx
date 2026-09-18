@@ -4,7 +4,7 @@ import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsUpDownIcon, Mo
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
-import { Spinner } from '@/components/ui/empty-state';
+import { Spinner } from '@/components/ui/spinner';
 import { PathBreadcrumb } from './path-breadcrumb';
 import { SftpFileList } from './sftp-file-list';
 import { SftpFileContextMenu, type SftpFileContextMenuAction } from './sftp-file-context-menu';
@@ -87,8 +87,10 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       () => (showHiddenFiles ? entries : entries.filter((entry) => !entry.name.startsWith('.'))),
       [entries, showHiddenFiles],
     );
-    const loading = side === 'local' ? connection.localLoading : connection.remoteLoading;
-    const restorePending = !isLocal && connection.restorePending?.[side] === true;
+    const connecting = connection.connectionAttemptIds?.[side] !== undefined;
+    const loading = connecting
+      || (side === 'local' ? connection.localLoading : connection.remoteLoading);
+    const restorePending = !connecting && !isLocal && connection.restorePending?.[side] === true;
     const error = restorePending ? t('sftp.restore.disconnected') : side === 'local' ? connection.localError : connection.remoteError;
     const isHostKeyError = !isLocal && !!error && (error.toLowerCase().includes('host key') || error.toLowerCase().includes('trust this host'));
     const pane = side === 'local' ? connection.localPane : connection.remotePane;
@@ -183,13 +185,13 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     }, []);
 
     useEffect(() => {
-      if (restorePending) return;
+      if (connecting || restorePending) return;
       if (isLocal) {
         loadLocalDirectory(path);
       } else {
         loadRemoteDirectory(path);
       }
-    }, [isLocal, loadLocalDirectory, loadRemoteDirectory, restorePending]);
+    }, [connecting, isLocal, loadLocalDirectory, loadRemoteDirectory, restorePending]);
 
     const navigateTo = useCallback(
       (target: string, pushHistory = true): void => {
@@ -438,7 +440,12 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     const canGoForward = history.index < history.stack.length - 1;
 
     return (
-      <div ref={mergedRef} onKeyDown={handlePaneKeyDown} className="flex h-full flex-col overflow-hidden bg-app-surface">
+      <div
+        ref={mergedRef}
+        onKeyDown={handlePaneKeyDown}
+        aria-busy={connecting || undefined}
+        className="flex h-full flex-col overflow-hidden bg-app-surface"
+      >
         {/* Title bar */}
         <div className="flex h-10 shrink-0 items-center justify-between border-b border-app-border/50 bg-app-surface px-1">
           {onTitleClick ? (
@@ -446,6 +453,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
               variant="ghost"
               size="xs"
               onClick={onTitleClick}
+              disabled={connecting}
               aria-label={t('sftp.source.switch')}
               className="min-w-0 max-w-[70%] justify-start px-1 h-8"
             >
@@ -565,11 +573,13 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
               </div>
             </div>
           )}
-          {loading && entries.length === 0 && (
+          {(connecting || (loading && entries.length === 0)) && (
             // top-8 keeps the file-list header (h-8) visible while loading.
             <div className="absolute inset-x-0 bottom-0 top-8 z-10 flex flex-col items-center justify-center gap-2 bg-app-surface">
               <Spinner />
-              <span className="text-xs text-app-text-soft">{t('common.loading')}</span>
+              <span className="text-xs text-app-text-soft">
+                {t(connecting ? 'sftp.status.connecting' : 'common.loading')}
+              </span>
             </div>
           )}
           {error && (

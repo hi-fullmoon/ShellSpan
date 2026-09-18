@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SftpTabBar } from '../sftp-tab-bar';
 import { useSftpStore } from '@/stores/sftpStore';
@@ -107,6 +107,33 @@ describe('SftpTabBar', () => {
     expect(screen.getByText('Conn A')).toBeInTheDocument();
     expect(screen.getByText('Conn B')).toBeInTheDocument();
     expect(screen.getAllByRole('tab')[1]).not.toHaveClass('shadow-md');
+  });
+
+  it('renders a connection placeholder as a busy tab without tab actions', () => {
+    useSftpStore.getState().beginConnectionAttempt({
+      title: 'Pending server',
+      host: 'h',
+      port: 22,
+      username: 'u',
+      profileId: 'profile-1',
+      connection: {
+        host: 'h',
+        port: 22,
+        username: 'u',
+        authMethod: 'password',
+      },
+    }, undefined, 'remote', 'attempt-1');
+    const onTabContextMenu = vi.fn();
+
+    render(<SftpTabBar onTabContextMenu={onTabContextMenu} />);
+
+    const tab = screen.getByRole('tab', { name: 'Pending server' });
+    expect(tab).toHaveAttribute('aria-busy', 'true');
+    expect(within(tab).getByRole('status', { name: 'Loading' })).toBeInTheDocument();
+    expect(within(tab).queryByRole('button')).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(tab, { clientX: 10, clientY: 20 });
+    expect(onTabContextMenu).not.toHaveBeenCalled();
   });
 
   it('activates a tab when clicked', async () => {
