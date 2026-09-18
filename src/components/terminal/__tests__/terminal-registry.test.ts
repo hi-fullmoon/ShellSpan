@@ -6,7 +6,12 @@ import {
   getRecentTerminalOutput,
   getRecentTerminalOutputSnapshot,
 } from '@/lib/terminal/terminal-output-buffer';
-import { findHttpLinksInLine, resolveTerminalTheme, terminalRegistry } from '../registry/terminal-registry';
+import {
+  findHttpLinksInBuffer,
+  findHttpLinksInLine,
+  resolveTerminalTheme,
+  terminalRegistry,
+} from '../registry/terminal-registry';
 
 const webglMocks = vi.hoisted(() => {
   type Behavior = 'success' | 'constructor-throw' | 'activate-throw';
@@ -78,6 +83,7 @@ vi.mock('@/lib/ipc/tauri', () => ({
   invokeMarkSessionReady: vi.fn().mockResolvedValue(undefined),
   invokeSetSessionOutputPaused: vi.fn().mockResolvedValue(undefined),
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
+  invokeWriteSessionBytes: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
   listenToSshData: vi.fn().mockResolvedValue(() => {}),
   listenToSshStatus: vi.fn().mockResolvedValue(() => {}),
@@ -316,6 +322,8 @@ describe('terminalRegistry', () => {
     const { invokeResizeSession } = await import('@/lib/ipc/tauri');
     const controller = createController('s1');
     controller.attach(document.createElement('div'));
+    await Promise.resolve();
+    await Promise.resolve();
     vi.mocked(invokeResizeSession).mockClear();
     const nextCols = controller.terminal.cols + 1;
     const nextRows = controller.terminal.rows + 1;
@@ -334,7 +342,9 @@ describe('terminalRegistry', () => {
     controller.focus();
 
     expect(order).toEqual(['fit', 'refresh', 'focus']);
-    expect(invokeResizeSession).toHaveBeenCalledWith('s1', nextCols, nextRows);
+    await vi.waitFor(() => {
+      expect(invokeResizeSession).toHaveBeenCalledWith('s1', nextCols, nextRows);
+    });
     expect(controller.terminal.refresh).toHaveBeenCalledWith(
       0,
       controller.terminal.rows - 1,
@@ -445,6 +455,10 @@ describe('terminalRegistry', () => {
         get: () => document.body,
       });
       controller.attach(document.createElement('div'));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
       vi.mocked(invokeResizeSession).mockClear();
       vi.spyOn(controller.fitAddon, 'proposeDimensions')
         .mockReturnValueOnce({ cols: 100, rows: 30 })
@@ -455,7 +469,13 @@ describe('terminalRegistry', () => {
       vi.advanceTimersByTime(99);
       expect(invokeResizeSession).not.toHaveBeenCalled();
 
-      vi.advanceTimersByTime(1);
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
       expect(invokeResizeSession).toHaveBeenCalledOnce();
       expect(invokeResizeSession).toHaveBeenCalledWith('s1', 101, 31);
 
@@ -466,6 +486,38 @@ describe('terminalRegistry', () => {
       terminalRegistry.disposeAll();
       vi.useRealTimers();
       globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it('retries the latest resize after a transient IPC failure', async () => {
+    vi.useFakeTimers();
+    const { invokeResizeSession } = await import('@/lib/ipc/tauri');
+    vi.mocked(invokeResizeSession)
+      .mockRejectedValueOnce(new Error('transient resize failure'))
+      .mockResolvedValue(undefined);
+
+    try {
+      const controller = createController('s1');
+      controller.attach(document.createElement('div'));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(invokeResizeSession).toHaveBeenCalledOnce();
+      const initialDimensions = vi.mocked(invokeResizeSession).mock.calls[0];
+
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(invokeResizeSession).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(invokeResizeSession).mock.calls[1]).toEqual(initialDimensions);
+    } finally {
+      terminalRegistry.disposeAll();
+      vi.useRealTimers();
+      vi.mocked(invokeResizeSession).mockReset().mockResolvedValue(undefined);
     }
   });
 
@@ -551,6 +603,37 @@ describe('terminalRegistry', () => {
     expect(fit).toHaveBeenCalledTimes(1);
   });
 
+  it('synchronizes the pty after a display preference changes the fitted grid', async () => {
+    const { invokeResizeSession } = await import('@/lib/ipc/tauri');
+    const controller = createController('s1');
+    controller.attach(document.createElement('div'));
+    await vi.waitFor(() => expect(invokeResizeSession).toHaveBeenCalled());
+    vi.mocked(invokeResizeSession).mockClear();
+    const nextCols = controller.terminal.cols + 2;
+    const nextRows = controller.terminal.rows + 1;
+    vi.spyOn(controller.fitAddon, 'fit').mockImplementation(() => {
+      controller.terminal.resize(nextCols, nextRows);
+    });
+
+    controller.updateOptions({
+      fontSize: 16,
+      fontFamily: 'system',
+      cursorBlink: true,
+      cursorStyle: 'block',
+      scrollback: 10000,
+      colorScheme: 'app',
+      autoReconnect: false,
+      lineHeight: 1,
+      letterSpacing: 0,
+      urlDetection: true,
+      bellStyle: 'none',
+    });
+
+    await vi.waitFor(() => {
+      expect(invokeResizeSession).toHaveBeenCalledWith('s1', nextCols, nextRows);
+    });
+  });
+
   it('writes connected input to the session', async () => {
     const { invokeWriteSession } = await import('@/lib/ipc/tauri');
     const getStatus = vi.fn().mockReturnValue('connected');
@@ -566,6 +649,23 @@ describe('terminalRegistry', () => {
     controller.simulateInput('hello');
 
     expect(invokeWriteSession).toHaveBeenCalledWith('s1', 'hello');
+  });
+
+  it('forwards xterm binary mouse reports without UTF-8 re-encoding', async () => {
+    const { invokeWriteSessionBytes } = await import('@/lib/ipc/tauri');
+    const controller = createController('s1');
+    const binaryCore = controller.terminal as unknown as {
+      _core: { coreService: { triggerBinaryEvent(data: string): void } };
+    };
+
+    binaryCore._core.coreService.triggerBinaryEvent(String.fromCharCode(0x1b, 0x5b, 0x80));
+
+    await vi.waitFor(() => {
+      expect(invokeWriteSessionBytes).toHaveBeenCalledWith(
+        's1',
+        new Uint8Array([0x1b, 0x5b, 0x80]),
+      );
+    });
   });
 
   it('announces the first blocked Agent-owned input and honors suppression counts', async () => {
@@ -832,5 +932,37 @@ describe('findHttpLinksInLine', () => {
 
   it('ignores non-HTTP schemes', () => {
     expect(findHttpLinksInLine('javascript:alert(1) file:///tmp/test')).toEqual([]);
+  });
+
+  it('maps links after wide cells to terminal columns', async () => {
+    const controller = createController('wide-link');
+    controller.terminal.resize(40, 4);
+    await new Promise<void>((resolve) => {
+      controller.terminal.write('你 https://example.com', resolve);
+    });
+
+    expect(findHttpLinksInBuffer(controller.terminal.buffer.active, 1, 40)).toEqual([{
+      text: 'https://example.com',
+      range: {
+        start: { x: 4, y: 1 },
+        end: { x: 22, y: 1 },
+      },
+    }]);
+  });
+
+  it('returns one complete link across wrapped buffer rows', async () => {
+    const controller = createController('wrapped-link');
+    controller.terminal.resize(12, 4);
+    await new Promise<void>((resolve) => {
+      controller.terminal.write('https://example.com', resolve);
+    });
+
+    expect(findHttpLinksInBuffer(controller.terminal.buffer.active, 2, 12)).toEqual([{
+      text: 'https://example.com',
+      range: {
+        start: { x: 1, y: 1 },
+        end: { x: 7, y: 2 },
+      },
+    }]);
   });
 });
