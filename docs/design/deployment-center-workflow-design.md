@@ -947,6 +947,7 @@ interface DeploymentNodeProgressEvent {
 
 建议增加独立 restart-scoped gate，例如 `SHELLSPAN_DEPLOYMENT_WORKFLOW`：
 
+- 缺失时默认开启；
 - 关闭时禁止创建/修改/执行 工作流；
 - 工作流 只读查看、取消、恢复和审计不受影响；
 - 无效环境值 fail closed；

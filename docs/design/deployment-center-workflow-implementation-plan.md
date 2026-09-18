@@ -28,7 +28,7 @@
 - 节点输入绑定是语义真相；画布连线只是输入绑定的投影。
 - canonical plan 冻结 workflow revision、source、target、artifact、节点版本、配置、固定动作和补偿动作。
 - 人工回滚始终创建新的 `rollback` run 并重新预检、审批和执行。
-- `SHELLSPAN_DEPLOYMENT_WORKFLOW` 是独立、restart-scoped、fail-closed 的功能门禁。
+- `SHELLSPAN_DEPLOYMENT_WORKFLOW` 是独立、restart-scoped、默认开启且对无效值 fail-closed 的功能门禁。
 - 首轮完整交付覆盖 Docker Compose 和静态站点；systemd、外部 Artifact Provider、多主机和签名策略留作后续扩展，不阻塞 工作流 首次上线。
 
 ## 3. 阶段依赖

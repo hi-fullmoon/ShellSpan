@@ -535,6 +535,6 @@ All summary keys must be reviewed `deployment.*` localization keys. Remote stdou
 - Only the manual UI approval wire value `approvalSource: manualUi` is accepted. Agent, recovery and Quick Action values do not deserialize as approval authority.
 - Agent and Quick Action integrations may create a draft or request preparation only; neither integration exposes `approve_deployment_run`.
 - Workflow and node config store credential/config references only. Secret values are resolved at the execution boundary and never enter workflow JSON, plan, events, logs, Artifact metadata or audit.
-- `SHELLSPAN_DEPLOYMENT_WORKFLOW` is read once at process start. Missing, false or invalid values disable admissions.
+- `SHELLSPAN_DEPLOYMENT_WORKFLOW` is read once at process start. Missing values enable admissions by default; explicit false values and invalid values disable admissions.
 - With the gate closed, create, update, archive, prepare, approve and start fail closed. Read-only projection, cancel, reconcile and audit export remain available so disabling admissions cannot strand an active run.
 - Production registers only current protocol commands. legacy conversion, history reads, execution and IPC are absent. Legacy SQLite tables remain untouched and unread; no automatic data deletion is authorized.

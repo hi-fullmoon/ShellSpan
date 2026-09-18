@@ -65,7 +65,7 @@
 
 ## 门禁验证
 
-`SHELLSPAN_DEPLOYMENT_WORKFLOW` 缺失、false 或无效时 admissions fail closed。关闭门禁会拒绝创建、修改、归档、准备、审批和启动；只读、取消、reconcile 和审计继续可用。门禁在进程启动时读取，运行中不热切换。
+`SHELLSPAN_DEPLOYMENT_WORKFLOW` 缺失时 admissions 默认开启；显式 false 或无效值时 fail closed。关闭门禁会拒绝创建、修改、归档、准备、审批和启动；只读、取消、reconcile 和审计继续可用。门禁在进程启动时读取，运行中不热切换。
 
 ## 实际渲染
 

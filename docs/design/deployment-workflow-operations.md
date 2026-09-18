@@ -6,7 +6,7 @@
 
 ## 启用与关闭
 
-`SHELLSPAN_DEPLOYMENT_WORKFLOW` 是 restart-scoped 门禁，仅接受明确的 true/false 值。缺失、无效或关闭均 fail closed；修改后必须重启应用。
+`SHELLSPAN_DEPLOYMENT_WORKFLOW` 是 restart-scoped 门禁，仅接受明确的 true/false 值。缺失时默认开启；显式关闭或值无效时 fail closed。修改后必须重启应用。
 
 | 门禁状态 | 允许 | 禁止 |
 | --- | --- | --- |
