@@ -394,6 +394,21 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(screen.getAllByText('Task still incomplete')).toHaveLength(2);
   });
 
+  it('shows a recoverable step budget boundary as incomplete instead of failed', () => {
+    const events: AgentSessionEvent[] = agentSessionBaselineScenarios.hello.events.map((event) => (
+      event.type === 'turn/end'
+        ? { ...event, data: { reason: 'stepBudgetReached: maximum 128 Steps per Turn' } }
+        : event
+    ));
+    const nodes = projectAgentChatNodes(events);
+    const { container } = render(<AiConversationNodeList nodes={nodes} />);
+
+    expect(screen.getByText('Step budget reached; you can continue the task')).toBeVisible();
+    expect(container.querySelector('[data-ai-node-kind="turnTail"] .ai-turn-tail'))
+      .toHaveAttribute('data-status', 'incomplete');
+    expect(container.querySelector('[data-ai-node-kind="error"]')).toBeNull();
+  });
+
   it.each([
     ['Usage 144 tok', 'Turn usage'],
     ['Time 1.1s', 'Turn timing and speed'],

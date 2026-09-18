@@ -205,6 +205,72 @@ describe('AI workspace Phase 5 workflows', () => {
     expect(screen.getByRole('textbox').textContent).toBe('preserved draft');
   });
 
+  it('shows volatile terminal input in the approval without persisting it in the view', () => {
+    const approval: AiPendingApproval = {
+      ...pendingApproval,
+      toolName: 'write_terminal_input',
+      arguments: {
+        inputKind: 'paste',
+        byteLength: 28,
+        contentPersisted: false,
+      },
+    };
+    const { container } = render(
+      <AiWorkspaceRoot
+        view={agentView(approval)}
+        scope="terminal"
+        composerState={createAiComposerState({
+          phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true,
+          sessionId: 'agent-phase5',
+        })}
+        approvalArguments={{ inputKind: 'paste', text: 'printf "review-before-run"\n' }}
+      />,
+    );
+
+    expect(screen.getByText('Terminal input (escaped)')).toBeVisible();
+    expect(container.querySelector('[data-slot="ai-approval-panel"] code')).toHaveTextContent(
+      '"printf \\"review-before-run\\"\\n"',
+    );
+    expect(approval.arguments).not.toHaveProperty('text');
+  });
+
+  it('keeps ephemeral approval fail-closed while exact arguments load or fail', () => {
+    const approval: AiPendingApproval = {
+      ...pendingApproval,
+      toolName: 'write_terminal_input',
+      arguments: {
+        inputKind: 'paste',
+        byteLength: 8,
+        contentPersisted: false,
+      },
+    };
+    const composer = createAiComposerState({
+      phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true,
+      sessionId: 'agent-phase5',
+    });
+    const { rerender } = render(
+      <AiWorkspaceRoot
+        view={agentView(approval)} scope="terminal" composerState={composer}
+        approvalArgumentsLoading
+      />,
+    );
+
+    expect(screen.getByText('Loading the exact private arguments for review…')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+
+    act(() => {
+      rerender(
+        <AiWorkspaceRoot
+          view={agentView(approval)} scope="terminal" composerState={composer}
+          approvalArgumentsError="Exact private arguments unavailable"
+        />,
+      );
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Exact private arguments unavailable');
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled();
+  });
+
   it('shows approval pending and failure without reporting an approved result', () => {
     const composer = createAiComposerState({
       phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true,

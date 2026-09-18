@@ -6,6 +6,7 @@ import { AiSessionHeader } from '@/components/ai/workspace/ai-session-header';
 import { AiSessionBrowser } from '@/components/ai/workspace/ai-session-browser';
 import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
 import { AiArtifactDetails } from '@/components/ai/workspace/ai-artifact-details';
+import type { AiSessionSummary } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 
@@ -123,5 +124,59 @@ describe('AiSessionHeader', () => {
     );
     expect(screen.getByLabelText('Current login: root@175.178.66.45:22'))
       .toHaveTextContent('root@175.178.66.45:22');
+  });
+
+  it('keeps subagent Sessions out of ordinary history', () => {
+    const parent: AiSessionSummary = {
+      id: 'parent',
+      kind: 'agent',
+      title: 'Parent task',
+      updatedAt: '2026-09-18T00:00:00.000Z',
+      status: 'running',
+      scopeKey: 'workbench-ai',
+      archived: false,
+    };
+    const child: AiSessionSummary = {
+      ...parent,
+      id: 'child',
+      title: 'Inspect implementation',
+      parentSessionId: parent.id,
+      subagent: {
+        descriptorId: 'descriptor-child',
+        role: 'explorer',
+        continuable: false,
+        depth: 1,
+      },
+    };
+    render(
+      <AiSessionBrowser
+        sessions={[parent, child]}
+        loading={false}
+        error={null}
+        archivingId={null}
+        onBack={vi.fn()}
+        onNew={vi.fn()}
+        onOpen={vi.fn()}
+        onArchive={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Parent task')).toBeVisible();
+    expect(screen.queryByText('Inspect implementation')).toBeNull();
+
+    cleanup();
+    render(
+      <AiSessionBrowser
+        sessions={[child]}
+        loading={false}
+        error={null}
+        archivingId={null}
+        onBack={vi.fn()}
+        onNew={vi.fn()}
+        onOpen={vi.fn()}
+        onArchive={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Inspect implementation')).toBeVisible();
   });
 });

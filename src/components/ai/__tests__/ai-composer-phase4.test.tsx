@@ -89,15 +89,22 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
   });
 
-  it('presents retrying a failed turn as a compact secondary action', async () => {
-    const user = userEvent.setup();
-    const retryTurn = vi.fn();
-    render(<AiComposerSeat phase="active" status="failed" onRetryTurn={retryTurn} />);
+  it('does not offer a retry action for a failed turn', () => {
+    render(<AiComposerSeat phase="active" status="failed" />);
 
-    const button = screen.getByRole('button', { name: 'Retry this turn' });
+    expect(screen.queryByRole('button', { name: 'Retry this turn' })).toBeNull();
+  });
+
+  it('offers an explicit continuation after the step budget pauses a turn', async () => {
+    const user = userEvent.setup();
+    const continueTurn = vi.fn();
+    render(<AiComposerSeat phase="active" status="idle"
+      budgetContinuationAvailable onContinueBudgetedTurn={continueTurn} />);
+
+    const button = screen.getByRole('button', { name: 'Continue task' });
     expect(button).toHaveClass('self-center', 'rounded-full', 'bg-secondary');
     await user.click(button);
-    expect(retryTurn).toHaveBeenCalledOnce();
+    expect(continueTurn).toHaveBeenCalledOnce();
   });
 
   it('aligns the unavailable icon and copy with a compact gap', () => {
@@ -338,6 +345,27 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(stop).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: 'Queue for next turn' })).toBeNull();
   });
+
+  it.each(['waitingApproval', 'waitingQuestion'] as const)(
+    'keeps Stop enabled with an empty Composer while %s',
+    async phase => {
+      const user = userEvent.setup();
+      const stop = vi.fn();
+      render(<Harness initial={createAiComposerState({
+        phase,
+        runtimeStatus: 'waiting',
+        waitingApproval: phase === 'waitingApproval',
+        waitingQuestion: phase === 'waitingQuestion',
+        sessionId: 'session-1',
+        draft: '',
+      })} onStop={stop} />);
+
+      const button = screen.getByRole('button', { name: 'Stop this turn' });
+      expect(button).toBeEnabled();
+      await user.click(button);
+      expect(stop).toHaveBeenCalledOnce();
+    },
+  );
 
   it('keeps approval drafts editable while awaiting a decision', () => {
     render(<Harness initial={createAiComposerState({

@@ -8,10 +8,20 @@ import { useTerminalStore } from '@/stores/terminalStore';
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
     t: (key: string) => ({
-      'agent.permission.composer.readOnly': '仅可查看',
-      'agent.permission.composer.readOnlyDescription': '修改、破坏性及敏感读取需要确认。',
-      'agent.permission.composer.fullAccess': '完全权限',
-      'agent.permission.composer.fullAccessDescription': '自动执行当前终端中的所有命令。',
+      'agent.permission.composer.readOnly': '帮我批准',
+      'agent.permission.composer.readOnlyDescription': '仅对检测到的风险操作请求批准。',
+      'agent.permission.autoApproveReadOnly': '帮我批准',
+      'agent.permission.autoApproveReadOnlyDescription': '仅对检测到的风险操作请求批准。',
+      'agent.permission.recommended': '推荐',
+      'agent.permission.highRisk': '高风险',
+      'agent.permission.requestApproval': '请求批准',
+      'agent.permission.requestApprovalDescription': '执行每项 Agent 工具操作时始终询问。',
+      'agent.permission.fullAccess': '完全访问权限',
+      'agent.permission.fullAccessDescription': '无需逐次批准即可执行原生策略允许的操作；目标和网络范围限制仍然生效。',
+      'agent.permission.composer.fullAccess': '完全访问权限',
+      'agent.permission.composer.fullAccessDescription': '无需逐次批准即可执行原生策略允许的操作；目标和网络范围限制仍然生效。',
+      'agent.permission.fullAccessWarning': '可自动执行受限的回环 HTTP 操作；未声明目标的网络命令仍会被阻止。',
+      'agent.permission.fullAccessConfirm': '允许完全访问',
     })[key] ?? key,
   }),
 }));
@@ -37,22 +47,24 @@ describe('Agent permission selector', () => {
     connectSession();
   });
 
-  it('exposes only the two product modes and confirms full access', async () => {
+  it('exposes all three runtime modes and confirms full access for the named target', async () => {
     render(<AgentPermissionSelector sessionId="session-1" />);
     expect(useAgentPermissionStore.getState().getMode('session-1')).toBe('autoApproveReadOnly');
     fireEvent.click(screen.getByRole('button', { name: 'agent.permission' }));
-    expect(await screen.findAllByRole('menuitemradio')).toHaveLength(2);
-    expect(screen.queryByRole('menuitemradio', { name: /agent\.permission\.requestApproval/ })).toBeNull();
-    fireEvent.click(await screen.findByRole('menuitemradio', { name: /agent\.permission\.fullAccess/ }));
-    const warning = await screen.findByText('agent.permission.fullAccessWarning');
+    expect(await screen.findAllByRole('menuitemradio')).toHaveLength(3);
+    expect(screen.getByText('推荐')).toBeVisible();
+    expect(screen.getByRole('menuitemradio', { name: /^请求批准/ })).toBeVisible();
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /^完全访问权限/ }));
+    const warning = await screen.findByText('可自动执行受限的回环 HTTP 操作；未声明目标的网络命令仍会被阻止。');
     expect(warning).toBeVisible();
+    expect(screen.getByText('Production (operator@server.example.com:22)')).toBeVisible();
     const dialog = warning.closest('[role="alertdialog"]');
     expect(dialog?.querySelector('.lucide-shield-alert')).toBeInTheDocument();
     expect(dialog?.querySelector('[data-slot="alert-dialog-media"]')).toHaveClass(
       'bg-app-warning/10',
       'text-app-warning',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'agent.permission.fullAccessConfirm' }));
+    fireEvent.click(screen.getByRole('button', { name: '允许完全访问' }));
     expect(useAgentPermissionStore.getState().getMode('session-1')).toBe('fullAccess');
   });
 
@@ -63,15 +75,49 @@ describe('Agent permission selector', () => {
       'composer',
     );
     fireEvent.click(screen.getByRole('button', { name: 'agent.permission.composerAria' }));
-    expect(await screen.findByRole('menuitemradio', { name: '仅可查看' })).toBeVisible();
-    expect(screen.getByRole('menuitemradio', { name: '完全权限' })).toBeVisible();
-    expect(screen.getByText('修改、破坏性及敏感读取需要确认。')).toBeVisible();
-    expect(screen.getByText('自动执行当前终端中的所有命令。')).toBeVisible();
+    const options = await screen.findAllByRole('menuitemradio');
+    expect(options).toHaveLength(3);
+    expect(options[0]).toHaveTextContent('帮我批准');
+    expect(options[0]).toHaveTextContent('推荐');
+    expect(options[1]).toHaveTextContent('请求批准');
+    expect(options[2]).toHaveTextContent('完全访问权限');
+    expect(options[2]).toHaveTextContent('高风险');
+    expect(screen.getByRole('menuitemradio', { name: /^帮我批准/ })).toBeVisible();
+    expect(screen.getByRole('menuitemradio', { name: /^完全访问权限/ })).toBeVisible();
+    expect(screen.getByRole('menuitemradio', { name: '请求批准' })).toBeVisible();
+    expect(screen.getByText('仅对检测到的风险操作请求批准。')).toBeVisible();
+    expect(screen.getByText('无需逐次批准即可执行原生策略允许的操作；目标和网络范围限制仍然生效。')).toBeVisible();
     expect(screen.queryByText('工作区内修改')).toBeNull();
-    expect(screen.queryByRole('menuitemradio', { name: /agent\.permission\.requestApproval/ })).toBeNull();
   });
 
-  it('returns to the read-only auto-approval default and disables elevation after disconnect', async () => {
+  it('switches to request-approval mode through the Composer menu', async () => {
+    render(<AgentPermissionSelector sessionId="session-1" variant="composer" />);
+    fireEvent.click(screen.getByRole('button', { name: 'agent.permission.composerAria' }));
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: '请求批准' }));
+    expect(useAgentPermissionStore.getState().getMode('session-1')).toBe('requestApproval');
+  });
+
+  it('closes an open full-access confirmation when the connection target changes', async () => {
+    const { rerender } = render(<AgentPermissionSelector sessionId="session-1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'agent.permission' }));
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /^完全访问权限/ }));
+    expect(await screen.findByRole('alertdialog')).toBeVisible();
+
+    useTerminalStore.getState().addSession({
+      sessionId: 'session-2',
+      title: 'Staging',
+      host: 'staging.example.com',
+      port: 22,
+      username: 'deployer',
+    }, 'profile-2');
+    useTerminalStore.getState().setStatus('session-2', { sessionId: 'session-2', status: 'connected' });
+    rerender(<AgentPermissionSelector sessionId="session-2" />);
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(useAgentPermissionStore.getState().getMode('session-2')).toBe('autoApproveReadOnly');
+  });
+
+  it('returns to the approve-for-me default and disables elevation after disconnect', async () => {
     useAgentPermissionStore.getState().setMode('session-1', 'fullAccess');
     render(<AgentPermissionSelector sessionId="session-1" />);
     useTerminalStore.getState().setClosed('session-1', {

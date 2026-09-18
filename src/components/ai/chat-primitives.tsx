@@ -26,7 +26,6 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
   useMessageScroller,
-  useMessageScrollerScrollable,
 } from '@/components/ui/message-scroller';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiScrollAnchor } from '@/lib/ai/panel-route';
@@ -37,12 +36,16 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 interface MessageScrollerProps {
   children: React.ReactNode;
   followKey: string;
-  followEndKey?: string;
+  turnAnchorKey?: string;
   className?: string;
   contentClassName?: string;
   ariaLabel?: string;
   initialAnchor?: AiScrollAnchor;
   onAnchorChange?: (anchor: AiScrollAnchor) => void;
+}
+
+interface ConversationScrollerProps extends MessageScrollerProps {
+  restoreToEnd?: boolean;
 }
 
 const SCROLL_EDGE_THRESHOLD = 8;
@@ -56,31 +59,39 @@ function wantsScrollAnchor(child: React.ReactNode): boolean {
     && (child.props.scrollAnchor ?? child.props.role === 'user');
 }
 
+function messageItemId(child: React.ReactNode, index: number): string {
+  if (!React.isValidElement<{ scrollItemId?: string }>(child)) return String(index);
+  return child.props.scrollItemId
+    ?? (child.key === null ? String(index) : String(child.key));
+}
+
 export const MessageScroller: React.FC<MessageScrollerProps> = (props) => {
   const openingAnchor = useRef(props.initialAnchor);
+  const restoreToEnd = openingAnchor.current?.atBottom === true;
   // Following the latest output is navigation state too. Restoring it through
   // scrollToMessage would leave the primitive in its detached jump mode.
-  const readingAnchor = openingAnchor.current?.atBottom ? undefined : openingAnchor.current;
+  const readingAnchor = restoreToEnd ? undefined : openingAnchor.current;
   return (
     <MessageScrollerProvider
       autoScroll
       defaultScrollPosition={readingAnchor ? 'start' : 'end'}
       scrollEdgeThreshold={SCROLL_EDGE_THRESHOLD}
     >
-      <ConversationScroller {...props} initialAnchor={readingAnchor} />
+      <ConversationScroller {...props} initialAnchor={readingAnchor} restoreToEnd={restoreToEnd} />
     </MessageScrollerProvider>
   );
 };
 
-const ConversationScroller: React.FC<MessageScrollerProps> = ({
+const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   children,
   followKey,
-  followEndKey,
+  turnAnchorKey,
   className,
   contentClassName,
   ariaLabel,
   initialAnchor,
   onAnchorChange,
+  restoreToEnd = false,
 }) => {
   const { t } = useI18n();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -91,39 +102,18 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
   const restoreFrameRef = useRef<number | null>(null);
   const [positionReady, setPositionReady] = useState(false);
   const { scrollToEnd, scrollToMessage, scrollToStart } = useMessageScroller();
-  const { end: canScrollToEnd } = useMessageScrollerScrollable();
-  const followEndKeyRef = useRef(followEndKey);
+  const turnAnchorKeyRef = useRef(
+    initialAnchor === undefined && !restoreToEnd ? undefined : turnAnchorKey,
+  );
   const childItems = React.Children.toArray(children);
-  const anchorDecisionsRef = useRef<Map<string, boolean> | null>(null);
-  // Existing user rows retain their anchors. A newly appended user row anchors
-  // only when the reader had already left the live edge before it appeared.
-  if (anchorDecisionsRef.current === null) {
-    anchorDecisionsRef.current = new Map(childItems.flatMap((child, index) => {
-      const itemKey = React.isValidElement(child) && child.key !== null ? child.key : index;
-      return wantsScrollAnchor(child) ? [[String(itemKey), true] as const] : [];
-    }));
-  }
-  const anchorDecisions = anchorDecisionsRef.current;
-  const newAnchorDecisions: Array<readonly [string, boolean]> = [];
   const messageItems = childItems.map((child, index) => {
     const itemKey = React.isValidElement(child) && child.key !== null ? child.key : index;
-    const messageId = String(itemKey);
-    const wantsAnchor = wantsScrollAnchor(child);
-    const scrollAnchor = wantsAnchor && (anchorDecisions.get(messageId) ?? canScrollToEnd);
-    if (wantsAnchor && !anchorDecisions.has(messageId)) {
-      newAnchorDecisions.push([messageId, scrollAnchor]);
-    }
+    const messageId = messageItemId(child, index);
     return (
-      <MessageScrollerItem key={itemKey} messageId={messageId} scrollAnchor={scrollAnchor}>
+      <MessageScrollerItem key={itemKey} messageId={messageId} scrollAnchor={wantsScrollAnchor(child)}>
         {child}
       </MessageScrollerItem>
     );
-  });
-
-  useLayoutEffect(() => {
-    for (const [messageId, scrollAnchor] of newAnchorDecisions) {
-      anchorDecisions.set(messageId, scrollAnchor);
-    }
   });
 
   const cancelRestore = useCallback(() => {
@@ -137,14 +127,17 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
   }, [cancelRestore]);
 
   useLayoutEffect(() => {
-    const previous = followEndKeyRef.current;
-    followEndKeyRef.current = followEndKey;
-    if (followEndKey === undefined || followEndKey === previous) return;
+    const previous = turnAnchorKeyRef.current;
+    turnAnchorKeyRef.current = turnAnchorKey;
+    if (turnAnchorKey === undefined || turnAnchorKey === previous) return;
     cancelRestore();
-    followingIntentRef.current = true;
-    scrollToEnd();
-    setPositionReady(true);
-  }, [cancelRestore, followEndKey, scrollToEnd]);
+    followingIntentRef.current = false;
+    scrollToMessage(turnAnchorKey, { align: 'start' });
+    // On the initial mount, keep the transcript hidden until the deferred
+    // content-visibility correction below has replayed the anchor. Later turns
+    // are already laid out and can be revealed immediately.
+    if (restoredAnchorRef.current) setPositionReady(true);
+  }, [cancelRestore, scrollToMessage, turnAnchorKey]);
 
   const handlePointerDown = useCallback(() => {
     interruptRestore();
@@ -158,8 +151,9 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
     pointerScrollStartRef.current = null;
     if (viewport.scrollTop < start && !isNearBottom(viewport)) {
       followingIntentRef.current = false;
-      // The primitive can still consider a recent programmatic scroll active.
-      // Release it only after an actual pointer-driven upward scroll.
+      // A native scrollbar drag can overlap the primitive's short
+      // programmatic-scroll grace period. Forward the real upward intent so
+      // the primitive releases follow mode immediately.
       viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
     }
   }, []);
@@ -171,8 +165,8 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
       return;
     }
     if (viewport && (followingIntentRef.current || isNearBottom(viewport))) {
-      // The primitive treats every wheel event as a request to stop following,
-      // even when a downward gesture only overlaps a pending streaming resize.
+      // Downward input at the live edge should not cancel follow merely
+      // because a streaming resize has not been observed yet.
       event.stopPropagation();
     }
   }, []);
@@ -225,7 +219,12 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
     const item = node?.closest<HTMLElement>('[data-slot="message-scroller-item"]');
     let restoreAnchor: () => void;
     if (!initialAnchor) {
-      restoreAnchor = () => { scrollToEnd(); };
+      // A new turn follows the reading-oriented behavior used by leading chat
+      // products: keep the submitted prompt at the top while output grows
+      // below it. With no turn yet, retain the usual live-edge default.
+      restoreAnchor = turnAnchorKey && !restoreToEnd
+        ? () => { scrollToMessage(turnAnchorKey, { align: 'start' }); }
+        : () => { scrollToEnd(); };
     } else if (item?.dataset.messageId) {
       const messageId = item.dataset.messageId;
       const paddingTop = Number.parseFloat(getComputedStyle(content).paddingBlockStart) || 0;
@@ -238,7 +237,6 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
         // A near-end position must also resume following, including anchors
         // saved before atBottom was recorded.
         if ((spacer && !spacer.hidden) || isNearBottom(scrollport)) {
-          followingIntentRef.current = true;
           scrollToEnd();
         }
       };
@@ -261,7 +259,7 @@ const ConversationScroller: React.FC<MessageScrollerProps> = ({
     // Saved positions are restored once on mount. Prepending and streaming
     // remain owned by MessageScroller, without replaying saved scroll events.
     restoredAnchorRef.current = true;
-  }, [children, initialAnchor, scrollToEnd, scrollToMessage, scrollToStart]);
+  }, [children, initialAnchor, restoreToEnd, scrollToEnd, scrollToMessage, scrollToStart, turnAnchorKey]);
 
   return (
     <MessageScrollerPrimitive

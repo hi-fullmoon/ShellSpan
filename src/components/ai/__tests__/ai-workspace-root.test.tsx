@@ -236,6 +236,134 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(composer).toHaveTextContent('Unsent draft');
   });
 
+  it('shows live subagent information in the header and opens the child transcript', async () => {
+    const user = userEvent.setup();
+    const base = agentView('running');
+    const child = {
+      id: 'session-child',
+      kind: 'agent' as const,
+      title: 'Inspect the existing page',
+      updatedAt: '2026-09-02T08:00:03.000Z',
+      status: 'running' as const,
+      scopeKey: base.summary.scopeKey,
+      parentSessionId: base.summary.id,
+      subagent: {
+        descriptorId: 'descriptor-child',
+        role: 'explorer' as const,
+        continuable: false,
+        depth: 1,
+      },
+      archived: false,
+    };
+    const view: AiSessionView = {
+      ...base,
+      subagents: [{
+        sessionId: child.id,
+        parentSessionId: base.summary.id,
+        descriptorId: child.subagent.descriptorId,
+        role: child.subagent.role,
+        continuable: child.subagent.continuable,
+        depth: child.subagent.depth,
+        status: 'running',
+      }],
+    };
+    const onOpen = vi.fn();
+    render(
+      <AiWorkspaceRoot
+        view={view}
+        scope="workbench"
+        sessions={[base.summary, child]}
+        onOpenSession={onOpen}
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: '1 subagent, 1 running' });
+    expect(trigger).toBeVisible();
+    await user.click(trigger);
+    const catalog = await screen.findByRole('dialog', { name: 'Subagent sessions' });
+    expect(within(catalog).getByText('Inspect the existing page')).toBeVisible();
+    expect(within(catalog).getByText('Explorer')).toBeVisible();
+    expect(within(catalog).getByText('One-shot · In progress')).toBeVisible();
+
+    await user.click(within(catalog).getByRole('button', {
+      name: 'Open subagent “Inspect the existing page”: Explorer, One-shot, In progress',
+    }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: child.id }));
+  });
+
+  it('counts nested descendants and keeps lineage navigation on a leaf subagent', async () => {
+    const user = userEvent.setup();
+    const base = agentView('running');
+    const child = {
+      ...base.summary,
+      id: 'session-child',
+      title: 'Inspect implementation',
+      parentSessionId: base.summary.id,
+      subagent: {
+        descriptorId: 'descriptor-child',
+        role: 'explorer',
+        continuable: true,
+        depth: 1,
+      },
+    };
+    const grandchild = {
+      ...base.summary,
+      id: 'session-grandchild',
+      title: 'Verify the result',
+      parentSessionId: child.id,
+      subagent: {
+        descriptorId: 'descriptor-grandchild',
+        role: 'verifier',
+        continuable: false,
+        depth: 2,
+      },
+    };
+    const onOpen = vi.fn();
+    const { rerender } = render(
+      <AiWorkspaceRoot
+        view={{
+          ...base,
+          subagents: [{
+            sessionId: child.id,
+            parentSessionId: base.summary.id,
+            descriptorId: child.subagent.descriptorId,
+            role: child.subagent.role,
+            continuable: child.subagent.continuable,
+            depth: child.subagent.depth,
+            status: 'running',
+          }],
+        }}
+        scope="workbench"
+        sessions={[base.summary, child, grandchild]}
+        onOpenSession={onOpen}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '2 subagents, 2 running' }));
+    const catalog = await screen.findByRole('dialog', { name: 'Subagent sessions' });
+    expect(within(catalog).getByText('Inspect implementation')).toBeVisible();
+    expect(within(catalog).getByText('Verify the result')).toBeVisible();
+    await user.keyboard('{Escape}');
+
+    rerender(
+      <AiWorkspaceRoot
+        view={{ ...base, summary: grandchild, subagents: [] }}
+        scope="workbench"
+        sessions={[base.summary, child, grandchild]}
+        onOpenSession={onOpen}
+      />,
+    );
+    const lineage = screen.getByRole('button', { name: 'View the lineage of subagent “Verify the result”' });
+    expect(lineage).toBeVisible();
+    await user.click(lineage);
+    const leafCatalog = await screen.findByRole('dialog', { name: 'Subagent sessions' });
+    expect(within(leafCatalog).getByText('Current')).toBeVisible();
+    await user.click(within(leafCatalog).getByRole('button', {
+      name: 'Open root session “Check nginx and report evidence.”',
+    }));
+    expect(onOpen).toHaveBeenCalledWith(base.summary);
+  });
+
   it('keeps the stage6a question actionable outside collapsed process and preserves ordinary draft', async () => {
     const base = agentView();
     const pendingQuestion: NonNullable<AiSessionView['pendingQuestion']> = {
@@ -372,7 +500,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(runningIndicator?.querySelector('[data-slot="marker-content"]')).toHaveClass('shimmer');
   });
 
-  it('resumes live-edge scrolling when an Agent user submits a new turn', async () => {
+  it('keeps one stable top anchor while an optimistic Agent turn commits', async () => {
     const view = agentView('running');
     const previousUser = view.nodes.find((node) => node.kind === 'userMessage');
     if (!previousUser) throw new Error('Agent fixture has no user message');
@@ -385,7 +513,6 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     };
     const { container, rerender } = render(<AiWorkspaceRoot view={view} scope="terminal" />);
     const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
-    let scrollHeight = 600;
     let scrollTop = 100;
     const rect = (top: number) => ({
       top, bottom: top + 100, height: 100, left: 0, right: 320, width: 320,
@@ -394,40 +521,27 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const scrollTo = vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); });
     Object.defineProperties(viewport, {
       clientHeight: { configurable: true, value: 100 },
-      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollHeight: { configurable: true, value: 600 },
       scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
       scrollTo: { configurable: true, value: scrollTo },
       getBoundingClientRect: { configurable: true, value: () => rect(0) },
     });
-    const installItemRects = (): void => {
-      const items = container.querySelectorAll<HTMLElement>('[data-slot="message-scroller-item"]');
-      items.forEach((item, index) => {
-        item.getBoundingClientRect = () => rect((index === items.length - 1 ? scrollHeight - 100 : index * 100) - scrollTop);
-      });
-    };
-    installItemRects();
     fireEvent.wheel(viewport, { deltaY: -100 });
     fireEvent.scroll(viewport);
 
-    scrollHeight = 1_400;
     rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, nextUser] }} scope="terminal" />);
-    installItemRects();
+    const optimisticItem = container.querySelector(`[data-ai-node-key="${nextUser.key}"]`)
+      ?.closest('[data-slot="message-scroller-item"]');
+    expect(optimisticItem).toHaveAttribute('data-scroll-anchor', 'true');
+    expect(optimisticItem).toHaveAttribute('data-message-id', 'user:next-submission');
 
-    await waitFor(() => expect(scrollTop).toBe(1_300));
-    expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', top: 1_300 });
-    expect(container.querySelector(`[data-ai-node-key="${nextUser.key}"]`)?.closest('[data-slot="message-scroller-item"]'))
-      .toHaveAttribute('data-scroll-anchor', 'false');
-
-    scrollTop = 400;
-    fireEvent.wheel(viewport, { deltaY: -100 });
-    fireEvent.scroll(viewport);
-    scrollTo.mockClear();
     const committedUser = { ...nextUser, key: 'user:next-submission', clientSubmissionId: undefined, delivery: 'committed' as const };
     rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, committedUser] }} scope="terminal" />);
-    installItemRects();
-    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
-    expect(scrollTo).not.toHaveBeenCalled();
-    expect(scrollTop).toBe(400);
+    const committedItem = container.querySelector(`[data-ai-node-key="${committedUser.key}"]`)
+      ?.closest('[data-slot="message-scroller-item"]');
+    expect(committedItem).toBe(optimisticItem);
+    expect(committedItem).toHaveAttribute('data-scroll-anchor', 'true');
+    expect(committedItem).toHaveAttribute('data-message-id', 'user:next-submission');
   });
 
   it('keeps one collapsed reasoning row in Ask while hiding the full Agent process', async () => {
@@ -443,7 +557,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const reasoning = screen.getByRole('button', { name: 'Thought' });
     expect(reasoning).toHaveAttribute('aria-expanded', 'false');
     expect(container.querySelector('[data-ai-node-kind="userMessage"]')?.closest('[data-slot="message-scroller-item"]'))
-      .toHaveAttribute('data-scroll-anchor', 'false');
+      .toHaveAttribute('data-scroll-anchor', 'true');
     expect(container.querySelector('[data-ai-node-kind="turnProcess"]')).toBeNull();
     expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toBeInTheDocument();
     const footer = screen.getByLabelText('Turn statistics');

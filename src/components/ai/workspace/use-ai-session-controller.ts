@@ -5,7 +5,7 @@ import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
 import { questionKey } from '@/types/agent-question';
 import { useImageDraft } from './use-image-draft';
 import { sessionProviderConfig } from '@/lib/ai/session-settings';
-import { listAllAiSessions } from '@/lib/ai/session-list';
+import { isTopLevelAiSession, listAllAiSessions } from '@/lib/ai/session-list';
 import type { AiProviderConfig } from '@/types/ai';
 import { requireVision } from '@/lib/ai/vision-contract';
 import { resolveAiSubmission } from '@/lib/ai/submission-policy';
@@ -23,8 +23,11 @@ import {
 } from '@/lib/ai/optimistic-submission';
 import { normalizeAiSessionError, sessionArchiveErrorMessage } from '@/lib/ai/session-error';
 import { canContinueOnReconnectedTerminal, isDirectReconnectedTerminal } from '@/lib/ai/reconnected-terminal';
-import type { AiConversationNode } from '@/lib/ai/conversation-node';
-import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
+import {
+  latestTurnReachedStepBudget,
+  type AiConversationNode,
+  type AiConversationNodeOf,
+} from '@/lib/ai/conversation-node';
 import {
   createAiWorkspaceNavigationState,
   sessionRouteKey,
@@ -35,6 +38,7 @@ import type {
   AiCreateSessionInput,
   AiInboxMutationInput,
   AiInboxItem,
+  AiPendingApproval,
   AiSessionAdapter,
   AiSessionSummary,
   AiSessionView,
@@ -113,6 +117,9 @@ export interface AiSessionController {
   readonly deletingSessionId: string | null;
   readonly approvalDecision: 'approve' | 'reject' | null;
   readonly approvalError: string | null;
+  readonly approvalArguments: unknown | null;
+  readonly approvalArgumentsLoading: boolean;
+  readonly approvalArgumentsError: string | null;
   readonly loadingOlder: boolean;
   readonly queueMutation: AiQueueMutationState | null;
   readonly renamingSessionId: string | null;
@@ -121,7 +128,7 @@ export interface AiSessionController {
   readonly setBusyPreference: (value: 'queue' | 'steer') => void;
   readonly submit: (gesture: 'keyboard' | 'primary', accelerated?: boolean) => void;
   readonly stop: () => void;
-  readonly retryTurn: () => void;
+  readonly continueBudgetedTurn: () => void;
   readonly continueOnReconnectedTerminal: (() => void) | null;
   readonly historicalContinuationAvailable: boolean;
   readonly historicalContinuationBusy: boolean;
@@ -182,6 +189,38 @@ function permissionMode(mode: AgentPermissionMode): AgentSessionPermissionMode {
   if (mode === 'autoApproveReadOnly') return 'scopedAutopilot';
   if (mode === 'fullAccess') return 'operator';
   return 'requestApproval';
+}
+
+function permissionModeForUi(mode: AgentSessionPermissionMode | undefined): AgentPermissionMode {
+  if (mode === 'scopedAutopilot') return 'autoApproveReadOnly';
+  if (mode === 'operator') return 'fullAccess';
+  return 'requestApproval';
+}
+
+function approvalIdentityKey(approval: AiPendingApproval): string {
+  return JSON.stringify([
+    approval.sessionId,
+    approval.turnId,
+    approval.stepId,
+    approval.requestId,
+    approval.callId,
+    approval.approvalId,
+  ]);
+}
+
+function needsVolatileApprovalArguments(approval: AiPendingApproval): boolean {
+  if (approval.toolName !== 'write_terminal_input' && approval.toolName !== 'wait_terminal') {
+    return false;
+  }
+  if (!approval.arguments || typeof approval.arguments !== 'object' || Array.isArray(approval.arguments)) {
+    return false;
+  }
+  const arguments_ = approval.arguments as Record<string, unknown>;
+  if (arguments_.contentPersisted !== false) return false;
+  if (approval.toolName === 'write_terminal_input') {
+    return arguments_.inputKind === 'text' || arguments_.inputKind === 'paste';
+  }
+  return arguments_.textProvided === true;
 }
 
 function sameTarget(left: AgentSessionTarget | undefined, right: AgentSessionTarget | undefined): boolean {
@@ -255,6 +294,11 @@ export function useAiSessionController({
   const deletePendingRef = useRef(false);
   const [approvalDecision, setApprovalDecision] = useState<'approve' | 'reject' | null>(null);
   const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [approvalArgumentsPreview, setApprovalArgumentsPreview] = useState<Readonly<{
+    key: string;
+    status: 'loading' | 'ready' | 'error';
+    arguments: unknown | null;
+  }> | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [queueMutation, setQueueMutation] = useState<AiQueueMutationState | null>(null);
   const queueOperationRef = useRef<{ input: AiInboxMutationInput; pending: boolean } | null>(null);
@@ -354,7 +398,11 @@ export function useAiSessionController({
   const terminalUnavailableReason = scope === 'terminal' && !canStartAgent
     ? t('agent.availability.needsTerminal')
     : null;
-  const hasProvider = Boolean(view?.snapshot.value.header.modelSelection?.modelId.trim() || provider?.model.trim());
+  const hasProvider = Boolean(
+    view?.snapshot.value.header.modelSelection?.modelId.trim()
+    || view?.snapshot.value.header.subagent?.provider.modelId.trim()
+    || provider?.model.trim(),
+  );
 
   const updateOptimistic = useCallback((updater: (
     current: readonly AiOptimisticSubmission[],
@@ -415,10 +463,13 @@ export function useAiSessionController({
     const next = createAiComposerState({
       sessionId: summary?.id ?? null,
       runtimeStatus: summary?.status ?? 'idle',
-      terminal: summary !== undefined && ['completed', 'cancelled', 'failed'].includes(summary.status),
+      terminal: summary !== undefined && (
+        summary.subagent?.continuable === false
+        || ['completed', 'cancelled', 'failed'].includes(summary.status)
+      ),
       waitingApproval: summary?.status === 'waiting',
       draft: useAiDraftStore.getState().drafts[key] ?? '',
-      preferredBusyMode: composerRef.current.preferredBusyMode,
+      preferredBusyMode: summary?.subagent ? 'queue' : composerRef.current.preferredBusyMode,
     });
     composerRef.current = next;
     setComposer(next);
@@ -705,7 +756,7 @@ export function useAiSessionController({
           archived: false,
           limit: 100,
         }, canPublish);
-        sessionId = summaries?.[0]?.id ?? null;
+        sessionId = summaries?.find((summary) => isTopLevelAiSession(summary, summaries))?.id ?? null;
       }
       if (!canPublish() || !sessionId) return;
       const publish = (next: AiSessionView): void => {
@@ -753,7 +804,8 @@ export function useAiSessionController({
       sessionId: view?.summary.id ?? null,
       status: view?.status ?? 'idle',
       terminal: view !== null
-        && (view.summary.archived || Boolean(view.snapshot.value.header.subagent)
+        && (view.summary.archived
+          || view.snapshot.value.header.subagent?.continuable === false
           || (scope === 'terminal'
             && view.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId)),
       waitingApproval: view?.pendingApproval !== null && view?.pendingApproval !== undefined,
@@ -814,7 +866,8 @@ export function useAiSessionController({
       : visibleView
   ), [continuationSourceId, historicalSources, visibleView]);
   const sessionProviderResolution = useMemo(() => {
-    const selection = visibleView?.snapshot.value.header.modelSelection;
+    const selection = visibleView?.snapshot.value.header.modelSelection
+      ?? visibleView?.snapshot.value.header.subagent?.provider;
     if (!selection) return { provider: undefined, error: null };
     try {
       return { provider: sessionProviderConfig(selection, providers), error: null };
@@ -822,26 +875,64 @@ export function useAiSessionController({
       return { provider: undefined, error: normalizeAiSessionError(error).message };
     }
   }, [providers, visibleView]);
-  const readOnlySession = scope === 'terminal' && Boolean(visibleView
+  const oneShotSubagent = visibleView?.snapshot.value.header.subagent?.continuable === false;
+  const historicalTargetUnavailable = scope === 'terminal' && Boolean(visibleView
     && visibleView.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId);
+  const readOnlySession = oneShotSubagent || historicalTargetUnavailable;
   const canContinueReconnectedView = scope === 'terminal' && visibleView?.snapshot.kind === 'agent'
     && canContinueOnReconnectedTerminal(visibleView.snapshot.value, activeTerminal) && hasProvider;
-  const canContinueHistoricalView = scope === 'terminal' && readOnlySession
+  const canContinueHistoricalView = scope === 'terminal' && historicalTargetUnavailable
     && visibleView?.snapshot.kind === 'agent'
     && Boolean(provider)
     && canContinueHistoricalConversation(visibleView.snapshot.value, activeTerminal);
-  const agentUnavailableReason = canContinueHistoricalView ? terminalUnavailableReason
-    : sessionProviderResolution.error
-      ?? (readOnlySession && !canContinueReconnectedView
+  const agentUnavailableReason = oneShotSubagent
+    ? t('ai.workspace.subagents.oneShotReadOnly')
+    : canContinueHistoricalView ? terminalUnavailableReason
+      : sessionProviderResolution.error
+      ?? (historicalTargetUnavailable && !canContinueReconnectedView
         ? t('ai.workspace.sessions.previousTerminalReadOnly') : terminalUnavailableReason);
   const pendingNodes = useMemo(() => (
     view ? [] : withOptimisticConversationNodes([], optimistic, workspaceScopeKey, null)
   ), [optimistic, view, workspaceScopeKey]);
+  const pendingApprovalKey = view?.pendingApproval
+    ? approvalIdentityKey(view.pendingApproval)
+    : null;
 
   useEffect(() => {
     setApprovalDecision(null);
     setApprovalError(null);
-  }, [view?.pendingApproval?.approvalId]);
+    const approval = view?.pendingApproval;
+    if (!approval || !needsVolatileApprovalArguments(approval)) {
+      setApprovalArgumentsPreview(null);
+      return;
+    }
+    const key = approvalIdentityKey(approval);
+    if (!adapter.loadApprovalArguments) {
+      setApprovalArgumentsPreview({ key, status: 'error', arguments: null });
+      return;
+    }
+    setApprovalArgumentsPreview({ key, status: 'loading', arguments: null });
+    let stale = false;
+    void adapter.loadApprovalArguments(approval).then((arguments_) => {
+      const current = viewRef.current?.pendingApproval;
+      if (stale || !current || approvalIdentityKey(current) !== key) return;
+      if (arguments_ === null) {
+        setApprovalArgumentsPreview({ key, status: 'error', arguments: null });
+      } else {
+        setApprovalArgumentsPreview({ key, status: 'ready', arguments: arguments_ });
+      }
+    }, () => {
+      if (!stale && viewRef.current?.pendingApproval
+        && approvalIdentityKey(viewRef.current.pendingApproval) === key) {
+        setApprovalArgumentsPreview({ key, status: 'error', arguments: null });
+      }
+    });
+    return () => { stale = true; };
+  }, [adapter, pendingApprovalKey]);
+
+  const approvalArgumentsPreviewForCurrent = approvalArgumentsPreview?.key === pendingApprovalKey
+    ? approvalArgumentsPreview
+    : null;
 
   const refreshSessions = useCallback(async (): Promise<void> => {
     const requestId = ++sessionListRequestRef.current;
@@ -873,6 +964,17 @@ export function useAiSessionController({
     setNavigation((current) => ({ ...current, route: { kind: 'sessions' } }));
     void refreshSessions();
   }, [claimWorkspace, refreshSessions]);
+
+  const subagentDirectoryKey = view
+    ? [
+        view.snapshot.value.header.parentSessionId ?? '',
+        ...(view.subagents ?? []).map((subagent) => subagent.sessionId),
+      ].join('\u0000')
+    : '';
+  useEffect(() => {
+    if (!subagentDirectoryKey) return;
+    void refreshSessions();
+  }, [refreshSessions, subagentDirectoryKey]);
 
   const openSession = useCallback((summary: AiSessionSummary): void => {
     claimWorkspace();
@@ -1244,8 +1346,9 @@ export function useAiSessionController({
     pendingNodes,
     composer,
     selectedProvider: canContinueHistoricalView ? provider : sessionProviderResolution.provider,
-    selectedPermission: canContinueHistoricalView ? undefined : visibleView ? (visibleView.snapshot.value.header.permissionMode === 'operator'
-      ? 'fullAccess' : 'autoApproveReadOnly') : undefined,
+    selectedPermission: canContinueHistoricalView || !visibleView
+      ? undefined
+      : permissionModeForUi(visibleView.snapshot.value.header.permissionMode),
     selectedExecutionSurface: canContinueHistoricalView ? newExecutionSurface : visibleView?.snapshot.value.header.executionSurface
       ?? newExecutionSurface,
     settingsBusy,
@@ -1295,6 +1398,16 @@ export function useAiSessionController({
     deletingSessionId,
     approvalDecision,
     approvalError,
+    approvalArguments: approvalArgumentsPreviewForCurrent?.status === 'ready'
+      ? approvalArgumentsPreviewForCurrent.arguments
+      : null,
+    approvalArgumentsLoading: Boolean(view?.pendingApproval
+      && needsVolatileApprovalArguments(view.pendingApproval)
+      && approvalArgumentsPreviewForCurrent?.status !== 'ready'
+      && approvalArgumentsPreviewForCurrent?.status !== 'error'),
+    approvalArgumentsError: approvalArgumentsPreviewForCurrent?.status === 'error'
+      ? t('ai.workspace.approval.previewUnavailable')
+      : null,
     loadingOlder,
     queueMutation,
     renamingSessionId,
@@ -1304,6 +1417,8 @@ export function useAiSessionController({
     submit: (gesture, accelerated = false) => {
       claimWorkspace();
       const context = submissionContextRef.current;
+      const effectiveAccelerated = accelerated
+        && !viewRef.current?.snapshot.value.header.subagent;
       if (scope === 'terminal' && viewRef.current?.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId
         && viewRef.current?.snapshot.kind === 'agent'
         && canContinueHistoricalConversation(viewRef.current.snapshot.value, activeTerminal)) {
@@ -1366,7 +1481,7 @@ export function useAiSessionController({
       dispatch({
         type: 'submit.requested',
         gesture,
-        accelerated,
+        accelerated: effectiveAccelerated,
         clientOperationId,
         now: now(),
         hasProvider,
@@ -1374,10 +1489,12 @@ export function useAiSessionController({
       });
     },
     stop: () => dispatch({ type: 'stop.requested' }),
-    retryTurn: () => {
-      if (viewRef.current?.status !== 'failed' || !canStartAgent) return;
+    continueBudgetedTurn: () => {
+      const current = viewRef.current;
+      if (!canStartAgent || current?.status !== 'idle'
+        || !latestTurnReachedStepBudget(current.nodes)) return;
       dispatch({ type: 'submit.requested', gesture: 'primary', accelerated: false,
-        content: t('ai.workspace.retryTurnPrompt'), clientOperationId: operationId(),
+        content: t('ai.workspace.continueBudgetedTurnPrompt'), clientOperationId: operationId(),
         now: Date.now(), hasProvider, canCreateSession: canStartAgent });
     },
     continueOnReconnectedTerminal: reconnectedSnapshot ? () => {

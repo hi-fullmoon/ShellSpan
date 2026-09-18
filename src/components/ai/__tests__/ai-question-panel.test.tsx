@@ -220,13 +220,30 @@ describe('Stage 6A question form', () => {
         question={{
           ...question,
           status: 'answered',
-          answers: [{ id: 'choice', selected: ['B'] }],
+          questions: [
+            question.questions[0],
+            {
+              id: 'path',
+              question: 'Where should it be created?',
+              multi_select: false,
+            },
+            {
+              id: 'scope',
+              question: 'Which features should it include?',
+              multi_select: false,
+            },
+          ],
+          answers: [
+            { id: 'choice', selected: ['B'] },
+            { id: 'path', selected: [], custom: '/root/todo-app' },
+            { id: 'scope', selected: ['Minimal CRUD'] },
+          ],
         }}
       />,
     );
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     const trigger = screen.getByRole('button', {
-      name: 'Question 1/1 Answered',
+      name: 'Question 3/3 Answered',
     });
     expect(trigger).toBeVisible();
     expect(trigger).not.toHaveClass('ai-turn-process-trigger');
@@ -246,9 +263,24 @@ describe('Stage 6A question form', () => {
     const historyContent = historyCard?.querySelector<HTMLElement>(
       '[data-slot="card-content"]',
     );
-    expect(historyCard).toHaveClass('ml-[22px]', 'py-1.5');
-    expect(historyContent).toHaveClass('px-2.5');
-    expect(historyCard!.querySelector<HTMLElement>('[data-slot="field-set"]')).toHaveClass('gap-1');
+    expect(historyCard).toHaveClass('ml-[22px]', 'h-fit', 'shrink-0', 'py-1.5');
+    expect(historyContent).toHaveClass('flex-none', 'px-2.5');
+    const historyList = historyCard!.querySelector<HTMLElement>(
+      '[data-slot="field-group"]',
+    );
+    const historyItems = historyCard!.querySelectorAll<HTMLElement>(
+      '[data-slot="field-set"]',
+    );
+    expect(historyList).toHaveClass(
+      'grid',
+      'auto-rows-max',
+      'content-start',
+      'gap-1',
+    );
+    expect(historyItems).toHaveLength(3);
+    historyItems.forEach((item) => {
+      expect(item).toHaveClass('flex-none', 'gap-0');
+    });
     const panel = document.querySelector<HTMLElement>(
       '.ai-question-history > [data-slot="collapsible-content"]',
     );

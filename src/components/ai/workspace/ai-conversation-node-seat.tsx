@@ -659,6 +659,7 @@ export const AiConversationNodeSeat = React.memo(function AiConversationNodeSeat
   readonly node: AiConversationNode;
   readonly renderers?: AiConversationNodeRendererMap;
   readonly scrollAnchor?: boolean;
+  readonly scrollItemId?: string;
   readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
   readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
 }) {

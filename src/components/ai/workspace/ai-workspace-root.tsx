@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef } from 'react';
 import { MessageCircleQuestionIcon, SquareTerminalIcon } from 'lucide-react';
 
 import { useI18n } from '@/hooks/useI18n';
-import type { AiConversationNode } from '@/lib/ai/conversation-node';
+import {
+  latestTurnReachedStepBudget,
+  type AiConversationNode,
+} from '@/lib/ai/conversation-node';
 import { findConversationTool } from '@/lib/ai/conversation-tool';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiInboxItem, AiSessionView } from '@/lib/ai/session-adapter';
@@ -21,6 +24,10 @@ import { AiConversation } from './ai-conversation';
 import { aiAskConversationNodeRenderers } from './ai-conversation-node-seat';
 import { AiSessionHeader } from './ai-session-header';
 import { AiSessionBrowser } from './ai-session-browser';
+import {
+  AiSubagentCatalog,
+  type AiSubagentCatalogEntry,
+} from './ai-subagent-catalog';
 import { AiToolDetails } from './ai-tool-details';
 import { AiArtifactDetails } from './ai-artifact-details';
 import type { AiQueueMutationState } from './use-ai-session-controller';
@@ -84,6 +91,105 @@ function omitSystemPrompts(nodes: readonly AiConversationNode[]): readonly AiCon
   return nodes.filter((node) => node.kind !== 'systemPrompt');
 }
 
+interface AiSubagentLineage {
+  readonly root: AiSessionSummary;
+  readonly current: AiSessionSummary;
+  readonly entries: readonly AiSubagentCatalogEntry[];
+}
+
+function subagentLineage(
+  view: AiSessionView | null,
+  sessions: readonly AiSessionSummary[],
+): AiSubagentLineage | null {
+  if (!view) return null;
+  const byId = new Map(sessions.map((summary) => [summary.id, summary]));
+  byId.set(view.summary.id, { ...view.summary, status: view.status });
+  const projected = new Map(
+    (view.subagents ?? []).map((subagent) => [subagent.sessionId, subagent]),
+  );
+  for (const activity of projected.values()) {
+    const existing = byId.get(activity.sessionId);
+    byId.set(activity.sessionId, existing
+      ? {
+          ...existing,
+          status: activity.status,
+          parentSessionId: activity.parentSessionId ?? existing.parentSessionId,
+          subagent: {
+            descriptorId: activity.descriptorId ?? existing.subagent?.descriptorId ?? activity.sessionId,
+            role: activity.role,
+            continuable: activity.continuable,
+            depth: activity.depth,
+          },
+        }
+      : {
+          id: activity.sessionId,
+          kind: 'agent',
+          title: activity.sessionId,
+          updatedAt: view.summary.updatedAt,
+          status: activity.status,
+          scopeKey: view.summary.scopeKey,
+          targetId: view.summary.targetId,
+          parentSessionId: activity.parentSessionId ?? view.summary.id,
+          subagent: {
+            descriptorId: activity.descriptorId ?? activity.sessionId,
+            role: activity.role,
+            continuable: activity.continuable,
+            depth: activity.depth,
+          },
+          archived: false,
+        });
+  }
+
+  const current = byId.get(view.summary.id) ?? view.summary;
+  let root = current;
+  const ancestorIds = new Set([current.id]);
+  while (root.subagent && root.parentSessionId) {
+    const parent = byId.get(root.parentSessionId);
+    if (!parent || ancestorIds.has(parent.id)) break;
+    ancestorIds.add(parent.id);
+    root = parent;
+  }
+
+  const children = new Map<string, AiSessionSummary[]>();
+  for (const summary of byId.values()) {
+    if (!summary.subagent || !summary.parentSessionId) continue;
+    const siblings = children.get(summary.parentSessionId);
+    if (siblings) siblings.push(summary);
+    else children.set(summary.parentSessionId, [summary]);
+  }
+  for (const siblings of children.values()) {
+    siblings.sort((left, right) => (
+      left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id)
+    ));
+  }
+
+  const entries: AiSubagentCatalogEntry[] = [];
+  const visited = new Set<string>();
+  const appendChildren = (parentSessionId: string, depth: number): void => {
+    for (const summary of children.get(parentSessionId) ?? []) {
+      if (visited.has(summary.id)) continue;
+      visited.add(summary.id);
+      const activity = projected.get(summary.id);
+      const status = summary.status === 'running' || summary.status === 'waiting'
+        ? summary.status
+        : activity?.status === 'running' || activity?.status === 'waiting'
+          ? activity.status
+          : summary.status;
+      entries.push({
+        summary,
+        role: activity?.role ?? summary.subagent!.role,
+        continuable: activity?.continuable ?? summary.subagent!.continuable,
+        status,
+        depth,
+        detail: activity?.summary,
+      });
+      appendChildren(summary.id, depth + 1);
+    }
+  };
+  appendChildren(root.id, 1);
+  return { root, current, entries };
+}
+
 export interface AiWorkspaceRootProps {
   readonly mode?: 'ask' | 'agent';
   readonly imageControls?: React.ReactNode;
@@ -112,6 +218,9 @@ export interface AiWorkspaceRootProps {
   readonly deletingSessionId?: string | null;
   readonly approvalDecision?: 'approve' | 'reject' | null;
   readonly approvalError?: string | null;
+  readonly approvalArguments?: unknown | null;
+  readonly approvalArgumentsLoading?: boolean;
+  readonly approvalArgumentsError?: string | null;
   readonly onListFileReferences?: import('@/types/agent-file-reference').ListFileReferences;
   readonly onListSkills?: (root?: string) => Promise<import('@/types/agent-skill').SkillUserList>;
   readonly skillsScopeKey?: string;
@@ -130,7 +239,7 @@ export interface AiWorkspaceRootProps {
   readonly onSubmit?: (input: AiWorkspaceSubmitInput) => void | Promise<void>;
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
-  readonly onRetryTurn?: () => void;
+  readonly onContinueBudgetedTurn?: () => void;
   readonly onContinueOnReconnectedTerminal?: () => void;
   readonly historicalContinuationAvailable?: boolean;
   readonly historicalContinuationBusy?: boolean;
@@ -188,6 +297,9 @@ export function AiWorkspaceRoot({
   deletingSessionId = null,
   approvalDecision = null,
   approvalError = null,
+  approvalArguments = null,
+  approvalArgumentsLoading = false,
+  approvalArgumentsError = null,
   onAnswerQuestion,
   onListFileReferences,
   onListSkills,
@@ -206,7 +318,7 @@ export function AiWorkspaceRoot({
   onSubmit,
   onSubmitGesture,
   onStop,
-  onRetryTurn,
+  onContinueBudgetedTurn,
   onContinueOnReconnectedTerminal,
   historicalContinuationAvailable = false,
   historicalContinuationBusy = false,
@@ -261,6 +373,10 @@ export function AiWorkspaceRoot({
     ? t('agent.emptyDescription')
     : t('ai.workbench.empty');
   const surfaceMode = mode ?? 'agent';
+  const budgetContinuationAvailable = surfaceMode === 'agent'
+    && !readOnlySession
+    && status === 'idle'
+    && latestTurnReachedStepBudget(visibleNodes);
   const historicalComposerEnabled = readOnlySession && historicalContinuationAvailable;
   const historicalComposerDisplay = readOnlySession
     && (historicalComposerEnabled || !onContinueOnReconnectedTerminal);
@@ -297,6 +413,10 @@ export function AiWorkspaceRoot({
   const artifactDetailsNode = route.kind === 'artifactDetails'
     ? view?.nodes.find((node) => node.kind === 'artifact' && node.artifactId === route.artifactId)
     : undefined;
+  const lineage = useMemo(
+    () => subagentLineage(view, sessions),
+    [sessions, view],
+  );
 
   useEffect(() => {
     const target = navigation.returnFocus;
@@ -343,6 +463,15 @@ export function AiWorkspaceRoot({
           : t(scope === 'terminal' ? 'section.terminal' : 'section.workbench')}
         status={status}
         mode={surfaceMode}
+        lineage={onOpenSession && lineage
+          ? (
+              <AiSubagentCatalog
+                {...lineage}
+                onOpen={onOpenSession}
+                onRefresh={onRefreshSessions}
+              />
+            )
+          : undefined}
         onClose={onClose}
         onHistory={onHistory}
         historyOpen={route.kind === 'sessions'}
@@ -405,7 +534,6 @@ export function AiWorkspaceRoot({
               renderers={surfaceMode === 'ask' ? aiAskConversationNodeRenderers : undefined}
               runningIndicator={readOnlySession ? 'none' : surfaceMode}
               pending={surfaceMode === 'ask' && composerState?.phase === 'submitting'}
-              followUserSubmissions
               status={status}
               throughSeq={view?.throughSeq ?? null}
               initialAnchor={scrollAnchor}
@@ -422,7 +550,8 @@ export function AiWorkspaceRoot({
         <AiComposerSeat
           mode={surfaceMode}
           imageControls={surfaceMode === 'agent' ? imageControls : undefined}
-          onPasteImages={surfaceMode === 'agent' && !readOnlySession ? onPasteImages : undefined}
+          onPasteImages={surfaceMode === 'agent' && !readOnlySession
+            && !view?.snapshot.value.header.subagent ? onPasteImages : undefined}
           hasImages={surfaceMode === 'agent' ? hasImages : false}
           imageBusy={surfaceMode === 'agent' ? imageBusy : false}
           imageLocked={surfaceMode === 'agent' ? imageLocked : false}
@@ -452,17 +581,22 @@ export function AiWorkspaceRoot({
           projectTargetLabel={projectTargetLabel}
           approvalDecision={approvalDecision}
           approvalError={approvalError}
+          approvalArguments={approvalArguments}
+          approvalArgumentsLoading={approvalArgumentsLoading}
+          approvalArgumentsError={approvalArgumentsError}
           unavailableReason={agentUnavailableReason}
           onDraftChange={onDraftChange}
           onSubmit={onSubmit ? (content) => onSubmit({ content }) : undefined}
           onSubmitGesture={onSubmitGesture}
           onStop={readOnlySession ? undefined : onStop}
-          onRetryTurn={readOnlySession ? undefined : onRetryTurn}
+          onContinueBudgetedTurn={readOnlySession ? undefined : onContinueBudgetedTurn}
+          budgetContinuationAvailable={budgetContinuationAvailable}
           onContinueOnReconnectedTerminal={historicalComposerEnabled ? undefined : onContinueOnReconnectedTerminal}
           historicalContinuationAvailable={historicalContinuationAvailable}
           historicalContinuationBusy={historicalContinuationBusy}
           historicalContinuationError={historicalContinuationError}
-          onBusyPreferenceChange={surfaceMode === 'agent' && !readOnlySession ? onBusyPreferenceChange : undefined}
+          onBusyPreferenceChange={surfaceMode === 'agent' && !readOnlySession
+            && !view?.snapshot.value.header.subagent ? onBusyPreferenceChange : undefined}
           onUpdateQueueItem={surfaceMode === 'agent' && !readOnlySession ? onUpdateQueueItem : undefined}
           onRemoveQueueItem={surfaceMode === 'agent' && !readOnlySession ? onRemoveQueueItem : undefined}
           onSteerQueueItem={surfaceMode === 'agent' && !readOnlySession ? onSteerQueueItem : undefined}

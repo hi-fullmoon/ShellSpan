@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ChevronDownIcon,
   ShieldAlertIcon,
   ShieldCheckIcon,
+  ShieldIcon,
   TriangleAlertIcon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
@@ -20,7 +22,7 @@ import {
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
-import { useTerminalStore } from '@/stores/terminalStore';
+import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import type { AgentPermissionMode } from '@/types/agent-approval';
 
 const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = 'autoApproveReadOnly';
@@ -36,6 +38,15 @@ const PERMISSION_OPTIONS = [
     description: 'agent.permission.autoApproveReadOnlyDescription',
   },
   {
+    mode: 'requestApproval',
+    icon: ShieldIcon,
+    iconClassName: 'bg-muted text-muted-foreground',
+    label: 'agent.permission.requestApproval',
+    composerLabel: 'agent.permission.requestApproval',
+    composerDescription: 'agent.permission.requestApprovalDescription',
+    description: 'agent.permission.requestApprovalDescription',
+  },
+  {
     mode: 'fullAccess',
     icon: ShieldAlertIcon,
     iconClassName: 'bg-app-warning/10 text-app-warning',
@@ -47,6 +58,29 @@ const PERMISSION_OPTIONS = [
 ] as const;
 
 const COMPOSER_PERMISSION_OPTIONS = PERMISSION_OPTIONS;
+
+interface FullAccessConfirmationTarget {
+  readonly sessionId: string;
+  readonly identity: string;
+  readonly label: string;
+}
+
+function terminalIdentity(session: TerminalSession): string {
+  return JSON.stringify([
+    session.sessionId,
+    session.profileId ?? null,
+    session.host,
+    session.port,
+    session.username,
+    session.terminalSessionId ?? null,
+    session.terminalGeneration ?? null,
+  ]);
+}
+
+function terminalLabel(session: TerminalSession): string {
+  if (session.host === 'local' && session.port === 0) return `${session.title} (local)`;
+  return `${session.title} (${session.username}@${session.host}:${session.port})`;
+}
 
 export interface AgentPermissionSelectorProps {
   readonly sessionId: string;
@@ -66,17 +100,21 @@ export function AgentPermissionSelector({
   const { t } = useI18n();
   const binding = useAgentPermissionStore((state) => state.bindings[sessionId]);
   const setMode = useAgentPermissionStore((state) => state.setMode);
-  const connected = useTerminalStore((state) => state.sessions.some(
-    (session) => session.sessionId === sessionId && session.status === 'connected',
+  const terminal = useTerminalStore((state) => state.sessions.find(
+    (session) => session.sessionId === sessionId,
   ));
+  const connected = terminal?.status === 'connected';
   const [fullAccessDialogOpen, setFullAccessDialogOpen] = useState(false);
+  const [confirmationTarget, setConfirmationTarget] = useState<FullAccessConfirmationTarget | null>(null);
   const composer = variant === 'composer';
   const mode = selectedMode ?? binding?.mode ?? DEFAULT_AGENT_PERMISSION_MODE;
   const changeMode = (nextMode: AgentPermissionMode): void => {
     if (onModeChange) void onModeChange(nextMode);
     else setMode(sessionId, nextMode);
   };
-  const visibleMode = mode === 'fullAccess' ? mode : DEFAULT_AGENT_PERMISSION_MODE;
+  const visibleMode = PERMISSION_OPTIONS.some((option) => option.mode === mode)
+    ? mode
+    : DEFAULT_AGENT_PERMISSION_MODE;
   const current = PERMISSION_OPTIONS.find((option) => option.mode === visibleMode)
     ?? PERMISSION_OPTIONS[0];
   const CurrentIcon = current.icon;
@@ -84,10 +122,26 @@ export function AgentPermissionSelector({
     ? composer ? current.composerLabel : 'agent.permission.fullAccessSelected'
     : composer ? current.composerLabel : current.label;
 
+  useEffect(() => {
+    if (!fullAccessDialogOpen || !confirmationTarget) return;
+    if (!terminal || terminal.status !== 'connected'
+      || confirmationTarget.sessionId !== sessionId
+      || confirmationTarget.identity !== terminalIdentity(terminal)) {
+      setFullAccessDialogOpen(false);
+      setConfirmationTarget(null);
+    }
+  }, [confirmationTarget, fullAccessDialogOpen, sessionId, terminal]);
+
   const selectMode = (value: string): void => {
     const nextMode = value as AgentPermissionMode;
     if (nextMode === mode) return;
     if (nextMode === 'fullAccess') {
+      if (!terminal || terminal.status !== 'connected') return;
+      setConfirmationTarget({
+        sessionId,
+        identity: terminalIdentity(terminal),
+        label: terminalLabel(terminal),
+      });
       setFullAccessDialogOpen(true);
       return;
     }
@@ -164,9 +218,24 @@ export function AgentPermissionSelector({
                   >
                     {composer ? (
                       <>
-                        <Icon className="mt-0.5" strokeWidth={1.6} />
+                        <Icon
+                          className={cn('mt-0.5', option.mode === 'fullAccess' && 'text-app-warning')}
+                          strokeWidth={1.6}
+                        />
                         <span className="flex min-w-0 flex-col gap-0.5">
-                          <span>{t(option.composerLabel)}</span>
+                          <span className="flex items-center gap-1.5">
+                            <span>{t(option.composerLabel)}</span>
+                            {option.mode === DEFAULT_AGENT_PERMISSION_MODE && (
+                              <Badge variant="secondary" size="sm">
+                                {t('agent.permission.recommended')}
+                              </Badge>
+                            )}
+                            {option.mode === 'fullAccess' && (
+                              <Badge variant="destructive" size="sm">
+                                {t('agent.permission.highRisk')}
+                              </Badge>
+                            )}
+                          </span>
                           <span className="text-[11px] leading-4 text-muted-foreground" aria-hidden="true">
                             {t(option.composerDescription)}
                           </span>
@@ -184,7 +253,19 @@ export function AgentPermissionSelector({
                           <Icon strokeWidth={1.75} />
                         </span>
                         <span className="min-w-0 leading-tight">
-                          <span className="block font-medium">{t(option.label)}</span>
+                          <span className="flex items-center gap-1.5 font-medium">
+                            <span>{t(option.label)}</span>
+                            {option.mode === DEFAULT_AGENT_PERMISSION_MODE && (
+                              <Badge variant="secondary" size="sm">
+                                {t('agent.permission.recommended')}
+                              </Badge>
+                            )}
+                            {option.mode === 'fullAccess' && (
+                              <Badge variant="destructive" size="sm">
+                                {t('agent.permission.highRisk')}
+                              </Badge>
+                            )}
+                          </span>
                           <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground sm:whitespace-nowrap">
                             {t(option.description)}
                           </span>
@@ -209,18 +290,40 @@ export function AgentPermissionSelector({
 
       <ConfirmationDialog
         open={fullAccessDialogOpen}
-        onOpenChange={setFullAccessDialogOpen}
+        onOpenChange={(open) => {
+          setFullAccessDialogOpen(open);
+          if (!open) setConfirmationTarget(null);
+        }}
         title={t('agent.permission.fullAccessTitle')}
         description={t('agent.permission.fullAccessWarning')}
         confirmLabel={t('agent.permission.fullAccessConfirm')}
         confirmVariant="warning"
+        confirmDisabled={!confirmationTarget || !terminal || terminal.status !== 'connected'
+          || confirmationTarget.sessionId !== sessionId
+          || confirmationTarget.identity !== terminalIdentity(terminal)}
         media={<ShieldAlertIcon />}
         mediaVariant="warning"
         onConfirm={() => {
+          const live = useTerminalStore.getState().sessions.find((session) => session.sessionId === sessionId);
+          if (!confirmationTarget || !live || live.status !== 'connected'
+            || confirmationTarget.sessionId !== sessionId
+            || confirmationTarget.identity !== terminalIdentity(live)) {
+            setFullAccessDialogOpen(false);
+            setConfirmationTarget(null);
+            return;
+          }
           changeMode('fullAccess');
           setFullAccessDialogOpen(false);
+          setConfirmationTarget(null);
         }}
-      />
+      >
+        {confirmationTarget && (
+          <Alert variant="warning" size="sm">
+            <AlertTitle>{t('agent.permission.fullAccessTarget')}</AlertTitle>
+            <AlertDescription>{confirmationTarget.label}</AlertDescription>
+          </Alert>
+        )}
+      </ConfirmationDialog>
     </div>
   );
 }
