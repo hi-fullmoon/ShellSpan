@@ -13,6 +13,7 @@ import {
   agentSessionAllEventFamiliesFixture,
   agentSessionEventFixture,
   agentSessionWaitingApprovalEventFixture,
+  sessionEvent,
 } from '@/test/fixtures/agent-session';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
 import type { AgentSessionEvent } from '@/types/agent-session';
@@ -533,5 +534,26 @@ describe('AI Phase 3 chat projection', () => {
       data: { status: 'completed' },
     } as unknown as AgentSessionEvent;
     expect(projectAgentChatNodes([unknownEvent])).toEqual([]);
+  });
+
+  it.each([
+    'noProgress: repeated tool calls',
+    'modelStreamTotalTimeout: provider stalled',
+    'networkRecoveryTimeout: provider stayed offline',
+    'taskTokenBudgetExceeded: budget exhausted',
+    'taskActiveTimeExceeded: budget exhausted',
+    'preStepRejected: policy denied the step',
+    'terminalTargetUnavailable: terminal changed',
+    'runtimeRestarted: an in-flight Model Step was not replayed',
+  ])('projects %s as a failed turn', (reason) => {
+    const nodes = projectAgentChatNodes([
+      sessionEvent(0, { type: 'turn/start', turnId: 'turn-failed' }),
+      sessionEvent(1, { type: 'turn/end', turnId: 'turn-failed', data: { reason } }),
+    ]);
+    const process = turnProcess(nodes, 'turn-failed');
+    expect(process.status).toBe('failed');
+    expect(process.children).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'error', state: 'failed', message: reason }),
+    ]));
   });
 });

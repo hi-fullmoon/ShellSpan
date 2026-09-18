@@ -8,10 +8,12 @@ import {
   invokeAgentRuntimeSteer,
   invokeApproveAgentRuntimeTool,
   invokeArchiveAgentRuntimeSession,
+  invokeCancelAgentRuntimeChild,
   invokeDeleteAgentRuntimeSession,
   invokeInterruptAgentRuntime,
   invokeResumeAgentRuntime,
   invokeCreateAgentRuntimeSession,
+  invokeGetPendingAgentRuntimeApprovalArguments,
   invokeGetAgentRuntimeArtifact,
   invokeListAgentRuntimeSessions,
   invokeMutateAgentRuntimeInbox,
@@ -21,6 +23,7 @@ import {
   invokeSelectAgentRuntimeModel,
   invokeSetAgentRuntimePermission,
   invokeSetAgentRuntimeExecutionSurface,
+  invokeSendAgentRuntimeChildInput,
 } from '@/lib/ipc/tauri';
 import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
@@ -42,6 +45,7 @@ import type {
   AiSessionAdapter,
   AiSessionError,
   AiSessionListener,
+  AiSessionSubagentSummary,
   AiSessionSummary,
   AiSessionSummaryPage,
   AiSessionRenameInput,
@@ -99,9 +103,12 @@ export interface AgentSessionAdapterDependencies {
   readonly followup: typeof invokeAgentRuntimeFollowup;
   readonly steer: typeof invokeAgentRuntimeSteer;
   readonly stop: typeof invokeInterruptAgentRuntime;
+  readonly sendChildInput: typeof invokeSendAgentRuntimeChildInput;
+  readonly cancelChild: typeof invokeCancelAgentRuntimeChild;
   readonly resume?: typeof invokeResumeAgentRuntime;
   readonly approve: typeof invokeApproveAgentRuntimeTool;
   readonly reject: typeof invokeRejectAgentRuntimeTool;
+  readonly approvalArguments?: typeof invokeGetPendingAgentRuntimeApprovalArguments;
   readonly archive: typeof invokeArchiveAgentRuntimeSession;
   readonly delete: typeof invokeDeleteAgentRuntimeSession;
   readonly list: typeof invokeListAgentRuntimeSessions;
@@ -124,9 +131,12 @@ const defaultDependencies: AgentSessionAdapterDependencies = {
   followup: invokeAgentRuntimeFollowup,
   steer: invokeAgentRuntimeSteer,
   stop: invokeInterruptAgentRuntime,
+  sendChildInput: invokeSendAgentRuntimeChildInput,
+  cancelChild: invokeCancelAgentRuntimeChild,
   resume: invokeResumeAgentRuntime,
   approve: invokeApproveAgentRuntimeTool,
   reject: invokeRejectAgentRuntimeTool,
+  approvalArguments: invokeGetPendingAgentRuntimeApprovalArguments,
   archive: invokeArchiveAgentRuntimeSession,
   delete: invokeDeleteAgentRuntimeSession,
   list: invokeListAgentRuntimeSessions,
@@ -142,6 +152,19 @@ interface AgentAdapterEntry {
   readonly stopListening: () => void;
   connecting?: Promise<AiSessionView>;
   view?: AiSessionView;
+}
+
+function sessionSubagentSummary(
+  subagent: AgentSessionSnapshot['header']['subagent'],
+): AiSessionSubagentSummary | undefined {
+  return subagent
+    ? {
+        descriptorId: subagent.descriptorId,
+        role: subagent.role,
+        continuable: subagent.continuable,
+        depth: subagent.depth,
+      }
+    : undefined;
 }
 
 function sessionSummary(
@@ -160,6 +183,8 @@ function sessionSummary(
     status,
     scopeKey: sessionScopeKey(snapshot.header.target, snapshot.header.sessionId),
     targetId: snapshot.header.target?.targetId,
+    parentSessionId: snapshot.header.parentSessionId,
+    subagent: sessionSubagentSummary(snapshot.header.subagent),
     archived: snapshot.archived,
     revision: events.length,
   };
@@ -293,6 +318,11 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
     if (event.type === 'session/permission_changed') header.permissionMode = event.data.mode;
     if (event.type === 'session/execution_surface_changed') header.executionSurface = event.data.surface;
   }
+  const task = activity.plan === undefined
+    ? state.snapshot.task
+    : activity.plan === null
+      ? (({ plan: _plan, ...rest }) => rest)(state.snapshot.task)
+      : { ...state.snapshot.task, plan: activity.plan };
   return {
     summary: sessionSummary(state.snapshot, events, activity.status),
     snapshot: {
@@ -302,11 +332,15 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
         status: activity.status,
         ended: [...events].reverse().find(event => event.type === 'session/ended' || event.type === 'session/resumed')?.type === 'session/ended',
         header,
-        task: activity.plan === undefined ? state.snapshot.task : { ...state.snapshot.task, plan: activity.plan },
+        task,
       },
     },
     nodes,
     activityNodes: activity.nodes,
+    subagents: activity.agents.filter((agent) => (
+      agent.descriptorId !== undefined
+      && agent.parentSessionId === state.snapshot?.header.sessionId
+    )),
     inbox: projectAgentInbox(events),
     pendingApproval: pendingApproval(nodes),
     pendingQuestion: projectQuestions(events).find((q) => q.status === 'pending') ?? null,
@@ -343,6 +377,8 @@ function listSummary(page: AgentSessionListPage): readonly AiSessionSummary[] {
     status: session.status,
     scopeKey: sessionScopeKey(session.header.target, session.header.sessionId),
     targetId: session.header.target?.targetId,
+    parentSessionId: session.header.parentSessionId,
+    subagent: sessionSubagentSummary(session.header.subagent),
     archived: session.archived,
     revision: session.eventCount,
   }));
@@ -577,8 +613,40 @@ export function createAgentSessionAdapter(
         resolvedSessionId = (await createSession(input.create)).summary.id;
       }
       let view = await openEntry(resolvedSessionId);
-      if (view.summary.archived || view.snapshot.value.header.subagent) {
+      if (view.summary.archived) {
         throw new Error('This conversation cannot accept human follow-up messages');
+      }
+      const child = view.snapshot.value.header.subagent;
+      if (child) {
+        const parentSessionId = view.snapshot.value.header.parentSessionId;
+        if (!child.continuable || !parentSessionId) {
+          throw new Error('This one-shot subagent cannot accept human follow-up messages');
+        }
+        if (hasImages) throw new Error('Subagent continuation accepts text only');
+        await dependencies.sendChildInput({
+          parentSessionId,
+          childSessionId: resolvedSessionId,
+          content,
+          clientSubmissionId: input.clientOperationId,
+        });
+        const entry = ensureEntry(resolvedSessionId);
+        const state = await entry.client.reconnect();
+        if (!state.events.some((event) => (
+          event.type === 'agent/inbox/spliced'
+          && event.data.operation === 'enqueued'
+          && event.data.messages.some((message) => (
+            message.clientSubmissionId === input.clientOperationId
+          ))
+        ))) {
+          throw new Error('Subagent continuation is not confirmed; retry the same draft');
+        }
+        entry.view = agentSessionView(state);
+        for (const listener of entry.listeners) listener(entry.view);
+        return {
+          sessionId: resolvedSessionId,
+          clientOperationId: input.clientOperationId,
+          mode: 'nextTurn',
+        };
       }
       if (['cancelled', 'failed', 'completed'].includes(view.status) || view.snapshot.value.ended) {
         await (dependencies.resume ?? invokeResumeAgentRuntime)({ sessionId: resolvedSessionId });
@@ -623,7 +691,13 @@ export function createAgentSessionAdapter(
       };
     },
     async stop(sessionId: string): Promise<void> {
-      await dependencies.stop({ sessionId });
+      const current = await openEntry(sessionId);
+      const parentSessionId = current.snapshot.value.header.parentSessionId;
+      if (current.snapshot.value.header.subagent && parentSessionId) {
+        await dependencies.cancelChild({ parentSessionId, childSessionId: sessionId });
+      } else {
+        await dependencies.stop({ sessionId });
+      }
       const entry = ensureEntry(sessionId);
       entry.view = agentSessionView(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
@@ -633,6 +707,9 @@ export function createAgentSessionAdapter(
     },
     async reject(input: AiApprovalDecisionInput): Promise<void> {
       await dependencies.reject(decision(input));
+    },
+    async loadApprovalArguments(input: AiApprovalDecisionInput): Promise<unknown | null> {
+      return dependencies.approvalArguments?.(decision(input)) ?? null;
     },
     async archive(sessionId: string): Promise<void> {
       await dependencies.archive({ sessionId });

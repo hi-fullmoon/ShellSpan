@@ -1,5 +1,14 @@
 import type { AiSessionAdapter, AiSessionSummary, ListSessionsInput } from './session-adapter';
 
+/** A subagent remains top-level when its durable parent is no longer listed. */
+export function isTopLevelAiSession(
+  summary: AiSessionSummary,
+  sessions: readonly AiSessionSummary[],
+): boolean {
+  if (summary.subagent === undefined || summary.parentSessionId === undefined) return true;
+  return !sessions.some((candidate) => candidate.id === summary.parentSessionId);
+}
+
 /** Runtime pages are ascending and may be empty after the adapter's scope filter. */
 export async function listAllAiSessions(
   adapter: Pick<AiSessionAdapter, 'list'>,

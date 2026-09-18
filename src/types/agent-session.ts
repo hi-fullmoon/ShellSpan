@@ -851,6 +851,7 @@ export interface AgentChildInputRequest {
   readonly parentSessionId: string;
   readonly childSessionId: string;
   readonly content: string;
+  readonly clientSubmissionId?: string;
 }
 
 export interface AgentChildRequest {
@@ -1054,10 +1055,11 @@ export interface AgentActivityProjection {
   readonly status: AgentSessionRuntimeStatus;
   readonly statusReason?: string;
   readonly turns: readonly AgentActivityTurn[];
+  /** `null` means a newer turn explicitly cleared the preceding turn's plan. */
   readonly plan?: Readonly<{
     version: number;
     steps: readonly AgentSessionPlanStep[];
-  }>;
+  }> | null;
   readonly context: AgentActivityContext;
   readonly agents: readonly AgentActivityAgent[];
   readonly recovery: AgentSessionRecoveryState;

@@ -97,10 +97,10 @@ function eventStepId(event: RuntimeEventLike): string | null {
 function terminalStatusFromReason(
   reason: string,
 ): Exclude<AiTurnProcessStatus, 'running' | 'partial'> {
-  if (reason === 'incomplete') return 'incomplete';
+  if (reason === 'incomplete' || reason.startsWith('stepBudgetReached:')) return 'incomplete';
   if (/waiting/i.test(reason)) return 'waiting';
   if (/cancel|stop|interrupt/i.test(reason)) return 'cancelled';
-  if (/fail|error|limit|max.?token/i.test(reason)) return 'failed';
+  if (/fail|error|limit|max.?token|timeout|exceed|exhaust|reject|restart|no.?progress|unavailable|recovery.?required/i.test(reason)) return 'failed';
   return 'completed';
 }
 

@@ -3,6 +3,7 @@ import type {
 } from '@/types/ai';
 import type {
   AgentArtifactResponse,
+  AgentActivityAgent,
   AgentActivityNode,
   AgentSessionSnapshot,
   CreateAgentSessionRequest,
@@ -13,6 +14,13 @@ import type {
   AiSessionStatus,
 } from './conversation-node';
 
+export interface AiSessionSubagentSummary {
+  readonly descriptorId: string;
+  readonly role: AgentActivityAgent['role'];
+  readonly continuable: boolean;
+  readonly depth?: number;
+}
+
 export interface AiSessionSummary {
   readonly id: string;
   readonly kind: AiSessionKind;
@@ -22,6 +30,9 @@ export interface AiSessionSummary {
   readonly scopeKey: string;
   /** The exact execution target, which changes when a terminal reconnects. */
   readonly targetId?: string;
+  /** Parent ownership is retained so subagent Sessions stay out of ordinary history. */
+  readonly parentSessionId?: string;
+  readonly subagent?: AiSessionSubagentSummary;
   readonly archived: boolean;
   readonly revision?: number | null;
 }
@@ -76,6 +87,8 @@ export interface AiSessionView {
   readonly snapshot: AiSessionSourceSnapshot;
   readonly nodes: readonly AiConversationNode[];
   readonly activityNodes: readonly AgentActivityNode[];
+  /** Direct children projected from the selected Session's durable subagent events. */
+  readonly subagents?: readonly AgentActivityAgent[];
   readonly inbox: readonly AiInboxItem[];
   readonly pendingApproval: AiPendingApproval | null;
   readonly status: AiSessionStatus;
@@ -177,6 +190,7 @@ export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
   stop(sessionId: string): Promise<void>;
   approve(input: AiApprovalDecisionInput): Promise<void>;
   reject(input: AiApprovalDecisionInput): Promise<void>;
+  loadApprovalArguments?(input: AiApprovalDecisionInput): Promise<unknown | null>;
   archive(sessionId: string): Promise<void>;
   delete(sessionId: string): Promise<void>;
   evict?(sessionId: string): void;

@@ -11,6 +11,7 @@ import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { agentSessionBaselineView } from './agent-session-baseline-page';
 import { agentSessionBaselineScenario } from './fixtures/agent-session-baseline';
+import type { AiPendingApproval } from '@/lib/ai/session-adapter';
 
 interface ComposerScene {
   phase?: AiComposerPhase;
@@ -33,7 +34,18 @@ const listFiles = async () => ({
 });
 
 function ComposerPage({ mode }: { readonly mode: 'ask' | 'agent' }) {
-  const errorMessage = new URLSearchParams(location.search).get('error');
+  const params = new URLSearchParams(location.search);
+  const errorMessage = params.get('error');
+  const approvalPreview = params.get('approvalPreview');
+  const pendingApproval: AiPendingApproval | null = approvalPreview ? {
+    sessionId: 'visual-session', turnId: 'visual-turn', stepId: 'visual-step',
+    requestId: 'visual-request', callId: 'visual-call', approvalId: 'visual-approval',
+    risk: 'stateChange', prompt: null, reason: 'nativePolicyRequiresApproval',
+    expiresAtUnixMs: Date.now() + 60_000, toolName: 'write_terminal_input',
+    target: { kind: 'local', targetId: 'visual-target', sessionId: 'visual-terminal', label: 'Local terminal' },
+    arguments: { inputKind: 'paste', byteLength: 17, contentPersisted: false },
+    effect: 'stateChange', evidenceRefs: [],
+  } : null;
   const [scene, setScene] = useState<ComposerScene>({
     draft: '', owner: 'A', status: 'idle', hero: false, terminal: false, errorMessage,
   });
@@ -45,17 +57,31 @@ function ComposerPage({ mode }: { readonly mode: 'ask' | 'agent' }) {
     style={{ width: '100vw', height: '100vh' }}>
     <AiWorkspaceRoot
       mode={mode}
-      view={scene.hero ? null : { ...base, status: scene.status, summary: { ...base.summary, id: scene.owner } }}
+      view={scene.hero ? null : {
+        ...base,
+        status: pendingApproval ? 'waiting' : scene.status,
+        summary: { ...base.summary, id: scene.owner, status: pendingApproval ? 'waiting' : scene.status },
+        pendingApproval,
+      }}
       scope={mode === 'ask' ? 'workbench' : 'terminal'} canStartAgent={!scene.unavailableReason}
       agentUnavailableReason={scene.unavailableReason}
       composerState={createAiComposerState({ sessionId: scene.hero ? null : scene.owner, draft: scene.draft,
-        runtimeStatus: scene.status, phase: scene.phase, terminal: scene.terminal,
+        runtimeStatus: pendingApproval ? 'waiting' : scene.status,
+        phase: pendingApproval ? 'waitingApproval' : scene.phase,
+        waitingApproval: Boolean(pendingApproval), terminal: scene.terminal,
         lastError: scene.errorMessage
           ? { kind: 'unknown', message: scene.errorMessage, retryable: true }
           : null })}
       skillsScopeKey={scene.owner}
       skillsNeedsRoot={scene.needsRoot}
       projectTargetLabel={scene.targetLabel}
+      approvalArguments={approvalPreview === 'ready'
+        ? { inputKind: 'paste', text: 'printf "visual approval"\n' }
+        : null}
+      approvalArgumentsLoading={approvalPreview === 'loading'}
+      approvalArgumentsError={approvalPreview === 'error' ? 'Exact private arguments unavailable' : null}
+      onApprove={() => undefined}
+      onReject={() => undefined}
       onDraftChange={draft => setScene(current => ({ ...current, draft }))}
       onNewSession={() => setScene(current => ({ ...current, owner: `${current.owner}-new`, draft: '', hero: true, status: 'idle', terminal: false }))}
       onSubmitGesture={() => setScene(current => ({ ...current, draft: '', status: 'running', hero: false }))}

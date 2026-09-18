@@ -22,10 +22,10 @@ function toolEventKey(stepId: string | undefined, callId: string): string {
 }
 
 function terminalStatusFromReason(reason: string): AgentSessionRuntimeStatus {
-  if (reason === 'incomplete') return 'idle';
+  if (reason === 'incomplete' || reason.startsWith('stepBudgetReached:')) return 'idle';
   if (/waiting/i.test(reason)) return 'waiting';
   if (/cancel|stop|interrupt/i.test(reason)) return 'cancelled';
-  if (/fail|error|limit|max.?token/i.test(reason)) return 'failed';
+  if (/fail|error|limit|max.?token|timeout|exceed|exhaust|reject|restart|no.?progress|unavailable|recovery.?required/i.test(reason)) return 'failed';
   return 'completed';
 }
 
@@ -764,6 +764,9 @@ function projectActivityUnchecked(
         statusReason = event.data.reason;
         break;
       case 'turn/start': {
+        // Match the runtime projection: a task plan is scoped to the turn that
+        // wrote it and never leaks into the next user turn.
+        plan = null;
         const turn = ensureTurn(event);
         turn.startedAt = event.timeUnixMs;
         turn.status = 'running';
