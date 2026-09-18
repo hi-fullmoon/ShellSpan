@@ -13,7 +13,6 @@ pub(crate) struct CallPolicyScopeNative {
     pub(crate) sensitive_path_count: usize,
     pub(crate) critical_path_count: usize,
     pub(crate) unknown_write: bool,
-    pub(crate) unknown_network_egress: bool,
 }
 pub(crate) fn current_unix_ms() -> u64 {
     std::time::SystemTime::now()
@@ -90,7 +89,6 @@ pub(crate) fn inspect_call_policy_scope_native(
             call.tool_name.as_str(),
             "exec_command" | "terminal_execute" | "write_terminal_input"
         ),
-        unknown_network_egress: call.arguments.get("command").is_some(),
     })
 }
 pub(crate) fn path_is_sensitive_native(path: &str) -> bool {
@@ -136,12 +134,6 @@ pub(crate) fn enforce_native_call_policy_native(
         )
     {
         return Err("native policy rejects state changes on critical paths".into());
-    }
-    if matches!(call.tool_name.as_str(), "exec_command" | "terminal_execute")
-        && scope.unknown_network_egress
-        && effect.kind == AgentEffectKindNative::ExternalSideEffect
-    {
-        return Err("native policy rejects unscoped command network egress".into());
     }
     Ok(())
 }
@@ -204,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn unscoped_direct_network_egress_is_rejected() {
+    fn direct_network_commands_retain_external_effect_without_claiming_a_sandbox() {
         let mut call = terminal_call();
         call.tool_name = "exec_command".into();
         call.arguments = json!({
@@ -213,10 +205,8 @@ mod tests {
         });
         let scope = inspect_call_policy_scope_native(&call).unwrap();
         let effect = effect(AgentEffectKindNative::ExternalSideEffect);
-        assert_eq!(
-            enforce_native_call_policy_native(&call, &effect, &scope),
-            Err("native policy rejects unscoped command network egress".into())
-        );
+        assert!(scope.network_destinations.is_empty());
+        assert!(enforce_native_call_policy_native(&call, &effect, &scope).is_ok());
     }
 
     #[test]
@@ -239,7 +229,6 @@ mod tests {
                 port: 18765,
             }]
         );
-        assert!(!scope.unknown_network_egress);
         assert!(enforce_native_call_policy_native(
             &call,
             &effect(AgentEffectKindNative::ExternalSideEffect),
