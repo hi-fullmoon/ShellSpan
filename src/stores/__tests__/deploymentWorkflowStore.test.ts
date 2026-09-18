@@ -125,6 +125,12 @@ describe('deploymentWorkflowStore', () => {
     });
     expect(useDeploymentWorkflowStore.getState().draft?.definition).toEqual(originalDefinition);
 
+    useDeploymentWorkflowStore.setState({
+      selectedWorkflowId: null,
+      draft: null,
+      semanticDirty: false,
+      layoutDirty: false,
+    });
     useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
     useDeploymentWorkflowStore.getState().connectInput('build', 'source', null);
     expect(useDeploymentWorkflowStore.getState()).toMatchObject({
@@ -133,6 +139,12 @@ describe('deploymentWorkflowStore', () => {
     });
     expect(useDeploymentWorkflowStore.getState().draft?.definition.nodes.find((node) => node.id === 'build')?.inputs).not.toHaveProperty('source');
 
+    useDeploymentWorkflowStore.setState({
+      selectedWorkflowId: null,
+      draft: null,
+      semanticDirty: false,
+      layoutDirty: false,
+    });
     useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
     useDeploymentWorkflowStore.getState().connectInput('build', 'source', {
       fromNodeId: 'source',
@@ -295,5 +307,81 @@ describe('deploymentWorkflowStore', () => {
     await expect(useDeploymentWorkflowStore.getState().saveDraft()).rejects.toThrow('REVISION_CONFLICT');
     expect(useDeploymentWorkflowStore.getState().draft?.definition.nodes[0].displayName).toBe('Local draft');
     expect(useDeploymentWorkflowStore.getState().semanticDirty).toBe(true);
+  });
+
+  it('keeps dirty drafts until a pending workflow selection is confirmed', () => {
+    const current = record();
+    const other = { ...record(), id: 'workflow-2', name: 'Other site' };
+    useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current, other] });
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+    useDeploymentWorkflowStore.getState().updateNode('source', { displayName: 'Local source' });
+
+    expect(useDeploymentWorkflowStore.getState().selectWorkflow(current.id)).toBe(true);
+    expect(useDeploymentWorkflowStore.getState().draft?.definition.nodes[0].displayName).toBe('Local source');
+    expect(useDeploymentWorkflowStore.getState().selectWorkflow(other.id)).toBe(false);
+    expect(useDeploymentWorkflowStore.getState().pendingSelectionId).toBe(other.id);
+    expect(useDeploymentWorkflowStore.getState().draft?.id).toBe(current.id);
+
+    useDeploymentWorkflowStore.getState().confirmPendingSelection();
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      selectedWorkflowId: other.id,
+      pendingSelectionId: null,
+      semanticDirty: false,
+      layoutDirty: false,
+    });
+  });
+
+  it('keeps the committed semantic revision when a following layout save fails', async () => {
+    const current = record();
+    useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current] });
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+    useDeploymentWorkflowStore.getState().updateNode('source', { displayName: 'Committed source' });
+    useDeploymentWorkflowStore.getState().moveNode('source', 84, 96);
+    const updated = {
+      ...current,
+      revision: 2,
+      definition: useDeploymentWorkflowStore.getState().draft!.definition,
+      updatedAt: 3,
+    };
+    mocks.update.mockResolvedValue(updated);
+    mocks.updateLayout.mockRejectedValueOnce(new Error('LAYOUT_WRITE_FAILED'));
+
+    await expect(useDeploymentWorkflowStore.getState().saveDraft()).rejects.toThrow('LAYOUT_WRITE_FAILED');
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      semanticDirty: false,
+      layoutDirty: true,
+    });
+    expect(useDeploymentWorkflowStore.getState().draft?.revision).toBe(2);
+
+    mocks.updateLayout.mockResolvedValue({
+      workflowId: current.id,
+      layoutRevision: 2,
+      layoutDigest: `sha256:${'b'.repeat(64)}`,
+      layout: useDeploymentWorkflowStore.getState().draft!.layout,
+      createdAt: 4,
+    });
+    await useDeploymentWorkflowStore.getState().saveDraft();
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      semanticDirty: false,
+      layoutDirty: false,
+    });
+  });
+
+  it('locks semantic and layout mutations while a save is in flight', () => {
+    const current = record();
+    useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current] });
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+    const before = structuredClone(useDeploymentWorkflowStore.getState().draft!);
+    useDeploymentWorkflowStore.setState({ saving: true });
+
+    useDeploymentWorkflowStore.getState().updateNode('source', { displayName: 'Late edit' });
+    useDeploymentWorkflowStore.getState().moveNode('source', 999, 999);
+
+    expect(useDeploymentWorkflowStore.getState().draft).toEqual(before);
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      semanticDirty: false,
+      layoutDirty: false,
+    });
   });
 });

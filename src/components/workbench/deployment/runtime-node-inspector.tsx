@@ -26,6 +26,7 @@ import {
   deploymentNodeProgress,
   deploymentStatusLabel,
   formatDeploymentDate,
+  formatDeploymentDuration,
 } from './runtime-utils';
 
 export const RuntimeNodeProgress: React.FC<{ node: DeploymentRunNodeRecord }> = ({ node }) => {
@@ -87,6 +88,9 @@ export const RuntimeNodeInspector: React.FC<RuntimeNodeInspectorProps> = ({
   const selectedEvents = state.events.filter((event) => event.nodeId === state.selectedNodeId).slice(0, 6);
   const selectedOutputs = state.detail?.outputs.filter((output) => output.nodeId === state.selectedNodeId) ?? [];
   const selectedArtifact = selectedOutputs.find((output) => output.artifactReference)?.artifactReference;
+  const selectedAttemptRecord = state.attempts.find(
+    (attempt) => attempt.attempt === selectedAttempt,
+  ) ?? null;
 
   React.useEffect(() => {
     setSelectedAttempt(state.attempts[0]?.attempt ?? null);
@@ -138,6 +142,31 @@ export const RuntimeNodeInspector: React.FC<RuntimeNodeInspectorProps> = ({
                 selectedAttempt={selectedAttempt}
                 onChange={setSelectedAttempt}
               />
+              {selectedAttemptRecord && (
+                <dl
+                  className="grid grid-cols-2 gap-2 text-xs"
+                  data-testid="deployment-selected-attempt"
+                  data-attempt={selectedAttemptRecord.attempt}
+                >
+                  <div>
+                    <dt className="text-muted-foreground">{t('deployment.runtime.attempt.executor')}</dt>
+                    <dd className="truncate">{selectedAttemptRecord.executorVersion}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">{t('deployment.runtime.run.duration')}</dt>
+                    <dd>{formatDeploymentDuration(
+                      selectedAttemptRecord.startedAt,
+                      selectedAttemptRecord.finishedAt,
+                    )}</dd>
+                  </div>
+                  {selectedAttemptRecord.failureCategory && (
+                    <div className="col-span-2">
+                      <dt className="text-muted-foreground">{t('deployment.runtime.attempt.failure')}</dt>
+                      <dd className="break-words">{selectedAttemptRecord.failureCategory}</dd>
+                    </div>
+                  )}
+                </dl>
+              )}
               <RuntimeNodeProgress node={selectedNode} />
               {selectedArtifact && (
                 <Button

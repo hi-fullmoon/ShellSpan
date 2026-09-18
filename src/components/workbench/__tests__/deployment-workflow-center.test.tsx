@@ -166,7 +166,10 @@ describe('DeploymentWorkflowCenter', () => {
     vi.stubGlobal('ResizeObserver', DeploymentResizeObserverMock);
     useDeploymentWorkflowStore.getState().reset();
     useDeploymentWorkflowRunStore.getState().reset();
-    useDeploymentWorkflowRunStore.setState({ workflowId: workflow.id });
+    useDeploymentWorkflowRunStore.setState({
+      workflowId: workflow.id,
+      refreshWorkflow: vi.fn().mockResolvedValue(undefined),
+    });
     useDeploymentWorkflowStore.setState({
       capabilities: {
         schemaVersion: 1, admissionsEnabled: true, defaultEnabled: false,
@@ -299,6 +302,30 @@ describe('DeploymentWorkflowCenter', () => {
     await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
   });
 
+  it('surfaces non-preparation runtime errors once and clears the store error', async () => {
+    render(
+      <React.StrictMode>
+        <DeploymentWorkflowCenter />
+      </React.StrictMode>,
+    );
+    act(() => {
+      useDeploymentWorkflowRunStore.setState({
+        error: 'cancel failed',
+        errorContext: 'operation',
+      });
+    });
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(useToastStore.getState().toasts[0]).toMatchObject({
+      message: 'deployment.runtime.error.generic',
+      variant: 'error',
+    });
+    expect(useDeploymentWorkflowRunStore.getState()).toMatchObject({
+      error: null,
+      errorContext: null,
+    });
+  });
+
   it('provides keyboard alternatives for canvas selection, layout movement, and configuration', () => {
     const { container } = render(<DeploymentWorkflowCenter />);
     const source = container.querySelector<HTMLElement>('[data-node-id="source"]');
@@ -316,5 +343,51 @@ describe('DeploymentWorkflowCenter', () => {
     expect(screen.getByTestId('deployment-node-config').querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
     fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
     return waitFor(() => expect(configure).toHaveFocus());
+  });
+
+  it('keeps a new unsaved workflow selected when saved workflows already exist', async () => {
+    render(<DeploymentWorkflowCenter />);
+    act(() => {
+      useDeploymentWorkflowStore.getState().startTemplate(
+        'blank',
+        'Second workflow',
+        profile.id,
+        '/srv/second',
+      );
+    });
+
+    await waitFor(() => expect(useDeploymentWorkflowStore.getState().draft).toMatchObject({
+      id: null,
+      name: 'Second workflow',
+    }));
+    expect(useDeploymentWorkflowStore.getState().selectedWorkflowId).toBeNull();
+  });
+
+  it('allows an editable workflow to be enabled from workflow settings', async () => {
+    render(<DeploymentWorkflowCenter />);
+    fireEvent.click(screen.getByRole('button', { name: 'deployment.editor.settings' }));
+    const enabled = await screen.findByRole('switch', { name: 'deployment.editor.enabled' });
+    expect(enabled).not.toBeChecked();
+    fireEvent.click(enabled);
+    fireEvent.click(screen.getByRole('button', { name: 'deployment.editor.settingsApply' }));
+
+    await waitFor(() => expect(useDeploymentWorkflowStore.getState().draft?.enabled).toBe(true));
+    expect(useDeploymentWorkflowStore.getState().semanticDirty).toBe(true);
+  });
+
+  it('disables every mutation entry point when admissions are read-only', () => {
+    useDeploymentWorkflowStore.setState({
+      capabilities: {
+        schemaVersion: 1, admissionsEnabled: false, defaultEnabled: false,
+        flagName: 'SHELLSPAN_DEPLOYMENT_WORKFLOW', source: 'defaultDisabled',
+        readOnlyAvailable: true, cancelRecoveryAuditAvailable: true, coordinatorAvailable: true,
+      },
+    });
+    render(<DeploymentWorkflowCenter />);
+
+    expect(screen.getByRole('button', { name: 'deployment.editor.nodeLibrary' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'deployment.editor.settings' })).toBeDisabled();
+    expect(screen.getByLabelText('deployment.editor.nodeName')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'deployment.editor.removeNode' })).toBeDisabled();
   });
 });

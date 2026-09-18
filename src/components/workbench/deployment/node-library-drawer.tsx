@@ -22,9 +22,10 @@ import { deploymentLocaleKey } from './deployment-editor-ui';
 interface NodeLibraryPaneProps {
   catalog: DeploymentNodeTypeCatalog;
   onAdd: (spec: DeploymentNodeTypeSpec) => void;
+  editable?: boolean;
 }
 
-const NodeLibraryPane: React.FC<NodeLibraryPaneProps> = ({ catalog, onAdd }) => {
+const NodeLibraryPane: React.FC<NodeLibraryPaneProps> = ({ catalog, onAdd, editable = true }) => {
   const { t } = useI18n();
   const [search, setSearch] = React.useState('');
   const normalizedSearch = search.trim().toLocaleLowerCase();
@@ -75,6 +76,7 @@ const NodeLibraryPane: React.FC<NodeLibraryPaneProps> = ({ catalog, onAdd }) => 
                     variant="ghost"
                     className="h-auto min-w-0 items-start justify-start px-1 py-2 text-left"
                     onClick={() => onAdd(spec)}
+                    disabled={!editable}
                     aria-label={t('deployment.editor.addNodeNamed', { name })}
                   >
                     <div className="min-w-0 flex-1">
@@ -111,6 +113,7 @@ export const NodeLibraryDrawer: React.FC<NodeLibraryDrawerProps> = ({
   onOpenChange,
   catalog,
   onAdd,
+  editable = true,
   finalFocusRef,
 }) => {
   const { t } = useI18n();
@@ -123,7 +126,7 @@ export const NodeLibraryDrawer: React.FC<NodeLibraryDrawerProps> = ({
             {t('deployment.editor.nodeLibraryDescription')}
           </p>
         </DrawerHeader>
-        <NodeLibraryPane catalog={catalog} onAdd={onAdd} />
+        <NodeLibraryPane catalog={catalog} onAdd={onAdd} editable={editable} />
       </DrawerContent>
     </Drawer>
   );

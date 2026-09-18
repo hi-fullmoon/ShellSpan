@@ -14,6 +14,8 @@ export interface WorkflowListPaneProps {
   onSearchChange: (value: string) => void;
   onSelect: (id: string) => void;
   onCreate: () => void;
+  canCreate?: boolean;
+  selectionDisabled?: boolean;
   showHeader?: boolean;
 }
 
@@ -24,6 +26,8 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
   onSearchChange,
   onSelect,
   onCreate,
+  canCreate = true,
+  selectionDisabled = false,
   showHeader = true,
 }) => {
   const { t } = useI18n();
@@ -50,6 +54,7 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
             size="icon-sm"
             variant="ghost"
             onClick={onCreate}
+            disabled={!canCreate}
             aria-label={t('deployment.editor.template.title')}
           >
             <PlusIcon data-icon="inline-start" />
@@ -75,6 +80,7 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
               variant={workflow.id === selectedWorkflowId ? 'secondary' : 'ghost'}
               className="h-auto min-w-0 justify-start py-2"
               onClick={() => onSelect(workflow.id)}
+              disabled={selectionDisabled}
             >
               <span className="min-w-0 flex-1 truncate text-left">{workflow.name}</span>
               <Badge variant="outline">

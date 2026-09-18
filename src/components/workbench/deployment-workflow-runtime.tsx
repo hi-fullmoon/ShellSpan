@@ -144,8 +144,9 @@ const PreparationProgress: React.FC = () => {
 const PrepareView: React.FC<{
   workflow: DeploymentWorkflowRecord;
   semanticDirty: boolean;
+  admissionsEnabled: boolean;
   onOpenApproval: (trigger?: HTMLElement | null) => void;
-}> = ({ workflow, semanticDirty, onOpenApproval }) => {
+}> = ({ workflow, semanticDirty, admissionsEnabled, onOpenApproval }) => {
   const { t } = useI18n();
   const state = useDeploymentWorkflowRunStore();
   const awaiting = state.detail?.summary.status === 'awaiting_approval' ? state.detail : null;
@@ -175,7 +176,7 @@ const PrepareView: React.FC<{
             </Alert>
           )}
           {state.preparing && <PreparationProgress />}
-          {state.error && (
+          {state.error && state.errorContext === 'prepare' && (
             <Alert variant="destructive">
               <AlertTriangleIcon />
               <AlertTitle>{state.error.includes('CAPABILITY')
@@ -201,6 +202,7 @@ const PrepareView: React.FC<{
                 <Button
                   size="sm"
                   onClick={(event) => onOpenApproval(event.currentTarget)}
+                  disabled={!admissionsEnabled}
                   data-testid="deployment-open-approval"
                 >
                   <ShieldCheckIcon data-icon="inline-start" />
@@ -255,9 +257,20 @@ const PrepareView: React.FC<{
           size="sm"
           onClick={(event) => {
             const trigger = event.currentTarget;
-            void state.prepare(workflow).then(() => onOpenApproval(trigger)).catch(() => undefined);
+            void state.prepare(workflow).then(() => {
+              const latest = useDeploymentWorkflowRunStore.getState();
+              if (latest.workflowId === workflow.id
+                && latest.detail?.summary.workflowId === workflow.id) {
+                onOpenApproval(trigger);
+              }
+            }).catch(() => undefined);
           }}
-          disabled={semanticDirty || !workflow.enabled || state.preparing}
+          disabled={semanticDirty
+            || !admissionsEnabled
+            || !workflow.enabled
+            || state.preparing
+            || state.loading
+            || state.action !== null}
         >
           {state.preparing
             ? <Spinner data-icon="inline-start" />
@@ -292,6 +305,7 @@ const RunListPane: React.FC<{ workflow: DeploymentWorkflowRecord }> = ({ workflo
           variant="ghost"
           aria-label={t('common.refresh')}
           onClick={() => void state.refreshWorkflow(workflow.id, true).catch(() => undefined)}
+          disabled={state.loading || state.action !== null || state.preparing}
         >
           <RefreshCwIcon data-icon="inline-start" />
         </Button>
@@ -304,6 +318,7 @@ const RunListPane: React.FC<{ workflow: DeploymentWorkflowRecord }> = ({ workflo
               variant={run.runId === state.selectedRunId ? 'secondary' : 'ghost'}
               className="h-auto min-w-0 justify-start py-2"
               onClick={() => void state.selectRun(run.runId).catch(() => undefined)}
+              disabled={state.loading || state.action !== null || state.preparing}
             >
               <span className="min-w-0 flex-1 text-left">
                 <span className="block truncate">{run.targetRelease.releaseId}</span>
@@ -336,9 +351,10 @@ const RunListPane: React.FC<{ workflow: DeploymentWorkflowRecord }> = ({ workflo
 const RunsView: React.FC<{
   workflow: DeploymentWorkflowRecord;
   catalog: DeploymentNodeTypeCatalog | null;
+  admissionsEnabled: boolean;
   onOpenApproval: (trigger?: HTMLElement | null) => void;
   onOpenEvidence: (trigger: HTMLElement) => void;
-}> = ({ workflow, catalog, onOpenApproval, onOpenEvidence }) => {
+}> = ({ workflow, catalog, admissionsEnabled, onOpenApproval, onOpenEvidence }) => {
   const { t } = useI18n();
   const state = useDeploymentWorkflowRunStore();
   const [cancelOpen, setCancelOpen] = React.useState(false);
@@ -355,7 +371,7 @@ const RunsView: React.FC<{
     return () => window.clearInterval(timer);
   }, [active]);
 
-  if (state.loading && state.runs.length === 0) {
+  if (state.loading) {
     return <PanelLoadingState label={t('deployment.runtime.loading')} />;
   }
   if (state.runs.length === 0) {
@@ -386,14 +402,19 @@ const RunsView: React.FC<{
           description={description}
           actions={(
             <div className="flex shrink-0 items-center gap-1">
-              {detail.summary.status === 'awaiting_approval' && (
+              {['awaiting_approval', 'approved'].includes(detail.summary.status) && (
                 <Button
                   size="sm"
                   onClick={(event) => onOpenApproval(event.currentTarget)}
+                  disabled={!admissionsEnabled || state.action !== null}
                   data-testid="deployment-open-approval"
                 >
                   <ShieldCheckIcon data-icon="inline-start" />
-                  <span className="hidden @min-[48rem]:inline">{t('deployment.runtime.reviewApproval')}</span>
+                  <span className="hidden @min-[48rem]:inline">
+                    {t(detail.summary.status === 'approved'
+                      ? 'deployment.runtime.startApproved'
+                      : 'deployment.runtime.reviewApproval')}
+                  </span>
                 </Button>
               )}
               {['approved', 'in_progress', 'verifying', 'reconciling'].includes(detail.summary.status) && (
@@ -401,6 +422,7 @@ const RunsView: React.FC<{
                   size="sm"
                   variant="destructiveOutline"
                   onClick={() => setCancelOpen(true)}
+                  disabled={state.action !== null}
                 >
                   <SquareIcon data-icon="inline-start" />
                   <span className="hidden @min-[48rem]:inline">{t('common.cancel')}</span>
@@ -464,11 +486,13 @@ export function DeploymentWorkflowRuntimeView({
   workflow,
   catalog = null,
   semanticDirty = false,
+  admissionsEnabled = true,
 }: {
   kind: RuntimeViewKind;
   workflow: DeploymentWorkflowRecord;
   catalog?: DeploymentNodeTypeCatalog | null;
   semanticDirty?: boolean;
+  admissionsEnabled?: boolean;
 }): React.ReactNode {
   const [approvalOpen, setApprovalOpen] = React.useState(false);
   const [evidenceOpen, setEvidenceOpen] = React.useState(false);
@@ -490,6 +514,7 @@ export function DeploymentWorkflowRuntimeView({
         <PrepareView
           workflow={workflow}
           semanticDirty={semanticDirty}
+          admissionsEnabled={admissionsEnabled}
           onOpenApproval={openApproval}
         />
       )}
@@ -497,17 +522,23 @@ export function DeploymentWorkflowRuntimeView({
         <RunsView
           workflow={workflow}
           catalog={catalog}
+          admissionsEnabled={admissionsEnabled}
           onOpenApproval={openApproval}
           onOpenEvidence={openEvidence}
         />
       )}
       {kind === 'versions' && (
-        <ReleaseList workflow={workflow} onOpenApproval={openApproval} />
+        <ReleaseList
+          workflow={workflow}
+          admissionsEnabled={admissionsEnabled}
+          onOpenApproval={openApproval}
+        />
       )}
       <ApprovalDialog
         open={approvalOpen}
         onOpenChange={setApprovalOpen}
         workflow={workflow}
+        admissionsEnabled={admissionsEnabled}
         returnFocusRef={approvalReturnFocusRef}
       />
       <EvidenceDialog

@@ -45,6 +45,7 @@ export interface NodeInputFieldsProps {
   spec: DeploymentNodeTypeSpec;
   definition: DeploymentWorkflowDefinition;
   catalog: DeploymentNodeTypeCatalog;
+  editable?: boolean;
 }
 
 export const NodeInputFields: React.FC<NodeInputFieldsProps> = ({
@@ -52,6 +53,7 @@ export const NodeInputFields: React.FC<NodeInputFieldsProps> = ({
   spec,
   definition,
   catalog,
+  editable = true,
 }) => {
   const { t } = useI18n();
   const connectInput = useDeploymentWorkflowStore((state) => state.connectInput);
@@ -81,6 +83,7 @@ export const NodeInputFields: React.FC<NodeInputFieldsProps> = ({
             <Select
               items={options}
               value={value}
+              disabled={!editable}
               onValueChange={(next) => {
                 if (!next || next === DEPLOYMENT_NONE_VALUE) {
                   connectInput(node.id, input.name, null);
@@ -128,12 +131,14 @@ interface ConfigFieldControlProps {
   node: DeploymentWorkflowNode;
   field: DeploymentNodeConfigFieldSpec;
   definition: DeploymentWorkflowDefinition;
+  editable: boolean;
 }
 
 const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
   node,
   field,
   definition,
+  editable,
 }) => {
   const { t } = useI18n();
   const profiles = useProfileStore((state) => state.profiles);
@@ -157,6 +162,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
         <Select
           items={options}
           value={String(value ?? '')}
+          disabled={!editable}
           onValueChange={(next) => update(node.id, field.name, next ?? '')}
         >
           <SelectTrigger id={id}><SelectValue /></SelectTrigger>
@@ -184,6 +190,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
         <Select
           items={options}
           value={String(value ?? '')}
+          disabled={!editable}
           onValueChange={(next) => update(node.id, field.name, next ?? '')}
         >
           <SelectTrigger id={id}><SelectValue /></SelectTrigger>
@@ -207,6 +214,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
           id={id}
           checked={value === true}
           onCheckedChange={(checked) => update(node.id, field.name, checked)}
+          disabled={!editable}
         />
         <div className="flex flex-col gap-1">
           <FieldLabel htmlFor={id}>{t(deploymentLocaleKey(field.labelKey))}</FieldLabel>
@@ -224,6 +232,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
           id={id}
           value={listValue(value)}
           rows={3}
+          disabled={!editable}
           onChange={(event) => {
             const entries = event.target.value
               .split(/[\n,]/)
@@ -252,6 +261,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
         min={field.minimum}
         max={field.maximum}
         value={typeof value === 'string' || typeof value === 'number' ? value : ''}
+        disabled={!editable}
         onChange={(event) => update(
           node.id,
           field.name,
@@ -267,9 +277,15 @@ export interface NodeInspectorProps {
   draft: DeploymentWorkflowDraft;
   node: DeploymentWorkflowNode | null;
   catalog: DeploymentNodeTypeCatalog;
+  editable?: boolean;
 }
 
-export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catalog }) => {
+export const NodeInspector: React.FC<NodeInspectorProps> = ({
+  draft,
+  node,
+  catalog,
+  editable = true,
+}) => {
   const { t } = useI18n();
   const updateNode = useDeploymentWorkflowStore((state) => state.updateNode);
   const removeNode = useDeploymentWorkflowStore((state) => state.removeNode);
@@ -314,6 +330,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catal
           size="icon-sm"
           variant="ghost"
           onClick={() => removeNode(node.id)}
+          disabled={!editable}
           aria-label={t('deployment.editor.removeNode')}
         >
           <Trash2Icon data-icon="inline-start" />
@@ -329,6 +346,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catal
               id={`node-name-${node.id}`}
               value={node.displayName}
               onChange={(event) => updateNode(node.id, { displayName: event.target.value })}
+              disabled={!editable}
             />
           </Field>
           <Field>
@@ -355,6 +373,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catal
               min={1}
               max={86_400}
               value={node.timeoutSeconds}
+              disabled={!editable}
               onChange={(event) => updateNode(node.id, {
                 timeoutSeconds: Number(event.target.value),
               })}
@@ -365,6 +384,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catal
             spec={spec}
             definition={draft.definition}
             catalog={catalog}
+            editable={editable}
           />
           {spec.configSchema.fields.map((field) => (
             <ConfigFieldControl
@@ -372,6 +392,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catal
               node={node}
               field={field}
               definition={draft.definition}
+              editable={editable}
             />
           ))}
           {spec.capabilities.length > 0 && (

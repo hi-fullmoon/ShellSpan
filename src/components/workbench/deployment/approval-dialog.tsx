@@ -44,6 +44,7 @@ export interface ApprovalDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workflow: DeploymentWorkflowRecord;
+  admissionsEnabled?: boolean;
   returnFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
@@ -51,6 +52,7 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
   open,
   onOpenChange,
   workflow,
+  admissionsEnabled = true,
   returnFocusRef,
 }) => {
   const { t } = useI18n();
@@ -63,6 +65,7 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
   const summary = detail?.approvalSummary ?? null;
   const invalid = !summary
     || !detail
+    || !['awaiting_approval', 'approved'].includes(detail.summary.status)
     || detail.summary.expired
     || detail.summary.planDrifted
     || now > detail.summary.expiresAt;
@@ -169,7 +172,7 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
           <Button
             ref={approveRef}
             autoFocus
-            disabled={invalid || action === 'approve'}
+            disabled={!admissionsEnabled || invalid || action === 'approve'}
             onClick={() => void approveAndStart()
               .then(() => onOpenChange(false))
               .catch(() => undefined)}
@@ -177,7 +180,9 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
             {action === 'approve'
               ? <Spinner data-icon="inline-start" />
               : <PlayIcon data-icon="inline-start" />}
-            {t('deployment.runtime.approveAndRun')}
+            {t(detail?.summary.status === 'approved'
+              ? 'deployment.runtime.startApproved'
+              : 'deployment.runtime.approveAndRun')}
           </Button>
         </DialogFooter>
       </DialogContent>

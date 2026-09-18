@@ -19,6 +19,7 @@ export interface WorkflowTopologyListProps {
   draft: DeploymentWorkflowDraft;
   catalog: DeploymentNodeTypeCatalog;
   issues: readonly DeploymentEditorIssue[];
+  editable?: boolean;
   onConfigure: (id: string, trigger: HTMLButtonElement) => void;
 }
 
@@ -26,6 +27,7 @@ export const WorkflowTopologyList: React.FC<WorkflowTopologyListProps> = ({
   draft,
   catalog,
   issues,
+  editable = true,
   onConfigure,
 }) => {
   const { t } = useI18n();
@@ -98,6 +100,7 @@ export const WorkflowTopologyList: React.FC<WorkflowTopologyListProps> = ({
                 spec={spec}
                 definition={draft.definition}
                 catalog={catalog}
+                editable={editable}
               />
             </section>
           </React.Fragment>

@@ -384,6 +384,31 @@ describe('WorkflowCanvas', () => {
     ]);
   });
 
+  it('keeps Flow type registries stable and viewport changes outside domain state', () => {
+    const moveNodes = vi.fn();
+    const connectInput = vi.fn();
+    useDeploymentWorkflowStore.setState({ moveNodes, connectInput });
+    const view = renderCanvas();
+    const nodeTypes = flowMock.props?.nodeTypes;
+    const edgeTypes = flowMock.props?.edgeTypes;
+
+    act(() => flowMock.props?.onMoveEnd?.(null, { x: 96, y: 48, zoom: 0.75 }));
+    expect(moveNodes).not.toHaveBeenCalled();
+    expect(connectInput).not.toHaveBeenCalled();
+
+    view.rerender(
+      <WorkflowCanvas
+        draft={draft}
+        catalog={catalog}
+        selectedNodeId="source"
+        issues={[]}
+        editable
+      />,
+    );
+    expect(flowMock.props?.nodeTypes).toBe(nodeTypes);
+    expect(flowMock.props?.edgeTypes).toBe(edgeTypes);
+  });
+
   it('synchronizes node selection, clears it from the pane, and preserves keyboard movement', () => {
     const selectNode = vi.fn();
     const moveNodes = vi.fn();
