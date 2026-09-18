@@ -307,6 +307,7 @@ describe('AiConversationNodeList', () => {
       title: 'write_file',
       summary: 'write_file completed',
       state: 'succeeded',
+      durationMs: 24,
       input: {
         path: 'todo-app/package.json',
         content: '{\n  "name": "todo-app"\n}\n',
@@ -377,6 +378,9 @@ describe('AiConversationNodeList', () => {
     expect(writeRow).toHaveTextContent('Write');
     expect(writeRow).toHaveTextContent('todo-app/package.json');
     expect(writeRow.querySelector('.ai-tool-diff-stat')).toHaveTextContent('+3 -0');
+    const writeMeta = writeRow.querySelector('.ai-tool-meta');
+    expect(writeMeta).toHaveClass('inline-flex', 'items-baseline', 'gap-2');
+    expect(writeMeta).toHaveTextContent('+3 -024 ms');
     expect(writeRow).not.toHaveTextContent('write_file completed');
 
     const editSeat = container.querySelector('[data-ai-node-key="tool:edit"]') as HTMLElement;

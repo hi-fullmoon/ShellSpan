@@ -575,7 +575,10 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(container.querySelector('[data-ai-node-kind="userMessage"]')?.closest('[data-slot="message-scroller-item"]'))
       .toHaveAttribute('data-scroll-anchor', 'true');
     expect(container.querySelector('[data-ai-node-kind="turnProcess"]')).toBeNull();
-    expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toBeInTheDocument();
+    const turnTail = container.querySelector('[data-ai-node-kind="turnTail"]');
+    expect(turnTail).toBeInTheDocument();
+    expect(turnTail?.closest('[data-slot="message-scroller-item"]')).toHaveClass('-ml-1');
+    expect(turnTail?.querySelector('.ai-turn-tail')).not.toHaveClass('-ml-1');
     const footer = screen.getByLabelText('Turn statistics');
     expect(within(footer).getByRole('button', { name: 'Copy' })).toBeVisible();
     expect(within(footer).getByRole('button', { name: 'Usage 144 tok' })).toBeVisible();
