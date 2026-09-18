@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [codeInspectorPlugin({ bundler: 'vite' }), tailwindcss(), react()],
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src'),
+      '@': resolve(import.meta.dirname, './src'),
     },
   },
   server: {
@@ -23,7 +23,7 @@ export default defineConfig({
   build: {
     rolldownOptions: {
       input: {
-        main: resolve(__dirname, 'index.html'),
+        main: resolve(import.meta.dirname, 'index.html'),
       },
       output: {
         codeSplitting: {
