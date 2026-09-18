@@ -8,6 +8,7 @@
     "dev": "vite --host 0.0.0.0 --port 1420",
     "build": "tsc && vite build",
     "test": "vitest run",
+    "test:image-draft-indexeddb": "node scripts/verify-image-draft-indexeddb.mjs",
     "test:agent-visible-terminal": "node scripts/verify-agent-visible-terminal.mjs",
     "test:terminal-broker:linux-container": "node scripts/verify-terminal-broker-linux-container.mjs",
     "test:terminal-visible:linux-container": "node scripts/verify-terminal-broker-linux-container.mjs",

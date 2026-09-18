@@ -14,27 +14,51 @@ export interface ImageDraft {
   };
 }
 
-function open(): Promise<IDBDatabase> {
+const DATABASE_NAME = 'shellspan-image-drafts-v1';
+const DRAFT_STORE = 'drafts';
+const SESSION_INDEX = 'session';
+
+function ensureSchema(request: IDBOpenDBRequest): void {
+  const store = request.result.objectStoreNames.contains(DRAFT_STORE)
+    ? request.transaction!.objectStore(DRAFT_STORE)
+    : request.result.createObjectStore(DRAFT_STORE, { keyPath: 'owner' });
+  if (!store.indexNames.contains(SESSION_INDEX)) {
+    store.createIndex(SESSION_INDEX, 'operation.sessionId');
+  }
+}
+
+function requestDatabase(version?: number): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('shellspan-image-drafts-v1', 2);
-    request.onupgradeneeded = () => {
-      const store = request.result.objectStoreNames.contains('drafts')
-        ? request.transaction!.objectStore('drafts') : request.result.createObjectStore('drafts', { keyPath: 'owner' });
-      if (!store.indexNames.contains('session')) store.createIndex('session', 'operation.sessionId');
-    };
+    const request = version === undefined
+      ? indexedDB.open(DATABASE_NAME)
+      : indexedDB.open(DATABASE_NAME, version);
+    request.onupgradeneeded = () => ensureSchema(request);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+function hasCurrentSchema(db: IDBDatabase): boolean {
+  if (!db.objectStoreNames.contains(DRAFT_STORE)) return false;
+  return db.transaction(DRAFT_STORE).objectStore(DRAFT_STORE).indexNames.contains(SESSION_INDEX);
+}
+
+async function open(): Promise<IDBDatabase> {
+  const db = await requestDatabase();
+  if (hasCurrentSchema(db)) return db;
+  const migrationVersion = db.version + 1;
+  db.close();
+  return requestDatabase(migrationVersion);
 }
 export async function readImageDraft(owner: string): Promise<ImageDraft | null> {
   const db = await open();
   try {
     return await new Promise((resolve, reject) => {
-      const store = db.transaction('drafts').objectStore('drafts');
+      const store = db.transaction(DRAFT_STORE).objectStore(DRAFT_STORE);
       const request = store.get(owner);
       request.onsuccess = () => {
         if (request.result?.images.length || !owner.startsWith('agent:')) { resolve(request.result ?? null); return; }
-        const bound = store.index('session').get(owner.slice('agent:'.length));
+        const bound = store.index(SESSION_INDEX).get(owner.slice('agent:'.length));
         bound.onsuccess = () => resolve(bound.result ?? request.result ?? null);
         bound.onerror = () => reject(bound.error);
       };
@@ -47,8 +71,8 @@ export async function writeImageDraft(next: ImageDraft, expectedRevision: number
   const db = await open();
   try {
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction('drafts', 'readwrite');
-      const store = tx.objectStore('drafts');
+      const tx = db.transaction(DRAFT_STORE, 'readwrite');
+      const store = tx.objectStore(DRAFT_STORE);
       let conflict = false;
       const request = store.get(next.owner);
       request.onsuccess = () => {
