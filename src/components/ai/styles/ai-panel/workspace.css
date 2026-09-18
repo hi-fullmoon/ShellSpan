@@ -1,6 +1,6 @@
 .ai-workspace-root {
   --ai-shell-clearance: 12px;
-  --ai-transcript-extra-inset: 16px;
+  --ai-transcript-extra-inset: 8px;
   --ai-chat-content-max-width: 640px;
   --ai-composer-card-max-width: calc(var(--ai-chat-content-max-width) + 32px);
 

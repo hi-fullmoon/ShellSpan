@@ -625,9 +625,13 @@ export function AiToolRow({
           >
             {summary}
           </span>
-          {changeStat && <span className="ai-tool-diff-stat ml-2 shrink-0 whitespace-nowrap">{changeStat}</span>}
-          {node.durationMs !== null && (
-            <span className="ai-tool-duration ml-2 shrink-0 whitespace-nowrap">{t('ai.workspace.durationMs', { duration: node.durationMs })}</span>
+          {(changeStat || node.durationMs !== null) && (
+            <span className="ai-tool-meta ml-2 inline-flex shrink-0 items-baseline gap-2 whitespace-nowrap">
+              {changeStat && <span className="ai-tool-diff-stat">{changeStat}</span>}
+              {node.durationMs !== null && (
+                <span className="ai-tool-duration">{t('ai.workspace.durationMs', { duration: node.durationMs })}</span>
+              )}
+            </span>
           )}
         </CollapsibleTrigger>
         <CollapsibleContent>

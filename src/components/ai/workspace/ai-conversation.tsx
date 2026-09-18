@@ -140,6 +140,7 @@ export function AiConversation({
           renderers={renderers}
           scrollAnchor={node.kind === 'userMessage'}
           scrollItemId={conversationItemId(node)}
+          scrollItemClassName={node.kind === 'turnTail' ? '-ml-1' : undefined}
           onOpenTool={onOpenTool}
           onOpenArtifact={onOpenArtifact}
         />
