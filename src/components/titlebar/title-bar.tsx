@@ -35,7 +35,10 @@ export const TitleBar: React.FC = () => {
       data-tauri-drag-region
     >
       <SectionNav />
-      <div className="flex h-full items-center gap-2 pr-2">
+      <div
+        className={cn('flex h-full items-center gap-2', isMacOS && 'pr-2')}
+        data-slot="titlebar-actions"
+      >
         {activeSection !== 'sftp' && (
           <Button
             variant={aiOpen ? 'secondary' : 'ghost'}
