@@ -9,6 +9,7 @@ import {
   invokeSetSessionOutputPaused,
   invokeResizeSession,
   invokeWriteSession,
+  invokeWriteSessionBytes,
   invokeOpenUrl,
   listenToSshClosed,
   listenToSshData,
@@ -31,7 +32,7 @@ import type {
   TerminalCursorStyle,
   TerminalFontFamily,
 } from '@/types';
-import type { IDisposable, ILink } from '@xterm/xterm';
+import type { IBuffer, IBufferCellPosition, IDisposable, ILink } from '@xterm/xterm';
 
 const logger = createLogger('terminal');
 
@@ -94,6 +95,8 @@ const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
 const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 
 const RESIZE_DEBOUNCE_MS = 100;
+const RESIZE_RETRY_BASE_MS = 250;
+const RESIZE_RETRY_MAX_MS = 2000;
 const OUTPUT_PAUSE_HIGH_WATERMARK = 512 * 1024;
 const OUTPUT_RESUME_LOW_WATERMARK = 128 * 1024;
 const OUTPUT_RESUME_RETRY_BASE_MS = 250;
@@ -123,6 +126,55 @@ export function findHttpLinksInLine(line: string): Array<{ text: string; start: 
     links.push({ text, start: match.index + 1, end: match.index + text.length });
   }
   return links;
+}
+
+export function findHttpLinksInBuffer(
+  buffer: IBuffer,
+  bufferLineNumber: number,
+  columns: number,
+): Array<Pick<ILink, 'text' | 'range'>> {
+  const targetIndex = bufferLineNumber - 1;
+  const targetLine = buffer.getLine(targetIndex);
+  if (!targetLine) return [];
+
+  let firstLineIndex = targetIndex;
+  while (firstLineIndex > 0 && buffer.getLine(firstLineIndex)?.isWrapped) {
+    firstLineIndex -= 1;
+  }
+
+  let text = '';
+  const starts: IBufferCellPosition[] = [];
+  const ends: IBufferCellPosition[] = [];
+  const reusableCell = buffer.getNullCell();
+  for (let lineIndex = firstLineIndex; lineIndex < buffer.length; lineIndex += 1) {
+    const line = buffer.getLine(lineIndex);
+    if (!line || (lineIndex > firstLineIndex && !line.isWrapped)) break;
+
+    const columnCount = Math.min(columns, line.length);
+    for (let column = 0; column < columnCount; column += 1) {
+      const cell = line.getCell(column, reusableCell);
+      if (!cell) continue;
+      const width = cell.getWidth();
+      if (width === 0) continue;
+      const chars = cell.getChars() || ' ';
+      const start = { x: column + 1, y: lineIndex + 1 };
+      const end = { x: column + Math.max(1, width), y: lineIndex + 1 };
+      text += chars;
+      for (let offset = 0; offset < chars.length; offset += 1) {
+        starts.push(start);
+        ends.push(end);
+      }
+    }
+
+    if (!buffer.getLine(lineIndex + 1)?.isWrapped) break;
+  }
+
+  return findHttpLinksInLine(text).flatMap((detected) => {
+    const start = starts[detected.start - 1];
+    const end = ends[detected.end - 1];
+    if (!start || !end || bufferLineNumber < start.y || bufferLineNumber > end.y) return [];
+    return [{ text: detected.text, range: { start, end } }];
+  });
 }
 
 function playBellSound(): void {
@@ -385,11 +437,15 @@ class TerminalControllerImpl implements TerminalController {
   private linkProviderDisposable?: IDisposable;
   private resizeDebounceTimer: number | null = null;
   private pendingDimensions: { cols: number; rows: number } | null = null;
-  // Last size forwarded to the pty. The backend relays every resize as an
+  // Last size acknowledged by the pty resize command. The backend relays every resize as an
   // SSH window-change even when the size is unchanged, and the resulting
   // SIGWINCH makes the remote shell redraw its prompt — sometimes leaving
   // duplicated/garbled prompt lines — so identical resizes are dropped here.
   private lastSentDimensions: { cols: number; rows: number } | null = null;
+  private sendingDimensions: { cols: number; rows: number } | null = null;
+  private queuedResizeDimensions: { cols: number; rows: number } | null = null;
+  private resizeRetryTimer: number | null = null;
+  private resizeRetryAttempts = 0;
   private rendererInitialized = false;
   private webglAddon?: WebglAddon;
   private webglContextLossDisposable?: IDisposable;
@@ -448,6 +504,9 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.onData((data) => {
       this.handleInput(data);
     });
+    this.terminal.onBinary((data) => {
+      this.handleBinaryInput(data);
+    });
     this.terminal.onBell(() => {
       if (this.preferences.bellStyle === 'sound') playBellSound();
     });
@@ -499,6 +558,15 @@ class TerminalControllerImpl implements TerminalController {
       this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.disconnectedHint')));
       this.inputBlockedNoticeRef = true;
     }
+  }
+
+  private handleBinaryInput(data: string): void {
+    if (this.getStatus(this.sessionId) !== 'connected') return;
+    const bytes = Uint8Array.from(data, (character) => character.charCodeAt(0) & 0xff);
+    void this.writeUserBinaryInput(bytes).catch((error) => {
+      logger.error(`Failed to write binary input to session ${this.sessionId}`, error);
+      this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.writeFailedLabel'), t('terminal.notice.writeFailedMessage'), '31'));
+    });
   }
 
   private updateElementStyles(theme = resolveTerminalTheme(this.preferences.colorScheme)): void {
@@ -568,19 +636,15 @@ class TerminalControllerImpl implements TerminalController {
     if (!this.preferences.urlDetection) return;
     this.linkProviderDisposable = this.terminal.registerLinkProvider({
       provideLinks: (bufferLineNumber, callback) => {
-        const line = this.terminal.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true);
-        if (!line) {
-          callback(undefined);
-          return;
-        }
         const links: ILink[] = [];
-        for (const detected of findHttpLinksInLine(line)) {
+        for (const detected of findHttpLinksInBuffer(
+          this.terminal.buffer.active,
+          bufferLineNumber,
+          this.terminal.cols,
+        )) {
           links.push({
             text: detected.text,
-            range: {
-              start: { x: detected.start, y: bufferLineNumber },
-              end: { x: detected.end, y: bufferLineNumber },
-            },
+            range: detected.range,
             decorations: { pointerCursor: true, underline: true },
             activate: (_event, text) => {
               void invokeOpenUrl(text).catch((error) => {
@@ -906,12 +970,76 @@ class TerminalControllerImpl implements TerminalController {
     this.pendingDimensions = null;
   }
 
+  private cancelResizeRetry(): void {
+    if (this.resizeRetryTimer !== null) {
+      window.clearTimeout(this.resizeRetryTimer);
+      this.resizeRetryTimer = null;
+    }
+  }
+
+  private sameDimensions(
+    left: { cols: number; rows: number } | null,
+    right: { cols: number; rows: number },
+  ): boolean {
+    return left?.cols === right.cols && left.rows === right.rows;
+  }
+
   private sendResize(cols: number, rows: number): void {
-    const last = this.lastSentDimensions;
-    if (last && last.cols === cols && last.rows === rows) return;
-    this.lastSentDimensions = { cols, rows };
-    invokeResizeSession(this.sessionId, cols, rows).catch((error) => {
-      logger.warn(`Failed to resize session ${this.sessionId}`, error);
+    const dimensions = { cols, rows };
+    if (!this.sendingDimensions && this.sameDimensions(this.lastSentDimensions, dimensions)) {
+      this.queuedResizeDimensions = null;
+      this.cancelResizeRetry();
+      this.resizeRetryAttempts = 0;
+      return;
+    }
+    if (this.sameDimensions(this.queuedResizeDimensions, dimensions)) return;
+    if (!this.queuedResizeDimensions && this.sameDimensions(this.sendingDimensions, dimensions)) return;
+    this.queuedResizeDimensions = dimensions;
+    this.cancelResizeRetry();
+    this.flushResizeQueue();
+  }
+
+  private flushResizeQueue(): void {
+    if (this.disposed || this.sendingDimensions || this.resizeRetryTimer !== null) return;
+    const dimensions = this.queuedResizeDimensions;
+    if (!dimensions) return;
+    if (this.sameDimensions(this.lastSentDimensions, dimensions)) {
+      this.queuedResizeDimensions = null;
+      this.resizeRetryAttempts = 0;
+      return;
+    }
+    this.queuedResizeDimensions = null;
+    this.sendingDimensions = dimensions;
+    const sessionId = this.sessionId;
+    void invokeResizeSession(sessionId, dimensions.cols, dimensions.rows).then(() => {
+      if (this.disposed || this.sessionId !== sessionId) return;
+      this.lastSentDimensions = dimensions;
+      this.resizeRetryAttempts = 0;
+    }).catch((error) => {
+      if (!this.disposed && this.sessionId === sessionId && !this.queuedResizeDimensions) {
+        this.queuedResizeDimensions = dimensions;
+        const delay = Math.min(
+          RESIZE_RETRY_BASE_MS * 2 ** this.resizeRetryAttempts,
+          RESIZE_RETRY_MAX_MS,
+        );
+        this.resizeRetryAttempts += 1;
+        this.resizeRetryTimer = window.setTimeout(() => {
+          this.resizeRetryTimer = null;
+          const status = this.getStatus(this.sessionId);
+          if (status !== 'connected' && status !== 'connecting') {
+            this.queuedResizeDimensions = null;
+            this.resizeRetryAttempts = 0;
+            return;
+          }
+          this.flushResizeQueue();
+        }, delay);
+      }
+      logger.warn(`Failed to resize session ${sessionId}`, error);
+    }).finally(() => {
+      if (this.sendingDimensions === dimensions) this.sendingDimensions = null;
+      if (this.queuedResizeDimensions && this.resizeRetryTimer === null) {
+        this.flushResizeQueue();
+      }
     });
   }
 
@@ -1084,10 +1212,7 @@ class TerminalControllerImpl implements TerminalController {
     }
   }
 
-  writeUserInput(data: string): Promise<boolean> {
-    if (this.disposed || this.getStatus(this.sessionId) !== 'connected') {
-      return Promise.resolve(false);
-    }
+  private canWriteUserInput(): boolean {
     if (this.userInputSuppressions > 0) {
       logger.debug(`Dropped user input while an Agent command owns session=${this.sessionId}`);
       if (!this.agentInputBlockedNoticeRef) {
@@ -1099,14 +1224,30 @@ class TerminalControllerImpl implements TerminalController {
         ));
         for (const listener of this.userInputBlockedListeners) listener();
       }
-      return Promise.resolve(false);
+      return false;
     }
     if (Date.now() < this.inputGraceDeadlineRef) {
       logger.debug(`Dropped input during post-reconnect grace period session=${this.sessionId}`);
+      return false;
+    }
+    return true;
+  }
+
+  writeUserInput(data: string): Promise<boolean> {
+    if (this.disposed || this.getStatus(this.sessionId) !== 'connected') {
       return Promise.resolve(false);
     }
+    if (!this.canWriteUserInput()) return Promise.resolve(false);
     this.trackUserInput(data);
     return this.writeInput(data).then(() => true);
+  }
+
+  private writeUserBinaryInput(bytes: Uint8Array): Promise<boolean> {
+    if (this.disposed || this.getStatus(this.sessionId) !== 'connected') {
+      return Promise.resolve(false);
+    }
+    if (!this.canWriteUserInput()) return Promise.resolve(false);
+    return invokeWriteSessionBytes(this.sessionId, bytes).then(() => true);
   }
 
   writeInput(data: string): Promise<void> {
@@ -1176,6 +1317,9 @@ class TerminalControllerImpl implements TerminalController {
     });
     this.clearListeners();
     this.cancelPendingResize();
+    this.cancelResizeRetry();
+    this.queuedResizeDimensions = null;
+    this.resizeRetryAttempts = 0;
     this.cancelOutputResumeRetry();
     this.outputResumeRetryAttempts = 0;
     if (this.outputPaused) {
@@ -1236,10 +1380,15 @@ class TerminalControllerImpl implements TerminalController {
       this.updateLinkProvider();
     }
     if (geometryChanged && this.host) {
+      const previousCols = this.terminal.cols;
+      const previousRows = this.terminal.rows;
       try {
         this.fitAddon.fit();
       } catch {
         // The host can briefly be unmeasurable while switching sections.
+      }
+      if (this.terminal.cols !== previousCols || this.terminal.rows !== previousRows) {
+        this.sendResize(this.terminal.cols, this.terminal.rows);
       }
     }
   }
@@ -1257,6 +1406,8 @@ class TerminalControllerImpl implements TerminalController {
     logger.debug(`Terminal disposed for session ${this.sessionId}`);
     this.emitLifecycle({ type: 'disposed', sessionId: this.sessionId });
     this.cancelOutputResumeRetry();
+    this.cancelResizeRetry();
+    this.queuedResizeDimensions = null;
     if (this.outputPaused) {
       this.setOutputPaused(false);
     }
