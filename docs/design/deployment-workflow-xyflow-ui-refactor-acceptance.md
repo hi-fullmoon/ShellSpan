@@ -1,6 +1,6 @@
 # Deployment Workflow React Flow UI 重构验收记录
 
-> 状态：阶段 0–4 已完成，阶段 5 待实施
+> 状态：阶段 0–5 已完成；React Flow UI 重构验收收口
 > 基线日期：2026-09-17
 > 适用计划：[`deployment-workflow-xyflow-ui-refactor-plan.md`](./deployment-workflow-xyflow-ui-refactor-plan.md)
 
@@ -133,3 +133,18 @@
 - 中文宽 prepare/runs、英文宽 versions、英文窄 runs、中文窄四个覆盖层均已实际渲染检查；临时截图只用于本阶段检查，没有提前创建或覆盖阶段 5 的正式证据目录。全新页面的 warning/error 日志均为空。
 - 阶段 4 规定门禁：中心组件、Runtime 组件与 Run Store 共 3 个文件、19 个测试通过。扩展复核覆盖 Flow 投影/连接、两个 Store、设计画布、中心、Runtime 与 locale key 集合，共 8 个文件、48 个测试通过；`pnpm build`、`pnpm check:ai-styles` 和 `git diff --check` 通过。
 - 与计划无功能偏差。阶段 5 必须继续保持 input binding 是唯一 edge 真相、运行图严格只读、覆盖层完整高度收缩链、四种容器 scroll ownership 与本阶段 coordinator/IPC 边界；正式截图仍应写入新的 `deployment-workflow-xyflow-refactor/` 目录，不得使用本阶段临时图替代。
+
+### 阶段 5：全量验证、视觉证据与收口
+
+- 逐项复核阶段 0–4 退出条件并完成静态审计：部署中心没有 Card import/DOM、裸 `invoke`、第二份 edge 持久化状态、viewport 到领域 Store 的写入、effectful 单节点捷径、硬编码颜色/暗色覆盖或未本地化的主要用户文案。设计态与运行态继续只由 `DeploymentWorkflowDefinition.nodes[*].inputs` 投影 edge；运行 Flow 的拖动、连接、重连和删除保持关闭。
+- 删除中英文各 444 个已无生产引用的旧部署键，只保留仍由连接入口、空态、审计导出和命令面板使用的兼容键；补齐 prepare/attempt/coordinator/integrity 原生时间线事件文案，移除用户可见的协议版本号和过期“阶段 5”占位文案。locale key 集合与旧键消失均有回归测试。
+- 新增最大规模投影测试：64 节点、每节点 16 个输入和 16 个输出，共 1008 条 binding edge；node/edge ID 唯一、领域 definition 不出现 `edges` 属性，投影在测试环境中小于 1000 ms。画布组件测试确认 `nodeTypes` / `edgeTypes` 引用稳定，viewport 变化不会调用任何领域 Store 写操作。
+- 键盘实测：设计态有 10 个节点和 12 条 edge 可按 Tab 到达；Enter 可选择、Escape 可清除选择；方向键移动由自动化回归覆盖。窄容器提供 10 个“配置”按钮和 12 个可读 binding Select，不挂载 React Flow。Approval、Evidence、rollback 覆盖层关闭后焦点均返回真实触发器，Artifact Drawer 焦点返回由组件测试覆盖。
+- 正式视觉证据写入 [`evidence/deployment-workflow-xyflow-refactor/`](./evidence/deployment-workflow-xyflow-refactor/)：`design-wide`、`design-medium`、`design-narrow`、`design-ai`、`prepare-wide`、`runs-wide`、`runs-narrow`、`versions-wide`、`approval-narrow`、`artifact-narrow`、`evidence-narrow`、`rollback-narrow` 共 12 张 PNG；旧 Phase 4–6 证据未修改。
+- 实际渲染使用系统 Microsoft Edge 的 Playwright 通道（本机没有 Playwright bundled Chromium），viewport 为 `1500 × 900`，工作台外框为 1420 / 860 / 430 / 780 px，对应阶段 0 的内部内容宽度 1418 / 858 / 428 / 778 px。12 个场景的 document/workbench/current-view 横向溢出均为 0 px，部署中心 Card 数均为 0；AI 场景全页唯一 Card 来自相邻 AI 夹具，不属于部署中心。
+- 宽/中/AI 设计图均显示 10 节点、12 条 binding edge 和 22 个可见 Handle；窄设计只显示拓扑替代路径。宽/窄运行图均显示 10 节点、12 条 edge 和 0 个可见 Handle。窄覆盖层高度为 Approval 736 px、Artifact 800 px、Evidence 704 px、rollback 480 px，固定标题/底部操作与正文滚动层均保持可见。
+- Scroll ownership 复核通过：页面和主工作区不拥有横向滚动；宽设计的列表/Inspector、宽运行的列表/Inspector、prepare/versions 正文以及四类覆盖层正文分别拥有自己的 ScrollArea；React Flow 只负责画布 pan/zoom；窄设计只由拓扑 ScrollArea 滚动。最终证据页面全新加载后的 console warning/error 均为空；截图自动化早期连续 resize/HMR 时开发服务器记录过既有的 `ResizeObserver loop completed with undelivered notifications`，全新导航和 reload 后不可复现。
+- 定向阶段 4/5 回归：9 个文件、54 个测试全部通过。`pnpm test`：212 个文件通过、1 个文件跳过，1899 个测试通过、1 个测试跳过。`pnpm build`、`pnpm check:rust:includes`（42 个 include 文件）、`pnpm check:ai-styles`、`pnpm check:llm:catalog`（55 个模型和 4 个负向夹具）、`cargo fmt --check`、`git diff --check` 均通过；构建仅保留既有 ineffective dynamic import 与大 chunk warning。
+- Rust 测试发现并修复一个 Windows CRLF 下无效的 canonical digest 测试替换：测试先归一化夹具行尾，再验证 JSON key 重排不改变 digest，生产编译器逻辑未改。默认 `target` 的完整 `cargo test` 会被用户正在运行的 `ShellSpan.exe` 锁定，因此改用 D 盘临时 `CARGO_TARGET_DIR` 完成完整门禁：library 852 个通过、42 个按环境约定忽略，main/doc-test 0 个测试，integration 5 个通过。首次并行全量运行时 `terminal_broker::tests::interactive_wait_observes_idle_and_terminal_closure_without_replay` 偶发返回 stale transport；该用例单独复跑通过，随后完整命令复跑通过。临时 target 已删除。
+- `pnpm test:deployment:e2e` 已实际执行，但 Docker Desktop Linux Engine 未运行，`npipe:////./pipe/dockerDesktopLinuxEngine` 不存在，容器构建无法开始；依据计划把这一项记录为环境型 E2E 未运行完成，未误报为通过。
+- 与计划无功能偏差。唯一工具偏差是使用系统 Edge 代替缺失的 bundled Chromium；唯一未完成门禁是计划明确允许记录环境缺口的 Docker E2E。未创建 commit、tag 或 push。
