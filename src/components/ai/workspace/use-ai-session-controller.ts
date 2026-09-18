@@ -272,6 +272,19 @@ export function useAiSessionController({
   }, [defaultProviderId, providers, routeSnapshot]);
   const activeTerminal = terminalSessions.find((item) => item.sessionId === activeTerminalId);
   const historyScopeKey = activeTerminal ? terminalLoginScopeKey(activeTerminal) : null;
+  // Session recovery depends on the terminal's durable target identity, not on
+  // prompt/integration metadata. Those fields can change rapidly while menus
+  // and dialogs resize or refocus the terminal surface.
+  const restoreTerminalKey = activeTerminal
+    ? JSON.stringify([
+        activeTerminal.sessionId,
+        activeTerminal.replacesSessionId ?? null,
+        activeTerminal.profileId ?? null,
+        activeTerminal.host,
+        activeTerminal.port,
+        activeTerminal.username,
+      ])
+    : '';
   const [view, setView] = useState<AiSessionView | null>(null);
   const [historicalSources, setHistoricalSources] = useState<readonly AiSessionView[]>([]);
   const [historicalContinuationBusy, setHistoricalContinuationBusy] = useState(false);
@@ -776,11 +789,11 @@ export function useAiSessionController({
       unsubscribe();
     };
   }, [
-    activeTerminal,
     adapter,
     canRestoreWorkbench,
     dispatch,
     openedSessionId,
+    restoreTerminalKey,
     scope,
     skillNavigation,
     workspaceChanging,

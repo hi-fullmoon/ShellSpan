@@ -1301,6 +1301,30 @@ describe('AiWorkspaceController', () => {
     })));
   });
 
+  it('does not restart session recovery when terminal metadata changes after selecting permissions', async () => {
+    connectedTerminal();
+    const agent = adapter();
+    const user = userEvent.setup();
+    render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+    await waitFor(() => expect(agent.list).toHaveBeenCalledOnce());
+
+    await user.click(screen.getByRole('button', { name: /Permission mode:/ }));
+    await user.click(await screen.findByRole('menuitemradio', { name: /^Full access/ }));
+    await user.click(await screen.findByRole('button', { name: 'Allow full access' }));
+    expect(useAgentPermissionStore.getState().getMode('terminal-1')).toBe('fullAccess');
+
+    act(() => {
+      useTerminalStore.setState((state) => ({
+        sessions: state.sessions.map((session) => session.sessionId === 'terminal-1'
+          ? { ...session, promptReady: false, integrationStateRevision: 2 }
+          : session),
+      }));
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Permission mode: Full access/ })).toBeVisible());
+    expect(agent.list).toHaveBeenCalledOnce();
+  });
+
   it('freezes the selected visible-terminal surface into a new Session request', async () => {
     connectedTerminal();
     const agent = adapter({
