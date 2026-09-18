@@ -2517,9 +2517,9 @@ impl AgentToolPipeline {
             };
             if super::model::recorded_tool_call_omits_replay(call) {
                 let reason = if status == AgentToolApprovalStatus::Approved {
-                    "An ephemeral terminal call was authorized but not dispatched before restart; it was cancelled because its private arguments were not persisted."
+                    "An ephemeral tool call was authorized but not dispatched before restart; it was cancelled because its private arguments were not persisted."
                 } else {
-                    "An ephemeral terminal call approval was cancelled after restart because its private arguments were not persisted."
+                    "An ephemeral tool call approval was cancelled after restart because its private arguments were not persisted."
                 };
                 self.sessions.append_batch(
                     &entry.session_id,
