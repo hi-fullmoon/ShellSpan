@@ -11,7 +11,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { useSftpStore, type SftpSide } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
-import type { ConnectionProfile, RemoteFsError } from '@/types';
+import type { ConnectionProfile } from '@/types';
 import { promptForMissingPassword, persistPromptedPassword } from '@/lib/connections/password-prompt';
 import { getToastErrorMessage } from '@/lib/error';
 import { createLogger } from '@/lib/logger';
@@ -51,8 +51,9 @@ export function useSftpConnectionOpener(): {
   hostKeyDialog: SftpHostKeyDialogState;
   closeHostKeyDialog: () => void;
 } {
-  const addConnection = useSftpStore((state) => state.addConnection);
-  const attachRemoteConnection = useSftpStore((state) => state.attachRemoteConnection);
+  const beginConnectionAttempt = useSftpStore((state) => state.beginConnectionAttempt);
+  const resolveConnectionAttempt = useSftpStore((state) => state.resolveConnectionAttempt);
+  const endConnectionAttempt = useSftpStore((state) => state.endConnectionAttempt);
   const hydrateSftpBookmarks = useSftpStore((state) => state.hydrateSftpBookmarks);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
   const touchProfile = useRecentProfilesStore((state) => state.touchProfile);
@@ -61,11 +62,12 @@ export function useSftpConnectionOpener(): {
 
   const finishOpen = useCallback(
     (
+      attemptId: string,
       profile: ConnectionProfile,
       targetConnectionId?: string,
       targetSide: SftpSide = 'remote',
       initialDirectory?: string,
-    ): void => {
+    ): boolean => {
       const connection = buildRemoteConnectionRequest(profile);
       const summary = {
         sessionId: generateId(),
@@ -74,37 +76,34 @@ export function useSftpConnectionOpener(): {
         port: profile.port,
         username: profile.username,
       };
+      const connectionId = resolveConnectionAttempt(
+        attemptId,
+        summary,
+        connection,
+        profile.id,
+        initialDirectory,
+      );
+      if (!connectionId) return false;
       const ownerPrefix = targetConnectionId
         ? `sftp:${targetConnectionId}:${targetSide}:`
         : undefined;
       const releasedPreviousOwner = ownerPrefix
         ? usePortForwardStore.getState().stopOwnersByPrefix(ownerPrefix)
         : Promise.resolve();
-      if (targetConnectionId) {
-        attachRemoteConnection(targetConnectionId, targetSide, summary, connection, profile.id);
-      } else {
-        addConnection(summary, connection, profile.id);
-      }
-      const connectionId = targetConnectionId ?? useSftpStore.getState().activeConnectionId;
-      if (connectionId) {
-        if (initialDirectory) {
-          useSftpStore.getState().setPath(connectionId, targetSide, initialDirectory);
-        }
-        void releasedPreviousOwner.then(() => usePortForwardStore
-          .getState()
-          .startAutoForOwner(profile, `sftp:${connectionId}:${targetSide}:${summary.sessionId}`));
-        void hydrateSftpBookmarks(
-          profile.host,
-          profile.port,
-          profile.username,
-          connectionId,
-          targetSide,
-        );
-      }
+      void releasedPreviousOwner.then(() => usePortForwardStore
+        .getState()
+        .startAutoForOwner(profile, `sftp:${connectionId}:${targetSide}:${summary.sessionId}`));
+      void hydrateSftpBookmarks(
+        profile.host,
+        profile.port,
+        profile.username,
+        connectionId,
+        targetSide,
+      );
       touchProfile(profile.id);
-      setActiveSection('sftp');
+      return true;
     },
-    [addConnection, attachRemoteConnection, hydrateSftpBookmarks, setActiveSection, touchProfile],
+    [hydrateSftpBookmarks, resolveConnectionAttempt, touchProfile],
   );
 
   const verifyHostKey = useCallback(
@@ -165,87 +164,97 @@ export function useSftpConnectionOpener(): {
       targetSide: SftpSide = 'remote',
       initialDirectory?: string,
     ) => {
-      const profileWithSavedSecrets = await useProfileStore
-        .getState()
-        .ensurePassword(profile);
-      const profileWithPassword = await promptForMissingPassword(profileWithSavedSecrets);
-      if (!profileWithPassword) {
-        return;
-      }
-
-      const profileWithKey = await ensureKeychainKeyForProfile(profileWithPassword);
-      if (!profileWithKey) {
-        return;
-      }
-
-      const preparedProfile = profileWithKey;
-
-      // Persist a password entered via the prompt once the connection
-      // succeeds; failures are swallowed inside persistPromptedPassword.
-      const finish = (): void => {
-        void persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
-        finishOpen(preparedProfile, targetConnectionId, targetSide, initialDirectory);
-      };
-
-      // Let the real pooled connection perform host-key verification,
-      // authentication, and SFTP initialization on the same SSH session. This
-      // avoids a separate host-key-only handshake for direct connections.
-      const attemptSftpConnection = async () => {
-        const request = buildRemoteConnectionRequest(preparedProfile);
-        await invokeWarmRemoteConnection(request);
-      };
-
-      const handleRemoteFsError = (error: RemoteFsError): boolean => {
-        if (error.type === 'HostKeyUnknown' || error.type === 'HostKeyMismatch') {
-          setHostKeyDialog({
-            open: true,
-            host: error.payload.host,
-            port: error.payload.port,
-            fingerprint: error.payload.fingerprint,
-            mismatch: error.type === 'HostKeyMismatch',
-            onTrust: () => {
-              void invokeTrustHost(
-                error.payload.host,
-                error.payload.port,
-                error.payload.fingerprint ?? '',
-              )
-                .then(() => {
-                  setHostKeyDialog(CLOSED_DIALOG);
-                  return attemptSftpConnection();
-                })
-                .then(() => {
-                  finish();
-                })
-                .catch((retryError: unknown) => {
-                  const parsed = parseRemoteFsError(retryError);
-                  if (parsed && handleRemoteFsError(parsed)) {
-                    return;
-                  }
-                  useToastStore
-                    .getState()
-                    .addToast(getToastErrorMessage(retryError), 'error');
-                });
-            },
-          });
-          return true;
-        }
-        return false;
-      };
-
+      const beginAttempt = (attemptProfile: ConnectionProfile): string =>
+        beginConnectionAttempt({
+          title: attemptProfile.name,
+          host: attemptProfile.host,
+          port: attemptProfile.port,
+          username: attemptProfile.username,
+          profileId: attemptProfile.id,
+          connection: buildRemoteConnectionRequest(attemptProfile),
+        }, targetConnectionId, targetSide);
+      const connectionAttemptId = beginAttempt(profile);
+      setActiveSection('sftp');
       try {
-        await attemptSftpConnection();
-        finish();
-      } catch (error) {
-        const parsed = parseRemoteFsError(error);
-        if (parsed && handleRemoteFsError(parsed)) {
+        const profileWithSavedSecrets = await useProfileStore
+          .getState()
+          .ensurePassword(profile);
+        const profileWithPassword = await promptForMissingPassword(profileWithSavedSecrets);
+        if (!profileWithPassword) {
           return;
         }
-        useToastStore
-          .getState()
-          .addToast(getToastErrorMessage(error), 'error');
+
+        const profileWithKey = await ensureKeychainKeyForProfile(profileWithPassword);
+        if (!profileWithKey) {
+          return;
+        }
+
+        const preparedProfile = profileWithKey;
+
+        const attemptSftpConnection = async (attemptId: string): Promise<void> => {
+          try {
+            // Let the real pooled connection perform host-key verification,
+            // authentication, and SFTP initialization on the same SSH session.
+            await invokeWarmRemoteConnection(buildRemoteConnectionRequest(preparedProfile));
+            if (finishOpen(
+              attemptId,
+              preparedProfile,
+              targetConnectionId,
+              targetSide,
+              initialDirectory,
+            )) {
+              // Failures are swallowed inside persistPromptedPassword.
+              void persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
+            }
+          } catch (error) {
+            const parsed = parseRemoteFsError(error);
+            if (parsed && (
+              parsed.type === 'HostKeyUnknown'
+              || parsed.type === 'HostKeyMismatch'
+            )) {
+              setHostKeyDialog({
+                open: true,
+                host: parsed.payload.host,
+                port: parsed.payload.port,
+                fingerprint: parsed.payload.fingerprint,
+                mismatch: parsed.type === 'HostKeyMismatch',
+                onTrust: () => {
+                  void invokeTrustHost(
+                    parsed.payload.host,
+                    parsed.payload.port,
+                    parsed.payload.fingerprint ?? '',
+                  )
+                    .then(async () => {
+                      setHostKeyDialog(CLOSED_DIALOG);
+                      const retryAttemptId = beginAttempt(preparedProfile);
+                      setActiveSection('sftp');
+                      try {
+                        await attemptSftpConnection(retryAttemptId);
+                      } finally {
+                        endConnectionAttempt(retryAttemptId);
+                      }
+                    })
+                    .catch((retryError: unknown) => {
+                      useToastStore
+                        .getState()
+                        .addToast(getToastErrorMessage(retryError), 'error');
+                    });
+                },
+              });
+              return;
+            }
+            useToastStore
+              .getState()
+              .addToast(getToastErrorMessage(error), 'error');
+          }
+        };
+
+        await attemptSftpConnection(connectionAttemptId);
+      } finally {
+        endConnectionAttempt(connectionAttemptId);
       }
     },
-    [finishOpen],
+    [beginConnectionAttempt, endConnectionAttempt, finishOpen, setActiveSection],
   );
 
   const closeHostKeyDialog = (): void => {

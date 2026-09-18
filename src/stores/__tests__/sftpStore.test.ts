@@ -60,6 +60,118 @@ describe('sftpStore', () => {
     expect(state.activeConnectionId).toBe(state.connections[0]?.id);
   });
 
+  it('shows and resolves a pending connection in place', () => {
+    const attemptId = useSftpStore.getState().beginConnectionAttempt({
+      title: 'Pending server',
+      host: 'pending.example.com',
+      port: 22,
+      username: 'deploy',
+      profileId: 'profile-pending',
+      connection: {
+        host: 'pending.example.com',
+        port: 22,
+        username: 'deploy',
+        authMethod: 'password',
+      },
+    }, undefined, 'remote', 'attempt-1');
+
+    expect(attemptId).toBe('attempt-1');
+    expect(useSftpStore.getState()).toMatchObject({
+      activeConnectionId: 'attempt-1',
+      connections: [{
+        id: 'attempt-1',
+        title: 'Pending server',
+        pendingConnection: true,
+        remoteLoading: true,
+        connectionAttemptIds: { remote: 'attempt-1' },
+      }],
+    });
+
+    const connectionId = useSftpStore.getState().resolveConnectionAttempt(
+      attemptId,
+      {
+        sessionId: 'connected-session',
+        title: 'Pending server',
+        host: 'pending.example.com',
+        port: 22,
+        username: 'deploy',
+      },
+      {
+        host: 'pending.example.com',
+        port: 22,
+        username: 'deploy',
+        authMethod: 'password',
+        password: 'resolved-secret',
+      },
+      'profile-pending',
+      '/srv/app',
+    );
+
+    expect(connectionId).toBe('attempt-1');
+    expect(useSftpStore.getState().connections).toHaveLength(1);
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      id: 'attempt-1',
+      sessionId: 'connected-session',
+      pendingConnection: false,
+      remoteLoading: false,
+      remotePath: '/srv/app',
+      connectionAttemptIds: { remote: undefined },
+    });
+  });
+
+  it('removes a cancelled new attempt and clears an existing pane attempt', () => {
+    const pending = {
+      title: 'Pending server',
+      host: 'pending.example.com',
+      port: 22,
+      username: 'deploy',
+      profileId: 'profile-pending',
+      connection: {
+        host: 'pending.example.com',
+        port: 22,
+        username: 'deploy',
+        authMethod: 'password' as const,
+      },
+    };
+    useSftpStore.getState().beginConnectionAttempt(
+      pending,
+      undefined,
+      'remote',
+      'new-attempt',
+    );
+    useSftpStore.getState().endConnectionAttempt('new-attempt');
+    expect(useSftpStore.getState().connections).toEqual([]);
+
+    useSftpStore.getState().addConnection(
+      {
+        sessionId: 'existing-session',
+        title: 'Existing server',
+        host: 'h',
+        port: 22,
+        username: 'u',
+      },
+      baseConnection.connection,
+    );
+    const existingId = useSftpStore.getState().connections[0]!.id;
+    useSftpStore.getState().beginConnectionAttempt(
+      pending,
+      existingId,
+      'local',
+      'pane-attempt',
+    );
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      localLoading: true,
+      connectionAttemptIds: { local: 'pane-attempt' },
+    });
+
+    useSftpStore.getState().endConnectionAttempt('pane-attempt');
+    expect(useSftpStore.getState().connections).toHaveLength(1);
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      localLoading: false,
+      connectionAttemptIds: { local: undefined },
+    });
+  });
+
   it('sets path and entries', () => {
     useSftpStore.getState().addConnection(
       {

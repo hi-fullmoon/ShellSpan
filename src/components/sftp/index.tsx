@@ -88,6 +88,7 @@ const Sftp: React.FC = () => {
       });
       return;
     }
+    if (connections.some((connection) => connection.pendingConnection)) return;
     stageSftpWorkspace(serializeSftpWorkspace(connections, activeConnectionId));
     const timer = window.setTimeout(() => {
       void flushSftpWorkspace().catch((error) => {
@@ -225,6 +226,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
   const { t } = useI18n();
   const leftSource = getSftpPaneSource(connection, 'local');
   const rightSource = getSftpPaneSource(connection, 'remote');
+  const rightConnecting = connection.connectionAttemptIds?.remote !== undefined;
   const leftIsLocal = leftSource === 'local';
   const rightIsLocal = rightSource === 'local';
   const localActions = useSftpPaneActions(connection, 'local', leftIsLocal);
@@ -846,7 +848,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                 onReconnect={() => reconnectRestoredPane('local')}
               />
             }
-            right={rightSource === 'empty' ? (
+            right={rightSource === 'empty' && !rightConnecting ? (
               <div className="flex h-full flex-col items-center justify-center gap-4 bg-app-surface p-8 text-center">
                 <div className="flex flex-col gap-1">
                   <p className="text-sm font-semibold text-app-text">{t('sftp.source.emptyTitle')}</p>

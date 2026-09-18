@@ -176,6 +176,33 @@ describe('SftpPane', () => {
     expect(screen.getByText('Test')).toBeInTheDocument();
   });
 
+  it('shows connection progress without listing the remote directory early', () => {
+    const connection = createConnection();
+    connection.connectionAttemptIds = { remote: 'attempt-1' };
+    connection.remoteLoading = true;
+    connection.remoteEntries = [{
+      path: '/old-entry.txt',
+      name: 'old-entry.txt',
+      kind: 'file',
+      size: 1,
+    }];
+    vi.mocked(invokeListRemoteDirectory).mockClear();
+
+    const { container } = render(
+      <SftpPane
+        connection={connection}
+        side="remote"
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    expect(container.firstChild).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByText('sftp.status.connecting')).toBeInTheDocument();
+    expect(invokeListRemoteDirectory).not.toHaveBeenCalled();
+  });
+
   it('navigates only the addressed pane when a host-bound path event arrives', async () => {
     const connection = createConnection();
     vi.mocked(invokeListRemoteDirectory).mockResolvedValue({
