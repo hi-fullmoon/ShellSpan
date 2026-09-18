@@ -390,7 +390,8 @@ describe('AI Phase 4 Turn Process renderer', () => {
     const nodes = projectAgentChatNodes(events);
     const { container } = render(<AiConversationNodeList nodes={nodes} />);
     expect(screen.getByRole('button', { name: 'Task still incomplete' })).toBeInTheDocument();
-    expect(container.querySelector('[data-ai-node-kind="turnTail"] .ai-turn-tail')).toHaveAttribute('data-status', 'incomplete');
+    expect(container.querySelector('[data-ai-node-kind="turnTail"] .ai-turn-tail'))
+      .toHaveAttribute('data-status', 'incomplete');
     expect(screen.getAllByText('Task still incomplete')).toHaveLength(2);
   });
 

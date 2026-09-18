@@ -17,10 +17,11 @@ vi.mock('@/hooks/useI18n', () => ({
       'agent.permission.requestApproval': '请求批准',
       'agent.permission.requestApprovalDescription': '执行每项 Agent 工具操作时始终询问。',
       'agent.permission.fullAccess': '完全访问权限',
-      'agent.permission.fullAccessDescription': '无需逐次批准即可执行原生策略允许的操作；目标和网络范围限制仍然生效。',
+      'agent.permission.fullAccessSelected': '完全访问',
+      'agent.permission.fullAccessDescription': '无需逐次批准即可在冻结工作区内执行操作；工作区外写入和未授权网络访问仍会被拦截。',
       'agent.permission.composer.fullAccess': '完全访问权限',
-      'agent.permission.composer.fullAccessDescription': '无需逐次批准即可执行原生策略允许的操作；目标和网络范围限制仍然生效。',
-      'agent.permission.fullAccessWarning': '可自动执行受限的回环 HTTP 操作；未声明目标的网络命令仍会被阻止。',
+      'agent.permission.composer.fullAccessDescription': '冻结工作区内自动执行；工作区外写入仍会被拦截。',
+      'agent.permission.fullAccessWarning': '工作区外写入、未授权网络访问和无法强制边界的 Shell 操作仍会被拦截或请求批准。',
       'agent.permission.fullAccessConfirm': '允许完全访问',
     })[key] ?? key,
   }),
@@ -55,7 +56,7 @@ describe('Agent permission selector', () => {
     expect(screen.getByText('推荐')).toBeVisible();
     expect(screen.getByRole('menuitemradio', { name: /^请求批准/ })).toBeVisible();
     fireEvent.click(await screen.findByRole('menuitemradio', { name: /^完全访问权限/ }));
-    const warning = await screen.findByText('可自动执行受限的回环 HTTP 操作；未声明目标的网络命令仍会被阻止。');
+    const warning = await screen.findByText('工作区外写入、未授权网络访问和无法强制边界的 Shell 操作仍会被拦截或请求批准。');
     expect(warning).toBeVisible();
     expect(screen.getByText('Production (operator@server.example.com:22)')).toBeVisible();
     const dialog = warning.closest('[role="alertdialog"]');
@@ -86,8 +87,21 @@ describe('Agent permission selector', () => {
     expect(screen.getByRole('menuitemradio', { name: /^完全访问权限/ })).toBeVisible();
     expect(screen.getByRole('menuitemradio', { name: '请求批准' })).toBeVisible();
     expect(screen.getByText('仅对检测到的风险操作请求批准。')).toBeVisible();
-    expect(screen.getByText('无需逐次批准即可执行原生策略允许的操作；目标和网络范围限制仍然生效。')).toBeVisible();
+    expect(screen.getByText('冻结工作区内自动执行；工作区外写入仍会被拦截。')).toBeVisible();
     expect(screen.queryByText('工作区内修改')).toBeNull();
+  });
+
+  it('shows the concise full-access label in the Composer trigger after selection', async () => {
+    const { container } = render(<AgentPermissionSelector sessionId="session-1" variant="composer" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'agent.permission.composerAria' }));
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /^完全访问权限/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '允许完全访问' }));
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-slot="agent-permission-trigger-content"]'))
+        .toHaveTextContent(/^完全访问$/);
+    });
   });
 
   it('switches to request-approval mode through the Composer menu', async () => {

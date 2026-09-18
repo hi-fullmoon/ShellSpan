@@ -116,6 +116,22 @@ function connectedTerminal(sessionId = 'terminal-1'): void {
   });
 }
 
+function connectedLocalTerminal(sessionId = 'terminal-local'): void {
+  useTerminalStore.setState({
+    activeSessionId: sessionId,
+    sessions: [{
+      sessionId,
+      title: 'Local',
+      host: 'local',
+      port: 0,
+      username: 'local',
+      status: 'connected',
+      integrationState: 'ready',
+      promptReady: true,
+    }],
+  });
+}
+
 it('allows changing model and permissions in a running conversation without changing defaults', async () => {
   connectedTerminal();
   const user = userEvent.setup();
@@ -477,6 +493,22 @@ describe('archived session deletion', () => {
     act(() => result.current.deleteSession(summary));
     expect(agent.delete).not.toHaveBeenCalled();
   });
+});
+
+it('does not mount an empty image addon for stale image errors', () => {
+  connectedTerminal();
+  const imageDraft = vi.spyOn(imageDraftModule, 'useImageDraft').mockReturnValue({
+    owner: 'test', draft: { owner: 'test', revision: 1, text: '', images: [] },
+    pendingFiles: [], busy: false, locked: false, error: 'IMAGE_CANCELLED',
+    send: vi.fn(), reportError: vi.fn(), add: vi.fn(), remove: vi.fn(), cancel: vi.fn(),
+  });
+  try {
+    const { container } = render(<AiWorkspaceController scope="terminal" adapter={adapter()} />);
+    expect(screen.queryByTestId('image-draft')).not.toBeInTheDocument();
+    expect(container.querySelector('.ai-image-draft-addon')).toBeNull();
+  } finally {
+    imageDraft.mockRestore();
+  }
 });
 
 it.each(['', ' \n\t '])('routes image-only text %j through image submission', async draft => {
@@ -1323,6 +1355,63 @@ describe('AiWorkspaceController', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Permission mode: Full access/ })).toBeVisible());
     expect(agent.list).toHaveBeenCalledOnce();
+  });
+
+  it('freezes the current local directory before creating a full-access Session', async () => {
+    connectedLocalTerminal();
+    useAgentPermissionStore.getState().setMode('terminal-local', 'fullAccess');
+    const submit: AiSessionControllerAdapter['submit'] = vi.fn(async (_sessionId, input) => ({
+      sessionId: input.create!.request.sessionId,
+      clientOperationId: input.clientOperationId,
+      mode: input.mode,
+    }));
+    const resolveTerminalDirectory = vi.fn(async () => '/Users/test/project');
+    const { result } = renderHook(() => useAiSessionController({
+      scope: 'terminal',
+      adapter: adapter({ submit }),
+      resolveTerminalDirectory,
+    }));
+
+    act(() => {
+      result.current.setDraft('Delete an obsolete generated file');
+      result.current.submit('primary');
+    });
+
+    await waitFor(() => expect(submit).toHaveBeenCalledWith(null, expect.objectContaining({
+      create: expect.objectContaining({
+        request: expect.objectContaining({
+          permissionMode: 'operator',
+          target: expect.objectContaining({
+            kind: 'local',
+            cwd: '/Users/test/project',
+          }),
+        }),
+      }),
+    })));
+    expect(resolveTerminalDirectory).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'terminal-local',
+    }));
+  });
+
+  it('fails closed when a local full-access Session has no frozen workspace root', async () => {
+    connectedLocalTerminal();
+    useAgentPermissionStore.getState().setMode('terminal-local', 'fullAccess');
+    const submit = vi.fn();
+    const { result } = renderHook(() => useAiSessionController({
+      scope: 'terminal',
+      adapter: adapter({ submit }),
+      resolveTerminalDirectory: vi.fn(async () => null),
+    }));
+
+    act(() => {
+      result.current.setDraft('Run with full access');
+      result.current.submit('primary');
+    });
+
+    await waitFor(() => expect(result.current.composer.lastError?.message).toContain(
+      'full-access task cannot start',
+    ));
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it('freezes the selected visible-terminal surface into a new Session request', async () => {

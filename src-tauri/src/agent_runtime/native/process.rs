@@ -440,7 +440,61 @@ pub(crate) fn spawn_local_process_native(
     cwd: Option<&Path>,
     timeout: Duration,
 ) -> Result<Arc<ManagedProcessNative>, String> {
-    let mut child = local_shell_command(command);
+    spawn_local_process_with_scope_native(
+        task_id,
+        request_id,
+        owner_target_id,
+        command,
+        cwd,
+        timeout,
+        LocalFilesystemScopeNative::Unrestricted,
+    )
+}
+
+pub(crate) fn spawn_workspace_scoped_local_process_native(
+    task_id: String,
+    request_id: String,
+    owner_target_id: String,
+    command: &str,
+    workspace_root: &Path,
+    timeout: Duration,
+) -> Result<Arc<ManagedProcessNative>, String> {
+    spawn_local_process_with_scope_native(
+        task_id,
+        request_id,
+        owner_target_id,
+        command,
+        Some(workspace_root),
+        timeout,
+        LocalFilesystemScopeNative::WorkspaceOnly,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocalFilesystemScopeNative {
+    Unrestricted,
+    WorkspaceOnly,
+}
+
+fn spawn_local_process_with_scope_native(
+    task_id: String,
+    request_id: String,
+    owner_target_id: String,
+    command: &str,
+    cwd: Option<&Path>,
+    timeout: Duration,
+    filesystem_scope: LocalFilesystemScopeNative,
+) -> Result<Arc<ManagedProcessNative>, String> {
+    let (mut child, sandbox_temp) = match filesystem_scope {
+        LocalFilesystemScopeNative::Unrestricted => (local_shell_command(command), None),
+        LocalFilesystemScopeNative::WorkspaceOnly => {
+            let root = cwd.ok_or_else(|| {
+                "operator execution requires a frozen local workspace root".to_string()
+            })?;
+            let (command, temp) = workspace_scoped_local_shell_command(command, root)?;
+            (command, Some(temp))
+        }
+    };
     if let Some(cwd) = cwd {
         child.current_dir(cwd);
     }
@@ -477,6 +531,9 @@ pub(crate) fn spawn_local_process_native(
     );
     let worker = Arc::clone(&process);
     thread::spawn(move || {
+        // Keep the per-process writable temporary root alive until the complete
+        // subprocess tree has reached a terminal state.
+        let _sandbox_temp = sandbox_temp;
         run_local_worker(
             worker,
             child,
@@ -489,6 +546,97 @@ pub(crate) fn spawn_local_process_native(
         )
     });
     Ok(process)
+}
+
+fn canonical_workspace_root_native(root: &Path) -> Result<PathBuf, String> {
+    let metadata = std::fs::symlink_metadata(root)
+        .map_err(|error| format!("failed to inspect operator workspace root: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err("operator workspace root must be a real directory".into());
+    }
+    let canonical = std::fs::canonicalize(root)
+        .map_err(|error| format!("failed to canonicalize operator workspace root: {error}"))?;
+    if canonical.parent().is_none() {
+        return Err("filesystem roots cannot be operator workspaces".into());
+    }
+    Ok(canonical)
+}
+
+fn sandbox_temp_native() -> Result<tempfile::TempDir, String> {
+    tempfile::Builder::new()
+        .prefix("shellspan-agent-")
+        .tempdir()
+        .map_err(|error| format!("failed to create Agent sandbox temp directory: {error}"))
+}
+
+#[cfg(target_os = "macos")]
+fn workspace_scoped_local_shell_command(
+    command: &str,
+    root: &Path,
+) -> Result<(Command, tempfile::TempDir), String> {
+    let root = canonical_workspace_root_native(root)?;
+    let temp = sandbox_temp_native()?;
+    let temp_root = std::fs::canonicalize(temp.path())
+        .map_err(|error| format!("failed to canonicalize Agent sandbox temp directory: {error}"))?;
+    let root = seatbelt_string_native(&root)?;
+    let temp_path = seatbelt_string_native(&temp_root)?;
+    let profile = format!(
+        "(version 1)\n(deny default)\n(import \"system.sb\")\n(deny network*)\n(deny file-write* (subpath \"/cores\"))\n(allow process*)\n(allow file-read*)\n(allow file-write* (subpath \"{root}\") (subpath \"{temp_path}\"))"
+    );
+    let mut process = Command::new("/usr/bin/sandbox-exec");
+    process.args(["-p", &profile, "/bin/sh", "-lc", command]);
+    process.env("TMPDIR", &temp_root);
+    process.env("TMP", &temp_root);
+    process.env("TEMP", &temp_root);
+    Ok((process, temp))
+}
+
+#[cfg(target_os = "macos")]
+fn seatbelt_string_native(path: &Path) -> Result<String, String> {
+    let value = path
+        .to_str()
+        .ok_or_else(|| "operator workspace path is not valid UTF-8".to_string())?;
+    if value.chars().any(char::is_control) {
+        return Err("operator workspace path contains control characters".into());
+    }
+    Ok(value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[cfg(target_os = "linux")]
+fn workspace_scoped_local_shell_command(
+    command: &str,
+    root: &Path,
+) -> Result<(Command, tempfile::TempDir), String> {
+    let root = canonical_workspace_root_native(root)?;
+    let temp = sandbox_temp_native()?;
+    let temp_root = std::fs::canonicalize(temp.path())
+        .map_err(|error| format!("failed to canonicalize Agent sandbox temp directory: {error}"))?;
+    let mut process = Command::new("bwrap");
+    process.args([
+        "--die-with-parent",
+        "--new-session",
+        "--unshare-net",
+        "--ro-bind",
+        "/",
+        "/",
+        "--bind",
+    ]);
+    process.arg(&root).arg(&root);
+    process.arg("--bind").arg(&temp_root).arg(&temp_root);
+    process.arg("--chdir").arg(&root);
+    process.args(["/bin/sh", "-lc", command]);
+    process.env("TMPDIR", &temp_root);
+    process.env("TMP", &temp_root);
+    process.env("TEMP", &temp_root);
+    Ok((process, temp))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn workspace_scoped_local_shell_command(
+    _command: &str,
+    _root: &Path,
+) -> Result<(Command, tempfile::TempDir), String> {
+    Err("operator workspace sandbox is unavailable on this platform".into())
 }
 
 pub(crate) struct RemoteProcessStartNative {
@@ -1221,5 +1369,75 @@ mod tests {
             process.snapshot().unwrap().state,
             ProcessLifecycleNative::TimedOut
         );
+    }
+
+    #[test]
+    fn operator_workspace_rejects_a_filesystem_root() {
+        let root = if cfg!(target_os = "windows") {
+            Path::new("C:\\")
+        } else {
+            Path::new("/")
+        };
+        assert!(canonical_workspace_root_native(root)
+            .unwrap_err()
+            .contains("filesystem roots"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn operator_workspace_sandbox_allows_inside_delete_and_blocks_parent_escape() {
+        let base = tempfile::tempdir().unwrap();
+        let workspace = base.path().join("workspace");
+        let outside = base.path().join("outside");
+        std::fs::create_dir(&workspace).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(workspace.join("inside.txt"), b"inside").unwrap();
+        std::fs::write(outside.join("keep.txt"), b"outside").unwrap();
+        std::fs::write(outside.join("symlink-keep.txt"), b"outside").unwrap();
+        std::os::unix::fs::symlink(&outside, workspace.join("outside-link")).unwrap();
+
+        let process = spawn_workspace_scoped_local_process_native(
+            "task-scoped".into(),
+            "request-scoped".into(),
+            "local-scoped".into(),
+            "rm inside.txt; rm ../outside/keep.txt; python3 -c 'import os; os.remove(\"outside-link/symlink-keep.txt\")'",
+            &workspace,
+            Duration::from_secs(10),
+        )
+        .unwrap();
+        let snapshot = process.wait(Duration::from_secs(10)).unwrap();
+
+        assert_eq!(snapshot.state, ProcessLifecycleNative::Exited);
+        assert_ne!(snapshot.exit_code, Some(0));
+        assert!(!workspace.join("inside.txt").exists());
+        assert!(outside.join("keep.txt").exists());
+        assert!(outside.join("symlink-keep.txt").exists());
+        assert!(snapshot.stderr.contains("Operation not permitted"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn operator_workspace_sandbox_blocks_arbitrary_network_connections() {
+        let workspace = tempfile::tempdir().unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let command = format!(
+            "python3 -c 'import socket; socket.create_connection((\"127.0.0.1\", {port}), 1)'"
+        );
+
+        let process = spawn_workspace_scoped_local_process_native(
+            "task-network".into(),
+            "request-network".into(),
+            "local-network".into(),
+            &command,
+            workspace.path(),
+            Duration::from_secs(10),
+        )
+        .unwrap();
+        let snapshot = process.wait(Duration::from_secs(10)).unwrap();
+
+        assert_eq!(snapshot.state, ProcessLifecycleNative::Exited);
+        assert_ne!(snapshot.exit_code, Some(0));
+        assert!(snapshot.stderr.contains("Operation not permitted"));
     }
 }

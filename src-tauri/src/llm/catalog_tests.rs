@@ -137,7 +137,7 @@ fn built_in_models_inherit_preset_compat_and_apply_local_differences() {
 }
 
 #[test]
-fn minimax_m3_uses_the_documented_agent_output_budget() {
+fn minimax_m3_uses_the_documented_agent_output_and_vision_budgets() {
     let mut p = provider("MiniMax-M3");
     p.profile = "minimax".into();
 
@@ -145,6 +145,14 @@ fn minimax_m3_uses_the_documented_agent_output_budget() {
 
     assert_eq!(resolved.context_window, 1_000_000);
     assert_eq!(resolved.max_output_tokens, 131_072);
+    assert_eq!(resolved.image_input, Support::Supported);
+    let vision = resolved
+        .vision
+        .as_ref()
+        .expect("MiniMax M3 native multimodality");
+    assert_eq!(vision.max_request_images, 20);
+    assert_eq!(vision.max_request_image_bytes, 20 * 1024 * 1024);
+    assert_eq!(vision.reserved_tokens_per_image, 4096);
 }
 
 #[test]

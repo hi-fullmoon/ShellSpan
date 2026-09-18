@@ -79,9 +79,11 @@ describe('AI panel production path and immutable shell', () => {
     render(<div data-testid="outside-ai-scope"><AiPanel /></div>);
 
     const panel = screen.getByRole('complementary', { name: 'ai.workbench.title' });
-    const workspace = panel.querySelector('[data-slot="ai-workspace-root"]');
+    const workspace = panel.querySelector<HTMLElement>('[data-slot="ai-workspace-root"]')!;
     expect(panel).toHaveClass('ai-panel-shell');
     expect(getComputedStyle(panel).maxWidth).toBe('100%');
+    expect(getComputedStyle(workspace).getPropertyValue('--ai-transcript-extra-inset').trim())
+      .toBe('8px');
     expect(getComputedStyle(panel).getPropertyValue('--dsw-alias-bg-base').trim())
       .toBe('rgb(255,255,255)');
     expect(getComputedStyle(screen.getByTestId('outside-ai-scope'))

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -32,6 +32,8 @@ const tool: AiConversationNodeOf<'tool'> = {
   timestamp: '2026-09-03T00:00:00.000Z',
   callId: 'call-phase5',
   name: 'terminal.exec',
+  nativeName: 'exec_command',
+  title: null,
   summary: 'Restart nginx',
   state: 'approval',
   effect: 'stateChange',
@@ -157,7 +159,7 @@ describe('AI workspace Phase 5 workflows', () => {
     expect(screen.getByText('Restart safely')).toBeVisible();
   });
 
-  it('shows approval above the editable Composer and exposes recoverable decisions', async () => {
+  it('overlays approval while preserving the Composer draft and exposes recoverable decisions', async () => {
     const user = userEvent.setup();
     const approve = vi.fn();
     const reject = vi.fn();
@@ -169,7 +171,7 @@ describe('AI workspace Phase 5 workflows', () => {
       sessionId: 'agent-phase5',
       draft: 'preserved draft',
     });
-    const { rerender } = render(
+    const { container, rerender } = render(
       <AiWorkspaceRoot
         view={agentView(pendingApproval)}
         scope="terminal"
@@ -180,11 +182,22 @@ describe('AI workspace Phase 5 workflows', () => {
       />,
     );
 
-    expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
-    expect(screen.getByRole('group', { name: /Allow this command/ })).toBeVisible();
+    const composerCard = container.querySelector<HTMLElement>('[data-composer-card]');
+    const composerEditor = container.querySelector<HTMLElement>('[data-composer-editor]');
+    expect(composerCard).toHaveClass('invisible');
+    expect(composerCard).toHaveAttribute('aria-hidden', 'true');
+    expect(composerEditor).toHaveAttribute('contenteditable', 'true');
+    expect(composerEditor).toHaveTextContent('preserved draft');
+    const approval = screen.getByRole('group', { name: /Allow this command/ });
+    const overlay = approval.closest<HTMLElement>('[data-slot="ai-approval-overlay"]');
+    const composerAnchor = container.querySelector<HTMLElement>('.ai-composer-input-anchor');
+    expect(overlay).toHaveClass('absolute', 'inset-x-0', 'bottom-0');
+    expect(composerAnchor).toContainElement(overlay);
+    expect(composerAnchor).toContainElement(composerCard);
+    expect(approval).toBeVisible();
     expect(screen.getByText(/will run on Production/)).toBeVisible();
     expect(screen.getByText('systemctl restart nginx')).toBeVisible();
-    expect(screen.getByText('Restart the web server to apply its new configuration.')).toBeVisible();
+    expect(within(approval).getByText('Restart the web server to apply its new configuration.')).toBeVisible();
     expect(screen.getByText('Modifies the system')).toBeVisible();
     expect(screen.queryByText('stateChange')).toBeNull();
     expect(screen.queryByText(/Native effect:/)).toBeNull();
@@ -202,7 +215,9 @@ describe('AI workspace Phase 5 workflows', () => {
         composerState={createAiComposerState({ ...composer, phase: 'running', runtimeStatus: 'running', waitingApproval: false })}
       />,
     );
+    expect(screen.getByRole('textbox')).toBeVisible();
     expect(screen.getByRole('textbox').textContent).toBe('preserved draft');
+    expect(container.querySelector('[data-composer-card]')).not.toHaveClass('invisible');
   });
 
   it('shows volatile terminal input in the approval without persisting it in the view', () => {
@@ -325,7 +340,9 @@ describe('AI workspace Phase 5 workflows', () => {
     expect(container.querySelectorAll('[data-slot="ai-tool-details"]')).toHaveLength(1);
     expect(container.querySelectorAll('aside')).toHaveLength(0);
     await user.click(screen.getByRole('button', { name: 'Back' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Command: Restart nginx' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('button', {
+      name: 'Command: Restart the web server to apply its new configuration.',
+    })).toHaveFocus());
   });
 
   it('opens a failed nested command by its key when another step reused the call ID', async () => {
@@ -514,7 +531,9 @@ describe('AI workspace Phase 5 workflows', () => {
     );
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.getByRole('log', { name: 'AI conversation' })).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Command: Restart nginx' }));
+    await user.click(screen.getByRole('button', {
+      name: 'Command: Restart the web server to apply its new configuration.',
+    }));
     expect(screen.getByRole('button', { name: 'Open details for terminal.exec' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Open artifact Deployment report' })).toBeVisible();
   });

@@ -435,6 +435,15 @@ does not create network isolation or an exact destination scope.
 `sensitiveRead`, `stateChange`, `destructive`, and `externalSideEffect` effects
 MUST require confirmation. `operator` MAY skip per-call confirmation, but MUST
 NOT broaden the frozen target, tool, filesystem, or network scope.
+For a local target with a frozen workspace root, every `operator` Direct shell
+command MUST run in an operating-system sandbox whose only writable roots are
+that canonical workspace and a command-lifetime temporary directory; arbitrary
+network access MUST remain unavailable. A rooted local `operator` command MUST
+use Direct even when the Session selected the bound-terminal surface. Shell
+execution whose filesystem scope cannot be enforced, including remote Direct
+execution and visible-terminal input, MUST still require confirmation in
+`operator` mode. Sandbox setup failure MUST fail closed and MUST NOT retry the
+command without isolation.
 Loopback HTTP verification uses the structured `probe_http` tool, which fixes
 the destination to the frozen local or SSH target's `127.0.0.1`, follows no
 redirects, exposes no arbitrary request headers, and enforces method, request
