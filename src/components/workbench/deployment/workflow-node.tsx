@@ -51,7 +51,7 @@ export const DeploymentFlowNodeFrame: React.FC<DeploymentFlowNodeFrameProps> = (
   return (
     <div
       className={cn(
-        'relative w-64 rounded-md border bg-background px-3 py-2 text-foreground',
+        'relative w-60 rounded-md border bg-background px-2.5 py-2 text-foreground',
         invalid && 'border-destructive',
         selected && 'border-primary ring-2 ring-ring/30',
         readOnly && 'border-dashed',
@@ -68,7 +68,7 @@ export const DeploymentFlowNodeFrame: React.FC<DeploymentFlowNodeFrameProps> = (
         </div>
         <Badge variant="outline" size="sm">v{workflowNode.typeVersion}</Badge>
       </div>
-      <div className="mt-2 flex flex-wrap gap-1">{badges}</div>
+      <div className="mt-1.5 flex flex-wrap gap-1">{badges}</div>
       {children}
     </div>
   );
@@ -122,8 +122,8 @@ export const WorkflowNode = React.memo<NodeProps<WorkflowCanvasNode>>(({
         </>
       )}
     >
-      <div className="mt-3 grid grid-cols-2 gap-4 border-t pt-2 text-xs">
-        <div className="flex min-w-0 flex-col gap-2">
+      <div className="mt-2 grid grid-cols-2 gap-3 border-t pt-1.5 text-xs">
+        <div className="flex min-w-0 flex-col gap-1.5">
           {inputPorts.map((port, index) => {
             const label = t(dynamicKey(`deployment.editor.port.${port.name}`));
             const type = t(dynamicKey(`deployment.editor.portType.${port.portType}`));
@@ -149,7 +149,7 @@ export const WorkflowNode = React.memo<NodeProps<WorkflowCanvasNode>>(({
             );
           })}
         </div>
-        <div className="flex min-w-0 flex-col gap-2 text-right">
+        <div className="flex min-w-0 flex-col gap-1.5 text-right">
           {outputPorts.map((port, index) => {
             const label = t(dynamicKey(`deployment.editor.port.${port.name}`));
             const type = t(dynamicKey(`deployment.editor.portType.${port.portType}`));

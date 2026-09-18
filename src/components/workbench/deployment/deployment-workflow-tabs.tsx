@@ -49,7 +49,7 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
   const { t } = useI18n();
   return (
     <div
-      className="flex min-h-11 shrink-0 flex-nowrap items-center gap-2 overflow-hidden border-b px-3 py-1.5"
+      className="flex min-h-10 shrink-0 flex-nowrap items-center gap-2 overflow-hidden border-b px-3 py-1"
       data-testid="deployment-workflow-toolbar"
     >
       <div className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">

@@ -95,6 +95,7 @@ interface TemplateDialogProps {
 const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) => {
   const { t } = useI18n();
   const profiles = useProfileStore((state) => state.profiles);
+  const profileFilterId = useDeploymentWorkflowStore((state) => state.profileFilterId);
   const startTemplate = useDeploymentWorkflowStore((state) => state.startTemplate);
   const [kind, setKind] = React.useState<DeploymentWorkflowTemplateKind>('staticSite');
   const [name, setName] = React.useState('');
@@ -117,9 +118,10 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
     if (!open) return;
     setKind('staticSite');
     setName('');
-    setProfileId(profiles[0]?.id ?? '');
+    const filteredProfile = profiles.find((profile) => profile.id === profileFilterId);
+    setProfileId(filteredProfile?.id ?? profiles[0]?.id ?? '');
     setRemoteRoot('/srv/apps/example');
-  }, [open, profiles]);
+  }, [open, profileFilterId, profiles]);
 
   const submit = (event: React.FormEvent): void => {
     event.preventDefault();
@@ -130,14 +132,14 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[min(40rem,calc(100vh-2rem))] w-[calc(100%-2rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="shrink-0 p-4">
+      <DialogContent className="flex h-[min(26rem,calc(100vh-2rem))] w-[calc(100%-2rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b px-4 py-3">
           <DialogTitle>{t('deployment.editor.template.title')}</DialogTitle>
           <DialogDescription>{t('deployment.editor.template.description')}</DialogDescription>
         </DialogHeader>
         <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={submit}>
           <ScrollArea className="min-h-0 flex-1">
-            <FieldGroup className="px-4 pb-4">
+            <FieldGroup className="gap-3 p-4">
               <Field>
                 <FieldLabel htmlFor="deployment-template">
                   {t('deployment.editor.template.kind')}
@@ -149,7 +151,7 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
                     (value ?? 'staticSite') as DeploymentWorkflowTemplateKind,
                   )}
                 >
-                  <SelectTrigger id="deployment-template"><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="deployment-template" size="sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
                       {templateOptions.map((option) => (
@@ -173,6 +175,7 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
                   id="deployment-name"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
+                  className="h-8"
                   autoFocus
                   required
                 />
@@ -186,7 +189,7 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
                   value={profileId}
                   onValueChange={(value) => setProfileId(value ?? '')}
                 >
-                  <SelectTrigger id="deployment-profile"><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="deployment-profile" size="sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
                       {profileOptions.map((option) => (
@@ -206,20 +209,21 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
                   id="deployment-root"
                   value={remoteRoot}
                   onChange={(event) => setRemoteRoot(event.target.value)}
+                  className="h-8"
                   required
                 />
               </Field>
             </FieldGroup>
           </ScrollArea>
-          <DialogFooter className="shrink-0 border-t p-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <DialogFooter className="shrink-0 border-t px-4 py-3">
+            <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               {t('common.cancel')}
             </Button>
             <Button
               type="submit"
+              size="sm"
               disabled={!name.trim() || !profileId || !validRemoteRoot}
             >
-              <PlusIcon data-icon="inline-start" />
               {t('deployment.editor.template.use')}
             </Button>
           </DialogFooter>
@@ -394,6 +398,10 @@ export const DeploymentWorkflowCenter: React.FC<{
     : state.workflows;
 
   React.useEffect(() => {
+    if (draft?.id === null) setSearch('');
+  }, [draft?.id]);
+
+  React.useEffect(() => {
     if (!state.initialized || visibleWorkflows.length === 0) return;
     if (state.draft?.id === null) return;
     if (dirty) return;
@@ -448,6 +456,7 @@ export const DeploymentWorkflowCenter: React.FC<{
   const workflowPane = (
     <WorkflowListPane
       workflows={visibleWorkflows}
+      draftName={draft?.id === null ? draft.name : null}
       selectedWorkflowId={state.selectedWorkflowId}
       search={search}
       onSearchChange={setSearch}
@@ -622,12 +631,13 @@ export const DeploymentWorkflowCenter: React.FC<{
               className="min-h-0 gap-0 overflow-hidden p-0"
               finalFocus={workflowsTriggerRef}
             >
-              <DrawerHeader className="shrink-0 border-b p-4">
+              <DrawerHeader className="shrink-0 border-b px-3 py-2.5">
                 <DrawerTitle>{t('deployment.editor.workflows')}</DrawerTitle>
               </DrawerHeader>
               <div className="min-h-0 flex-1">
                 <WorkflowListPane
                   workflows={visibleWorkflows}
+                  draftName={draft.id === null ? draft.name : null}
                   selectedWorkflowId={state.selectedWorkflowId}
                   search={search}
                   onSearchChange={setSearch}
@@ -668,15 +678,15 @@ export const DeploymentWorkflowCenter: React.FC<{
               className="min-h-0 gap-0 overflow-hidden p-0"
               finalFocus={configFinalFocusRef}
             >
-              <DrawerHeader className="shrink-0 border-b p-4">
+              <DrawerHeader className="shrink-0 border-b px-3 py-2.5">
                 <DrawerTitle>{t('deployment.editor.configuration')}</DrawerTitle>
               </DrawerHeader>
               <div className="min-h-0 flex-1">{inspector}</div>
             </DrawerContent>
           </Drawer>
           <Dialog open={issuesOpen} onOpenChange={setIssuesOpen}>
-            <DialogContent className="flex h-[min(36rem,calc(100vh-2rem))] w-[calc(100%-2rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0">
-              <DialogHeader className="shrink-0 p-4">
+            <DialogContent className="flex h-[min(30rem,calc(100vh-2rem))] w-[calc(100%-2rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0">
+              <DialogHeader className="shrink-0 border-b px-4 py-3">
                 <DialogTitle>{t('deployment.editor.validation.title')}</DialogTitle>
                 <DialogDescription>{t('deployment.editor.validation.description')}</DialogDescription>
               </DialogHeader>
@@ -694,11 +704,11 @@ export const DeploymentWorkflowCenter: React.FC<{
                   />
                 </div>
               </ScrollArea>
-              <DialogFooter className="shrink-0 border-t p-4">
-                <Button variant="outline" onClick={() => setIssuesOpen(false)}>
+              <DialogFooter className="shrink-0 border-t px-4 py-3">
+                <Button variant="outline" size="sm" onClick={() => setIssuesOpen(false)}>
                   {t('common.close')}
                 </Button>
-                <Button onClick={() => void validate()} disabled={state.validating}>
+                <Button size="sm" onClick={() => void validate()} disabled={state.validating}>
                   {state.validating && <Spinner data-icon="inline-start" />}
                   {t('deployment.editor.validate')}
                 </Button>

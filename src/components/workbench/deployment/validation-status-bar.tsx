@@ -22,7 +22,7 @@ export const ValidationStatusBar: React.FC<ValidationStatusBarProps> = ({
   const { t } = useI18n();
   return (
     <footer
-      className="flex min-h-9 shrink-0 flex-nowrap items-center gap-2 overflow-hidden border-t bg-muted/20 px-2"
+      className="flex min-h-8 shrink-0 flex-nowrap items-center gap-2 overflow-hidden border-t bg-muted/20 px-2"
       data-testid="deployment-validation-status"
       aria-label={t('deployment.editor.status.label')}
     >

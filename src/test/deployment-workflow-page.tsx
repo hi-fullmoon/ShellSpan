@@ -163,7 +163,7 @@ export async function mountDeploymentWorkflowPage(root: HTMLElement): Promise<vo
   useProfileStore.setState({ profiles: [profile] });
   useDeploymentWorkflowStore.setState({
     capabilities: {
-      schemaVersion: 1, admissionsEnabled: true, defaultEnabled: false,
+      schemaVersion: 1, admissionsEnabled: true, defaultEnabled: true,
       flagName: 'SHELLSPAN_DEPLOYMENT_WORKFLOW', source: 'environment',
       readOnlyAvailable: true, cancelRecoveryAuditAvailable: true, coordinatorAvailable: true,
     },

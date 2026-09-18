@@ -46,7 +46,7 @@ const NodeLibraryPane: React.FC<NodeLibraryPaneProps> = ({ catalog, onAdd, edita
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="deployment-node-library">
-      <div className="shrink-0 px-4 pb-3">
+      <div className="shrink-0 px-3 pb-2">
         <WorkbenchSearchInput
           containerClassName="min-w-0 w-full flex-1"
           value={search}
@@ -58,7 +58,7 @@ const NodeLibraryPane: React.FC<NodeLibraryPaneProps> = ({ catalog, onAdd, edita
         />
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col px-4 pb-4">
+        <div className="flex flex-col px-3 pb-3">
           {grouped.map(([category, specs], groupIndex) => (
             <section key={category} className="flex flex-col gap-1.5 py-2">
               {groupIndex > 0 && <Separator className="mb-2" />}
@@ -120,7 +120,7 @@ export const NodeLibraryDrawer: React.FC<NodeLibraryDrawerProps> = ({
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="min-h-0 gap-0 overflow-hidden p-0" finalFocus={finalFocusRef}>
-        <DrawerHeader className="shrink-0 border-b p-4">
+        <DrawerHeader className="shrink-0 border-b px-3 py-2.5">
           <DrawerTitle>{t('deployment.editor.nodeLibrary')}</DrawerTitle>
           <p className="text-xs text-muted-foreground">
             {t('deployment.editor.nodeLibraryDescription')}

@@ -32,6 +32,11 @@ const profile: ConnectionProfile = {
   username: 'deploy', authMethod: 'password', createdAt: 1, updatedAt: 1,
 };
 
+const filteredProfile: ConnectionProfile = {
+  id: 'profile-2', name: 'Staging', host: 'staging.example.test', port: 22,
+  username: 'release', authMethod: 'password', createdAt: 1, updatedAt: 1,
+};
+
 const catalog: DeploymentNodeTypeCatalog = {
   schemaVersion: 1,
   nodes: [
@@ -172,7 +177,7 @@ describe('DeploymentWorkflowCenter', () => {
     });
     useDeploymentWorkflowStore.setState({
       capabilities: {
-        schemaVersion: 1, admissionsEnabled: true, defaultEnabled: false,
+        schemaVersion: 1, admissionsEnabled: true, defaultEnabled: true,
         flagName: 'SHELLSPAN_DEPLOYMENT_WORKFLOW', source: 'environment',
         readOnlyAvailable: true, cancelRecoveryAuditAvailable: true, coordinatorAvailable: true,
       },
@@ -233,9 +238,10 @@ describe('DeploymentWorkflowCenter', () => {
     expect(within(workspace).getByRole('separator', { name: 'deployment.editor.resize.workflows' })).toBeInTheDocument();
     expect(within(workspace).getByRole('separator', { name: 'deployment.editor.resize.inspector' })).toBeInTheDocument();
     expect(screen.getByTestId('deployment-validation-status')).toHaveClass('shrink-0', 'border-t');
+    expect(screen.getByTestId('deployment-validation-status')).toHaveClass('min-h-8');
 
     const toolbar = screen.getByTestId('deployment-workflow-toolbar');
-    expect(toolbar).toHaveClass('flex-nowrap');
+    expect(toolbar).toHaveClass('flex-nowrap', 'min-h-10');
     expect(within(toolbar).getByRole('tab', { name: 'deployment.editor.tab.design' })).toHaveAttribute('aria-selected', 'true');
   });
 
@@ -347,6 +353,8 @@ describe('DeploymentWorkflowCenter', () => {
 
   it('keeps a new unsaved workflow selected when saved workflows already exist', async () => {
     render(<DeploymentWorkflowCenter />);
+    const search = screen.getByRole('textbox', { name: 'deployment.editor.search' });
+    fireEvent.change(search, { target: { value: 'stale-filter' } });
     act(() => {
       useDeploymentWorkflowStore.getState().startTemplate(
         'blank',
@@ -361,6 +369,52 @@ describe('DeploymentWorkflowCenter', () => {
       name: 'Second workflow',
     }));
     expect(useDeploymentWorkflowStore.getState().selectedWorkflowId).toBeNull();
+    await waitFor(() => expect(search).toHaveValue(''));
+    const workflowList = screen.getByTestId('deployment-workflow-list');
+    expect(within(workflowList).getByText('Second workflow')).toBeInTheDocument();
+    expect(within(workflowList).getByText('deployment.editor.unsaved')).toBeInTheDocument();
+    expect(within(workflowList).getByText('deployment.editor.workflowCount:2')).toBeInTheDocument();
+  });
+
+  it('keeps the template dialog compact with icon-free footer actions', async () => {
+    render(<DeploymentWorkflowCenter />);
+    fireEvent.click(screen.getByRole('button', { name: 'deployment.editor.newWorkflow' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveClass('h-[min(26rem,calc(100vh-2rem))]');
+    const cancel = within(dialog).getByRole('button', { name: 'common.cancel' });
+    const submit = within(dialog).getByRole('button', { name: 'deployment.editor.template.use' });
+    expect(cancel.querySelector('svg')).toBeNull();
+    expect(submit.querySelector('svg')).toBeNull();
+    expect(within(dialog).getByLabelText('deployment.editor.workflowName')).toHaveClass('h-8');
+    expect(within(dialog).getByLabelText('deployment.editor.template.kind')).toHaveAttribute('data-size', 'sm');
+  });
+
+  it('defaults a template to the active profile filter and keeps that filter after creation', async () => {
+    useProfileStore.setState({ profiles: [profile, filteredProfile] });
+    useDeploymentWorkflowStore.setState({ profileFilterId: filteredProfile.id });
+    render(<DeploymentWorkflowCenter />);
+    fireEvent.click(screen.getByRole('button', { name: 'deployment.editor.newWorkflow' }));
+
+    const dialog = await screen.findByRole('dialog');
+    const target = within(dialog).getByLabelText('deployment.editor.targetProfile');
+    expect(target).toHaveTextContent('Staging · release@staging.example.test');
+    fireEvent.change(within(dialog).getByLabelText('deployment.editor.workflowName'), {
+      target: { value: 'Staging workflow' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', {
+      name: 'deployment.editor.template.use',
+    }));
+
+    await waitFor(() => expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      profileFilterId: filteredProfile.id,
+      draft: {
+        name: 'Staging workflow',
+        definition: {
+          targets: [{ connectionProfileId: filteredProfile.id }],
+        },
+      },
+    }));
   });
 
   it('allows an editable workflow to be enabled from workflow settings', async () => {
@@ -378,8 +432,8 @@ describe('DeploymentWorkflowCenter', () => {
   it('disables every mutation entry point when admissions are read-only', () => {
     useDeploymentWorkflowStore.setState({
       capabilities: {
-        schemaVersion: 1, admissionsEnabled: false, defaultEnabled: false,
-        flagName: 'SHELLSPAN_DEPLOYMENT_WORKFLOW', source: 'defaultDisabled',
+        schemaVersion: 1, admissionsEnabled: false, defaultEnabled: true,
+        flagName: 'SHELLSPAN_DEPLOYMENT_WORKFLOW', source: 'environment',
         readOnlyAvailable: true, cancelRecoveryAuditAvailable: true, coordinatorAvailable: true,
       },
     });

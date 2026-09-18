@@ -174,8 +174,8 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     return {
       ...node,
       data,
-      initialWidth: 256,
-      initialHeight: 176,
+      initialWidth: 240,
+      initialHeight: 160,
       draggable: editable,
       connectable: editable,
       deletable: false,
@@ -528,7 +528,7 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           <Background color="var(--border)" gap={20} size={1} />
           <Controls
             showInteractive={false}
-            fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+            fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
             aria-label={t('deployment.editor.flow.controls')}
             className="overflow-hidden rounded-md border border-border bg-background text-foreground"
           >

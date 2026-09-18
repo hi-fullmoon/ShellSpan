@@ -120,7 +120,7 @@ describe('deployment flow projection', () => {
       }),
       expect.objectContaining({
         id: 'target/primary',
-        position: { x: 280, y: 0 },
+        position: { x: 316, y: 36 },
         selected: true,
       }),
     ]);
@@ -149,8 +149,8 @@ describe('deployment flow projection', () => {
     const projected = projectDeploymentFlow(definition, null, null, null);
 
     expect(projected.nodes.map((item) => item.position)).toEqual([
-      { x: 0, y: 0 },
-      { x: 280, y: 0 },
+      { x: 36, y: 36 },
+      { x: 316, y: 36 },
     ]);
     expect(projected.nodes.every((item) => item.data.catalogNode === null)).toBe(true);
     expect(projected.nodes.every((item) => item.data.inputPorts.length === 0)).toBe(true);

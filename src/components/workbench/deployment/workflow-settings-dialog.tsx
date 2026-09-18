@@ -58,18 +58,19 @@ export const WorkflowSettingsDialog: React.FC<WorkflowSettingsDialogProps> = ({
       onOpenChangeComplete={(nextOpen) => { if (!nextOpen) returnFocusRef?.current?.focus(); }}
     >
       <DialogContent className="w-[calc(100%-2rem)] max-w-lg">
-        <form className="flex flex-col gap-4" onSubmit={submit}>
+        <form className="flex flex-col gap-3" onSubmit={submit}>
           <DialogHeader>
             <DialogTitle>{t('deployment.editor.settings')}</DialogTitle>
             <DialogDescription>{t('deployment.editor.settingsDescription')}</DialogDescription>
           </DialogHeader>
-          <FieldGroup>
+          <FieldGroup className="gap-3">
             <Field data-disabled={!editable}>
               <FieldLabel htmlFor="deployment-workflow-settings-name">
                 {t('deployment.editor.workflowName')}
               </FieldLabel>
               <Input
                 id="deployment-workflow-settings-name"
+                className="h-8"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 disabled={!editable}
@@ -94,10 +95,10 @@ export const WorkflowSettingsDialog: React.FC<WorkflowSettingsDialogProps> = ({
             </Field>
           </FieldGroup>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               {t('common.cancel')}
             </Button>
-            <Button type="submit" disabled={!editable || !name.trim()}>
+            <Button type="submit" size="sm" disabled={!editable || !name.trim()}>
               {t('deployment.editor.settingsApply')}
             </Button>
           </DialogFooter>
