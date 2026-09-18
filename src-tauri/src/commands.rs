@@ -846,6 +846,14 @@ pub(crate) fn create_local_session(
                         warn!("Failed to flush local shell input session_id={worker_id}: {error}");
                     }
                 }
+                LocalWorkerActivity::Command(Ok(SessionCommand::WriteBytes(bytes))) => {
+                    if let Err(error) = writer.write_all(&bytes) {
+                        warn!("Failed to write local shell binary input session_id={worker_id}: {error}");
+                    }
+                    if let Err(error) = writer.flush() {
+                        warn!("Failed to flush local shell binary input session_id={worker_id}: {error}");
+                    }
+                }
                 LocalWorkerActivity::Command(Ok(SessionCommand::Resize { cols, rows })) => {
                     if let Err(error) = master.resize(PtySize {
                         rows: rows.max(1) as u16,
@@ -994,7 +1002,9 @@ pub(crate) fn create_local_session(
                     Err(_) => {
                         break;
                     }
-                    Ok(SessionCommand::Write(_)) | Ok(SessionCommand::Resize { .. }) => {}
+                    Ok(SessionCommand::Write(_))
+                    | Ok(SessionCommand::WriteBytes(_))
+                    | Ok(SessionCommand::Resize { .. }) => {}
                 },
                 recv(output_state_rx) -> state => {
                     if state.is_err() {
@@ -1053,6 +1063,24 @@ pub(crate) fn write_session(
     let result = agent_runtime.write_user_terminal_input(&state, &session_id, data);
     if let Err(error) = &result {
         warn!("Failed to write SSH session input session_id={session_id}: {error}");
+    }
+    result
+}
+
+#[tauri::command]
+pub(crate) fn write_session_bytes(
+    state: State<'_, SessionManager>,
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
+    session_id: String,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    const MAX_BINARY_INPUT_BYTES: usize = 4 * 1024;
+    if bytes.is_empty() || bytes.len() > MAX_BINARY_INPUT_BYTES {
+        return Err("terminal binary input is outside the allowed size".to_string());
+    }
+    let result = agent_runtime.write_user_terminal_binary_input(&state, &session_id, bytes);
+    if let Err(error) = &result {
+        warn!("Failed to write binary terminal input session_id={session_id}: {error}");
     }
     result
 }

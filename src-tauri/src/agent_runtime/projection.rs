@@ -71,6 +71,11 @@ pub(crate) fn derive_task(events: &[AgentSessionEvent]) -> AgentTaskProjection {
                     projection.goal.clone_from(goal);
                 }
             }
+            // A plan belongs to the turn that created it. Keep its final rows
+            // visible after turn/end, but do not carry it into the next turn.
+            AgentSessionEventPayload::TurnStart => {
+                projection.plan = None;
+            }
             AgentSessionEventPayload::TaskPlan { version, steps } => {
                 projection.plan = Some(AgentTaskPlanProjection {
                     version: *version,
@@ -113,6 +118,17 @@ mod tests {
 
     fn event(seq: u64, payload: AgentSessionEventPayload) -> AgentSessionEvent {
         AgentSessionEvent::new("session".into(), seq, 1_000 + seq, None, None, payload)
+    }
+
+    fn turn_event(seq: u64, turn_id: &str, payload: AgentSessionEventPayload) -> AgentSessionEvent {
+        AgentSessionEvent::new(
+            "session".into(),
+            seq,
+            1_000 + seq,
+            Some(turn_id.into()),
+            None,
+            payload,
+        )
     }
 
     #[test]
@@ -158,5 +174,66 @@ mod tests {
         assert_eq!(projection.task_id.as_deref(), Some("task-1"));
         assert_eq!(projection.status.as_deref(), Some("running"));
         assert_eq!(projection.evidence[0].recorded_at_seq, 2);
+    }
+
+    #[test]
+    fn task_plan_stays_visible_after_turn_end_and_clears_on_the_next_turn() {
+        let events = vec![
+            turn_event(0, "turn-1", AgentSessionEventPayload::TurnStart),
+            turn_event(
+                1,
+                "turn-1",
+                AgentSessionEventPayload::TaskPlan {
+                    version: 1,
+                    steps: vec![AgentPlanStep {
+                        id: "inspect".into(),
+                        title: "Inspect the target".into(),
+                        status: super::super::AgentPlanStepStatus::Completed,
+                        detail: None,
+                        evidence_refs: Vec::new(),
+                    }],
+                },
+            ),
+            turn_event(
+                2,
+                "turn-1",
+                AgentSessionEventPayload::TurnEnd {
+                    reason: "completed".into(),
+                },
+            ),
+        ];
+        assert_eq!(derive_task(&events).plan.unwrap().version, 1);
+
+        let unfinished = vec![
+            turn_event(0, "turn-1", AgentSessionEventPayload::TurnStart),
+            turn_event(
+                1,
+                "turn-1",
+                AgentSessionEventPayload::TaskPlan {
+                    version: 1,
+                    steps: vec![AgentPlanStep {
+                        id: "inspect".into(),
+                        title: "Inspect the target".into(),
+                        status: super::super::AgentPlanStepStatus::InProgress,
+                        detail: None,
+                        evidence_refs: Vec::new(),
+                    }],
+                },
+            ),
+            turn_event(
+                2,
+                "turn-1",
+                AgentSessionEventPayload::TurnEnd {
+                    reason: "incomplete".into(),
+                },
+            ),
+        ];
+        assert!(derive_task(&unfinished).plan.is_some_and(|plan| {
+            plan.steps[0].status == super::super::AgentPlanStepStatus::InProgress
+        }));
+
+        let mut next_turn = events;
+        next_turn.push(turn_event(3, "turn-2", AgentSessionEventPayload::TurnStart));
+        assert!(derive_task(&next_turn).plan.is_none());
     }
 }

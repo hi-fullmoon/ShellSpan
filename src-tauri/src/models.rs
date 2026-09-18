@@ -867,6 +867,7 @@ pub(crate) struct LocalFileEntry {
 }
 pub(crate) enum SessionCommand {
     Write(String),
+    WriteBytes(Vec<u8>),
     Resize { cols: u32, rows: u32 },
     Close,
 }
@@ -1685,6 +1686,22 @@ impl SessionManager {
         enqueue_session_command(managed, SessionCommand::Write(data), session_id)
     }
 
+    pub(crate) fn write_session_bytes(
+        &self,
+        session_id: &str,
+        bytes: Vec<u8>,
+    ) -> Result<(), String> {
+        let guard = self
+            .registry
+            .lock()
+            .map_err(|_| "session registry poisoned".to_string())?;
+        let managed = guard
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| format!("session {session_id} not found"))?;
+        enqueue_session_command(managed, SessionCommand::WriteBytes(bytes), session_id)
+    }
+
     pub(crate) fn resize(&self, session_id: &str, cols: u32, rows: u32) -> Result<(), String> {
         let guard = self
             .registry
@@ -1867,7 +1884,9 @@ mod session_manager_tests {
             .try_iter()
             .filter_map(|command| match command {
                 SessionCommand::Write(data) => Some(data),
-                SessionCommand::Resize { .. } | SessionCommand::Close => None,
+                SessionCommand::WriteBytes(_)
+                | SessionCommand::Resize { .. }
+                | SessionCommand::Close => None,
             })
             .collect()
     }

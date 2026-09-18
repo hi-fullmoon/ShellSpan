@@ -270,7 +270,8 @@ fn is_session_tool(name: &str) -> bool {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdatePlanArguments {
-    plan_version: u64,
+    #[serde(default)]
+    plan_version: Option<u64>,
     #[serde(default)]
     explanation: Option<String>,
     steps: Vec<AgentPlanStep>,
@@ -542,6 +543,16 @@ impl AgentToolPipeline {
         self.parallel_limit
             .store(limit, std::sync::atomic::Ordering::Release);
         Ok(())
+    }
+
+    pub(crate) fn store_replay_artifact(
+        &self,
+        session_id: &str,
+        replay: &crate::llm::replay::ReplayEnvelopeV5,
+    ) -> Result<super::AgentStoredReplay, String> {
+        self.artifacts
+            .store_replay(session_id, replay)
+            .map(super::AgentStoredReplay::artifact)
     }
 
     pub(crate) fn terminal_interactive_tools_enabled(
@@ -1171,11 +1182,12 @@ impl AgentToolPipeline {
                         _ => None,
                     })
                     .unwrap_or(0);
-                if arguments.plan_version != previous_version.saturating_add(1) {
-                    return Err(format!(
-                        "update_plan version must be {}",
-                        previous_version.saturating_add(1)
-                    ));
+                let next_version = previous_version.saturating_add(1);
+                if arguments
+                    .plan_version
+                    .is_some_and(|version| version != next_version)
+                {
+                    return Err(format!("update_plan version must be {}", next_version));
                 }
                 if arguments
                     .explanation
@@ -1184,9 +1196,9 @@ impl AgentToolPipeline {
                 {
                     return Err("update_plan explanation is outside bounds".into());
                 }
-                super::session::validate_task_plan(arguments.plan_version, &arguments.steps)
+                super::session::validate_task_plan(next_version, &arguments.steps)
                     .map_err(|error| format!("invalid update_plan arguments: {error}"))?;
-                Ok(arguments)
+                Ok((next_version, arguments))
             });
         let mut payloads = vec![
             AgentScopedPayload {
@@ -1219,15 +1231,34 @@ impl AgentToolPipeline {
             },
         ];
         match parsed {
-            Ok(arguments) => {
-                let summary = arguments.explanation.unwrap_or_else(|| {
-                    format!("Task plan advanced to version {}", arguments.plan_version)
-                });
+            Ok((plan_version, arguments)) => {
+                let counts = arguments
+                    .steps
+                    .iter()
+                    .fold([0_usize; 5], |mut counts, step| {
+                        let index = match step.status {
+                            super::AgentPlanStepStatus::Pending => 0,
+                            super::AgentPlanStepStatus::InProgress => 1,
+                            super::AgentPlanStepStatus::Completed => 2,
+                            super::AgentPlanStepStatus::Blocked => 3,
+                            super::AgentPlanStepStatus::Failed => 4,
+                        };
+                        counts[index] += 1;
+                        counts
+                    });
+                let mut summary = format!(
+                    "Updated task plan: {} pending, {} in progress, {} completed, {} blocked, {} failed (version {})",
+                    counts[0], counts[1], counts[2], counts[3], counts[4], plan_version
+                );
+                if let Some(explanation) = arguments.explanation {
+                    summary.push_str(". ");
+                    summary.push_str(&explanation);
+                }
                 payloads.push(AgentScopedPayload {
                     turn_id: Some(turn_id.into()),
                     step_id: Some(step_id.into()),
                     payload: AgentSessionEventPayload::TaskPlan {
-                        version: arguments.plan_version,
+                        version: plan_version,
                         steps: arguments.steps,
                     },
                 });
@@ -1239,7 +1270,16 @@ impl AgentToolPipeline {
                         name: call.name,
                         status: AgentToolResultStatus::Completed,
                         summary,
-                        data: Some(serde_json::json!({ "planVersion": arguments.plan_version })),
+                        data: Some(serde_json::json!({
+                            "planVersion": plan_version,
+                            "counts": {
+                                "pending": counts[0],
+                                "inProgress": counts[1],
+                                "completed": counts[2],
+                                "blocked": counts[3],
+                                "failed": counts[4]
+                            }
+                        })),
                         duration_ms: None,
                         evidence_refs: Vec::new(),
                     },
@@ -2036,6 +2076,35 @@ impl AgentToolPipeline {
         Ok(())
     }
 
+    pub(crate) fn pending_approval_arguments(
+        &self,
+        input: &AgentToolDecisionInput,
+    ) -> Result<Option<Value>, String> {
+        let key = approval_key(&input.session_id, &input.step_id, &input.call_id);
+        let pending = self
+            .pending
+            .lock()
+            .map_err(|_| "native approval registry is unavailable".to_string())?;
+        let Some(record) = pending.get(&key) else {
+            return Ok(None);
+        };
+        if record.status != PendingStatus::Requested
+            || record.approval_id != input.approval_id
+            || record.request.session_id != input.session_id
+            || record.request.turn_id != input.turn_id
+            || record.request.step_id != input.step_id
+            || record.request.request_id != input.request_id
+            || record.request.model_call.call_id != input.call_id
+        {
+            return Err("approval identity or state is stale".into());
+        }
+        Ok(super::model::tool_call_arguments_are_ephemeral(
+            &record.request.model_call.name,
+            &record.request.model_call.arguments,
+        )
+        .then(|| record.request.model_call.arguments.clone()))
+    }
+
     async fn continue_after_pending(
         &self,
         entry: &Arc<AgentEntry>,
@@ -2414,7 +2483,7 @@ impl AgentToolPipeline {
                 .position(|candidate| candidate.call_id == call_id)
                 .ok_or_else(|| "recovery lost the durable model call".to_string())?;
             let raw_call = &raw_calls[raw_index];
-            let remaining_calls = raw_calls
+            let remaining_calls: Vec<ModelToolCall> = raw_calls
                 .iter()
                 .skip(raw_index + 1)
                 .filter(|call| !results.contains_key(&(step_id.clone(), call.call_id.clone())))
@@ -2446,6 +2515,58 @@ impl AgentToolPipeline {
                     .ok_or_else(|| "recovered tool call has no Rust permission mode".to_string())?,
                 execution_surface: snapshot.header.execution_surface,
             };
+            if super::model::recorded_tool_call_omits_replay(call) {
+                let reason = if status == AgentToolApprovalStatus::Approved {
+                    "An ephemeral terminal call was authorized but not dispatched before restart; it was cancelled because its private arguments were not persisted."
+                } else {
+                    "An ephemeral terminal call approval was cancelled after restart because its private arguments were not persisted."
+                };
+                self.sessions.append_batch(
+                    &entry.session_id,
+                    vec![
+                        AgentScopedPayload {
+                            turn_id: Some(request.turn_id.clone()),
+                            step_id: Some(request.step_id.clone()),
+                            payload: AgentSessionEventPayload::ToolApproval {
+                                request_id: request.request_id.clone(),
+                                call_id: request.model_call.call_id.clone(),
+                                approval_id: (!approval_id.is_empty()).then(|| approval_id.clone()),
+                                status: AgentToolApprovalStatus::Cancelled,
+                                risk: call.effect,
+                                reason: Some("ephemeralArgumentsUnavailableAfterRestart".into()),
+                                expires_at_unix_ms: Some(expires_at),
+                                prompt: None,
+                            },
+                        },
+                        AgentScopedPayload {
+                            turn_id: Some(request.turn_id.clone()),
+                            step_id: Some(request.step_id.clone()),
+                            payload: AgentSessionEventPayload::ToolResult {
+                                call_id: request.model_call.call_id.clone(),
+                                name: request.model_call.name.clone(),
+                                status: AgentToolResultStatus::Cancelled,
+                                summary: reason.into(),
+                                data: Some(serde_json::json!({
+                                    "recovery": "notRestartable",
+                                    "reason": "ephemeralArgumentsUnavailableAfterRestart"
+                                })),
+                                duration_ms: None,
+                                evidence_refs: Vec::new(),
+                            },
+                        },
+                    ],
+                )?;
+                for remaining in &remaining_calls {
+                    let mut remaining_request = request.clone();
+                    remaining_request.model_call = remaining.clone();
+                    self.commit_not_started(
+                        &remaining_request,
+                        "ephemeralArgumentsUnavailableAfterRestart",
+                    )?;
+                }
+                resumable = true;
+                continue;
+            }
             let mut preparation = self.native.prepare(request.clone())?;
             let lease = Arc::new(PreparedLease::new(self.native.clone(), &preparation.token));
             if preparation.call != *call {

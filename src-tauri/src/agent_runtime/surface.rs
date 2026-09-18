@@ -28,7 +28,7 @@ pub(crate) enum AgentSurfaceMessage {
         content: Vec<AgentAssistantContentBlock>,
         interrupted: bool,
         #[serde(skip)]
-        replay: Option<Box<crate::llm::replay::ReplayEnvelopeV5>>,
+        replay: Option<Box<super::AgentStoredReplay>>,
     },
     Tool {
         call_id: String,

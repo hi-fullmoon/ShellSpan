@@ -137,6 +137,17 @@ fn built_in_models_inherit_preset_compat_and_apply_local_differences() {
 }
 
 #[test]
+fn minimax_m3_uses_the_documented_agent_output_budget() {
+    let mut p = provider("MiniMax-M3");
+    p.profile = "minimax".into();
+
+    let resolved = resolve(&p).unwrap();
+
+    assert_eq!(resolved.context_window, 1_000_000);
+    assert_eq!(resolved.max_output_tokens, 131_072);
+}
+
+#[test]
 fn custom_capacity_is_not_inferred_or_clamped_to_obsolete_hint_bounds() {
     let mut p = provider("custom-small");
     p.model_definition = Some(fixture_definition(p.kind, 4096));

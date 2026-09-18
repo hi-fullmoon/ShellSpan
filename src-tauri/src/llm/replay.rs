@@ -10,7 +10,9 @@ use std::collections::{HashMap, HashSet};
 
 pub(crate) const REPLAY_ENVELOPE_VERSION: u32 = 1;
 const MAX_REPLAY_STRING_BYTES: usize = 64 * 1024;
-const MAX_REPLAY_METADATA_BYTES: usize = 256 * 1024;
+// Replay metadata has its own bounded blob budget. The Session event budget is
+// enforced separately; envelopes that do not fit inline are claim-checked.
+const MAX_REPLAY_METADATA_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
