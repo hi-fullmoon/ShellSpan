@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { WorkbenchSidebar } from '../workbench-sidebar';
 import { useUpdateStore } from '@/stores/updateStore';
-import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -30,21 +29,12 @@ vi.mock('@/hooks/useI18n', () => ({
 describe('WorkbenchSidebar', () => {
   beforeEach(() => {
     useUpdateStore.setState({ phase: 'idle' });
-    useDeploymentWorkflowRunStore.setState({ runs: [] });
   });
 
-  it('shows the unresolved deployment count without adding an execution action', () => {
-    useDeploymentWorkflowRunStore.setState({
-      runs: [
-        { runId: 'run-1', workflowId: 'workflow-1', workflowRevision: 1, operationKind: 'deploy', triggerKind: 'manual', status: 'state_unknown', planDigest: `sha256:${'b'.repeat(64)}`, targetRelease: { releaseId: 'release-1', artifactContentDigest: `sha256:${'a'.repeat(64)}`, layoutDigest: `sha256:${'c'.repeat(64)}` }, artifactReferences: [], expiresAt: 10, expired: false, planDrifted: false, createdAt: 1, updatedAt: 2, startedAt: 1, finishedAt: null },
-        { runId: 'run-2', workflowId: 'workflow-1', workflowRevision: 1, operationKind: 'deploy', triggerKind: 'manual', status: 'in_progress', planDigest: `sha256:${'d'.repeat(64)}`, targetRelease: { releaseId: 'release-2', artifactContentDigest: `sha256:${'e'.repeat(64)}`, layoutDigest: `sha256:${'f'.repeat(64)}` }, artifactReferences: [], expiresAt: 10, expired: false, planDrifted: false, createdAt: 1, updatedAt: 3, startedAt: 1, finishedAt: null },
-      ],
-    });
+  it('hides the deployment center menu entry', () => {
     render(<WorkbenchSidebar activeTab="connections" onTabChange={vi.fn()} onOpenSettings={vi.fn()} onCheckForUpdates={vi.fn()} onOpenAbout={vi.fn()} onRequestExit={vi.fn()} />);
 
-    const deployments = screen.getByRole('button', { name: /deployment.title/ });
-    expect(deployments).toHaveTextContent('1');
-    expect(screen.queryByRole('button', { name: /approve|execute/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /deployment.title/ })).not.toBeInTheDocument();
   });
 
   it('activates a menu item when WKWebView drops its trackpad pointerdown', () => {
