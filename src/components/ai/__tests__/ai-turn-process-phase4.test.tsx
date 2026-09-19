@@ -342,7 +342,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
       .toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('scopes manual disclosure state to session, Turn, and answer generation', async () => {
+  it('preserves manual disclosure state across answer generations within a turn', async () => {
     const user = userEvent.setup();
     const first = processNode({
       key: 'turn-process:phase4-generation',
@@ -359,7 +359,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
       answerGeneration: 'generation-two',
       lastSeq: first.lastSeq + 1,
     }]} />);
-    expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'true');
 
     rerender(<AiConversationNodeList nodes={[{ ...first, lastSeq: first.lastSeq + 2 }]} />);
     expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'true');

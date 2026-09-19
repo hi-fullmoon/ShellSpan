@@ -394,11 +394,12 @@ function ApprovalMarkerNodeView({
 
 function RetryNodeView({ node }: { readonly node: AiConversationNodeOf<'retry'> }) {
   const { t } = useI18n();
+  const outputRecovery = node.reason === 'outputLimitContinuation';
   return (
-    <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_max-content_minmax(0,1fr)] items-center gap-1 py-0.5" data-variant="retry">
+    <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_max-content_minmax(0,1fr)] items-center gap-1 py-0.5" data-variant="retry" role="status">
       <RefreshCwIcon aria-hidden="true" />
-      <span>{t('ai.workspace.retry', { attempt: node.attempt })}</span>
-      <span className="ai-transcript-notice-detail min-w-0 truncate">{node.reason}</span>
+      <span>{t(outputRecovery ? 'ai.workspace.outputLimitContinuation' : 'ai.workspace.retry', { attempt: node.attempt })}</span>
+      <span className="ai-transcript-notice-detail min-w-0 truncate">{outputRecovery ? t('ai.workspace.outputLimitContinuationDetail') : node.reason}</span>
     </div>
   );
 }
@@ -407,7 +408,7 @@ function errorNodeMessage(
   node: AiConversationNodeOf<'error'>,
   t: (key: LocaleKey) => string,
 ): string {
-  return node.message.startsWith('outputLimit:') || node.message.includes('code=OUTPUT_LIMIT')
+  return node.message === 'outputLimit' || node.message.startsWith('outputLimit:') || node.message.includes('code=OUTPUT_LIMIT')
     ? t('ai.error.outputLimit')
     : node.message;
 }
@@ -443,7 +444,9 @@ const TURN_PROCESS_DISCLOSURE_LIMIT = 512;
 const turnProcessDisclosures = new Map<string, StoredTurnProcessDisclosure>();
 
 function turnProcessDisclosureKey(node: AiConversationNodeOf<'turnProcess'>): string {
-  return `${node.sessionId}:${node.turnId ?? 'unscoped'}:${node.answerGeneration}`;
+  // Tool continuations and retries change the request, not the displayed turn.
+  // Remounting here restarts the panel's height animation and loses user state.
+  return JSON.stringify([node.sessionId, node.key]);
 }
 
 function storeTurnProcessDisclosure(

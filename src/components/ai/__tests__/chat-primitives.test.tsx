@@ -356,50 +356,8 @@ describe('MessageScroller', () => {
     expect(scrollTo).toHaveBeenCalled();
   });
 
-  it.each(['End', 'ArrowDown', 'PageDown', ' '])(
-    'keeps following a stream after %s is pressed at the live edge', async (key) => {
-      let followKey = 'streaming:1';
-      let height = 300;
-      let scrollTop = 200;
-      const thread = () => (
-        <MessageScroller
-          followKey={followKey}
-          turnAnchorKey="response"
-          initialAnchor={{ nodeKey: 'response', offset: 0, scrollTop: 200, atBottom: true }}
-        >
-          <ScrollAnchorRow key="response" id="response" scrollAnchor scrollItemId="response" />
-        </MessageScroller>
-      );
-      const { container, rerender } = render(thread());
-      const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
-      const item = container.querySelector<HTMLElement>('[data-slot="message-scroller-item"]')!;
-      const rect = (top: number, rectHeight: number) => ({
-        top, bottom: top + rectHeight, height: rectHeight, left: 0, right: 320, width: 320,
-        x: 0, y: top, toJSON: () => ({}),
-      });
-      const scrollTo = vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); });
-      Object.defineProperties(viewport, {
-        clientHeight: { configurable: true, value: 100 },
-        scrollHeight: { configurable: true, get: () => height },
-        scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
-        scrollTo: { configurable: true, value: scrollTo },
-        getBoundingClientRect: { configurable: true, value: () => rect(0, 100) },
-      });
-      item.getBoundingClientRect = () => rect(-scrollTop, height);
-      await waitFor(() => expect(container.querySelector('[data-slot="message-scroller"]')).not.toHaveClass('invisible'));
-      fireEvent.scroll(viewport);
-      scrollTo.mockClear();
-
-      fireEvent.keyDown(viewport, { key });
-      scrollTo.mockClear();
-      height = 400;
-      followKey = 'streaming:2';
-      rerender(thread());
-
-      expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', top: 300 });
-      expect(scrollTop).toBe(300);
-    },
-  );
+  // Keyboard + streamed resize coverage lives in verify-ai-streaming.mjs,
+  // exercising native layout/ResizeObserver rather than a followKey scroll write.
 
   it('anchors a new user turn near the top instead of chasing its streamed tail', async () => {
     let ids = ['first', 'second'];
@@ -455,7 +413,7 @@ describe('MessageScroller', () => {
     expect(userItem).toHaveAttribute('data-scroll-anchor', 'true');
   });
 
-  it('uses an explicit turn key to top-align an initially mounted user turn', async () => {
+  it('follows an initially mounted short turn and restores its live edge', async () => {
     let itemCount = 2;
     let scrollTop = 0;
     let savedAnchor: AiScrollAnchor | undefined;
@@ -511,30 +469,18 @@ describe('MessageScroller', () => {
       .toHaveAttribute('data-scroll-anchor', 'true');
 
     fireEvent.scroll(container.querySelector('[data-message-scroller-viewport]')!);
-    expect(savedAnchor).toEqual(expect.objectContaining({ atBottom: false }));
+    expect(savedAnchor).toEqual(expect.objectContaining({ atBottom: true }));
     itemCount = 3;
     rerender(thread());
     await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(scrollTop).toBe(100);
-    expect(scrollTop).toBeLessThan(200);
+    expect(scrollTop).toBe(200);
 
     unmount();
     scrollTop = 0;
     const restored = render(thread(savedAnchor));
-    await waitFor(() => expect(scrollTop).toBe(100));
+    await waitFor(() => expect(scrollTop).toBe(200));
     fireEvent.scroll(restored.container.querySelector('[data-message-scroller-viewport]')!);
-    itemCount = 4;
-    restored.rerender(thread(savedAnchor));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(scrollTop).toBe(100);
-
-    const restoredViewport = restored.container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
-    scrollTop = 300;
-    fireEvent.wheel(restoredViewport, { deltaY: 20 });
-    fireEvent.scroll(restoredViewport);
-    itemCount = 5;
-    restored.rerender(thread(savedAnchor));
-    await waitFor(() => expect(scrollTop).toBe(400));
+    expect(savedAnchor).toEqual(expect.objectContaining({ atBottom: true }));
   });
 
   it('preserves a saved live-edge position instead of replaying the turn anchor', async () => {

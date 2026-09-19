@@ -2,19 +2,16 @@ import { AiComposerEditor } from './ai-composer-editor';
 import { AiCompletionPopover } from './ai-completion-popover';
 import { useFileCompletion } from './use-file-completion';
 import { useSkillCompletion } from './use-skill-completion';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUpIcon,
   ChevronDownIcon,
   CornerUpLeftIcon,
-  InfoIcon,
   ListPlusIcon,
-  RotateCcwIcon,
   ShieldCheckIcon,
   SquareIcon,
 } from 'lucide-react';
 
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -83,16 +80,11 @@ export interface AiComposerSeatProps {
   readonly approvalArgumentsLoading?: boolean;
   readonly approvalArgumentsError?: string | null;
   readonly unavailableReason?: string | null;
+  readonly availabilityHintId?: string;
   readonly onDraftChange?: (value: string) => void;
   readonly onSubmit?: (value: string) => void | Promise<void>;
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
-  readonly onContinueBudgetedTurn?: () => void;
-  readonly budgetContinuationAvailable?: boolean;
-  readonly onContinueOnReconnectedTerminal?: () => void;
-  readonly historicalContinuationAvailable?: boolean;
-  readonly historicalContinuationBusy?: boolean;
-  readonly historicalContinuationError?: string | null;
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onUpdateQueueItem?: (item: AiInboxItem, content: string) => void;
   readonly onRemoveQueueItem?: (item: AiInboxItem) => void;
@@ -139,16 +131,11 @@ export function AiComposerSeat({
   approvalArgumentsLoading = false,
   approvalArgumentsError = null,
   unavailableReason = null,
+  availabilityHintId,
   onDraftChange,
   onSubmit,
   onSubmitGesture,
   onStop,
-  onContinueBudgetedTurn,
-  budgetContinuationAvailable = false,
-  onContinueOnReconnectedTerminal,
-  historicalContinuationAvailable = false,
-  historicalContinuationBusy = false,
-  historicalContinuationError = null,
   onBusyPreferenceChange,
   onUpdateQueueItem,
   onRemoveQueueItem,
@@ -162,7 +149,6 @@ export function AiComposerSeat({
   onOpenApprovalDetails,
 }: AiComposerSeatProps): React.ReactNode {
   const { t } = useI18n();
-  const availabilityHintId = useId();
   const [localDraft, setLocalDraft] = useState(defaultDraft);
   const composingRef = useRef(false);
   const composingUntilRef = useRef(0);
@@ -248,47 +234,6 @@ export function AiComposerSeat({
       {mode === 'agent' && (
         <AiTaskStrip steps={taskSteps} active={status === 'running' || status === 'waiting'} />
       )}
-      <div className="ai-composer-notices flex min-w-0 flex-col gap-1.5 empty:hidden">
-        {historicalContinuationAvailable && (
-          <Alert variant="subtle" size="sm" role="status">
-            <AlertDescription>{t(historicalContinuationBusy
-              ? 'ai.workspace.sessions.continuePreparing'
-              : 'ai.workspace.sessions.continueComposerHint')}</AlertDescription>
-          </Alert>
-        )}
-        {historicalContinuationError && (
-          <Alert variant="destructiveSubtle" size="sm" role="alert">
-            <AlertDescription>{historicalContinuationError}</AlertDescription>
-          </Alert>
-        )}
-        {status === 'failed' && onContinueOnReconnectedTerminal && (
-          <Button type="button" variant="secondary" size="sm" className="self-center rounded-full"
-            disabled={stopping || submitting || unavailable} onClick={onContinueOnReconnectedTerminal}>
-            <RotateCcwIcon data-icon="inline-start" />
-            {t('ai.workspace.continueOnReconnectedTerminal')}
-          </Button>
-        )}
-        {budgetContinuationAvailable && onContinueBudgetedTurn && !terminal && (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="self-center rounded-full"
-            disabled={stopping || submitting || unavailable}
-            onClick={onContinueBudgetedTurn}
-          >
-            <RotateCcwIcon data-icon="inline-start" />
-            {t('ai.workspace.continueBudgetedTurn')}
-          </Button>
-        )}
-        {waitingApproval && !pendingApproval && (
-          <Alert size="sm">
-            <AlertTitle>{t('ai.workspace.approvalWaiting')}</AlertTitle>
-            <AlertDescription>{t('ai.workspace.approvalPhase5')}</AlertDescription>
-          </Alert>
-        )}
-      </div>
-      {stopping && <Alert size="sm" variant="subtle" role="status"><AlertDescription>{t('ai.workspace.stopping')}</AlertDescription></Alert>}
       {completion.dialog}
       {mode === 'agent' && <AiQueueDock
         items={queueItems}
@@ -303,7 +248,6 @@ export function AiComposerSeat({
         onRetry={onRetryQueueMutation}
       />}
       {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
-      {waitingQuestion && !pendingQuestion && <Alert><AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle><AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription></Alert>}
       {
         <div ref={completionAnchor} className="ai-composer-input-anchor relative min-w-0">
           <InputGroup className={cn(
@@ -539,19 +483,6 @@ export function AiComposerSeat({
           </AiCompletionPopover>
         </div>
       }
-      {unavailableReason && (
-        <Alert
-          id={availabilityHintId}
-          variant="subtle"
-          size="sm"
-          role="status"
-          aria-label={t('agent.availability.title')}
-          className="mx-2 flex w-auto items-center gap-x-1"
-        >
-          <InfoIcon aria-hidden="true" className="shrink-0" />
-          <AlertDescription className="min-w-0 break-words">{unavailableReason}</AlertDescription>
-        </Alert>
-      )}
       <span className="sr-only" aria-live="polite">
         {announcement ? t(`ai.workspace.announce.${announcement}` as LocaleKey) : null}
       </span>

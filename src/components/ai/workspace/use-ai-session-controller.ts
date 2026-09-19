@@ -592,12 +592,8 @@ export function useAiSessionController({
       || (target.kind === 'remote' && !target.profileId)) return input;
     const root = await resolveProjectRoot();
     if (!root) {
-      // Local operator commands require an enforceable sandbox root. Remote
-      // shells cannot enforce that boundary, so preserve the existing
-      // confirmation-gated terminal fallback when the cwd probe is unavailable.
-      if (target.kind === 'local') {
-        throw new Error(t('ai.workspace.error.fullAccessRootRequired'));
-      }
+      // The directory enables structured file tools; full-access shell execution
+      // does not require a workspace sandbox or a successful directory probe.
       return input;
     }
     return {
@@ -609,7 +605,7 @@ export function useAiSessionController({
           : { ...target, rootPath: root },
       },
     };
-  }, [createInput, resolveProjectRoot, t]);
+  }, [createInput, resolveProjectRoot]);
   const ensureProjectSession = useCallback(async (root?: string): Promise<string> => {
     const epoch = projectEpoch.current;
     let sessionId = viewRef.current?.summary.id ?? openedSessionId;

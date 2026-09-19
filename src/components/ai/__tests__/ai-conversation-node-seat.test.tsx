@@ -16,6 +16,7 @@ import {
   agentSessionEventFixture,
   agentSessionFailedEventFixture,
   agentSessionRunningEventFixture,
+  sessionEvent,
 } from '@/test/fixtures/agent-session';
 import '@/components/ai/styles/styles.css';
 
@@ -148,7 +149,10 @@ describe('AiConversationNodeList', () => {
     expect(container.querySelectorAll('[data-ai-node-key]')).toHaveLength(nodes.length);
   });
 
-  it('renders an actionable message instead of raw output-limit diagnostics', () => {
+  it.each([
+    'outputLimit',
+    'outputLimit: attempt=1 maxAttempts=3 kind=Terminal code=OUTPUT_LIMIT',
+  ])('renders an actionable message for %s', (message) => {
     const error: AiConversationNodeOf<'error'> = {
       kind: 'error',
       key: 'error:output-limit',
@@ -160,7 +164,7 @@ describe('AiConversationNodeList', () => {
       lastSeq: 1,
       timestamp: '2026-09-18T00:00:00.000Z',
       scope: 'session',
-      message: 'outputLimit: attempt=1 maxAttempts=3 kind=Terminal code=OUTPUT_LIMIT',
+      message,
       code: null,
       state: 'failed',
     };
@@ -168,9 +172,22 @@ describe('AiConversationNodeList', () => {
     render(<AiConversationNodeList nodes={[error]} />);
 
     expect(within(screen.getByRole('alert')).getByText(
-      'Automatic continuation still reached the model output limit. The generated content was kept; narrow the task and try again.',
+      'The model still reached its output limit after reducing the step size. Saved changes were kept; unfinished tool calls were not executed. Check the model output limit in provider settings before continuing.',
     )).toBeVisible();
     expect(screen.queryByText(/maxAttempts/)).not.toBeInTheDocument();
+  });
+
+  it('renders output-limit continuation as a readable status without an error count', () => {
+    const nodes = projectAgentChatNodes([
+      sessionEvent(0, { type: 'turn/start', turnId: 'turn-recovery' }),
+      sessionEvent(1, { type: 'step/start', turnId: 'turn-recovery', stepId: 'step-recovery' }),
+      sessionEvent(2, { type: 'step/end', turnId: 'turn-recovery', stepId: 'step-recovery', data: { reason: 'outputLimitContinuation' } }),
+    ]);
+    render(<AiConversationNodeList nodes={nodes} />);
+    expect(screen.getByText('Continuing in smaller steps (1/2)')).toBeVisible();
+    expect(screen.getByText('Output limit reached. Checking saved work before continuing.')).toBeVisible();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText(/outputLimitContinuation|Request failed|1 error/)).not.toBeInTheDocument();
   });
 
   it('hides internal runtime, Agent instruction, and Skills catalog context', () => {
@@ -403,6 +420,7 @@ describe('AiConversationNodeList', () => {
       },
       output: { written: true, operation: 'create', path: 'todo-app/package.json' },
     });
+    const longLine = '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">';
     const patch = [
       '--- original',
       '+++ modified',
@@ -410,7 +428,7 @@ describe('AiConversationNodeList', () => {
       '-old',
       '+new',
       ' kept',
-      '+extra',
+      `+${longLine}`,
       '',
     ].join('\n');
     const edit = toolNode({
@@ -480,6 +498,12 @@ describe('AiConversationNodeList', () => {
     expect(diff).toHaveTextContent('todo-app/src/app.ts');
     expect(diff.querySelectorAll('[data-diff="removed"]')).toHaveLength(1);
     expect(diff.querySelectorAll('[data-diff="added"]')).toHaveLength(2);
+    expect(diff.querySelector('section')).toHaveClass('min-w-0', 'max-w-full');
+    expect(diff.querySelector('.ai-diff-body')).toHaveClass(
+      'min-w-0', 'max-w-full', 'overflow-auto', 'whitespace-pre-wrap', '[overflow-wrap:anywhere]',
+    );
+    expect(diff.querySelector('.ai-diff-body')).not.toHaveClass('whitespace-pre');
+    expect(diff.querySelectorAll('[data-diff="added"]')[1]?.textContent).toBe(`+ ${longLine}`);
 
     const replaceSeat = container.querySelector('[data-ai-node-key="tool:replace"]') as HTMLElement;
     const replaceRow = within(replaceSeat).getByRole('button', {

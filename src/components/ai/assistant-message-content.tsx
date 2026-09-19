@@ -1,12 +1,11 @@
 import React, {
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import Markdown from 'react-markdown';
+import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 
@@ -212,42 +211,45 @@ const MarkdownContent = React.memo(function MarkdownContent({
   copyLabel: string;
   showCodeBlockActions: boolean;
 }): React.JSX.Element {
+  // Stable element types preserve code/table DOM (focus and horizontal scroll)
+  // when the growing chunk is parsed again.
+  const components = useMemo<Components>(() => ({
+    a: ({ children: linkChildren, href }) => <MarkdownLink href={href}>{linkChildren}</MarkdownLink>,
+    blockquote: ({ children: quoteChildren }) => <blockquote>{quoteChildren}</blockquote>,
+    code: ({ children: codeChildren, className }) => (
+      <MarkdownInlineCode className={className}>{codeChildren}</MarkdownInlineCode>
+    ),
+    hr: () => <Separator />,
+    img: ({ alt }) => <span className="ai-markdown-image-alt">[{alt || 'image'}]</span>,
+    pre: ({ children: codeChildren }) => (
+      <MarkdownCodeBlock
+        copiedLabel={copiedLabel}
+        copyLabel={copyLabel}
+        showActions={showCodeBlockActions}
+      >
+        {codeChildren}
+      </MarkdownCodeBlock>
+    ),
+    table: ({ children: tableChildren }) => (
+      <div className="ai-markdown-table-scroll my-4 max-w-full overflow-x-auto overscroll-x-contain" tabIndex={0}>
+        <table>{tableChildren}</table>
+      </div>
+    ),
+  }), [copiedLabel, copyLabel, showCodeBlockActions]);
   return (
     <div className="ai-assistant-markdown min-w-0 max-w-full [overflow-wrap:anywhere]">
       <Markdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={MARKDOWN_PLUGINS}
         skipHtml
-        components={{
-          a: ({ children: linkChildren, href }) => <MarkdownLink href={href}>{linkChildren}</MarkdownLink>,
-          blockquote: ({ children: quoteChildren }) => (
-            <blockquote>{quoteChildren}</blockquote>
-          ),
-          code: ({ children: codeChildren, className }) => (
-            <MarkdownInlineCode className={className}>{codeChildren}</MarkdownInlineCode>
-          ),
-          hr: () => <Separator />,
-          img: ({ alt }) => <span className="ai-markdown-image-alt">[{alt || 'image'}]</span>,
-          pre: ({ children: codeChildren }) => (
-            <MarkdownCodeBlock
-              copiedLabel={copiedLabel}
-              copyLabel={copyLabel}
-              showActions={showCodeBlockActions}
-            >
-              {codeChildren}
-            </MarkdownCodeBlock>
-          ),
-          table: ({ children: tableChildren }) => (
-            <div className="ai-markdown-table-scroll my-4 max-w-full overflow-x-auto overscroll-x-contain" tabIndex={0}>
-              <table>{tableChildren}</table>
-            </div>
-          ),
-        }}
+        components={components}
       >
         {children}
       </Markdown>
     </div>
   );
 });
+
+const MARKDOWN_PLUGINS = [remarkGfm];
 
 function answerFromBlocks(blocks: readonly AgentSessionAssistantContentBlock[]): string {
   return blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('');
@@ -260,11 +262,11 @@ const AssistantMessageContentComponent: React.FC<{
 }> = ({ blocks, streaming, showCodeBlockActions = true }) => {
   const { t } = useI18n();
   const answer = useMemo(() => answerFromBlocks(blocks), [blocks]);
-  const deferredAnswer = useDeferredValue(answer);
-  const renderedAnswer = streaming ? deferredAnswer : answer;
-  const answerChunks = useMemo(() => splitStreamingMarkdown(renderedAnswer), [renderedAnswer]);
+  // The session client already batches streaming updates per animation frame.
+  // Commit text with that frame so scroll measurements see the displayed text.
+  const answerChunks = useMemo(() => splitStreamingMarkdown(answer), [answer]);
 
-  if (!renderedAnswer) {
+  if (!answer) {
     return streaming
       ? <span className="ai-turn-status shimmer inline-flex min-h-6.5 self-start items-center gap-2 whitespace-nowrap" role="status">{t('ai.thinking.inProgress')}</span>
       : null;
