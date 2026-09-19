@@ -23,6 +23,7 @@ import { useProfileStore } from '@/stores/profileStore';
 import { buildChangeDirectoryCommand } from '@/lib/host/host-context';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 import { t } from '@/locales';
+import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 
 export interface ConnectSessionOptions {
   insertAfterId?: string;
@@ -186,7 +187,9 @@ export function useConnectSession(): {
     });
     setActiveSection('terminal');
     try {
-      const summary = await invokeCreateLocalSession();
+      const dimensions = await terminalRegistry.measureInitialDimensions(connectionAttemptId);
+      if (!useTerminalStore.getState().sessions.some((session) => session.sessionId === connectionAttemptId)) return;
+      const summary = await invokeCreateLocalSession(dimensions?.cols, dimensions?.rows);
       resolveConnectionAttempt(connectionAttemptId, summary);
     } catch (error) {
       useToastStore.getState().addToast(getToastErrorMessage(error), 'error');

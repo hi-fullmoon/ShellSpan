@@ -206,6 +206,8 @@ describe('useConnectSession', () => {
       pendingConnection: true,
     });
 
+    await waitFor(() => expect(invokeCreateLocalSession).toHaveBeenCalledTimes(1));
+
     await act(async () => {
       resolveSession(SUMMARY);
       await connection;
