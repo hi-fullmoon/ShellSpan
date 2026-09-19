@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AiScrollAnchor } from '@/lib/ai/panel-route';
 import { Message, MessageScroller } from '../chat-primitives';
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -355,46 +356,50 @@ describe('MessageScroller', () => {
     expect(scrollTo).toHaveBeenCalled();
   });
 
-  it('corrects a followed stream revision during layout before the resize frame', async () => {
-    let followKey = 'streaming:1';
-    let height = 300;
-    let scrollTop = 200;
-    const thread = () => (
-      <MessageScroller
-        followKey={followKey}
-        turnAnchorKey="response"
-        initialAnchor={{ nodeKey: 'response', offset: 0, scrollTop: 200, atBottom: true }}
-      >
-        <ScrollAnchorRow key="response" id="response" scrollAnchor scrollItemId="response" />
-      </MessageScroller>
-    );
-    const { container, rerender } = render(thread());
-    const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
-    const item = container.querySelector<HTMLElement>('[data-slot="message-scroller-item"]')!;
-    const rect = (top: number, rectHeight: number) => ({
-      top, bottom: top + rectHeight, height: rectHeight, left: 0, right: 320, width: 320,
-      x: 0, y: top, toJSON: () => ({}),
-    });
-    const scrollTo = vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); });
-    Object.defineProperties(viewport, {
-      clientHeight: { configurable: true, value: 100 },
-      scrollHeight: { configurable: true, get: () => height },
-      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
-      scrollTo: { configurable: true, value: scrollTo },
-      getBoundingClientRect: { configurable: true, value: () => rect(0, 100) },
-    });
-    item.getBoundingClientRect = () => rect(-scrollTop, height);
-    await waitFor(() => expect(container.querySelector('[data-slot="message-scroller"]')).not.toHaveClass('invisible'));
-    fireEvent.scroll(viewport);
-    scrollTo.mockClear();
+  it.each(['End', 'ArrowDown', 'PageDown', ' '])(
+    'keeps following a stream after %s is pressed at the live edge', async (key) => {
+      let followKey = 'streaming:1';
+      let height = 300;
+      let scrollTop = 200;
+      const thread = () => (
+        <MessageScroller
+          followKey={followKey}
+          turnAnchorKey="response"
+          initialAnchor={{ nodeKey: 'response', offset: 0, scrollTop: 200, atBottom: true }}
+        >
+          <ScrollAnchorRow key="response" id="response" scrollAnchor scrollItemId="response" />
+        </MessageScroller>
+      );
+      const { container, rerender } = render(thread());
+      const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
+      const item = container.querySelector<HTMLElement>('[data-slot="message-scroller-item"]')!;
+      const rect = (top: number, rectHeight: number) => ({
+        top, bottom: top + rectHeight, height: rectHeight, left: 0, right: 320, width: 320,
+        x: 0, y: top, toJSON: () => ({}),
+      });
+      const scrollTo = vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); });
+      Object.defineProperties(viewport, {
+        clientHeight: { configurable: true, value: 100 },
+        scrollHeight: { configurable: true, get: () => height },
+        scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+        scrollTo: { configurable: true, value: scrollTo },
+        getBoundingClientRect: { configurable: true, value: () => rect(0, 100) },
+      });
+      item.getBoundingClientRect = () => rect(-scrollTop, height);
+      await waitFor(() => expect(container.querySelector('[data-slot="message-scroller"]')).not.toHaveClass('invisible'));
+      fireEvent.scroll(viewport);
+      scrollTo.mockClear();
 
-    height = 400;
-    followKey = 'streaming:2';
-    rerender(thread());
+      fireEvent.keyDown(viewport, { key });
+      scrollTo.mockClear();
+      height = 400;
+      followKey = 'streaming:2';
+      rerender(thread());
 
-    expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', top: 300 });
-    expect(scrollTop).toBe(300);
-  });
+      expect(scrollTo).toHaveBeenCalledWith({ behavior: 'auto', top: 300 });
+      expect(scrollTop).toBe(300);
+    },
+  );
 
   it('anchors a new user turn near the top instead of chasing its streamed tail', async () => {
     let ids = ['first', 'second'];
@@ -453,6 +458,7 @@ describe('MessageScroller', () => {
   it('uses an explicit turn key to top-align an initially mounted user turn', async () => {
     let itemCount = 2;
     let scrollTop = 0;
+    let savedAnchor: AiScrollAnchor | undefined;
     const scrollTo = vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); });
     const rect = (top: number) => ({
       top, bottom: top + 100, height: 100, left: 0, right: 320, width: 320,
@@ -483,14 +489,19 @@ describe('MessageScroller', () => {
         {id}
       </div>
     );
-    const thread = () => (
-      <MessageScroller followKey={String(itemCount)} turnAnchorKey="user">
+    const thread = (initialAnchor?: AiScrollAnchor) => (
+      <MessageScroller
+        followKey={String(itemCount)}
+        turnAnchorKey="user"
+        initialAnchor={initialAnchor}
+        onAnchorChange={(anchor) => { savedAnchor = anchor; }}
+      >
         <PositionedRow key="history" id="history" index={0} />
         <PositionedRow key="user" id="user" index={1} scrollAnchor scrollItemId="user" />
         {itemCount > 2 && <PositionedRow key="assistant" id="assistant" index={2} />}
       </MessageScroller>
     );
-    const { container, rerender } = render(thread());
+    const { container, rerender, unmount } = render(thread());
     const scroller = container.querySelector('[data-slot="message-scroller"]');
 
     expect(scroller).toHaveClass('invisible');
@@ -499,11 +510,31 @@ describe('MessageScroller', () => {
     expect(container.querySelector('[data-ai-node-key="user"]')?.closest('[data-slot="message-scroller-item"]'))
       .toHaveAttribute('data-scroll-anchor', 'true');
 
+    fireEvent.scroll(container.querySelector('[data-message-scroller-viewport]')!);
+    expect(savedAnchor).toEqual(expect.objectContaining({ atBottom: false }));
     itemCount = 3;
     rerender(thread());
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(scrollTop).toBe(100);
     expect(scrollTop).toBeLessThan(200);
+
+    unmount();
+    scrollTop = 0;
+    const restored = render(thread(savedAnchor));
+    await waitFor(() => expect(scrollTop).toBe(100));
+    fireEvent.scroll(restored.container.querySelector('[data-message-scroller-viewport]')!);
+    itemCount = 4;
+    restored.rerender(thread(savedAnchor));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(scrollTop).toBe(100);
+
+    const restoredViewport = restored.container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
+    scrollTop = 300;
+    fireEvent.wheel(restoredViewport, { deltaY: 20 });
+    fireEvent.scroll(restoredViewport);
+    itemCount = 5;
+    restored.rerender(thread(savedAnchor));
+    await waitFor(() => expect(scrollTop).toBe(400));
   });
 
   it('preserves a saved live-edge position instead of replaying the turn anchor', async () => {

@@ -103,6 +103,9 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const followingIntentRef = useRef(initialAnchor === undefined);
+  // A top-aligned turn can also sit at the scrollport's bottom. Its own scroll
+  // event must not turn that reading position into live-tail follow mode.
+  const suppressProgrammaticFollowRef = useRef(initialAnchor?.atBottom === false);
   const pointerScrollStartRef = useRef<number | null>(null);
   const restoredAnchorRef = useRef(false);
   const restoreFrameRef = useRef<number | null>(null);
@@ -139,6 +142,8 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     if (turnAnchorKey === undefined || turnAnchorKey === previous) return;
     cancelRestore();
     followingIntentRef.current = false;
+    suppressProgrammaticFollowRef.current = true;
+    pointerScrollStartRef.current = null;
     scrollToMessage(turnAnchorKey, { align: 'start' });
     // On the initial mount, keep the transcript hidden until the deferred
     // content-visibility correction below has replayed the anchor. Later turns
@@ -164,6 +169,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     const start = pointerScrollStartRef.current;
     if (!viewport || start === null || Math.abs(viewport.scrollTop - start) <= 0.5) return;
     pointerScrollStartRef.current = null;
+    suppressProgrammaticFollowRef.current = false;
     if (viewport.scrollTop < start && !isNearBottom(viewport)) {
       followingIntentRef.current = false;
       // A native scrollbar drag can overlap the primitive's short
@@ -179,12 +185,19 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       followingIntentRef.current = false;
       return;
     }
+    if (event.deltaY > 0) {
+      suppressProgrammaticFollowRef.current = false;
+      if (viewport && isNearBottom(viewport) && !followingIntentRef.current) {
+        followingIntentRef.current = true;
+        scrollToEnd();
+      }
+    }
     if (viewport && (followingIntentRef.current || isNearBottom(viewport))) {
       // Downward input at the live edge should not cancel follow merely
       // because a streaming resize has not been observed yet.
       event.stopPropagation();
     }
-  }, []);
+  }, [scrollToEnd]);
 
   useLayoutEffect(() => () => {
     cancelRestore();
@@ -194,7 +207,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const readAnchor = useCallback(() => {
     const scrollport = viewportRef.current;
     if (!scrollport) return;
-    if (isNearBottom(scrollport)) followingIntentRef.current = true;
+    if (!suppressProgrammaticFollowRef.current && isNearBottom(scrollport)) followingIntentRef.current = true;
     const content = contentRef.current;
     if (!content || !onAnchorChange) return;
     const viewportTop = scrollport.getBoundingClientRect().top;
@@ -216,7 +229,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       const rect = row.getBoundingClientRect();
       onAnchorChange({
         nodeKey, offset: rect.top - viewportTop, scrollTop: scrollport.scrollTop,
-        atBottom: isNearBottom(scrollport),
+        atBottom: !suppressProgrammaticFollowRef.current && isNearBottom(scrollport),
       });
       break;
     }
@@ -249,9 +262,9 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
         // A jump can add a spacer to align a message beyond the natural end.
         // Restoring a shorter/reflowed transcript must clamp to its real end.
         const spacer = content.querySelector<HTMLElement>('[data-message-scroller-spacer]');
-        // A near-end position must also resume following, including anchors
-        // saved before atBottom was recorded.
-        if ((spacer && !spacer.hidden) || isNearBottom(scrollport)) {
+        // Legacy anchors without atBottom may still represent a live edge.
+        // An explicit false preserves a top-aligned turn when it is reopened.
+        if (initialAnchor.atBottom !== false && ((spacer && !spacer.hidden) || isNearBottom(scrollport))) {
           scrollToEnd();
         }
       };
@@ -290,10 +303,25 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
         onScroll={readAnchor}
         onWheelCapture={handleWheelCapture}
         onWheel={interruptRestore}
-        onTouchMove={() => { followingIntentRef.current = false; interruptRestore(); }}
+        onTouchMove={() => {
+          suppressProgrammaticFollowRef.current = false;
+          followingIntentRef.current = false;
+          interruptRestore();
+        }}
         onKeyDown={(event) => {
-          if (['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', ' '].includes(event.key)) {
-            followingIntentRef.current = false;
+          if (event.target === event.currentTarget) {
+            const viewport = viewportRef.current;
+            if (['ArrowDown', 'End', 'PageDown', ' '].includes(event.key)) {
+              suppressProgrammaticFollowRef.current = false;
+              if (viewport && isNearBottom(viewport)) {
+                followingIntentRef.current = true;
+                scrollToEnd();
+              } else {
+                followingIntentRef.current = false;
+              }
+            } else if (['ArrowUp', 'Home', 'PageUp'].includes(event.key)) {
+              followingIntentRef.current = false;
+            }
           }
           interruptRestore();
         }}
@@ -303,7 +331,13 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
         </MessageScrollerContent>
       </MessageScrollerViewport>
       <Tooltip>
-        <TooltipTrigger render={<MessageScrollerButton aria-label={t('ai.scrollToLatest')} />}>
+        <TooltipTrigger render={<MessageScrollerButton
+          aria-label={t('ai.scrollToLatest')}
+          onClick={() => {
+            suppressProgrammaticFollowRef.current = false;
+            followingIntentRef.current = true;
+          }}
+        />}>
           <ArrowDownIcon />
         </TooltipTrigger>
         <TooltipContent>{t('ai.scrollToLatest')}</TooltipContent>
