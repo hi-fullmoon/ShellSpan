@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+mod reasoning;
+
 pub(in crate::llm) struct ChatCompletionsReplayCodec;
 pub(in crate::llm) static CHAT_COMPLETIONS_REPLAY_CODEC: ChatCompletionsReplayCodec =
     ChatCompletionsReplayCodec;
@@ -23,11 +25,14 @@ impl ReplayCodec for ChatCompletionsReplayCodec {
     fn validate_response_metadata(&self, value: &Value) -> Result<(), NormalizedModelError> {
         let object = crate::llm::replay::object_with_allowed_keys(
             value,
-            &["id", "model", "systemFingerprint"],
+            &["id", "model", "systemFingerprint", "reasoningDetails"],
             "chat-completions response metadata",
         )?;
         for key in ["id", "model", "systemFingerprint"] {
             crate::llm::replay::optional_bounded_string(object, key, "chat-completions response")?;
+        }
+        if let Some(details) = object.get("reasoningDetails") {
+            reasoning::validate_details(details)?;
         }
         Ok(())
     }
@@ -49,31 +54,7 @@ impl ReplayCodec for ChatCompletionsReplayCodec {
             "chat-completions block metadata",
         )?;
         if let Some(details) = object.get("reasoningDetails") {
-            let details = details.as_array().ok_or_else(|| {
-                crate::llm::replay::replay_error(
-                    "REPLAY_METADATA_INVALID",
-                    "reasoningDetails must be an array",
-                )
-            })?;
-            for detail in details {
-                let detail = crate::llm::replay::object_with_allowed_keys(
-                    detail,
-                    &["type", "text", "signature", "index", "id", "format"],
-                    "chat-completions reasoning detail",
-                )?;
-                for key in ["type", "text", "signature", "id", "format"] {
-                    crate::llm::replay::optional_bounded_string(detail, key, "reasoning detail")?;
-                }
-                if detail
-                    .get("index")
-                    .is_some_and(|value| value.as_u64().is_none())
-                {
-                    return Err(crate::llm::replay::replay_error(
-                        "REPLAY_METADATA_INVALID",
-                        "reasoning detail index must be an unsigned integer",
-                    ));
-                }
-            }
+            reasoning::validate_details(details)?;
         }
         crate::llm::replay::optional_bounded_string(
             object,
@@ -287,7 +268,22 @@ pub(in crate::llm) async fn stream_chat(
             "OUTPUT_LIMIT",
         ));
     }
-    let replay_response = Value::Object(accumulated.replay_response.clone());
+    finish_chat_response(accumulated, capabilities, finish_reason, usage)
+}
+
+pub(in crate::llm) fn finish_chat_response(
+    accumulated: ChatAccumulator,
+    capabilities: ProviderCapabilities,
+    mut finish_reason: ModelFinishReason,
+    usage: ProviderUsage,
+) -> Result<ModelResponse, NormalizedModelError> {
+    let mut replay_response = Value::Object(accumulated.replay_response.clone());
+    // Reasoning is message-level provider state, including empty/signed or
+    // encrypted blocks with no display text. Do not tie its lifetime to a
+    // visible Reasoning block, which the runtime may legitimately filter out.
+    if !accumulated.reasoning_details.is_empty() {
+        replay_response["reasoningDetails"] = json!(accumulated.reasoning_details);
+    }
     let content = accumulated.finish(true, capabilities.think_tag_fallback)?;
     if content
         .iter()
@@ -303,10 +299,7 @@ pub(in crate::llm) async fn stream_chat(
                 .iter()
                 .map(|block| match block {
                     ModelContentBlock::Text { .. } => json!({}),
-                    ModelContentBlock::Reasoning { provider_item, .. } => provider_item
-                        .as_ref()
-                        .and_then(|item| item.get("reasoning_details"))
-                        .map_or_else(|| json!({}), |details| json!({"reasoningDetails": details})),
+                    ModelContentBlock::Reasoning { .. } => json!({}),
                     ModelContentBlock::ToolCall { call } => call
                         .provider_call_id
                         .as_ref()
@@ -374,24 +367,39 @@ pub(in crate::llm) fn process_chat_event(
         *completed = true;
         *finish_reason = normalize_finish_reason(reason);
     }
-    if capabilities.split_reasoning {
-        if let Some(details) = value
-            .pointer("/choices/0/delta/reasoning_details")
-            .and_then(Value::as_array)
-        {
-            if details.starts_with(&accumulated.reasoning_details) {
-                accumulated.reasoning_details = details.clone();
-            } else if !accumulated.reasoning_details.starts_with(details) {
-                accumulated.reasoning_details.extend(details.clone());
-            }
-        }
+    if let Some(details) = value
+        .pointer("/choices/0/delta/reasoning_details")
+        .filter(|value| !value.is_null())
+    {
+        reasoning::accumulate_details(
+            &mut accumulated.reasoning_details,
+            details,
+            capabilities.cumulative_stream,
+        )?;
     }
     let direct_reasoning = value
         .pointer("/choices/0/delta/reasoning_content")
+        .filter(|value| value.as_str().is_some_and(|text| !text.is_empty()))
         .or_else(|| value.pointer("/choices/0/delta/reasoning"))
-        .and_then(Value::as_str);
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty());
+    let cumulative_reasoning = (capabilities.cumulative_stream
+        && direct_reasoning.is_none()
+        && value
+            .pointer("/choices/0/delta/reasoning_details")
+            .is_some())
+    .then(|| {
+        accumulated
+            .reasoning_details
+            .iter()
+            .filter_map(|detail| detail.get("text").and_then(Value::as_str))
+            .collect::<String>()
+    });
     let reasoning_fragments = direct_reasoning.map_or_else(
         || {
+            if let Some(text) = cumulative_reasoning.as_deref() {
+                return vec![text];
+            }
             value
                 .pointer("/choices/0/delta/reasoning_details")
                 .and_then(Value::as_array)
@@ -497,3 +505,7 @@ pub(in crate::llm) fn process_chat_event(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "__tests__/reasoning.rs"]
+mod tests;

@@ -12,7 +12,7 @@ pub(crate) const REPLAY_ENVELOPE_VERSION: u32 = 1;
 const MAX_REPLAY_STRING_BYTES: usize = 64 * 1024;
 // Replay metadata has its own bounded blob budget. The Session event budget is
 // enforced separately; envelopes that do not fit inline are claim-checked.
-const MAX_REPLAY_METADATA_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const MAX_REPLAY_METADATA_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -114,37 +114,64 @@ pub(crate) fn optional_bounded_string(
             format!("{label}.{key} must be a string"),
         )
     })?;
-    if value.is_empty() || value.len() > MAX_REPLAY_STRING_BYTES || value.starts_with("data:") {
+    if value.is_empty() {
         return Err(replay_error(
             "REPLAY_METADATA_INVALID",
-            format!("{label}.{key} is empty, oversized, or embeds data"),
+            format!("{label}.{key} must not be empty"),
+        ));
+    }
+    if value.len() > MAX_REPLAY_STRING_BYTES {
+        return Err(replay_error(
+            "REPLAY_METADATA_TOO_LARGE",
+            format!(
+                "{label}.{key} has {} bytes; limit is {MAX_REPLAY_STRING_BYTES} bytes",
+                value.len()
+            ),
+        ));
+    }
+    if value.starts_with("data:") {
+        return Err(replay_error(
+            "REPLAY_METADATA_FORBIDDEN",
+            format!("{label}.{key} embeds data"),
         ));
     }
     Ok(Some(value.to_string()))
 }
 
 pub(crate) fn validate_metadata_safety(value: &Value) -> Result<(), NormalizedModelError> {
-    if serde_json::to_vec(value)
+    let bytes = serde_json::to_vec(value)
         .map_err(|error| replay_error("REPLAY_METADATA_INVALID", error.to_string()))?
-        .len()
-        > MAX_REPLAY_METADATA_BYTES
-    {
+        .len();
+    if bytes > MAX_REPLAY_METADATA_BYTES {
         return Err(replay_error(
-            "REPLAY_METADATA_INVALID",
-            "replay metadata exceeded the storage boundary",
+            "REPLAY_METADATA_TOO_LARGE",
+            format!(
+                "replay metadata has {bytes} bytes; limit is {MAX_REPLAY_METADATA_BYTES} bytes"
+            ),
         ));
     }
-    fn walk(value: &Value) -> bool {
+    fn walk(value: &Value, reasoning_detail: bool) -> bool {
         match value {
             Value::String(value) => value.starts_with("data:") || value.contains(";base64,"),
-            Value::Array(values) => values.iter().any(walk),
-            Value::Object(values) => values
-                .iter()
-                .any(|(key, value)| crate::redaction::is_sensitive_key(key) || walk(value)),
+            Value::Array(values) => values.iter().any(|value| walk(value, reasoning_detail)),
+            Value::Object(values) => values.iter().any(|(key, value)| {
+                if crate::redaction::is_sensitive_key(key) {
+                    return true;
+                }
+                // Validated reasoning prose can discuss data URLs or SSE
+                // syntax. It is not an image attachment or an opaque ID.
+                if reasoning_detail
+                    && matches!(key.as_str(), "text" | "summary")
+                    && value.is_string()
+                {
+                    return false;
+                }
+                walk(value, key == "reasoningDetails")
+            }),
             _ => false,
         }
     }
-    if walk(value) {
+    if walk(value, false) {
         return Err(replay_error(
             "REPLAY_METADATA_FORBIDDEN",
             "replay metadata contains a credential-like field or embedded data",

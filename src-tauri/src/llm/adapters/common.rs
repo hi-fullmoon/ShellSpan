@@ -304,7 +304,11 @@ pub(in crate::llm) fn chat_messages(
                 json!({"role":"user", "content":blocks})
             }
             ModelMessage::User { content } => json!({ "role": "user", "content": content }),
-            ModelMessage::Assistant { content, .. } => {
+            ModelMessage::Assistant {
+                content,
+                native_replay,
+                ..
+            } => {
                 let text = content
                     .iter()
                     .filter_map(|block| match block {
@@ -330,7 +334,12 @@ pub(in crate::llm) fn chat_messages(
                     "role": "assistant",
                     "content": if text.is_empty() { Value::Null } else { Value::String(text) },
                 });
-                if capabilities.split_reasoning {
+                if let Some(details) = native_replay
+                    .as_ref()
+                    .and_then(|value| value.get("reasoningDetails"))
+                {
+                    value["reasoning_details"] = details.clone();
+                } else if capabilities.split_reasoning {
                     let details: Vec<Value> = content
                         .iter()
                         .filter_map(|block| match block {
