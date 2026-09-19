@@ -426,7 +426,7 @@ class TerminalControllerImpl implements TerminalController {
   private inputBlockedNoticeRef = false;
   private userInputSuppressions = 0;
   private readonly userInputBlockedListeners = new Set<() => void>();
-  private agentInputBlockedNoticeRef = false;
+  private agentInputBlockedFeedbackRef = false;
   private pendingUserInputText = '';
   private unverifiedUserSubmission = false;
   private recentOutputTail = '';
@@ -1094,7 +1094,7 @@ class TerminalControllerImpl implements TerminalController {
       this.userInputSuppressions = Math.max(0, this.userInputSuppressions - 1);
       if (onBlocked) this.userInputBlockedListeners.delete(onBlocked);
       if (this.userInputSuppressions === 0) {
-        this.agentInputBlockedNoticeRef = false;
+        this.agentInputBlockedFeedbackRef = false;
         this.userInputBlockedListeners.clear();
       }
     };
@@ -1215,13 +1215,8 @@ class TerminalControllerImpl implements TerminalController {
   private canWriteUserInput(): boolean {
     if (this.userInputSuppressions > 0) {
       logger.debug(`Dropped user input while an Agent command owns session=${this.sessionId}`);
-      if (!this.agentInputBlockedNoticeRef) {
-        this.agentInputBlockedNoticeRef = true;
-        this.writeSystemLine(formatTerminalNoticeLine(
-          t('terminal.agentLease.inputBlockedLabel'),
-          t('terminal.agentLease.inputBlockedHint'),
-          '33',
-        ));
+      if (!this.agentInputBlockedFeedbackRef) {
+        this.agentInputBlockedFeedbackRef = true;
         for (const listener of this.userInputBlockedListeners) listener();
       }
       return false;
@@ -1331,7 +1326,7 @@ class TerminalControllerImpl implements TerminalController {
     this.recentOutputTail = '';
     this.userInputSuppressions = 0;
     this.userInputBlockedListeners.clear();
-    this.agentInputBlockedNoticeRef = false;
+    this.agentInputBlockedFeedbackRef = false;
     this.outputGeneration += 1;
     this.sessionId = sessionId;
     rebindTerminalOutput(previousSessionId, sessionId);
@@ -1421,7 +1416,7 @@ class TerminalControllerImpl implements TerminalController {
     this.outputFilters.clear();
     this.userInputSuppressions = 0;
     this.userInputBlockedListeners.clear();
-    this.agentInputBlockedNoticeRef = false;
+    this.agentInputBlockedFeedbackRef = false;
     this.lifecycleListeners.clear();
     this.removeFromRegistry(this.sessionId);
   }

@@ -243,9 +243,15 @@ describe('TerminalPane', () => {
       }));
     });
 
-    const bar = screen.getByRole('status');
+    const bar = screen.getByTestId('agent-terminal-lease-bar');
     expect(bar).toHaveAttribute('aria-live', 'polite');
     expect(bar).toHaveTextContent('terminal.agentLease.inputBlockedAccessibleHint');
+    const prompt = screen.getByRole('status', {
+      name: 'terminal.agentLease.inputBlockedPrompt',
+    });
+    expect(prompt).toHaveTextContent('terminal.agentLease.inputBlockedPrompt');
+    expect(prompt).toHaveClass('pointer-events-none', 'absolute', 'inset-0');
+    expect(prompt.querySelectorAll('.animate-pulse')).toHaveLength(0);
   });
 
   it('keeps cancellation available between commands while terminal input stays locked', async () => {

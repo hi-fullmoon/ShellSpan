@@ -1,4 +1,5 @@
 import { terminalRegistry, type TerminalOutputFilter } from '@/components/terminal/registry/terminal-registry';
+import { invokeGetTerminalBrokerSnapshot } from '@/lib/ipc/tauri';
 import type { TerminalSession } from '@/stores/terminalStore';
 
 const QUERY_TIMEOUT_MS = 4_000;
@@ -23,15 +24,7 @@ function isAbsoluteDirectory(session: TerminalSession, directory: string): boole
     : directory.startsWith('/') && !directory.includes('\\');
 }
 
-function queryCommand(session: TerminalSession, token: string): { command: string; terminator: string } {
-  const windows = session.host === 'local' && session.port === 0
-    && navigator.userAgent.toLowerCase().includes('windows');
-  if (windows) {
-    return {
-      command: `$__ss_c=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Location).ProviderPath));[Console]::Write(([char]27).ToString()+']777;shellspan-cwd:${token}:'+$__ss_c+[char]7);Remove-Variable __ss_c`,
-      terminator: '\r',
-    };
-  }
+function queryCommand(token: string): { command: string; terminator: string } {
   return {
     command: `python3 -c 'import os,base64,sys;sys.stdout.write("\\x1b]777;shellspan-cwd:${token}:"+base64.b64encode(os.getcwd().encode()).decode()+"\\x07")'`,
     terminator: '\n',
@@ -39,15 +32,29 @@ function queryCommand(session: TerminalSession, token: string): { command: strin
 }
 
 /**
- * Reads the directory owned by the interactive shell itself. The response is
- * carried in a private OSC sequence, so neither it nor the probe command is
- * rendered into the terminal. A partial user command is never disturbed.
+ * Reads the directory reported by shell integration. Remote shells without
+ * integration can answer through a private OSC probe. A partial user command
+ * is never disturbed.
  */
 export async function readTerminalCurrentDirectory(session: TerminalSession): Promise<string | null> {
   const controller = terminalRegistry.get(session.sessionId);
   if (!controller || controller.hasPendingUserInput() || controller.hasUnverifiedUserSubmission()) return null;
   await controller.whenOutputReady();
   if (controller.hasPendingUserInput() || controller.hasUnverifiedUserSubmission()) return null;
+
+  const local = session.host === 'local' && session.port === 0;
+  try {
+    const integrated = (await invokeGetTerminalBrokerSnapshot(session.sessionId)).session;
+    const directory = integrated?.currentDirectory;
+    if (integrated?.promptReady && directory && isAbsoluteDirectory(session, directory)) {
+      return directory;
+    }
+  } catch {
+    // Older or unintegrated remote sessions can still use the interactive probe.
+  }
+  // PowerShell echoes the injected command before its response can be filtered.
+  // Never write a background directory probe into a local interactive terminal.
+  if (local) return null;
 
   const token = crypto.randomUUID().replace(/-/g, '');
   const prefix = `${OSC}${token}:`;
@@ -101,7 +108,7 @@ export async function readTerminalCurrentDirectory(session: TerminalSession): Pr
   const removeFilter = controller.subscribeOutputFilter(filter);
   const timeout = window.setTimeout(() => settle(null), QUERY_TIMEOUT_MS);
   try {
-    const { command, terminator } = queryCommand(session, token);
+    const { command, terminator } = queryCommand(token);
     await controller.writeInput(`${command}${terminator}`);
     return await result;
   } catch {

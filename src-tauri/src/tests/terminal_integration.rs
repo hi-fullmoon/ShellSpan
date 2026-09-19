@@ -108,6 +108,13 @@
             );
             assert!(script.contains("AddToHistoryHandler"));
             assert!(script.contains("Start-ShellSpanCommand $CommandLine"));
+            if shell == TerminalShellKind::WindowsPowerShell {
+                assert!(script.contains("Invoke-ShellSpanFirstEnter"));
+                assert!(script.contains(
+                    "Set-PSReadLineKeyHandler -Chord Enter -Function $script:OriginalEnterFunction"
+                ));
+                assert!(script.contains("$script:InstallHistoryOnPrompt = $true"));
+            }
             assert!(script.contains("$PreviousSuccess = $?"));
             assert!(script.contains("$global:LASTEXITCODE"));
             assert!(script.contains("$global:LASTEXITCODE -ne 0"));
@@ -794,6 +801,21 @@
         let mut reader = pair.master.try_clone_reader().unwrap();
         let writer = Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
         let integration = PreparedLocalShellIntegration::prepare(shell).unwrap();
+        let _history_fixture = if shell == TerminalShellKind::WindowsPowerShell {
+            let root = tempfile::tempdir().unwrap();
+            let history_path = root.path().join("history.txt");
+            fs::write(&history_path, "Write-Output 'saved-history-only'\n").unwrap();
+            let bootstrap = fs::read_to_string(&integration.bootstrap_path).unwrap();
+            let history_setting = format!(
+                "Import-Module PSReadLine\n    Set-PSReadLineOption -HistorySavePath '{}'",
+                history_path.to_string_lossy().replace('\'', "''")
+            );
+            let seeded = bootstrap.replacen("Import-Module PSReadLine", &history_setting, 1);
+            fs::write(&integration.bootstrap_path, seeded).unwrap();
+            Some(root)
+        } else {
+            None
+        };
         let integration_id = integration.integration_id().to_string();
         broker
             .register_integration_channel(&transport_id, &integration_id, shell)

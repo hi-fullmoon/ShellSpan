@@ -435,6 +435,12 @@ does not create network isolation or an exact destination scope.
 `sensitiveRead`, `stateChange`, `destructive`, and `externalSideEffect` effects
 MUST require confirmation. `operator` MAY skip per-call confirmation, but MUST
 NOT broaden the frozen target, tool, filesystem, or network scope.
+When a new remote `operator` Session starts from an interactive terminal backed
+by a frozen credential profile, the client SHOULD resolve and freeze that
+shell's current directory as `rootPath` so generated files use the bounded
+native file tools instead of terminal heredocs. A profileless remote Session or
+one whose directory probe is unavailable MUST remain unrooted and retain the
+confirmation-gated terminal fallback.
 For a local target with a frozen workspace root, every `operator` Direct shell
 command MUST run in an operating-system sandbox whose only writable roots are
 that canonical workspace and a command-lifetime temporary directory; arbitrary
@@ -547,7 +553,11 @@ that raw PTY bytes alone cannot reach the reader or advance lifecycle.
 - Windows PowerShell 5.1 and PowerShell 7 use a session-scoped module,
   `PSReadLine` accepted-line handler, prompt wrapper, and a byte-mode named
   pipe created by the PowerShell process. The pipe handle is not inherited by
-  external commands. Missing PSReadLine degrades explicitly. The module object
+  external commands. PowerShell 5.1 captures the first Enter through a
+  temporary key handler, then restores the original binding and installs the
+  accepted-line handler after history import; its older PSReadLine otherwise
+  reports saved history as fresh commands. Missing PSReadLine degrades
+  explicitly. The module object
   needed by the hooks remains reachable from the interactive PowerShell session;
   deliberate in-shell invocation is the same documented cooperative-producer
   limitation, never a security guarantee. `$?` identifies success of the last
