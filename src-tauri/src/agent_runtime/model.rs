@@ -20,9 +20,10 @@ impl ModelRequest {
     pub(crate) fn from_surface(
         request_id: String,
         surface: &AgentSurfaceSnapshot,
-        system_prompt: String,
+        mut system_prompt: String,
         tools: Vec<AgentRequestToolSchema>,
     ) -> Self {
+        system_prompt.push_str("\nHistorical tool arguments containing [ephemeral terminal input omitted], [ephemeral terminal match text omitted], or [ephemeral process input omitted] are privacy receipts, not commands or literal input. Only historical content was omitted; new tool input is passed unchanged. Never copy these markers into tool calls. Read current terminal/process state and reconstruct the intended command from the task; if the original input is required and unavailable, report that limitation instead of guessing.");
         let mut messages = Vec::with_capacity(surface.messages.len());
         for message in &surface.messages {
             match message {
@@ -395,6 +396,34 @@ const OMITTED_TERMINAL_INPUT: &str = "[ephemeral terminal input omitted]";
 const OMITTED_TERMINAL_MATCH: &str = "[ephemeral terminal match text omitted]";
 const OMITTED_PROCESS_INPUT: &str = "[ephemeral process input omitted]";
 
+pub(crate) fn reject_omitted_input_replay(
+    tool_name: &str,
+    arguments: &serde_json::Value,
+) -> Result<(), String> {
+    let field = match tool_name {
+        "write_terminal_input" | "wait_terminal" => "text",
+        "write_process_input" => "input",
+        "run_terminal_command" | "exec_command" => "command",
+        _ => return Ok(()),
+    };
+    if arguments
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|text| {
+            [
+                OMITTED_TERMINAL_INPUT,
+                OMITTED_TERMINAL_MATCH,
+                OMITTED_PROCESS_INPUT,
+            ]
+            .iter()
+            .any(|placeholder| text.contains(placeholder))
+        })
+    {
+        return Err("ephemeralInputUnavailable: omitted history text is not executable input; do not replay it. Read the current terminal state and supply the actual intended input, or report that the input is unavailable.".into());
+    }
+    Ok(())
+}
+
 fn model_history_tool_arguments(call: &RecordedToolCall) -> serde_json::Value {
     if !recorded_tool_call_omits_replay(call) {
         return call.arguments.clone();
@@ -650,6 +679,10 @@ mod stage_c_tests {
 
         let request =
             ModelRequest::from_surface("request".into(), &surface, "system".into(), Vec::new());
+        assert!(request
+            .system_prompt
+            .contains("Only historical content was omitted"));
+        assert!(request.system_prompt.contains("Never copy these markers"));
         let ModelMessage::Assistant { content, .. } = &request.messages[0] else {
             panic!("expected assistant history")
         };

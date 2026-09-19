@@ -608,6 +608,10 @@ fn normalize_arguments(
     visible_route: Option<TerminalVisibleCommandRoute>,
     direct_lifecycle_required: bool,
 ) -> Result<(String, Value), String> {
+    super::model::reject_omitted_input_replay(
+        &request.model_call.name,
+        &request.model_call.arguments,
+    )?;
     if request.model_call.name == "run_terminal_command" {
         let arguments: TerminalCommandArguments =
             serde_json::from_value(request.model_call.arguments.clone()).map_err(|error| {
