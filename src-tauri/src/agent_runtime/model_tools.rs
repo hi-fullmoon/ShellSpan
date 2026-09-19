@@ -222,12 +222,12 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "spawn_one_shot_agent".into(),
-            description: "Create a least-privilege child Agent in a durable child Session, wait for exactly one Turn, and return its settlement.".into(),
+            description: "Create a least-privilege child Agent for a small task that must settle in exactly one Turn. Its step budget is a hard limit. For implementation, debugging, or work that may need continuation, use spawn_continuable_agent instead.".into(),
             input_schema: subagent_spawn_schema(),
         },
         ModelToolDefinition {
             name: "spawn_continuable_agent".into(),
-            description: "Create a least-privilege continuable child Agent in a durable child Session and return its first settlement.".into(),
+            description: "Create a least-privilege continuable child Agent in a durable child Session and return its first settlement. Prefer this for implementation and debugging. A step-budget boundary returns partial progress; inspect it and use send_child_input with the same childSessionId while continuable is true. Token, tool, turn, and time budgets are cumulative and never reset by continuation.".into(),
             input_schema: subagent_spawn_schema(),
         },
         ModelToolDefinition {
