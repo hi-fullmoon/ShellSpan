@@ -43,7 +43,7 @@ describe('single Agent Runtime architecture', () => {
     }
   });
 
-  it('keeps Native limited to the fifteen OS-effect tools', async () => {
+  it('keeps Native limited to the registered OS-effect tools', async () => {
     const entries = await readdir(nativeRoot);
     expect(entries).not.toEqual(
       expect.arrayContaining(['context.rs', 'fleet.rs', 'persistence.rs', 'result.rs']),
@@ -69,6 +69,7 @@ describe('single Agent Runtime architecture', () => {
       'list_directory',
       'search_text',
       'write_file',
+      'edit_file',
       'apply_patch',
       'transfer_file',
     ]);

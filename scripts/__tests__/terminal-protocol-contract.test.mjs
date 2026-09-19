@@ -353,6 +353,30 @@ describe('terminal execution Phase 0 protocol contract', () => {
     }), validator.errorsText(validate.errors)).toBe(true);
   });
 
+  it('validates exact edits and retains the native write limit above the advisory budget', async () => {
+    const validator = new Ajv2020({ allErrors: true, strict: true });
+    const validate = validator.compile(await readJson('tool-contract.schema.json'));
+    const base = {
+      requestId: 'request-edit', callId: 'call-edit', toolName: 'edit_file',
+      target: { kind: 'local', targetId: 'local', sessionId: 'terminal', cwd: '/workspace' },
+      capabilityId: 'edit',
+    };
+    const argumentsValue = {
+      path: 'app.js', oldString: 'const data', newString: '',
+      precondition: { sha256: '0'.repeat(64) },
+    };
+    expect(validate({ ...base, arguments: argumentsValue }), validator.errorsText(validate.errors)).toBe(true);
+    for (const changes of [
+      { oldString: '' }, { precondition: { mustNotExist: true } },
+      { replaceAll: true }, { newString: 'x'.repeat(32769) },
+    ]) {
+      expect(validate({ ...base, arguments: { ...argumentsValue, ...changes } })).toBe(false);
+    }
+    expect(validate({ ...base, toolName: 'write_file', arguments: {
+      path: 'app.js', content: 'x'.repeat(9000), precondition: { sha256: '0'.repeat(64) },
+    } }), validator.errorsText(validate.errors)).toBe(true);
+  });
+
   it('reserves every migration flag with an explicit rollback rule', async () => {
     const compatibility = await readFile(
       path.join(protocolRoot, 'terminal-execution-compatibility.md'),
