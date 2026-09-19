@@ -149,7 +149,7 @@
 }
 
 .ai-assistant-markdown .ai-markdown-local-path {
-  cursor: pointer;
+  cursor: text;
 }
 
 .ai-assistant-markdown [data-slot='separator'] {

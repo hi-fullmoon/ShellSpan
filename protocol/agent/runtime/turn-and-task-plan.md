@@ -8,6 +8,10 @@ Primary Agent turns have a 128-step default soft boundary in addition to cancell
 
 Subagents retain their explicit hard `maxStepsPerTurn` budget. Reaching a delegated budget records `stepLimitExceeded` and fails that bounded child settlement so the parent receives explicit partial-work evidence.
 
+## Model output limit
+
+When a model response ends with `length` or the provider returns `OUTPUT_LIMIT`, the runtime records available partial text and reasoning as an interrupted assistant message and discards any unfinished tool calls without executing them. Completed responses also record usage; provider errors retain their request failure evidence. The runtime adds a continuation instruction and starts another step in the same turn. At most two automatic continuation steps are allowed per turn. A third output-limit stop preserves available partial content and fails the Session with `outputLimit`; the UI shows a concise error and does not offer a separate continuation button. Cancellation and the existing turn and task budgets still apply to each step.
+
 ## Task-plan writes
 
 `update_plan` is a whole-list replacement for the current turn's task plan:

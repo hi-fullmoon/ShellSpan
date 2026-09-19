@@ -103,12 +103,18 @@ function MarkdownInlineCode({ children, className }: { children: React.ReactNode
     : platform === 'windows'
       ? t('ai.path.revealExplorer')
       : t('ai.path.revealFileManager');
+  const openShortcut = platform === 'macos'
+    ? t('ai.path.openWithCommand')
+    : t('ai.path.openWithCtrl');
   const code = (
     <code
       className={cn(!className && 'ai-markdown-inline-code', isLocalPath && 'ai-markdown-local-path', className)}
       role={isLocalPath ? 'link' : undefined}
       tabIndex={isLocalPath ? 0 : undefined}
-      onClick={isLocalPath ? openPath : undefined}
+      title={isLocalPath ? openShortcut : undefined}
+      onClick={isLocalPath ? (event) => {
+        if (platform === 'macos' ? event.metaKey : event.ctrlKey) openPath();
+      } : undefined}
       onKeyDown={isLocalPath ? (event) => {
         if (event.key === 'Enter') openPath();
       } : undefined}

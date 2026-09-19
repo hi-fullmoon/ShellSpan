@@ -146,7 +146,6 @@ export function AiWorkspaceController({
       onSubmitGesture={controller.submit}
       onStop={controller.stop}
       onContinueBudgetedTurn={controller.continueBudgetedTurn}
-      onContinueOutputLimitedTurn={controller.continueOutputLimitedTurn}
       onContinueOnReconnectedTerminal={controller.continueOnReconnectedTerminal ?? undefined}
       historicalContinuationAvailable={controller.historicalContinuationAvailable}
       historicalContinuationBusy={controller.historicalContinuationBusy}

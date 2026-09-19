@@ -433,9 +433,8 @@ it('continues an idle conversation after its step budget boundary', async () => 
   ));
 });
 
-it('offers a one-click continuation after the model output limit', async () => {
+it('does not show a manual continuation button after the model output limit', async () => {
   connectedTerminal();
-  const user = userEvent.setup();
   const base = runningAgentView();
   const events = agentSessionBaselineScenarios.hello.events.map((event) => (
     event.type === 'turn/end'
@@ -464,16 +463,8 @@ it('offers a one-click continuation after the model output limit', async () => {
   render(<AiWorkspaceController scope="terminal" adapter={agent} />);
   await waitFor(() => expect(agent.open).toHaveBeenCalledWith(view.summary.id));
 
-  const continuation = await screen.findByRole('button', { name: 'Continue generating' });
-  expect(continuation).toBeEnabled();
-  await user.click(continuation);
-  await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(
-    view.summary.id,
-    expect.objectContaining({
-      content: 'Continue from where the previous response stopped at the output limit, without repeating completed work.',
-      mode: 'nextTurn',
-    }),
-  ));
+  expect(screen.queryByRole('button', { name: 'Continue generating' })).not.toBeInTheDocument();
+  expect(agent.submit).not.toHaveBeenCalled();
 });
 
 describe('session archive', () => {

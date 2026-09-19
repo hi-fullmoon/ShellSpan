@@ -89,8 +89,6 @@ export interface AiComposerSeatProps {
   readonly onStop?: () => void;
   readonly onContinueBudgetedTurn?: () => void;
   readonly budgetContinuationAvailable?: boolean;
-  readonly onContinueOutputLimitedTurn?: () => void;
-  readonly outputLimitContinuationAvailable?: boolean;
   readonly onContinueOnReconnectedTerminal?: () => void;
   readonly historicalContinuationAvailable?: boolean;
   readonly historicalContinuationBusy?: boolean;
@@ -147,8 +145,6 @@ export function AiComposerSeat({
   onStop,
   onContinueBudgetedTurn,
   budgetContinuationAvailable = false,
-  onContinueOutputLimitedTurn,
-  outputLimitContinuationAvailable = false,
   onContinueOnReconnectedTerminal,
   historicalContinuationAvailable = false,
   historicalContinuationBusy = false,
@@ -283,19 +279,6 @@ export function AiComposerSeat({
           >
             <RotateCcwIcon data-icon="inline-start" />
             {t('ai.workspace.continueBudgetedTurn')}
-          </Button>
-        )}
-        {outputLimitContinuationAvailable && onContinueOutputLimitedTurn && !terminal && (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="self-center rounded-full"
-            disabled={stopping || submitting || unavailable}
-            onClick={onContinueOutputLimitedTurn}
-          >
-            <RotateCcwIcon data-icon="inline-start" />
-            {t('ai.workspace.continueOutputLimitedTurn')}
           </Button>
         )}
         {waitingApproval && !pendingApproval && (

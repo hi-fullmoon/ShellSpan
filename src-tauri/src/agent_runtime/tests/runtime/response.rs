@@ -4,6 +4,172 @@ use crate::agent_runtime::{
 };
 
 #[tokio::test]
+async fn output_limit_continues_with_partial_text_without_running_cut_off_tools() {
+    let mut partial = response("Partial answer.");
+    partial.finish_reason = ModelFinishReason::Length;
+    set_tool_calls(
+        &mut partial,
+        vec![ModelToolCall {
+            call_id: "cut-off-call".into(),
+            provider_call_id: Some("provider-cut-off-call".into()),
+            name: "write_file".into(),
+            arguments: json!({ "path": "unfinished.txt", "content": "partial" }),
+        }],
+    );
+    let adapter = FakeAdapter::new(vec![
+        FakeScript::Reply {
+            chunks: vec![],
+            response: partial,
+        },
+        reply("Completed answer.", &[]),
+    ]);
+    let native = RecordingNativeRuntime::new(false);
+    let (_root, runtime) = configured_with_native(
+        adapter.clone(),
+        AgentDriverConfig::default(),
+        native.clone(),
+    );
+    let id = "session-output-limit-continuation";
+    create(&runtime, id);
+    runtime
+        .followup(id, "message-output-limit".into(), "complete task".into())
+        .unwrap();
+    runtime.start(id, provider(), None).unwrap();
+    runtime.await_idle(id).await.unwrap();
+
+    assert_eq!(
+        runtime.session(id).unwrap().status,
+        AgentSessionStatus::Idle
+    );
+    assert_eq!(adapter.request_count(), 2);
+    assert_eq!(native.executions.load(Ordering::Acquire), 0);
+    let events = all_events(&runtime, id);
+    assert!(events.iter().any(|event| matches!(&event.payload,
+        AgentSessionEventPayload::AssistantMessage { content, interrupted: true, .. }
+            if matches!(content.as_slice(), [AgentAssistantContentBlock::Text { text }]
+                if text == "Partial answer.")
+    )));
+    assert!(events.iter().any(|event| matches!(&event.payload,
+        AgentSessionEventPayload::StepEnd { reason } if reason == "outputLimitContinuation"
+    )));
+    assert!(!events.iter().any(|event| matches!(&event.payload,
+        AgentSessionEventPayload::ToolResult { call_id, .. } if call_id == "cut-off-call"
+    )));
+    let requests = adapter.requests.lock().unwrap();
+    assert!(requests[1].messages.iter().any(|message| matches!(message,
+        ModelMessage::Assistant { content, .. }
+            if matches!(content.as_slice(), [ModelContentBlock::Text { text }]
+                if text == "Partial answer.")
+    )));
+    assert!(requests[1].messages.iter().any(|message| matches!(message,
+        ModelMessage::User { content } if content.contains("unfinished tool call was discarded")
+    )));
+}
+
+#[tokio::test]
+async fn repeated_output_limit_stops_after_two_automatic_continuations() {
+    let scripts = (0..3)
+        .map(|index| {
+            let mut partial = response(&format!("Part {index}."));
+            partial.finish_reason = ModelFinishReason::Length;
+            FakeScript::Reply {
+                chunks: vec![],
+                response: partial,
+            }
+        })
+        .collect();
+    let adapter = FakeAdapter::new(scripts);
+    let (_root, runtime) = configured(adapter.clone());
+    let id = "session-output-limit-exhausted";
+    create(&runtime, id);
+    runtime
+        .followup(id, "message-output-limit".into(), "complete task".into())
+        .unwrap();
+    runtime.start(id, provider(), None).unwrap();
+    runtime.await_idle(id).await.unwrap();
+
+    assert_eq!(adapter.request_count(), 3);
+    assert_eq!(
+        runtime.session(id).unwrap().status,
+        AgentSessionStatus::Failed
+    );
+    let events = all_events(&runtime, id);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(&event.payload,
+                AgentSessionEventPayload::StepEnd { reason } if reason == "outputLimitContinuation"
+            ))
+            .count(),
+        2
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                &event.payload,
+                AgentSessionEventPayload::AssistantMessage {
+                    interrupted: true,
+                    ..
+                }
+            ))
+            .count(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn coded_output_limit_error_continues_with_streamed_partial_text() {
+    let mut error = NormalizedModelError::new(
+        NormalizedModelErrorKind::Terminal,
+        "provider reached its output limit",
+    );
+    error.code = Some("OUTPUT_LIMIT".into());
+    let adapter = FakeAdapter::new(vec![
+        FakeScript::PartialError {
+            deltas: vec![StreamDelta::Text {
+                index: 0,
+                text: "Kept partial text.".into(),
+            }],
+            error,
+        },
+        reply("Finished response.", &[]),
+    ]);
+    let (_root, runtime) = configured(adapter.clone());
+    let id = "session-coded-output-limit";
+    create(&runtime, id);
+    runtime
+        .followup(id, "message-output-limit".into(), "complete task".into())
+        .unwrap();
+    runtime.start(id, provider(), None).unwrap();
+    runtime.await_idle(id).await.unwrap();
+
+    assert_eq!(adapter.request_count(), 2);
+    assert_eq!(
+        runtime.session(id).unwrap().status,
+        AgentSessionStatus::Idle
+    );
+    let events = all_events(&runtime, id);
+    assert!(events.iter().any(|event| matches!(&event.payload,
+        AgentSessionEventPayload::RequestFailure { failure, .. }
+            if failure.code.as_deref() == Some("OUTPUT_LIMIT")
+    )));
+    assert!(events.iter().any(|event| matches!(&event.payload,
+        AgentSessionEventPayload::AssistantMessage { content, interrupted: true, .. }
+            if matches!(content.as_slice(), [AgentAssistantContentBlock::Text { text }]
+                if text == "Kept partial text.")
+    )));
+    assert!(adapter.requests.lock().unwrap()[1]
+        .messages
+        .iter()
+        .any(|message| matches!(message,
+            ModelMessage::Assistant { content, .. }
+                if matches!(content.as_slice(), [ModelContentBlock::Text { text }]
+                    if text == "Kept partial text.")
+        )));
+}
+
+#[tokio::test]
 async fn whitespace_text_with_reasoning_and_tool_call_continues_after_approval() {
     // MiniMax can emit three newlines between reasoning and a tool call.
     let mut tool_response = response("\n\n\n");

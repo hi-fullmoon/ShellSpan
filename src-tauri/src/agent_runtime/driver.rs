@@ -1186,6 +1186,34 @@ async fn run_step(
                     cumulative_delay_ms,
                 )));
             }
+            Err(error) if error.code.as_deref() == Some("OUTPUT_LIMIT") => {
+                let partial = collected
+                    .lock()
+                    .map_err(|_| "model stream accumulator is unavailable".to_string())?
+                    .content();
+                sessions.append(
+                    &entry.session_id,
+                    Some(turn_id.to_string()),
+                    Some(step_id.to_string()),
+                    request_failure_payload(
+                        &request_id,
+                        &error,
+                        attempt,
+                        config.retry_policy.max_attempts().max(attempt),
+                        cumulative_delay_ms,
+                        !partial.is_empty(),
+                    ),
+                )?;
+                return settle_output_limit(
+                    sessions,
+                    entry,
+                    turn_id,
+                    step_id,
+                    &request_id,
+                    partial,
+                    None,
+                );
+            }
             Err(error) => {
                 let had_output = {
                     let collected = collected
@@ -1504,6 +1532,93 @@ fn subagent_budget_failure(
     Ok(None)
 }
 
+fn settle_output_limit(
+    sessions: &AgentSessionStore,
+    entry: &Arc<AgentEntry>,
+    turn_id: &str,
+    step_id: &str,
+    request_id: &str,
+    partial: Vec<AgentAssistantContentBlock>,
+    usage: Option<AgentTokenUsage>,
+) -> Result<StepSettlement, String> {
+    let continuation_count = sessions
+        .all_events(&entry.session_id)?
+        .iter()
+        .filter(|event| {
+            event.turn_id.as_deref() == Some(turn_id)
+                && matches!(&event.payload, AgentSessionEventPayload::StepEnd { reason }
+                    if reason == "outputLimitContinuation")
+        })
+        .count();
+    let continue_turn = continuation_count < 2;
+    let mut payloads = Vec::new();
+    if !partial.is_empty() {
+        payloads.push(AgentScopedPayload {
+            turn_id: Some(turn_id.to_string()),
+            step_id: Some(step_id.to_string()),
+            payload: AgentSessionEventPayload::AssistantMessage {
+                message_id: format!("message-{}", Uuid::new_v4().simple()),
+                content: partial,
+                usage: usage.unwrap_or_default(),
+                stop_reason: AgentStopReason::Length,
+                interrupted: true,
+                replay: None,
+            },
+        });
+    }
+    if let Some(usage) = usage {
+        payloads.push(AgentScopedPayload {
+            turn_id: Some(turn_id.to_string()),
+            step_id: Some(step_id.to_string()),
+            payload: AgentSessionEventPayload::RequestUsage {
+                request_id: request_id.to_string(),
+                usage,
+                finish_reason: AgentStopReason::Length,
+            },
+        });
+    }
+    if continue_turn {
+        payloads.push(AgentScopedPayload {
+            turn_id: Some(turn_id.to_string()),
+            step_id: Some(step_id.to_string()),
+            payload: AgentSessionEventPayload::UserMessage {
+                message: super::AgentInboxMessage {
+                    images: Vec::new(),
+                    message_id: format!("message-{}", Uuid::new_v4().simple()),
+                    client_submission_id: None,
+                    content: "The previous model response reached its output limit. Continue the same task from the partial response without repeating completed work. Any unfinished tool call was discarded; inspect the current state before using tools.".into(),
+                    source: super::AgentMessageSource::runtime("output-limit-continuation".into()),
+                    terminal_context: None,
+                },
+            },
+        });
+    }
+    payloads.push(AgentScopedPayload {
+        turn_id: Some(turn_id.to_string()),
+        step_id: Some(step_id.to_string()),
+        payload: AgentSessionEventPayload::StepEnd {
+            reason: if continue_turn {
+                "outputLimitContinuation"
+            } else {
+                "outputLimit"
+            }
+            .into(),
+        },
+    });
+    sessions.append_batch(&entry.session_id, payloads)?;
+    entry.set_scope(Some(AgentActiveScope {
+        turn_id: turn_id.to_string(),
+        step_id: None,
+    }))?;
+    Ok(if continue_turn {
+        StepSettlement::ToolsCompleted
+    } else {
+        StepSettlement::Failed(
+            "outputLimit: AI provider repeatedly reached its output token limit".into(),
+        )
+    })
+}
+
 async fn commit_response(
     sessions: &AgentSessionStore,
     entry: &Arc<AgentEntry>,
@@ -1539,9 +1654,30 @@ async fn commit_response(
         ));
     }
     if finish_reason == ModelFinishReason::Length {
-        return Ok(StepSettlement::Failed(
-            "outputLimit: AI provider reached its output token limit".into(),
-        ));
+        // A length stop is a valid partial response. Keep its text, but never
+        // execute tool calls whose arguments may have been cut off.
+        let partial = model_content
+            .into_iter()
+            .filter_map(|block| match block {
+                ModelContentBlock::Text { text } => Some(AgentAssistantContentBlock::Text { text }),
+                ModelContentBlock::Reasoning { text, .. } => {
+                    Some(AgentAssistantContentBlock::Reasoning {
+                        text,
+                        provider_item: None,
+                    })
+                }
+                ModelContentBlock::ToolCall { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        return settle_output_limit(
+            sessions,
+            entry,
+            turn_id,
+            step_id,
+            request_id,
+            partial,
+            Some(token_usage(model_usage)),
+        );
     }
     let model_tool_calls = model_content
         .iter()
