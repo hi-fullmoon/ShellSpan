@@ -30,6 +30,8 @@ export function SubmissionCheck({ queue, history, imageOwner }: { queue: boolean
   useEffect(() => {
     Object.assign(window, { submissionCheck: {
       imageReady: Boolean(imageDraft.draft?.images.length),
+      imageBusy: imageDraft.busy,
+      imageError: imageDraft.error,
       pending: imageOwner ? Number(Boolean(imageDraft.submittedOperationId)) : composer.pendingSubmissions.length,
       acknowledge() {
         setCommitted(nodes.map((node) => node.kind === 'userMessage' ? { ...node, delivery: 'committed' } : node));
@@ -40,7 +42,7 @@ export function SubmissionCheck({ queue, history, imageOwner }: { queue: boolean
         }
       },
     } });
-  }, [composer, nodes, imageOwner, imageDraft.draft, imageDraft.submittedOperationId]);
+  }, [composer, nodes, imageOwner, imageDraft.draft, imageDraft.submittedOperationId, imageDraft.busy, imageDraft.error]);
   return <main className="ai-panel-shell h-dvh w-full min-w-0" data-ai-scope="workbench">
     <AiWorkspaceRoot
       scope="workbench" canStartAgent composerState={composer}
