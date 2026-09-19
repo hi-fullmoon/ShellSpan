@@ -70,6 +70,10 @@ function MarkdownLink({ children, href }: { children: React.ReactNode; href?: st
     <ContextMenu>
       <ContextMenuTrigger
         render={<a href={href} target="_blank" rel="noreferrer" />}
+        onClick={(event) => {
+          event.preventDefault();
+          openLink();
+        }}
       >
         {children}
       </ContextMenuTrigger>
