@@ -10,6 +10,7 @@ import {
   AiToolCopyButton,
   ToolStateIcon,
   formatToolValue,
+  toolOutputForCopy,
 } from './ai-tool-presentation';
 
 const DETAIL_PREVIEW_LIMIT = 64 * 1024;
@@ -92,10 +93,18 @@ export function AiToolDetails({
                 <p className="m-0 [overflow-wrap:anywhere]">{node.summary || node.name}</p>
               </div>
               <DetailCode value={node.input} label={t('ai.workspace.details.input')} />
-              <DetailSection title={t('ai.workspace.details.output')}>
+              <DetailSection
+                title={t('ai.workspace.details.output')}
+                actions={toolOutputForCopy(node) ? (
+                  <AiToolCopyButton
+                    text={toolOutputForCopy(node)}
+                    label={t('ai.workspace.details.copy', { section: t('ai.workspace.details.output') })}
+                  />
+                ) : undefined}
+              >
                 {node.output === null && node.state !== 'running'
                   ? <p className="ai-details-empty m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{t('ai.workspace.details.noOutput')}</p>
-                  : <AiToolExpandedContent node={node} />}
+                  : <AiToolExpandedContent node={node} showCopyActions={false} />}
                 {node.error && <p className="ai-detail-error m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{node.error}</p>}
               </DetailSection>
               <DetailCode

@@ -271,7 +271,7 @@ export function AiToolCopyButton({ text, label }: { readonly text: string; reado
   );
 }
 
-function TerminalSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
+function TerminalSurface({ node, compact, showCopyActions }: { node: ToolNode; compact: boolean; showCopyActions: boolean }) {
   const { t } = useI18n();
   const [commandExpanded, setCommandExpanded] = useState(false);
   const input = asRecord(node.input);
@@ -299,14 +299,14 @@ function TerminalSurface({ node, compact }: { node: ToolNode; compact: boolean }
           {displayCommand}
         </button>
         {exitCode !== null && exitCode !== 0 && <span className="ai-terminal-exit shrink-0">exit {exitCode}</span>}
-        <AiToolCopyButton text={displayCommand} label={t('ai.workspace.tool.copyCommand')} />
+        {showCopyActions && <AiToolCopyButton text={displayCommand} label={t('ai.workspace.tool.copyCommand')} />}
       </div>
       {node.state !== 'running' && (
         <div className="ai-terminal-output relative m-0 max-w-full">
           <div className="max-h-65 max-w-full overflow-auto py-3 pr-11 pl-3.5 whitespace-pre">
             {output ? <CappedText text={output} maxLines={compact ? 8 : Number.POSITIVE_INFINITY} /> : t('ai.workspace.tool.noOutput')}
           </div>
-          {output && (
+          {showCopyActions && output && (
             <div className="absolute top-2 right-3.5">
               <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} />
             </div>
@@ -535,7 +535,7 @@ function DiffSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
   );
 }
 
-function CodeSurface({ node }: { node: ToolNode }) {
+function CodeSurface({ node, showCopyActions }: { node: ToolNode; showCopyActions: boolean }) {
   const input = asRecord(node.input);
   const code = firstString(input, ['code', 'program', 'script']) ?? formatToolValue(node.input);
   const language = firstString(input, ['language', 'lang']) ?? 'code';
@@ -543,7 +543,7 @@ function CodeSurface({ node }: { node: ToolNode }) {
     <div className="ai-code-block ai-tool-code-block relative my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="code">
       <div className="ai-code-block-banner flex min-w-0 items-center justify-between gap-3 px-3.5 py-[9px]">
         <span className="ai-code-block-language min-w-0 truncate">{language}</span>
-        <AiToolCopyButton text={code} />
+        {showCopyActions && <AiToolCopyButton text={code} />}
       </div>
       <pre className="ai-code-block-pre m-0 max-w-full overflow-x-auto p-4 whitespace-pre-wrap break-all"><code>{bounded(code)}</code></pre>
       {node.output !== null && (
@@ -583,19 +583,21 @@ function IoSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
 export function AiToolExpandedContent({
   node,
   compact = false,
+  showCopyActions = true,
 }: {
   readonly node: ToolNode;
   readonly compact?: boolean;
+  readonly showCopyActions?: boolean;
 }) {
   const variant = classifyAiTool(node.name, node.nativeName);
   switch (variant) {
-    case 'terminal': return <TerminalSurface node={node} compact={compact} />;
+    case 'terminal': return <TerminalSurface node={node} compact={compact} showCopyActions={showCopyActions} />;
     case 'read': return <ReadSurface node={node} compact={compact} />;
     case 'search': return <SearchSurface node={node} compact={compact} />;
     case 'web': return <WebSurface node={node} />;
     case 'write':
     case 'edit': return <DiffSurface node={node} compact={compact} />;
-    case 'code': return <CodeSurface node={node} />;
+    case 'code': return <CodeSurface node={node} showCopyActions={showCopyActions} />;
     case 'plan':
     case 'generic': return <IoSurface node={node} compact={compact} />;
   }

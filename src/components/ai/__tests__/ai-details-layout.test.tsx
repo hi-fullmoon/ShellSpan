@@ -43,11 +43,11 @@ describe('AI details content sizing', () => {
     expect(lines).toEqual(expected);
   });
 
-  it('overrides the primitive inline fit-content minimum for long tool payloads', () => {
+  it.each(['wait_process', 'run_code', 'read_file', 'search', 'unknown_tool'])('keeps %s detail copy actions in aligned section headers and long payloads shrinkable', (name) => {
     const node: AiConversationNodeOf<'tool'> = {
       ...baseNode,
       kind: 'tool', key: 'tool:long-command', callId: 'long-command',
-      name: 'run_terminal_command', nativeName: null, title: null,
+      name, nativeName: null, title: null,
       summary: 'Command rejected', state: 'rejected',
       effect: 'unknown', durationMs: null, evidenceRefs: [],
       detailRef: { kind: 'agentTool', sessionId: baseNode.sessionId, callId: 'long-command' },
@@ -61,7 +61,15 @@ describe('AI details content sizing', () => {
     expect(content).toHaveStyle({ minWidth: '0' });
     expect(content?.style.minWidth).not.toBe('fit-content');
     expect(container.querySelector('.ai-detail-code')).toHaveTextContent(longValue);
-    expect(container.querySelector('.ai-terminal-output')).toHaveTextContent(longValue);
+    const sections = [...container.querySelectorAll('.ai-detail-section')];
+    expect(sections).toHaveLength(3);
+    for (const section of sections) {
+      const header = section.querySelector('.ai-detail-section-header');
+      expect(header).toHaveClass('items-center', 'justify-between', 'px-3');
+      expect(header?.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
+      expect(section.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
+    }
+    expect(screen.getByRole('button', { name: 'Copy Output' })).toBeInTheDocument();
   });
 
   it('keeps loaded artifact details shrinkable without truncating the preview', async () => {
