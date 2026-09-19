@@ -31,7 +31,7 @@ const image = { name: '32x32.png', mediaType: 'image/png',
 
 try {
   for (const browserType of [chromium, webkit]) {
-    const browser = await browserType.launch();
+    const browser = await browserType.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] });
     try {
       for (const width of [420, 900]) {
         const page = await browser.newPage({ viewport: { width, height: 720 }, reducedMotion: 'no-preference' });
@@ -60,21 +60,14 @@ try {
         assert.ok((await metrics()).gap <= 8, `${browserType.name()} ${width}: turn did not enter live follow`);
 
         for (const releaseBetweenDrags of [false, true]) {
-          await viewport.evaluate((element) => {
-            window.scrollTrace = [];
-            for (const type of ['pointerdown', 'pointerup', 'scroll']) {
-              element.addEventListener(type, (event) => window.scrollTrace.push({ type, top: element.scrollTop, target: event.target.tagName }), { once: true });
-            }
-          });
           const track = await viewport.boundingBox();
           assert.ok(track);
           const x = track.x + track.width - 3;
-          await page.screenshot({ path: '/tmp/shellspan-scrollbar-before-drag.png' });
           await page.mouse.move(x, track.y + track.height - 12);
           await page.mouse.down();
           await page.mouse.move(x, track.y + track.height / 2, { steps: 8 });
           await settle();
-          assert.ok((await metrics()).gap > 100, `native scrollbar drag did not leave the bottom: ${JSON.stringify(await page.evaluate(() => window.scrollTrace))}`);
+          assert.ok((await metrics()).gap > 100, 'native scrollbar drag did not leave the bottom');
           if (releaseBetweenDrags) {
             await page.mouse.up();
             const thumb = await viewport.evaluate((element) => {
@@ -186,6 +179,10 @@ try {
           });
           await page.keyboard.press('Enter');
           await page.waitForFunction(() => window.submissionCheck.pending === 1);
+          if (withImage) {
+            await page.waitForFunction(() => !window.submissionCheck.imageBusy);
+            assert.equal(await page.evaluate(() => window.submissionCheck.imageError), null);
+          }
           await settle();
           assert.ok((await metrics()).gap <= 8, `Enter (${queue ? 'queue' : 'send'}) did not return from history to bottom`);
           assert.equal(await page.locator('[data-scroll-anchor="true"]').count(), 0,
@@ -204,7 +201,7 @@ try {
             'acknowledgement overrode reading position after a send');
         }
         assert.deepEqual(errors, []);
-        process.stdout.write(`${browserType.name()} ${width}px: stream, keyboard, history, restore, jump, resize, animated process updates and Enter submission from history passed\n`);
+        process.stdout.write(`${browserType.name()} ${width}px: native scrollbar, text/image submission, stream, history, restore and animated process updates passed\n`);
         await page.close();
       }
     } finally {
