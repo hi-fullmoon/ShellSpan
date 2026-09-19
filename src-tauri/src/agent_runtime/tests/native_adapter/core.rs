@@ -340,6 +340,52 @@
     }
 
     #[test]
+    fn omitted_history_input_is_rejected_before_native_dispatch() {
+        let target = target_native(&local_target()).unwrap();
+        for marker in [
+            "[ephemeral terminal input omitted]",
+            "[ephemeral terminal match text omitted]",
+            "[ephemeral process input omitted]",
+        ] {
+            for (name, arguments) in [
+                (
+                    "write_terminal_input",
+                    json!({ "inputKind": "text", "text": marker }),
+                ),
+                (
+                    "write_terminal_input",
+                    json!({ "inputKind": "paste", "text": format!("{marker}{marker}") }),
+                ),
+                (
+                    "write_process_input",
+                    json!({ "processHandle": "process-1", "input": marker }),
+                ),
+                (
+                    "wait_terminal",
+                    json!({ "text": marker, "timeoutMs": 1000 }),
+                ),
+                (
+                    "run_terminal_command",
+                    json!({ "command": format!("echo {marker}"), "explanation": "retry" }),
+                ),
+                ("exec_command", json!({ "command": marker })),
+            ] {
+                let mut call = request(name, arguments);
+                call.execution_surface = AgentExecutionSurface::BoundTerminal;
+                assert!(normalize_arguments(&call, &target, None, false)
+                    .unwrap_err()
+                    .starts_with("ephemeralInputUnavailable:"));
+            }
+        }
+        let mut key = request(
+            "write_terminal_input",
+            json!({ "inputKind": "key", "key": "enter" }),
+        );
+        key.execution_surface = AgentExecutionSurface::BoundTerminal;
+        assert!(normalize_arguments(&key, &target, None, false).is_ok());
+    }
+
+    #[test]
     fn interactive_terminal_tools_require_bound_surface_and_do_not_record_input_content() {
         let target = target_native(&local_target()).unwrap();
         let direct = request("read_terminal", json!({}));
