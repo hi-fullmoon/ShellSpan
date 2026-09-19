@@ -210,6 +210,22 @@
       "untrustedResultFields": []
     },
     {
+      "name": "edit_file",
+      "version": "1.0.0",
+      "targetKinds": ["local", "remote"],
+      "effectMode": "fixed",
+      "allowedEffects": ["stateChange"],
+      "idempotency": "conditional",
+      "parallel": false,
+      "cancellable": true,
+      "retryPolicy": "reconcileFirst",
+      "defaultTimeoutMs": 60000,
+      "maxOutputBytes": 262144,
+      "maxConcurrency": 1,
+      "requiredCapabilities": ["filesystem.patch"],
+      "untrustedResultFields": []
+    },
+    {
       "name": "apply_patch",
       "version": "1.0.0",
       "targetKinds": ["local", "remote"],
