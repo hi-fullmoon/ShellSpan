@@ -433,23 +433,25 @@ does not create network isolation or an exact destination scope.
 `requestApproval` MUST require confirmation for every native tool call.
 `scopedAutopilot` MAY automatically execute only ordinary `readOnly` effects;
 `sensitiveRead`, `stateChange`, `destructive`, and `externalSideEffect` effects
-MUST require confirmation. `operator` MAY skip per-call confirmation, but MUST
-NOT broaden the frozen target, tool, filesystem, or network scope.
+MUST require confirmation. `operator` is full access: native calls, including
+remote commands, visible terminal input, and configured MCP tools, MUST NOT
+require per-call approval. Shell commands run without a workspace filesystem
+or network sandbox, with the connected account's operating-system permissions.
+The frozen connection identity, tool argument validation, capability binding,
+cancellation, and audit remain enforced. Structured file and HTTP tools retain
+their explicit path and destination contracts; shell commands may access paths
+outside the workspace and arbitrary network destinations.
 When a new remote `operator` Session starts from an interactive terminal backed
 by a frozen credential profile, the client SHOULD resolve and freeze that
 shell's current directory as `rootPath` so generated files use the bounded
 native file tools instead of terminal heredocs. A profileless remote Session or
-one whose directory probe is unavailable MUST remain unrooted and retain the
-confirmation-gated terminal fallback.
-For a local target with a frozen workspace root, every `operator` Direct shell
-command MUST run in an operating-system sandbox whose only writable roots are
-that canonical workspace and a command-lifetime temporary directory; arbitrary
-network access MUST remain unavailable. A rooted local `operator` command MUST
-use Direct even when the Session selected the bound-terminal surface. Shell
-execution whose filesystem scope cannot be enforced, including remote Direct
-execution and visible-terminal input, MUST still require confirmation in
-`operator` mode. Sandbox setup failure MUST fail closed and MUST NOT retry the
-command without isolation.
+one whose directory probe is unavailable MUST remain unrooted and may execute
+shell commands without approval in `operator` mode. Local full-access Sessions
+also MUST NOT require a successful directory probe to start. Full access preserves
+the selected execution surface; commands requiring trusted lifecycle evidence
+still use Direct execution. Enabling full access requires explicit confirmation
+for the current connection instance and does not grant authority over another
+connection or bypass operating-system permissions.
 Loopback HTTP verification uses the structured `probe_http` tool, which fixes
 the destination to the frozen local or SSH target's `127.0.0.1`, follows no
 redirects, exposes no arbitrary request headers, and enforces method, request

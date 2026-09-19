@@ -38,6 +38,7 @@
         "list_directory",
         "search_text",
         "write_file",
+        "edit_file",
         "apply_patch",
         "transfer_file"
       ]
@@ -359,6 +360,17 @@
         "precondition": { "$ref": "#/$defs/writeFilePrecondition" }
       }
     },
+    "editFileArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "oldString", "newString", "precondition"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "oldString": { "type": "string", "minLength": 1, "maxLength": 32768 },
+        "newString": { "type": "string", "maxLength": 32768 },
+        "precondition": { "$ref": "#/$defs/writeFileDigestPrecondition" }
+      }
+    },
     "patchPrecondition": {
       "type": "object",
       "additionalProperties": false,
@@ -377,7 +389,7 @@
         "preconditions": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 128,
+          "maxItems": 1,
           "items": { "$ref": "#/$defs/patchPrecondition" }
         },
         "dryRun": { "type": "boolean" }
@@ -534,6 +546,14 @@
       ],
       "unevaluatedProperties": false
     },
+    "editFileCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "edit_file" }, "arguments": { "$ref": "#/$defs/editFileArguments" }, "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/remoteTarget" }] } } }
+      ],
+      "unevaluatedProperties": false
+    },
     "applyPatchCall": {
       "type": "object",
       "allOf": [
@@ -565,6 +585,7 @@
         { "$ref": "#/$defs/listDirectoryCall" },
         { "$ref": "#/$defs/searchTextCall" },
         { "$ref": "#/$defs/writeFileCall" },
+        { "$ref": "#/$defs/editFileCall" },
         { "$ref": "#/$defs/applyPatchCall" },
         { "$ref": "#/$defs/transferFileCall" }
       ]
@@ -909,6 +930,7 @@
     "listDirectoryResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "list_directory" }, "data": { "$ref": "#/$defs/listDirectoryResultData" } } }], "unevaluatedProperties": false },
     "searchTextResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "search_text" }, "data": { "$ref": "#/$defs/searchTextResultData" } } }], "unevaluatedProperties": false },
     "writeFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "write_file" }, "data": { "$ref": "#/$defs/writeFileResultData" } } }], "unevaluatedProperties": false },
+    "editFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "edit_file" }, "data": { "$ref": "#/$defs/applyPatchResultData" } } }], "unevaluatedProperties": false },
     "applyPatchResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "apply_patch" }, "data": { "$ref": "#/$defs/applyPatchResultData" } } }], "unevaluatedProperties": false },
     "transferFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "transfer_file" }, "data": { "$ref": "#/$defs/transferFileResultData" } } }], "unevaluatedProperties": false },
     "agentToolResult": {
@@ -926,6 +948,7 @@
         { "$ref": "#/$defs/listDirectoryResult" },
         { "$ref": "#/$defs/searchTextResult" },
         { "$ref": "#/$defs/writeFileResult" },
+        { "$ref": "#/$defs/editFileResult" },
         { "$ref": "#/$defs/applyPatchResult" },
         { "$ref": "#/$defs/transferFileResult" }
       ]
