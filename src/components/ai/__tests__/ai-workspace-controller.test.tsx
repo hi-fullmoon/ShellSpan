@@ -540,7 +540,7 @@ it('does not mount an empty image addon for stale image errors', () => {
   connectedTerminal();
   const imageDraft = vi.spyOn(imageDraftModule, 'useImageDraft').mockReturnValue({
     owner: 'test', draft: { owner: 'test', revision: 1, text: '', images: [] },
-    pendingFiles: [], busy: false, locked: false, error: 'IMAGE_CANCELLED',
+    pendingFiles: [], busy: false, submittedOperationId: undefined, locked: false, error: 'IMAGE_CANCELLED',
     send: vi.fn(), reportError: vi.fn(), add: vi.fn(), remove: vi.fn(), cancel: vi.fn(),
   });
   try {
@@ -558,7 +558,7 @@ it.each(['', ' \n\t '])('routes image-only text %j through image submission', as
   const imageDraft = vi.spyOn(imageDraftModule, 'useImageDraft').mockReturnValue({
     owner: 'test', draft: { owner: 'test', revision: 1, text: draft,
       images: [{ name: 'fixture.png', mediaType: 'image/png', data: 'aGVsbG8=' }] },
-    pendingFiles: [], busy: false, locked: false, error: null,
+    pendingFiles: [], busy: false, submittedOperationId: undefined, locked: false, error: null,
     send, reportError, add: vi.fn(), remove: vi.fn(), cancel: vi.fn(),
   });
   const vision = vi.spyOn(visionContract, 'requireVision').mockImplementation(() => undefined);
@@ -1020,7 +1020,7 @@ describe('AiWorkspaceController', () => {
     expect(result.current.readOnlySession).toBe(false);
   });
 
-  it('keeps the explicit safe-reconnect action visible for an old failed Session', () => {
+  it('does not show a reconnect continuation button for an old failed Session', () => {
     const base = runningAgentView('agent-old', 'terminal-old');
     const failed: AiSessionView = {
       ...base,
@@ -1030,7 +1030,7 @@ describe('AiWorkspaceController', () => {
     };
     render(<AiWorkspaceRoot scope="terminal" view={failed} readOnlySession
       onContinueOnReconnectedTerminal={vi.fn()} />);
-    expect(screen.getByRole('button', { name: 'Continue in reconnected terminal' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Continue in reconnected terminal' })).toBeNull();
   });
 
   it('renews the subscription when history selects the current session again', async () => {
@@ -1504,13 +1504,14 @@ describe('AiWorkspaceController', () => {
     expect(resolveTerminalDirectory).not.toHaveBeenCalled();
   });
 
-  it('fails closed when a local full-access Session has no frozen workspace root', async () => {
+  it('allows a local full-access Session without a discovered workspace root', async () => {
     connectedLocalTerminal();
     useAgentPermissionStore.getState().setMode('terminal-local', 'fullAccess');
-    const submit = vi.fn();
+    const agent = adapter();
+    const submit = agent.submit;
     const { result } = renderHook(() => useAiSessionController({
       scope: 'terminal',
-      adapter: adapter({ submit }),
+      adapter: agent,
       resolveTerminalDirectory: vi.fn(async () => null),
     }));
 
@@ -1519,10 +1520,10 @@ describe('AiWorkspaceController', () => {
       result.current.submit('primary');
     });
 
-    await waitFor(() => expect(result.current.composer.lastError?.message).toContain(
-      'full-access task cannot start',
-    ));
-    expect(submit).not.toHaveBeenCalled();
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    const create = vi.mocked(submit).mock.calls[0][1].create;
+    expect(create?.request.permissionMode).toBe('operator');
+    expect(create?.request.target?.kind).toBe('local');
   });
 
   it('freezes the selected visible-terminal surface into a new Session request', async () => {

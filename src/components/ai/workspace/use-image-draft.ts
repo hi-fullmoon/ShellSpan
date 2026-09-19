@@ -12,6 +12,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
   const [draft, setDraft] = useState<ImageDraft | null>(null);
   const [pendingFiles, setPendingFiles] = useState<readonly File[]>([]);
   const [busy, setBusy] = useState(false);
+  const [submittedOperationId, setSubmittedOperationId] = useState<string>();
   const [error, setError] = useState<string | null>(null);
   const reportError = useCallback((value: string | null) => {
     setError(value);
@@ -27,6 +28,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
   const saving = useRef<{ generation: number; promise: Promise<void> } | null>(null);
   useEffect(() => {
     const generation = ++epoch.current;
+    setSubmittedOperationId(undefined);
     current.current = null; setDraft(null); setPendingFiles([]); setError(null); setBusy(false); running.current = false; ready.current = false;
     if (typeof indexedDB === 'undefined') { ready.current = true; return; }
     void readImageDraft(owner).then(value => {
@@ -127,6 +129,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       const value = { ...previous, revision: previous.revision + 1, text: previous.operation ? previous.text : textRef.current, operation };
       await persist(value, generation); // operation identity is durable BEFORE any create/send IPC
       if (!isCurrent(generation)) return;
+      setSubmittedOperationId(operation.id);
       await submit(value);
       await writeImageDraft({ owner: value.owner, revision: value.revision + 1, text: '', images: [] }, value.revision);
       if (isCurrent(generation)) {
@@ -151,5 +154,5 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       running.current = false; setBusy(false); reportError('IMAGE_CANCELLED');
     } catch (e) { if (isCurrent(generation)) reportError(String(e)); }
   }
-  return { owner, draft, pendingFiles, busy, error, add, remove, send, cancel, locked: Boolean(draft?.operation), reportError };
+  return { owner, draft, pendingFiles, busy, submittedOperationId, error, add, remove, send, cancel, locked: Boolean(draft?.operation), reportError };
 }

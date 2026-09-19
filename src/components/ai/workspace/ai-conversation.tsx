@@ -1,8 +1,9 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker';
 import { BrainIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
+import { cn } from '@/lib/utils';
 import type { AiConversationNode, AiConversationNodeOf, AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiScrollAnchor } from '@/lib/ai/panel-route';
 import { MessageScroller } from '../chat-primitives';
@@ -69,6 +70,8 @@ export interface AiConversationProps {
   readonly renderers?: AiConversationNodeRendererMap;
   readonly runningIndicator?: 'agent' | 'ask' | 'none';
   readonly pending?: boolean;
+  readonly submittedOperationId?: string;
+  readonly imageSubmissionId?: string;
   readonly status: AiSessionStatus;
   readonly throughSeq: number | null;
   readonly initialAnchor?: AiScrollAnchor;
@@ -85,6 +88,8 @@ export function AiConversation({
   renderers,
   runningIndicator = 'agent',
   pending = false,
+  submittedOperationId,
+  imageSubmissionId,
   status,
   throughSeq,
   initialAnchor,
@@ -116,12 +121,17 @@ export function AiConversation({
     && !visibleResponseStarted;
   const latestUser = latestUserIndex >= 0 ? nodes[latestUserIndex] : undefined;
   const latestUserKey = latestUser ? conversationItemId(latestUser) : undefined;
+  const scrollToBottomKeys = useMemo(() => [
+    ...(latestUserKey ? [latestUserKey] : []),
+    ...(submittedOperationId ? [`user:${submittedOperationId}`] : []),
+    ...(imageSubmissionId ? [`user:${imageSubmissionId}`] : []),
+  ], [latestUserKey, submittedOperationId, imageSubmissionId]);
   return (
     <MessageScroller
       className="min-h-0 flex-1"
       contentClassName="ai-conversation-content mx-auto min-w-0 w-[min(calc(100%-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)),var(--ai-chat-content-max-width))] gap-4 px-0 pt-5 pb-7"
       followKey={followKey(nodes, throughSeq)}
-      turnAnchorKey={latestUserKey}
+      scrollToBottomKeys={scrollToBottomKeys}
       ariaLabel={t('ai.conversation')}
       initialAnchor={initialAnchor}
       onAnchorChange={onAnchorChange}
@@ -133,14 +143,17 @@ export function AiConversation({
           </Button>
         </div>
       )}
-      {nodes.map((node) => (
+      {nodes.map((node, index) => (
         <AiConversationNodeSeat
           key={conversationItemId(node)}
           node={node}
           renderers={renderers}
-          scrollAnchor={node.kind === 'userMessage'}
+          scrollAnchor={false}
           scrollItemId={conversationItemId(node)}
-          scrollItemClassName={node.kind === 'turnTail' ? '-ml-1' : undefined}
+          scrollItemClassName={cn(
+            node.kind === 'turnTail' && '-ml-1.5',
+            index >= latestUserIndex && '[content-visibility:visible] [contain-intrinsic-size:none]',
+          )}
           onOpenTool={onOpenTool}
           onOpenArtifact={onOpenArtifact}
         />

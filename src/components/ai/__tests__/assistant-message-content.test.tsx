@@ -248,6 +248,21 @@ describe('AssistantMessageContent', () => {
     expect(screen.queryByText(/```bash/)).not.toBeInTheDocument();
   });
 
+  it('preserves code and table elements and focus while the same Markdown chunk grows', () => {
+    const content = '```bash\npnpm test\n```\n\n| Command | Purpose |\n| --- | --- |\n| pnpm test | Tests |\n';
+    const { container, rerender } = render(
+      <AssistantMessageContent blocks={[{ type: 'text', text: content }]} streaming />,
+    );
+    const code = container.querySelector('pre');
+    const table = container.querySelector<HTMLDivElement>('.ai-markdown-table-scroll')!;
+    table.focus();
+    rerender(<AssistantMessageContent blocks={[{ type: 'text', text: content + '| pnpm build | Build |\n' }]} streaming />);
+    expect(container.querySelector('pre')).toBe(code);
+    expect(container.querySelector('.ai-markdown-table-scroll')).toBe(table);
+    expect(table).toHaveFocus();
+    expect(table).toHaveTextContent('pnpm build');
+  });
+
   it('preserves a large loose list across streaming render chunks', () => {
     const content = `${Array.from(
       { length: 120 },

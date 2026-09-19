@@ -82,6 +82,7 @@ export function AiWorkspaceController({
       onPasteImages={controller.canStartAgent ? controller.imageDraft.add : undefined}
       hasImages={Boolean(controller.imageDraft.draft?.images.length)}
       imageBusy={controller.imageDraft.busy}
+      imageSubmissionId={controller.imageDraft.submittedOperationId}
       imageLocked={controller.imageDraft.locked}
       onAnswerQuestion={controller.answerQuestion}
       onListFileReferences={controller.listFileReferences}

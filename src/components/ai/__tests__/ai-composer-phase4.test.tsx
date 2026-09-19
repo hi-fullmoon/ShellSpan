@@ -95,32 +95,16 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(screen.queryByRole('button', { name: 'Retry this turn' })).toBeNull();
   });
 
-  it('offers an explicit continuation after the step budget pauses a turn', async () => {
-    const user = userEvent.setup();
-    const continueTurn = vi.fn();
-    render(<AiComposerSeat phase="active" status="idle"
-      budgetContinuationAvailable onContinueBudgetedTurn={continueTurn} />);
-
-    const button = screen.getByRole('button', { name: 'Continue task' });
-    expect(button).toHaveClass('self-center', 'rounded-full', 'bg-secondary');
-    await user.click(button);
-    expect(continueTurn).toHaveBeenCalledOnce();
+  it('leaves availability notices to the workspace while retaining the accessible reference', () => {
+    render(<AiComposerSeat phase="active" status="idle" unavailableReason="Connect a terminal" availabilityHintId="workspace-availability" />);
+    expect(screen.queryByRole('status', { name: 'Agent is unavailable' })).toBeNull();
+    expect(screen.getByRole('textbox')).toHaveAttribute('aria-describedby', 'workspace-availability');
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
   });
 
-  it('aligns the unavailable icon and copy with a compact gap', () => {
-    render(<AiComposerSeat phase="active" status="idle" unavailableReason="Connect a terminal" />);
-    const notice = screen.getByRole('status', { name: 'Agent is unavailable' });
-    expect(notice).toHaveClass('flex', 'items-center', 'gap-x-1');
-    expect(notice.querySelector('svg')).toHaveClass('shrink-0');
-  });
-
-  it('offers a separate new-terminal continuation when a safe replacement is available', async () => {
-    const user = userEvent.setup();
-    const continueTask = vi.fn();
-    render(<AiComposerSeat phase="active" status="failed"
-      onContinueOnReconnectedTerminal={continueTask} />);
-    await user.click(screen.getByRole('button', { name: 'Continue in reconnected terminal' }));
-    expect(continueTask).toHaveBeenCalledOnce();
+  it('does not show a new-terminal continuation button after failure', () => {
+    render(<AiComposerSeat phase="active" status="failed" />);
+    expect(screen.queryByRole('button', { name: 'Continue in reconnected terminal' })).toBeNull();
   });
 
   it('adds pasted images once without submitting the message', () => {
@@ -392,7 +376,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     })} />);
     expect(screen.getByRole('textbox')).not.toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('textbox').textContent).toBe('keep this draft');
-    expect(screen.getByText('Waiting for approval')).toBeVisible();
+    expect(screen.queryByText('Waiting for approval')).toBeNull();
     expect(screen.queryByRole('button', { name: /approve/i })).toBeNull();
   });
 

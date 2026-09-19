@@ -37,6 +37,8 @@ interface MessageScrollerProps {
   children: React.ReactNode;
   followKey: string;
   turnAnchorKey?: string;
+  /** New local submission/message identities resume following once per identity. */
+  scrollToBottomKeys?: readonly string[];
   className?: string;
   contentClassName?: string;
   ariaLabel?: string;
@@ -80,8 +82,9 @@ export const MessageScroller: React.FC<MessageScrollerProps> = (props) => {
   return (
     <MessageScrollerProvider
       autoScroll
-      defaultScrollPosition={readingAnchor ? 'start' : 'end'}
+      defaultScrollPosition={readingAnchor ? 'start' : props.turnAnchorKey && !restoreToEnd ? 'last-anchor' : 'end'}
       scrollEdgeThreshold={SCROLL_EDGE_THRESHOLD}
+      scrollPreviousItemPeek={0}
     >
       <ConversationScroller {...props} initialAnchor={readingAnchor} restoreToEnd={restoreToEnd} />
     </MessageScrollerProvider>
@@ -92,6 +95,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   children,
   followKey,
   turnAnchorKey,
+  scrollToBottomKeys,
   className,
   contentClassName,
   ariaLabel,
@@ -102,7 +106,6 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const { t } = useI18n();
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const followingIntentRef = useRef(initialAnchor === undefined);
   // A top-aligned turn can also sit at the scrollport's bottom. Its own scroll
   // event must not turn that reading position into live-tail follow mode.
   const suppressProgrammaticFollowRef = useRef(initialAnchor?.atBottom === false);
@@ -111,9 +114,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const restoreFrameRef = useRef<number | null>(null);
   const [positionReady, setPositionReady] = useState(false);
   const { scrollToEnd, scrollToMessage, scrollToStart } = useMessageScroller();
-  const turnAnchorKeyRef = useRef(
-    initialAnchor === undefined && !restoreToEnd ? undefined : turnAnchorKey,
-  );
+  const observedBottomKeys = useRef(new Set(scrollToBottomKeys));
   const childItems = React.Children.toArray(children);
   const messageItems = childItems.map((child, index) => {
     const itemKey = React.isValidElement(child) && child.key !== null ? child.key : index;
@@ -137,67 +138,87 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   }, [cancelRestore]);
 
   useLayoutEffect(() => {
-    const previous = turnAnchorKeyRef.current;
-    turnAnchorKeyRef.current = turnAnchorKey;
-    if (turnAnchorKey === undefined || turnAnchorKey === previous) return;
+    let requested = false;
+    for (const key of scrollToBottomKeys ?? []) {
+      if (observedBottomKeys.current.has(key)) continue;
+      observedBottomKeys.current.add(key);
+      requested = true;
+    }
+    if (!requested) return;
+    // Bound navigation memory while retaining recent optimistic/committed IDs
+    // so acknowledgement cannot pull a user who has since scrolled up.
+    while (observedBottomKeys.current.size > 256) {
+      observedBottomKeys.current.delete(observedBottomKeys.current.values().next().value!);
+    }
     cancelRestore();
-    followingIntentRef.current = false;
-    suppressProgrammaticFollowRef.current = true;
+    restoredAnchorRef.current = true;
+    suppressProgrammaticFollowRef.current = false;
     pointerScrollStartRef.current = null;
-    scrollToMessage(turnAnchorKey, { align: 'start' });
-    // On the initial mount, keep the transcript hidden until the deferred
-    // content-visibility correction below has replayed the anchor. Later turns
-    // are already laid out and can be revealed immediately.
-    if (restoredAnchorRef.current) setPositionReady(true);
-  }, [cancelRestore, scrollToMessage, turnAnchorKey]);
-
-  useLayoutEffect(() => {
-    if (!turnAnchorKey || !restoredAnchorRef.current || !followingIntentRef.current) return;
-    // The primitive observes content growth, but its resize correction is
-    // deferred to the next animation frame. Apply committed stream revisions
-    // during layout so the live tail cannot paint once at the old scrollTop.
     scrollToEnd();
-  }, [followKey, scrollToEnd, turnAnchorKey]);
+    setPositionReady(true);
+  }, [cancelRestore, scrollToBottomKeys, scrollToEnd]);
 
   const handlePointerDown = useCallback(() => {
     interruptRestore();
     pointerScrollStartRef.current = viewportRef.current?.scrollTop ?? null;
   }, [interruptRestore]);
 
+  useEffect(() => {
+    const clearPointerIntent = () => { pointerScrollStartRef.current = null; };
+    // Release may happen outside the transcript (including a native scrollbar).
+    // A completed click must not turn a later layout correction into a drag.
+    window.addEventListener('pointerup', clearPointerIntent, true);
+    window.addEventListener('pointercancel', clearPointerIntent, true);
+    window.addEventListener('blur', clearPointerIntent);
+    return () => {
+      window.removeEventListener('pointerup', clearPointerIntent, true);
+      window.removeEventListener('pointercancel', clearPointerIntent, true);
+      window.removeEventListener('blur', clearPointerIntent);
+    };
+  }, []);
+
   const handleScrollCapture = useCallback(() => {
     const viewport = viewportRef.current;
     const start = pointerScrollStartRef.current;
     if (!viewport || start === null || Math.abs(viewport.scrollTop - start) <= 0.5) return;
-    pointerScrollStartRef.current = null;
+    pointerScrollStartRef.current = viewport.scrollTop;
     suppressProgrammaticFollowRef.current = false;
-    if (viewport.scrollTop < start && !isNearBottom(viewport)) {
-      followingIntentRef.current = false;
-      // A native scrollbar drag can overlap the primitive's short
-      // programmatic-scroll grace period. Forward the real upward intent so
-      // the primitive releases follow mode immediately.
-      viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+    if (viewport.scrollTop > start && isNearBottom(viewport)) {
+      // A prior upward drag enters the primitive's settling-jump mode. Native
+      // scrollbar movement emits no wheel/key event to release that mode.
+      scrollToEnd();
+    } else if (viewport.scrollTop < start && !isNearBottom(viewport)) {
+      // A scrollbar drag may overlap the primitive's programmatic-scroll grace
+      // period. Its public jump API releases following without synthetic input.
+      const top = viewport.getBoundingClientRect().top;
+      const item = Array.from(contentRef.current?.children ?? []).find((row) => (
+        row instanceof HTMLElement && row.dataset.messageId && row.getBoundingClientRect().bottom > top
+      ));
+      if (item instanceof HTMLElement && item.dataset.messageId) {
+        const paddingTop = contentRef.current
+          ? Number.parseFloat(getComputedStyle(contentRef.current).paddingBlockStart) || 0
+          : 0;
+        scrollToMessage(item.dataset.messageId, {
+          align: 'start', scrollMargin: item.getBoundingClientRect().top - top - paddingTop,
+        });
+      }
     }
-  }, []);
+  }, [scrollToEnd, scrollToMessage]);
 
   const handleWheelCapture = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     const viewport = viewportRef.current;
-    if (event.deltaY < 0) {
-      followingIntentRef.current = false;
-      return;
-    }
+    if (event.deltaY < 0) return;
     if (event.deltaY > 0) {
       suppressProgrammaticFollowRef.current = false;
-      if (viewport && isNearBottom(viewport) && !followingIntentRef.current) {
-        followingIntentRef.current = true;
+      // The primitive marks the live edge as non-scrollable even while a
+      // streamed resize is waiting for its frame. Preserve that follow intent.
+      if (viewport && (isNearBottom(viewport) || !viewport.dataset.scrollable?.split(' ').includes('end'))) {
+        interruptRestore();
         scrollToEnd();
+        event.stopPropagation();
       }
     }
-    if (viewport && (followingIntentRef.current || isNearBottom(viewport))) {
-      // Downward input at the live edge should not cancel follow merely
-      // because a streaming resize has not been observed yet.
-      event.stopPropagation();
-    }
-  }, [scrollToEnd]);
+  }, [interruptRestore, scrollToEnd]);
 
   useLayoutEffect(() => () => {
     cancelRestore();
@@ -207,7 +228,6 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const readAnchor = useCallback(() => {
     const scrollport = viewportRef.current;
     if (!scrollport) return;
-    if (!suppressProgrammaticFollowRef.current && isNearBottom(scrollport)) followingIntentRef.current = true;
     const content = contentRef.current;
     if (!content || !onAnchorChange) return;
     const viewportTop = scrollport.getBoundingClientRect().top;
@@ -247,11 +267,11 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     const item = node?.closest<HTMLElement>('[data-slot="message-scroller-item"]');
     let restoreAnchor: () => void;
     if (!initialAnchor) {
-      // A new turn follows the reading-oriented behavior used by leading chat
-      // products: keep the submitted prompt at the top while output grows
-      // below it. With no turn yet, retain the usual live-edge default.
+      // Let the primitive own the anchored-to-message mode and transition to
+      // following-bottom as the response fills the viewport. scrollToMessage
+      // would instead enter its detached, permanent jump mode.
       restoreAnchor = turnAnchorKey && !restoreToEnd
-        ? () => { scrollToMessage(turnAnchorKey, { align: 'start' }); }
+        ? () => {}
         : () => { scrollToEnd(); };
     } else if (item?.dataset.messageId) {
       const messageId = item.dataset.messageId;
@@ -305,7 +325,6 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
         onWheel={interruptRestore}
         onTouchMove={() => {
           suppressProgrammaticFollowRef.current = false;
-          followingIntentRef.current = false;
           interruptRestore();
         }}
         onKeyDown={(event) => {
@@ -314,13 +333,8 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
             if (['ArrowDown', 'End', 'PageDown', ' '].includes(event.key)) {
               suppressProgrammaticFollowRef.current = false;
               if (viewport && isNearBottom(viewport)) {
-                followingIntentRef.current = true;
                 scrollToEnd();
-              } else {
-                followingIntentRef.current = false;
               }
-            } else if (['ArrowUp', 'Home', 'PageUp'].includes(event.key)) {
-              followingIntentRef.current = false;
             }
           }
           interruptRestore();
@@ -335,7 +349,6 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
           aria-label={t('ai.scrollToLatest')}
           onClick={() => {
             suppressProgrammaticFollowRef.current = false;
-            followingIntentRef.current = true;
           }}
         />}>
           <ArrowDownIcon />

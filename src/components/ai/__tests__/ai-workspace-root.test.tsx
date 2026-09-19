@@ -84,6 +84,42 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiWorkspaceRoot Phase 3 skeleton', () => {
+  it.each(['stopping', 'waitingApproval', 'waitingQuestion'] as const)('places %s notices above the conversation instead of beside the composer', (phase) => {
+    const { container, rerender } = render(<AiWorkspaceRoot scope="terminal" view={agentView('running')}
+      composerState={createAiComposerState({ phase, runtimeStatus: 'running' })} />);
+    const notices = container.querySelector('[data-slot="ai-workspace-status-notices"]')!;
+    const body = container.querySelector('[data-slot="ai-workspace-body"]')!;
+    const composer = container.querySelector('[data-slot="ai-composer-seat"]')!;
+    expect(notices.querySelector('[data-slot="alert"]')).not.toBeNull();
+    expect(notices.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(composer.querySelector('[data-slot="alert"]')).toBeNull();
+    rerender(<AiWorkspaceRoot scope="terminal" view={agentView('idle')}
+      composerState={createAiComposerState({ phase: 'idle', runtimeStatus: 'idle' })} />);
+    expect(notices).toBeEmptyDOMElement();
+    expect(notices).toHaveClass('empty:hidden');
+  });
+
+  it('places history and availability notices above the conversation with no continuation buttons', () => {
+    const { container } = render(<AiWorkspaceRoot scope="terminal" view={agentView('failed')}
+      historicalContinuationAvailable historicalContinuationBusy historicalContinuationError="Connection lost"
+      agentUnavailableReason="Connect a terminal" onContinueOnReconnectedTerminal={() => {}} />);
+    const notices = container.querySelector('[data-slot="ai-workspace-status-notices"]') as HTMLElement;
+    expect(within(notices).getByText('Preparing the continued conversation…')).toBeVisible();
+    expect(within(notices).getByText('Connection lost')).toBeVisible();
+    const availability = within(notices).getByRole('status', { name: 'Agent is unavailable' });
+    expect(screen.getByRole('textbox')).toHaveAttribute('aria-describedby', availability.id);
+    expect(screen.queryByRole('button', { name: 'Continue in reconnected terminal' })).toBeNull();
+  });
+
+  it('does not offer a continue task button after a step budget pause', () => {
+    const view = agentView('idle');
+    const nodes = view.nodes.map(node => node.kind === 'turnTail'
+      ? { ...node, endReason: 'stepBudgetReached: maximum 128 Steps per Turn' } : node);
+    expect(nodes.some(node => node.kind === 'turnTail')).toBe(true);
+    render(<AiWorkspaceRoot scope="terminal" view={{ ...view, nodes }} onContinueBudgetedTurn={() => {}} />);
+    expect(screen.queryByRole('button', { name: 'Continue task' })).toBeNull();
+  });
+
   it('does not show a live waiting indicator for a read-only historical session', () => {
     const view = agentView('waiting');
     const { container, rerender } = render(
@@ -516,7 +552,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(container.querySelector('[data-ai-running-indicator]')).toBe(runningIndicator);
   });
 
-  it('keeps one stable top anchor while an optimistic Agent turn commits', async () => {
+  it('returns to the bottom for a new user message and preserves its row on commit', async () => {
     const view = agentView('running');
     const previousUser = view.nodes.find((node) => node.kind === 'userMessage');
     if (!previousUser) throw new Error('Agent fixture has no user message');
@@ -548,15 +584,16 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, nextUser] }} scope="terminal" />);
     const optimisticItem = container.querySelector(`[data-ai-node-key="${nextUser.key}"]`)
       ?.closest('[data-slot="message-scroller-item"]');
-    expect(optimisticItem).toHaveAttribute('data-scroll-anchor', 'true');
+    expect(optimisticItem).toHaveAttribute('data-scroll-anchor', 'false');
     expect(optimisticItem).toHaveAttribute('data-message-id', 'user:next-submission');
+    expect(scrollTop).toBe(500);
 
     const committedUser = { ...nextUser, key: 'user:next-submission', clientSubmissionId: undefined, delivery: 'committed' as const };
     rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, committedUser] }} scope="terminal" />);
     const committedItem = container.querySelector(`[data-ai-node-key="${committedUser.key}"]`)
       ?.closest('[data-slot="message-scroller-item"]');
     expect(committedItem).toBe(optimisticItem);
-    expect(committedItem).toHaveAttribute('data-scroll-anchor', 'true');
+    expect(committedItem).toHaveAttribute('data-scroll-anchor', 'false');
     expect(committedItem).toHaveAttribute('data-message-id', 'user:next-submission');
   });
 
@@ -574,12 +611,12 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(reasoning).toHaveAttribute('aria-expanded', 'false');
     expect(reasoning.querySelector('.lucide-brain')).toBeInTheDocument();
     expect(container.querySelector('[data-ai-node-kind="userMessage"]')?.closest('[data-slot="message-scroller-item"]'))
-      .toHaveAttribute('data-scroll-anchor', 'true');
+      .toHaveAttribute('data-scroll-anchor', 'false');
     expect(container.querySelector('[data-ai-node-kind="turnProcess"]')).toBeNull();
     const turnTail = container.querySelector('[data-ai-node-kind="turnTail"]');
     expect(turnTail).toBeInTheDocument();
-    expect(turnTail?.closest('[data-slot="message-scroller-item"]')).toHaveClass('-ml-1');
-    expect(turnTail?.querySelector('.ai-turn-tail')).not.toHaveClass('-ml-1');
+    expect(turnTail?.closest('[data-slot="message-scroller-item"]')).toHaveClass('-ml-1.5');
+    expect(turnTail?.querySelector('.ai-turn-tail')).not.toHaveClass('-ml-1.5');
     const footer = screen.getByLabelText('Turn statistics');
     expect(within(footer).getByRole('button', { name: 'Copy' })).toBeVisible();
     expect(within(footer).getByRole('button', { name: 'Usage 144 tok' })).toBeVisible();

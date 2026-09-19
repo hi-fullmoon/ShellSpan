@@ -518,9 +518,9 @@ function DiffSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
   return (
     <div className="ai-diff-block my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-px overflow-hidden" data-ai-tool-view="diff">
       {hunks.map((hunk, index) => (
-        <section key={`${hunk.path}:${index}`}>
+        <section key={`${hunk.path}:${index}`} className="min-w-0 max-w-full">
           <div className="ai-block-banner flex min-w-0 items-center gap-2 truncate px-3.5 py-[9px]">{hunk.path}</div>
-          <pre className="ai-diff-body m-0 flex max-h-65 max-w-full flex-col overflow-auto px-3.5 py-3 whitespace-pre">
+          <pre className="ai-diff-body m-0 flex min-w-0 max-h-65 max-w-full flex-col overflow-auto px-3.5 py-3 whitespace-pre-wrap [overflow-wrap:anywhere]">
             {(hunk.oldText === null ? [] : contentLines(hunk.oldText))
               .slice(0, compact ? 8 : undefined).map((line, lineIndex) => (
               <span key={`old-${lineIndex}`} data-diff="removed">- {line}</span>

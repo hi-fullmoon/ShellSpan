@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useId, useMemo, useRef } from 'react';
 import { MessageCircleQuestionIcon } from 'lucide-react';
 import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 
 import { useI18n } from '@/hooks/useI18n';
-import {
-  latestTurnReachedStepBudget,
-  type AiConversationNode,
-} from '@/lib/ai/conversation-node';
+import type { AiConversationNode } from '@/lib/ai/conversation-node';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { findConversationTool } from '@/lib/ai/conversation-tool';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiInboxItem, AiSessionView } from '@/lib/ai/session-adapter';
@@ -197,6 +195,7 @@ export interface AiWorkspaceRootProps {
   readonly onPasteImages?: (files: File[]) => void | Promise<void>;
   readonly hasImages?: boolean;
   readonly imageBusy?: boolean;
+  readonly imageSubmissionId?: string;
   readonly imageLocked?: boolean;
   readonly view: AiSessionView | null;
   readonly scope: Extract<AppSection, 'terminal' | 'workbench'>;
@@ -276,7 +275,7 @@ export interface AiWorkspaceRootProps {
 
 export function AiWorkspaceRoot({
   mode,
-  imageControls, onPasteImages, hasImages, imageBusy, imageLocked,
+  imageControls, onPasteImages, hasImages, imageBusy, imageSubmissionId, imageLocked,
   view,
   scope,
   title,
@@ -319,7 +318,6 @@ export function AiWorkspaceRoot({
   onSubmit,
   onSubmitGesture,
   onStop,
-  onContinueBudgetedTurn,
   onContinueOnReconnectedTerminal,
   historicalContinuationAvailable = false,
   historicalContinuationBusy = false,
@@ -374,10 +372,7 @@ export function AiWorkspaceRoot({
     ? t('agent.emptyDescription')
     : t('ai.workbench.empty');
   const surfaceMode = mode ?? 'agent';
-  const budgetContinuationAvailable = surfaceMode === 'agent'
-    && !readOnlySession
-    && status === 'idle'
-    && latestTurnReachedStepBudget(visibleNodes);
+  const availabilityHintId = useId();
   const historicalComposerEnabled = readOnlySession && historicalContinuationAvailable;
   const historicalComposerDisplay = readOnlySession
     && (historicalComposerEnabled || !onContinueOnReconnectedTerminal);
@@ -393,6 +388,8 @@ export function AiWorkspaceRoot({
     pendingSubmissions: [],
     failedDrafts: [],
   } : composerState;
+  const pendingSubmissions = activeComposerState?.pendingSubmissions;
+  const submittedOperationId = pendingSubmissions?.[pendingSubmissions.length - 1]?.clientOperationId;
   const conversationNodes = useMemo(() => (
     surfaceMode === 'ask'
       ? askConversationNodes(visibleNodes)
@@ -512,6 +509,46 @@ export function AiWorkspaceRoot({
       />
 
       <div
+        data-slot="ai-workspace-status-notices"
+        className="mx-auto flex w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] shrink-0 flex-col gap-1.5 px-[var(--ai-shell-clearance)] pt-2 empty:hidden"
+      >
+        {historicalContinuationAvailable && (
+          <Alert variant="subtle" size="sm" role="status">
+            <AlertDescription>{t(historicalContinuationBusy
+              ? 'ai.workspace.sessions.continuePreparing'
+              : 'ai.workspace.sessions.continueComposerHint')}</AlertDescription>
+          </Alert>
+        )}
+        {historicalContinuationError && (
+          <Alert variant="destructiveSubtle" size="sm">
+            <AlertDescription>{historicalContinuationError}</AlertDescription>
+          </Alert>
+        )}
+        {activeComposerState?.phase === 'stopping' && (
+          <Alert size="sm" variant="subtle" role="status">
+            <AlertDescription>{t('ai.workspace.stopping')}</AlertDescription>
+          </Alert>
+        )}
+        {surfaceMode === 'agent' && activeComposerState?.phase === 'waitingApproval' && !view?.pendingApproval && (
+          <Alert size="sm">
+            <AlertTitle>{t('ai.workspace.approvalWaiting')}</AlertTitle>
+            <AlertDescription>{t('ai.workspace.approvalPhase5')}</AlertDescription>
+          </Alert>
+        )}
+        {activeComposerState?.phase === 'waitingQuestion' && !view?.pendingQuestion && (
+          <Alert size="sm">
+            <AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle>
+            <AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>
+          </Alert>
+        )}
+        {agentUnavailableReason && (
+          <Alert id={availabilityHintId} variant="subtle" size="sm" role="status" aria-label={t('agent.availability.title')}>
+            <AlertDescription className="min-w-0 break-words">{agentUnavailableReason}</AlertDescription>
+          </Alert>
+        )}
+      </div>
+
+      <div
         data-slot="ai-workspace-body"
         className="ai-workspace-body relative flex min-h-0 min-w-0 flex-1 flex-col"
       >
@@ -535,6 +572,8 @@ export function AiWorkspaceRoot({
               renderers={surfaceMode === 'ask' ? aiAskConversationNodeRenderers : undefined}
               runningIndicator={readOnlySession ? 'none' : surfaceMode}
               pending={surfaceMode === 'ask' && composerState?.phase === 'submitting'}
+              submittedOperationId={submittedOperationId}
+              imageSubmissionId={imageSubmissionId}
               status={status}
               throughSeq={view?.throughSeq ?? null}
               initialAnchor={scrollAnchor}
@@ -586,16 +625,11 @@ export function AiWorkspaceRoot({
           approvalArgumentsLoading={approvalArgumentsLoading}
           approvalArgumentsError={approvalArgumentsError}
           unavailableReason={agentUnavailableReason}
+          availabilityHintId={availabilityHintId}
           onDraftChange={onDraftChange}
           onSubmit={onSubmit ? (content) => onSubmit({ content }) : undefined}
           onSubmitGesture={onSubmitGesture}
           onStop={readOnlySession ? undefined : onStop}
-          onContinueBudgetedTurn={readOnlySession ? undefined : onContinueBudgetedTurn}
-          budgetContinuationAvailable={budgetContinuationAvailable}
-          onContinueOnReconnectedTerminal={historicalComposerEnabled ? undefined : onContinueOnReconnectedTerminal}
-          historicalContinuationAvailable={historicalContinuationAvailable}
-          historicalContinuationBusy={historicalContinuationBusy}
-          historicalContinuationError={historicalContinuationError}
           onBusyPreferenceChange={surfaceMode === 'agent' && !readOnlySession
             && !view?.snapshot.value.header.subagent ? onBusyPreferenceChange : undefined}
           onUpdateQueueItem={surfaceMode === 'agent' && !readOnlySession ? onUpdateQueueItem : undefined}
