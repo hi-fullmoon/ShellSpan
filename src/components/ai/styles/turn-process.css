@@ -26,25 +26,23 @@
   color: var(--ai-text-muted);
 }
 
-.ai-disclosure-leading > svg,
 .ai-block-banner > svg,
 .ai-produced-files-label > svg,
-.ai-transcript-notice > svg,
 .ai-turn-error > svg,
 .ai-artifact-summary > svg {
   width: 14px;
   height: 14px;
 }
 
-/* Match the separator and inline notice icons to the text baseline. Disclosure
-   icons are already centered by the shared 24px row and must not be shifted. */
-.ai-disclosure-separator,
+.ai-disclosure-leading > svg,
 .ai-transcript-notice > svg {
-  translate: 0 1px;
+  width: 14px;
+  height: 14px;
 }
 
-.ai-transcript-notice[data-variant='cancelled'] > svg {
-  translate: none;
+/* Match the separator to the text baseline; row icons use centered layout. */
+.ai-disclosure-separator {
+  translate: 0 1px;
 }
 
 .ai-disclosure-title {
@@ -71,13 +69,13 @@
 
 .ai-disclosure-leading > * {
   position: absolute;
-  inset: 1px;
+  inset: 0;
   margin: auto;
 }
 
 .ai-disclosure-leading > .ai-disclosure-chevron {
   position: absolute;
-  inset: 1px;
+  inset: 0;
   width: 14px;
   height: 14px;
   margin: auto;

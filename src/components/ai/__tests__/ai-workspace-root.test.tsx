@@ -710,6 +710,8 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     if (process.getAttribute('aria-expanded') === 'false') await user.click(process);
 
     expect(container.querySelectorAll('[data-ai-process-child="approvalMarker"]')).toHaveLength(1);
+    expect(container.querySelector('[data-ai-process-child="approvalMarker"] .ai-transcript-notice'))
+      .toHaveClass('items-center', 'gap-1');
 
     rerender(<AiWorkspaceRoot view={withPermission('operator')} scope="terminal" />);
 
