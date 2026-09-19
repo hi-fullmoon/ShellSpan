@@ -384,7 +384,7 @@ function ApprovalMarkerNodeView({
 }: { readonly node: AiConversationNodeOf<'approvalMarker'> }) {
   const { t } = useI18n();
   return (
-    <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_max-content_minmax(0,1fr)] items-center gap-1.5 py-0.5" data-variant="approval" data-state={node.status}>
+    <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_max-content_minmax(0,1fr)] items-center gap-1 py-0.5" data-variant="approval" data-state={node.status}>
       <ShieldAlertIcon aria-hidden="true" />
       <span>{t(`ai.workspace.approval.${node.status}` as LocaleKey)}</span>
       {node.prompt && <span className="ai-transcript-notice-detail min-w-0 truncate">{node.prompt}</span>}
@@ -395,7 +395,7 @@ function ApprovalMarkerNodeView({
 function RetryNodeView({ node }: { readonly node: AiConversationNodeOf<'retry'> }) {
   const { t } = useI18n();
   return (
-    <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_max-content_minmax(0,1fr)] items-center gap-1.5 py-0.5" data-variant="retry">
+    <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_max-content_minmax(0,1fr)] items-center gap-1 py-0.5" data-variant="retry">
       <RefreshCwIcon aria-hidden="true" />
       <span>{t('ai.workspace.retry', { attempt: node.attempt })}</span>
       <span className="ai-transcript-notice-detail min-w-0 truncate">{node.reason}</span>
@@ -416,7 +416,7 @@ function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> 
   const { t } = useI18n();
   if (node.state === 'cancelled') {
     return (
-      <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_minmax(0,1fr)] items-center gap-1.5 py-0.5" data-variant="cancelled" role="status">
+      <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_minmax(0,1fr)] items-center gap-1 py-0.5" data-variant="cancelled" role="status">
         <SquareIcon aria-hidden="true" />
         <span>{t('ai.workspace.stopped')}</span>
       </div>
@@ -556,7 +556,7 @@ function TurnProcessDisclosure({
         </CollapsibleTrigger>
         <Separator className="ai-turn-process-separator" />
         <CollapsibleContent>
-          <div className="ai-turn-process-body flex w-full min-w-0 max-w-full flex-col gap-1.5 box-border pt-1.5 pr-0 pb-0.5">
+          <div className="ai-turn-process-body flex w-full min-w-0 max-w-full flex-col gap-1 box-border pt-1.5 pr-0 pb-0.5">
             {node.children.map((child) => (
               <div
                 key={child.key}

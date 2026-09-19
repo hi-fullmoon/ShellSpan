@@ -125,12 +125,14 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(getComputedStyle(processBody!).borderLeftStyle).toBe('none');
     expect(getComputedStyle(process.querySelector('.ai-disclosure-leading')!).translate).toBe('none');
     expect(process.querySelector('.ai-disclosure-leading')).toHaveClass('mr-1');
+    expect(getComputedStyle(process.querySelector('.ai-disclosure-leading > svg')!).width).toBe('14px');
     expect(processSeparator).not.toHaveClass('ml-[22px]');
     const reasoning = screen.getByRole('button', {
       name: 'Reasoning Read the frozen context. Answer directly.',
     });
     expect(reasoning).toHaveAttribute('aria-expanded', 'false');
     expect(reasoning.querySelector('.ai-disclosure-leading')).toHaveClass('mr-1');
+    expect(getComputedStyle(reasoning.querySelector('.ai-disclosure-leading > svg')!).width).toBe('14px');
     await user.click(reasoning);
     const reasoningPanel = container.querySelector<HTMLElement>(
       '.ai-reasoning-row > [data-slot="collapsible-content"]',
