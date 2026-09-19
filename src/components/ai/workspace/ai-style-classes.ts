@@ -6,7 +6,7 @@ export const AI_TOOL_ROW_CLASS =
   'ai-tool-row relative flex h-6 w-full min-w-0 cursor-pointer items-center justify-start gap-0 overflow-hidden p-0 text-left';
 
 export const AI_DISCLOSURE_LEADING_CLASS =
-  'ai-disclosure-leading relative mr-1.5 inline-flex size-4 shrink-0 items-center justify-center';
+  'ai-disclosure-leading relative mr-1 inline-flex size-4 shrink-0 items-center justify-center';
 
 export const AI_DISCLOSURE_TITLE_CLASS =
   'ai-disclosure-title shrink-0 whitespace-nowrap';
