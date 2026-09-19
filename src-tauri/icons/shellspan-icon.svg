@@ -1,25 +1,12 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
   <title>ShellSpan</title>
   <defs>
-    <linearGradient id="tile" x1="160" y1="90" x2="848" y2="930" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1A3145"/>
-      <stop offset="0.55" stop-color="#101D2E"/>
-      <stop offset="1" stop-color="#0B1322"/>
-    </linearGradient>
-    <linearGradient id="span" x1="256" y1="288" x2="748" y2="748" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#67E8F9"/>
-      <stop offset="0.52" stop-color="#38BDF8"/>
-      <stop offset="1" stop-color="#34D399"/>
+    <linearGradient id="fold" x1="410" y1="528" x2="610" y2="604" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D3D3D3"/>
+      <stop offset="1" stop-color="#858585"/>
     </linearGradient>
   </defs>
-
-  <rect x="32" y="32" width="960" height="960" rx="224" fill="url(#tile)"/>
-  <rect x="47" y="47" width="930" height="930" rx="209" stroke="#36566D" stroke-opacity="0.65" stroke-width="22"/>
-  <path
-    d="M722 314H421C331 314 276 355 276 430C276 492 329 526 422 526H612C704 526 754 564 754 635C754 711 700 753 609 753H303"
-    stroke="url(#span)"
-    stroke-width="104"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="#505050"/>
+  <path d="M704 318H430C349 318 302 353 302 418C302 474 333 498 410 528L610 604C687 635 724 662 724 712C724 769 679 786 608 786H314" stroke="#F4F4F4" stroke-width="100" stroke-linecap="square" stroke-linejoin="round"/>
+  <path d="M410 528L610 604" stroke="url(#fold)" stroke-width="100"/>
 </svg>

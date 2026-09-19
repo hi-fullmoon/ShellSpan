@@ -1,0 +1,12 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>ShellSpan</title>
+  <defs>
+    <linearGradient id="fold" x1="410" y1="528" x2="610" y2="604" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D3D3D3"/>
+      <stop offset="1" stop-color="#858585"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="#505050"/>
+  <path d="M704 318H430C349 318 302 353 302 418C302 474 333 498 410 528L610 604C687 635 724 662 724 712C724 769 679 786 608 786H314" stroke="#F4F4F4" stroke-width="100" stroke-linecap="square" stroke-linejoin="round"/>
+  <path d="M410 528L610 604" stroke="url(#fold)" stroke-width="100"/>
+</svg>
