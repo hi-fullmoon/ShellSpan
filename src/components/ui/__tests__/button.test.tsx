@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { DownloadIcon } from 'lucide-react';
 import { Button } from '../button';
 import { Spinner } from '../empty-state';
+import { InputGroupButton } from '../input-group';
+import { Toggle } from '../toggle';
 
 describe('Button', () => {
   it('renders children', () => {
@@ -28,6 +30,7 @@ describe('Button', () => {
 
     const button = screen.getByRole('button', { name: 'Export' });
     expect(button).toHaveClass('leading-none');
+    expect(button).toHaveClass('gap-1');
     expect(button.className).toContain('[&_svg]:size-3.5');
   });
 
@@ -41,6 +44,18 @@ describe('Button', () => {
     const button = screen.getByRole('button', { name: 'Download' });
     expect(button).toHaveClass('size-6');
     expect(button.className).toContain('[&_svg]:size-3');
+  });
+
+  it('uses the same icon and label spacing in input actions and toggles', () => {
+    render(
+      <>
+        <InputGroupButton><DownloadIcon data-icon="inline-start" />Export</InputGroupButton>
+        <Toggle><DownloadIcon data-icon="inline-start" />Export selected</Toggle>
+      </>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Export' })).toHaveClass('gap-1');
+    expect(screen.getByRole('button', { name: 'Export selected' })).toHaveClass('gap-1');
   });
 
   it('renders destructive outline actions without a filled background', () => {

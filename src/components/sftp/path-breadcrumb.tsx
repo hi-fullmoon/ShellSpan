@@ -69,7 +69,7 @@ const BreadcrumbSegment: React.FC<BreadcrumbSegmentProps> = ({ segment, onNaviga
             size="sm"
             onClick={(event) => navigateFromButton(event, segment.path, onNavigate)}
             onDoubleClick={(event) => event.stopPropagation()}
-            className="h-6 gap-1 px-1 text-muted-foreground hover:text-app-text [&_svg]:size-3"
+            className="h-6 px-1 text-muted-foreground hover:text-app-text [&_svg]:size-3"
           />
         }
       >
@@ -183,7 +183,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
         {segments.map((segment) => (
           <React.Fragment key={segment.path}>
             <ChevronIcon />
-            <Button data-breadcrumb-segment tabIndex={-1} variant="ghost" size="sm" className="h-6 gap-1 px-1 [&_svg]:size-3">
+            <Button data-breadcrumb-segment tabIndex={-1} variant="ghost" size="sm" className="h-6 px-1 [&_svg]:size-3">
               <FolderIcon data-icon="inline-start" />
               <span className="max-w-[200px] truncate leading-none">{segment.name}</span>
             </Button>

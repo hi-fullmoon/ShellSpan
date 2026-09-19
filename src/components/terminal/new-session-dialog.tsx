@@ -205,7 +205,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
           onClick={() => activateCommand(command)}
           onMouseEnter={() => setSelectedIndex(index)}
           data-command-index={index}
-          className="h-auto w-full justify-start gap-3 rounded-lg p-3 text-left"
+          className="h-auto w-full justify-start gap-1 rounded-lg p-3 text-left"
         >
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <ServerIcon data-icon="inline-start" />
@@ -275,7 +275,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
                 onClick={() => activateCommand(localCommand.command)}
                 onMouseEnter={() => setSelectedIndex(localCommand.index)}
                 data-command-index={localCommand.index}
-                className="h-auto w-full justify-start gap-3 rounded-lg p-3 text-left"
+                className="h-auto w-full justify-start gap-1 rounded-lg p-3 text-left"
               >
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                   <SquareTerminalIcon data-icon="inline-start" />

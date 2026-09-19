@@ -81,7 +81,7 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children, 
     onClick={onClick}
     disabled={disabled}
     className={cn(
-      'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors disabled:pointer-events-none disabled:opacity-40',
+      'flex w-full items-center gap-1 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors disabled:pointer-events-none disabled:opacity-40',
       danger ? 'text-app-error hover:bg-app-error/10' : 'text-app-text hover:bg-app-primary/10 hover:text-app-primary',
     )}
   >
