@@ -14,10 +14,11 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::agent_runtime::{
-    AgentToolCallNative, AgentToolTargetNative, ApplyPatchArgumentsNative, FileEncodingNative,
-    ListDirectoryArgumentsNative, ReadFileArgumentsNative, SearchModeNative,
-    SearchTextArgumentsNative, TransferDirectionNative, TransferFileArgumentsNative,
-    WriteFileArgumentsNative, WriteFilePreconditionNative, MAX_WRITE_FILE_CONTENT_BYTES,
+    AgentToolCallNative, AgentToolTargetNative, ApplyPatchArgumentsNative, EditFileArgumentsNative,
+    FileEncodingNative, ListDirectoryArgumentsNative, PatchPreconditionNative,
+    ReadFileArgumentsNative, SearchModeNative, SearchTextArgumentsNative, TransferDirectionNative,
+    TransferFileArgumentsNative, WriteFileArgumentsNative, WriteFilePreconditionNative,
+    MAX_WRITE_FILE_CONTENT_BYTES,
 };
 use crate::connection::connect_sftp;
 use crate::db::Database;
@@ -168,17 +169,9 @@ pub(super) fn preview_file_call_native(
                 diff: preview.diff,
             })
         }
-        "apply_patch" => {
-            let arguments: ApplyPatchArgumentsNative =
-                serde_json::from_value(call.arguments.clone())
-                    .map_err(|error| format!("invalid apply_patch arguments: {error}"))?;
-            let preview = compute_patch_preview(
-                &call.target,
-                &arguments,
-                database,
-                credentials,
-                known_hosts_path,
-            )?;
+        "apply_patch" | "edit_file" => {
+            let (preview, _) =
+                compute_edit_call_preview(call, database, credentials, known_hosts_path)?;
             Ok(AgentCallPreviewNative {
                 tool_name: call.tool_name.clone(),
                 target_id: call.target.target_id().to_string(),
@@ -230,7 +223,7 @@ pub(super) fn execute_file_tool_native(
         "list_directory" => execute_list_directory(&context, &operation),
         "search_text" => execute_search_text(&context, &operation),
         "write_file" => execute_write_file(&context, &operation),
-        "apply_patch" => execute_apply_patch(&context, &operation),
+        "apply_patch" | "edit_file" => execute_apply_patch(&context, &operation),
         "transfer_file" => execute_transfer_file(&context, &operation),
         _ => Err("tool has no native M2 file driver".into()),
     }
@@ -491,17 +484,13 @@ fn execute_apply_patch(
     operation: &FileOperationGuardNative,
 ) -> Result<FileToolOutputNative, String> {
     operation.ensure_active()?;
-    let arguments: ApplyPatchArgumentsNative =
-        serde_json::from_value(context.call.arguments.clone())
-            .map_err(|error| format!("invalid apply_patch arguments: {error}"))?;
-    let preview = compute_patch_preview(
-        &context.call.target,
-        &arguments,
+    let (preview, dry_run) = compute_edit_call_preview(
+        context.call,
         context.database,
         context.credentials,
         context.known_hosts_path,
     )?;
-    if arguments.dry_run.unwrap_or(false) {
+    if dry_run {
         return Ok(FileToolOutputNative {
             summary: "Validated the exact patch without writing.".into(),
             data: json!({
@@ -544,7 +533,10 @@ fn execute_apply_patch(
         MAX_FILE_BYTES,
     )?;
     if sha256_hex(&verified) != preview.after_sha256 || verified != preview.after {
-        return Err("apply_patch write verification failed".into());
+        return Err(format!(
+            "{} write verification failed",
+            context.call.tool_name
+        ));
     }
     Ok(FileToolOutputNative {
         summary: "Applied, re-read, and verified the exact native patch.".into(),
@@ -817,6 +809,76 @@ struct PatchPreviewNative {
     metadata: CheckpointOriginalMetadataNative,
 }
 
+fn compute_edit_call_preview(
+    call: &AgentToolCallNative,
+    database: &Database,
+    credentials: &CredentialManager,
+    known_hosts_path: &Path,
+) -> Result<(PatchPreviewNative, bool), String> {
+    if call.tool_name == "apply_patch" {
+        let arguments: ApplyPatchArgumentsNative =
+            serde_json::from_value(call.arguments.clone())
+                .map_err(|error| format!("invalid apply_patch arguments: {error}"))?;
+        return compute_patch_preview(
+            &call.target,
+            &arguments,
+            database,
+            credentials,
+            known_hosts_path,
+        )
+        .map(|preview| (preview, arguments.dry_run.unwrap_or(false)));
+    }
+    crate::agent_runtime::validate_tool_arguments_native("edit_file", &call.arguments)?;
+    let arguments: EditFileArgumentsNative = serde_json::from_value(call.arguments.clone())
+        .map_err(|error| format!("invalid edit_file arguments: {error}"))?;
+    let registry = FileOperationRegistryNative::default();
+    let operation = registry.begin("edit-preview", "edit-preview")?;
+    let (_, before, _) = read_target_file(
+        &call.target,
+        &arguments.path,
+        database,
+        credentials,
+        known_hosts_path,
+        &operation,
+        MAX_FILE_BYTES,
+    )?;
+    if sha256_hex(&before) != arguments.precondition.sha256 {
+        return Err("edit_file digest precondition failed; read the current file before editing again. No file was changed.".into());
+    }
+    let text = std::str::from_utf8(&before)
+        .map_err(|_| "edit_file only supports UTF-8 text files".to_string())?;
+    let start = text.find(&arguments.old_string)
+        .ok_or_else(|| "edit_file oldString was not found; read the current file and use exact text. No file was changed.".to_string())?;
+    if text.rfind(&arguments.old_string) != Some(start) {
+        return Err("edit_file oldString is not unique; include more surrounding context. No file was changed.".into());
+    }
+    let after = text.replacen(&arguments.old_string, &arguments.new_string, 1);
+    if after.len() as u64 > MAX_FILE_BYTES {
+        return Err("edit_file result exceeds the native file size limit".into());
+    }
+    let patch = diffy::create_patch(text, &after).to_string();
+    if patch.len() > MAX_EXACT_DIFF_BYTES {
+        return Err("edit_file exact diff exceeds the native output limit".into());
+    }
+    // Reuse the digest-bound patch preview and commit path. Its second read
+    // rejects a concurrent change before review, and commit rechecks the digest.
+    compute_patch_preview(
+        &call.target,
+        &ApplyPatchArgumentsNative {
+            patch,
+            preconditions: vec![PatchPreconditionNative {
+                path: arguments.path,
+                sha256: arguments.precondition.sha256,
+            }],
+            dry_run: None,
+        },
+        database,
+        credentials,
+        known_hosts_path,
+    )
+    .map(|preview| (preview, false))
+}
+
 fn compute_patch_preview(
     target: &AgentToolTargetNative,
     arguments: &ApplyPatchArgumentsNative,
@@ -841,22 +903,23 @@ fn compute_patch_preview(
     )?;
     let before_sha256 = sha256_hex(&before);
     if before_sha256 != precondition.sha256 {
-        return Err("apply_patch digest precondition failed".into());
+        return Err("apply_patch digest precondition failed; no file was changed. Read the current file with read_file and rebuild the patch using its returned SHA-256; do not guess the digest.".into());
     }
     let before_text = std::str::from_utf8(&before)
         .map_err(|_| "apply_patch only supports UTF-8 text files".to_string())?;
-    let patch = diffy::Patch::from_str(&arguments.patch)
-        .map_err(|error| format!("apply_patch diff is invalid: {error}"))?;
+    let patch = diffy::Patch::from_str(&arguments.patch).map_err(|error| {
+        format!("apply_patch diff is invalid: {error}. No file was changed. Supply standard unified diff with ---/+++ headers and @@ -old_start,old_count +new_start,new_count @@ hunks whose counts match their lines; not SEARCH/REPLACE or *** Begin Patch syntax.")
+    })?;
     let after_text = diffy::apply(before_text, &patch)
-        .map_err(|error| format!("apply_patch diff does not match the file: {error}"))?;
+        .map_err(|error| format!("apply_patch diff does not match the file: {error}. No file was changed. Read the current file and rebuild the patch from its exact content and SHA-256."))?;
     let after = after_text.into_bytes();
+    if after == before {
+        return Err("apply_patch produces no change; no file was written. Read the relevant lines to check whether the requested change is already present; otherwise supply a patch with actual additions or deletions.".into());
+    }
     if after.len() as u64 > MAX_FILE_BYTES {
         return Err("patched file exceeds the native size limit".into());
     }
     let diff = diffy::create_patch(before_text, std::str::from_utf8(&after).unwrap()).to_string();
-    if diff.trim().is_empty() {
-        return Err("apply_patch produces no change".into());
-    }
     if diff.len() > MAX_EXACT_DIFF_BYTES {
         return Err("apply_patch exact diff exceeds the native output limit".into());
     }
@@ -2152,6 +2215,185 @@ mod tests {
         )
         .unwrap();
         assert_eq!(fs::read(path).unwrap(), b"after");
+    }
+
+    #[test]
+    fn edit_file_changes_long_lines_and_rejects_ambiguous_or_stale_edits() {
+        let workspace = tempfile::tempdir().unwrap();
+        let runtime_root = tempfile::tempdir().unwrap();
+        let database = Database::open(&runtime_root.path().join("edit.db")).unwrap();
+        let credentials = CredentialManager::in_memory_for_tests();
+        let known_hosts_path = runtime_root.path().join("known_hosts");
+        let checkpoints = CheckpointStoreNative::default();
+        let operations = FileOperationRegistryNative::default();
+        let path = workspace.path().join("app.js");
+        let original = format!(
+            "const data = \"{}中文\";\r\n// keep aaa\r\n",
+            "x".repeat(9000)
+        );
+        fs::write(&path, &original).unwrap();
+        let make_call = |old: &str, new: &str, digest: &str| AgentToolCallNative {
+            request_id: "edit-request".into(),
+            call_id: Uuid::new_v4().to_string(),
+            tool_name: "edit_file".into(),
+            arguments: json!({ "path": "app.js", "oldString": old, "newString": new,
+                "precondition": { "sha256": digest } }),
+            target: AgentToolTargetNative::Local {
+                target_id: "local".into(),
+                session_id: "terminal".into(),
+                cwd: Some(workspace.path().to_string_lossy().to_string()),
+            },
+            capability_id: "edit".into(),
+        };
+        let run = |call: &AgentToolCallNative| {
+            execute_file_tool_native(FileExecutionContextNative {
+                task_id: "edit-task",
+                call,
+                database: &database,
+                credentials: &credentials,
+                known_hosts_path: &known_hosts_path,
+                checkpoint_root: runtime_root.path(),
+                checkpoints: &checkpoints,
+                operations: &operations,
+            })
+        };
+        let digest = sha256_hex(original.as_bytes());
+        for (old, new, expected) in [
+            ("aa", "b", "not unique"), // includes overlapping matches
+            ("missing", "b", "not found"),
+            ("", "b", "nonempty"),
+            ("data", "data", "distinct"),
+        ] {
+            let error = run(&make_call(old, new, &digest))
+                .err()
+                .expect("must reject");
+            assert!(error.contains(expected), "{error}");
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        }
+        let call = make_call("const data", "const info", &digest);
+        let preview =
+            preview_file_call_native(&call, &database, &credentials, &known_hosts_path).unwrap();
+        assert_eq!(preview.tool_name, "edit_file");
+        let output = run(&call).unwrap();
+        let changed = original.replacen("const data", "const info", 1);
+        assert_eq!(fs::read_to_string(&path).unwrap(), changed);
+        assert_eq!(output.data["verified"], true);
+        assert_eq!(output.data["applied"], true);
+        assert!(output.data["checkpointId"].as_str().is_some());
+        assert_eq!(
+            output.data["files"][0]["afterSha256"],
+            sha256_hex(changed.as_bytes())
+        );
+        assert_eq!(output.data["diff"], preview.diff.unwrap());
+        assert!(run(&call)
+            .err()
+            .unwrap()
+            .contains("digest precondition failed"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), changed);
+        let deletion = make_call("中文", "", &sha256_hex(changed.as_bytes()));
+        run(&deletion).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            changed.replace("中文", "")
+        );
+    }
+
+    #[test]
+    fn apply_patch_rejects_noops_and_recovers_with_fresh_file_digests() {
+        let workspace = tempfile::tempdir().unwrap();
+        let runtime_root = tempfile::tempdir().unwrap();
+        let database = Database::open(&runtime_root.path().join("patch.db")).unwrap();
+        let credentials = CredentialManager::in_memory_for_tests();
+        let known_hosts_path = runtime_root.path().join("known_hosts");
+        let checkpoints = CheckpointStoreNative::default();
+        let operations = FileOperationRegistryNative::default();
+        let path = workspace.path().join("index.html");
+        let original = "<main>before</main>\n";
+        fs::write(&path, original).unwrap();
+        let run = |patch: &str, sha256: &str, dry_run: bool| {
+            let call = AgentToolCallNative {
+                request_id: "patch-request".into(),
+                call_id: Uuid::new_v4().to_string(),
+                tool_name: "apply_patch".into(),
+                arguments: json!({
+                    "patch": patch,
+                    "preconditions": [{ "path": "index.html", "sha256": sha256 }],
+                    "dryRun": dry_run,
+                }),
+                target: AgentToolTargetNative::Local {
+                    target_id: "local".into(),
+                    session_id: "terminal".into(),
+                    cwd: Some(workspace.path().to_string_lossy().to_string()),
+                },
+                capability_id: "patch".into(),
+            };
+            execute_file_tool_native(FileExecutionContextNative {
+                task_id: "patch-task",
+                call: &call,
+                database: &database,
+                credentials: &credentials,
+                known_hosts_path: &known_hosts_path,
+                checkpoint_root: runtime_root.path(),
+                checkpoints: &checkpoints,
+                operations: &operations,
+            })
+        };
+        let original_sha = sha256_hex(original.as_bytes());
+        let noops = [
+            diffy::create_patch(original, original).to_string(),
+            "--- original\n+++ modified\n@@ -1 +1 @@\n <main>before</main>\n".into(),
+            "--- original\n+++ modified\n@@ -1 +1 @@\n-<main>before</main>\n+<main>before</main>\n"
+                .into(),
+        ];
+        for noop in noops {
+            for dry_run in [false, true] {
+                let error = run(&noop, &original_sha, dry_run)
+                    .err()
+                    .expect("no-op must fail");
+                assert!(
+                    error.starts_with("apply_patch produces no change"),
+                    "{error}"
+                );
+                assert_eq!(fs::read_to_string(&path).unwrap(), original);
+            }
+        }
+        let malformed = "--- original\n+++ modified\n@@ -1,2 +1 @@\n-old\n+new\n";
+        let error = run(malformed, &original_sha, false).err().unwrap();
+        assert!(error.starts_with("apply_patch diff is invalid:"));
+        assert!(error.contains("standard unified diff"));
+        let mismatch = diffy::create_patch("different\n", "new\n").to_string();
+        let error = run(&mismatch, &original_sha, false).err().unwrap();
+        assert!(error.starts_with("apply_patch diff does not match the file:"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert!(!runtime_root
+            .path()
+            .join("agent-native-call-checkpoints")
+            .exists());
+
+        let changed = "<main>after</main>\n";
+        let patch = diffy::create_patch(original, changed).to_string();
+        let preview = run(&patch, &original_sha, true).unwrap();
+        assert_eq!(preview.data["applied"], false);
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        let applied = run(&patch, &original_sha, false).unwrap();
+        assert_eq!(applied.data["applied"], true);
+        assert_eq!(applied.data["verified"], true);
+        assert_eq!(applied.data["files"][0]["beforeSha256"], original_sha);
+        assert_eq!(
+            applied.data["files"][0]["afterSha256"],
+            sha256_hex(&fs::read(&path).unwrap())
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), changed);
+
+        let final_content = "<main>after</main>\n<footer>done</footer>\n";
+        let next_patch = diffy::create_patch(changed, final_content).to_string();
+        let error = run(&next_patch, &original_sha, false).err().unwrap();
+        assert!(error.starts_with("apply_patch digest precondition failed"));
+        assert!(error.contains("read_file"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), changed);
+        let current_sha = sha256_hex(&fs::read(&path).unwrap());
+        run(&next_patch, &current_sha, false).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), final_content);
     }
 
     #[test]

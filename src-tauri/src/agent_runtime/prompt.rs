@@ -90,7 +90,7 @@ fn permission_prompt(mode: Option<AgentSessionPermissionMode>) -> String {
     match mode.unwrap_or(AgentSessionPermissionMode::RequestApproval) {
         AgentSessionPermissionMode::RequestApproval => "The Session is in request-approval mode. ShellSpan requires user authorization before every native tool call, including read-only inspection.".into(),
         AgentSessionPermissionMode::ScopedAutopilot => "The Session is in scoped-autopilot mode. Only ordinary read-only effects may run automatically; sensitive reads, state changes, destructive operations, and external side effects require approval. Use only effects and targets in the frozen capability scope.".into(),
-        AgentSessionPermissionMode::Operator => "The Session is in operator mode. Use only the frozen target and structured tool scope; ShellSpan remains the authority for native validation and execution.".into(),
+        AgentSessionPermissionMode::Operator => "The Session is in full-access operator mode. Native tool calls run without per-call approval. Shell commands can access files outside the workspace and use the network with the connected account's permissions, without a workspace sandbox. Use only the frozen target and respect each structured tool's contract; target identity, cancellation, and audit checks remain enforced.".into(),
     }
 }
 
@@ -112,7 +112,10 @@ fn workspace_prompt(
                 } else if !target_has_native_file_access(target) {
                     prompt.push_str(" The frozen remote root has no credential-backed profile, so native file tools are unavailable. Use run_terminal_command for filesystem work when it is supplied. Terminal commands are limited to 8192 UTF-8 bytes, so split large writes across bounded single-line calls; delegating to a child Agent does not remove that limit.");
                 } else if has_tool("write_file") && has_tool("apply_patch") {
-                    prompt.push_str(" Native file tools are available. Use write_file for complete UTF-8 files up to 32 KiB; build larger files with read_file plus apply_patch in bounded increments. Never embed file contents in run_terminal_command.");
+                    prompt.push_str(" Native file tools are available. Use write_file for complete UTF-8 files only when they fit the current response budget; 32 KiB is a tool safety ceiling, not a generation target. Prefer read_file plus apply_patch in bounded increments for existing files, even below 32 KiB. For a new large file, create a small valid section, then add the remaining implementation through focused patches. Read the actual destination before editing, preserve unrelated content, and wait for each write result before editing that file again. Use the verified afterSha256 for the next patch; read again if the digest or context changed. Only a successful tool result establishes a saved change. Finish all requested functionality and run relevant checks before reporting completion. Never embed file contents in run_terminal_command.");
+                    if has_tool("edit_file") {
+                        prompt.push_str(" Prefer edit_file for a unique exact text replacement, especially inside long lines; it avoids generating whole-line diffs. Use apply_patch for multi-line changes. Advisory edit sizes must not prevent a necessary complete edit within the native safety bounds.");
+                    }
                 }
             }
             prompt
@@ -147,9 +150,8 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
         "probe_http" => target.is_some_and(|target| {
             target.kind == "local" || (target.kind == "remote" && target.profile_id.is_some())
         }),
-        "read_file" | "list_directory" | "search_text" | "write_file" | "apply_patch" => {
-            target.is_some_and(target_has_native_file_access)
-        }
+        "read_file" | "list_directory" | "search_text" | "write_file" | "edit_file"
+        | "apply_patch" => target.is_some_and(target_has_native_file_access),
         "transfer_file" => target.is_some_and(|target| {
             target.kind == "remote"
                 && target_has_native_file_access(target)

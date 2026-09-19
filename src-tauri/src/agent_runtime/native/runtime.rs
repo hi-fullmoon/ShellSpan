@@ -41,14 +41,13 @@ use super::{
     enforce_native_call_policy_native, execute_file_tool_native, execute_http_probe_native,
     execute_mcp_tool_native, inspect_call_policy_scope_native, load_mcp_server_native,
     preview_file_call_native, spawn_local_process_native, spawn_remote_process_native,
-    spawn_workspace_scoped_local_process_native, AgentCallPreviewNative,
-    CapabilityIssueRequestNative, CheckpointStoreNative, FileExecutionContextNative,
-    FileOperationRegistryNative, IssuedCapabilityNative, McpServerConfigNative,
-    McpToolPolicyNative, NativeCapabilityStoreNative, ProcessLifecycleNative,
-    ProcessRegistryNative, ProcessSnapshotNative, RegisteredToolNative, RemoteProcessStartNative,
-    TerminalExecuteRegistry, TerminalExecuteValidationStage, TerminalInputSource,
-    TerminalInteractiveRegistry, TerminalInteractiveValidationStage, TerminalLeaseManager,
-    ToolRegistryErrorNative, ToolRegistryNative,
+    AgentCallPreviewNative, CapabilityIssueRequestNative, CheckpointStoreNative,
+    FileExecutionContextNative, FileOperationRegistryNative, IssuedCapabilityNative,
+    McpServerConfigNative, McpToolPolicyNative, NativeCapabilityStoreNative,
+    ProcessLifecycleNative, ProcessRegistryNative, ProcessSnapshotNative, RegisteredToolNative,
+    RemoteProcessStartNative, TerminalExecuteRegistry, TerminalExecuteValidationStage,
+    TerminalInputSource, TerminalInteractiveRegistry, TerminalInteractiveValidationStage,
+    TerminalLeaseManager, ToolRegistryErrorNative, ToolRegistryNative,
 };
 
 pub(crate) const DEFAULT_CAPABILITY_TTL_MS: u64 = 120_000;
@@ -528,7 +527,6 @@ impl NativeToolEngine {
             context.request.permission_mode,
             effect.kind,
             scope.sensitive_path_count,
-            operator_call_is_scope_enforced(&call),
         );
         Ok(PreparedAuthorizationNative {
             native_prompt: native_prompt(&context, &call, &effect, &scope, &preview, ttl_ms),
@@ -660,7 +658,9 @@ impl NativeToolEngine {
         prepared: &PreparedMcpAuthorizationNative,
         approved: bool,
     ) -> Result<AgentCapabilityGrantNative, String> {
-        if !approved {
+        if prepared.context.request.permission_mode != AgentPermissionModeNative::Operator
+            && !approved
+        {
             return Err("native MCP capability approval was denied".into());
         }
         let IssuedCapabilityNative {
@@ -878,8 +878,8 @@ impl NativeToolEngine {
             "write_stdin" => self.write_process(context, &call, &effect),
             "wait_process" => self.wait_process(context, &call, &effect),
             "kill_process" => self.kill_process(context, &call, &effect),
-            "read_file" | "list_directory" | "search_text" | "write_file" | "apply_patch"
-            | "transfer_file" => self.execute_file_tool(
+            "read_file" | "list_directory" | "search_text" | "write_file" | "edit_file"
+            | "apply_patch" | "transfer_file" => self.execute_file_tool(
                 context,
                 &call,
                 &effect,
@@ -1250,37 +1250,14 @@ impl NativeToolEngine {
         self.processes.ensure_capacity()?;
         validate_frozen_cwd(&call.target, arguments.cwd.as_deref())?;
         let process = match &call.target {
-            AgentToolTargetNative::Local { target_id, cwd, .. } => {
-                if context.request.permission_mode == AgentPermissionModeNative::Operator {
-                    match cwd.as_deref() {
-                        Some(root) => spawn_workspace_scoped_local_process_native(
-                            context.request.task_id.clone(),
-                            context.request.request_id.clone(),
-                            target_id.clone(),
-                            &arguments.command,
-                            Path::new(root),
-                            timeout,
-                        )?,
-                        None => spawn_local_process_native(
-                            context.request.task_id.clone(),
-                            context.request.request_id.clone(),
-                            target_id.clone(),
-                            &arguments.command,
-                            None,
-                            timeout,
-                        )?,
-                    }
-                } else {
-                    spawn_local_process_native(
-                        context.request.task_id.clone(),
-                        context.request.request_id.clone(),
-                        target_id.clone(),
-                        &arguments.command,
-                        cwd.as_deref().map(Path::new),
-                        timeout,
-                    )?
-                }
-            }
+            AgentToolTargetNative::Local { target_id, cwd, .. } => spawn_local_process_native(
+                context.request.task_id.clone(),
+                context.request.request_id.clone(),
+                target_id.clone(),
+                &arguments.command,
+                cwd.as_deref().map(Path::new),
+                timeout,
+            )?,
             AgentToolTargetNative::Remote { target_id, .. } => {
                 let connection = connection_for_remote_target(&call.target, database, credentials)?;
                 spawn_remote_process_native(RemoteProcessStartNative {
@@ -1966,7 +1943,6 @@ fn requires_native_confirmation(
     permission_mode: AgentPermissionModeNative,
     effect: AgentEffectKindNative,
     sensitive_path_count: usize,
-    operator_scope_enforced: bool,
 ) -> bool {
     match permission_mode {
         AgentPermissionModeNative::RequestApproval => true,
@@ -1980,18 +1956,7 @@ fn requires_native_confirmation(
                         | AgentEffectKindNative::ExternalSideEffect
                 )
         }
-        AgentPermissionModeNative::Operator => !operator_scope_enforced,
-    }
-}
-
-fn operator_call_is_scope_enforced(call: &AgentToolCallNative) -> bool {
-    match call.tool_name.as_str() {
-        "exec_command" => matches!(
-            &call.target,
-            AgentToolTargetNative::Local { cwd: Some(root), .. } if !root.trim().is_empty()
-        ),
-        "terminal_execute" | "write_terminal_input" => false,
-        _ => true,
+        AgentPermissionModeNative::Operator => false,
     }
 }
 
@@ -2110,31 +2075,26 @@ mod tests {
             AgentPermissionModeNative::RequestApproval,
             AgentEffectKindNative::ReadOnly,
             0,
-            true,
         ));
         assert!(requires_native_confirmation(
             AgentPermissionModeNative::ScopedAutopilot,
             AgentEffectKindNative::SensitiveRead,
             0,
-            true,
         ));
         assert!(requires_native_confirmation(
             AgentPermissionModeNative::ScopedAutopilot,
             AgentEffectKindNative::StateChange,
             0,
-            true,
         ));
         assert!(requires_native_confirmation(
             AgentPermissionModeNative::ScopedAutopilot,
             AgentEffectKindNative::ReadOnly,
             1,
-            true,
         ));
         assert!(!requires_native_confirmation(
             AgentPermissionModeNative::ScopedAutopilot,
             AgentEffectKindNative::ReadOnly,
             0,
-            true,
         ));
 
         for effect in [
@@ -2148,19 +2108,17 @@ mod tests {
                 AgentPermissionModeNative::Operator,
                 effect,
                 1,
-                true,
             ));
         }
-        assert!(requires_native_confirmation(
+        assert!(!requires_native_confirmation(
             AgentPermissionModeNative::Operator,
             AgentEffectKindNative::Destructive,
             0,
-            false,
         ));
     }
 
     #[test]
-    fn operator_only_skips_confirmation_for_scope_enforced_shell_calls() {
+    fn operator_skips_confirmation_for_local_remote_and_terminal_calls() {
         let scoped_local = AgentToolCallNative {
             request_id: "request-scope".into(),
             call_id: "call-scope".into(),
@@ -2173,7 +2131,6 @@ mod tests {
             },
             capability_id: "pending".into(),
         };
-        assert!(operator_call_is_scope_enforced(&scoped_local));
 
         let mut unrooted = scoped_local.clone();
         unrooted.target = AgentToolTargetNative::Local {
@@ -2181,7 +2138,6 @@ mod tests {
             session_id: "terminal-local".into(),
             cwd: None,
         };
-        assert!(!operator_call_is_scope_enforced(&unrooted));
 
         let mut remote = scoped_local.clone();
         remote.target = AgentToolTargetNative::Remote {
@@ -2194,11 +2150,88 @@ mod tests {
             root_path: Some("/workspace".into()),
             local_root: None,
         };
-        assert!(!operator_call_is_scope_enforced(&remote));
+        for mut call in [scoped_local, unrooted, remote] {
+            for tool in ["exec_command", "terminal_execute", "write_terminal_input"] {
+                call.tool_name = tool.into();
+                call.arguments = json!({
+                    "command": "ls -la /usr/share/nginx/html/ 2>/dev/null; cat /etc/nginx/nginx.conf | head -20",
+                    "explanation": "inspect nginx configuration"
+                });
+                let scope = inspect_call_policy_scope_native(&call).unwrap();
+                assert!(!requires_native_confirmation(
+                    AgentPermissionModeNative::Operator,
+                    AgentEffectKindNative::StateChange,
+                    scope.sensitive_path_count,
+                ));
+                assert!(requires_native_confirmation(
+                    AgentPermissionModeNative::ScopedAutopilot,
+                    AgentEffectKindNative::StateChange,
+                    scope.sensitive_path_count,
+                ));
+            }
+        }
+    }
 
-        let mut structured = scoped_local;
-        structured.tool_name = "write_file".into();
-        assert!(operator_call_is_scope_enforced(&structured));
+    #[test]
+    #[cfg(unix)]
+    fn operator_direct_execution_can_write_outside_its_working_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = directory.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let target = AgentToolTargetNative::Local {
+            target_id: "target-full-access".into(),
+            session_id: "terminal-full-access".into(),
+            cwd: Some(workspace.to_str().unwrap().into()),
+        };
+        let context = NativeExecutionContext {
+            request: AgentRequestNative {
+                contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
+                request_id: "request-full-access".into(),
+                user_session_id: "session-full-access".into(),
+                task_id: "task-full-access".into(),
+                goal: "write outside the working directory".into(),
+                success_criteria: vec!["file exists outside the workspace".into()],
+                targets: vec![target.clone()],
+                permission_mode: AgentPermissionModeNative::Operator,
+            },
+            turn_id: "turn-full-access".into(),
+            step_id: "step-full-access".into(),
+        };
+        let call = AgentToolCallNative {
+            request_id: context.request.request_id.clone(),
+            call_id: "call-full-access".into(),
+            tool_name: "exec_command".into(),
+            arguments: json!({
+                "command": "printf full-access > ../outside.txt",
+                "explanation": "verify full-access filesystem execution",
+                "cwd": workspace.to_str().unwrap(),
+                "channel": "direct"
+            }),
+            target,
+            capability_id: "pending".into(),
+        };
+        let engine = NativeToolEngine::default();
+        let effect =
+            assess_effect_native(&engine.tool("exec_command").unwrap().descriptor, &call).unwrap();
+        let database = Database::open(&directory.path().join("runtime.db")).unwrap();
+        let result = engine
+            .execute_command(
+                &context,
+                &call,
+                &effect,
+                &SessionManager::default(),
+                &database,
+                &CredentialManager::new(),
+                &directory.path().join("known_hosts"),
+                5_000,
+                1,
+            )
+            .unwrap();
+        assert_eq!(result.status, AgentToolResultStatusNative::Completed);
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("outside.txt")).unwrap(),
+            "full-access"
+        );
     }
 
     #[test]

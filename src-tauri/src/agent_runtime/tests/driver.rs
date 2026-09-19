@@ -1,6 +1,33 @@
     use super::*;
 
     #[test]
+    fn output_recovery_count_survives_successful_steps_but_is_scoped_to_turn() {
+        let events = [
+            ("turn-1", "outputLimitContinuation"),
+            ("turn-1", "toolsCompleted"),
+            ("turn-2", "outputLimitContinuation"),
+            ("turn-1", "outputLimitContinuation"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (turn, reason))| {
+            let mut record = event(
+                index as u64,
+                AgentSessionEventPayload::StepEnd {
+                    reason: reason.into(),
+                },
+            );
+            record.turn_id = Some(turn.into());
+            record
+        })
+        .collect::<Vec<_>>();
+        assert_eq!(output_limit_continuation_count(&events[..2], "turn-1"), 1);
+        assert_eq!(output_limit_continuation_count(&events, "turn-1"), 2);
+        assert_eq!(output_limit_continuation_count(&events, "turn-2"), 1);
+        assert_eq!(output_limit_continuation_count(&events, "turn-3"), 0);
+    }
+
+    #[test]
     fn settled_plan_failures_do_not_force_another_completion_attempt() {
         use super::super::AgentPlanStepStatus::{Blocked, Completed, Failed, InProgress, Pending};
 
@@ -242,6 +269,165 @@
                 event.turn_id = Some("turn-1".into());
                 event.step_id = Some(step_id.into());
                 event
+            })
+            .collect()
+    }
+
+    #[test]
+    fn failed_file_edits_stop_despite_changing_arguments_and_interleaved_reads() {
+        let mut events = Vec::new();
+        for index in 0..3 {
+            events.extend(file_edit_step(index, "index.html", false));
+            events.extend(repeated_step(
+                &format!("read-step-{index}"),
+                &format!("read-{index}"),
+                "unchanged",
+                false,
+                100,
+            ));
+        }
+        assert_eq!(failed_file_edit_streak(&events, "turn-1"), 3);
+        assert!(
+            no_progress_reason(&events, "turn-1", AgentDriverConfig::default())
+                .unwrap()
+                .contains("3 edits to the same file failed")
+        );
+        assert_eq!(failed_file_edit_streak(&events, "other-turn"), 0);
+
+        // A completed edit on a different file cannot hide these failures.
+        events.extend(file_edit_step(3, "other.html", true));
+        assert_eq!(failed_file_edit_streak(&events, "turn-1"), 3);
+        events.extend(file_edit_step(4, "index.html", true));
+        assert_eq!(failed_file_edit_streak(&events, "turn-1"), 0);
+        assert!(no_progress_reason(&events, "turn-1", AgentDriverConfig::default()).is_none());
+    }
+
+    #[test]
+    fn rejected_patch_preparation_counts_but_permission_denials_do_not() {
+        let mut events = Vec::new();
+        for (index, summary) in [
+            "apply_patch produces no change",
+            "apply_patch diff is invalid: missing hunk",
+            "apply_patch digest precondition failed",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut step = file_edit_step(index, "index.html", false);
+            for event in &mut step {
+                if let AgentSessionEventPayload::ToolResult {
+                    status,
+                    summary: message,
+                    ..
+                } = &mut event.payload
+                {
+                    *status = super::super::AgentToolResultStatus::Rejected;
+                    *message = summary.into();
+                }
+            }
+            events.extend(step);
+        }
+        assert!(no_progress_reason(&events, "turn-1", AgentDriverConfig::default()).is_some());
+        for event in &mut events {
+            if let AgentSessionEventPayload::ToolResult { summary, .. } = &mut event.payload {
+                *summary = "Tool not started: permission denied".into();
+            }
+        }
+        assert_eq!(failed_file_edit_streak(&events, "turn-1"), 0);
+    }
+
+    #[test]
+    fn file_edit_failures_reset_only_on_verified_changes_or_user_input() {
+        let mut events = file_edit_step(0, "index.html", false);
+        events.extend(file_edit_step(1, "index.html", false));
+        for (applied, verified, before, after) in [
+            (false, false, "before", "after"), // dry run
+            (true, true, "before", "before"),  // legacy no-op success
+            (true, false, "before", "after"),  // unverified write
+        ] {
+            let mut step = file_edit_step(2, "index.html", true);
+            for event in &mut step {
+                if let AgentSessionEventPayload::ToolResult { data, .. } = &mut event.payload {
+                    *data = Some(serde_json::json!({
+                        "applied": applied, "verified": verified,
+                        "files": [{ "beforeSha256": before, "afterSha256": after }]
+                    }));
+                }
+            }
+            events.extend(step);
+            assert_eq!(failed_file_edit_streak(&events, "turn-1"), 2);
+        }
+        events.extend(repeated_step("steer", "read-steer", "unchanged", true, 200));
+        assert_eq!(failed_file_edit_streak(&events, "turn-1"), 0);
+
+        // Whole-file writes share the failure count with patches to the same path.
+        events.extend(file_edit_step(4, "index.html", false));
+        let mut write = file_edit_step(5, "index.html", false);
+        for event in &mut write {
+            if let AgentSessionEventPayload::ToolCall { call } = &mut event.payload {
+                call.name = "write_file".into();
+                call.arguments = serde_json::json!({ "path": "index.html", "content": "next" });
+            }
+        }
+        events.extend(write);
+        assert_eq!(failed_file_edit_streak(&events, "turn-1"), 2);
+    }
+
+    fn file_edit_step(
+        index: usize,
+        path: &str,
+        changed: bool,
+    ) -> Vec<super::super::AgentSessionEvent> {
+        let call_id = format!("edit-{index}");
+        let payloads = [
+            AgentSessionEventPayload::ToolCall {
+                call: super::super::RecordedToolCall {
+                    call_id: call_id.clone(),
+                    provider_call_id: None,
+                    name: "apply_patch".into(),
+                    native_name: None,
+                    arguments: serde_json::json!({
+                        "patch": diffy::create_patch("before\n", &format!("after-{index}\n")).to_string(),
+                        "preconditions": [{ "path": path, "sha256": "0".repeat(64) }]
+                    }),
+                    title: None,
+                    effect: None,
+                    target: None,
+                },
+            },
+            AgentSessionEventPayload::ToolResult {
+                call_id,
+                name: "apply_patch".into(),
+                status: if changed {
+                    super::super::AgentToolResultStatus::Completed
+                } else {
+                    super::super::AgentToolResultStatus::Failed
+                },
+                summary: if changed {
+                    "Applied patch".into()
+                } else {
+                    "apply_patch digest precondition failed".into()
+                },
+                data: changed.then(|| {
+                    serde_json::json!({
+                        "applied": true, "verified": true,
+                        "files": [{ "beforeSha256": "0".repeat(64), "afterSha256": "1".repeat(64) }]
+                    })
+                }),
+                duration_ms: None,
+                evidence_refs: Vec::new(),
+            },
+            AgentSessionEventPayload::StepEnd {
+                reason: "toolsCompleted".into(),
+            },
+        ];
+        payloads
+            .into_iter()
+            .map(|payload| {
+                let mut record = event(index as u64, payload);
+                record.turn_id = Some("turn-1".into());
+                record.step_id = Some(format!("edit-step-{index}"));
+                record
             })
             .collect()
     }

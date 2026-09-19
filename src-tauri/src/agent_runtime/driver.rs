@@ -19,6 +19,7 @@ use super::{
 use super::{AgentInboxLane, AgentInboxMessage, AgentMessageSource};
 
 const DEFAULT_MAX_STEPS_PER_TURN: usize = 128;
+const MAX_FAILED_FILE_EDITS: usize = 3;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AgentDriverConfig {
@@ -164,20 +165,14 @@ async fn drive_agent_inner(
         let snapshot = sessions.snapshot(&entry.session_id)?;
         let existing_scope = entry.scope()?;
         if let Some(scope) = &existing_scope {
-            if scope.step_id.is_none()
-                && !snapshot
-                    .inbox
-                    .next_step
-                    .iter()
-                    .any(|message| message.source.kind == super::AgentMessageSourceKind::User)
-                && config.max_identical_tool_steps > 0
-                && repeated_tool_step_streak(&all_events, &scope.turn_id)
-                    >= config.max_identical_tool_steps
-            {
-                let reason = format!(
-                    "noProgress: {} repeated tool steps produced no new evidence",
-                    config.max_identical_tool_steps
-                );
+            let reason =
+                no_progress_reason(&all_events, &scope.turn_id, config).filter(|_| {
+                    scope.step_id.is_none()
+                        && !snapshot.inbox.next_step.iter().any(|message| {
+                            message.source.kind == super::AgentMessageSourceKind::User
+                        })
+                });
+            if let Some(reason) = reason {
                 close_open_scope(sessions, entry, &reason)?;
                 if !snapshot.inbox.next_turn.is_empty() {
                     continue;
@@ -352,21 +347,16 @@ async fn drive_agent_inner(
                 close_open_scope(sessions, entry, "cancelled")?;
                 return Ok(AgentDriverSettlement::Cancelled);
             }
-            if continue_after_tools
-                && config.max_identical_tool_steps > 0
-                && !sessions
-                    .snapshot(&entry.session_id)?
-                    .inbox
-                    .next_step
-                    .iter()
-                    .any(|message| message.source.kind == super::AgentMessageSourceKind::User)
-                && repeated_tool_step_streak(&sessions.all_events(&entry.session_id)?, &turn_id)
-                    >= config.max_identical_tool_steps
-            {
-                let reason = format!(
-                    "noProgress: {} repeated tool steps produced no new evidence",
-                    config.max_identical_tool_steps
-                );
+            let snapshot = sessions.snapshot(&entry.session_id)?;
+            let reason =
+                no_progress_reason(&sessions.all_events(&entry.session_id)?, &turn_id, config)
+                    .filter(|_| {
+                        continue_after_tools
+                            && !snapshot.inbox.next_step.iter().any(|message| {
+                                message.source.kind == super::AgentMessageSourceKind::User
+                            })
+                    });
+            if let Some(reason) = reason {
                 close_open_scope(sessions, entry, &reason)?;
                 if !sessions
                     .snapshot(&entry.session_id)?
@@ -802,6 +792,11 @@ async fn run_step(
                 request.messages = inherited_messages;
             }
             tools.apply_ephemeral_terminal_results(&entry.session_id, turn_id, &mut request)?;
+            super::model_tools::apply_file_edit_budget(
+                &mut request,
+                crate::llm::catalog::resolve(&model.provider)?.max_output_tokens,
+                output_limit_continuation_count(&task_events, turn_id),
+            );
             if entry.subagent.is_some() {
                 if let Some(limit) = config.max_steps_per_turn {
                     request
@@ -1394,6 +1389,114 @@ fn task_budget_failure(
     Ok(None)
 }
 
+fn no_progress_reason(
+    events: &[super::AgentSessionEvent],
+    turn_id: &str,
+    config: AgentDriverConfig,
+) -> Option<String> {
+    if failed_file_edit_streak(events, turn_id) >= MAX_FAILED_FILE_EDITS {
+        return Some(format!(
+            "noProgress: {MAX_FAILED_FILE_EDITS} edits to the same file failed without a verified change; automatic retries stopped. Review the file and tool errors before continuing."
+        ));
+    }
+    (config.max_identical_tool_steps > 0
+        && repeated_tool_step_streak(events, turn_id) >= config.max_identical_tool_steps)
+        .then(|| {
+            format!(
+                "noProgress: {} repeated tool steps produced no new evidence",
+                config.max_identical_tool_steps
+            )
+        })
+}
+
+// File reads, plan updates and changing patch syntax are not successful edits.
+// Only a verified write to the same target/path or new user input resets its streak.
+fn failed_file_edit_streak(events: &[super::AgentSessionEvent], turn_id: &str) -> usize {
+    let mut calls = BTreeMap::new();
+    let mut failures = BTreeMap::new();
+    for event in events
+        .iter()
+        .filter(|event| event.turn_id.as_deref() == Some(turn_id))
+    {
+        match &event.payload {
+            AgentSessionEventPayload::UserMessage { message }
+                if message.source.kind == super::AgentMessageSourceKind::User =>
+            {
+                calls.clear();
+                failures.clear();
+            }
+            AgentSessionEventPayload::ToolCall { call }
+                if matches!(
+                    call.name.as_str(),
+                    "apply_patch" | "write_file" | "edit_file"
+                ) =>
+            {
+                calls.insert(call.call_id.as_str(), call);
+            }
+            AgentSessionEventPayload::ToolResult {
+                call_id,
+                status,
+                summary,
+                data,
+                ..
+            } => {
+                let Some(call) = calls.remove(call_id.as_str()) else {
+                    continue;
+                };
+                let path = if call.name == "apply_patch" {
+                    call.arguments.pointer("/preconditions/0/path")
+                } else {
+                    call.arguments.get("path")
+                };
+                let Some(path) = path.and_then(serde_json::Value::as_str) else {
+                    continue;
+                };
+                let key = (
+                    call.target.as_ref().map(|target| target.target_id.as_str()),
+                    path,
+                );
+                // Patch validation runs during preparation, whose failures are
+                // recorded as Rejected rather than Failed. Do not count user or
+                // policy denials as malformed edits.
+                let preparation_error = *status == super::AgentToolResultStatus::Rejected
+                    && [
+                        "apply_patch ",
+                        "write_file ",
+                        "edit_file ",
+                        "invalid apply_patch ",
+                        "invalid write_file ",
+                        "invalid edit_file ",
+                    ]
+                    .iter()
+                    .any(|prefix| summary.starts_with(prefix));
+                if *status == super::AgentToolResultStatus::Failed || preparation_error {
+                    *failures.entry(key).or_insert(0_usize) += 1;
+                } else if *status == super::AgentToolResultStatus::Completed {
+                    let Some(data) = data else { continue };
+                    let digest_data = if matches!(call.name.as_str(), "apply_patch" | "edit_file") {
+                        data.pointer("/files/0")
+                    } else {
+                        Some(data)
+                    };
+                    let before = digest_data.and_then(|value| value.get("beforeSha256"));
+                    let after = digest_data.and_then(|value| value.get("afterSha256"));
+                    let wrote = data.get("applied").or_else(|| data.get("written"))
+                        == Some(&serde_json::Value::Bool(true));
+                    if wrote
+                        && data.get("verified") == Some(&serde_json::Value::Bool(true))
+                        && after.and_then(serde_json::Value::as_str).is_some()
+                        && before != after
+                    {
+                        failures.remove(&key);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    failures.values().copied().max().unwrap_or(0)
+}
+
 fn repeated_tool_step_streak(events: &[super::AgentSessionEvent], turn_id: &str) -> usize {
     let mut signatures = Vec::new();
     for event in events.iter().rev() {
@@ -1553,6 +1656,17 @@ fn subagent_budget_failure(
     Ok(None)
 }
 
+fn output_limit_continuation_count(events: &[super::AgentSessionEvent], turn_id: &str) -> usize {
+    events
+        .iter()
+        .filter(|event| {
+            event.turn_id.as_deref() == Some(turn_id)
+                && matches!(&event.payload, AgentSessionEventPayload::StepEnd { reason }
+                    if reason == "outputLimitContinuation")
+        })
+        .count()
+}
+
 fn settle_output_limit(
     sessions: &AgentSessionStore,
     entry: &Arc<AgentEntry>,
@@ -1562,15 +1676,8 @@ fn settle_output_limit(
     partial: Vec<AgentAssistantContentBlock>,
     usage: Option<AgentTokenUsage>,
 ) -> Result<StepSettlement, String> {
-    let continuation_count = sessions
-        .all_events(&entry.session_id)?
-        .iter()
-        .filter(|event| {
-            event.turn_id.as_deref() == Some(turn_id)
-                && matches!(&event.payload, AgentSessionEventPayload::StepEnd { reason }
-                    if reason == "outputLimitContinuation")
-        })
-        .count();
+    let continuation_count =
+        output_limit_continuation_count(&sessions.all_events(&entry.session_id)?, turn_id);
     let continue_turn = continuation_count < 2;
     let mut payloads = Vec::new();
     if !partial.is_empty() {
@@ -1607,7 +1714,7 @@ fn settle_output_limit(
                     images: Vec::new(),
                     message_id: format!("message-{}", Uuid::new_v4().simple()),
                     client_submission_id: None,
-                    content: "The previous model response reached its output limit. Continue the same task from the partial response without repeating completed work. Any unfinished tool call was discarded; inspect the current state before using tools.".into(),
+                    content: "The previous model response reached its output limit. Any unfinished tool call was discarded and did not execute. Continue the same task with a smaller complete next action. Inspect uncertain outcomes using only the tools supplied in the current request; successful tool results establish what was saved. Keep commentary brief, preserve completed work, and wait for each operation result before continuing. Complete the remaining functionality and verify it before reporting success; do not substitute placeholders or stop after the first section.".into(),
                     source: super::AgentMessageSource::runtime("output-limit-continuation".into()),
                     terminal_context: None,
                 },
