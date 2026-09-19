@@ -482,6 +482,68 @@ describe('AgentSessionAdapter', () => {
     expect((await adapter.open('session-fixture')).snapshot.value.header.executionSurface).toBe('boundTerminal');
   });
 
+  it('resumes a failed conversation before changing its permission mode', async () => {
+    const base = agentSessionEventFixture[0]!;
+    const events: AgentSessionEvent[] = [base, {
+      ...base, seq: 1, type: 'session/ended', data: { status: 'failed' },
+    }];
+    const order: string[] = [];
+    const dependencies = agentDependencies(events);
+    const resume = vi.fn(async () => {
+      order.push('resume');
+      events.push({ ...base, seq: 2, type: 'session/resumed', data: {} });
+      return snapshot();
+    });
+    const setPermission = vi.fn(async () => {
+      order.push('permission');
+      events.push({
+        ...base, seq: 3, type: 'session/permission_changed', data: { mode: 'operator' },
+      });
+      return snapshot();
+    });
+    const adapter = createAgentSessionAdapter({ ...dependencies, resume, setPermission });
+
+    await adapter.setPermission?.('session-fixture', 'operator');
+
+    expect(order).toEqual(['resume', 'permission']);
+    expect((await adapter.open('session-fixture')).snapshot.value.header.permissionMode).toBe('operator');
+  });
+
+  it('resumes a failed conversation before changing its model', async () => {
+    const base = agentSessionEventFixture[0]!;
+    const events: AgentSessionEvent[] = [base, {
+      ...base, seq: 1, type: 'session/ended', data: { status: 'failed' },
+    }];
+    const order: string[] = [];
+    const dependencies = agentDependencies(events);
+    const resume = vi.fn(async () => {
+      order.push('resume');
+      events.push({ ...base, seq: 2, type: 'session/resumed', data: {} });
+      return snapshot();
+    });
+    const selectModel = vi.fn(async () => {
+      order.push('model');
+      events.push({
+        ...base,
+        seq: 3,
+        type: 'session/model_selected',
+        data: {
+          provider: { routeId: provider.id, modelId: provider.model },
+        },
+      });
+      return snapshot();
+    });
+    const adapter = createAgentSessionAdapter({ ...dependencies, resume, selectModel });
+
+    await adapter.selectModel?.('session-fixture', provider);
+
+    expect(order).toEqual(['resume', 'model']);
+    expect((await adapter.open('session-fixture')).snapshot.value.header.modelSelection).toMatchObject({
+      routeId: provider.id,
+      modelId: provider.model,
+    });
+  });
+
   it('passes the selected execution surface through Session creation', async () => {
     const dependencies = agentDependencies(agentSessionEventFixture);
     const adapter = createAgentSessionAdapter(dependencies);

@@ -1,32 +1,45 @@
 .ai-question-panel {
   border-radius: 22px;
-  background: var(--dsw-alias-bg-layer-1);
-  box-shadow: var(--dsw-elevation-soft);
+  background: var(--ai-surface);
+  box-shadow: var(--ai-elevation-soft);
 }
 
 .ai-question-history-card {
   --card-spacing: 0px;
 }
 
+.ai-question-history-question {
+  color: var(--ai-text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.ai-question-history-answer {
+  color: var(--ai-text);
+  font-size: 14px;
+  line-height: 20px;
+}
+
 .ai-question-panel-header {
-  background: var(--dsw-alias-bg-layer-1);
+  background: var(--ai-surface);
 }
 
 .ai-question-panel-title {
-  color: var(--dsw-alias-label-primary);
+  color: var(--ai-text);
   font-size: 17px;
   font-weight: 600;
   line-height: 22px;
 }
 
 .ai-question-panel-header [data-slot='card-description'] {
-  color: var(--dsw-alias-label-secondary);
+  color: var(--ai-text-secondary);
   font-size: 14px;
   line-height: 20px;
 }
 
 .ai-question-panel-actions [data-slot='button'] {
-  color: var(--dsw-alias-label-secondary);
+  color: var(--ai-text-secondary);
 }
 
 .ai-question-panel-actions [data-slot='button']:first-child svg {
@@ -45,26 +58,26 @@
   border-color: transparent;
   border-radius: 7px;
   background: transparent;
-  color: var(--dsw-alias-label-primary);
+  color: var(--ai-text);
 }
 
 .ai-question-option:hover {
   border-color: transparent;
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--ai-action-hover);
 }
 
 .ai-question-option[aria-pressed='true'],
 .ai-question-option[data-state='on'] {
   border-color: transparent;
-  background: var(--dsw-alias-state-business-tertiary);
-  color: var(--dsw-alias-label-primary);
+  background: var(--ai-accent-soft);
+  color: var(--ai-text);
   box-shadow: none;
 }
 
 .ai-question-option[aria-pressed='true']:hover,
 .ai-question-option[data-state='on']:hover {
-  background: var(--dsw-alias-state-business-tertiary);
-  color: var(--dsw-alias-label-primary);
+  background: var(--ai-accent-soft);
+  color: var(--ai-text);
 }
 
 .ai-question-option-heading {
@@ -76,14 +89,14 @@
 
 .ai-question-option-index {
   border-radius: 8px;
-  background: var(--dsw-alias-interactive-bg-hover-solid);
-  color: var(--dsw-alias-label-secondary);
+  background: var(--ai-action-hover-solid);
+  color: var(--ai-text-secondary);
   font-size: 12px;
   font-weight: 500;
 }
 
 .ai-question-option-description {
-  color: var(--dsw-alias-label-secondary);
+  color: var(--ai-text-secondary);
   font-size: 13px;
   font-weight: 400;
   line-height: 18px;
@@ -92,17 +105,17 @@
 
 .ai-question-option[aria-pressed='true'] .ai-question-option-description,
 .ai-question-option[data-state='on'] .ai-question-option-description {
-  color: var(--dsw-alias-label-secondary);
+  color: var(--ai-text-secondary);
 }
 
 .ai-question-option > .ai-question-option-check {
   position: absolute;
   top: 7px;
   inset-inline-end: 7px;
-  color: var(--dsw-alias-state-business-primary);
+  color: var(--ai-accent);
   filter: drop-shadow(
     0 0 4px
-    color-mix(in srgb, var(--dsw-alias-state-business-primary) 42%, transparent)
+    color-mix(in srgb, var(--ai-accent) 42%, transparent)
   );
 }
 
@@ -114,14 +127,14 @@
 .ai-question-custom-input:hover,
 .ai-question-custom-input:focus-within {
   border-color: transparent;
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--ai-action-hover);
   box-shadow: none;
 }
 
 .ai-question-custom-input [data-slot='input-group-addon'] {
   border-radius: 6px;
-  background: var(--dsw-alias-interactive-bg-hover-solid);
-  color: var(--dsw-alias-label-secondary);
+  background: var(--ai-action-hover-solid);
+  color: var(--ai-text-secondary);
 }
 
 .ai-question-custom-input [data-slot='input-group-addon'] > svg {
@@ -130,26 +143,26 @@
 }
 
 .ai-composer-seat .ai-question-custom-input .ai-question-textarea {
-  color: var(--dsw-alias-label-primary);
+  color: var(--ai-text);
   font-size: 13px;
   line-height: 19px;
 }
 
 .ai-question-textarea::placeholder {
-  color: var(--dsw-alias-label-caption);
+  color: var(--ai-text-caption);
 }
 
 .ai-question-panel-footer {
   border-top-color: transparent;
-  background: var(--dsw-alias-bg-layer-1);
+  background: var(--ai-surface);
 }
 
 .ai-question-pagination {
-  color: var(--dsw-alias-label-secondary);
+  color: var(--ai-text-secondary);
 }
 
 .ai-question-pagination > span {
-  color: var(--dsw-alias-label-primary);
+  color: var(--ai-text);
   font-size: 13px;
 }
 

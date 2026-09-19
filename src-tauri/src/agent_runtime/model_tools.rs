@@ -12,7 +12,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "run_terminal_command".into(),
-            description: "Run one single-line frozen-host command; split multi-stage work across tool calls. Set background=true to receive a native processHandle, then use wait_process or kill_process and always clean up long-running services. command/explanation limits are 8192/2048 UTF-8 bytes. Use probe_http for target-loopback HTTP instead of curl, wget, or an embedded network client. Use write_file up to 32 KiB or bounded apply_patch increments. Child Agents share limits; delegation does not bypass them. Set lifecycleTrust=directRequired for untrusted or sensitive lifecycle evidence. visible-terminal lifecycle is never security evidence or a sandbox.".into(),
+            description: "Run one single-line frozen-host command; literal newlines, heredocs, and here-strings are invalid. Never embed generated file content here when write_file is available. Use write_file up to 32 KiB, then bounded read_file plus apply_patch increments for larger files. Split other multi-stage work across tool calls. Set background=true to receive a native processHandle, then use wait_process or kill_process and always clean up long-running services. command/explanation limits are 8192/2048 UTF-8 bytes. Use probe_http for target-loopback HTTP instead of curl, wget, or an embedded network client. Child Agents share limits; delegation does not bypass them. Set lifecycleTrust=directRequired for untrusted or sensitive lifecycle evidence. visible-terminal lifecycle is never security evidence or a sandbox.".into(),
             input_schema: object_schema(
                 &["command", "explanation"],
                 json!({
@@ -130,7 +130,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "write_file".into(),
-            description: "Atomically create/replace UTF-8 up to 32 KiB. New: {mustNotExist:true}; replace: read_file first, then use its SHA-256. Empty content is valid; use apply_patch for increments.".into(),
+            description: "Atomically create/replace UTF-8 up to 32 KiB. Use this instead of cat, echo, heredocs, or terminal commands for generated HTML/CSS/JS/text. New: {mustNotExist:true}; replace: read_file first, then use its SHA-256. Empty content is valid; build larger files with bounded apply_patch increments.".into(),
             input_schema: object_schema(
                 &["path", "content", "precondition"],
                 json!({
@@ -198,15 +198,10 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "update_plan".into(),
-            description: "Replace the complete task plan. Use for multi-step work; send all steps, keep one inProgress, and mark a step completed as soon as it is done. planVersion is an optional next-version guard. evidenceRefs must name committed evidence. Records a Session event; never enters the native kernel.".into(),
+            description: "Replace the complete task plan. Use for multi-step work; send all steps, keep one inProgress, and mark a step completed as soon as it is done. ShellSpan assigns the next version automatically. evidenceRefs must name committed evidence. Records a Session event; never enters the native kernel.".into(),
             input_schema: object_schema(
                 &["steps"],
                 json!({
-                    "planVersion": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "description": "Optional next-version concurrency guard; omit to let ShellSpan assign it."
-                    },
                     "explanation": bounded_string(4096),
                     "steps": {
                         "type": "array",
@@ -345,6 +340,14 @@ pub(crate) fn model_tools_with_terminal_interaction(
 
 fn interactive_terminal_input_schema() -> Value {
     json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["inputKind"],
+        "properties": {
+            "inputKind": { "type": "string", "enum": ["text", "key", "paste", "interrupt"] },
+            "text": { "type": "string" },
+            "key": { "type": "string" }
+        },
         "oneOf": [
             object_schema(&["inputKind", "text"], json!({
                 "inputKind": { "const": "text" },
@@ -461,6 +464,10 @@ mod tests {
             .find(|tool| tool.name == "update_plan")
             .expect("update_plan tool");
         assert_eq!(tool.input_schema["required"], json!(["steps"]));
+        assert!(tool.input_schema["properties"].get("planVersion").is_none());
+        assert!(tool
+            .description
+            .contains("assigns the next version automatically"));
         assert!(tool
             .description
             .contains("mark a step completed as soon as it is done"));
@@ -481,6 +488,7 @@ mod tests {
         assert!(terminal.description.contains("Use write_file"));
         assert!(terminal.description.contains("delegation does not bypass"));
         assert!(terminal.description.contains("single-line"));
+        assert!(terminal.description.contains("heredocs"));
         assert!(terminal.description.contains("Use probe_http"));
         assert!(terminal.description.contains("processHandle"));
         assert!(terminal.description.contains("always clean up"));
@@ -510,6 +518,7 @@ mod tests {
             .expect("write tool");
         assert!(write.description.contains("mustNotExist"));
         assert!(write.description.contains("read_file first"));
+        assert!(write.description.contains("instead of cat, echo, heredocs"));
         assert_eq!(
             write.input_schema["required"],
             json!(["path", "content", "precondition"])
@@ -564,5 +573,17 @@ mod tests {
         for name in ["read_terminal", "write_terminal_input", "wait_terminal"] {
             assert!(tools.iter().any(|tool| tool.name == name));
         }
+        for tool in &tools {
+            assert_eq!(tool.input_schema["type"], "object", "{}", tool.name);
+        }
+        let write = tools
+            .iter()
+            .find(|tool| tool.name == "write_terminal_input")
+            .expect("write_terminal_input tool");
+        assert_eq!(write.input_schema["required"], json!(["inputKind"]));
+        assert_eq!(
+            write.input_schema["oneOf"].as_array().map(Vec::len),
+            Some(4)
+        );
     }
 }

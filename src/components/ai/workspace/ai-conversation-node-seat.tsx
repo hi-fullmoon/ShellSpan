@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
-  AtomIcon,
+  BrainIcon,
   ChevronDownIcon,
   CircleAlertIcon,
   FileInputIcon,
@@ -140,10 +140,19 @@ function contextLabelKey(
   }
 }
 
+function isUserVisibleContextInjection(
+  node: AiConversationNodeOf<'contextInjection'>,
+): boolean {
+  return node.provenance.kind !== 'runtime'
+    && node.provenance.kind !== 'agent-instructions'
+    && node.provenance.kind !== 'skill-catalog';
+}
+
 function ContextInjectionRow({
   node,
 }: { readonly node: AiConversationNodeOf<'contextInjection'> }) {
   const { t } = useI18n();
+  if (!isUserVisibleContextInjection(node)) return null;
   return (
     <SemanticNoteDisclosure
       body={node.loadedSkill
@@ -256,7 +265,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
           )}
         >
           <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
-            <AtomIcon />
+            <BrainIcon />
             <ChevronDownIcon className="ai-disclosure-chevron" />
           </span>
           <span className={cn(AI_DISCLOSURE_TITLE_CLASS, isStreaming && 'shimmer')}>{title}</span>
@@ -317,7 +326,7 @@ function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'r
           )}
         >
           <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
-            <AtomIcon />
+            <BrainIcon />
             <ChevronDownIcon className="ai-disclosure-chevron" />
           </span>
           <span className={cn(AI_DISCLOSURE_TITLE_CLASS, isStreaming && 'shimmer')}>{title}</span>
@@ -394,6 +403,15 @@ function RetryNodeView({ node }: { readonly node: AiConversationNodeOf<'retry'> 
   );
 }
 
+function errorNodeMessage(
+  node: AiConversationNodeOf<'error'>,
+  t: (key: LocaleKey) => string,
+): string {
+  return node.message.startsWith('outputLimit:') || node.message.includes('code=OUTPUT_LIMIT')
+    ? t('ai.error.outputLimit')
+    : node.message;
+}
+
 function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> }) {
   const { t } = useI18n();
   if (node.state === 'cancelled') {
@@ -409,7 +427,7 @@ function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> 
       <CircleAlertIcon aria-hidden="true" />
       <div className="ai-turn-error-copy block min-w-0 [overflow-wrap:anywhere]">
         <strong className="mr-1.5">{t('ai.requestFailed')}</strong>
-        <span>{node.message}</span>
+        <span>{errorNodeMessage(node, t)}</span>
       </div>
       {node.code && <code>{node.code}</code>}
     </div>
@@ -562,7 +580,9 @@ function TurnProcessRow({
   onOpenTool,
   renderers = aiConversationNodeRenderers,
 }: AiConversationNodeRendererProps<'turnProcess'>) {
-  if (node.children.length === 0) return null;
+  if (!node.children.some((child) => (
+    child.kind !== 'contextInjection' || isUserVisibleContextInjection(child)
+  ))) return null;
   const key = turnProcessDisclosureKey(node);
   return (
     <TurnProcessDisclosure

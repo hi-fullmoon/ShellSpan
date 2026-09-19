@@ -1619,6 +1619,67 @@ async fn update_plan_commits_in_primary_session_pipeline_and_checks_unfinished_w
 }
 
 #[tokio::test]
+async fn repeated_update_plan_without_version_uses_next_version() {
+    let plan_reply = |call_id: &str, status: &str| {
+        let mut result = response("");
+        result.finish_reason = ModelFinishReason::ToolCalls;
+        set_tool_calls(
+            &mut result,
+            vec![ModelToolCall {
+                call_id: call_id.into(),
+                provider_call_id: None,
+                name: "update_plan".into(),
+                arguments: json!({
+                    "steps": [{ "id": "todo", "title": "Build the app", "status": status }]
+                }),
+            }],
+        );
+        result
+    };
+    let adapter = FakeAdapter::new(vec![
+        FakeScript::Reply {
+            chunks: Vec::new(),
+            response: plan_reply("plan-1", "inProgress"),
+        },
+        FakeScript::Reply {
+            chunks: Vec::new(),
+            response: plan_reply("plan-2", "completed"),
+        },
+        reply("The app is ready.", &[]),
+    ]);
+    let (_root, runtime) = configured(adapter);
+    create(&runtime, "session-plan-versions");
+    runtime
+        .followup(
+            "session-plan-versions",
+            "message-plan-versions".into(),
+            "build it".into(),
+        )
+        .unwrap();
+    runtime
+        .start("session-plan-versions", provider(), None)
+        .unwrap();
+    runtime.await_idle("session-plan-versions").await.unwrap();
+
+    let events = all_events(&runtime, "session-plan-versions");
+    let versions = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            AgentSessionEventPayload::TaskPlan { version, .. } => Some(*version),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(versions, vec![1, 2]);
+    assert!(!events.iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::ToolResult {
+            status: AgentToolResultStatus::Failed,
+            ..
+        }
+    )));
+}
+
+#[tokio::test]
 async fn invalid_update_plan_is_a_tool_error_and_the_model_retries_in_turn() {
     let mut invalid_plan = response("");
     invalid_plan.finish_reason = ModelFinishReason::ToolCalls;

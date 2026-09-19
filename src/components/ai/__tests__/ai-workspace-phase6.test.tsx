@@ -41,7 +41,7 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('Phase 6 Queue Dock', () => {
-  it('matches the single-row harness chrome without a redundant direction icon', () => {
+  it('keeps compact single-row queue chrome without a redundant direction icon', () => {
     const { container } = render(<AiQueueDock items={[queue[0]]} />);
     const row = container.querySelector('.ai-queue-row');
 

@@ -54,7 +54,7 @@ function StatPopover({ icon, label, title, total, children }: {
   return (
     <Popover.Root>
       <Popover.Trigger
-        render={<Button type="button" variant="plain" size="sm" className="ai-turn-stat-trigger h-7 gap-[5px] px-[7px]" />}
+        render={<Button type="button" variant="plain" size="sm" className="ai-turn-stat-trigger h-7 px-[7px]" />}
       >
         {icon}<span>{label}</span>
       </Popover.Trigger>
@@ -114,7 +114,7 @@ export function AiTurnFooter({ node }: { readonly node: AiConversationNodeOf<'tu
       <MessageActions text={node.summaryText ?? ''} timestamp={node.timestamp} align="start"
         reveal="always"
         className="ai-turn-stats h-auto min-h-7 w-full min-w-0 max-w-full flex-wrap gap-x-1.5 gap-y-0.5 overflow-visible [&_time]:ml-0.5"
-        actionClassName="ai-turn-stat-trigger h-7 gap-[5px] overflow-hidden px-[7px]">
+        actionClassName="ai-turn-stat-trigger h-7 overflow-hidden px-[7px]">
         {hasUsage && (
           <StatPopover icon={<DatabaseIcon aria-hidden="true" />} title={label('usageTitle')}
             label={t('ai.workspace.turnFooter.usage', {

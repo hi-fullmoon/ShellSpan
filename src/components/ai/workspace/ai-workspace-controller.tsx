@@ -44,10 +44,7 @@ export function AiWorkspaceController({
     || controller.historicalContinuationBusy
     || (controller.readOnlySession && !configuringContinuation)
     || existingSessionLocked;
-  const runtimeSettingsLocked = modelSettingsLocked || (!configuringContinuation && (
-    Boolean(session?.ended)
-    || ['completed', 'cancelled', 'failed'].includes(controller.view?.status ?? 'idle')
-  ));
+  const runtimeSettingsLocked = modelSettingsLocked;
   const executionSurfaceLocked = modelSettingsLocked
     || (!configuringContinuation && (
       controller.composer.phase === 'submitting'
@@ -149,6 +146,7 @@ export function AiWorkspaceController({
       onSubmitGesture={controller.submit}
       onStop={controller.stop}
       onContinueBudgetedTurn={controller.continueBudgetedTurn}
+      onContinueOutputLimitedTurn={controller.continueOutputLimitedTurn}
       onContinueOnReconnectedTerminal={controller.continueOnReconnectedTerminal ?? undefined}
       historicalContinuationAvailable={controller.historicalContinuationAvailable}
       historicalContinuationBusy={controller.historicalContinuationBusy}

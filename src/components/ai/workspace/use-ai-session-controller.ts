@@ -29,6 +29,7 @@ import {
   type AiConversationNode,
   type AiConversationNodeOf,
 } from '@/lib/ai/conversation-node';
+import { latestTurnReachedOutputLimit } from '@/lib/ai/turn-continuation';
 import {
   createAiWorkspaceNavigationState,
   sessionRouteKey,
@@ -130,6 +131,7 @@ export interface AiSessionController {
   readonly submit: (gesture: 'keyboard' | 'primary', accelerated?: boolean) => void;
   readonly stop: () => void;
   readonly continueBudgetedTurn: () => void;
+  readonly continueOutputLimitedTurn: () => void;
   readonly continueOnReconnectedTerminal: (() => void) | null;
   readonly historicalContinuationAvailable: boolean;
   readonly historicalContinuationBusy: boolean;
@@ -582,21 +584,31 @@ export function useAiSessionController({
     if (projectEpoch.current !== epoch) throw new Error('Cancelled');
     return selectedRoot;
   }, [activeTerminal, resolveTerminalDirectory, scope]);
-  const createInputWithFrozenLocalRoot = useCallback(async (
+  const createInputWithFrozenTargetRoot = useCallback(async (
     content: string,
   ): Promise<Extract<AiCreateSessionInput, { kind: 'agent' }>> => {
     const input = createInput(content);
     const target = input.request.target;
-    if (target?.kind !== 'local' || input.request.permissionMode !== 'operator') return input;
+    if (!target || input.request.permissionMode !== 'operator'
+      || (target.kind !== 'local' && target.kind !== 'remote')
+      || (target.kind === 'remote' && !target.profileId)) return input;
     const root = await resolveProjectRoot();
     if (!root) {
-      throw new Error(t('ai.workspace.error.fullAccessRootRequired'));
+      // Local operator commands require an enforceable sandbox root. Remote
+      // shells cannot enforce that boundary, so preserve the existing
+      // confirmation-gated terminal fallback when the cwd probe is unavailable.
+      if (target.kind === 'local') {
+        throw new Error(t('ai.workspace.error.fullAccessRootRequired'));
+      }
+      return input;
     }
     return {
       ...input,
       request: {
         ...input.request,
-        target: { ...target, cwd: root },
+        target: target.kind === 'local'
+          ? { ...target, cwd: root }
+          : { ...target, rootPath: root },
       },
     };
   }, [createInput, resolveProjectRoot, t]);
@@ -709,7 +721,7 @@ export function useAiSessionController({
         };
         const cold = payload.sessionId === null ? await coldSkillSession.current : null;
         const create = payload.sessionId === null && !cold
-          ? await createInputWithFrozenLocalRoot(payload.content)
+          ? await createInputWithFrozenTargetRoot(payload.content)
           : undefined;
         const receipt = await adapter.submit(payload.sessionId ?? cold?.summary.id ?? null, {
           ...base,
@@ -1092,7 +1104,7 @@ export function useAiSessionController({
     setHistoricalContinuationBusy(true);
     setHistoricalContinuationError(null);
     const context = submissionContextRef.current;
-    void createInputWithFrozenLocalRoot(message).then(input => adapter.create({
+    void createInputWithFrozenTargetRoot(message).then(input => adapter.create({
       ...input,
       request: {
         ...input.request,
@@ -1122,7 +1134,7 @@ export function useAiSessionController({
       historicalContinuationPendingRef.current = false;
       if (mountedRef.current) setHistoricalContinuationBusy(false);
     });
-  }, [activeTerminal?.sessionId, adapter, createInputWithFrozenLocalRoot, dispatch, imageDraft.draft?.images.length,
+  }, [activeTerminal?.sessionId, adapter, createInputWithFrozenTargetRoot, dispatch, imageDraft.draft?.images.length,
     historicalSources, navigationDraftKey, now, openSession, operationId, provider, t]);
 
   useEffect(() => {
@@ -1506,7 +1518,7 @@ export function useAiSessionController({
         void imageDraft.send(async () => {
           const cold = await coldSkillSession.current;
           const sessionId = composer.sessionId ?? cold?.summary.id;
-          const create = sessionId ? undefined : await createInputWithFrozenLocalRoot(
+          const create = sessionId ? undefined : await createInputWithFrozenTargetRoot(
             composerRef.current.draft.trim() || t('ai.workspace.images.add'),
           );
           return { id: operationId(), sessionId: sessionId ?? create!.request.sessionId, mode: decision.mode, create };
@@ -1557,6 +1569,14 @@ export function useAiSessionController({
         || !latestTurnReachedStepBudget(current.nodes)) return;
       dispatch({ type: 'submit.requested', gesture: 'primary', accelerated: false,
         content: t('ai.workspace.continueBudgetedTurnPrompt'), clientOperationId: operationId(),
+        now: Date.now(), hasProvider, canCreateSession: canStartAgent });
+    },
+    continueOutputLimitedTurn: () => {
+      const current = viewRef.current;
+      if (!canStartAgent || current?.status !== 'failed'
+        || !latestTurnReachedOutputLimit(current.nodes)) return;
+      dispatch({ type: 'submit.requested', gesture: 'primary', accelerated: false,
+        content: t('ai.workspace.continueOutputLimitedTurnPrompt'), clientOperationId: operationId(),
         now: Date.now(), hasProvider, canCreateSession: canStartAgent });
     },
     continueOnReconnectedTerminal: reconnectedSnapshot ? () => {

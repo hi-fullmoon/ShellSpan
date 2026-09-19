@@ -435,6 +435,21 @@ export function createAgentSessionAdapter(
     return entry.connecting;
   };
 
+  const resumeEndedSession = async (
+    sessionId: string,
+    current?: AiSessionView,
+  ): Promise<AiSessionView> => {
+    const view = current ?? await openEntry(sessionId);
+    if (!view.snapshot.value.ended
+      && !['cancelled', 'failed', 'completed'].includes(view.status)) return view;
+    await (dependencies.resume ?? invokeResumeAgentRuntime)({ sessionId });
+    const entry = ensureEntry(sessionId);
+    const resumed = agentSessionView(await entry.client.reconnect());
+    entry.view = resumed;
+    for (const listener of entry.listeners) listener(resumed);
+    return resumed;
+  };
+
   const waitForCommittedOperation = async (
     sessionId: string,
     clientOperationId: string,
@@ -557,26 +572,23 @@ export function createAgentSessionAdapter(
     create: createSession,
     open: openEntry,
     async selectModel(sessionId, provider) {
+      await resumeEndedSession(sessionId);
       await (dependencies.selectModel ?? invokeSelectAgentRuntimeModel)({ sessionId, selection: { routeId: provider.id, modelId: provider.model, reasoningEffort: provider.reasoningEffort } });
       const entry = ensureEntry(sessionId);
       entry.view = agentSessionView(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
     },
     async setPermission(sessionId, mode) {
+      await resumeEndedSession(sessionId);
       await (dependencies.setPermission ?? invokeSetAgentRuntimePermission)({ sessionId, mode });
       const entry = ensureEntry(sessionId);
       entry.view = agentSessionView(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
     },
     async setExecutionSurface(sessionId, surface) {
-      const entry = ensureEntry(sessionId);
-      const current = await openEntry(sessionId);
-      if (current.snapshot.value.ended || ['cancelled', 'failed', 'completed'].includes(current.status)) {
-        await (dependencies.resume ?? invokeResumeAgentRuntime)({ sessionId });
-        entry.view = agentSessionView(await entry.client.reconnect());
-        for (const listener of entry.listeners) listener(entry.view);
-      }
+      await resumeEndedSession(sessionId);
       await (dependencies.setExecutionSurface ?? invokeSetAgentRuntimeExecutionSurface)({ sessionId, surface });
+      const entry = ensureEntry(sessionId);
       entry.view = agentSessionView(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
     },
@@ -648,13 +660,7 @@ export function createAgentSessionAdapter(
           mode: 'nextTurn',
         };
       }
-      if (['cancelled', 'failed', 'completed'].includes(view.status) || view.snapshot.value.ended) {
-        await (dependencies.resume ?? invokeResumeAgentRuntime)({ sessionId: resolvedSessionId });
-        const entry = ensureEntry(resolvedSessionId);
-        view = agentSessionView(await entry.client.reconnect());
-        entry.view = view;
-        for (const listener of entry.listeners) listener(view);
-      }
+      view = await resumeEndedSession(resolvedSessionId, view);
       // An idle restored Session needs an owning runtime before its next input. start is idempotent.
       // A text follow-up still sends retained image bytes. Reattach after process restart
       // and apply the same vision preflight before accepting more Inbox content.

@@ -175,7 +175,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
         {selected ? (
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex min-w-0 shrink-0 items-center gap-2 border-b px-4 py-2">
-              <Button variant="ghost" size="sm" className="gap-1" onClick={closeView} aria-label={t('settings.ai.records.back')}>
+              <Button variant="ghost" size="sm" onClick={closeView} aria-label={t('settings.ai.records.back')}>
                 <ChevronLeftIcon data-icon="inline-start" />
                 {t('settings.ai.records.back')}
               </Button>

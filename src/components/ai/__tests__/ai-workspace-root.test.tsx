@@ -572,6 +572,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     const reasoning = screen.getByRole('button', { name: 'Thought' });
     expect(reasoning).toHaveAttribute('aria-expanded', 'false');
+    expect(reasoning.querySelector('.lucide-brain')).toBeInTheDocument();
     expect(container.querySelector('[data-ai-node-kind="userMessage"]')?.closest('[data-slot="message-scroller-item"]'))
       .toHaveAttribute('data-scroll-anchor', 'true');
     expect(container.querySelector('[data-ai-node-kind="turnProcess"]')).toBeNull();
@@ -590,6 +591,25 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     await user.click(reasoning);
     expect(reasoning).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Read the frozen context. Answer directly.')).toBeVisible();
+  });
+
+  it('keeps pasted image drafts available in Ask without an upload button', () => {
+    const onPasteImages = vi.fn();
+    render(
+      <AiWorkspaceRoot
+        view={null}
+        scope="workbench"
+        mode="ask"
+        imageControls={<div data-testid="ask-image-draft">image preview</div>}
+        onPasteImages={onPasteImages}
+        hasImages
+        onSubmitGesture={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('ask-image-draft')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Add images' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
   });
 
   it('expands Ask reasoning while streaming and collapses it when thinking settles', () => {
@@ -649,8 +669,9 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       />,
     );
 
-    expect(container.querySelector('[data-ai-thinking-indicator]'))
-      .toHaveTextContent('Thinking…');
+    const thinkingIndicator = container.querySelector('[data-ai-thinking-indicator]');
+    expect(thinkingIndicator).toHaveTextContent('Thinking…');
+    expect(thinkingIndicator?.querySelector('.lucide-brain')).toBeInTheDocument();
     expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
     expect(screen.queryByText('Working…')).toBeNull();
   });

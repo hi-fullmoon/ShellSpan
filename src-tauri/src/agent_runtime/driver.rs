@@ -1836,17 +1836,21 @@ fn model_error_reason(
     max_attempts: u32,
     cumulative_delay_ms: u64,
 ) -> String {
-    let prefix = match error.kind {
-        NormalizedModelErrorKind::Cancelled => "cancelled",
-        NormalizedModelErrorKind::Retryable
-        | NormalizedModelErrorKind::Transport
-        | NormalizedModelErrorKind::Timeout
-        | NormalizedModelErrorKind::EmptyResponse => "providerRetryExhausted",
-        NormalizedModelErrorKind::Protocol => "providerProtocolFailure",
-        NormalizedModelErrorKind::ContextTooLarge => "contextTooLarge",
-        NormalizedModelErrorKind::Authentication => "authenticationFailed",
-        NormalizedModelErrorKind::RateLimited => "rateLimited",
-        NormalizedModelErrorKind::Terminal => "providerFailure",
+    let prefix = if error.code.as_deref() == Some("OUTPUT_LIMIT") {
+        "outputLimit"
+    } else {
+        match error.kind {
+            NormalizedModelErrorKind::Cancelled => "cancelled",
+            NormalizedModelErrorKind::Retryable
+            | NormalizedModelErrorKind::Transport
+            | NormalizedModelErrorKind::Timeout
+            | NormalizedModelErrorKind::EmptyResponse => "providerRetryExhausted",
+            NormalizedModelErrorKind::Protocol => "providerProtocolFailure",
+            NormalizedModelErrorKind::ContextTooLarge => "contextTooLarge",
+            NormalizedModelErrorKind::Authentication => "authenticationFailed",
+            NormalizedModelErrorKind::RateLimited => "rateLimited",
+            NormalizedModelErrorKind::Terminal => "providerFailure",
+        }
     };
     format!(
         "{prefix}: attempt={attempt} maxAttempts={max_attempts} cumulativeDelayMs={cumulative_delay_ms} kind={:?} status={} code={} message={}",

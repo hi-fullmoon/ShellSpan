@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = new URL('../src/components/ai/', import.meta.url);
 const rootPath = fileURLToPath(root);
-const styles = new URL('./styles/ai-panel/', root);
+const styles = new URL('./styles/', root);
 
 const layoutProperties = new Set([
   'align-content', 'align-items', 'align-self', 'aspect-ratio', 'bottom',

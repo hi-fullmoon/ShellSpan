@@ -142,6 +142,28 @@
         assert!(error.contains("suggestedAction=split_bounded_commands"));
         assert!(!error.contains("suggestedTool=write_file"));
 
+        let mut profileless_rooted_request = request(
+            "run_terminal_command",
+            json!({
+                "command": "x".repeat(8_193),
+                "explanation": "write generated content"
+            }),
+        );
+        let mut profileless_rooted = remote_target();
+        profileless_rooted.profile_id = None;
+        profileless_rooted.root_path = Some("/remote/workspace".into());
+        profileless_rooted_request.target = profileless_rooted;
+        let profileless_rooted_target = target_native(&profileless_rooted_request.target).unwrap();
+        let error = normalize_arguments(
+            &profileless_rooted_request,
+            &profileless_rooted_target,
+            None,
+            false,
+        )
+        .unwrap_err();
+        assert!(error.contains("suggestedAction=split_bounded_commands"));
+        assert!(!error.contains("suggestedTool=write_file"));
+
         let error = normalize_arguments(
             &request(
                 "run_terminal_command",
@@ -171,8 +193,24 @@
         )
         .unwrap_err();
         assert!(error.contains("multiline commands are not allowed"));
-        assert!(error.contains("split multi-stage work across tool calls"));
+        assert!(error.contains("doNotRetry=true"));
+        assert!(error.contains("suggestedTool=write_file"));
+        assert!(error.contains("do not use cat, echo, heredocs"));
         assert!(error.contains("use probe_http"));
+
+        let mut unrooted_request = request(
+            "run_terminal_command",
+            json!({
+                "command": "printf first\nprintf second",
+                "explanation": "write generated content"
+            }),
+        );
+        unrooted_request.target = remote_target();
+        let unrooted_target = target_native(&unrooted_request.target).unwrap();
+        let error =
+            normalize_arguments(&unrooted_request, &unrooted_target, None, false).unwrap_err();
+        assert!(error.contains("suggestedAction=split_bounded_commands"));
+        assert!(!error.contains("suggestedTool=write_file"));
     }
 
     #[test]

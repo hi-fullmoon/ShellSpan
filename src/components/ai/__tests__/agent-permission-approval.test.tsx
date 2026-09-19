@@ -83,6 +83,13 @@ describe('Agent permission selector', () => {
     expect(options[1]).toHaveTextContent('请求批准');
     expect(options[2]).toHaveTextContent('完全访问权限');
     expect(options[2]).toHaveTextContent('高风险');
+    for (const option of options) {
+      expect(option).not.toHaveClass('focus:**:text-accent-foreground');
+    }
+    expect(screen.getByText('仅对检测到的风险操作请求批准。'))
+      .toHaveClass('text-muted-foreground');
+    expect(screen.getByText('高风险')).toHaveClass('text-destructive');
+    expect(options[2].querySelector('.lucide-shield-alert')).toHaveClass('text-app-warning');
     expect(screen.getByRole('menuitemradio', { name: /^帮我批准/ })).toBeVisible();
     expect(screen.getByRole('menuitemradio', { name: /^完全访问权限/ })).toBeVisible();
     expect(screen.getByRole('menuitemradio', { name: '请求批准' })).toBeVisible();

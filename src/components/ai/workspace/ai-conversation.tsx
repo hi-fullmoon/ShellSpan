@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker';
-import { AtomIcon } from 'lucide-react';
+import { BrainIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNode, AiConversationNodeOf, AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiScrollAnchor } from '@/lib/ai/panel-route';
@@ -21,7 +21,7 @@ const AskThinkingIndicator = memo(function AskThinkingIndicator() {
       data-ai-thinking-indicator=""
     >
       <MarkerIcon>
-        <AtomIcon aria-hidden="true" />
+        <BrainIcon aria-hidden="true" />
       </MarkerIcon>
       <MarkerContent className="shimmer">{t('ai.thinking.inProgress')}</MarkerContent>
     </Marker>

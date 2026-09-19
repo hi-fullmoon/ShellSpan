@@ -31,10 +31,6 @@
   background: var(--app-scrollbar-thumb-hover);
 }
 
-.ai-panel-drawer {
-  --shadow-dialog: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
-}
-
 @container ai-workspace (min-width: 400px) {
   .ai-workspace-root {
     --ai-shell-clearance: 16px;
@@ -45,14 +41,6 @@
   .ai-workspace-root {
     --ai-shell-clearance: 20px;
   }
-}
-
-@container ai-workspace (max-width: 399px) {
-  .ai-empty-hero [data-slot='empty-state-title'] {
-    font-size: 22px;
-    line-height: 28px;
-  }
-
 }
 
 @media (prefers-reduced-motion: reduce) {

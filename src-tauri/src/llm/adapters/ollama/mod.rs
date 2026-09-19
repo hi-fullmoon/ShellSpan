@@ -274,9 +274,10 @@ pub(in crate::llm) fn process_ollama_line(
         return Err(normalize_provider_error(400, error));
     }
     if value.get("done_reason").and_then(Value::as_str) == Some("length") {
-        return Err(NormalizedModelError::new(
+        return Err(coded_error(
             NormalizedModelErrorKind::Terminal,
             "AI provider reached the configured output token limit",
+            "OUTPUT_LIMIT",
         ));
     }
     if value.get("done").and_then(Value::as_bool) == Some(true) {

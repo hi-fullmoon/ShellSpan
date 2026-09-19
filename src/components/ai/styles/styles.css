@@ -1,0 +1,16 @@
+/* AI panel styles are split by responsibility. Keep imports in this order so
+ * the existing cascade remains stable. */
+@import './foundation.css';
+@import './workspace.css';
+@import './transcript.css';
+@import './turn-process.css';
+@import './tool-results.css';
+@import './turn-footer.css';
+@import './details.css';
+@import './composer-shell.css';
+@import './questions.css';
+@import './composer-controls.css';
+@import './context-menus.css';
+@import './tasks.css';
+@import './responsive.css';
+@import './composer-editor.css';

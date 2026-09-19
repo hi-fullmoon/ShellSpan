@@ -10,6 +10,8 @@ import {
   FileSearchIcon,
   FileTextIcon,
   GlobeIcon,
+  ListTodoIcon,
+  PanelRightOpenIcon,
   SearchIcon,
   ShieldAlertIcon,
   SparklesIcon,
@@ -25,6 +27,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
+import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import {
   AI_DISCLOSURE_LEADING_CLASS,
@@ -43,6 +46,7 @@ export type AiToolVariant =
   | 'write'
   | 'edit'
   | 'code'
+  | 'plan'
   | 'generic';
 
 type ToolNode = AiConversationNodeOf<'tool'>;
@@ -117,6 +121,7 @@ const EXACT_TOOL_VARIANTS: Readonly<Record<string, AiToolVariant>> = {
   exec_command: 'terminal',
   kill_process: 'terminal',
   list_directory: 'read',
+  update_plan: 'plan',
   probe_http: 'web',
   read_file: 'read',
   read_terminal: 'terminal',
@@ -151,6 +156,7 @@ function iconFor(variant: AiToolVariant): ComponentType<React.SVGProps<SVGSVGEle
     case 'write': return FilePenLineIcon;
     case 'edit': return FileSearchIcon;
     case 'code': return Code2Icon;
+    case 'plan': return ListTodoIcon;
     case 'generic': return SparklesIcon;
   }
 }
@@ -175,6 +181,7 @@ function toolSummary(node: ToolNode, variant: AiToolVariant): string {
     write: ['path', 'file_path', 'filePath'],
     edit: ['path', 'file_path', 'filePath'],
     code: ['description', 'language'],
+    plan: ['explanation'],
     generic: ['description', 'explanation', 'summary', 'intent'],
   };
   const inputSummary = firstString(input, keys[variant]);
@@ -245,6 +252,7 @@ export function AiToolCopyButton({ text, label }: { readonly text: string; reado
             type="button"
             variant="ghost"
             size="icon-xs"
+            className="ai-tool-copy-button"
             aria-label={copied ? t('common.copied') : (label ?? t('common.copy'))}
             onClick={() => {
               if (!navigator.clipboard || copied) return;
@@ -265,9 +273,11 @@ export function AiToolCopyButton({ text, label }: { readonly text: string; reado
 
 function TerminalSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
   const { t } = useI18n();
+  const [commandExpanded, setCommandExpanded] = useState(false);
   const input = asRecord(node.input);
   const output = outputText(node);
   const command = firstString(input, ['command', 'cmd', 'script']) ?? formatToolValue(node.input);
+  const displayCommand = command || node.name;
   const outputRecord = asRecord(node.output);
   const exitCode = firstNumber(outputRecord, ['exitCode', 'exit_code', 'code']);
   const cwd = firstString(input, ['cwd', 'workdir', 'workingDirectory'])
@@ -276,16 +286,31 @@ function TerminalSurface({ node, compact }: { node: ToolNode; compact: boolean }
     ?? '$';
   return (
     <div className="ai-terminal-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="terminal" data-running={node.state === 'running' || undefined}>
-      <div className="ai-terminal-header flex min-w-0 items-center gap-2 px-3.5 py-[9px]">
-        <span className={AI_STATE_DOT_CLASS} data-state={node.state} aria-hidden="true" />
+      <div className="ai-terminal-header flex min-w-0 items-start gap-2 px-3.5 py-[9px]">
+        <span className={cn(AI_STATE_DOT_CLASS, 'mt-1.5')} data-state={node.state} aria-hidden="true" />
         <span className="ai-terminal-cwd shrink-0">{cwd}</span>
-        <span className="ai-terminal-command min-w-0 flex-1 truncate">{command || node.name}</span>
+        <button
+          type="button"
+          className="ai-terminal-command min-w-0 flex-1 cursor-pointer p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-expanded={commandExpanded}
+          aria-label={t(commandExpanded ? 'ai.workspace.tool.collapseCommand' : 'ai.workspace.tool.expandCommand')}
+          onClick={() => setCommandExpanded((expanded) => !expanded)}
+        >
+          {displayCommand}
+        </button>
         {exitCode !== null && exitCode !== 0 && <span className="ai-terminal-exit shrink-0">exit {exitCode}</span>}
-        {output && <AiToolCopyButton text={output} />}
+        <AiToolCopyButton text={displayCommand} label={t('ai.workspace.tool.copyCommand')} />
       </div>
       {node.state !== 'running' && (
-        <div className="ai-terminal-output m-0 max-h-65 max-w-full overflow-auto px-3.5 py-3 whitespace-pre">
-          {output ? <CappedText text={output} maxLines={compact ? 8 : Number.POSITIVE_INFINITY} /> : t('ai.workspace.tool.noOutput')}
+        <div className="ai-terminal-output relative m-0 max-w-full">
+          <div className="max-h-65 max-w-full overflow-auto py-3 pr-11 pl-3.5 whitespace-pre">
+            {output ? <CappedText text={output} maxLines={compact ? 8 : Number.POSITIVE_INFINITY} /> : t('ai.workspace.tool.noOutput')}
+          </div>
+          {output && (
+            <div className="absolute top-2 right-3.5">
+              <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -571,6 +596,7 @@ export function AiToolExpandedContent({
     case 'write':
     case 'edit': return <DiffSurface node={node} compact={compact} />;
     case 'code': return <CodeSurface node={node} />;
+    case 'plan':
     case 'generic': return <IoSurface node={node} compact={compact} />;
   }
 }
@@ -651,6 +677,7 @@ export function AiToolRow({
                     />
                   )}
                 >
+                  <PanelRightOpenIcon data-icon="inline-start" />
                   {t('ai.workspace.tool.inspect')}
                 </TooltipTrigger>
                 <TooltipContent>{t('ai.workspace.details.toolTitle')}</TooltipContent>

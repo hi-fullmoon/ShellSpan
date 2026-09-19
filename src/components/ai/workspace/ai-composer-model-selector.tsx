@@ -148,7 +148,7 @@ export function AiComposerModelSelector({
           <Button
             variant="ghost"
             size="xs"
-            className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] gap-1 overflow-hidden pr-1.5 pl-2"
+            className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] overflow-hidden pr-1.5 pl-2"
             disabled={disabled || current === undefined || groups.length === 0}
             aria-label={t('ai.workspace.model.trigger', { selection: triggerLabel })}
           />
@@ -181,7 +181,7 @@ export function AiComposerModelSelector({
           <DropdownMenuGroup>
             <DropdownMenuItem
               closeOnClick={false}
-              className="ai-model-menu-cell min-h-9 min-w-56 gap-1.5 pr-[5px] pl-2 [&>:first-child]:flex-1"
+              className="ai-model-menu-cell min-h-9 min-w-56 gap-1 pr-[5px] pl-2 [&>:first-child]:flex-1"
               onClick={() => setPane('model')}
             >
               <span>{t('ai.workspace.model.model')}</span>
@@ -191,7 +191,7 @@ export function AiComposerModelSelector({
             {hasReasoning && (
               <DropdownMenuItem
                 closeOnClick={false}
-                className="ai-model-menu-cell min-h-9 min-w-56 gap-1.5 pr-[5px] pl-2 [&>:first-child]:flex-1"
+                className="ai-model-menu-cell min-h-9 min-w-56 gap-1 pr-[5px] pl-2 [&>:first-child]:flex-1"
                 onClick={() => setPane('reasoning')}
               >
                 <span>{t('ai.workspace.model.reasoning')}</span>
@@ -222,7 +222,7 @@ export function AiComposerModelSelector({
                   key={`${provider.id}:${provider.model}`}
                   value={`${provider.id}\u0000${provider.model}`}
                   closeOnClick
-                  className="ai-model-menu-option min-h-[34px] gap-1.5 py-[5px] pl-2"
+                  className="ai-model-menu-option min-h-[34px] gap-1 py-[5px] pl-2"
                 >
                   <span className="truncate">
                     {provider.modelDefinition?.displayName ?? provider.model}
@@ -254,7 +254,7 @@ export function AiComposerModelSelector({
               <DropdownMenuRadioItem
                 value="provider-default"
                 closeOnClick
-                className="ai-model-menu-option min-h-[34px] gap-1.5 py-[5px] pl-2"
+                className="ai-model-menu-option min-h-[34px] gap-1 py-[5px] pl-2"
               >
                 <span>{t('ai.reasoningEffort.default')}</span>
               </DropdownMenuRadioItem>
@@ -263,7 +263,7 @@ export function AiComposerModelSelector({
                   key={option}
                   value={option}
                   closeOnClick
-                  className="ai-model-menu-option min-h-[34px] gap-1.5 py-[5px] pl-2"
+                  className="ai-model-menu-option min-h-[34px] gap-1 py-[5px] pl-2"
                 >
                   <span>{resolved?.reasoning.find(o => o.id === option)?.displayName ?? option}</span>
                 </DropdownMenuRadioItem>

@@ -11,7 +11,7 @@ import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
 import type { RouteSnapshot } from '@/types/ai';
 import type { AgentSessionEvent } from '@/types/agent-session';
-import '@/components/ai/ai-panel.css';
+import '@/components/ai/styles/styles.css';
 
 function reasoningNode(
   changes: Partial<AiConversationNodeOf<'reasoning'>> = {},
@@ -46,8 +46,8 @@ function contextNode(): AiConversationNodeOf<'contextInjection'> {
     lastSeq: 2,
     timestamp: '2026-09-03T00:00:00.200Z',
     messageId: 'context-phase4',
-    content: 'Runtime context from the committed event.',
-    provenance: { kind: 'runtime', label: 'ShellSpan Runtime', producerId: 'runtime' },
+    content: 'Plugin context from the committed event.',
+    provenance: { kind: 'plugin', label: 'ShellSpan Plugin', producerId: 'plugin' },
   };
 }
 
@@ -115,7 +115,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(getComputedStyle(processPanel!).transitionProperty).toBe('height, opacity');
     expect(getComputedStyle(processPanel!).overflow).toBe('hidden');
     expect(getComputedStyle(processPanel!).transitionDuration).toBe(
-      'var(--ds-transition-duration-slow), var(--ds-transition-duration)',
+      'var(--ai-transition-duration-slow), var(--ai-transition-duration)',
     );
     const processBody = container.querySelector<HTMLElement>('.ai-turn-process-body');
     expect(processBody).toHaveClass('w-full');
@@ -123,7 +123,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(processBody).not.toHaveClass('ml-[22px]');
     expect(processBody).not.toHaveClass('pl-[15px]');
     expect(getComputedStyle(processBody!).borderLeftStyle).toBe('none');
-    expect(getComputedStyle(process.querySelector('.ai-disclosure-leading')!).translate).toBe('0 1px');
+    expect(getComputedStyle(process.querySelector('.ai-disclosure-leading')!).translate).toBe('none');
     expect(processSeparator).not.toHaveClass('ml-[22px]');
     const reasoning = screen.getByRole('button', {
       name: 'Reasoning Read the frozen context. Answer directly.',
@@ -286,7 +286,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
       childKeys: [context.key],
     });
     const { rerender } = render(<AiConversationNodeList nodes={[running]} />);
-    const contextTrigger = screen.getByRole('button', { name: 'Runtime context' });
+    const contextTrigger = screen.getByRole('button', { name: 'Plugin context' });
     await user.click(contextTrigger);
     const contextPanel = document.querySelector<HTMLElement>(
       '.ai-semantic-note > [data-slot="collapsible-content"]',

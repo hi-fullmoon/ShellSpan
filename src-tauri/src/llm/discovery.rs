@@ -150,9 +150,9 @@ fn discovered(
 pub(crate) fn catalog_models(
     provider: &AiProviderConfig,
 ) -> Result<Option<Vec<DiscoveredModel>>, String> {
-    // Curated cloud profiles already have a complete capability catalog. Like
-    // DeepSeek Harness, expose that catalog to configuration surfaces instead
-    // of replacing it with a /models response that normally carries IDs only.
+    // Curated cloud profiles already have a complete capability catalog. Expose
+    // that catalog to configuration surfaces instead of replacing it with a
+    // /models response that normally carries IDs only.
     // Ollama and generic gateways remain endpoint-discovered because their
     // installed models are deployment-specific.
     if provider.kind != AiProviderKind::Ollama && provider.profile != "generic" {

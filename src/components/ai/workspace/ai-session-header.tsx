@@ -2,7 +2,6 @@ import {
   MessageCircleQuestionIcon,
   HistoryIcon,
   PanelRightCloseIcon,
-  SquareTerminalIcon,
   SquarePenIcon,
 } from 'lucide-react';
 
@@ -11,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/hooks/useI18n';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import { AiHeaderIconButton } from './ai-header-icon-button';
+import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 
 export interface AiSessionHeaderProps {
   readonly title: string;
@@ -50,20 +50,20 @@ export function AiSessionHeader({
     <header
       data-slot="ai-workspace-header"
       data-session-status={status}
-      className="ai-session-header relative flex h-10 min-h-10 min-w-0 shrink-0 items-center gap-2 px-[var(--ai-shell-clearance)]"
+      className="ai-session-header relative flex h-10 min-h-10 min-w-0 shrink-0 items-center gap-2 border-b border-border px-[var(--ai-shell-clearance)]"
       data-ai-mode={mode}
     >
       <div className="ai-session-title-cluster flex min-w-0 flex-1 items-center gap-2">
-        <span className="ai-session-mode-icon relative grid size-7 shrink-0 place-items-center" aria-hidden="true">
-          {mode === 'ask' ? <MessageCircleQuestionIcon /> : <SquareTerminalIcon />}
+        <span className="ai-session-mode-icon relative grid size-7 shrink-0 place-items-center rounded-[9px] bg-primary/10 text-primary [&>svg]:size-[15px]" aria-hidden="true">
+          {mode === 'ask' ? <MessageCircleQuestionIcon /> : <ShellSpanGlyph />}
           <span className="ai-session-status-dot absolute -right-0.5 -bottom-0.5 size-[7px] shrink-0" data-state={status} />
         </span>
         <span className="ai-session-heading flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1">
-            <h2 className="ai-session-title min-w-0 truncate">{title}</h2>
+            <h2 className="ai-session-title min-w-0 truncate text-sm font-medium leading-5 text-foreground">{title}</h2>
             {lineage}
           </span>
-          <span className="ai-session-context truncate">{context}</span>
+          <span className="ai-session-context truncate text-[11px] leading-[15px] text-muted-foreground">{context}</span>
         </span>
         <span className="sr-only">{statusLabel}</span>
       </div>

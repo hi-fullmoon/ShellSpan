@@ -9,7 +9,7 @@ import {
   TerminalAgentController,
   WorkbenchAskController,
 } from './workspace/ai-workspace-controller';
-import './ai-panel.css';
+import './styles/styles.css';
 
 const AI_PANEL_DEFAULT_WIDTH = 400;
 const AI_PANEL_MIN_WIDTH = 320;
@@ -222,7 +222,7 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
       data-slot="ai-panel"
       data-ai-scope={scope}
       data-compact={compactViewport || undefined}
-      className="ai-panel-shell"
+      className="ai-panel-shell relative flex h-full min-w-0 max-w-full shrink-0 flex-col overflow-hidden border-l-0 bg-card font-sans text-sm leading-[22px] text-foreground"
       style={{ width: compactViewport ? '100%' : panelWidth }}
       aria-label={panelTitle}
       hidden={!visible}

@@ -78,6 +78,7 @@ windows-sys = { version = "0.61", features = [
   "Win32_Networking_WinSock",
   "Win32_Storage",
   "Win32_Storage_FileSystem",
+  "Win32_UI_Shell",
 ] }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]

@@ -181,6 +181,44 @@ impl ProviderRoute {
     }
 }
 
+fn uses_legacy_minimax_builtin_catalog(route: &ProviderRoute) -> Result<bool, String> {
+    if route.preset_id != "minimax" || route.model_overrides.is_some() {
+        return Ok(false);
+    }
+    let Some(models) = &route.models else {
+        return Ok(false);
+    };
+    let mut legacy = catalog::preset_models(&route.preset_id, route.kind()?)?;
+    let Some(minimax_m3) = legacy.get_mut("MiniMax-M3") else {
+        return Ok(false);
+    };
+    minimax_m3.context_window = 204_800;
+    minimax_m3.max_output_tokens = 4_096;
+    minimax_m3.image_input = catalog::Support::Unsupported;
+    minimax_m3.vision = None;
+    Ok(models == &legacy)
+}
+
+fn migrate_legacy_builtin_catalogs(snapshot: &mut RouteSnapshot) -> Result<bool, String> {
+    let mut changed = false;
+    for route in &mut snapshot.routes {
+        if !uses_legacy_minimax_builtin_catalog(route)? {
+            continue;
+        }
+        route.models = None;
+        route.revision = route.revision.checked_add(1).ok_or("REVISION_EXHAUSTED")?;
+        route.replay_domain_id = uuid::Uuid::new_v4().to_string();
+        changed = true;
+    }
+    if changed {
+        snapshot.revision = snapshot
+            .revision
+            .checked_add(1)
+            .ok_or("REVISION_EXHAUSTED")?;
+    }
+    Ok(changed)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RouteSnapshot {
@@ -230,7 +268,7 @@ pub(crate) struct RouteStore {
 impl RouteStore {
     pub fn open(database: Database, credentials: CredentialManager) -> Result<Self, String> {
         let preferences = database.load_preferences()?;
-        let snapshot = match preferences.iter().find(|(k, _)| k == ROUTES_KEY) {
+        let mut snapshot = match preferences.iter().find(|(k, _)| k == ROUTES_KEY) {
             Some((_, value)) => {
                 serde_json::from_str(value).map_err(|e| format!("INVALID_ROUTE_DOCUMENT: {e}"))?
             }
@@ -244,6 +282,14 @@ impl RouteStore {
             }
         };
         snapshot.validate()?;
+        let previous_revision = snapshot.revision;
+        if migrate_legacy_builtin_catalogs(&mut snapshot)? {
+            snapshot.validate()?;
+            database.commit_llm_routes(
+                Some(previous_revision),
+                &serde_json::to_string(&snapshot).map_err(|e| e.to_string())?,
+            )?;
+        }
         let store = Self {
             current: Arc::new(Mutex::new(Arc::new(snapshot))),
             database,

@@ -16,6 +16,72 @@
             .iter()
             .any(|(key, _)| key == "llm.legacyBackup.v1"));
     }
+
+    #[test]
+    fn legacy_minimax_builtin_snapshot_migrates_back_to_inherited_catalog() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("db.sqlite")).unwrap();
+        let mut models =
+            catalog::preset_models("minimax", AiProviderKind::OpenAiCompatible).unwrap();
+        let old_m3 = models.get_mut("MiniMax-M3").unwrap();
+        old_m3.context_window = 204_800;
+        old_m3.max_output_tokens = 4_096;
+        old_m3.image_input = catalog::Support::Unsupported;
+        old_m3.vision = None;
+        let snapshot = RouteSnapshot {
+            schema_version: 1,
+            revision: 3,
+            routes: vec![ProviderRoute {
+                id: "minimax".into(),
+                revision: 2,
+                display_name: "MiniMax".into(),
+                adapter_id: "chat-completions".into(),
+                base_url: "https://api.minimaxi.com".into(),
+                auth: RouteAuth::Keychain {
+                    reference: "fixture".into(),
+                },
+                replay_domain_id: "old-domain".into(),
+                preset_id: "minimax".into(),
+                models: Some(models),
+                model_overrides: None,
+                defaults: Some(ModelSelection {
+                    route_id: "minimax".into(),
+                    model_id: "MiniMax-M3".into(),
+                    reasoning_effort: None,
+                }),
+                retry_policy: Default::default(),
+                timeouts: Default::default(),
+            }],
+            default_selection: Some(ModelSelection {
+                route_id: "minimax".into(),
+                model_id: "MiniMax-M3".into(),
+                reasoning_effort: None,
+            }),
+        };
+        db.commit_llm_routes(None, &serde_json::to_string(&snapshot).unwrap())
+            .unwrap();
+
+        let store = RouteStore::open(db.clone(), CredentialManager::in_memory_for_tests()).unwrap();
+        let migrated = store.snapshot().unwrap();
+        let route = migrated.route("minimax").unwrap();
+        assert_eq!(migrated.revision, 4);
+        assert_eq!(route.revision, 3);
+        assert_ne!(route.replay_domain_id, "old-domain");
+        assert!(route.models.is_none());
+        assert_eq!(
+            route
+                .provider(route.defaults.as_ref().unwrap())
+                .unwrap()
+                .model_definition
+                .unwrap()
+                .max_output_tokens,
+            131_072
+        );
+
+        let reopened = RouteStore::open(db, CredentialManager::in_memory_for_tests()).unwrap();
+        assert_eq!(reopened.snapshot().unwrap().revision, 4);
+    }
+
     #[test]
     fn validates_mutual_exclusion_duplicate_and_unknown_adapter() {
         let mut route = ProviderRoute {

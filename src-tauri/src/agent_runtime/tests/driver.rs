@@ -181,6 +181,15 @@
                     .starts_with(prefix)
             );
         }
+
+        let mut output_limit = NormalizedModelError::new(
+            NormalizedModelErrorKind::Terminal,
+            "AI provider reached the configured output token limit",
+        );
+        output_limit.code = Some("OUTPUT_LIMIT".into());
+        let reason = model_error_reason(&output_limit, 1, 3, 0);
+        assert!(reason.starts_with("outputLimit:"));
+        assert!(reason.contains("code=OUTPUT_LIMIT"));
     }
 
     #[test]

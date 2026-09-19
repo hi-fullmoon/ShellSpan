@@ -397,6 +397,7 @@ pub fn run() {
             commands::pick_local_files,
             commands::pick_local_folder,
             commands::open_path,
+            commands::reveal_path,
             commands::pick_private_key_file,
             commands::open_remote_file,
             commands::preview_local_file,

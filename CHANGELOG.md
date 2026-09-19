@@ -153,7 +153,6 @@ All notable changes to ShellSpan are documented in this file.
 
 ### Documentation
 
-- **ai:** add DeepSeek Harness implementation plan for AI panel
 - **llm:** add adapter architecture and implementation progress
 - **petdex:** add integration roadmap and validation evidence
 - **product-roadmap:** add termbridge agent roadmap

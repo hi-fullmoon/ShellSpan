@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
 import { createRoot } from 'react-dom/client';
-import '@/components/ai/ai-panel.css';
+import '@/components/ai/styles/styles.css';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { applyTheme } from '@/lib/theme';

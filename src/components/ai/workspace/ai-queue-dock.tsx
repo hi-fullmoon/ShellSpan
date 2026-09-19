@@ -154,7 +154,7 @@ export function AiQueueDock({
         <Button
           type="button"
           variant="plain"
-          className="ai-queue-header flex h-9 w-full min-w-0 items-center gap-2.5 px-3 py-1 [&>:last-child]:ml-auto"
+          className="ai-queue-header flex h-9 w-full min-w-0 items-center gap-1 px-3 py-1 [&>:last-child]:ml-auto"
           aria-expanded={expanded}
           disabled={editingId !== null}
           onClick={() => setCollapsed((value) => !value)}

@@ -10,14 +10,29 @@ beforeEach(async () => { await initI18n('en-US'); Element.prototype.scrollIntoVi
 afterEach(cleanup);
 
 describe('composer layout', () => {
-  it('gives the hero editor compact but visible top padding', () => {
-    const { container, rerender } = render(<AiComposerSeat phase="hero" status="idle" />);
+  it('keeps image drafts flush with the top edge in every phase', () => {
+    const imageControls = <div>image preview</div>;
+    const { container, rerender } = render(
+      <AiComposerSeat phase="hero" status="idle" imageControls={imageControls} />,
+    );
     const card = container.querySelector('[data-composer-card]');
-    expect(card).toHaveClass('pt-1.5');
-    expect(card).not.toHaveClass('pt-2.5');
+    expect(card).not.toHaveClass('pt-1.5', 'pt-2.5');
+    expect(card).toHaveClass('gap-0');
+    expect(card).not.toHaveClass('gap-3');
+    expect(container.querySelector('.ai-composer-toolbar')).toHaveClass('mt-3');
+
+    rerender(<AiComposerSeat phase="active" status="idle" imageControls={imageControls} />);
+    expect(container.querySelector('[data-composer-card]')).not.toHaveClass('pt-1.5', 'pt-2.5');
+  });
+
+  it('restores phase-specific top padding when there is no image draft', () => {
+    const { container, rerender } = render(<AiComposerSeat phase="hero" status="idle" />);
+    expect(container.querySelector('[data-composer-card]')).toHaveClass('pt-1.5');
+    expect(container.querySelector('[data-composer-card]')).not.toHaveClass('pt-2.5');
 
     rerender(<AiComposerSeat phase="active" status="idle" />);
     expect(container.querySelector('[data-composer-card]')).toHaveClass('pt-2.5');
+    expect(container.querySelector('[data-composer-card]')).not.toHaveClass('pt-1.5');
   });
 });
 
