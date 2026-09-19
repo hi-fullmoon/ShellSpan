@@ -1,10 +1,10 @@
 import { skillContexts } from './skill-projection';
-import { projectQuestions } from './question-projection';
+import { createCommittedEventProjection } from './committed-event-projection';
+import { createQuestionProjector } from './question-projection';
 import { questionKey } from '@/types/agent-question';
 import {
   agentEventTimestamp,
   agentToolEventKey,
-  validateCommittedAgentEventWindow,
 } from '@/lib/ai/agent-session-event-window';
 import type {
   AgentSessionAssistantContentBlock,
@@ -273,9 +273,15 @@ function topLevelSort(left: AiConversationNode, right: AiConversationNode): numb
 export function projectAgentChatNodes(
   events: readonly AgentSessionEvent[],
 ): readonly AiConversationNode[] {
-  validateCommittedAgentEventWindow(events);
-  if (events.length === 0) return [];
+  return createAgentChatProjector()(events);
+}
 
+export function createAgentChatProjector(): (events: readonly AgentSessionEvent[]) => readonly AiConversationNode[] {
+  return createCommittedEventProjection(createChatProjection);
+}
+
+function createChatProjection() {
+  const projectQuestions = createQuestionProjector();
   const turns = new Map<string, TurnState>();
   const userMessages = new Map<string, AiUserMessageNode>();
   const systemPrompts = new Map<string, AiSystemPromptNode>();
@@ -523,7 +529,7 @@ export function projectAgentChatNodes(
     }
   };
 
-  for (const event of events) {
+  const apply = (event: AgentSessionEvent): void => {
     if (event.turnId) ensureTurn(event);
     switch (event.type) {
       case 'session/created':
@@ -637,6 +643,26 @@ export function projectAgentChatNodes(
         break;
       }
       case 'step/end': {
+        if (event.data.reason === 'outputLimitContinuation') {
+          const turn = ensureTurn(event);
+          settleStreamingOutput(event, 'incomplete', 'step');
+          const requestId = event.stepId ? activeRequestByStep.get(event.stepId) : undefined;
+          const key = `output-limit-continuation:${event.turnId}:${event.stepId ?? event.seq}`;
+          const previous = turn?.children.get(key);
+          const attempt = previous?.kind === 'retry' ? previous.attempt
+            : 1 + [...(turn?.children.values() ?? [])].filter((node) => (
+              node.kind === 'retry' && node.reason === 'outputLimitContinuation'
+            )).length;
+          putProcessChild(eventTurnId(event), {
+            kind: 'retry', key, sourceKind: 'agent', sessionId: event.sessionId,
+            turnId: eventTurnId(event), stepId: eventStepId(event),
+            firstSeq: previous?.firstSeq ?? event.seq, lastSeq: event.seq,
+            timestamp: agentEventTimestamp(event.timeUnixMs),
+            requestId: requestId ?? key, previousRequestId: requestId ?? null,
+            attempt, reason: 'outputLimitContinuation',
+          });
+          break;
+        }
         const status = terminalStatusFromReason(event.data.reason);
         settleStreamingOutput(event, status, 'step');
         if (status === 'failed' || status === 'cancelled') {
@@ -1049,7 +1075,7 @@ export function projectAgentChatNodes(
         // Future Event v5 extensions remain visible in Activity, never as guessed chat copy.
         break;
     }
-  }
+  };
 
   const completedStats = (turn: TurnState): AiDurableTurnStats => {
     const turnRequests = turn.requestIds
@@ -1129,137 +1155,138 @@ export function projectAgentChatNodes(
     };
   };
 
-  const scopedUsers = new Map<string, AiUserMessageNode[]>();
-  for (const node of userMessages.values()) {
-    if (node.turnId === null) {
-      unscopedNodes.set(node.key, node);
-      continue;
+  const snapshot = (events: readonly AgentSessionEvent[]): readonly AiConversationNode[] => {
+    const projectedUnscoped = new Map(unscopedNodes);
+    const scopedUsers = new Map<string, AiUserMessageNode[]>();
+    for (const node of userMessages.values()) {
+      if (node.turnId === null) {
+        projectedUnscoped.set(node.key, node);
+        continue;
+      }
+      const values = scopedUsers.get(node.turnId) ?? [];
+      values.push(node);
+      scopedUsers.set(node.turnId, values);
     }
-    const values = scopedUsers.get(node.turnId) ?? [];
-    values.push(node);
-    scopedUsers.set(node.turnId, values);
-  }
 
-  const scopedPrompts = new Map<string, AiSystemPromptNode[]>();
-  for (const node of systemPrompts.values()) {
-    if (node.turnId === null) {
-      unscopedNodes.set(node.key, node);
-      continue;
+    const scopedPrompts = new Map<string, AiSystemPromptNode[]>();
+    for (const node of systemPrompts.values()) {
+      if (node.turnId === null) {
+        projectedUnscoped.set(node.key, node);
+        continue;
+      }
+      const values = scopedPrompts.get(node.turnId) ?? [];
+      values.push(node);
+      scopedPrompts.set(node.turnId, values);
     }
-    const values = scopedPrompts.get(node.turnId) ?? [];
-    values.push(node);
-    scopedPrompts.set(node.turnId, values);
-  }
 
-  const scopedArtifacts = new Map<string, AiArtifactNode[]>();
-  for (const node of artifacts.values()) {
-    if (node.turnId === null) {
-      unscopedNodes.set(node.key, node);
-      continue;
+    const scopedArtifacts = new Map<string, AiArtifactNode[]>();
+    for (const node of artifacts.values()) {
+      if (node.turnId === null) {
+        projectedUnscoped.set(node.key, node);
+        continue;
+      }
+      const values = scopedArtifacts.get(node.turnId) ?? [];
+      values.push(node);
+      scopedArtifacts.set(node.turnId, values);
     }
-    const values = scopedArtifacts.get(node.turnId) ?? [];
-    values.push(node);
-    scopedArtifacts.set(node.turnId, values);
-  }
 
-  const questionNodes = projectQuestions(events).map((question): AiQuestionNode => ({
-    kind: 'question', key: `question:${questionKey(question.identity)}`, sourceKind: 'agent',
-    sessionId: question.identity.sessionId, turnId: question.identity.turnId, stepId: question.identity.stepId,
-    firstSeq: question.firstSeq, lastSeq: question.lastSeq, timestamp: question.timestamp, question,
-  }));
-  for (const question of questionNodes) {
-    const turn = question.turnId === null ? undefined : turns.get(question.turnId);
-    if (turn) turn.children.set(question.key, question);
-    else unscopedNodes.set(question.key, question);
-  }
+    const questionNodes = projectQuestions(events).map((question): AiQuestionNode => ({
+      kind: 'question', key: `question:${questionKey(question.identity)}`, sourceKind: 'agent',
+      sessionId: question.identity.sessionId, turnId: question.identity.turnId, stepId: question.identity.stepId,
+      firstSeq: question.firstSeq, lastSeq: question.lastSeq, timestamp: question.timestamp, question,
+    }));
+    for (const question of questionNodes) {
+      const turn = question.turnId === null ? undefined : turns.get(question.turnId);
+      if (turn) turn.children.set(question.key, question);
+      else projectedUnscoped.set(question.key, question);
+    }
 
-  const nodes: AiConversationNode[] = [...unscopedNodes.values()].sort(topLevelSort);
-  const orderedTurns = [...turns.values()].sort((left, right) => (
-    left.firstSeq - right.firstSeq || left.id.localeCompare(right.id)
-  ));
-  const settledTurnStats: AiDurableTurnStats[] = [];
-  for (const turn of orderedTurns) {
-    nodes.push(...(scopedPrompts.get(turn.id) ?? []).sort(topLevelSort));
-    nodes.push(...(scopedUsers.get(turn.id) ?? []).sort(topLevelSort));
-
-    const assistants = [...turn.assistants.values()].sort(topLevelSort);
-    const closing = [...assistants].reverse().find((assistant) => (
-      textContent(assistant.blocks).trim() !== '' && !hasToolCall(assistant.blocks)
+    const nodes: AiConversationNode[] = [...projectedUnscoped.values()].sort(topLevelSort);
+    const orderedTurns = [...turns.values()].sort((left, right) => (
+      left.firstSeq - right.firstSeq || left.id.localeCompare(right.id)
     ));
-    for (const assistant of assistants) {
-      if (assistant.key !== closing?.key) turn.children.set(assistant.key, assistant);
-    }
-    const questionCallIds = new Set(
-      [...turn.children.values()].flatMap((child) =>
-        child.kind === 'question' ? [child.question.identity.callId] : [],
-      ),
-    );
-    const children = [...turn.children.values()]
-      .filter((child) => child.kind !== 'tool' || !questionCallIds.has(child.callId))
-      .sort(processChildSort);
-    const status: AiTurnProcessStatus = turn.startSeq === undefined
-      ? 'partial'
-      : turn.status ?? (turn.endSeq === undefined ? 'running' : 'completed');
-    const answerGeneration = [...turn.requestIds].reverse()[0] ?? `turn:${turn.id}`;
-    const process: AiTurnProcessNode = {
-      kind: 'turnProcess',
-      key: `turn-process:${turn.id}`,
-      sourceKind: 'agent',
-      sessionId: turn.sessionId,
-      turnId: turn.id,
-      stepId: null,
-      firstSeq: turn.startSeq ?? turn.firstSeq,
-      lastSeq: turn.endSeq ?? turn.lastSeq,
-      timestamp: turn.timestamp,
-      status,
-      answerGeneration,
-      hasStartBoundary: turn.startSeq !== undefined,
-      hasEndBoundary: turn.endSeq !== undefined,
-      childKeys: children.map((child) => child.key),
-      children,
-    };
-    nodes.push(process);
-    const hasTurnTail = turn.startSeq !== undefined && turn.endSeq !== undefined
-      && Boolean(turn.endReason && turn.endTimestamp);
-    if (closing) nodes.push(hasTurnTail ? { ...closing, hasTurnTail: true } : closing);
-    nodes.push(...(scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort));
+    const settledTurnStats: AiDurableTurnStats[] = [];
+    for (const turn of orderedTurns) {
+      nodes.push(...(scopedPrompts.get(turn.id) ?? []).sort(topLevelSort));
+      nodes.push(...(scopedUsers.get(turn.id) ?? []).sort(topLevelSort));
 
-    if (turn.startSeq !== undefined && turn.endSeq !== undefined && turn.endReason && turn.endTimestamp) {
-      const stats = completedStats(turn);
-      settledTurnStats.push(stats);
-      const latestRequest = [...turn.requestIds]
-        .reverse()
-        .map((requestId) => requests.get(requestId))
-        .find((request) => request !== undefined);
-      const tail: AiTurnTailNode = {
-        kind: 'turnTail',
-        key: `turn-tail:${turn.id}`,
+      const assistants = [...turn.assistants.values()].sort(topLevelSort);
+      const closing = [...assistants].reverse().find((assistant) => (
+        textContent(assistant.blocks).trim() !== '' && !hasToolCall(assistant.blocks)
+      ));
+      const questionCallIds = new Set(
+        [...turn.children.values()].flatMap((child) =>
+          child.kind === 'question' ? [child.question.identity.callId] : [],
+        ),
+      );
+      const children = [...turn.children.values(), ...assistants.filter((assistant) => assistant.key !== closing?.key)]
+        .filter((child) => child.kind !== 'tool' || !questionCallIds.has(child.callId))
+        .sort(processChildSort);
+      const status: AiTurnProcessStatus = turn.startSeq === undefined
+        ? 'partial'
+        : turn.status ?? (turn.endSeq === undefined ? 'running' : 'completed');
+      const answerGeneration = [...turn.requestIds].reverse()[0] ?? `turn:${turn.id}`;
+      const process: AiTurnProcessNode = {
+        kind: 'turnProcess',
+        key: `turn-process:${turn.id}`,
         sourceKind: 'agent',
         sessionId: turn.sessionId,
         turnId: turn.id,
         stepId: null,
-        firstSeq: turn.endSeq,
-        lastSeq: turn.endSeq,
-        timestamp: turn.endTimestamp,
-        status: turn.status ?? 'completed',
-        endReason: turn.endReason,
-        stopReason: latestRequest?.stopReason ?? null,
-        usage: aggregateUsage(stats),
-        stats,
-        sessionStats: aggregateDurableSessionStats(settledTurnStats, events[0]?.seq === 0),
-        summaryText: closing ? textContent(closing.blocks) : undefined,
-        durationMs: turn.startedAt === undefined ? undefined
-          : Math.max(0, Date.parse(turn.endTimestamp) - turn.startedAt),
-        models: [...new Map(turn.requestIds.flatMap((requestId) => {
-          const request = requests.get(requestId);
-          return request ? [[JSON.stringify([request.providerId, request.model]), {
-            providerId: request.providerId, model: request.model,
-          }] as const] : [];
-        })).values()],
+        firstSeq: turn.startSeq ?? turn.firstSeq,
+        lastSeq: turn.endSeq ?? turn.lastSeq,
+        timestamp: turn.timestamp,
+        status,
+        answerGeneration,
+        hasStartBoundary: turn.startSeq !== undefined,
+        hasEndBoundary: turn.endSeq !== undefined,
+        childKeys: children.map((child) => child.key),
+        children,
       };
-      nodes.push(tail);
-    }
-  }
+      nodes.push(process);
+      const hasTurnTail = turn.startSeq !== undefined && turn.endSeq !== undefined
+        && Boolean(turn.endReason && turn.endTimestamp);
+      if (closing) nodes.push(hasTurnTail ? { ...closing, hasTurnTail: true } : closing);
+      nodes.push(...(scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort));
 
-  return nodes;
+      if (turn.startSeq !== undefined && turn.endSeq !== undefined && turn.endReason && turn.endTimestamp) {
+        const stats = completedStats(turn);
+        settledTurnStats.push(stats);
+        const latestRequest = [...turn.requestIds]
+          .reverse()
+          .map((requestId) => requests.get(requestId))
+          .find((request) => request !== undefined);
+        const tail: AiTurnTailNode = {
+          kind: 'turnTail',
+          key: `turn-tail:${turn.id}`,
+          sourceKind: 'agent',
+          sessionId: turn.sessionId,
+          turnId: turn.id,
+          stepId: null,
+          firstSeq: turn.endSeq,
+          lastSeq: turn.endSeq,
+          timestamp: turn.endTimestamp,
+          status: turn.status ?? 'completed',
+          endReason: turn.endReason,
+          stopReason: latestRequest?.stopReason ?? null,
+          usage: aggregateUsage(stats),
+          stats,
+          sessionStats: aggregateDurableSessionStats(settledTurnStats, events[0]?.seq === 0),
+          summaryText: closing ? textContent(closing.blocks) : undefined,
+          durationMs: turn.startedAt === undefined ? undefined
+            : Math.max(0, Date.parse(turn.endTimestamp) - turn.startedAt),
+          models: [...new Map(turn.requestIds.flatMap((requestId) => {
+            const request = requests.get(requestId);
+            return request ? [[JSON.stringify([request.providerId, request.model]), {
+              providerId: request.providerId, model: request.model,
+            }] as const] : [];
+          })).values()],
+        };
+        nodes.push(tail);
+      }
+    }
+
+    return nodes;
+  };
+  return { apply, snapshot };
 }

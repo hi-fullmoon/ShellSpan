@@ -551,6 +551,8 @@ describe('AI Phase 3 chat projection', () => {
   });
 
   it.each([
+    'outputLimit',
+    'outputLimit: AI provider repeatedly reached its output token limit',
     'noProgress: repeated tool calls',
     'modelStreamTotalTimeout: provider stalled',
     'networkRecoveryTimeout: provider stayed offline',
@@ -569,5 +571,29 @@ describe('AI Phase 3 chat projection', () => {
     expect(process.children).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'error', state: 'failed', message: reason }),
     ]));
+  });
+
+  it('keeps output-limit recovery out of errors and retains notices after completion', () => {
+    const events = [
+      sessionEvent(0, { type: 'turn/start', turnId: 'turn-recovery' }),
+      sessionEvent(1, { type: 'step/start', turnId: 'turn-recovery', stepId: 'step-1' }),
+      sessionEvent(2, { type: 'step/end', turnId: 'turn-recovery', stepId: 'step-1', data: { reason: 'outputLimitContinuation' } }),
+      sessionEvent(3, { type: 'step/start', turnId: 'turn-recovery', stepId: 'step-2' }),
+      sessionEvent(4, { type: 'step/end', turnId: 'turn-recovery', stepId: 'step-2', data: { reason: 'outputLimitContinuation' } }),
+    ];
+    const recovering = turnProcess(projectAgentChatNodes(events), 'turn-recovery');
+    expect(recovering.status).toBe('running');
+    expect(recovering.children.filter((node) => node.kind === 'error')).toHaveLength(0);
+    expect(recovering.children.filter((node) => node.kind === 'retry')).toMatchObject([
+      { reason: 'outputLimitContinuation', attempt: 1 },
+      { reason: 'outputLimitContinuation', attempt: 2 },
+    ]);
+    const completed = turnProcess(projectAgentChatNodes([
+      ...events,
+      sessionEvent(5, { type: 'turn/end', turnId: 'turn-recovery', data: { reason: 'completed' } }),
+    ]), 'turn-recovery');
+    expect(completed.status).toBe('completed');
+    expect(completed.children.filter((node) => node.kind === 'error')).toHaveLength(0);
+    expect(completed.children.filter((node) => node.kind === 'retry')).toHaveLength(2);
   });
 });

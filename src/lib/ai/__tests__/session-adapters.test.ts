@@ -5,6 +5,7 @@ import { AgentSessionCommittedClient } from '@/lib/ai/agent-session-client';
 import {
   agentSessionView,
   createAgentSessionAdapter,
+  createAgentSessionViewProjector,
   projectAgentInbox,
   type AgentSessionAdapterDependencies,
 } from '@/lib/ai/agent-session-adapter';
@@ -201,6 +202,22 @@ function agentDependencies(
 }
 
 describe('AgentSessionAdapter', () => {
+  it('keeps incremental session views equivalent to full replay across streaming and reconnects', () => {
+    const project = createAgentSessionViewProjector();
+    const value = snapshot();
+    for (const source of [agentSessionEventFixture, agentSessionSteerFixture]) {
+      for (let length = 1; length <= source.length; length += 1) {
+        const events = source.slice(0, length);
+        const state = {
+          snapshot: value, events, lastCommittedSeq: events[events.length - 1]?.seq,
+          hasTerminalEvent: events.some((event) => event.type === 'session/ended'),
+        };
+        expect(project(state)).toEqual(agentSessionView(state));
+      }
+      const state = { snapshot: value, events: structuredClone(source), hasTerminalEvent: false };
+      expect(project(state)).toEqual(agentSessionView(state));
+    }
+  });
   it('loads volatile approval arguments through the exact approval identity', async () => {
     const dependencies = agentDependencies(agentSessionWaitingApprovalEventFixture);
     const approvalArguments = vi.fn(async () => ({
