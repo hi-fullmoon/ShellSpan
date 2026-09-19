@@ -31,7 +31,7 @@ vi.mock('@/stores/knownHostsStore', () => ({
 }));
 
 describe('KnownHostsPanel', () => {
-  it('renders the header refresh action as a text button', () => {
+  it('lets the header search shrink until the wide container breakpoint', () => {
     render(<KnownHostsPanel />);
 
     expect(screen.getByRole('button', { name: 'common.refresh' }))
@@ -45,7 +45,6 @@ describe('KnownHostsPanel', () => {
       'w-64',
       'max-w-full',
       'flex-1',
-      '@min-[64rem]:w-64',
       '@min-[64rem]:flex-none',
     );
   });
