@@ -1,6 +1,59 @@
     use super::*;
 
     #[test]
+    fn settled_plan_failures_do_not_force_another_completion_attempt() {
+        use super::super::AgentPlanStepStatus::{Blocked, Completed, Failed, InProgress, Pending};
+
+        let plan = |turn: &str, statuses: &[super::super::AgentPlanStepStatus]| {
+            let mut recorded = event(
+                1,
+                AgentSessionEventPayload::TaskPlan {
+                    version: 1,
+                    steps: statuses
+                        .iter()
+                        .enumerate()
+                        .map(|(index, status)| super::super::AgentPlanStep {
+                            id: format!("step-{index}"),
+                            title: format!("Step {index}"),
+                            status: *status,
+                            detail: None,
+                            evidence_refs: Vec::new(),
+                        })
+                        .collect(),
+                },
+            );
+            recorded.turn_id = Some(turn.into());
+            recorded
+        };
+        for statuses in [
+            vec![Completed, Completed, Blocked, Completed],
+            vec![Failed],
+            vec![Blocked, Failed],
+        ] {
+            let events = vec![plan("current", &statuses)];
+            assert!(incomplete_plan_for_turn(&events, "current"));
+            assert!(!plan_needs_completion_check(&events, "current"));
+        }
+        for status in [Pending, InProgress] {
+            let events = vec![plan("current", &[Blocked, status])];
+            assert!(incomplete_plan_for_turn(&events, "current"));
+            assert!(plan_needs_completion_check(&events, "current"));
+        }
+        let events = vec![
+            plan("current", &[InProgress]),
+            plan("current", &[Completed, Blocked]),
+            plan("other-turn", &[Pending]),
+        ];
+        assert!(!plan_needs_completion_check(&events, "current"));
+        assert!(!incomplete_plan_for_turn(&events, "missing-turn"));
+        assert!(!plan_needs_completion_check(&[], "current"));
+        assert!(!incomplete_plan_for_turn(
+            &[plan("current", &[Completed])],
+            "current"
+        ));
+    }
+
+    #[test]
     fn root_and_delegated_step_budgets_have_distinct_settlements() {
         assert_eq!(
             AgentDriverConfig::default().max_steps_per_turn,
@@ -10,6 +63,45 @@
             step_budget_reason(DEFAULT_MAX_STEPS_PER_TURN, true).starts_with("stepBudgetReached:")
         );
         assert!(step_budget_reason(4, false).starts_with("stepLimitExceeded:"));
+        let mut child = super::super::AgentSubagentSession {
+            descriptor_id: "budget-child".into(),
+            parent_task_id: "budget-parent".into(),
+            role: super::super::AgentSubagentRole::General,
+            continuable: true,
+            depth: 1,
+            inheritance: super::super::AgentSubagentInheritance::Blank,
+            capability_scope: super::super::AgentCapabilityScope {
+                tool_names: Vec::new(),
+                effects: Vec::new(),
+                target_ids: Vec::new(),
+            },
+            target_scope: Vec::new(),
+            budget: super::super::AgentSubagentBudget {
+                max_steps_per_turn: 8,
+                max_turns: 3,
+                max_tool_calls: 12,
+                max_tokens: 16_000,
+                timeout_ms: 60_000,
+            },
+            provider: super::super::AgentSubagentModel {
+                route_id: "budget-route".into(),
+                model_id: "budget-model".into(),
+                reasoning_effort: None,
+                route_revision: None,
+            },
+        };
+        assert!(step_budget_recoverable(None));
+        assert!(step_budget_recoverable(Some(&child)));
+        child.continuable = false;
+        assert!(!step_budget_recoverable(Some(&child)));
+    }
+
+    #[test]
+    fn child_budget_notice_counts_the_current_request_and_reserves_handoff() {
+        let notice = step_budget_notice(8, 6);
+        assert!(notice.contains("step 6 of 8; 2 further model steps"));
+        assert!(notice.contains("Do not claim unfinished work is complete"));
+        assert!(step_budget_notice(8, 8).contains("0 further model steps"));
     }
 
     fn event(
