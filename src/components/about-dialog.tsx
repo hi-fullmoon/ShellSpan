@@ -9,6 +9,7 @@ import {
 import { useI18n } from '@/hooks/useI18n';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { isTauriRuntime } from '@/lib/ipc/tauri';
+import { ShellSpanMark } from '@/components/brand/shellspan-mark';
 
 interface AboutDialogProps {
   open: boolean;
@@ -54,7 +55,12 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({ open, onClose }) => {
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <CompactDialogContent className="max-w-md">
         <CompactDialogHeader
-          title={t('about.title')}
+          title={(
+            <span className="flex items-center gap-2">
+              <ShellSpanMark className="size-6" data-slot="about-shellspan-mark" />
+              {t('about.title')}
+            </span>
+          )}
           description={t('app.tagline')}
         />
         <CompactDialogBody>
