@@ -38,8 +38,8 @@ pub(crate) struct AgentDriverConfig {
 impl Default for AgentDriverConfig {
     fn default() -> Self {
         Self {
-            // Root sessions treat this as a recoverable turn boundary, while
-            // delegated sessions keep their explicit hard per-turn budget.
+            // Root and continuable child sessions preserve state at this boundary.
+            // One-shot children retain their explicit single-turn contract.
             max_steps_per_turn: Some(DEFAULT_MAX_STEPS_PER_TURN),
             max_turns_per_session: 64,
             max_identical_tool_steps: 6,
@@ -243,10 +243,10 @@ async fn drive_agent_inner(
                 .max_steps_per_turn
                 .filter(|limit| step_index > *limit)
             {
-                let root_budget_boundary = entry.subagent.is_none();
-                let reason = step_budget_reason(limit, root_budget_boundary);
+                let recoverable = step_budget_recoverable(entry.subagent.as_ref());
+                let reason = step_budget_reason(limit, recoverable);
                 close_open_scope(sessions, entry, &reason)?;
-                if root_budget_boundary {
+                if recoverable {
                     continue;
                 }
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
@@ -394,10 +394,10 @@ async fn drive_agent_inner(
                 .max_steps_per_turn
                 .filter(|limit| step_index >= *limit)
             {
-                let root_budget_boundary = entry.subagent.is_none();
-                let reason = step_budget_reason(limit, root_budget_boundary);
+                let recoverable = step_budget_recoverable(entry.subagent.as_ref());
+                let reason = step_budget_reason(limit, recoverable);
                 close_open_scope(sessions, entry, &reason)?;
-                if root_budget_boundary {
+                if recoverable {
                     break;
                 }
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
@@ -452,6 +452,17 @@ async fn drive_agent_inner(
             }))?;
         }
     }
+}
+
+fn step_budget_recoverable(subagent: Option<&super::AgentSubagentSession>) -> bool {
+    subagent.is_none_or(|child| child.continuable)
+}
+
+fn step_budget_notice(limit: usize, step_index: usize) -> String {
+    let remaining = limit.saturating_sub(step_index);
+    format!(
+        "\nDelegated execution budget: this is step {step_index} of {limit}; {remaining} further model steps remain in this turn. When at most two further steps remain, prioritize verification and report completed work, evidence, remaining work, and blockers to the parent. Do not claim unfinished work is complete. A step-budget pause preserves executed actions; the parent may continue an eligible child using send_child_input in the same Session. Never restart completed commands or spawn replacement children to bypass cumulative budgets."
+    )
 }
 
 fn step_budget_reason(limit: usize, recoverable: bool) -> String {
@@ -682,6 +693,9 @@ async fn run_step(
             return Ok(StepSettlement::Cancelled);
         }
         let task_events = sessions.all_events(&entry.session_id)?;
+        if let Some(reason) = subagent_budget_failure(entry, &task_events)? {
+            return Ok(StepSettlement::Failed(reason));
+        }
         if let Some(reason) = task_budget_failure(&task_events, config)? {
             return Ok(StepSettlement::Failed(reason));
         }
@@ -788,6 +802,13 @@ async fn run_step(
                 request.messages = inherited_messages;
             }
             tools.apply_ephemeral_terminal_results(&entry.session_id, turn_id, &mut request)?;
+            if entry.subagent.is_some() {
+                if let Some(limit) = config.max_steps_per_turn {
+                    request
+                        .system_prompt
+                        .push_str(&step_budget_notice(limit, step_index));
+                }
+            }
             request
         };
         let request_surface_generation = request.surface_generation;
@@ -1310,7 +1331,7 @@ fn model_tools_for(
         .collect()
 }
 
-fn current_unix_ms() -> Result<u64, String> {
+pub(super) fn current_unix_ms() -> Result<u64, String> {
     Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| "system clock is before the Unix epoch".to_string())?
@@ -1777,7 +1798,8 @@ async fn commit_response(
             event.turn_id.as_deref() == Some(turn_id)
                 && matches!(&event.payload, AgentSessionEventPayload::StepEnd { reason } if reason == "completionCheck")
         });
-        if incomplete && !checked {
+        let continue_plan = plan_needs_completion_check(&events, turn_id) && !checked;
+        if continue_plan {
             payloads.push(AgentScopedPayload {
                 turn_id: Some(turn_id.to_string()),
                 step_id: Some(step_id.to_string()),
@@ -1797,12 +1819,10 @@ async fn commit_response(
             turn_id: Some(turn_id.to_string()),
             step_id: Some(step_id.to_string()),
             payload: AgentSessionEventPayload::StepEnd {
-                reason: if incomplete {
-                    if checked {
-                        "incomplete"
-                    } else {
-                        "completionCheck"
-                    }
+                reason: if continue_plan {
+                    "completionCheck"
+                } else if incomplete {
+                    "incomplete"
                 } else {
                     "completed"
                 }
@@ -1814,12 +1834,10 @@ async fn commit_response(
             turn_id: turn_id.to_string(),
             step_id: None,
         }))?;
-        return Ok(if incomplete {
-            if checked {
-                StepSettlement::Incomplete
-            } else {
-                StepSettlement::ToolsCompleted
-            }
+        return Ok(if continue_plan {
+            StepSettlement::ToolsCompleted
+        } else if incomplete {
+            StepSettlement::Incomplete
         } else {
             StepSettlement::Completed
         });
@@ -1837,6 +1855,24 @@ async fn commit_response(
 }
 
 pub(super) fn incomplete_plan_for_turn(events: &[super::AgentSessionEvent], turn_id: &str) -> bool {
+    latest_plan_for_turn(events, turn_id)
+        .iter()
+        .any(|step| step.status != super::AgentPlanStepStatus::Completed)
+}
+
+fn plan_needs_completion_check(events: &[super::AgentSessionEvent], turn_id: &str) -> bool {
+    latest_plan_for_turn(events, turn_id).iter().any(|step| {
+        matches!(
+            step.status,
+            super::AgentPlanStepStatus::Pending | super::AgentPlanStepStatus::InProgress
+        )
+    })
+}
+
+fn latest_plan_for_turn<'a>(
+    events: &'a [super::AgentSessionEvent],
+    turn_id: &str,
+) -> &'a [super::AgentPlanStep] {
     events
         .iter()
         .rev()
@@ -1844,15 +1880,11 @@ pub(super) fn incomplete_plan_for_turn(events: &[super::AgentSessionEvent], turn
             AgentSessionEventPayload::TaskPlan { steps, .. }
                 if event.turn_id.as_deref() == Some(turn_id) =>
             {
-                Some(
-                    steps
-                        .iter()
-                        .any(|step| step.status != super::AgentPlanStepStatus::Completed),
-                )
+                Some(steps.as_slice())
             }
             _ => None,
         })
-        .unwrap_or(false)
+        .unwrap_or_default()
 }
 
 fn append_interrupted_message(

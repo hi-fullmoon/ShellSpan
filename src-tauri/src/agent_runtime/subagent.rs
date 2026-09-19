@@ -941,16 +941,25 @@ impl SubAgentManager {
         client_submission_id: Option<String>,
     ) -> Result<(), String> {
         let child = self.ensure_owned_child(parent_session_id, child_session_id)?;
-        if !child
+        let subagent = child
             .header
             .subagent
             .as_ref()
-            .is_some_and(|subagent| subagent.continuable)
-        {
+            .ok_or_else(|| "child Session lost subagent metadata".to_string())?;
+        if !subagent.continuable {
             return Err("one-shot child Agent cannot accept continuation input".into());
         }
         if child.ended || child.status.is_terminal() {
             return Err("terminal child Agent cannot be continued".into());
+        }
+        let events = self.sessions.all_events(child_session_id)?;
+        if !child_has_remaining_budget(
+            &subagent.budget,
+            &events,
+            self.driver_config.max_turns_per_session,
+            super::driver::current_unix_ms()?,
+        ) {
+            return Err("subagentBudgetExhausted: cumulative child budget is exhausted; inspect its saved progress and report or take over the remaining work. Do not spawn a replacement to reset this budget.".into());
         }
         self.ensure_resident(child_session_id)?;
         self.sessions.enqueue(
@@ -1321,8 +1330,23 @@ impl SubAgentManager {
             )?;
         }
         let events = self.sessions.all_events(child_session_id)?;
-        let summary = assistant_summary(&events)
+        let mut summary = assistant_summary(&events)
             .unwrap_or_else(|| format!("Child Agent settled with status {:?}", snapshot.status));
+        let budget_reason = last_step_budget_reason(&events);
+        if let Some(reason) = budget_reason {
+            let report = events
+                .iter()
+                .rev()
+                .find_map(|event| match &event.payload {
+                    AgentSessionEventPayload::AssistantMessage { content, .. } => {
+                        let text = super::assistant_content_text(content);
+                        (!text.trim().is_empty()).then_some(text)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| "No final report; inspect saved tool results and plan.".into());
+            summary = format!("Partial child result: {reason}. Progress is saved; this is not task completion. Latest report: {report}");
+        }
         let tool_status = match snapshot.status {
             AgentSessionStatus::Idle if incomplete => AgentToolResultStatus::Failed,
             AgentSessionStatus::Idle | AgentSessionStatus::Completed => {
@@ -1339,6 +1363,45 @@ impl SubAgentManager {
             .subagent
             .clone()
             .ok_or_else(|| "child Session lost subagent metadata".to_string())?;
+        let can_continue = continuable
+            && snapshot.status == AgentSessionStatus::Idle
+            && !snapshot.ended
+            && child_has_remaining_budget(
+                &subagent.budget,
+                &events,
+                self.driver_config.max_turns_per_session,
+                super::driver::current_unix_ms()?,
+            );
+        let latest_plan = events.iter().rev().find_map(|event| match &event.payload {
+            AgentSessionEventPayload::TaskPlan { steps, .. } => Some(
+                steps
+                    .iter()
+                    .map(|step| {
+                        json!({
+                            "id": step.id, "title": step.title, "status": step.status,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        });
+        let data = json!({
+            "childSessionId": child_session_id,
+            "descriptorId": subagent.descriptor_id,
+            "continuable": can_continue,
+            "status": snapshot.status,
+            "partial": budget_reason.is_some() || incomplete,
+            "stopReason": budget_reason,
+            "plan": latest_plan,
+            "recentToolResults": if budget_reason.is_some() { partial_tool_results(&events) } else { Vec::new() },
+            "nextAction": if budget_reason.is_none() && !incomplete {
+                "Inspect the child outcome and evidence."
+            } else if can_continue {
+                "Inspect progress; if useful work remains, use send_child_input with this childSessionId. Continue from saved state without repeating completed actions."
+            } else {
+                "Inspect saved progress and take over or report remaining work. Do not create replacement children to bypass the exhausted budget."
+            },
+        });
         let parent_closing = self
             .agents
             .get(&request.parent_session_id)?
@@ -1363,12 +1426,7 @@ impl SubAgentManager {
                 call_id: request.call.call_id.clone(),
                 name: request.call.name.clone(),
                 status: tool_status,
-                data: Some(json!({
-                    "childSessionId": child_session_id,
-                    "descriptorId": subagent.descriptor_id,
-                    "continuable": continuable,
-                    "status": snapshot.status,
-                })),
+                data: Some(data.clone()),
             }),
         )?;
         if continuable && snapshot.status == AgentSessionStatus::Idle {
@@ -1386,7 +1444,7 @@ impl SubAgentManager {
         Ok(OrchestrationToolResult {
             status: tool_status,
             summary,
-            data: Some(json!({ "childSessionId": child_session_id })),
+            data: Some(data),
             evidence_refs: Vec::new(),
             result_committed: true,
         })
@@ -1693,6 +1751,67 @@ fn last_turn_incomplete(events: &[super::AgentSessionEvent]) -> bool {
         .unwrap_or(false)
 }
 
+fn last_step_budget_reason(events: &[super::AgentSessionEvent]) -> Option<&str> {
+    events
+        .iter()
+        .rev()
+        .find_map(|event| match &event.payload {
+            AgentSessionEventPayload::TurnEnd { reason } => Some(reason.as_str()),
+            _ => None,
+        })
+        .filter(|reason| {
+            reason.starts_with("stepBudgetReached:") || reason.starts_with("stepLimitExceeded:")
+        })
+}
+
+fn child_has_remaining_budget(
+    budget: &AgentSubagentBudget,
+    events: &[super::AgentSessionEvent],
+    max_turns: usize,
+    now: u64,
+) -> bool {
+    let turns = events
+        .iter()
+        .filter(|event| matches!(event.payload, AgentSessionEventPayload::TurnStart))
+        .count();
+    let tokens = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            AgentSessionEventPayload::RequestUsage { usage, .. } => usage.total_tokens,
+            _ => None,
+        })
+        .fold(0_u64, u64::saturating_add);
+    turns < max_turns.min(budget.max_turns as usize)
+        && super::tool_pipeline::admitted_tool_calls(events) < budget.max_tool_calls
+        && tokens < budget.max_tokens
+        && events
+            .first()
+            .is_some_and(|event| now.saturating_sub(event.time_unix_ms) < budget.timeout_ms)
+}
+
+fn partial_tool_results(events: &[super::AgentSessionEvent]) -> Vec<serde_json::Value> {
+    let mut results = events
+        .iter()
+        .rev()
+        .filter_map(|event| match &event.payload {
+            AgentSessionEventPayload::ToolResult {
+                call_id,
+                name,
+                status,
+                summary,
+                ..
+            } => Some(json!({
+                "callId": call_id, "name": name, "status": status,
+                "summary": summary.chars().take(1_024).collect::<String>(),
+            })),
+            _ => None,
+        })
+        .take(8)
+        .collect::<Vec<_>>();
+    results.reverse();
+    results
+}
+
 fn ensure_fleet_owner(fleet: &FleetRuntime, parent_session_id: &str) -> Result<(), String> {
     if fleet.parent_session_id != parent_session_id {
         return Err("parent Session does not own the Fleet".into());
@@ -1816,6 +1935,135 @@ fn fleet_tool_result(
 #[cfg(test)]
 mod retry_policy_tests {
     use super::*;
+
+    fn budget_event(
+        seq: u64,
+        payload: AgentSessionEventPayload,
+    ) -> super::super::AgentSessionEvent {
+        super::super::AgentSessionEvent::new(
+            "budget-session".into(),
+            seq,
+            1_000 + seq,
+            Some("budget-turn".into()),
+            None,
+            payload,
+        )
+    }
+
+    #[test]
+    fn child_continuation_preserves_cumulative_budgets() {
+        let mut events = vec![
+            budget_event(0, AgentSessionEventPayload::TurnStart),
+            budget_event(
+                1,
+                AgentSessionEventPayload::RequestUsage {
+                    request_id: "budget-request".into(),
+                    usage: super::super::AgentTokenUsage {
+                        total_tokens: Some(100),
+                        ..Default::default()
+                    },
+                    finish_reason: super::super::AgentStopReason::Stop,
+                },
+            ),
+            budget_event(
+                2,
+                AgentSessionEventPayload::TurnEnd {
+                    reason: "stepBudgetReached: maximum 8 Steps per Turn".into(),
+                },
+            ),
+        ];
+        let budget = AgentSubagentBudget {
+            max_steps_per_turn: 8,
+            max_turns: 2,
+            max_tool_calls: 2,
+            max_tokens: 200,
+            timeout_ms: 1_000,
+        };
+        assert!(child_has_remaining_budget(&budget, &events, 64, 1_500));
+        assert!(!child_has_remaining_budget(&budget, &events, 1, 1_500));
+        assert!(!child_has_remaining_budget(&budget, &events, 64, 2_000));
+        assert!(!child_has_remaining_budget(
+            &AgentSubagentBudget {
+                max_tokens: 100,
+                ..budget.clone()
+            },
+            &events,
+            64,
+            1_500
+        ));
+        let call = super::super::recorded_tool_call(super::super::ModelToolCall {
+            call_id: "budget-call".into(),
+            provider_call_id: None,
+            name: "read_terminal".into(),
+            arguments: json!({}),
+        });
+        events.push(budget_event(3, AgentSessionEventPayload::ToolCall { call }));
+        assert!(!child_has_remaining_budget(
+            &AgentSubagentBudget {
+                max_tool_calls: 1,
+                ..budget.clone()
+            },
+            &events,
+            64,
+            1_500
+        ));
+        events.push(budget_event(4, AgentSessionEventPayload::TurnStart));
+        assert!(!child_has_remaining_budget(&budget, &events, 64, 1_500));
+    }
+
+    #[test]
+    fn only_the_latest_turn_controls_partial_budget_settlement() {
+        for reason in [
+            "stepBudgetReached: maximum 8 Steps per Turn",
+            "stepLimitExceeded: maximum 8 Steps per Turn",
+        ] {
+            let mut events = vec![budget_event(
+                0,
+                AgentSessionEventPayload::TurnEnd {
+                    reason: reason.into(),
+                },
+            )];
+            assert_eq!(last_step_budget_reason(&events), Some(reason));
+            events.push(budget_event(
+                1,
+                AgentSessionEventPayload::TurnEnd {
+                    reason: "completed".into(),
+                },
+            ));
+            assert_eq!(last_step_budget_reason(&events), None);
+        }
+    }
+
+    #[test]
+    fn partial_handoff_is_bounded_and_does_not_copy_raw_tool_data() {
+        let events = (0..10)
+            .map(|seq| {
+                budget_event(
+                    seq,
+                    AgentSessionEventPayload::ToolResult {
+                        call_id: format!("call-{seq}"),
+                        name: "read_terminal".into(),
+                        status: AgentToolResultStatus::Completed,
+                        summary: "终端状态已读取".repeat(300),
+                        data: Some(json!({ "content": "private-terminal-content" })),
+                        duration_ms: None,
+                        evidence_refs: Vec::new(),
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        let results = partial_tool_results(&events);
+        assert_eq!(results.len(), 8);
+        assert_eq!(results[0]["callId"], "call-2");
+        assert_eq!(results[7]["callId"], "call-9");
+        assert_eq!(
+            results[0]["summary"].as_str().unwrap().chars().count(),
+            1_024
+        );
+        assert!(!serde_json::to_string(&results)
+            .unwrap()
+            .contains("private-terminal-content"));
+    }
 
     #[test]
     fn child_descriptor_contains_only_model_selection() {
