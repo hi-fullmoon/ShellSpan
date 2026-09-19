@@ -13,6 +13,25 @@ import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-bas
 import type { AgentSessionEvent } from '@/types/agent-session';
 
 describe('Agent committed Activity projection', () => {
+  it('keeps a recovery step nonterminal without generating a failure diagnostic', () => {
+    const events = [
+      sessionEvent(0, { type: 'turn/start', turnId: 'turn-recovery' }),
+      sessionEvent(1, { type: 'step/start', turnId: 'turn-recovery', stepId: 'step-recovery' }),
+      sessionEvent(2, { type: 'step/end', turnId: 'turn-recovery', stepId: 'step-recovery', data: { reason: 'outputLimitContinuation' } }),
+    ];
+    const activity = projectAgentActivity(events);
+    expect(activity.turns[0]?.status).toBe('running');
+    expect(activity.turns[0]?.steps[0]).toMatchObject({
+      status: 'idle', endReason: 'outputLimitContinuation',
+    });
+    expect(activity.nodes.some((node) => node.status === 'failed')).toBe(false);
+    const exhausted = projectAgentActivity([
+      ...events,
+      sessionEvent(3, { type: 'turn/end', turnId: 'turn-recovery', data: { reason: 'outputLimit' } }),
+    ]);
+    expect(exhausted.turns[0]?.status).toBe('failed');
+  });
+
   it('preserves the structured final retry failure without adding assistant text', () => {
     const headerIndex = agentSessionEventFixture.findIndex((event) => event.type === 'request/header');
     const header = agentSessionEventFixture[headerIndex];

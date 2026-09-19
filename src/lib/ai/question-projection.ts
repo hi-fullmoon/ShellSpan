@@ -1,12 +1,23 @@
 import type { AgentSessionEvent } from '@/types/agent-session';
 import { questionKey, type AgentQuestionView } from '@/types/agent-question';
+import { createCommittedEventProjection } from './committed-event-projection';
 
 /** Both views consume the same committed identity and answer, never local drafts. */
 export function projectQuestions(
   events: readonly AgentSessionEvent[],
 ): readonly AgentQuestionView[] {
+  const projection = createQuestionProjection();
+  for (const event of events) projection.apply(event);
+  return projection.snapshot();
+}
+
+export function createQuestionProjector(): (events: readonly AgentSessionEvent[]) => readonly AgentQuestionView[] {
+  return createCommittedEventProjection(createQuestionProjection);
+}
+
+function createQuestionProjection() {
   const questions = new Map<string, AgentQuestionView>();
-  for (const event of events) {
+  const apply = (event: AgentSessionEvent): void => {
     if (event.type === 'question/requested') {
       questions.set(questionKey(event.data.identity), {
         identity: event.data.identity,
@@ -38,6 +49,6 @@ export function projectQuestions(
               : [],
         });
     }
-  }
-  return [...questions.values()];
+  };
+  return { apply, snapshot: () => [...questions.values()] };
 }

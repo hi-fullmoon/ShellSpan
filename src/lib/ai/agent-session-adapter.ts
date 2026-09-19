@@ -1,4 +1,5 @@
 import { AgentSessionCommittedClient, type AgentSessionStreamState } from '@/lib/ai/agent-session-client';
+import { createCommittedEventProjection } from './committed-event-projection';
 import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeListAgentFileReferences } from '@/lib/ipc/tauri';
 import { projectQuestions } from './question-projection';
 import { invokeSubmitAgentImages } from '@/lib/ipc/tauri';
@@ -25,14 +26,14 @@ import {
   invokeSetAgentRuntimeExecutionSurface,
   invokeSendAgentRuntimeChildInput,
 } from '@/lib/ipc/tauri';
-import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
+import { createAgentActivityProjector, projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
 import type {
   AgentSessionEvent,
   AgentSessionListPage,
   AgentSessionSnapshot,
 } from '@/types/agent-session';
-import { projectAgentChatNodes } from './conversation-projection';
+import { createAgentChatProjector, projectAgentChatNodes } from './conversation-projection';
 import { findConversationTool } from './conversation-tool';
 import type { AiConversationNode } from './conversation-node';
 import type {
@@ -147,6 +148,7 @@ const defaultDependencies: AgentSessionAdapterDependencies = {
 };
 
 interface AgentAdapterEntry {
+  readonly project: (state: AgentSessionStreamState) => AiSessionView;
   readonly client: AgentCommittedClientLike;
   readonly listeners: Set<AiSessionListener>;
   readonly stopListening: () => void;
@@ -171,12 +173,13 @@ function sessionSummary(
   snapshot: AgentSessionSnapshot,
   events: readonly AgentSessionEvent[],
   status: AiSessionView['status'],
+  metadataEvents: readonly AgentSessionEvent[] = events,
 ): AiSessionSummary {
   const lastEvent = events[events.length - 1];
   return {
     id: snapshot.header.sessionId,
     kind: 'agent',
-    title: [...events].reverse().find((event) => event.type === 'session/renamed')?.data.title
+    title: [...metadataEvents].reverse().find((event) => event.type === 'session/renamed')?.data.title
       ?? snapshot.header.title
       ?? snapshot.header.goal,
     updatedAt: new Date(lastEvent?.timeUnixMs ?? snapshot.header.createdAtUnixMs).toISOString(),
@@ -307,11 +310,15 @@ function terminalError(nodes: readonly AiConversationNode[]): AiSessionError | n
   };
 }
 
-export function agentSessionView(state: AgentSessionStreamState): AiSessionView {
+export function agentSessionView(state: AgentSessionStreamState, projected?: {
+  readonly activity: ReturnType<typeof projectAgentActivity>;
+  readonly nodes: readonly AiConversationNode[];
+  readonly metadataEvents: readonly AgentSessionEvent[];
+}): AiSessionView {
   if (!state.snapshot) throw new Error('Agent Session snapshot is unavailable');
-  const events = state.events;
-  const activity = projectAgentActivity(events);
-  const nodes = projectAgentChatNodes(events);
+  const events = projected?.metadataEvents ?? state.events;
+  const activity = projected?.activity ?? projectAgentActivity(state.events);
+  const nodes = projected?.nodes ?? projectAgentChatNodes(state.events);
   const header = { ...state.snapshot.header };
   for (const event of events) {
     if (event.type === 'session/model_selected') header.modelSelection = event.data.provider;
@@ -324,7 +331,7 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
       ? (({ plan: _plan, ...rest }) => rest)(state.snapshot.task)
       : { ...state.snapshot.task, plan: activity.plan };
   return {
-    summary: sessionSummary(state.snapshot, events, activity.status),
+    summary: sessionSummary(state.snapshot, state.events, activity.status, events),
     snapshot: {
       kind: 'agent',
       value: {
@@ -366,6 +373,23 @@ export function agentSessionView(state: AgentSessionStreamState): AiSessionView 
     canLoadOlder: false,
     contextUsage: contextUsage(events),
   };
+}
+
+/** A session-owned incremental projection, discarded together with its client. */
+export function createAgentSessionViewProjector(): (state: AgentSessionStreamState) => AiSessionView {
+  const chat = createAgentChatProjector();
+  const activity = createAgentActivityProjector();
+  // Chunks affect chat and Activity, but never inbox/configuration/question state.
+  const metadata = createCommittedEventProjection(() => {
+    const events: AgentSessionEvent[] = [];
+    return {
+      apply(event) { if (event.type !== 'assistant/chunk') events.push(event); },
+      snapshot() { return events; },
+    };
+  });
+  return (state) => agentSessionView(state, {
+    activity: activity(state.events), nodes: chat(state.events), metadataEvents: metadata(state.events),
+  });
 }
 
 function listSummary(page: AgentSessionListPage): readonly AiSessionSummary[] {
@@ -411,10 +435,11 @@ export function createAgentSessionAdapter(
     const client = dependencies.client(sessionId);
     const listeners = new Set<AiSessionListener>();
     const entry: AgentAdapterEntry = {
+      project: createAgentSessionViewProjector(),
       client,
       listeners,
       stopListening: client.onChange((state) => {
-        const view = agentSessionView(state);
+        const view = entry.project(state);
         entry.view = view;
         for (const listener of listeners) listener(view);
       }),
@@ -426,7 +451,7 @@ export function createAgentSessionAdapter(
   const openEntry = async (sessionId: string): Promise<AiSessionView> => {
     const entry = ensureEntry(sessionId);
     entry.connecting ??= entry.client.connect().then((state) => {
-      const view = agentSessionView(state);
+      const view = entry.project(state);
       entry.view = view;
       return view;
     }).finally(() => {
@@ -444,7 +469,7 @@ export function createAgentSessionAdapter(
       && !['cancelled', 'failed', 'completed'].includes(view.status)) return view;
     await (dependencies.resume ?? invokeResumeAgentRuntime)({ sessionId });
     const entry = ensureEntry(sessionId);
-    const resumed = agentSessionView(await entry.client.reconnect());
+    const resumed = entry.project(await entry.client.reconnect());
     entry.view = resumed;
     for (const listener of entry.listeners) listener(resumed);
     return resumed;
@@ -478,7 +503,7 @@ export function createAgentSessionAdapter(
       if (settled) return;
       void entry.client.reconnect().then((state) => {
         if (settled) return;
-        const refreshed = agentSessionView(state);
+        const refreshed = entry.project(state);
         entry.view = refreshed;
         for (const subscribed of entry.listeners) subscribed(refreshed);
         if (refreshed.committedOperationIds?.includes(clientOperationId)) return;
@@ -507,7 +532,7 @@ export function createAgentSessionAdapter(
       // so retries can acknowledge the original operation, even after consumption.
       if (!entry.view?.committedOperationIds?.includes(clientOperationId)) {
         try {
-          const refreshed = agentSessionView(await entry.client.reconnect());
+          const refreshed = entry.project(await entry.client.reconnect());
           entry.view = refreshed;
           for (const subscribed of entry.listeners) subscribed(refreshed);
         } catch {
@@ -560,7 +585,7 @@ export function createAgentSessionAdapter(
       // IPC success alone is not the UI acknowledgement: a lost live event must
       // be repaired before the form discards its retryable draft.
       const entry = ensureEntry(input.identity.sessionId);
-      const view = agentSessionView(await entry.client.reconnect());
+      const view = entry.project(await entry.client.reconnect());
       entry.view = view;
       for (const listener of entry.listeners) listener(view);
       if (!view.committedOperationIds?.includes(input.clientOperationId)) {
@@ -575,21 +600,21 @@ export function createAgentSessionAdapter(
       await resumeEndedSession(sessionId);
       await (dependencies.selectModel ?? invokeSelectAgentRuntimeModel)({ sessionId, selection: { routeId: provider.id, modelId: provider.model, reasoningEffort: provider.reasoningEffort } });
       const entry = ensureEntry(sessionId);
-      entry.view = agentSessionView(await entry.client.reconnect());
+      entry.view = entry.project(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
     },
     async setPermission(sessionId, mode) {
       await resumeEndedSession(sessionId);
       await (dependencies.setPermission ?? invokeSetAgentRuntimePermission)({ sessionId, mode });
       const entry = ensureEntry(sessionId);
-      entry.view = agentSessionView(await entry.client.reconnect());
+      entry.view = entry.project(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
     },
     async setExecutionSurface(sessionId, surface) {
       await resumeEndedSession(sessionId);
       await (dependencies.setExecutionSurface ?? invokeSetAgentRuntimeExecutionSurface)({ sessionId, surface });
       const entry = ensureEntry(sessionId);
-      entry.view = agentSessionView(await entry.client.reconnect());
+      entry.view = entry.project(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
     },
     subscribe(sessionId: string, listener: AiSessionListener): () => void {
@@ -652,7 +677,7 @@ export function createAgentSessionAdapter(
         ))) {
           throw new Error('Subagent continuation is not confirmed; retry the same draft');
         }
-        entry.view = agentSessionView(state);
+        entry.view = entry.project(state);
         for (const listener of entry.listeners) listener(entry.view);
         return {
           sessionId: resolvedSessionId,
@@ -705,7 +730,7 @@ export function createAgentSessionAdapter(
         await dependencies.stop({ sessionId });
       }
       const entry = ensureEntry(sessionId);
-      entry.view = agentSessionView(await entry.client.reconnect());
+      entry.view = entry.project(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
     },
     async approve(input: AiApprovalDecisionInput): Promise<void> {
@@ -753,7 +778,7 @@ export function createAgentSessionAdapter(
     async refresh(sessionId: string): Promise<AiSessionView> {
       const entry = ensureEntry(sessionId);
       const state = await entry.client.reconnect();
-      const view = agentSessionView(state);
+      const view = entry.project(state);
       entry.view = view;
       for (const listener of entry.listeners) listener(view);
       return view;

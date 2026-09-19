@@ -1,4 +1,5 @@
 import { skillContexts } from './skill-projection';
+import { createCommittedEventProjection } from './committed-event-projection';
 import {
   type AgentActivityAgent,
   type AgentActivityNode,
@@ -14,7 +15,6 @@ import {
 import {
   agentEventTimestamp,
   agentToolEventKey,
-  validateCommittedAgentEventWindow,
 } from '@/lib/ai/agent-session-event-window';
 
 function toolEventKey(stepId: string | undefined, callId: string): string {
@@ -22,6 +22,7 @@ function toolEventKey(stepId: string | undefined, callId: string): string {
 }
 
 function terminalStatusFromReason(reason: string): AgentSessionRuntimeStatus {
+  if (reason === 'outputLimitContinuation') return 'idle';
   if (reason === 'incomplete' || reason.startsWith('stepBudgetReached:')) return 'idle';
   if (/waiting/i.test(reason)) return 'waiting';
   if (/cancel|stop|interrupt/i.test(reason)) return 'cancelled';
@@ -119,15 +120,13 @@ function activityEventData(event: AgentSessionEvent): unknown {
   return 'data' in event ? event.data ?? null : null;
 }
 
-function projectActivityNodesUnchecked(
-  events: readonly AgentSessionEvent[],
-): readonly AgentActivityNode[] {
+function createActivityNodesProjection() {
   const nodes: AgentActivityNode[] = [];
   const indexByKey = new Map<string, number>();
   const currentRequestByStep = new Map<string, string>();
   const requestTurn = new Map<string, { readonly turnId: string | null; readonly stepId: string | null }>();
   const subagentKeys = new Map<string, string>();
-  let taskKey = `activity:task:${events[0]?.sessionId ?? 'unknown'}`;
+  let taskKey: string | undefined;
   let activeCompactionKey: string | null = null;
   let latestTurnId: string | null = null;
 
@@ -220,7 +219,8 @@ function projectActivityNodesUnchecked(
     }
   );
 
-  for (const event of events) {
+  const apply = (event: AgentSessionEvent): void => {
+    taskKey ??= `activity:task:${event.sessionId}`;
     if (event.turnId) latestTurnId = event.turnId;
     switch (event.type) {
       case 'session/model_selected':
@@ -594,21 +594,21 @@ function projectActivityNodesUnchecked(
         break;
       }
     }
-  }
+  };
 
-  return [...nodes].sort((left, right) => (
+  const snapshot = (): readonly AgentActivityNode[] => [...nodes].sort((left, right) => (
     left.firstSeq - right.firstSeq
     || ACTIVITY_KIND_ORDER[left.kind] - ACTIVITY_KIND_ORDER[right.kind]
     || left.key.localeCompare(right.key)
   ));
+  return { apply, snapshot };
 }
 
 /** Project the complete diagnostic Activity trail without exposing it as chat copy. */
 export function projectAgentActivityNodes(
   events: readonly AgentSessionEvent[],
 ): readonly AgentActivityNode[] {
-  validateCommittedAgentEventWindow(events);
-  return projectActivityNodesUnchecked(events);
+  return createCommittedEventProjection(createActivityNodesProjection)(events);
 }
 
 interface MutableActivityStep {
@@ -632,9 +632,7 @@ interface MutableActivityTurn {
   steps: MutableActivityStep[];
 }
 
-function projectActivityUnchecked(
-  events: readonly AgentSessionEvent[],
-): Omit<AgentActivityProjection, 'nodes'> {
+function createActivityProjection() {
   const turns: MutableActivityTurn[] = [];
   const turnById = new Map<string, MutableActivityTurn>();
   const stepById = new Map<string, MutableActivityStep>();
@@ -716,7 +714,7 @@ function projectActivityUnchecked(
     step.requests[step.requests.length - 1]
   );
 
-  for (const event of events) {
+  const apply = (event: AgentSessionEvent): void => {
     switch (event.type) {
       case 'session/created':
         agents.set(event.sessionId, {
@@ -996,60 +994,74 @@ function projectActivityUnchecked(
       default:
         break;
     }
-  }
-
-  const projectedTurns: AgentActivityTurn[] = turns.map((turn) => ({
-    id: turn.id,
-    index: turn.index,
-    status: turn.status,
-    startedAt: turn.startedAt,
-    endedAt: turn.endedAt,
-    durationMs: turn.startedAt !== undefined && turn.endedAt !== undefined
-      ? Math.max(0, turn.endedAt - turn.startedAt)
-      : undefined,
-    endReason: turn.endReason,
-    steps: turn.steps.map((step): AgentActivityStep => ({
-      id: step.id,
-      index: step.index,
-      status: step.status,
-      startedAt: step.startedAt,
-      endedAt: step.endedAt,
-      durationMs: step.startedAt !== undefined && step.endedAt !== undefined
-        ? Math.max(0, step.endedAt - step.startedAt)
-        : undefined,
-      endReason: step.endReason,
-      requests: step.requests,
-      tools: step.tools,
-    })),
-  }));
-
-  return {
-    sessionId: events[0]?.sessionId,
-    status,
-    statusReason,
-    turns: projectedTurns,
-    plan,
-    context: {
-      inputTokens,
-      contextWindow,
-      surfaceGeneration,
-      compactionCount,
-      artifacts,
-    },
-    agents: [...agents.values()],
-    recovery,
-    fleet,
-    evidenceCount,
   };
+
+  const snapshot = (events: readonly AgentSessionEvent[]): Omit<AgentActivityProjection, 'nodes'> => {
+    const projectedTurns: AgentActivityTurn[] = turns.map((turn) => ({
+      id: turn.id,
+      index: turn.index,
+      status: turn.status,
+      startedAt: turn.startedAt,
+      endedAt: turn.endedAt,
+      durationMs: turn.startedAt !== undefined && turn.endedAt !== undefined
+        ? Math.max(0, turn.endedAt - turn.startedAt)
+        : undefined,
+      endReason: turn.endReason,
+      steps: turn.steps.map((step): AgentActivityStep => ({
+        id: step.id,
+        index: step.index,
+        status: step.status,
+        startedAt: step.startedAt,
+        endedAt: step.endedAt,
+        durationMs: step.startedAt !== undefined && step.endedAt !== undefined
+          ? Math.max(0, step.endedAt - step.startedAt)
+          : undefined,
+        endReason: step.endReason,
+        requests: [...step.requests],
+        tools: [...step.tools],
+      })),
+    }));
+
+    return {
+      sessionId: events[0]?.sessionId,
+      status,
+      statusReason,
+      turns: projectedTurns,
+      plan,
+      context: {
+        inputTokens,
+        contextWindow,
+        surfaceGeneration,
+        compactionCount,
+        artifacts: [...artifacts],
+      },
+      agents: [...agents.values()],
+      recovery,
+      fleet,
+      evidenceCount,
+    };
+  };
+  return { apply, snapshot };
 }
 
 export function projectAgentActivity(
   events: readonly AgentSessionEvent[],
 ): AgentActivityProjection {
-  validateCommittedAgentEventWindow(events);
-  const projection = projectActivityUnchecked(events);
-  return {
-    ...projection,
-    nodes: projectActivityNodesUnchecked(events),
-  };
+  return createAgentActivityProjector()(events);
+}
+
+export function createAgentActivityProjector(): (events: readonly AgentSessionEvent[]) => AgentActivityProjection {
+  return createCommittedEventProjection(() => {
+    const activity = createActivityProjection();
+    const nodes = createActivityNodesProjection();
+    return {
+      apply(event) {
+        activity.apply(event);
+        nodes.apply(event);
+      },
+      snapshot(events) {
+        return { ...activity.snapshot(events), nodes: nodes.snapshot() };
+      },
+    };
+  });
 }
