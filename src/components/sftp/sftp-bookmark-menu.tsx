@@ -65,7 +65,7 @@ export const SftpBookmarkMenu: React.FC<SftpBookmarkMenuProps> = ({
                     onNavigate(path);
                     onClose();
                   }}
-                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary"
+                  className="flex w-full items-center gap-1 rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary"
                 >
                   <BookmarkIcon className="h-3.5 w-3.5 shrink-0 text-app-primary" />
                   <span className="min-w-0 flex-1 truncate font-mono">{path}</span>

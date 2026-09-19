@@ -208,7 +208,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
                     data-command-index={0}
                     onClick={() => activateOnce(() => onOpenLocal?.())}
                     onMouseEnter={() => setSelectedIndex(0)}
-                    className="h-auto w-full justify-start gap-3 rounded-lg p-3 text-left"
+                    className="h-auto w-full justify-start gap-1 rounded-lg p-3 text-left"
                   >
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                       <FolderIcon data-icon="inline-start" />
@@ -245,7 +245,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
                               onClick={() => handleConnect(profile)}
                               onMouseEnter={() => setSelectedIndex(commandIndex)}
                               data-command-index={commandIndex}
-                              className="h-auto w-full justify-start gap-3 rounded-lg p-3 text-left"
+                              className="h-auto w-full justify-start gap-1 rounded-lg p-3 text-left"
                             >
                               <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                                 <ServerIcon data-icon="inline-start" />

@@ -70,7 +70,7 @@ const WorkbenchSidebarItem: React.FC<WorkbenchSidebarItemProps> = ({
       {...activation}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex h-8 w-full items-center justify-start gap-2.5 rounded-lg px-3 text-[13px] font-medium transition-colors [&_svg]:size-4',
+        'flex h-8 w-full items-center justify-start gap-1 rounded-lg px-3 text-[13px] font-medium transition-colors [&_svg]:size-4',
         active
           ? 'bg-app-surface text-app-text shadow-sm ring-1 ring-app-border'
           : 'text-app-text-soft hover:bg-app-surface/50 hover:text-app-text',

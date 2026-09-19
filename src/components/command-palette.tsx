@@ -651,7 +651,7 @@ export const CommandPalette: React.FC = () => {
                       key={item.id}
                       variant="ghost"
                       className={cn(
-                        'h-auto w-full justify-start gap-3 px-2 py-2 text-left',
+                        'h-auto w-full justify-start gap-1 px-2 py-2 text-left',
                         itemIndex === activeIndex && 'bg-accent text-accent-foreground',
                       )}
                       disabled={item.disabled}
