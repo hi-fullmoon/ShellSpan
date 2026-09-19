@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { measureTerminalGeometry, TERMINAL_CONTAINER_CLASS } from './terminal-geometry';
 import {
   invokeGetSessionStatus,
   invokeMarkSessionReady,
@@ -493,7 +494,7 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.loadAddon(this.searchAddon);
 
     this.container = document.createElement('div');
-    this.container.className = 'h-full w-full [&_.xterm-viewport]:opacity-0 [&>.terminal.xterm]:h-full [&>.terminal.xterm]:p-[4px_0_4px_4px]';
+    this.container.className = TERMINAL_CONTAINER_CLASS;
 
     this.unlisten = {
       data: undefined,
@@ -1423,6 +1424,7 @@ class TerminalControllerImpl implements TerminalController {
 }
 
 interface TerminalRegistry {
+  measureInitialDimensions(sessionId: string): Promise<{ cols: number; rows: number } | undefined>;
   create(
     sessionId: string,
     setStatus: StatusCallback,
@@ -1451,6 +1453,20 @@ export const terminalRegistry: TerminalRegistry = (() => {
   };
 
   return {
+    async measureInitialDimensions(sessionId) {
+      await document.fonts?.ready;
+      // Let React commit the pending pane and the terminal section become visible.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const host = Array.from(document.querySelectorAll<HTMLElement>('[data-terminal-measure-session]'))
+        .find((element) => element.dataset.terminalMeasureSession === sessionId);
+      if (!host) return undefined;
+      return measureTerminalGeometry(host, {
+        fontFamily: TERMINAL_FONT_FAMILIES[preferences.fontFamily],
+        fontSize: preferences.fontSize,
+        lineHeight: preferences.lineHeight,
+        letterSpacing: preferences.letterSpacing,
+      });
+    },
     create(sessionId, setStatus, setClosed, getStatus, requestReconnect) {
       const existing = controllers.get(sessionId);
       if (existing) {

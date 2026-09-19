@@ -533,7 +533,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
             label={t('terminal.agentLease.inputBlockedPrompt')}
           />
         )}
-        <div ref={paneRef} className="h-full w-full p-0" />
+        <div ref={paneRef} data-terminal-measure-session={activeSession?.sessionId} className="h-full w-full p-0" />
       </div>
       <ConfirmationDialog
         open={Boolean(pendingPaste)}
