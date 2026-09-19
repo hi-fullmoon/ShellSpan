@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { MessageCircleQuestionIcon, SquareTerminalIcon } from 'lucide-react';
+import { MessageCircleQuestionIcon } from 'lucide-react';
+import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 
 import { useI18n } from '@/hooks/useI18n';
 import {
   latestTurnReachedStepBudget,
   type AiConversationNode,
 } from '@/lib/ai/conversation-node';
+import { latestTurnReachedOutputLimit } from '@/lib/ai/turn-continuation';
 import { findConversationTool } from '@/lib/ai/conversation-tool';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiInboxItem, AiSessionView } from '@/lib/ai/session-adapter';
@@ -240,6 +242,7 @@ export interface AiWorkspaceRootProps {
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
   readonly onContinueBudgetedTurn?: () => void;
+  readonly onContinueOutputLimitedTurn?: () => void;
   readonly onContinueOnReconnectedTerminal?: () => void;
   readonly historicalContinuationAvailable?: boolean;
   readonly historicalContinuationBusy?: boolean;
@@ -319,6 +322,7 @@ export function AiWorkspaceRoot({
   onSubmitGesture,
   onStop,
   onContinueBudgetedTurn,
+  onContinueOutputLimitedTurn,
   onContinueOnReconnectedTerminal,
   historicalContinuationAvailable = false,
   historicalContinuationBusy = false,
@@ -377,6 +381,10 @@ export function AiWorkspaceRoot({
     && !readOnlySession
     && status === 'idle'
     && latestTurnReachedStepBudget(visibleNodes);
+  const outputLimitContinuationAvailable = surfaceMode === 'agent'
+    && !readOnlySession
+    && status === 'failed'
+    && latestTurnReachedOutputLimit(visibleNodes);
   const historicalComposerEnabled = readOnlySession && historicalContinuationAvailable;
   const historicalComposerDisplay = readOnlySession
     && (historicalComposerEnabled || !onContinueOnReconnectedTerminal);
@@ -525,7 +533,7 @@ export function AiWorkspaceRoot({
               description={heroDescription}
               icon={surfaceMode === 'ask'
                 ? <MessageCircleQuestionIcon />
-                : <SquareTerminalIcon />}
+                : <ShellSpanGlyph />}
             />
           ) : (
             <AiConversation
@@ -549,12 +557,12 @@ export function AiWorkspaceRoot({
 
         <AiComposerSeat
           mode={surfaceMode}
-          imageControls={surfaceMode === 'agent' ? imageControls : undefined}
-          onPasteImages={surfaceMode === 'agent' && !readOnlySession
+          imageControls={imageControls}
+          onPasteImages={!readOnlySession
             && !view?.snapshot.value.header.subagent ? onPasteImages : undefined}
-          hasImages={surfaceMode === 'agent' ? hasImages : false}
-          imageBusy={surfaceMode === 'agent' ? imageBusy : false}
-          imageLocked={surfaceMode === 'agent' ? imageLocked : false}
+          hasImages={hasImages}
+          imageBusy={imageBusy}
+          imageLocked={imageLocked}
           phase={hero ? 'hero' : 'active'}
           status={historicalComposerDisplay ? 'idle' : status}
           draft={draft}
@@ -591,6 +599,8 @@ export function AiWorkspaceRoot({
           onStop={readOnlySession ? undefined : onStop}
           onContinueBudgetedTurn={readOnlySession ? undefined : onContinueBudgetedTurn}
           budgetContinuationAvailable={budgetContinuationAvailable}
+          onContinueOutputLimitedTurn={readOnlySession ? undefined : onContinueOutputLimitedTurn}
+          outputLimitContinuationAvailable={outputLimitContinuationAvailable}
           onContinueOnReconnectedTerminal={historicalComposerEnabled ? undefined : onContinueOnReconnectedTerminal}
           historicalContinuationAvailable={historicalContinuationAvailable}
           historicalContinuationBusy={historicalContinuationBusy}

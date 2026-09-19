@@ -12,10 +12,21 @@ import { useAppStore } from '@/stores/appStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import * as vision from '@/lib/ai/vision-contract';
+import type { ModelDefinition } from '@/lib/ai/provider-contract';
 
 const storage = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn() }));
 vi.mock('@/lib/ai/image-drafts', () => ({ readImageDraft: storage.read, writeImageDraft: storage.write }));
-const providerA = { id: 'provider-a', preset: 'custom' as const, profile: 'generic' as const, name: 'Provider A', kind: 'openAiCompatible' as const, baseUrl: 'https://a.invalid', model: 'model-a', requiresApiKey: false };
+const modelDefinition = {
+  contextWindow: 8192, maxOutputTokens: 1024, toolCalling: 'supported', textInput: 'supported', imageInput: 'supported', reasoning: [],
+  compat: {
+    protocol: 'openAiCompatible', cumulativeStream: false, supportsStreamUsage: true,
+    nativeReasoning: false, splitReasoning: false, replayReasoningContent: false,
+    thinkTagFallback: false, parallelToolCalls: true, strictSchema: true,
+    preservesReasoningAcrossTurns: false, reasoningEncoding: 'none',
+    clearThinking: false, defaultThinking: false,
+  },
+} satisfies ModelDefinition;
+const providerA = { id: 'provider-a', preset: 'custom' as const, profile: 'generic' as const, name: 'Provider A', kind: 'openAiCompatible' as const, baseUrl: 'https://a.invalid', model: 'model-a', requiresApiKey: false, modelDefinition };
 const providerB = { ...providerA, id: 'provider-b', name: 'Provider B', baseUrl: 'https://b.invalid', model: 'model-b' };
 function view(id = 'session-a'): AiSessionView {
   return {

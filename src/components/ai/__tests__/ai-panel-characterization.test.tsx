@@ -80,14 +80,15 @@ describe('AI panel production path and immutable shell', () => {
 
     const panel = screen.getByRole('complementary', { name: 'ai.workbench.title' });
     const workspace = panel.querySelector<HTMLElement>('[data-slot="ai-workspace-root"]')!;
-    expect(panel).toHaveClass('ai-panel-shell');
-    expect(getComputedStyle(panel).maxWidth).toBe('100%');
+    expect(panel).toHaveClass('ai-panel-shell', 'bg-card');
+    expect(panel).not.toHaveClass('bg-background');
+    expect(panel).toHaveClass('max-w-full');
     expect(getComputedStyle(workspace).getPropertyValue('--ai-transcript-extra-inset').trim())
       .toBe('8px');
-    expect(getComputedStyle(panel).getPropertyValue('--dsw-alias-bg-base').trim())
-      .toBe('rgb(255,255,255)');
+    expect(getComputedStyle(panel).getPropertyValue('--ai-canvas').trim())
+      .toBe('var(--card)');
     expect(getComputedStyle(screen.getByTestId('outside-ai-scope'))
-      .getPropertyValue('--dsw-alias-bg-base').trim()).toBe('');
+      .getPropertyValue('--ai-canvas').trim()).toBe('');
     expect(workspace).toHaveAttribute('data-phase', 'hero');
     expect(workspace).toHaveClass('ai-workspace-root');
     expect(workspace).toHaveClass('overflow-x-hidden');

@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { mockIPC } from '@tauri-apps/api/mocks';
-import '@/components/ai/ai-panel.css';
+import '@/components/ai/styles/styles.css';
 import { AiWorkspaceController } from '@/components/ai/workspace/ai-workspace-controller';
 import { Toaster } from '@/components/ui/sonner';
 import { initI18n } from '@/locales';

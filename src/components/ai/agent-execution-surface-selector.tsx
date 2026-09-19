@@ -105,7 +105,7 @@ export function AgentExecutionSurfaceSelector({
           <Button
             variant="ghost"
             size="xs"
-            className="ai-execution-surface-trigger h-7 min-w-0 max-w-[154px] gap-1 px-[7px] @max-[480px]/ai-workspace:size-7 @max-[480px]/ai-workspace:shrink-0 @max-[480px]/ai-workspace:p-0 @max-[480px]/ai-workspace:[&_[data-icon=inline-end]]:hidden"
+            className="ai-execution-surface-trigger h-7 min-w-0 max-w-[154px] px-[7px] @max-[480px]/ai-workspace:size-7 @max-[480px]/ai-workspace:shrink-0 @max-[480px]/ai-workspace:p-0 @max-[480px]/ai-workspace:[&_[data-icon=inline-end]]:hidden"
             data-execution-surface={surface}
             data-terminal-surface-state={presentation.state}
             data-real-terminal-state={presentation.realTerminalState}
@@ -159,7 +159,7 @@ export function AgentExecutionSurfaceSelector({
                 >
                   <Icon className="mt-0.5" strokeWidth={1.6} />
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="flex min-w-0 items-center gap-1">
                       <span className="min-w-0 truncate">{t(option.label)}</span>
                       {statusCopy && (
                         <Badge

@@ -126,7 +126,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
         </div>}
       </PopoverHeader>
       <div className="flex min-h-14 min-w-0 flex-col overflow-y-auto px-1.5 pb-1.5">
-        {needsRoot && <Button type="button" variant="secondary" className="h-auto w-full min-w-0 shrink-0 justify-start gap-3 px-3 py-2"
+        {needsRoot && <Button type="button" variant="secondary" className="h-auto w-full min-w-0 shrink-0 justify-start gap-1 px-3 py-2"
           aria-label={t('ai.workspace.files.chooseRoot')} aria-describedby={`${id}-root-hint`}
           onMouseDown={event => event.preventDefault()} onClick={() => { setError(null); setRootOpen(true); }}>
           <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">
@@ -154,7 +154,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
             const name = candidate.path.slice(slash + 1);
             return <Button key={candidate.path} id={`${id}-${i}`} type="button" role="option" aria-label={label}
               aria-selected={i === index} tabIndex={-1} variant={i === index ? 'secondary' : 'ghost'}
-              className="h-auto min-h-10 w-full min-w-0 shrink-0 justify-start gap-2.5 px-2.5 py-2"
+              className="h-auto min-h-10 w-full min-w-0 shrink-0 justify-start gap-1 px-2.5 py-2"
               title={label} onMouseDown={event => event.preventDefault()} onClick={() => choose(candidate)}>
               {directory ? <FolderIcon data-icon="inline-start" /> : <FileIcon data-icon="inline-start" />}
               <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">

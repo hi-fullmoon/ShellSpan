@@ -281,9 +281,10 @@ pub(in crate::llm) async fn stream_chat(
         });
     }
     if finish_reason == ModelFinishReason::Length {
-        return Err(NormalizedModelError::new(
+        return Err(coded_error(
             NormalizedModelErrorKind::Terminal,
             "AI provider reached the configured output token limit",
+            "OUTPUT_LIMIT",
         ));
     }
     let replay_response = Value::Object(accumulated.replay_response.clone());

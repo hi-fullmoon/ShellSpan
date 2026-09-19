@@ -320,15 +320,15 @@
 /* History is portalled outside the AI panel, so map its row tokens here. */
 .ai-session-history-popover {
   --ai-shell-clearance: 12px;
-  --ds-ease-in-out: ease-in-out;
-  --dsw-alias-label-primary: var(--popover-foreground);
-  --dsw-alias-label-tertiary: var(--muted-foreground);
-  --dsw-alias-interactive-bg-hover: var(--accent);
-  --dsw-alias-interactive-bg-active: var(--muted);
-  --dsw-alias-state-business-primary: var(--primary);
-  --dsw-alias-state-error-primary: var(--destructive);
-  --dsw-alias-state-success-primary: var(--app-success);
-  --dsw-alias-state-warn-primary: var(--app-warning);
+  --ai-ease-in-out: ease-in-out;
+  --ai-text: var(--popover-foreground);
+  --ai-text-muted: var(--muted-foreground);
+  --ai-action-hover: var(--accent);
+  --ai-action-active: var(--muted);
+  --ai-accent: var(--primary);
+  --ai-error: var(--destructive);
+  --ai-success: var(--app-success);
+  --ai-warning: var(--app-warning);
   width: min(420px, calc(100vw - 16px));
   height: min(380px, var(--available-height));
   max-height: calc(100dvh - 56px);

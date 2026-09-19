@@ -15,7 +15,7 @@ import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import type { AgentQuestionView } from '@/types/agent-question';
-import '@/components/ai/ai-panel.css';
+import '@/components/ai/styles/styles.css';
 
 const question: AgentQuestionView = {
   identity: {
@@ -122,9 +122,9 @@ describe('Stage 6A question form', () => {
     expect(screen.getAllByText('First decision')[0]).toBeVisible();
     expect(screen.queryByText('Second decision')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'B' }));
-    await user.click(screen.getByRole('button', { name: 'Next question' }));
     expect(screen.getAllByText('Second decision')[0]).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'D' }));
+    expect(screen.getAllByText('Second decision')[0]).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Previous question' }));
     expect(screen.getByRole('button', { name: 'B' })).toHaveAttribute(
       'aria-pressed',
@@ -135,6 +135,38 @@ describe('Stage 6A question form', () => {
       { id: 'choice', selected: ['B'] },
       { id: 'second', selected: ['D'] },
     ]);
+  });
+
+  it('keeps multi-select questions on screen until the user moves forward', async () => {
+    const user = userEvent.setup();
+    render(
+      <AiQuestionPanel
+        question={{
+          ...question,
+          questions: [
+            {
+              ...question.questions[0],
+              multi_select: true,
+              header: 'Multiple choices',
+            },
+            {
+              id: 'second',
+              header: 'Second decision',
+              question: 'Which follow-up?',
+              multi_select: false,
+              options: [{ label: 'C' }],
+            },
+          ],
+        }}
+        onAnswer={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'B' }));
+    expect(screen.getAllByText('Multiple choices')[0]).toBeVisible();
+    expect(screen.queryByText('Second decision')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next question' }));
+    expect(screen.getAllByText('Second decision')[0]).toBeVisible();
   });
 
   it('collapses and restores the active question without losing its draft', async () => {
@@ -271,6 +303,12 @@ describe('Stage 6A question form', () => {
     const historyItems = historyCard!.querySelectorAll<HTMLElement>(
       '[data-slot="field-set"]',
     );
+    const historyQuestions = historyCard!.querySelectorAll<HTMLElement>(
+      '.ai-question-history-question',
+    );
+    const historyAnswers = historyCard!.querySelectorAll<HTMLElement>(
+      '.ai-question-history-answer',
+    );
     expect(historyList).toHaveClass(
       'grid',
       'auto-rows-max',
@@ -281,6 +319,17 @@ describe('Stage 6A question form', () => {
     historyItems.forEach((item) => {
       expect(item).toHaveClass('flex-none', 'gap-0');
     });
+    expect(historyQuestions).toHaveLength(3);
+    expect(historyAnswers).toHaveLength(3);
+    expect(getComputedStyle(historyQuestions[0]).fontSize).toBe('12px');
+    expect(getComputedStyle(historyQuestions[0]).fontWeight).toBe('400');
+    expect(getComputedStyle(historyQuestions[0]).color).toBe(
+      'var(--ai-text-secondary)',
+    );
+    expect(getComputedStyle(historyAnswers[0]).fontSize).toBe('14px');
+    expect(getComputedStyle(historyAnswers[0]).color).toBe(
+      'var(--ai-text)',
+    );
     const panel = document.querySelector<HTMLElement>(
       '.ai-question-history > [data-slot="collapsible-content"]',
     );

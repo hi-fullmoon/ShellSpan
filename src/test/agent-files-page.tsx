@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { emit } from '@tauri-apps/api/event';
 import { mockIPC } from '@tauri-apps/api/mocks';
-import '@/components/ai/ai-panel.css';
+import '@/components/ai/styles/styles.css';
 import { AiWorkspaceController } from '@/components/ai/workspace/ai-workspace-controller';
 import { initI18n } from '@/locales';
 import { applyTheme } from '@/lib/theme';

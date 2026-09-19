@@ -13,9 +13,9 @@
 
 .ai-semantic-note-body {
   border-radius: 8px;
-  background: var(--dsw-alias-markdown-code-block);
-  color: var(--dsw-alias-label-tertiary);
-  font: 400 11px/16px var(--ds-font-family-code);
+  background: var(--ai-code-block);
+  color: var(--ai-text-muted);
+  font: 400 11px/16px var(--ai-font-family-code);
 }
 
 .ai-disclosure-row[data-reasoning-header] {
@@ -23,7 +23,7 @@
 }
 
 .ai-disclosure-leading {
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--ai-text-muted);
 }
 
 .ai-disclosure-leading > svg,
@@ -36,8 +36,8 @@
   height: 14px;
 }
 
-/* Match the optical center of the transcript's CJK and Latin text. */
-.ai-disclosure-leading,
+/* Match the separator and inline notice icons to the text baseline. Disclosure
+   icons are already centered by the shared 24px row and must not be shifted. */
 .ai-disclosure-separator,
 .ai-transcript-notice > svg {
   translate: 0 1px;
@@ -48,7 +48,7 @@
 }
 
 .ai-disclosure-title {
-  color: var(--dsw-alias-label-secondary);
+  color: var(--ai-text-secondary);
   font-size: 13px;
   font-weight: 400;
   line-height: 24px;
@@ -56,17 +56,17 @@
 
 .ai-disclosure-separator {
   border-radius: 1px;
-  background: var(--dsw-alias-label-caption);
+  background: var(--ai-text-caption);
 }
 
 .ai-disclosure-summary {
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--ai-text-muted);
   font-size: 13px;
   line-height: 24px;
 }
 
 .ai-disclosure-summary[data-error] {
-  color: var(--dsw-alias-state-error-primary);
+  color: var(--ai-error);
 }
 
 .ai-disclosure-leading > * {
@@ -83,7 +83,7 @@
   margin: auto;
   opacity: 0;
   transform: rotate(0deg);
-  transition: transform var(--ds-transition-duration) var(--ds-ease-in-out);
+  transition: transform var(--ai-transition-duration) var(--ai-ease-in-out);
 }
 
 .ai-turn-process-trigger > .ai-disclosure-leading > .ai-disclosure-chevron {
@@ -105,7 +105,7 @@
 }
 
 .ai-reasoning-body {
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--ai-text-muted);
   font-size: 13px;
   line-height: 20px;
 }
@@ -121,8 +121,8 @@
   overflow: hidden;
   opacity: 1;
   transition-property: height, opacity;
-  transition-duration: var(--ds-transition-duration), var(--ds-transition-duration-fast);
-  transition-timing-function: var(--ds-ease-in-out);
+  transition-duration: var(--ai-transition-duration), var(--ai-transition-duration-fast);
+  transition-timing-function: var(--ai-ease-in-out);
   will-change: height, opacity;
 }
 
@@ -139,18 +139,18 @@
 }
 
 .ai-turn-process > [data-slot='collapsible-content'] {
-  transition-duration: var(--ds-transition-duration-slow), var(--ds-transition-duration);
+  transition-duration: var(--ai-transition-duration-slow), var(--ai-transition-duration);
 }
 
 .ai-tool-duration {
-  color: var(--dsw-alias-label-caption);
+  color: var(--ai-text-caption);
   font-size: 11px;
   line-height: 20px;
 }
 
 .ai-tool-diff-stat {
-  color: var(--dsw-alias-label-caption);
-  font-family: var(--ds-font-family-code);
+  color: var(--ai-text-caption);
+  font-family: var(--ai-font-family-code);
   font-size: 11px;
   line-height: 20px;
 }
@@ -163,7 +163,7 @@
   background: linear-gradient(
     90deg,
     transparent 0%,
-    color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%,
+    color-mix(in srgb, var(--ai-canvas) 60%, transparent) 55%,
     transparent 100%
   );
   content: '';
@@ -183,31 +183,31 @@
 }
 
 .ai-tool-inspect {
-  border: 0.5px solid var(--dsw-alias-border-l3);
+  border: 0.5px solid var(--ai-border);
   border-radius: 999px;
-  background: var(--dsw-alias-bg-base);
-  color: var(--dsw-alias-label-secondary);
+  background: var(--ai-canvas);
+  color: var(--ai-text-secondary);
   font-size: 11px;
   line-height: 16px;
 }
 
 .ai-state-dot {
-  border: 1.5px solid var(--dsw-alias-label-tertiary);
+  border: 1.5px solid var(--ai-text-muted);
   border-radius: 50%;
 }
 
 .ai-state-dot[data-state='succeeded'],
 .ai-state-dot[data-state='completed'] {
-  border-color: var(--dsw-alias-state-success-primary);
-  background: var(--dsw-alias-state-success-primary);
+  border-color: var(--ai-success);
+  background: var(--ai-success);
 }
 
 .ai-state-dot[data-state='failed'],
 .ai-state-dot[data-state='rejected'] {
-  border-color: var(--dsw-alias-state-error-primary);
-  background: var(--dsw-alias-state-error-primary);
+  border-color: var(--ai-error);
+  background: var(--ai-error);
 }
 
 .ai-state-dot[data-state='approval'] {
-  border-color: var(--dsw-alias-state-warn-primary);
+  border-color: var(--ai-warning);
 }

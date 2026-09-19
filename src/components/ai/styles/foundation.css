@@ -1,0 +1,113 @@
+.ai-panel-shell,
+.ai-turn-stat-panel {
+  --ai-font-family: var(--font-sans);
+  --ai-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+  --ai-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ai-transition-duration: 0.2s;
+  --ai-transition-duration-fast: 0.1s;
+  --ai-transition-duration-slow: 0.3s;
+
+  --ai-canvas: var(--card);
+  --ai-surface: var(--card);
+  --ai-elevated: var(--popover);
+  --ai-border-subtle: color-mix(in srgb, var(--foreground) 4%, transparent);
+  --ai-border-soft: color-mix(in srgb, var(--foreground) 9%, transparent);
+  --ai-border: var(--border);
+  --ai-border-strong: color-mix(in srgb, var(--foreground) 18%, transparent);
+  --ai-brand: var(--primary);
+  --ai-button: var(--app-button);
+  --ai-action-active: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --ai-action-hover-solid: var(--muted);
+  --ai-action-hover: color-mix(in srgb, var(--foreground) 6%, transparent);
+  --ai-text-caption: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  --ai-text-dimmed: color-mix(in srgb, var(--foreground) 88%, transparent);
+  --ai-on-accent: var(--primary-foreground);
+  --ai-text: var(--foreground);
+  --ai-text-secondary: color-mix(in srgb, var(--foreground) 72%, transparent);
+  --ai-text-muted: var(--muted-foreground);
+  --ai-code-banner: color-mix(in srgb, var(--muted) 72%, var(--card));
+  --ai-code-block: color-mix(in srgb, var(--muted) 58%, var(--card));
+  --ai-code-inline: var(--muted);
+  --ai-scrollbar: var(--app-scrollbar-thumb);
+  --ai-scrollbar-hover: var(--app-scrollbar-thumb-hover);
+  --ai-accent: var(--primary);
+  --ai-accent-soft: color-mix(in srgb, var(--primary) 12%, var(--card));
+  --ai-error: var(--destructive);
+  --ai-success: var(--app-success);
+  --ai-warning: var(--app-warning);
+  --ai-bubble: color-mix(in srgb, var(--primary) 9%, var(--card));
+  --ai-input: var(--card);
+  --ai-menu: var(--popover);
+  --ai-selector: var(--muted);
+
+  --ai-content-font-size: 14px;
+  --ai-font-markdown-base: 14px/24px var(--ai-font-family);
+  --ai-font-markdown-code: 12px/19px var(--ai-font-family-code);
+  --ai-font-markdown-code-block: 13px/22px var(--ai-font-family-code);
+  --ai-font-markdown-code-block-small: 12px/18px var(--ai-font-family-code);
+
+  --ai-shadow-card: var(--shadow-card);
+  --ai-shadow-dialog: var(--shadow-dialog);
+  --ai-elevation-stroke-color: var(--ai-border-strong);
+}
+
+.ai-panel-shell,
+.ai-panel-shell * {
+  --ai-elevation-stroke: 0 0 0 0.5px var(--ai-elevation-stroke-color);
+  --ai-elevation-panel: var(--ai-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02);
+  --ai-elevation-soft: var(--ai-elevation-stroke), 0 4px 16px 0 rgba(0, 0, 0, 0.03), 0 0 24px 0 rgba(0, 0, 0, 0.03);
+}
+
+@supports (corner-shape: superellipse(1.5)) {
+  .ai-panel-shell {
+    --ai-corner-shape: superellipse(1.5);
+  }
+
+  .ai-panel-shell *,
+  .ai-panel-shell *::before,
+  .ai-panel-shell *::after {
+    corner-shape: var(--ai-corner-shape);
+  }
+
+  .ai-panel-shell :is(button, [data-slot='badge'], [data-slot='message-scroller-button']) {
+    corner-shape: round;
+  }
+}
+
+.ai-panel-shell :is(button, [role='button'], input, textarea):focus-visible {
+  outline: 2px solid var(--ai-accent);
+  outline-offset: 2px;
+}
+
+.ai-panel-resize-handle {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  z-index: 20;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+  box-shadow: inset 1px 0 var(--app-resize-divider);
+}
+
+.ai-panel-resize-handle::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 4px;
+  pointer-events: none;
+  background: transparent;
+  transition: background-color 150ms;
+}
+
+.ai-panel-resize-handle:hover::after {
+  background: var(--app-resize-divider-active);
+  transition-delay: 200ms;
+}
+
+.ai-panel-resize-handle:is(:focus-visible, [data-resizing])::after {
+  background: var(--app-resize-divider-active);
+  transition-delay: 0ms;
+}

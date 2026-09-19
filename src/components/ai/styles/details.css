@@ -1,33 +1,33 @@
 .ai-details-root {
-  background: var(--dsw-alias-bg-base);
+  background: var(--ai-canvas);
 }
 
 .ai-details-empty,
 .ai-detail-error {
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--ai-text-muted);
   font-size: 13px;
   line-height: 20px;
 }
 
 .ai-detail-error {
-  color: var(--dsw-alias-state-error-primary);
+  color: var(--ai-error);
 }
 
 .ai-detail-summary,
 .ai-artifact-summary {
-  color: var(--dsw-alias-label-secondary);
+  color: var(--ai-text-secondary);
   font-size: 13px;
   line-height: 20px;
 }
 
 .ai-detail-summary small,
 .ai-artifact-summary small {
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--ai-text-muted);
 }
 
 .ai-detail-section > h3 {
   margin: 0 0 6px;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--ai-text-secondary);
   font-size: 12px;
   font-weight: 500;
   line-height: 18px;
@@ -35,21 +35,21 @@
 
 .ai-detail-code {
   border-radius: 12px;
-  background: var(--dsw-alias-markdown-code-block);
-  color: var(--dsw-alias-label-primary);
-  font-family: var(--ds-font-family-code);
+  background: var(--ai-code-block);
+  color: var(--ai-text);
+  font-family: var(--ai-font-family-code);
   font-size: 13px;
   line-height: 22px;
 }
 
 .ai-detail-copy[data-slot='button'] {
   border-radius: 50%;
-  background: color-mix(in srgb, var(--dsw-alias-markdown-code-block) 92%, transparent);
-  color: var(--dsw-alias-label-tertiary);
+  background: color-mix(in srgb, var(--ai-code-block) 92%, transparent);
+  color: var(--ai-text-muted);
 }
 
 .ai-detail-summary p {
-  color: var(--dsw-alias-label-primary);
+  color: var(--ai-text);
   font-size: 13px;
   line-height: 21px;
 }
@@ -65,19 +65,19 @@
 }
 
 [data-slot='ai-tool-details'] .ai-detail-section {
-  border: 1px solid var(--dsw-alias-border-l2);
+  border: 1px solid var(--ai-border-soft);
   border-radius: 10px;
-  background: var(--dsw-alias-markdown-code-block);
+  background: var(--ai-code-block);
 }
 
 .ai-detail-section-header {
-  border-bottom: 1px solid var(--dsw-alias-border-l1);
-  background: var(--dsw-alias-bg-base);
+  border-bottom: 1px solid var(--ai-border-subtle);
+  background: var(--ai-canvas);
 }
 
 .ai-detail-section-header h3 {
   margin: 0;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--ai-text-secondary);
   font-size: 12px;
   font-weight: 600;
   line-height: 20px;
@@ -124,18 +124,18 @@
 }
 
 .ai-artifact-image-surface {
-  border: 0.5px solid var(--dsw-alias-border-l2);
+  border: 0.5px solid var(--ai-border-soft);
   border-radius: 12px;
-  background: var(--dsw-alias-markdown-code-block);
+  background: var(--ai-code-block);
 }
 
 .ai-artifact-metadata {
-  color: var(--dsw-alias-label-secondary);
+  color: var(--ai-text-secondary);
   font-size: 12px;
   line-height: 18px;
 }
 
 .ai-artifact-metadata dt {
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--ai-text-muted);
 }
 

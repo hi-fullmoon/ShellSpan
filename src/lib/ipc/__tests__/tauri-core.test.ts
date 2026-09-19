@@ -25,6 +25,7 @@ import {
   invokeListKeyCredentials,
   invokeListRemoteDirectory,
   invokeOpenRemoteFile,
+  invokeRevealPath,
   invokePreflightConnection,
   invokePreviewRemoteFile,
   invokeStoreKeyCredential,
@@ -37,6 +38,13 @@ import type { ConnectionProfile } from '@/types';
 beforeEach(() => {
   invokeMock.mockReset();
   loggerErrorMock.mockReset();
+});
+
+it('passes a local path unchanged to the reveal command', async () => {
+  invokeMock.mockResolvedValue(undefined);
+  const path = 'C:\\Users\\tester\\a,b & c.html';
+  await invokeRevealPath(path);
+  expect(invokeMock).toHaveBeenCalledWith('reveal_path', { path });
 });
 
 describe('AI route credentials', () => {

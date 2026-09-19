@@ -8,9 +8,20 @@ import React, {
 } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { toast } from 'sonner';
 
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuGroup,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
+import { invokeOpenPath, invokeOpenUrl, invokeRevealPath, isTauriRuntime } from '@/lib/ipc/tauri';
+import { getPlatform } from '@/lib/platform';
 import { splitStreamingMarkdown } from '@/lib/streaming-markdown';
 import type { AgentSessionAssistantContentBlock } from '@/types/agent-session';
 import { cn } from '@/lib/utils';
@@ -28,6 +39,108 @@ function languageFromNode(node: React.ReactNode): string {
   const child = React.Children.toArray(node).find(React.isValidElement);
   if (!React.isValidElement<{ className?: string }>(child)) return '';
   return /language-([^\s]+)/u.exec(child.props.className ?? '')?.[1] ?? '';
+}
+
+function MarkdownLink({ children, href }: { children: React.ReactNode; href?: string }) {
+  const { t } = useI18n();
+  const label = textFromNode(children).trim();
+  if (!href || !/^(https?:\/\/|mailto:)/iu.test(href)) {
+    return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
+  }
+
+  const openLink = (): void => {
+    if (isTauriRuntime()) {
+      void invokeOpenUrl(href).catch(() => toast.error(t('ai.link.openFailed')));
+    } else {
+      window.open(href, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const copy = (value: string): void => {
+    if (!navigator.clipboard) {
+      toast.error(t('ai.link.copyFailed'));
+      return;
+    }
+    void navigator.clipboard.writeText(value)
+      .then(() => toast.success(t('common.copied')))
+      .catch(() => toast.error(t('ai.link.copyFailed')));
+  };
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger
+        render={<a href={href} target="_blank" rel="noreferrer" />}
+      >
+        {children}
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuGroup>
+          <ContextMenuItem onClick={openLink}>{t('ai.link.open')}</ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => copy(href)}>{t('ai.link.copyAddress')}</ContextMenuItem>
+          {label && label !== href && (
+            <ContextMenuItem onClick={() => copy(label)}>{t('ai.link.copyText')}</ContextMenuItem>
+          )}
+        </ContextMenuGroup>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+function MarkdownInlineCode({ children, className }: { children: React.ReactNode; className?: string }) {
+  const { t } = useI18n();
+  const path = textFromNode(children).trim();
+  const isLocalPath = !className && /^(?:[A-Za-z]:[\\/]|\\\\|\/)[^\r\n]+$/u.test(path);
+  const openPath = (): void => {
+    void invokeOpenPath(path).catch(() => toast.error(t('ai.path.openFailed')));
+  };
+  const revealPath = (): void => {
+    void invokeRevealPath(path).catch(() => toast.error(t('ai.path.revealFailed')));
+  };
+  const platform = getPlatform();
+  const revealLabel = platform === 'macos'
+    ? t('ai.path.revealFinder')
+    : platform === 'windows'
+      ? t('ai.path.revealExplorer')
+      : t('ai.path.revealFileManager');
+  const code = (
+    <code
+      className={cn(!className && 'ai-markdown-inline-code', isLocalPath && 'ai-markdown-local-path', className)}
+      role={isLocalPath ? 'link' : undefined}
+      tabIndex={isLocalPath ? 0 : undefined}
+      onClick={isLocalPath ? openPath : undefined}
+      onKeyDown={isLocalPath ? (event) => {
+        if (event.key === 'Enter') openPath();
+      } : undefined}
+    >
+      {children}
+    </code>
+  );
+  if (!isLocalPath) return code;
+
+  const copyPath = (): void => {
+    if (!navigator.clipboard) {
+      toast.error(t('ai.path.copyFailed'));
+      return;
+    }
+    void navigator.clipboard.writeText(path)
+      .then(() => toast.success(t('common.copied')))
+      .catch(() => toast.error(t('ai.path.copyFailed')));
+  };
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={code} />
+      <ContextMenuContent>
+        <ContextMenuGroup>
+          <ContextMenuItem onClick={openPath}>{t('ai.path.open')}</ContextMenuItem>
+          <ContextMenuItem onClick={revealPath}>{revealLabel}</ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={copyPath}>{t('ai.path.copy')}</ContextMenuItem>
+        </ContextMenuGroup>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
 }
 
 function MarkdownCodeBlock({
@@ -95,18 +208,12 @@ const MarkdownContent = React.memo(function MarkdownContent({
         remarkPlugins={[remarkGfm]}
         skipHtml
         components={{
-          a: ({ children: linkChildren, href }) => (
-            <a href={href} target="_blank" rel="noreferrer">
-              {linkChildren}
-            </a>
-          ),
+          a: ({ children: linkChildren, href }) => <MarkdownLink href={href}>{linkChildren}</MarkdownLink>,
           blockquote: ({ children: quoteChildren }) => (
             <blockquote>{quoteChildren}</blockquote>
           ),
           code: ({ children: codeChildren, className }) => (
-            <code className={cn(!className && 'ai-markdown-inline-code', className)}>
-              {codeChildren}
-            </code>
+            <MarkdownInlineCode className={className}>{codeChildren}</MarkdownInlineCode>
           ),
           hr: () => <Separator />,
           img: ({ alt }) => <span className="ai-markdown-image-alt">[{alt || 'image'}]</span>,

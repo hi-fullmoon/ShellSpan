@@ -765,6 +765,10 @@ export async function invokeOpenPath(path: string): Promise<void> {
   return invokeLogged('open_path', { path });
 }
 
+export async function invokeRevealPath(path: string): Promise<void> {
+  return invokeLogged('reveal_path', { path });
+}
+
 function toBackendKeychainKind(kind: KeychainKeyKind): string {
   return kind === 'keyFile' ? 'keyfile' : kind;
 }

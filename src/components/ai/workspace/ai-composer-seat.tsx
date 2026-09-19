@@ -34,7 +34,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
-import { getPlatform } from '@/lib/platform';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiContextUsage, AiInboxItem, AiPendingApproval } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
@@ -90,6 +89,8 @@ export interface AiComposerSeatProps {
   readonly onStop?: () => void;
   readonly onContinueBudgetedTurn?: () => void;
   readonly budgetContinuationAvailable?: boolean;
+  readonly onContinueOutputLimitedTurn?: () => void;
+  readonly outputLimitContinuationAvailable?: boolean;
   readonly onContinueOnReconnectedTerminal?: () => void;
   readonly historicalContinuationAvailable?: boolean;
   readonly historicalContinuationBusy?: boolean;
@@ -107,7 +108,7 @@ export interface AiComposerSeatProps {
   readonly onOpenApprovalDetails?: () => void;
 }
 
-/** Harness-aligned Composer surface backed by the existing ShellSpan state machine. */
+/** ShellSpan composer surface backed by the existing workspace state machine. */
 export function AiComposerSeat({
   mode = 'agent',
   imageControls, onPasteImages, hasImages = false, imageBusy = false, imageLocked = false,
@@ -146,6 +147,8 @@ export function AiComposerSeat({
   onStop,
   onContinueBudgetedTurn,
   budgetContinuationAvailable = false,
+  onContinueOutputLimitedTurn,
+  outputLimitContinuationAvailable = false,
   onContinueOnReconnectedTerminal,
   historicalContinuationAvailable = false,
   historicalContinuationBusy = false,
@@ -282,6 +285,19 @@ export function AiComposerSeat({
             {t('ai.workspace.continueBudgetedTurn')}
           </Button>
         )}
+        {outputLimitContinuationAvailable && onContinueOutputLimitedTurn && !terminal && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="self-center rounded-full"
+            disabled={stopping || submitting || unavailable}
+            onClick={onContinueOutputLimitedTurn}
+          >
+            <RotateCcwIcon data-icon="inline-start" />
+            {t('ai.workspace.continueOutputLimitedTurn')}
+          </Button>
+        )}
         {waitingApproval && !pendingApproval && (
           <Alert size="sm">
             <AlertTitle>{t('ai.workspace.approvalWaiting')}</AlertTitle>
@@ -308,8 +324,8 @@ export function AiComposerSeat({
       {
         <div ref={completionAnchor} className="ai-composer-input-anchor relative min-w-0">
           <InputGroup className={cn(
-            'h-auto flex-col items-stretch gap-3 overflow-hidden',
-            phase === 'hero' ? 'pt-1.5' : 'pt-2.5',
+            'h-auto flex-col items-stretch gap-0 overflow-hidden',
+            !imageControls && (phase === 'hero' ? 'pt-1.5' : 'pt-2.5'),
             waitingApproval && pendingApproval && 'invisible',
           )} data-composer-card="" aria-hidden={waitingApproval && pendingApproval ? true : undefined} onClick={event => {
             if (event.target === event.currentTarget) completion.editor.current?.focus();
@@ -375,10 +391,10 @@ export function AiComposerSeat({
               }}
               placeholder={mode === 'ask'
                 ? t('ai.workbench.composerPlaceholder')
-                : t('ai.workspace.composerPlaceholder', { pasteShortcut: getPlatform() === 'macos' ? '⌘V' : 'Ctrl+V' })}
+                : t('ai.workspace.composerPlaceholder')}
             />
             {imageControls && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0 px-3">{imageControls}</InputGroupAddon>}
-            <InputGroupAddon align="block-end" className="ai-composer-toolbar min-h-10.5 min-w-0 justify-between gap-3 px-2 pt-0.5 pb-1.5 @max-[400px]/ai-workspace:gap-1 @max-[400px]/ai-workspace:px-[7px]" onClick={event => {
+            <InputGroupAddon align="block-end" className="ai-composer-toolbar mt-3 min-h-10.5 min-w-0 justify-between gap-3 px-2 pt-0.5 pb-1.5 @max-[400px]/ai-workspace:gap-1 @max-[400px]/ai-workspace:px-[7px]" onClick={event => {
               // Portal menu clicks bubble through React without occurring inside the toolbar.
               if (!event.currentTarget.contains(event.target as Node)) return;
               if (!(event.target as HTMLElement).closest('button, [role="button"]')) completion.editor.current?.focus();
@@ -433,11 +449,11 @@ export function AiComposerSeat({
                             if (value === 'queue' || value === 'steer') onBusyPreferenceChange?.(value);
                           }}
                         >
-                          <DropdownMenuRadioItem className="min-h-[34px] gap-1.5 py-[5px] pl-2 whitespace-nowrap" value="queue">
+                          <DropdownMenuRadioItem className="min-h-[34px] gap-1 py-[5px] pl-2 whitespace-nowrap" value="queue">
                             <ListPlusIcon />
                             {t('ai.workspace.queue.action')}
                           </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem className="min-h-[34px] gap-1.5 py-[5px] pl-2 whitespace-nowrap" value="steer">
+                          <DropdownMenuRadioItem className="min-h-[34px] gap-1 py-[5px] pl-2 whitespace-nowrap" value="steer">
                             <CornerUpLeftIcon />
                             {t('ai.workspace.steer.action')}
                           </DropdownMenuRadioItem>
@@ -453,7 +469,7 @@ export function AiComposerSeat({
                   <Button
                     variant="ghost"
                     size="xs"
-                    className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] gap-1 overflow-hidden pr-1.5 pl-2"
+                    className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] overflow-hidden pr-1.5 pl-2"
                     disabled={!onOpenModel}
                     onClick={onOpenModel}
                     aria-label={t('ai.workspace.model.trigger', { selection: modelLabel })}

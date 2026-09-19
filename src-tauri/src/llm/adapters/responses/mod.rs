@@ -27,6 +27,39 @@ fn sanitized_reasoning_item(value: &Value) -> Value {
     Value::Object(output)
 }
 
+fn response_incomplete_error(value: &Value) -> NormalizedModelError {
+    match value
+        .pointer("/response/incomplete_details/reason")
+        .and_then(Value::as_str)
+    {
+        Some("max_output_tokens" | "max_tokens") => coded_error(
+            NormalizedModelErrorKind::Terminal,
+            "AI provider reached the configured output token limit",
+            "OUTPUT_LIMIT",
+        ),
+        Some("max_messages") => coded_error(
+            NormalizedModelErrorKind::Terminal,
+            "AI provider reached the configured response message limit",
+            "RESPONSE_MAX_MESSAGES",
+        ),
+        Some("content_filter") => coded_error(
+            NormalizedModelErrorKind::Terminal,
+            "AI provider stopped the response because content was filtered",
+            "CONTENT_FILTER",
+        ),
+        Some("steered") => coded_error(
+            NormalizedModelErrorKind::Terminal,
+            "AI provider stopped the response after it was steered",
+            "RESPONSE_STEERED",
+        ),
+        _ => coded_error(
+            NormalizedModelErrorKind::Terminal,
+            "AI provider returned an incomplete response",
+            "RESPONSE_INCOMPLETE",
+        ),
+    }
+}
+
 impl ReplayCodec for ResponsesReplayCodec {
     fn adapter_id(&self) -> &'static str {
         "responses"
@@ -707,10 +740,7 @@ pub(in crate::llm) fn process_responses_event(
             }
         }
         Some("response.incomplete") => {
-            return Err(NormalizedModelError::new(
-                NormalizedModelErrorKind::Terminal,
-                "AI provider reached the configured output token limit",
-            ));
+            return Err(response_incomplete_error(&value));
         }
         Some("response.failed") | Some("error") => {
             let message = value
@@ -724,4 +754,32 @@ pub(in crate::llm) fn process_responses_event(
         _ => {}
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn incomplete_responses_preserve_the_provider_reason() {
+        for (reason, expected_code) in [
+            ("max_output_tokens", "OUTPUT_LIMIT"),
+            ("max_tokens", "OUTPUT_LIMIT"),
+            ("max_messages", "RESPONSE_MAX_MESSAGES"),
+            ("content_filter", "CONTENT_FILTER"),
+            ("steered", "RESPONSE_STEERED"),
+        ] {
+            let error = response_incomplete_error(&json!({
+                "response": { "incomplete_details": { "reason": reason } }
+            }));
+            assert_eq!(error.kind, NormalizedModelErrorKind::Terminal);
+            assert_eq!(error.code.as_deref(), Some(expected_code));
+        }
+
+        let unknown = response_incomplete_error(&json!({
+            "response": { "incomplete_details": { "reason": "future_reason" } }
+        }));
+        assert_eq!(unknown.code.as_deref(), Some("RESPONSE_INCOMPLETE"));
+        assert!(!unknown.message.contains("output token limit"));
+    }
 }

@@ -1836,6 +1836,9 @@ pub(crate) async fn disconnect_sftp(
 #[tauri::command]
 pub(crate) fn open_path(path: String) -> Result<(), String> {
     let path = std::path::Path::new(&path);
+    if !path.is_absolute() {
+        return Err("path must be absolute".into());
+    }
     if !path.exists() {
         return Err(format!("path does not exist: {}", path.display()));
     }
@@ -1852,11 +1855,32 @@ pub(crate) fn open_path(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        let explorer_path = std::path::PathBuf::from(portable_local_path(&canonical));
-        std::process::Command::new("explorer")
-            .arg(explorer_path)
-            .spawn()
-            .map_err(|error| format!("failed to open path: {error}"))?;
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+
+        let path = portable_local_path(&canonical);
+        let path_wide = std::ffi::OsStr::new(&path)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let verb = "open\0".encode_utf16().collect::<Vec<_>>();
+        // ShellExecute uses the file association chosen by the operating system.
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                verb.as_ptr(),
+                path_wide.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+            )
+        };
+        if result as isize <= 32 {
+            return Err(format!(
+                "failed to open path with default app: shell error {}",
+                result as isize
+            ));
+        }
     }
     #[cfg(target_os = "linux")]
     {
@@ -1866,6 +1890,57 @@ pub(crate) fn open_path(path: String) -> Result<(), String> {
             .map_err(|error| format!("failed to open path: {error}"))?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn reveal_path(path: String) -> Result<(), String> {
+    let path = std::path::Path::new(&path);
+    if !path.is_absolute() {
+        return Err("path must be absolute".into());
+    }
+    if !path.exists() {
+        return Err(format!("path does not exist: {}", path.display()));
+    }
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| format!("failed to canonicalize path: {error}"))?;
+
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg("-R")
+        .arg(&canonical)
+        .spawn()
+        .map_err(|error| format!("failed to reveal path: {error}"))?;
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+
+        std::process::Command::new("explorer.exe")
+            .raw_arg(explorer_select_argument(&canonical))
+            .spawn()
+            .map_err(|error| format!("failed to reveal path: {error}"))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open")
+        .arg(if canonical.is_dir() {
+            &canonical
+        } else {
+            canonical.parent().unwrap_or(&canonical)
+        })
+        .spawn()
+        .map_err(|error| format!("failed to reveal path: {error}"))?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn explorer_select_argument(path: &std::path::Path) -> String {
+    // Explorer parses /select,<path> as one command-line argument. Keep the
+    // Windows separators and quote the path so spaces remain part of it.
+    let path = portable_local_path(path).replace('/', "\\");
+    format!("/select,\"{path}\"")
 }
 
 #[tauri::command]

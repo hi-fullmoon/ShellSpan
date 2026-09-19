@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
-import '@/components/ai/ai-panel.css';
+import '@/components/ai/styles/styles.css';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { applyTheme } from '@/lib/theme';
 import { initI18n } from '@/locales';

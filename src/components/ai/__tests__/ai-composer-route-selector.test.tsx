@@ -42,7 +42,7 @@ describe('route-backed model selector',()=>{
     mocks.resolve.mockRejectedValue(new Error('UNSUPPORTED_REASONING_EFFORT'));
     const user=userEvent.setup(); render(<AiComposerModelSelector selection={{id:'route-a',routeRevision:1,profile:'generic',kind:'openAiCompatible',baseUrl:'https://route-a.example',model:'a-one',reasoningEffort:'removed-level',requiresApiKey:false}}/>);
     await user.click(screen.getByRole('button',{name:/Model selection/}));
-    expect(await screen.findByRole('status')).toHaveTextContent('INVALID_MODEL_SELECTION');
+    expect(await screen.findByText(/INVALID_MODEL_SELECTION/)).toBeVisible();
     expect(screen.queryByRole('menuitem',{name:/ai.workspace.model.reasoning/})).not.toBeInTheDocument();
   });
 });

@@ -160,7 +160,7 @@ it('allows changing model and permissions in a running conversation without chan
   expect(useAgentPermissionStore.getState().getMode('terminal-1')).toBe('autoApproveReadOnly');
 });
 
-it('allows changing model before retrying a failed conversation', async () => {
+it('allows changing model and permissions before retrying a failed conversation', async () => {
   connectedTerminal();
   const user = userEvent.setup();
   const base = runningAgentView();
@@ -179,6 +179,7 @@ it('allows changing model before retrying a failed conversation', async () => {
     list: vi.fn(async () => ({ sessions: [failed.summary] })),
     open: vi.fn(async () => failed),
     selectModel: vi.fn(async () => undefined),
+    setPermission: vi.fn(async () => undefined),
   });
 
   render(<AiWorkspaceController scope="terminal" adapter={agent} />);
@@ -193,6 +194,12 @@ it('allows changing model before retrying a failed conversation', async () => {
     failed.summary.id,
     expect.objectContaining({ id: second.id }),
   ));
+  const permission = screen.getByRole('button', { name: /Permission mode:/ });
+  expect(permission).toBeEnabled();
+  await user.click(permission);
+  await user.click(await screen.findByRole('menuitemradio', { name: /^Full access/ }));
+  await user.click(await screen.findByRole('button', { name: 'Allow full access' }));
+  await waitFor(() => expect(agent.setPermission).toHaveBeenCalledWith(failed.summary.id, 'operator'));
 });
 
 it('keeps the current session selection when a model change fails', async () => {
@@ -421,6 +428,49 @@ it('continues an idle conversation after its step budget boundary', async () => 
     view.summary.id,
     expect.objectContaining({
       content: 'Continue the previous request from the work already completed. Verify any uncertain outcomes first and do not repeat completed operations.',
+      mode: 'nextTurn',
+    }),
+  ));
+});
+
+it('offers a one-click continuation after the model output limit', async () => {
+  connectedTerminal();
+  const user = userEvent.setup();
+  const base = runningAgentView();
+  const events = agentSessionBaselineScenarios.hello.events.map((event) => (
+    event.type === 'turn/end'
+      ? { ...event, data: { reason: 'outputLimit: AI provider reached its output token limit' } }
+      : event
+  ));
+  const view: AiSessionView = {
+    ...base,
+    status: 'failed',
+    summary: { ...base.summary, status: 'failed' },
+    snapshot: {
+      kind: 'agent',
+      value: { ...base.snapshot.value, status: 'failed', ended: true },
+    },
+    nodes: projectAgentChatNodes(events),
+  };
+
+  const agent = adapter({
+    list: vi.fn(async () => ({ sessions: [view.summary] })),
+    open: vi.fn(async () => view),
+    submit: vi.fn(async (sessionId, input) => ({
+      sessionId: sessionId!, clientOperationId: input.clientOperationId, mode: input.mode,
+    })),
+  });
+
+  render(<AiWorkspaceController scope="terminal" adapter={agent} />);
+  await waitFor(() => expect(agent.open).toHaveBeenCalledWith(view.summary.id));
+
+  const continuation = await screen.findByRole('button', { name: 'Continue generating' });
+  expect(continuation).toBeEnabled();
+  await user.click(continuation);
+  await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(
+    view.summary.id,
+    expect.objectContaining({
+      content: 'Continue from where the previous response stopped at the output limit, without repeating completed work.',
       mode: 'nextTurn',
     }),
   ));
@@ -1152,6 +1202,7 @@ describe('AiWorkspaceController', () => {
     expect(screen.queryByRole('status', { name: 'Agent is unavailable' })).toBeNull();
     expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
     expect(screen.getByText('Q&A only · No terminal access')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Add images' })).toBeNull();
     expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
 
     await userEvent.setup().type(screen.getByRole('textbox'), 'Explain SSH keepalives');
@@ -1239,7 +1290,7 @@ describe('AiWorkspaceController', () => {
     await user.type(screen.getByRole('textbox'), 'draft survives approval');
 
     act(() => publish?.(pending));
-    expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
+    expect(screen.getByTestId('ai-workspace-composer')).toHaveAttribute('contenteditable', 'true');
     await user.click(screen.getByRole('button', { name: 'Allow once' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Approval conflict');
 
@@ -1391,6 +1442,75 @@ describe('AiWorkspaceController', () => {
     expect(resolveTerminalDirectory).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'terminal-local',
     }));
+  });
+
+  it('freezes the current remote directory so full-access Sessions receive native file tools', async () => {
+    connectedTerminal();
+    useTerminalStore.setState((state) => ({
+      sessions: state.sessions.map((session) => session.sessionId === 'terminal-1'
+        ? { ...session, profileId: 'profile-remote' }
+        : session),
+    }));
+    useAgentPermissionStore.getState().setMode('terminal-1', 'fullAccess');
+    const submit: AiSessionControllerAdapter['submit'] = vi.fn(async (_sessionId, input) => ({
+      sessionId: input.create!.request.sessionId,
+      clientOperationId: input.clientOperationId,
+      mode: input.mode,
+    }));
+    const resolveTerminalDirectory = vi.fn(async () => '/root/project');
+    const { result } = renderHook(() => useAiSessionController({
+      scope: 'terminal',
+      adapter: adapter({ submit }),
+      resolveTerminalDirectory,
+    }));
+
+    act(() => {
+      result.current.setDraft('Create a generated HTML page');
+      result.current.submit('primary');
+    });
+
+    await waitFor(() => expect(submit).toHaveBeenCalledWith(null, expect.objectContaining({
+      create: expect.objectContaining({
+        request: expect.objectContaining({
+          permissionMode: 'operator',
+          target: expect.objectContaining({
+            kind: 'remote',
+            profileId: 'profile-remote',
+            rootPath: '/root/project',
+          }),
+        }),
+      }),
+    })));
+    expect(resolveTerminalDirectory).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'terminal-1',
+    }));
+  });
+
+  it('keeps profileless remote full-access Sessions unrooted', async () => {
+    connectedTerminal();
+    useAgentPermissionStore.getState().setMode('terminal-1', 'fullAccess');
+    const submit: AiSessionControllerAdapter['submit'] = vi.fn(async (_sessionId, input) => ({
+      sessionId: input.create!.request.sessionId,
+      clientOperationId: input.clientOperationId,
+      mode: input.mode,
+    }));
+    const resolveTerminalDirectory = vi.fn(async () => '/root/project');
+    const { result } = renderHook(() => useAiSessionController({
+      scope: 'terminal',
+      adapter: adapter({ submit }),
+      resolveTerminalDirectory,
+    }));
+
+    act(() => {
+      result.current.setDraft('Create a generated HTML page');
+      result.current.submit('primary');
+    });
+
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    const create = vi.mocked(submit).mock.calls[0][1].create;
+    expect(create?.request.target).toEqual(expect.objectContaining({ kind: 'remote' }));
+    expect(create?.request.target?.rootPath).toBeUndefined();
+    expect(resolveTerminalDirectory).not.toHaveBeenCalled();
   });
 
   it('fails closed when a local full-access Session has no frozen workspace root', async () => {

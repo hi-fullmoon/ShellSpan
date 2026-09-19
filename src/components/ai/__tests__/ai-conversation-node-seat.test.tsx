@@ -17,7 +17,7 @@ import {
   agentSessionFailedEventFixture,
   agentSessionRunningEventFixture,
 } from '@/test/fixtures/agent-session';
-import '@/components/ai/ai-panel.css';
+import '@/components/ai/styles/styles.css';
 
 function toolNode(
   changes: Partial<AiConversationNodeOf<'tool'>> = {},
@@ -49,6 +49,25 @@ function toolNode(
     idempotency: null,
     approval: null,
     ...changes,
+  };
+}
+
+function contextNode(
+  kind: AiConversationNodeOf<'contextInjection'>['provenance']['kind'],
+): AiConversationNodeOf<'contextInjection'> {
+  return {
+    kind: 'contextInjection',
+    key: `context:${kind}`,
+    sourceKind: 'agent',
+    sessionId: 'session-context',
+    turnId: 'turn-context',
+    stepId: 'step-context',
+    firstSeq: 1,
+    lastSeq: 1,
+    timestamp: '2026-09-19T00:00:00.000Z',
+    messageId: `message:${kind}`,
+    content: `Content for ${kind}`,
+    provenance: { kind, label: `Label for ${kind}`, producerId: `producer:${kind}` },
   };
 }
 
@@ -127,6 +146,75 @@ describe('AiConversationNodeList', () => {
       }),
     ]);
     expect(container.querySelectorAll('[data-ai-node-key]')).toHaveLength(nodes.length);
+  });
+
+  it('renders an actionable message instead of raw output-limit diagnostics', () => {
+    const error: AiConversationNodeOf<'error'> = {
+      kind: 'error',
+      key: 'error:output-limit',
+      sourceKind: 'agent',
+      sessionId: 'session-output-limit',
+      turnId: 'turn-output-limit',
+      stepId: 'step-output-limit',
+      firstSeq: 1,
+      lastSeq: 1,
+      timestamp: '2026-09-18T00:00:00.000Z',
+      scope: 'session',
+      message: 'outputLimit: attempt=1 maxAttempts=3 kind=Terminal code=OUTPUT_LIMIT',
+      code: null,
+      state: 'failed',
+    };
+
+    render(<AiConversationNodeList nodes={[error]} />);
+
+    expect(within(screen.getByRole('alert')).getByText(
+      'The response reached the model output limit. Narrow the task or ask the Agent to continue in smaller parts.',
+    )).toBeVisible();
+    expect(screen.queryByText(/maxAttempts/)).not.toBeInTheDocument();
+  });
+
+  it('hides internal runtime, Agent instruction, and Skills catalog context', () => {
+    const hiddenContexts = [
+      contextNode('runtime'),
+      contextNode('agent-instructions'),
+      contextNode('skill-catalog'),
+    ];
+    const pluginContext = contextNode('plugin');
+    const process: AiConversationNodeOf<'turnProcess'> = {
+      kind: 'turnProcess',
+      key: 'turn-process:context-visibility',
+      sourceKind: 'agent',
+      sessionId: 'session-context',
+      turnId: 'turn-context',
+      stepId: null,
+      firstSeq: 1,
+      lastSeq: 4,
+      timestamp: '2026-09-19T00:00:00.000Z',
+      status: 'running',
+      answerGeneration: 'context-visibility-generation',
+      hasStartBoundary: true,
+      hasEndBoundary: false,
+      childKeys: [...hiddenContexts, pluginContext].map((context) => context.key),
+      children: [...hiddenContexts, pluginContext],
+    };
+
+    const { rerender } = render(<AiConversationNodeList nodes={[process]} />);
+
+    expect(screen.queryByRole('button', { name: 'Runtime context' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Agent instructions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Skill catalog' })).not.toBeInTheDocument();
+    for (const context of hiddenContexts) {
+      expect(screen.queryByText(context.content)).not.toBeInTheDocument();
+    }
+    expect(screen.getByRole('button', { name: 'Plugin context' })).toBeVisible();
+
+    rerender(<AiConversationNodeList nodes={[{
+      ...process,
+      lastSeq: 5,
+      childKeys: hiddenContexts.map((context) => context.key),
+      children: hiddenContexts,
+    }]} />);
+    expect(screen.queryByRole('button', { name: 'Processing' })).not.toBeInTheDocument();
   });
 
   it('rerenders only the changed streaming node across 20 projection revisions', () => {

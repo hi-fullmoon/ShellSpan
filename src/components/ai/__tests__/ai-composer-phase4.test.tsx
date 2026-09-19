@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiComposerSeat } from '@/components/ai/workspace/ai-composer-seat';
 import { AiComposerModelSelector } from '@/components/ai/workspace/ai-composer-model-selector';
-import '@/components/ai/ai-panel.css';
+import '@/components/ai/styles/styles.css';
 import { createAiComposerState, type AiComposerState } from '@/lib/ai/composer-machine';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
@@ -141,6 +141,26 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it('keeps image pasting available in Ask without an upload button', () => {
+    const onPasteImages = vi.fn();
+    render(
+      <AiComposerSeat
+        mode="ask"
+        phase="hero"
+        status="idle"
+        onPasteImages={onPasteImages}
+      />,
+    );
+    const image = new File(['image'], 'screenshot.png', { type: 'image/png' });
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: { files: [image], items: [] },
+    });
+
+    expect(screen.queryByRole('button', { name: 'Add images' })).toBeNull();
+    expect(onPasteImages).toHaveBeenCalledOnce();
+    expect(onPasteImages).toHaveBeenCalledWith([image]);
+  });
+
   it('accepts clipboard image items when the browser has no file list', () => {
     const onPasteImages = vi.fn();
     render(<AiComposerSeat phase="hero" status="idle" onPasteImages={onPasteImages} />);
@@ -177,14 +197,12 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     },
   );
 
-  it.each([['MacIntel', '⌘V'], ['Win32', 'Ctrl+V']])('shows the image paste shortcut for %s', (platform, shortcut) => {
-    const platformSpy = vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
-    try {
-      render(<AiComposerSeat phase="active" status="idle" />);
-      expect(screen.getByRole('textbox').getAttribute('aria-label')).toContain(`${shortcut} Paste images`);
-    } finally {
-      platformSpy.mockRestore();
-    }
+  it('keeps the placeholder focused on the primary composer actions', () => {
+    render(<AiComposerSeat phase="active" status="idle" />);
+    expect(screen.getByRole('textbox')).toHaveAttribute(
+      'aria-label',
+      'Ask anything… · Enter to send · Shift+Enter for a new line',
+    );
   });
 
   it('maps Enter and Ctrl/Cmd+Enter while preserving Shift+Enter and IME composition', () => {

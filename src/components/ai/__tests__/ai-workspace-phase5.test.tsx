@@ -18,7 +18,7 @@ import {
 import type { AiPendingApproval, AiSessionSummary, AiSessionView } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import '@/components/ai/ai-panel.css';
+import '@/components/ai/styles/styles.css';
 
 const tool: AiConversationNodeOf<'tool'> = {
   kind: 'tool',

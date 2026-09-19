@@ -96,6 +96,22 @@ export function AiQuestionPanel({
       });
     setError(null);
   };
+  const updateSelection = (selected: string[]): void => {
+    update({
+      id: currentQuestion.id,
+      selected,
+      ...(currentQuestion.multi_select && currentAnswer.custom
+        ? { custom: currentAnswer.custom }
+        : {}),
+    });
+    if (
+      !currentQuestion.multi_select &&
+      selected.length > 0 &&
+      currentIndex < question.questions.length - 1
+    ) {
+      setCurrentIndex((index) => index + 1);
+    }
+  };
   const submit = async (): Promise<void> => {
     if (pending || invalid || !onAnswer) return;
     const input = draft?.submission ?? {
@@ -175,15 +191,7 @@ export function AiQuestionPanel({
                       aria-label={currentQuestion.question}
                       multiple={currentQuestion.multi_select}
                       value={[...currentAnswer.selected]}
-                      onValueChange={(selected) =>
-                        update({
-                          id: currentQuestion.id,
-                          selected,
-                          ...(currentQuestion.multi_select && currentAnswer.custom
-                            ? { custom: currentAnswer.custom }
-                            : {}),
-                        })
-                      }
+                      onValueChange={updateSelection}
                       orientation="vertical"
                       variant="outline"
                     >
@@ -406,9 +414,11 @@ export function AiQuestionHistory({
                   const answer = question.answers.find((a) => a.id === q.id);
                   return (
                     <FieldSet className="ai-question-history-item flex-none gap-0" key={q.id}>
-                      <FieldLegend className="mb-0">{q.question}</FieldLegend>
+                      <FieldLegend className="ai-question-history-question mb-0">
+                        {q.question}
+                      </FieldLegend>
                       {answer && (
-                        <FieldDescription>
+                        <FieldDescription className="ai-question-history-answer">
                           {[...answer.selected, answer.custom]
                             .filter(Boolean)
                             .join(' · ')}

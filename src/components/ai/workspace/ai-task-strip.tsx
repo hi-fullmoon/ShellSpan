@@ -65,7 +65,7 @@ export function AiTaskStrip({ steps, active = true }: AiTaskStripProps): React.R
       data-slot="ai-task-strip"
     >
       <CollapsibleTrigger
-        className="ai-task-strip-trigger flex h-8 w-full min-w-0 cursor-pointer items-center gap-2.5 px-3 py-1 [&>:last-child]:ml-auto"
+        className="ai-task-strip-trigger flex h-8 w-full min-w-0 cursor-pointer items-center gap-1 px-3 py-1 [&>:last-child]:ml-auto"
         aria-label={t('ai.workspace.tasks.toggle', { count: steps.length })}
         aria-describedby={progressId}
       >

@@ -23,6 +23,41 @@
     use std::thread;
 
     #[test]
+    fn local_open_and_reveal_reject_relative_or_missing_paths() {
+        assert_eq!(
+            super::open_path("relative.txt".into()).unwrap_err(),
+            "path must be absolute"
+        );
+        assert_eq!(
+            super::reveal_path("relative.txt".into()).unwrap_err(),
+            "path must be absolute"
+        );
+
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory
+            .path()
+            .join("missing.txt")
+            .to_string_lossy()
+            .into_owned();
+        assert!(super::open_path(missing.clone())
+            .unwrap_err()
+            .contains("path does not exist"));
+        assert!(super::reveal_path(missing)
+            .unwrap_err()
+            .contains("path does not exist"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn reveal_uses_one_quoted_explorer_select_argument() {
+        let path = std::path::Path::new(r"C:\Users\tester\My Documents\todo.html");
+        assert_eq!(
+            super::explorer_select_argument(path),
+            r#"/select,"C:\Users\tester\My Documents\todo.html""#
+        );
+    }
+
+    #[test]
     fn ordinary_ssh_prepares_integration_only_for_the_remote_rollout() {
         assert!(should_prepare_remote_integration(true));
         assert!(!should_prepare_remote_integration(false));

@@ -1,5 +1,3 @@
-/* Transcript surfaces, ported from deepseek-harness ChatView, MessageItem,
- * AssistantMarkdown, ReasoningRow, ToolRow, blocks, and ProducedFiles. */
 .ai-transcript-flow-item:empty {
   display: none;
 }
@@ -7,9 +5,9 @@
 .ai-message-bubble-user .ai-message-bubble-content {
   border: 0;
   border-radius: 22px;
-  background: var(--dsw-specific-bubble);
-  color: var(--dsw-alias-label-primary);
-  font-size: var(--dsh-content-font-size);
+  background: var(--ai-bubble);
+  color: var(--ai-text);
+  font-size: var(--ai-content-font-size);
   line-height: 22px;
 }
 
@@ -22,21 +20,21 @@
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--dsw-alias-label-primary);
+  color: var(--ai-text);
 }
 
 .ai-user-delivery {
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--ai-text-muted);
   font-size: 11px;
   line-height: 16px;
 }
 
 .ai-user-delivery[data-state='failed'] {
-  color: var(--dsw-alias-state-error-primary);
+  color: var(--ai-error);
 }
 
 .ai-message-actions {
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--ai-text-muted);
 }
 
 .ai-message-actions time {
@@ -46,12 +44,12 @@
 
 .ai-message-action {
   border-radius: 50%;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--ai-text-muted);
 }
 
 .ai-message-action:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-secondary);
+  background: var(--ai-action-hover);
+  color: var(--ai-text-secondary);
 }
 
 @media (hover: hover) {
@@ -69,14 +67,14 @@
 }
 
 .ai-assistant-content {
-  color: var(--dsw-alias-label-primary);
-  font-size: var(--dsh-content-font-size);
+  color: var(--ai-text);
+  font-size: var(--ai-content-font-size);
   line-height: 24px;
 }
 
 .ai-assistant-markdown {
-  font: var(--dsw-font-markdown-base);
-  color: var(--dsw-alias-label-primary);
+  font: var(--ai-font-markdown-base);
+  color: var(--ai-text);
 }
 
 .ai-assistant-markdown strong {
@@ -125,32 +123,39 @@
 }
 
 .ai-assistant-markdown li::marker {
-  color: var(--dsw-alias-label-secondary);
+  color: var(--ai-text-secondary);
 }
 
 .ai-assistant-markdown blockquote {
   margin: 16px 0 0;
   padding-left: 14px;
-  border-left: 2px solid var(--dsw-alias-label-caption);
-  color: var(--dsw-alias-label-secondary);
+  border-left: 2px solid var(--ai-text-caption);
+  color: var(--ai-text-secondary);
 }
 
-.ai-assistant-markdown a {
+.ai-assistant-markdown a,
+.ai-assistant-markdown .ai-markdown-local-path {
   position: relative;
-  color: var(--dsw-alias-state-business-primary);
+  color: var(--ai-accent);
   text-decoration: none;
 }
 
 .ai-assistant-markdown a:hover,
-.ai-assistant-markdown a:focus-visible {
+.ai-assistant-markdown a:focus-visible,
+.ai-assistant-markdown .ai-markdown-local-path:hover,
+.ai-assistant-markdown .ai-markdown-local-path:focus-visible {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.ai-assistant-markdown .ai-markdown-local-path {
+  cursor: pointer;
 }
 
 .ai-assistant-markdown [data-slot='separator'] {
   height: 0.5px;
   margin: 32px 0;
-  background: var(--dsw-alias-border-l2);
+  background: var(--ai-border-soft);
 }
 
 .ai-markdown-inline-code {
@@ -158,8 +163,8 @@
   align-items: center;
   padding: 0 5px;
   border-radius: 6px;
-  background: var(--dsw-alias-markdown-inline-code);
-  font: var(--dsw-font-markdown-code);
+  background: var(--ai-code-inline);
+  font: var(--ai-font-markdown-code);
 }
 
 .ai-assistant-markdown > *:first-child,
@@ -173,36 +178,36 @@
 }
 
 .ai-markdown-image-alt {
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--ai-text-muted);
   font-style: italic;
 }
 
 .ai-code-block {
   border-radius: 12px;
-  background: var(--dsw-alias-markdown-code-block);
-  color: var(--dsw-alias-label-primary);
+  background: var(--ai-code-block);
+  color: var(--ai-text);
 }
 
 .ai-code-block-banner {
-  background: var(--dsw-alias-markdown-code-block-banner);
-  font: 11px/18px var(--dsw-font-family);
+  background: var(--ai-code-banner);
+  font: 11px/18px var(--ai-font-family);
 }
 
 .ai-code-block-language {
-  color: var(--dsw-alias-label-secondary);
-  font-family: var(--ds-font-family-code);
+  color: var(--ai-text-secondary);
+  font-family: var(--ai-font-family-code);
 }
 
 .ai-code-block-copy {
   border: 0;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--ai-text-secondary);
   font: inherit;
 }
 
 .ai-code-block-pre {
-  background: var(--dsw-alias-markdown-code-block);
-  font: var(--dsw-font-markdown-code-block);
+  background: var(--ai-code-block);
+  font: var(--ai-font-markdown-code-block);
 }
 
 .ai-code-block-pre code {
@@ -223,7 +228,7 @@
   min-width: 100px;
   max-width: min(30vw, 320px);
   padding: 10px 16px;
-  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+  border-bottom: 0.5px solid var(--ai-border-soft);
   font-size: 13px;
   line-height: 22px;
   text-align: start;
@@ -231,18 +236,18 @@
 }
 
 .ai-markdown-table-scroll th {
-  border-bottom-color: var(--dsw-alias-border-l3);
+  border-bottom-color: var(--ai-border);
   font-weight: 500;
 }
 
 .ai-assistant-stopped {
   border-radius: 6px;
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-tertiary);
+  background: var(--ai-action-hover);
+  color: var(--ai-text-muted);
   font-size: 11px;
   line-height: 18px;
 }
 
 .ai-assistant-stopped[data-state='failed'] {
-  color: var(--dsw-alias-state-error-primary);
+  color: var(--ai-error);
 }

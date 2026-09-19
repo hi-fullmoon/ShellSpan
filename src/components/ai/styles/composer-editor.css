@@ -1,5 +1,5 @@
 .ai-composer-placeholder {
-  color: var(--dsw-alias-label-caption);
+  color: var(--ai-text-caption);
   font-size: 14px;
   line-height: 24px;
 }
@@ -7,8 +7,8 @@
 .ai-composer-command {
   padding: 1px 5px;
   border-radius: 5px;
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
-  color: var(--dsw-alias-state-business-primary);
+  background: color-mix(in srgb, var(--ai-accent) 12%, transparent);
+  color: var(--ai-accent);
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
