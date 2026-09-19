@@ -484,7 +484,7 @@
     }
 
     #[test]
-    fn rooted_local_operator_commands_are_forced_to_scoped_direct_execution() {
+    fn rooted_local_operator_commands_preserve_the_selected_terminal_surface() {
         let target = target_native(&local_target()).unwrap();
         let mut operator = request(
             "run_terminal_command",
@@ -496,16 +496,16 @@
         operator.permission_mode = AgentSessionPermissionMode::Operator;
         operator.execution_surface = AgentExecutionSurface::BoundTerminal;
 
-        assert!(operator_command_requires_scoped_direct(&operator, &target));
+        let direct_required = terminal_command_requires_direct_lifecycle(&operator).unwrap();
+        assert!(!direct_required);
 
         let (name, arguments) = normalize_arguments(
             &operator,
             &target,
             Some(TerminalVisibleCommandRoute::TerminalExecute),
-            true,
+            direct_required,
         )
         .unwrap();
-        assert_eq!(name, "exec_command");
-        assert_eq!(arguments["cwd"], "/workspace");
-        assert_eq!(arguments["channel"], "direct");
+        assert_eq!(name, "terminal_execute");
+        assert_eq!(arguments["command"], "printf updated > result.txt");
     }

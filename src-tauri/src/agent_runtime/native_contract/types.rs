@@ -414,6 +414,15 @@ pub struct WriteFileArgumentsNative {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditFileArgumentsNative {
+    pub path: String,
+    pub old_string: String,
+    pub new_string: String,
+    pub precondition: WriteFileDigestPreconditionNative,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PatchPreconditionNative {
     pub path: String,
     pub sha256: String,

@@ -2,7 +2,7 @@ use serde::de::DeserializeOwned;
 
 use super::types::{
     AgentEffectKindNative, AgentObservedEffectNative, AgentRequestNative, AgentTargetKindNative,
-    AgentToolCallNative, AgentToolTargetNative, ApplyPatchArgumentsNative,
+    AgentToolCallNative, AgentToolTargetNative, ApplyPatchArgumentsNative, EditFileArgumentsNative,
     ExecCommandArgumentsNative, KillProcessArgumentsNative, ListDirectoryArgumentsNative,
     ProbeHttpArgumentsNative, ReadFileArgumentsNative, ReadTerminalArgumentsNative,
     SearchTextArgumentsNative, TerminalExecuteArgumentsNative, TerminalInteractiveInputKindNative,
@@ -46,7 +46,7 @@ const EXEC_EFFECTS: &[AgentEffectKindNative] = &[
     AgentEffectKindNative::ExternalSideEffect,
 ];
 
-pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 15] = [
+pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 16] = [
     AgentToolDescriptorNative {
         name: "exec_command",
         target_kinds: LOCAL_REMOTE,
@@ -121,6 +121,12 @@ pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 15] = [
     },
     AgentToolDescriptorNative {
         name: "write_file",
+        target_kinds: LOCAL_REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: STATE_CHANGE,
+    },
+    AgentToolDescriptorNative {
+        name: "edit_file",
         target_kinds: LOCAL_REMOTE,
         effect_mode: AgentToolEffectModeNative::Fixed,
         allowed_effects: STATE_CHANGE,
@@ -635,14 +641,27 @@ pub fn validate_tool_arguments_native(
                 }
             }
         }
+        "edit_file" => {
+            let value = decode_arguments::<EditFileArgumentsNative>(arguments)?;
+            validate_path(&value.path)?;
+            validate_sha256(&value.precondition.sha256)?;
+            if value.old_string.is_empty()
+                || value.old_string == value.new_string
+                || !write_file_content_is_valid(&value.old_string)
+                || !write_file_content_is_valid(&value.new_string)
+            {
+                return Err("edit_file requires distinct UTF-8 strings up to 32 KiB and a nonempty oldString".into());
+            }
+        }
         "apply_patch" => {
             let value = decode_arguments::<ApplyPatchArgumentsNative>(arguments)?;
             if value.patch.is_empty()
                 || value.patch.len() > 1_048_576
-                || value.preconditions.is_empty()
-                || value.preconditions.len() > 128
+                || value.preconditions.len() != 1
             {
-                return Err("apply_patch requires a patch and preconditions".into());
+                return Err(
+                    "apply_patch requires a patch and exactly one file precondition".into(),
+                );
             }
             for precondition in value.preconditions {
                 validate_path(&precondition.path)?;

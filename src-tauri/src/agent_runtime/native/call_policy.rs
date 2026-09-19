@@ -1,9 +1,9 @@
 //! Policy inspection utilities.  Durable Agent state is owned by SessionStore.
 use crate::agent_runtime::{
     AgentEffectKindNative, AgentNetworkDestinationNative, AgentObservedEffectNative,
-    AgentToolCallNative, ApplyPatchArgumentsNative, ListDirectoryArgumentsNative,
-    ProbeHttpArgumentsNative, ReadFileArgumentsNative, SearchTextArgumentsNative,
-    TransferFileArgumentsNative, WriteFileArgumentsNative,
+    AgentToolCallNative, ApplyPatchArgumentsNative, EditFileArgumentsNative,
+    ListDirectoryArgumentsNative, ProbeHttpArgumentsNative, ReadFileArgumentsNative,
+    SearchTextArgumentsNative, TransferFileArgumentsNative, WriteFileArgumentsNative,
 };
 use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +42,11 @@ pub(crate) fn inspect_call_policy_scope_native(
         "write_file" => vec![
             serde_json::from_value::<WriteFileArgumentsNative>(call.arguments.clone())
                 .map_err(|_| "write_file policy arguments were invalid".to_string())?
+                .path,
+        ],
+        "edit_file" => vec![
+            serde_json::from_value::<EditFileArgumentsNative>(call.arguments.clone())
+                .map_err(|_| "edit_file policy arguments were invalid".to_string())?
                 .path,
         ],
         "apply_patch" => {

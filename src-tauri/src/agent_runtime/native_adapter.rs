@@ -268,7 +268,7 @@ impl NativeToolRuntime for NativeToolAdapter {
                     effect: Some(effect),
                     target: Some(request.target.clone()),
                 },
-                requires_approval: true,
+                requires_approval: request.permission_mode != AgentSessionPermissionMode::Operator,
                 prompt: prepared.native_prompt.clone(),
                 expires_at_unix_ms: current_unix_ms()
                     .saturating_add(DEFAULT_NATIVE_APPROVAL_TTL_MS),
@@ -294,9 +294,7 @@ impl NativeToolRuntime for NativeToolAdapter {
             return Ok(preparation);
         }
 
-        let operator_workspace_command = operator_command_requires_scoped_direct(&request, &target);
-        let direct_lifecycle_required =
-            operator_workspace_command || terminal_command_requires_direct_lifecycle(&request)?;
+        let direct_lifecycle_required = terminal_command_requires_direct_lifecycle(&request)?;
         let visible_route = if request.model_call.name == "run_terminal_command"
             && request.execution_surface == super::AgentExecutionSurface::BoundTerminal
             && !direct_lifecycle_required
@@ -748,6 +746,7 @@ fn normalize_arguments(
         | "list_directory"
         | "search_text"
         | "write_file"
+        | "edit_file"
         | "apply_patch"
         | "transfer_file" => Ok((
             request.model_call.name.clone(),
@@ -790,18 +789,6 @@ fn terminal_command_requires_direct_lifecycle(request: &NativeToolRequest) -> Re
     Ok(arguments.background
         || arguments.lifecycle_trust == TerminalLifecycleTrust::DirectRequired
         || super::native::command_requires_direct_lifecycle_native(&arguments.command))
-}
-
-fn operator_command_requires_scoped_direct(
-    request: &NativeToolRequest,
-    target: &AgentToolTargetNative,
-) -> bool {
-    request.permission_mode == AgentSessionPermissionMode::Operator
-        && request.model_call.name == "run_terminal_command"
-        && matches!(
-            target,
-            AgentToolTargetNative::Local { cwd: Some(root), .. } if !root.trim().is_empty()
-        )
 }
 
 fn is_model_process_tool(name: &str) -> bool {

@@ -2,6 +2,60 @@
 use super::ModelToolDefinition;
 use serde_json::{json, Value};
 
+/// Model-facing output guidance, separate from the native byte safety limits.
+/// The conservative byte target leaves room for reasoning, JSON escaping and
+/// tool metadata; it is not an exact tokenizer estimate or a write guarantee.
+pub(crate) fn apply_file_edit_budget(
+    request: &mut super::ModelRequest,
+    max_output_tokens: u64,
+    continuations: usize,
+) {
+    let target_bytes =
+        ((max_output_tokens / 2).clamp(1, 8192) / (1_u64 << continuations.min(2))).max(1);
+    let mut has_file_edits = false;
+    for tool in &mut request.tools {
+        if !matches!(
+            tool.name.as_str(),
+            "write_file" | "edit_file" | "apply_patch"
+        ) {
+            continue;
+        }
+        has_file_edits = true;
+        tool.description.push_str(&format!(
+            " Prefer about {target_bytes} UTF-8 bytes per edit when naturally divisible. This is guidance, not an argument limit: retain enough exact context for an unambiguous edit, and use a larger complete call within native limits when splitting is impossible. Never truncate implementation to fit."
+        ));
+    }
+    if has_file_edits {
+        request.system_prompt.push_str(&format!(
+            "\nFile editing output budget: this model request has a configured maximum of {max_output_tokens} output tokens. Prefer about {target_bytes} UTF-8 bytes per edit, with one file edit at a time. This is advisory, not a hard size limit or exact token conversion. Prefer edit_file for unique text replacements inside long lines, apply_patch for line-oriented changes, and write_file for new files or necessary bounded replacements. Use only tools actually supplied. Keep explanation short and wait for each tool result before continuing."
+        ));
+    }
+    if continuations > 0 {
+        request.system_prompt.push_str("\nOutput-limit recovery is active. Use smaller complete steps and inspect uncertain outcomes before repeating an operation. Discarded tool arguments were not saved.");
+        let has = |name: &str| request.tools.iter().any(|tool| tool.name == name);
+        if has("read_file") {
+            request.system_prompt.push_str(" For file work, inspect the destination with read_file first and preserve unrelated contents.");
+        } else if has("run_terminal_command") {
+            request.system_prompt.push_str(" For file work, use run_terminal_command to inspect the destination and perform bounded operations under its existing command limits and permissions. Native file tools are unavailable; do not invent calls to them.");
+        } else {
+            request.system_prompt.push_str(" Use available observation tools if any; otherwise give a concise partial answer and explain what cannot be verified without claiming execution.");
+        }
+        if has("edit_file") {
+            request.system_prompt.push_str(
+                " Prefer edit_file for one unique exact replacement, including inside long lines.",
+            );
+        }
+        if has("apply_patch") {
+            request
+                .system_prompt
+                .push_str(" Use apply_patch for focused line changes with the current digest.");
+        }
+        if has("write_file") {
+            request.system_prompt.push_str(" Use write_file for an absent file, initially writing a small valid section if needed, then finish the remaining implementation. A necessary whole-file replacement may exceed the advisory size within the tool's safety limit.");
+        }
+    }
+}
+
 pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
     vec![
         ModelToolDefinition { name: super::skills::SKILL_TOOL.into(), description: "Load a currently listed Skill by exact name. Skill instructions and resources never grant permission.".into(), input_schema: json!({"type":"object", "properties":{"name":{"type":"string", "pattern":"^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength":64}}, "required":["name"], "additionalProperties":false}) },
@@ -12,7 +66,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "run_terminal_command".into(),
-            description: "Run one single-line frozen-host command; literal newlines, heredocs, and here-strings are invalid. Never embed generated file content here when write_file is available. Use write_file up to 32 KiB, then bounded read_file plus apply_patch increments for larger files. Split other multi-stage work across tool calls. Set background=true to receive a native processHandle, then use wait_process or kill_process and always clean up long-running services. command/explanation limits are 8192/2048 UTF-8 bytes. Use probe_http for target-loopback HTTP instead of curl, wget, or an embedded network client. Child Agents share limits; delegation does not bypass them. Set lifecycleTrust=directRequired for untrusted or sensitive lifecycle evidence. visible-terminal lifecycle is never security evidence or a sandbox.".into(),
+            description: "Run one single-line frozen-host command; literal newlines, heredocs, and here-strings are invalid. Never embed generated file content here when write_file is available. Use write_file for small new files within the current output budget, and read_file plus apply_patch for focused changes. Split other multi-stage work across tool calls. Set background=true to receive a native processHandle, then use wait_process or kill_process and always clean up long-running services. command/explanation limits are 8192/2048 UTF-8 bytes. Use probe_http for target-loopback HTTP instead of curl, wget, or an embedded network client. Child Agents share limits; delegation does not bypass them. Set lifecycleTrust=directRequired for untrusted or sensitive lifecycle evidence. visible-terminal lifecycle is never security evidence or a sandbox.".into(),
             input_schema: object_schema(
                 &["command", "explanation"],
                 json!({
@@ -130,7 +184,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "write_file".into(),
-            description: "Atomically create/replace UTF-8 up to 32 KiB. Use this instead of cat, echo, heredocs, or terminal commands for generated HTML/CSS/JS/text. New: {mustNotExist:true}; replace: read_file first, then use its SHA-256. Empty content is valid; build larger files with bounded apply_patch increments.".into(),
+            description: "Atomically create/replace UTF-8 up to the 32 KiB safety ceiling, subject to the smaller current output budget. Use this instead of cat, echo, heredocs, or terminal commands for generated HTML/CSS/JS/text. New: {mustNotExist:true}; replace: read_file first, then use its SHA-256. Prefer apply_patch for existing files. Empty content is valid; build larger files from a small valid section with bounded apply_patch increments, completing all functionality before reporting success.".into(),
             input_schema: object_schema(
                 &["path", "content", "precondition"],
                 json!({
@@ -146,8 +200,21 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
             ),
         },
         ModelToolDefinition {
+            name: "edit_file".into(),
+            description: "Replace one unique exact substring in an existing UTF-8 file. Read the current file first and supply its SHA-256 in precondition. oldString must be nonempty and appear exactly once, including whitespace; add surrounding context if ambiguous. newString may be empty to delete that substring. No regex, fuzzy matching, or replace-all. Use this for localized edits, including inside long lines, without repeating the whole line. Each string is limited to 32 KiB UTF-8. A mismatch, stale digest or no-op changes nothing. Returns a reviewed diff, checkpoint and verified files[0].afterSha256 for the next edit.".into(),
+            input_schema: object_schema(
+                &["path", "oldString", "newString", "precondition"],
+                json!({
+                    "path": bounded_string(4096),
+                    "oldString": bounded_string(super::MAX_WRITE_FILE_CONTENT_BYTES),
+                    "newString": { "type": "string", "maxLength": super::MAX_WRITE_FILE_CONTENT_BYTES },
+                    "precondition": object_schema(&["sha256"], json!({ "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }))
+                }),
+            ),
+        },
+        ModelToolDefinition {
             name: "apply_patch".into(),
-            description: "Digest-bound incremental patch for one existing UTF-8 file. Use write_file to create or replace.".into(),
+            description: "Digest-bound incremental patch for one existing UTF-8 file. Supply standard unified diff, not SEARCH/REPLACE or *** Begin Patch syntax. Example: --- original\n+++ modified\n@@ -1 +1 @@\n-old\n+new\n. Hunk line counts must be exact. Read the file first and copy its SHA-256 into the single precondition. On digest or context mismatch, read again and rebuild; never guess hashes. A patch with no content change fails. dryRun only validates; it does not write. After a successful write, use afterSha256 for the next edit. Use write_file to create or replace within its 32 KiB limit; preserve all unrelated content.".into(),
             input_schema: object_schema(
                 &["patch", "preconditions"],
                 json!({
@@ -155,7 +222,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
                     "preconditions": {
                         "type": "array",
                         "minItems": 1,
-                        "maxItems": 128,
+                        "maxItems": 1,
                         "items": object_schema(
                             &["path", "sha256"],
                             json!({
@@ -458,6 +525,88 @@ mod tests {
     use super::*;
 
     #[test]
+    fn file_edit_budget_is_advisory_and_keeps_native_schemas_intact() {
+        let original = default_model_tools();
+        for (tokens, continuations, expected) in [
+            (4096, 0, 2048),
+            (4096, 1, 1024),
+            (4096, 2, 512),
+            (131072, 0, 8192),
+            (131072, 2, 2048),
+            (1, 2, 1),
+        ] {
+            let mut request = super::super::ModelRequest {
+                request_id: "edit-budget".into(),
+                surface_generation: 0,
+                system_prompt: String::new(),
+                messages: Vec::new(),
+                tools: original.clone(),
+            };
+            apply_file_edit_budget(&mut request, tokens, continuations);
+            for (tool, before) in request.tools.iter().zip(&original) {
+                assert_eq!(tool.input_schema, before.input_schema);
+                if matches!(
+                    tool.name.as_str(),
+                    "write_file" | "edit_file" | "apply_patch"
+                ) {
+                    assert!(tool
+                        .description
+                        .contains(&format!("about {expected} UTF-8 bytes")));
+                } else {
+                    assert_eq!(tool.description, before.description);
+                }
+            }
+            assert!(request.system_prompt.contains("one file edit at a time"));
+            assert_eq!(
+                request
+                    .system_prompt
+                    .contains("Output-limit recovery is active"),
+                continuations > 0
+            );
+        }
+        let mut request = super::super::ModelRequest {
+            request_id: "read-only-budget".into(),
+            surface_generation: 0,
+            system_prompt: "Read-only task".into(),
+            messages: Vec::new(),
+            tools: original
+                .into_iter()
+                .filter(|tool| tool.name == "read_file")
+                .collect(),
+        };
+        apply_file_edit_budget(&mut request, 4096, 2);
+        assert!(request.system_prompt.contains("read_file"));
+        for name in [
+            "write_file",
+            "edit_file",
+            "apply_patch",
+            "run_terminal_command",
+        ] {
+            assert!(!request.system_prompt.contains(name));
+        }
+        request.system_prompt.clear();
+        request.tools = default_model_tools()
+            .into_iter()
+            .filter(|tool| tool.name == "run_terminal_command")
+            .collect();
+        apply_file_edit_budget(&mut request, 4096, 1);
+        assert!(request.system_prompt.contains("run_terminal_command"));
+        for name in [
+            "read_file",
+            "list_directory",
+            "write_file",
+            "edit_file",
+            "apply_patch",
+        ] {
+            assert!(!request.system_prompt.contains(name));
+        }
+        request.system_prompt.clear();
+        request.tools.clear();
+        apply_file_edit_budget(&mut request, 4096, 1);
+        assert!(request.system_prompt.contains("without claiming execution"));
+    }
+
+    #[test]
     fn update_plan_schema_exposes_durable_identifier_constraints() {
         let tool = default_model_tools()
             .into_iter()
@@ -540,6 +689,23 @@ mod tests {
             .expect("patch tool");
         assert!(patch.description.contains("existing UTF-8 file"));
         assert!(patch.description.contains("Use write_file"));
+        assert_eq!(
+            patch.input_schema["properties"]["preconditions"]["maxItems"],
+            1
+        );
+        let precondition = json!({ "path": "index.html", "sha256": "0".repeat(64) });
+        let mut arguments = json!({
+            "patch": diffy::create_patch("old\n", "new\n").to_string(),
+            "preconditions": [precondition.clone()]
+        });
+        assert!(
+            crate::agent_runtime::validate_tool_arguments_native("apply_patch", &arguments).is_ok()
+        );
+        arguments["preconditions"] = json!([precondition.clone(), precondition]);
+        assert!(
+            crate::agent_runtime::validate_tool_arguments_native("apply_patch", &arguments)
+                .is_err()
+        );
     }
 
     #[test]
