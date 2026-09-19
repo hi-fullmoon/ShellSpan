@@ -40,3 +40,30 @@ Run `pnpm check:llm:catalog` and `cargo test --manifest-path src-tauri/Cargo.tom
 Custom route `models` and `modelOverrides` remain full `ModelDefinition` values. Unlike trusted built-in entries, they must explicitly carry `compat`; this keeps persisted user declarations self-contained and prevents an absent field from enabling a capability. The provider editor materializes every model before saving: an exact built-in ID inherits its catalog definition, while an uncatalogued ID starts with a 262,144-token context window, 32,768-token output cap, text support, unknown tool support, and no image or reasoning support. Discovered capacities and user edits override those fallbacks in the persisted definition.
 
 The `openrouter` profile intentionally has no static models. Its catalog changes independently of ShellSpan releases, so the provider editor reads `GET /api/v1/models`, excludes entries carrying an `expiration_date`, retains each exact model slug, and adopts OpenRouter's capacities, tool parameters, reasoning-effort support, and input modalities into a complete persisted definition.
+
+## Chat Completions reasoning replay
+
+Returned `reasoning_details` are preserved even when the route does not request
+MiniMax's `reasoning_split` extension. MiniMax cumulative streams update existing
+details by index, ID, or positional identity; incremental streams preserve all
+fragments in order, including repeated text. Empty or null optional fields are
+valid and terminal placeholders do not erase earlier cumulative content.
+
+Replay envelope v1 stores new Chat Completions reasoning details in response
+metadata as `reasoningDetails`, independently of display text. This preserves
+signed or encrypted blocks with no visible reasoning through tool calls and
+session reloads. Readers still accept the previous block-level representation.
+Same-domain history emits the preserved details once; cross-domain history
+discards provider-private state. Older runtimes that do not recognize the new
+response field cannot resume these new records; no stored history is rewritten.
+
+Text, summary, signature, and encrypted data use the existing 8 MiB serialized
+metadata budget, not the 64 KiB identifier limit. Optional strings may be absent,
+null, or empty. Known text/summary prose may contain literal SSE `data:` syntax or
+data URLs; opaque fields still reject embedded attachments, and credential-like
+or unknown fields remain rejected. Invalid types report their indexed field;
+size failures use `REPLAY_METADATA_TOO_LARGE` with byte counts and limits, never
+the payload. Protocol failures remain non-retryable and never replay tools.
+
+References: [MiniMax streaming and tool-use contract](https://platform.minimax.io/docs/api-reference/text-openai-api)
+and [OpenRouter reasoning details](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
