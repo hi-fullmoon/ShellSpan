@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { terminalRegistry, type TerminalOutputFilter } from '@/components/terminal/registry/terminal-registry';
+import { invokeGetTerminalBrokerSnapshot } from '@/lib/ipc/tauri';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
 import type { TerminalSession } from '@/stores/terminalStore';
 
@@ -13,9 +14,45 @@ const session: TerminalSession = {
   status: 'connected',
 };
 
+vi.mock('@/lib/ipc/tauri', () => ({
+  invokeGetTerminalBrokerSnapshot: vi.fn().mockResolvedValue({ session: null }),
+}));
+
 afterEach(() => vi.restoreAllMocks());
 
 describe('readTerminalCurrentDirectory', () => {
+  it('uses the integrated prompt directory without injecting input into local PowerShell', async () => {
+    const controller = {
+      hasPendingUserInput: vi.fn(() => false),
+      hasUnverifiedUserSubmission: vi.fn(() => false),
+      whenOutputReady: vi.fn(async () => undefined),
+      writeInput: vi.fn(),
+      subscribeOutputFilter: vi.fn(),
+    };
+    vi.spyOn(terminalRegistry, 'get').mockReturnValue(controller as never);
+    vi.mocked(invokeGetTerminalBrokerSnapshot).mockResolvedValueOnce({
+      session: { promptReady: true, currentDirectory: 'C:\\Users\\tester' },
+    } as Awaited<ReturnType<typeof invokeGetTerminalBrokerSnapshot>>);
+
+    await expect(readTerminalCurrentDirectory({ ...session, host: 'local', port: 0 }))
+      .resolves.toBe('C:\\Users\\tester');
+    expect(controller.writeInput).not.toHaveBeenCalled();
+    expect(controller.subscribeOutputFilter).not.toHaveBeenCalled();
+  });
+
+  it('does not inject a local probe while shell integration is unavailable', async () => {
+    const controller = {
+      hasPendingUserInput: vi.fn(() => false),
+      hasUnverifiedUserSubmission: vi.fn(() => false),
+      whenOutputReady: vi.fn(async () => undefined),
+      writeInput: vi.fn(),
+    };
+    vi.spyOn(terminalRegistry, 'get').mockReturnValue(controller as never);
+
+    await expect(readTerminalCurrentDirectory({ ...session, host: 'local', port: 0 }))
+      .resolves.toBeNull();
+    expect(controller.writeInput).not.toHaveBeenCalled();
+  });
   it('reads a UTF-8 directory from the interactive shell and hides the probe output', async () => {
     let filter!: TerminalOutputFilter;
     let visible = '';

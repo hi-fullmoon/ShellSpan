@@ -645,6 +645,7 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
   $script:Pipe.WaitForConnection()
   $script:Utf8 = [System.Text.UTF8Encoding]::new($false,$true)
   $script:CommandActive = $false
+  $script:InstallHistoryOnPrompt = $false
   function Send-ShellSpanControl {{
     param([string[]]$Fields)
     foreach ($Field in $Fields) {{
@@ -664,6 +665,13 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
     }}
     Send-ShellSpanControl @('P',(Get-Location).ProviderPath)
     $Rendered = & $script:OriginalPrompt
+    if ($script:InstallHistoryOnPrompt) {{
+      $script:InstallHistoryOnPrompt = $false
+      Set-PSReadLineOption -AddToHistoryHandler {{
+        param($Line)
+        & $__shellspanModule {{ param($CommandLine) Start-ShellSpanCommand $CommandLine }} $Line
+      }}
+    }}
     Send-ShellSpanControl @('Q')
     return $Rendered
   }}
@@ -676,6 +684,23 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
     }}
     return $true
   }}
+  function Invoke-ShellSpanFirstEnter {{
+    param($Key, $Arg)
+    $Line = $null
+    $Cursor = 0
+    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$Line,[ref]$Cursor)
+    if (-not [string]::IsNullOrWhiteSpace($Line)) {{
+      $script:CommandActive = $true
+      Send-ShellSpanControl @('S',$Line,(Get-Location).ProviderPath)
+    }}
+    Set-PSReadLineKeyHandler -Chord Enter -Function $script:OriginalEnterFunction
+    $script:InstallHistoryOnPrompt = $true
+    if ($script:OriginalEnterFunction -eq 'ValidateAndAcceptLine') {{
+      [Microsoft.PowerShell.PSConsoleReadLine]::ValidateAndAcceptLine($Key,$Arg)
+    }} else {{
+      [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine($Key,$Arg)
+    }}
+  }}
   Set-Item -Path Function:\global:prompt -Value {{
     $PreviousSuccess = $?
     & $__shellspanModule {{ param($Success) Invoke-ShellSpanPrompt $Success }} $PreviousSuccess
@@ -683,9 +708,24 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
   if (Get-Module -ListAvailable -Name PSReadLine) {{
     Import-Module PSReadLine
     $script:OriginalHistoryHandler = (Get-PSReadLineOption).AddToHistoryHandler
-    Set-PSReadLineOption -AddToHistoryHandler {{
-      param($Line)
-      & $__shellspanModule {{ param($CommandLine) Start-ShellSpanCommand $CommandLine }} $Line
+    if ($ShellKind -eq 'windowsPowerShell') {{
+      # PSReadLine 2.0 replays saved history through AddToHistoryHandler on first ReadLine.
+      # Capture that first Enter directly, then install the handler at the next prompt.
+      $EnterHandler = Get-PSReadLineKeyHandler | Where-Object {{ $_.Key -eq 'Enter' }} | Select-Object -First 1
+      if ($null -eq $EnterHandler -or $EnterHandler.Function -notin @('AcceptLine','ValidateAndAcceptLine')) {{
+        Send-ShellSpanControl @('X','UnsupportedEnterHandler')
+        return
+      }}
+      $script:OriginalEnterFunction = $EnterHandler.Function
+      Set-PSReadLineKeyHandler -Chord Enter -ScriptBlock {{
+        param($Key,$Arg)
+        & $__shellspanModule {{ param($PressedKey,$Argument) Invoke-ShellSpanFirstEnter $PressedKey $Argument }} $Key $Arg
+      }}
+    }} else {{
+      Set-PSReadLineOption -AddToHistoryHandler {{
+        param($Line)
+        & $__shellspanModule {{ param($CommandLine) Start-ShellSpanCommand $CommandLine }} $Line
+      }}
     }}
   }} else {{
     Send-ShellSpanControl @('X','PSReadLineUnavailable')

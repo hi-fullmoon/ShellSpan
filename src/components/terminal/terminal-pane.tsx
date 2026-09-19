@@ -132,7 +132,7 @@ const AgentTerminalLeaseBar: React.FC<{
           type="button"
           variant="outline"
           size="xs"
-          className="agent-terminal-takeover shrink-0 gap-1"
+          className="agent-terminal-takeover shrink-0"
           disabled={lease.takeoverRequested}
           aria-busy={lease.takeoverRequested || undefined}
           aria-label={t(lease.takeoverRequested
@@ -157,7 +157,10 @@ const AgentTerminalLeaseBar: React.FC<{
 // to the clipboard on its way to the final selection.
 export const COPY_ON_SELECT_DEBOUNCE_MS = 250;
 
-const ReconnectingIndicator: React.FC<{ label: string }> = ({ label }) => (
+const TerminalPromptIndicator: React.FC<{
+  label: string;
+  animatedDots?: boolean;
+}> = ({ label, animatedDots = false }) => (
   <div
     className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
     role="status"
@@ -166,7 +169,7 @@ const ReconnectingIndicator: React.FC<{ label: string }> = ({ label }) => (
     <span className="rounded-sm bg-app-surface/90 px-3 py-1.5 font-mono text-sm text-app-text-soft shadow-sm">
       <span aria-hidden="true">
         {label}
-        {[0, 1, 2].map((index) => (
+        {animatedDots && [0, 1, 2].map((index) => (
           <span
             key={index}
             className="inline-block animate-pulse"
@@ -519,8 +522,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           </div>
         )}
         {activeSession?.reconnecting && (
-          <ReconnectingIndicator label={activeSession.status === 'connecting' && activeSession.statusMessage
-            ? activeSession.statusMessage : t('terminal.notice.reconnectingLabel')} />
+          <TerminalPromptIndicator
+            label={activeSession.status === 'connecting' && activeSession.statusMessage
+              ? activeSession.statusMessage : t('terminal.notice.reconnectingLabel')}
+            animatedDots
+          />
+        )}
+        {activeLease?.inputBlocked && !activeSession?.reconnecting && (
+          <TerminalPromptIndicator
+            label={t('terminal.agentLease.inputBlockedPrompt')}
+          />
         )}
         <div ref={paneRef} className="h-full w-full p-0" />
       </div>

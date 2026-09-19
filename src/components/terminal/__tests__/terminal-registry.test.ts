@@ -668,7 +668,7 @@ describe('terminalRegistry', () => {
     });
   });
 
-  it('announces the first blocked Agent-owned input and honors suppression counts', async () => {
+  it('reports the first blocked Agent-owned input without writing into terminal history', async () => {
     const { invokeWriteSession } = await import('@/lib/ipc/tauri');
     const controller = createController('s1');
     controller.attach(document.createElement('div'));
@@ -683,11 +683,14 @@ describe('terminalRegistry', () => {
     expect(invokeWriteSession).not.toHaveBeenCalled();
     expect(firstBlocked).toHaveBeenCalledOnce();
     expect(secondBlocked).toHaveBeenCalledOnce();
-    expect(writeln).toHaveBeenCalledOnce();
+    expect(writeln).not.toHaveBeenCalled();
 
     releaseFirst();
     await expect(controller.writeUserInput('still blocked')).resolves.toBe(false);
     expect(invokeWriteSession).not.toHaveBeenCalled();
+    expect(firstBlocked).toHaveBeenCalledOnce();
+    expect(secondBlocked).toHaveBeenCalledOnce();
+    expect(writeln).not.toHaveBeenCalled();
 
     releaseSecond();
     await expect(controller.writeUserInput('accepted')).resolves.toBe(true);

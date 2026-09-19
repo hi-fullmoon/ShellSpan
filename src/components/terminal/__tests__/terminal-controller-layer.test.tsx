@@ -222,6 +222,48 @@ describe('TerminalControllerLayer', () => {
     });
   });
 
+  it('recovers a prompt event missed while the integration listener was attaching', async () => {
+    const snapshot = (revision: number, promptReady: boolean) => ({
+      terminalExecuteRollout: { enabled: true },
+      remoteBoundTerminalRollout: { enabled: true },
+      session: {
+        terminalSessionId: 'terminal-1',
+        terminalGeneration: 1,
+        transportKind: 'windowsConPty',
+        integrationState: 'ready',
+        integrationStateRevision: revision,
+        promptReady,
+      },
+    }) as Awaited<ReturnType<typeof invokeGetTerminalBrokerSnapshot>>;
+    vi.mocked(invokeGetTerminalBrokerSnapshot)
+      .mockResolvedValueOnce(snapshot(2, false))
+      .mockResolvedValue(snapshot(3, true));
+    let finishSubscription: (() => void) | undefined;
+    vi.mocked(listenToTerminalIntegrationState).mockImplementation(() => new Promise((resolve) => {
+      finishSubscription = () => resolve(() => {});
+    }));
+
+    render(<TerminalControllerLayer />);
+    act(() => {
+      useTerminalStore.getState().addSession({
+        sessionId: 's1',
+        terminalSessionId: 'terminal-1',
+        terminalGeneration: 1,
+        title: 'powershell',
+        host: 'local',
+        port: 0,
+        username: 'user',
+      });
+    });
+    await vi.waitFor(() => expect(useTerminalStore.getState().sessions[0]?.promptReady).toBe(false));
+    await act(async () => finishSubscription?.());
+    await vi.waitFor(() => expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      integrationState: 'ready',
+      integrationStateRevision: 3,
+      promptReady: true,
+    }));
+  });
+
   it('does not present dedicatedAgentPtyRequired as visible-command ready', async () => {
     vi.mocked(invokeGetTerminalBrokerSnapshot).mockResolvedValue({
       terminalExecuteRollout: { enabled: true },

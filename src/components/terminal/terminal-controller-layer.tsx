@@ -21,6 +21,36 @@ import type { AgentSessionEvent, AgentTerminalLeaseEvent } from '@/types/agent-s
 const logger = createLogger('agent-terminal-lease');
 export const TAKEOVER_CONFIRMATION_TIMEOUT_MS = 5_000;
 
+async function refreshTerminalIntegrationState(sessionId: string): Promise<void> {
+  try {
+    const snapshot = await invokeGetTerminalBrokerSnapshot(sessionId);
+    const integrated = snapshot.session;
+    if (!integrated) return;
+    const remoteRolloutMissing = integrated.transportKind === 'sshPty'
+      && !snapshot.remoteBoundTerminalRollout.enabled;
+    const executionRolloutMissing = !snapshot.terminalExecuteRollout.enabled
+      || remoteRolloutMissing;
+    useTerminalStore.getState().setIntegrationState({
+      sessionId,
+      terminalSessionId: integrated.terminalSessionId,
+      terminalGeneration: integrated.terminalGeneration,
+      integrationStateRevision: integrated.integrationStateRevision,
+      state: integrated.integrationState === 'ready' && executionRolloutMissing
+        ? 'unavailable'
+        : integrated.integrationState === 'degraded'
+          ? 'unavailable'
+          : integrated.integrationState,
+      promptReady: integrated.promptReady,
+      shell: integrated.integrationShell,
+      reason: integrated.integrationState === 'ready' && executionRolloutMissing
+        ? remoteRolloutMissing ? 'remoteBoundTerminalDisabled' : 'terminalExecuteDisabled'
+        : integrated.integrationReason,
+    });
+  } catch (error) {
+    logger.warn(`Failed to read terminal integration state ${sessionId}`, error);
+  }
+}
+
 export interface AgentTerminalLeaseDisplayFilter extends TerminalOutputFilter {
   readonly operationId: string;
 }
@@ -571,32 +601,7 @@ export const TerminalControllerLayer: React.FC = () => {
           controller.writeDisconnectedHint();
         }
         if (session.terminalSessionId) {
-          void invokeGetTerminalBrokerSnapshot(session.sessionId).then((snapshot) => {
-            const integrated = snapshot.session;
-            if (!integrated) return;
-            const remoteRolloutMissing = integrated.transportKind === 'sshPty'
-              && !snapshot.remoteBoundTerminalRollout.enabled;
-            const executionRolloutMissing = !snapshot.terminalExecuteRollout.enabled
-              || remoteRolloutMissing;
-            setIntegrationState({
-              sessionId: session.sessionId,
-              terminalSessionId: integrated.terminalSessionId,
-              terminalGeneration: integrated.terminalGeneration,
-              integrationStateRevision: integrated.integrationStateRevision,
-              state: integrated.integrationState === 'ready' && executionRolloutMissing
-                ? 'unavailable'
-                : integrated.integrationState === 'degraded'
-                  ? 'unavailable'
-                  : integrated.integrationState,
-              promptReady: integrated.promptReady,
-              shell: integrated.integrationShell,
-              reason: integrated.integrationState === 'ready' && executionRolloutMissing
-                ? remoteRolloutMissing ? 'remoteBoundTerminalDisabled' : 'terminalExecuteDisabled'
-                : integrated.integrationReason,
-            });
-          }).catch((error) => {
-            logger.warn(`Failed to read terminal integration state ${session.sessionId}`, error);
-          });
+          void refreshTerminalIntegrationState(session.sessionId);
         }
       }
     }
@@ -635,7 +640,16 @@ export const TerminalControllerLayer: React.FC = () => {
       setIntegrationState(event.payload);
     }).then((disposeListener) => {
       if (disposed) disposeListener();
-      else unlistenIntegration = disposeListener;
+      else {
+        unlistenIntegration = disposeListener;
+        // A shell can reach its first prompt before the event listener is ready.
+        // Reconcile after subscription so that prompt boundary is not lost.
+        for (const session of useTerminalStore.getState().sessions) {
+          if (session.terminalSessionId && !session.pendingConnection) {
+            void refreshTerminalIntegrationState(session.sessionId);
+          }
+        }
+      }
     }).catch((error) => {
       logger.warn('Failed to subscribe to terminal integration state', error);
     });
