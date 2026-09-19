@@ -168,7 +168,7 @@ describe('AiConversationNodeList', () => {
     render(<AiConversationNodeList nodes={[error]} />);
 
     expect(within(screen.getByRole('alert')).getByText(
-      'The response reached the model output limit. Narrow the task or ask the Agent to continue in smaller parts.',
+      'Automatic continuation still reached the model output limit. The generated content was kept; narrow the task and try again.',
     )).toBeVisible();
     expect(screen.queryByText(/maxAttempts/)).not.toBeInTheDocument();
   });

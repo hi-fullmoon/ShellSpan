@@ -29,7 +29,6 @@ import {
   type AiConversationNode,
   type AiConversationNodeOf,
 } from '@/lib/ai/conversation-node';
-import { latestTurnReachedOutputLimit } from '@/lib/ai/turn-continuation';
 import {
   createAiWorkspaceNavigationState,
   sessionRouteKey,
@@ -131,7 +130,6 @@ export interface AiSessionController {
   readonly submit: (gesture: 'keyboard' | 'primary', accelerated?: boolean) => void;
   readonly stop: () => void;
   readonly continueBudgetedTurn: () => void;
-  readonly continueOutputLimitedTurn: () => void;
   readonly continueOnReconnectedTerminal: (() => void) | null;
   readonly historicalContinuationAvailable: boolean;
   readonly historicalContinuationBusy: boolean;
@@ -1569,14 +1567,6 @@ export function useAiSessionController({
         || !latestTurnReachedStepBudget(current.nodes)) return;
       dispatch({ type: 'submit.requested', gesture: 'primary', accelerated: false,
         content: t('ai.workspace.continueBudgetedTurnPrompt'), clientOperationId: operationId(),
-        now: Date.now(), hasProvider, canCreateSession: canStartAgent });
-    },
-    continueOutputLimitedTurn: () => {
-      const current = viewRef.current;
-      if (!canStartAgent || current?.status !== 'failed'
-        || !latestTurnReachedOutputLimit(current.nodes)) return;
-      dispatch({ type: 'submit.requested', gesture: 'primary', accelerated: false,
-        content: t('ai.workspace.continueOutputLimitedTurnPrompt'), clientOperationId: operationId(),
         now: Date.now(), hasProvider, canCreateSession: canStartAgent });
     },
     continueOnReconnectedTerminal: reconnectedSnapshot ? () => {
