@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -256,6 +256,9 @@ struct AgentSessionRecord {
     archived: bool,
     events: Vec<AgentSessionEvent>,
     inbox: AgentInbox,
+    driver_metrics: super::driver_metrics::DriverMetrics,
+    loop_progress: super::driver_progress::LoopProgress,
+    snapshot_cache: Arc<OnceLock<AgentSessionSnapshot>>,
 }
 
 impl AgentSessionRecord {
@@ -301,6 +304,9 @@ impl AgentSessionRecord {
             archived: false,
             events: Vec::with_capacity(events.len()),
             inbox: AgentInbox::default(),
+            driver_metrics: super::driver_metrics::DriverMetrics::default(),
+            loop_progress: super::driver_progress::LoopProgress::default(),
+            snapshot_cache: Arc::new(OnceLock::new()),
         };
         for event in events {
             validate_event_envelope(&record, &event)?;
@@ -321,7 +327,10 @@ impl AgentSessionRecord {
     }
 
     fn snapshot(&self) -> Result<AgentSessionSnapshot, String> {
-        Ok(AgentSessionSnapshot {
+        if let Some(snapshot) = self.snapshot_cache.get() {
+            return Ok(snapshot.clone());
+        }
+        let snapshot = AgentSessionSnapshot {
             header: self.header.clone(),
             status: self.status,
             ended: self.ended,
@@ -336,7 +345,9 @@ impl AgentSessionRecord {
             task: derive_task(&self.events),
             recovery: super::derive_recovery_checkpoint(&self.events),
             uncertain_native_effects: has_uncertain_tool_executions(&self.events),
-        })
+        };
+        let _ = self.snapshot_cache.set(snapshot.clone());
+        Ok(snapshot)
     }
 
     fn list_item(&self) -> AgentSessionListItem {
@@ -447,6 +458,7 @@ impl AgentSessionStore {
         }
         for record in archived.sessions.values_mut() {
             record.archived = true;
+            record.snapshot_cache = Arc::new(OnceLock::new());
         }
         for (session_id, record) in archived.sessions {
             if loaded.sessions.insert(session_id, record).is_some() {
@@ -1838,6 +1850,79 @@ impl AgentSessionStore {
             .clone())
     }
 
+    /// Synchronous read only: the callback must not call back into this store.
+    pub(super) fn read_events<T>(
+        &self,
+        session_id: &str,
+        read: impl FnOnce(&[AgentSessionEvent]) -> T,
+    ) -> Result<T, String> {
+        let inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?;
+        Ok(read(&record.events))
+    }
+
+    pub(super) fn read_turn_events<T>(
+        &self,
+        session_id: &str,
+        read: impl FnOnce(&[AgentSessionEvent]) -> T,
+    ) -> Result<T, String> {
+        let inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?;
+        Ok(read(&record.events[record.driver_metrics.turn_start..]))
+    }
+
+    pub(super) fn driver_metrics(
+        &self,
+        session_id: &str,
+    ) -> Result<super::driver_metrics::DriverMetrics, String> {
+        let inner = self.lock_configured()?;
+        Ok(inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?
+            .driver_metrics
+            .clone())
+    }
+
+    pub(super) fn loop_progress_counts(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<(usize, usize), String> {
+        let inner = self.lock_configured()?;
+        Ok(inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?
+            .loop_progress
+            .counts(turn_id))
+    }
+
+    pub(super) fn driver_control(
+        &self,
+        session_id: &str,
+    ) -> Result<(AgentSessionStatus, AgentInboxProjection), String> {
+        let inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?;
+        Ok((
+            record.status,
+            AgentInboxProjection {
+                paused_ids: record.inbox.paused_ids(),
+                next_turn: record.inbox.next_turn(),
+                next_step: record.inbox.next_step(),
+            },
+        ))
+    }
+
     pub(crate) fn snapshot(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
         validate_identifier(session_id, "sessionId")?;
         let inner = self.lock_configured()?;
@@ -1974,6 +2059,7 @@ impl AgentSessionStore {
                 .get_mut(session_id)
                 .expect("archived Session remains registered");
             record.archived = true;
+            record.snapshot_cache = Arc::new(OnceLock::new());
             record.snapshot()
         })();
         drop(inner);
@@ -2982,6 +3068,9 @@ fn validate_record_final(record: &AgentSessionRecord) -> Result<(), String> {
 }
 
 fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Result<(), String> {
+    record.snapshot_cache = Arc::new(OnceLock::new());
+    record.driver_metrics.observe(event);
+    record.loop_progress.observe(event);
     match &event.payload {
         AgentSessionEventPayload::SessionResumed {} => {
             record.status = AgentSessionStatus::Idle;

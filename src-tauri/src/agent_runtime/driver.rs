@@ -147,34 +147,33 @@ async fn drive_agent_inner(
                 ToolPipelineSettlement::Cancelled => return Ok(AgentDriverSettlement::Cancelled),
             }
         }
-        let all_events = sessions.all_events(&entry.session_id)?;
-        if let Some(reason) = subagent_budget_failure(entry, &all_events)? {
+        if let Some(reason) = sessions.read_events(&entry.session_id, |events| {
+            subagent_budget_failure(entry, events)
+        })?? {
             close_open_scope(sessions, entry, &reason)?;
             sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
             entry.set_phase(AgentLifecyclePhase::Stopping)?;
             return Ok(AgentDriverSettlement::Failed);
         }
-        let started_turns = all_events
-            .iter()
-            .rev()
-            .take_while(|event| {
-                !matches!(event.payload, AgentSessionEventPayload::SessionResumed {})
-            })
-            .filter(|event| matches!(event.payload, AgentSessionEventPayload::TurnStart))
-            .count();
-        let snapshot = sessions.snapshot(&entry.session_id)?;
+        let metrics = sessions.driver_metrics(&entry.session_id)?;
+        let started_turns = metrics.started_turns;
+        let (_, inbox) = sessions.driver_control(&entry.session_id)?;
         let existing_scope = entry.scope()?;
         if let Some(scope) = &existing_scope {
-            let reason =
-                no_progress_reason(&all_events, &scope.turn_id, config).filter(|_| {
-                    scope.step_id.is_none()
-                        && !snapshot.inbox.next_step.iter().any(|message| {
-                            message.source.kind == super::AgentMessageSourceKind::User
-                        })
-                });
+            let reason = no_progress_from_counts(
+                sessions.loop_progress_counts(&entry.session_id, &scope.turn_id)?,
+                config,
+            )
+            .filter(|_| {
+                scope.step_id.is_none()
+                    && !inbox
+                        .next_step
+                        .iter()
+                        .any(|message| message.source.kind == super::AgentMessageSourceKind::User)
+            });
             if let Some(reason) = reason {
                 close_open_scope(sessions, entry, &reason)?;
-                if !snapshot.inbox.next_turn.is_empty() {
+                if !inbox.next_turn.is_empty() {
                     continue;
                 }
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
@@ -185,7 +184,7 @@ async fn drive_agent_inner(
         // A waiting tool/question can resume inside the already admitted Turn.
         if existing_scope.is_none()
             && started_turns >= config.max_turns_per_session
-            && (!snapshot.inbox.next_turn.is_empty() || !snapshot.inbox.next_step.is_empty())
+            && (!inbox.next_turn.is_empty() || !inbox.next_step.is_empty())
         {
             let reason = format!(
                 "turnLimitExceeded: maximum {} Turns per Session",
@@ -212,28 +211,14 @@ async fn drive_agent_inner(
             step_id: Some(step_id),
         }) = existing_scope.clone()
         {
-            let index = all_events
-                .iter()
-                .filter(|e| {
-                    e.turn_id.as_deref() == Some(&turn_id)
-                        && matches!(e.payload, AgentSessionEventPayload::StepStart)
-                })
-                .count();
+            let index = metrics.turn_steps;
             (turn_id, step_id, index)
         } else if let Some(AgentActiveScope {
             turn_id,
             step_id: None,
         }) = existing_scope
         {
-            let step_index = sessions
-                .all_events(&entry.session_id)?
-                .iter()
-                .filter(|event| {
-                    event.turn_id.as_deref() == Some(&turn_id)
-                        && matches!(event.payload, AgentSessionEventPayload::StepStart)
-                })
-                .count()
-                .saturating_add(1);
+            let step_index = metrics.turn_steps.saturating_add(1);
             if let Some(limit) = config
                 .max_steps_per_turn
                 .filter(|limit| step_index > *limit)
@@ -347,20 +332,23 @@ async fn drive_agent_inner(
                 close_open_scope(sessions, entry, "cancelled")?;
                 return Ok(AgentDriverSettlement::Cancelled);
             }
-            let snapshot = sessions.snapshot(&entry.session_id)?;
-            let reason =
-                no_progress_reason(&sessions.all_events(&entry.session_id)?, &turn_id, config)
-                    .filter(|_| {
-                        continue_after_tools
-                            && !snapshot.inbox.next_step.iter().any(|message| {
-                                message.source.kind == super::AgentMessageSourceKind::User
-                            })
-                    });
+            let (_, inbox) = sessions.driver_control(&entry.session_id)?;
+            let reason = no_progress_from_counts(
+                sessions.loop_progress_counts(&entry.session_id, &turn_id)?,
+                config,
+            )
+            .filter(|_| {
+                continue_after_tools
+                    && !inbox
+                        .next_step
+                        .iter()
+                        .any(|message| message.source.kind == super::AgentMessageSourceKind::User)
+            });
             if let Some(reason) = reason {
                 close_open_scope(sessions, entry, &reason)?;
                 if !sessions
-                    .snapshot(&entry.session_id)?
-                    .inbox
+                    .driver_control(&entry.session_id)?
+                    .1
                     .next_turn
                     .is_empty()
                 {
@@ -682,11 +670,14 @@ async fn run_step(
         if entry.cancellation().is_cancelled() {
             return Ok(StepSettlement::Cancelled);
         }
-        let task_events = sessions.all_events(&entry.session_id)?;
-        if let Some(reason) = subagent_budget_failure(entry, &task_events)? {
+        if let Some(reason) = sessions.read_events(&entry.session_id, |events| {
+            subagent_budget_failure(entry, events)
+        })?? {
             return Ok(StepSettlement::Failed(reason));
         }
-        if let Some(reason) = task_budget_failure(&task_events, config)? {
+        if let Some(reason) =
+            task_budget_failure(&sessions.driver_metrics(&entry.session_id)?, config)?
+        {
             return Ok(StepSettlement::Failed(reason));
         }
         let request_id = format!("request-{}", Uuid::new_v4().simple());
@@ -795,7 +786,9 @@ async fn run_step(
             super::model_tools::apply_file_edit_budget(
                 &mut request,
                 crate::llm::catalog::resolve(&model.provider)?.max_output_tokens,
-                output_limit_continuation_count(&task_events, turn_id),
+                sessions.read_turn_events(&entry.session_id, |events| {
+                    output_limit_continuation_count(events, turn_id)
+                })?,
             );
             if entry.subagent.is_some() {
                 if let Some(limit) = config.max_steps_per_turn {
@@ -833,7 +826,9 @@ async fn run_step(
                 ));
             }
         }
-        let projected_tokens = consumed_model_tokens(&sessions.all_events(&entry.session_id)?)
+        let projected_tokens = sessions
+            .driver_metrics(&entry.session_id)?
+            .model_tokens
             .saturating_add(budget.estimated_input_tokens)
             .saturating_add(budget.output_reserve_tokens);
         if projected_tokens > config.max_model_tokens_per_session {
@@ -851,22 +846,25 @@ async fn run_step(
         if entry.cancellation().is_cancelled() {
             return Ok(StepSettlement::Cancelled);
         }
-        let mut request_events = super::request_log::request_events(
-            &sessions.all_events(&entry.session_id)?,
-            entry,
-            &model.provider,
-            &request,
-            &call.snapshot,
-            request_reason,
-            attempt,
-        )
-        .into_iter()
-        .map(|payload| AgentScopedPayload {
-            turn_id: Some(turn_id.to_string()),
-            step_id: Some(step_id.to_string()),
-            payload,
-        })
-        .collect::<Vec<_>>();
+        let mut request_events = sessions
+            .read_events(&entry.session_id, |events| {
+                super::request_log::request_events(
+                    events,
+                    entry,
+                    &model.provider,
+                    &request,
+                    &call.snapshot,
+                    request_reason,
+                    attempt,
+                )
+            })?
+            .into_iter()
+            .map(|payload| AgentScopedPayload {
+                turn_id: Some(turn_id.to_string()),
+                step_id: Some(step_id.to_string()),
+                payload,
+            })
+            .collect::<Vec<_>>();
         request_events.push(AgentScopedPayload {
             turn_id: Some(turn_id.to_string()),
             step_id: Some(step_id.to_string()),
@@ -885,21 +883,26 @@ async fn run_step(
         sessions.append_batch(&entry.session_id, request_events)?;
         let collected = Arc::new(Mutex::new(PartialContentAccumulator::default()));
         let cancellation = entry.cancellation();
-        let sink: Arc<dyn ModelStreamSink> = Arc::new(DurableModelStreamSink {
+        let stream_cancellation = cancellation.child_token();
+        let sink = Arc::new(DurableModelStreamSink {
+            #[cfg(test)]
             sessions: sessions.clone(),
-            session_id: entry.session_id.clone(),
             turn_id: turn_id.to_string(),
             step_id: step_id.to_string(),
             request_id: request_id.clone(),
             collected: Arc::clone(&collected),
-            cancellation: cancellation.clone(),
+            cancellation: stream_cancellation.clone(),
+            pending: Mutex::new(StreamBatch::default()),
+            writer: super::stream_writer::StreamWriter::new(
+                sessions.clone(),
+                entry.session_id.clone(),
+            )?,
         });
-        let remaining_active_ms = config
-            .max_active_duration_ms
-            .saturating_sub(active_duration_ms(
-                &sessions.all_events(&entry.session_id)?,
-                current_unix_ms()?,
-            ));
+        let remaining_active_ms = config.max_active_duration_ms.saturating_sub(
+            sessions
+                .driver_metrics(&entry.session_id)?
+                .active_duration_ms(current_unix_ms()?),
+        );
         let remaining_network_ms = network_recovery_started_at.map_or(u64::MAX, |started| {
             config
                 .network_recovery_window_ms
@@ -928,18 +931,64 @@ async fn run_step(
         let response = if stream_limit_ms == 0 {
             Err(deadline_error())
         } else {
-            tokio::select! {
-                biased;
-                _ = cancellation.cancelled() => Err(NormalizedModelError::cancelled()),
-                result = tokio::time::timeout(
-                    std::time::Duration::from_millis(stream_limit_ms),
-                    call.stream(request_id.clone(), cancellation.clone(), sink),
-                ) => match result {
-                    Ok(response) => response,
-                    Err(_) => Err(deadline_error()),
-                },
+            // ModelStreamSink is synchronous. Poll the adapter on a blocking
+            // worker so bounded writer backpressure cannot block the scheduler.
+            let runtime = tokio::runtime::Handle::current();
+            let prepared = call.clone();
+            let worker_sink = sink.clone();
+            let worker_token = stream_cancellation.clone();
+            let worker_request = request_id.clone();
+            let mut worker = tokio::task::spawn_blocking(move || {
+                runtime.block_on(async move {
+                    let response =
+                        prepared.stream(worker_request, worker_token.clone(), worker_sink);
+                    let result = tokio::select! {
+                        biased;
+                        _ = worker_token.cancelled() => Err(NormalizedModelError::cancelled()),
+                        result = response => result,
+                    };
+                    // A provider may cancel while returning an already-ready
+                    // response/error. Cancellation still wins before any retry.
+                    if worker_token.is_cancelled() {
+                        Err(NormalizedModelError::cancelled())
+                    } else {
+                        result
+                    }
+                })
+            });
+            let deadline = tokio::time::sleep(std::time::Duration::from_millis(stream_limit_ms));
+            tokio::pin!(deadline);
+            let mut joined = false;
+            let mut flush_interval =
+                tokio::time::interval(std::time::Duration::from_millis(STREAM_FLUSH_INTERVAL_MS));
+            flush_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let response = loop {
+                tokio::select! {
+                    biased;
+                    _ = cancellation.cancelled() => break Err(NormalizedModelError::cancelled()),
+                    _ = &mut deadline => break Err(deadline_error()),
+                    result = &mut worker => {
+                        joined = true;
+                        break result.unwrap_or_else(|error| Err(stream_storage_error(format!("model stream worker failed: {error}"))));
+                    }
+                    _ = flush_interval.tick() => {
+                        if let Err(error) = sink.flush_async(false).await {
+                            break Err(stream_storage_error(error));
+                        }
+                    }
+                }
+            };
+            if !joined {
+                stream_cancellation.cancel();
+                // Join before closing the sink: no accepted callback can race
+                // the final persistence fence or a subsequent model request.
+                let _ = worker.await;
             }
+            response
         };
+        // No response, retry, cancellation settlement or tool dispatch may pass
+        // buffered deltas. Close the sink as well, rejecting late provider emits.
+        sink.flush_async(true).await?;
         let response = match response {
             _ if cancellation.is_cancelled() => Err(NormalizedModelError::cancelled()),
             Ok(response) if !model_response_has_output(&response) => {
@@ -1333,6 +1382,7 @@ pub(super) fn current_unix_ms() -> Result<u64, String> {
         .as_millis() as u64)
 }
 
+#[cfg(test)]
 fn current_task_events(events: &[super::AgentSessionEvent]) -> &[super::AgentSessionEvent] {
     let start = events
         .iter()
@@ -1341,6 +1391,7 @@ fn current_task_events(events: &[super::AgentSessionEvent]) -> &[super::AgentSes
     &events[start..]
 }
 
+#[cfg(test)]
 fn consumed_model_tokens(events: &[super::AgentSessionEvent]) -> u64 {
     current_task_events(events)
         .iter()
@@ -1352,6 +1403,7 @@ fn consumed_model_tokens(events: &[super::AgentSessionEvent]) -> u64 {
         .fold(0_u64, u64::saturating_add)
 }
 
+#[cfg(test)]
 fn active_duration_ms(events: &[super::AgentSessionEvent], now: u64) -> u64 {
     let mut running_since = None;
     let mut total = 0_u64;
@@ -1371,16 +1423,16 @@ fn active_duration_ms(events: &[super::AgentSessionEvent], now: u64) -> u64 {
 }
 
 fn task_budget_failure(
-    events: &[super::AgentSessionEvent],
+    metrics: &super::driver_metrics::DriverMetrics,
     config: AgentDriverConfig,
 ) -> Result<Option<String>, String> {
-    if consumed_model_tokens(events) >= config.max_model_tokens_per_session {
+    if metrics.model_tokens >= config.max_model_tokens_per_session {
         return Ok(Some(format!(
             "taskTokenBudgetExceeded: maximum {} estimated model tokens",
             config.max_model_tokens_per_session
         )));
     }
-    if active_duration_ms(events, current_unix_ms()?) >= config.max_active_duration_ms {
+    if metrics.active_duration_ms(current_unix_ms()?) >= config.max_active_duration_ms {
         return Ok(Some(format!(
             "taskActiveTimeExceeded: maximum {} active ms",
             config.max_active_duration_ms
@@ -1389,28 +1441,44 @@ fn task_budget_failure(
     Ok(None)
 }
 
+#[cfg(test)]
 fn no_progress_reason(
     events: &[super::AgentSessionEvent],
     turn_id: &str,
     config: AgentDriverConfig,
 ) -> Option<String> {
-    if failed_file_edit_streak(events, turn_id) >= MAX_FAILED_FILE_EDITS {
+    let mut progress = super::driver_progress::LoopProgress::default();
+    for event in events
+        .iter()
+        .filter(|event| event.turn_id.as_deref() == Some(turn_id))
+    {
+        progress.observe(event);
+    }
+    no_progress_from_counts(progress.counts(turn_id), config)
+}
+
+fn no_progress_from_counts(
+    (failures, repetitions): (usize, usize),
+    config: AgentDriverConfig,
+) -> Option<String> {
+    if failures >= MAX_FAILED_FILE_EDITS {
         return Some(format!(
             "noProgress: {MAX_FAILED_FILE_EDITS} edits to the same file failed without a verified change; automatic retries stopped. Review the file and tool errors before continuing."
         ));
     }
-    (config.max_identical_tool_steps > 0
-        && repeated_tool_step_streak(events, turn_id) >= config.max_identical_tool_steps)
-        .then(|| {
+    (config.max_identical_tool_steps > 0 && repetitions >= config.max_identical_tool_steps).then(
+        || {
             format!(
                 "noProgress: {} repeated tool steps produced no new evidence",
                 config.max_identical_tool_steps
             )
-        })
+        },
+    )
 }
 
 // File reads, plan updates and changing patch syntax are not successful edits.
 // Only a verified write to the same target/path or new user input resets its streak.
+#[cfg(test)]
 fn failed_file_edit_streak(events: &[super::AgentSessionEvent], turn_id: &str) -> usize {
     let mut calls = BTreeMap::new();
     let mut failures = BTreeMap::new();
@@ -1497,27 +1565,75 @@ fn failed_file_edit_streak(events: &[super::AgentSessionEvent], turn_id: &str) -
     failures.values().copied().max().unwrap_or(0)
 }
 
+#[cfg(test)]
 fn repeated_tool_step_streak(events: &[super::AgentSessionEvent], turn_id: &str) -> usize {
-    let mut signatures = Vec::new();
-    for event in events.iter().rev() {
+    repeated_tool_step_streak_bounded(events, turn_id, 6)
+}
+
+#[cfg(test)]
+fn repeated_tool_step_streak_bounded(
+    events: &[super::AgentSessionEvent],
+    turn_id: &str,
+    limit: usize,
+) -> usize {
+    // Visit each event once; never scan the full log again for each StepEnd.
+    let mut signatures = std::collections::VecDeque::new();
+    let mut steps: BTreeMap<&str, Vec<&super::AgentSessionEvent>> = BTreeMap::new();
+    let mut progress = std::collections::HashSet::new();
+    let mut previous_plan = None;
+    let mut evidence = std::collections::HashSet::new();
+    for event in events {
         if event.turn_id.as_deref() != Some(turn_id) {
             continue;
         }
-        let AgentSessionEventPayload::StepEnd { reason } = &event.payload else {
+        let Some(step_id) = event.step_id.as_deref() else {
             continue;
         };
-        if reason != "toolsCompleted" {
-            break;
+        let made_progress = match &event.payload {
+            AgentSessionEventPayload::TaskPlan { steps, .. } => {
+                let changed = previous_plan != Some(steps);
+                previous_plan = Some(steps);
+                changed
+            }
+            AgentSessionEventPayload::TaskEvidence { kind, summary, .. } => {
+                evidence.insert((kind, summary))
+            }
+            AgentSessionEventPayload::UserMessage { message } => {
+                message.source.kind == super::AgentMessageSourceKind::User
+            }
+            AgentSessionEventPayload::ToolApproval {
+                status: super::AgentToolApprovalStatus::Approved,
+                approval_id: Some(_),
+                ..
+            }
+            | AgentSessionEventPayload::QuestionAnswered { .. } => true,
+            _ => false,
+        };
+        if made_progress {
+            progress.insert(step_id);
         }
-        let Some(step_id) = event.step_id.as_deref() else {
-            break;
-        };
-        let Some((signature, had_user_or_plan)) = tool_step_signature(events, step_id) else {
-            break;
-        };
-        signatures.push(signature);
-        if had_user_or_plan {
-            break;
+        match &event.payload {
+            AgentSessionEventPayload::ToolCall { .. }
+            | AgentSessionEventPayload::ToolResult { .. }
+            | AgentSessionEventPayload::TaskPlan { .. } => {
+                steps.entry(step_id).or_default().push(event)
+            }
+            AgentSessionEventPayload::StepEnd { reason } => {
+                let step = steps.remove(step_id).unwrap_or_default();
+                let reset = progress.remove(step_id);
+                if reset || reason != "toolsCompleted" {
+                    signatures.clear();
+                }
+                if reason == "toolsCompleted" {
+                    if let Some(signature) = tool_step_signature(&step) {
+                        signatures.push_front(signature);
+                        signatures.truncate(limit);
+                    } else {
+                        signatures.clear();
+                    }
+                }
+            }
+            _ => {}
         }
     }
     let mut longest = 0;
@@ -1534,30 +1650,11 @@ fn repeated_tool_step_streak(events: &[super::AgentSessionEvent], turn_id: &str)
     longest.max(signatures.len().min(1))
 }
 
-fn tool_step_signature(
-    events: &[super::AgentSessionEvent],
-    step_id: &str,
-) -> Option<(Vec<serde_json::Value>, bool)> {
-    let step_events = events
-        .iter()
-        .filter(|event| event.step_id.as_deref() == Some(step_id))
-        .collect::<Vec<_>>();
-    let had_user_or_plan = step_events.iter().any(|event| match &event.payload {
-        AgentSessionEventPayload::UserMessage { message } => {
-            message.source.kind == super::AgentMessageSourceKind::User
-        }
-        AgentSessionEventPayload::TaskPlan { .. }
-        | AgentSessionEventPayload::TaskEvidence { .. } => true,
-        AgentSessionEventPayload::ToolApproval {
-            status: super::AgentToolApprovalStatus::Approved,
-            approval_id: Some(_),
-            ..
-        }
-        | AgentSessionEventPayload::QuestionAnswered { .. } => true,
-        _ => false,
-    });
+pub(super) fn tool_step_signature(
+    step_events: &[&super::AgentSessionEvent],
+) -> Option<Vec<serde_json::Value>> {
     let mut signature = Vec::new();
-    for event in &step_events {
+    for (index, event) in step_events.iter().enumerate() {
         let AgentSessionEventPayload::ToolCall { call } = &event.payload else {
             continue;
         };
@@ -1574,6 +1671,20 @@ fn tool_step_signature(
                 } if call_id == &call.call_id => Some((name, status, summary, data)),
                 _ => None,
             })?;
+        if call.name == "update_plan" && *result.1 == super::AgentToolResultStatus::Completed {
+            // Version, explanation and version-bearing summaries are bookkeeping,
+            // not evidence that the task advanced. Match the committed plan body.
+            let plan =
+                step_events
+                    .iter()
+                    .skip(index + 1)
+                    .find_map(|event| match &event.payload {
+                        AgentSessionEventPayload::TaskPlan { steps, .. } => Some(steps),
+                        _ => None,
+                    })?;
+            signature.push(serde_json::json!([call.name, plan, result.1]));
+            continue;
+        }
         signature.push(serde_json::json!([
             call.name,
             call.arguments,
@@ -1584,7 +1695,7 @@ fn tool_step_signature(
             result.3.as_ref().map(normalize_tool_data),
         ]));
     }
-    (!signature.is_empty()).then_some((signature, had_user_or_plan))
+    (!signature.is_empty()).then_some(signature)
 }
 
 fn normalize_tool_data(value: &serde_json::Value) -> serde_json::Value {
@@ -1676,8 +1787,9 @@ fn settle_output_limit(
     partial: Vec<AgentAssistantContentBlock>,
     usage: Option<AgentTokenUsage>,
 ) -> Result<StepSettlement, String> {
-    let continuation_count =
-        output_limit_continuation_count(&sessions.all_events(&entry.session_id)?, turn_id);
+    let continuation_count = sessions.read_turn_events(&entry.session_id, |events| {
+        output_limit_continuation_count(events, turn_id)
+    })?;
     let continue_turn = continuation_count < 2;
     let mut payloads = Vec::new();
     if !partial.is_empty() {
@@ -1899,13 +2011,20 @@ async fn commit_response(
         return Ok(StepSettlement::Cancelled);
     }
     if tool_calls.is_empty() {
-        let events = sessions.all_events(&entry.session_id)?;
-        let incomplete = incomplete_plan_for_turn(&events, turn_id);
-        let checked = events.iter().any(|event| {
-            event.turn_id.as_deref() == Some(turn_id)
-                && matches!(&event.payload, AgentSessionEventPayload::StepEnd { reason } if reason == "completionCheck")
-        });
-        let continue_plan = plan_needs_completion_check(&events, turn_id) && !checked;
+        let (incomplete, continue_plan) =
+            sessions.read_turn_events(&entry.session_id, |events| {
+                let incomplete = incomplete_plan_for_turn(events, turn_id);
+                let checked = events.iter().any(|event| match &event.payload {
+                    AgentSessionEventPayload::StepEnd { reason } => {
+                        event.turn_id.as_deref() == Some(turn_id) && reason == "completionCheck"
+                    }
+                    _ => false,
+                });
+                (
+                    incomplete,
+                    plan_needs_completion_check(events, turn_id) && !checked,
+                )
+            })?;
         if continue_plan {
             payloads.push(AgentScopedPayload {
                 turn_id: Some(turn_id.to_string()),
@@ -2074,8 +2193,7 @@ fn append_status(
     status: AgentSessionStatus,
     reason: Option<String>,
 ) -> Result<(), String> {
-    let snapshot = sessions.snapshot(&entry.session_id)?;
-    if snapshot.status == status {
+    if sessions.driver_control(&entry.session_id)?.0 == status {
         return Ok(());
     }
     sessions.append(
@@ -2203,13 +2321,153 @@ impl PartialContentAccumulator {
 }
 
 struct DurableModelStreamSink {
+    #[cfg(test)]
     sessions: AgentSessionStore,
-    session_id: String,
     turn_id: String,
     step_id: String,
     request_id: String,
     collected: Arc<Mutex<PartialContentAccumulator>>,
     cancellation: tokio_util::sync::CancellationToken,
+    pending: Mutex<StreamBatch>,
+    writer: super::stream_writer::StreamWriter,
+}
+
+const STREAM_FLUSH_INTERVAL_MS: u64 = 40;
+const STREAM_BATCH_MAX_BYTES: usize = 64 * 1024;
+const STREAM_BATCH_MAX_EVENTS: usize = 128;
+
+#[derive(Default)]
+struct StreamBatch {
+    payloads: Vec<AgentScopedPayload>,
+    bytes: usize,
+    last_index: Option<u32>,
+    closed: bool,
+    error: Option<String>,
+}
+
+fn stream_storage_error(message: String) -> NormalizedModelError {
+    NormalizedModelError::new(NormalizedModelErrorKind::Terminal, message)
+}
+
+impl DurableModelStreamSink {
+    fn flush_locked(&self, batch: &mut StreamBatch) -> Result<(), String> {
+        if let Some(error) = &batch.error {
+            return Err(error.clone());
+        }
+        if batch.payloads.is_empty() {
+            return Ok(());
+        }
+        let payloads = std::mem::take(&mut batch.payloads);
+        batch.bytes = 0;
+        batch.last_index = None;
+        if let Err(error) = self.writer.append(payloads) {
+            batch.error = Some(error.clone());
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    async fn flush_async(self: &Arc<Self>, close: bool) -> Result<(), String> {
+        let sink = Arc::clone(self);
+        tokio::task::spawn_blocking(move || {
+            let mut batch = sink
+                .pending
+                .lock()
+                .map_err(|_| "model stream buffer is unavailable")?;
+            batch.closed |= close;
+            sink.flush_locked(&mut batch)?;
+            if let Err(error) = sink.writer.fence() {
+                batch.error = Some(error.clone());
+                return Err(error);
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|error| format!("model stream writer failed: {error}"))?
+    }
+
+    fn queue(
+        &self,
+        index: Option<u32>,
+        payload: AgentSessionEventPayload,
+    ) -> Result<(), NormalizedModelError> {
+        let mut batch = self
+            .pending
+            .lock()
+            .map_err(|_| stream_storage_error("model stream buffer is unavailable".into()))?;
+        if let Some(error) = &batch.error {
+            return Err(stream_storage_error(error.clone()));
+        }
+        if batch.closed || self.cancellation.is_cancelled() {
+            return Err(NormalizedModelError::cancelled());
+        }
+        self.writer.check().map_err(stream_storage_error)?;
+        let bytes = match &payload {
+            AgentSessionEventPayload::AssistantChunk {
+                text_delta,
+                reasoning_delta,
+                tool_call_delta,
+                ..
+            } => {
+                text_delta.as_ref().map_or(0, String::len)
+                    + reasoning_delta.as_ref().map_or(0, String::len)
+                    + tool_call_delta.as_ref().map_or(0, |delta| {
+                        delta.arguments_delta.as_ref().map_or(0, String::len)
+                            + delta.name_delta.as_ref().map_or(0, String::len)
+                            + delta.call_id.as_ref().map_or(0, String::len)
+                    })
+            }
+            _ => unreachable!("stream buffers contain only AssistantChunk events"),
+        };
+        if batch.bytes.saturating_add(bytes) > STREAM_BATCH_MAX_BYTES
+            || batch.payloads.len() >= STREAM_BATCH_MAX_EVENTS
+        {
+            self.flush_locked(&mut batch)
+                .map_err(stream_storage_error)?;
+        }
+        let merged = if batch.last_index == index && index.is_some() {
+            batch.payloads.last_mut().is_some_and(|previous| {
+                match (&mut previous.payload, &payload) {
+                    (
+                        AgentSessionEventPayload::AssistantChunk {
+                            text_delta: Some(previous),
+                            ..
+                        },
+                        AgentSessionEventPayload::AssistantChunk {
+                            text_delta: Some(next),
+                            ..
+                        },
+                    )
+                    | (
+                        AgentSessionEventPayload::AssistantChunk {
+                            reasoning_delta: Some(previous),
+                            ..
+                        },
+                        AgentSessionEventPayload::AssistantChunk {
+                            reasoning_delta: Some(next),
+                            ..
+                        },
+                    ) if previous.len() + next.len() <= MAX_AGENT_STREAM_DELTA_BYTES => {
+                        previous.push_str(next);
+                        true
+                    }
+                    _ => false,
+                }
+            })
+        } else {
+            false
+        };
+        if !merged {
+            batch.payloads.push(AgentScopedPayload {
+                turn_id: Some(self.turn_id.clone()),
+                step_id: Some(self.step_id.clone()),
+                payload,
+            });
+        }
+        batch.bytes = batch.bytes.saturating_add(bytes);
+        batch.last_index = index;
+        Ok(())
+    }
 }
 
 fn utf8_chunks(value: &str, max_bytes: usize) -> Vec<&str> {
@@ -2241,25 +2499,16 @@ impl ModelStreamSink for DurableModelStreamSink {
                     if self.cancellation.is_cancelled() {
                         return Err(NormalizedModelError::cancelled());
                     }
-                    self.sessions
-                        .append(
-                            &self.session_id,
-                            Some(self.turn_id.clone()),
-                            Some(self.step_id.clone()),
-                            AgentSessionEventPayload::AssistantChunk {
-                                request_id: self.request_id.clone(),
-                                text_delta: Some(chunk.to_owned()),
-                                reasoning_delta: None,
-                                tool_call_delta: None,
-                                usage: None,
-                            },
-                        )
-                        .map_err(|error| {
-                            NormalizedModelError::new(
-                                NormalizedModelErrorKind::Terminal,
-                                format!("failed to commit model stream chunk: {error}"),
-                            )
-                        })?;
+                    self.queue(
+                        Some(index),
+                        AgentSessionEventPayload::AssistantChunk {
+                            request_id: self.request_id.clone(),
+                            text_delta: Some(chunk.to_owned()),
+                            reasoning_delta: None,
+                            tool_call_delta: None,
+                            usage: None,
+                        },
+                    )?;
                     self.collected
                         .lock()
                         .map_err(|_| {
@@ -2276,25 +2525,16 @@ impl ModelStreamSink for DurableModelStreamSink {
                     if self.cancellation.is_cancelled() {
                         return Err(NormalizedModelError::cancelled());
                     }
-                    self.sessions
-                        .append(
-                            &self.session_id,
-                            Some(self.turn_id.clone()),
-                            Some(self.step_id.clone()),
-                            AgentSessionEventPayload::AssistantChunk {
-                                request_id: self.request_id.clone(),
-                                text_delta: None,
-                                reasoning_delta: Some(chunk.to_owned()),
-                                tool_call_delta: None,
-                                usage: None,
-                            },
-                        )
-                        .map_err(|error| {
-                            NormalizedModelError::new(
-                                NormalizedModelErrorKind::Terminal,
-                                format!("failed to commit model reasoning chunk: {error}"),
-                            )
-                        })?;
+                    self.queue(
+                        Some(index),
+                        AgentSessionEventPayload::AssistantChunk {
+                            request_id: self.request_id.clone(),
+                            text_delta: None,
+                            reasoning_delta: Some(chunk.to_owned()),
+                            tool_call_delta: None,
+                            usage: None,
+                        },
+                    )?;
                     self.collected
                         .lock()
                         .map_err(|_| {
@@ -2321,36 +2561,27 @@ impl ModelStreamSink for DurableModelStreamSink {
                     if self.cancellation.is_cancelled() {
                         return Err(NormalizedModelError::cancelled());
                     }
-                    self.sessions
-                        .append(
-                            &self.session_id,
-                            Some(self.turn_id.clone()),
-                            Some(self.step_id.clone()),
-                            AgentSessionEventPayload::AssistantChunk {
-                                request_id: self.request_id.clone(),
-                                text_delta: None,
-                                reasoning_delta: None,
-                                tool_call_delta: Some(AgentToolCallDelta {
-                                    index,
-                                    call_id: if position == 0 { call_id.clone() } else { None },
-                                    name_delta: if position == 0 {
-                                        name_delta.clone()
-                                    } else {
-                                        None
-                                    },
-                                    arguments_delta: argument_chunks
-                                        .get(position)
-                                        .map(|chunk| (*chunk).to_owned()),
-                                }),
-                                usage: None,
-                            },
-                        )
-                        .map_err(|error| {
-                            NormalizedModelError::new(
-                                NormalizedModelErrorKind::Terminal,
-                                format!("failed to commit model tool-call chunk: {error}"),
-                            )
-                        })?;
+                    self.queue(
+                        Some(index),
+                        AgentSessionEventPayload::AssistantChunk {
+                            request_id: self.request_id.clone(),
+                            text_delta: None,
+                            reasoning_delta: None,
+                            tool_call_delta: Some(AgentToolCallDelta {
+                                index,
+                                call_id: if position == 0 { call_id.clone() } else { None },
+                                name_delta: if position == 0 {
+                                    name_delta.clone()
+                                } else {
+                                    None
+                                },
+                                arguments_delta: argument_chunks
+                                    .get(position)
+                                    .map(|chunk| (*chunk).to_owned()),
+                            }),
+                            usage: None,
+                        },
+                    )?;
                     self.collected
                         .lock()
                         .map_err(|_| {
@@ -2363,25 +2594,16 @@ impl ModelStreamSink for DurableModelStreamSink {
                 }
             }
             StreamDelta::Usage { usage } => {
-                self.sessions
-                    .append(
-                        &self.session_id,
-                        Some(self.turn_id.clone()),
-                        Some(self.step_id.clone()),
-                        AgentSessionEventPayload::AssistantChunk {
-                            request_id: self.request_id.clone(),
-                            text_delta: None,
-                            reasoning_delta: None,
-                            tool_call_delta: None,
-                            usage: Some(token_usage(usage)),
-                        },
-                    )
-                    .map_err(|error| {
-                        NormalizedModelError::new(
-                            NormalizedModelErrorKind::Terminal,
-                            format!("failed to commit model usage update: {error}"),
-                        )
-                    })?;
+                self.queue(
+                    None,
+                    AgentSessionEventPayload::AssistantChunk {
+                        request_id: self.request_id.clone(),
+                        text_delta: None,
+                        reasoning_delta: None,
+                        tool_call_delta: None,
+                        usage: Some(token_usage(usage)),
+                    },
+                )?;
             }
         }
         Ok(())

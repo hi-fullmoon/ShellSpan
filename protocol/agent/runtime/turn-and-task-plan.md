@@ -28,6 +28,8 @@ Recovery instructions are generated from the request's available tools. Native f
 
 ## Task-plan writes
 
+Repeated plan submissions with an unchanged step list do not reset the no-progress detector. Successful `update_plan` signatures compare the step list, ignoring the assigned version and explanation. A changed plan, new user input, answered question, explicit approval, or new evidence can reset repetition tracking. Duplicate evidence with the same kind and summary does not reset it. The detector consumes committed events incrementally, computes each step signature once, and retains three signature digests with counters for periods one through three. File-edit failure counts also advance incrementally. Driver checks read these counters without replaying historical tool results. Restart rebuilds the same projection from the log; rejected batches do not alter it.
+
 `update_plan` is a whole-list replacement for the current turn's task plan:
 
 - `steps` is required and replaces the preceding list.
@@ -40,3 +42,9 @@ A final response triggers one completion check only when the current turn's late
 Ephemeral input placeholders in model history describe omitted content, not executable input. Model requests explicitly explain that historical input was omitted and new input is not replaced. Native tool preparation rejects these markers in terminal input, process input, terminal match text, and commands (including the native command name) before authorization or dispatch. The model must inspect current state and supply actual input or explain why it cannot proceed.
 
 The latest plan remains visible after `turn/end`. The UI derives an `inProgress` row as paused whenever its Session is idle, so unfinished work stays visible without displaying a stale spinner. The next `turn/start` clears the preceding projection until the new turn records its own plan. Durable `task/plan` events remain in Activity history for audit and replay.
+
+## Runtime projections and stream persistence
+
+Session token usage, active duration, turn count and current-turn step count advance with committed events and rebuild from the durable log on startup. Snapshot projections are cached for an unchanged record; event commits and archive changes invalidate the cache. Driver queries borrow events under the store lock rather than cloning the full history; current-turn checks start at the recorded turn offset.
+
+Assistant streaming deltas are buffered for periodic flushes at 40 ms. Each batch is bounded at 64 KiB or 128 events; a single background writer accepts at most two queued batches. Size-triggered, periodic and final flushes all use this writer. Synchronous model callbacks run on a blocking worker, so bounded queue pressure cannot block the async scheduler. The driver cancels and joins that worker before closing the sink, and a persistence fence drains accepted batches before response, retry, timeout or cancellation settlement. Adjacent text or reasoning deltas from the same content block may be merged within the existing UTF-8 event-size limit. Published events still follow durable batch writes; tool execution and approval boundaries are not buffered. A failed write is terminal for that stream and cannot be hidden by a later successful response. An abrupt process exit can lose the uncommitted tail; no buffered output is advertised as durable, and native effects retain their existing recovery semantics.
