@@ -780,7 +780,9 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     expect(container.querySelectorAll('[data-ai-process-child="approvalMarker"]')).toHaveLength(1);
     expect(container.querySelector('[data-ai-process-child="approvalMarker"] .ai-transcript-notice'))
-      .toHaveClass('items-center', 'gap-1');
+      .toHaveClass('items-center', 'gap-0');
+    expect(container.querySelector('[data-ai-process-child="approvalMarker"] .ai-disclosure-leading'))
+      .toHaveClass('mr-1');
 
     rerender(<AiWorkspaceRoot view={withPermission('operator')} scope="terminal" />);
 

@@ -169,12 +169,13 @@ describe('AiConversationNodeList', () => {
       state: 'failed',
     };
 
-    render(<AiConversationNodeList nodes={[error]} />);
+    const { container } = render(<AiConversationNodeList nodes={[error]} />);
 
     expect(within(screen.getByRole('alert')).getByText(
       'The model still reached its output limit after reducing the step size. Saved changes were kept; unfinished tool calls were not executed. Check the model output limit in provider settings before continuing.',
     )).toBeVisible();
     expect(screen.queryByText(/maxAttempts/)).not.toBeInTheDocument();
+    expect(container.querySelector('.ai-turn-error')).toHaveClass('grid-cols-[16px_minmax(0,1fr)_auto]', 'gap-1');
   });
 
   it('renders output-limit continuation as a readable status without an error count', () => {
@@ -376,6 +377,7 @@ describe('AiConversationNodeList', () => {
 
     const disclosure = screen.getByRole('button', { name: 'Reasoning Inspect the service state' });
     expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(getComputedStyle(disclosure.querySelector('.ai-disclosure-leading > svg:first-child')!).translate).toBe('0 -1px');
     expect(container.querySelector('.ai-reasoning-body')).toBeNull();
     await user.click(disclosure);
     expect(container.querySelector('.ai-reasoning-body'))
@@ -498,9 +500,19 @@ describe('AiConversationNodeList', () => {
     expect(diff).toHaveTextContent('todo-app/src/app.ts');
     expect(diff.querySelectorAll('[data-diff="removed"]')).toHaveLength(1);
     expect(diff.querySelectorAll('[data-diff="added"]')).toHaveLength(2);
+    expect(Array.from(diff.querySelectorAll('[data-diff]'), (line) => [
+      line.getAttribute('data-diff'), line.textContent,
+    ])).toEqual([
+      ['removed', '- old'],
+      ['added', '+ new'],
+      ['context', '  kept'],
+      ['added', `+ ${longLine}`],
+    ]);
     expect(diff.querySelector('section')).toHaveClass('min-w-0', 'max-w-full');
+    expect(diff.querySelector('.ai-block-banner')).toHaveClass('px-2.5', 'py-1.5');
     expect(diff.querySelector('.ai-diff-body')).toHaveClass(
-      'min-w-0', 'max-w-full', 'overflow-auto', 'whitespace-pre-wrap', '[overflow-wrap:anywhere]',
+      'min-w-0', 'max-w-full', 'overflow-auto', 'px-2.5', 'py-2',
+      'whitespace-pre-wrap', '[overflow-wrap:anywhere]',
     );
     expect(diff.querySelector('.ai-diff-body')).not.toHaveClass('whitespace-pre');
     expect(diff.querySelectorAll('[data-diff="added"]')[1]?.textContent).toBe(`+ ${longLine}`);
@@ -513,6 +525,75 @@ describe('AiConversationNodeList', () => {
     expect(within(container.querySelector('[data-ai-node-key="tool:orchestration"]') as HTMLElement)
       .getByRole('button', { name: 'Agent orchestration: Delegate repository inspection' }))
       .toBeVisible();
+  });
+
+  it('shows only changed lines in structured edit totals while keeping context and deletions in order', async () => {
+    const user = userEvent.setup();
+    const edit = toolNode({
+      key: 'tool:structured-edit',
+      name: 'edit_file',
+      nativeName: 'edit_file',
+      state: 'succeeded',
+      input: { path: 'src/example.ts' },
+      output: {
+        diffs: [{
+          path: 'src/example.ts',
+          oldText: 'same\nold\nkeep\nremove\n',
+          newText: 'same\nnew\nkeep\n',
+        }],
+      },
+    });
+    const { container } = render(<AiConversationNodeList nodes={[edit]} />);
+    await user.click(screen.getByRole('button', { name: 'Edit: src/example.ts +1 -2' }));
+
+    expect(Array.from(container.querySelectorAll('[data-ai-tool-view="diff"] [data-diff]'), (line) => [
+      line.getAttribute('data-diff'), line.textContent,
+    ])).toEqual([
+      ['context', '  same'],
+      ['removed', '- old'],
+      ['added', '+ new'],
+      ['context', '  keep'],
+      ['removed', '- remove'],
+    ]);
+  });
+
+  it('keeps a late change visible in compact mode without comparing unchanged large file sections', async () => {
+    const user = userEvent.setup();
+    const shared = `${Array.from({ length: 1_800 }, (_, index) => `same-${index.toString().padStart(4, '0')}`).join('\n')}\n`;
+    const edit = toolNode({
+      key: 'tool:late-edit', name: 'edit_file', nativeName: 'edit_file', state: 'succeeded',
+      input: { path: 'src/large.ts' },
+      output: { diffs: [{ path: 'src/large.ts', oldText: `${shared}old\nend\n`, newText: `${shared}new\nend\n` }] },
+    });
+    const { container } = render(<AiConversationNodeList nodes={[edit]} />);
+    await user.click(screen.getByRole('button', { name: 'Edit: src/large.ts +1 -1' }));
+
+    const diff = container.querySelector('[data-ai-tool-view="diff"]') as HTMLElement;
+    const visible = Array.from(diff.querySelectorAll('[data-diff]'), (line) => line.textContent);
+    expect(visible).toEqual(['  same-1797', '  same-1798', '  same-1799', '- old', '+ new', '  end']);
+    expect(diff.querySelector('[data-diff-simplified]')).toBeNull();
+  });
+
+  it('bounds large unrelated replacements and labels their simplified diff without exact totals', async () => {
+    const user = userEvent.setup();
+    const oldText = `${Array.from({ length: 2_000 }, (_, index) => `before-${index}`).join('\n')}\n`;
+    const newText = `${Array.from({ length: 2_000 }, (_, index) => `after-${index}`).join('\n')}\n`;
+    const edit = toolNode({
+      key: 'tool:large-replacement', name: 'edit_file', nativeName: 'edit_file', state: 'succeeded',
+      input: { path: 'src/replaced.ts' },
+      output: { diffs: [{ path: 'src/replaced.ts', oldText, newText }] },
+    });
+    const { container } = render(<AiConversationNodeList nodes={[edit]} />);
+    const row = screen.getByRole('button', { name: 'Edit: src/replaced.ts' });
+    expect(row.querySelector('.ai-tool-diff-stat')).toBeNull();
+    await user.click(row);
+
+    const diff = container.querySelector('[data-ai-tool-view="diff"]') as HTMLElement;
+    expect(diff.querySelector('[data-diff-simplified]')).toHaveTextContent(
+      'Large change shown as a whole block; line totals are omitted.',
+    );
+    expect(diff.querySelectorAll('[data-diff="removed"]')).toHaveLength(8);
+    expect(diff.querySelectorAll('[data-diff="added"]')).toHaveLength(8);
   });
 
   it('covers running, completed, and failed tool rows, inline expansion, details, and fallback', async () => {
@@ -548,6 +629,7 @@ describe('AiConversationNodeList', () => {
     const failedSeat = container.querySelector('[data-ai-node-key="tool:future"]') as HTMLElement;
 
     expect(runningSeat.querySelector('[data-tool-state="running"]')).toHaveAttribute('data-tool-variant', 'terminal');
+    expect(getComputedStyle(runningSeat.querySelector('.ai-tool-row .ai-disclosure-leading > svg:first-child')!).translate).toBe('0 -1px');
     expect(completedSeat.querySelector('[data-tool-state="succeeded"]')).toHaveAttribute('data-tool-variant', 'read');
     expect(completedSeat).toHaveTextContent('125 ms');
     expect(failedSeat.querySelector('[data-tool-state="failed"]')).toHaveAttribute('data-tool-fallback');
@@ -589,12 +671,38 @@ describe('AiConversationNodeList', () => {
       sha256: 'abc123',
       sensitivity: 'internal',
     };
-    render(<AiConversationNodeList nodes={[artifact]} onOpenArtifact={openArtifact} />);
+    const { container } = render(<AiConversationNodeList nodes={[artifact]} onOpenArtifact={openArtifact} />);
 
     expect(screen.getByText('Produced')).toBeVisible();
     expect(screen.getByText('42 B')).toBeVisible();
+    expect(container.querySelector('.ai-produced-files')).toHaveClass('min-h-6', 'items-center');
+    expect(container.querySelector('.ai-produced-files-label')).toHaveClass('gap-1');
+    expect(container.querySelector('.ai-produced-files-label > span')).toHaveClass('size-4', 'items-center', 'justify-center');
+    expect(getComputedStyle(container.querySelector('.ai-produced-files-label svg')!).translate).toBe('0 -1px');
     await user.click(screen.getByRole('button', { name: 'Open artifact Deployment report' }));
     expect(openArtifact).toHaveBeenCalledWith(artifact);
+  });
+
+  it('aligns approval icons and labels with tool rows', () => {
+    const tool = toolNode({ key: 'tool:alignment', state: 'succeeded' });
+    const approval: AiConversationNodeOf<'approvalMarker'> = {
+      kind: 'approvalMarker', key: 'approval:alignment', sourceKind: 'agent',
+      sessionId: 'session-fixture', turnId: 'turn-1', stepId: 'step-1',
+      firstSeq: 2, lastSeq: 2, timestamp: '2026-09-03T00:00:00.000Z',
+      approvalId: 'approval-1', requestId: 'request-1', callId: tool.callId,
+      status: 'approved', risk: 'readOnly', prompt: null, reason: null,
+      expiresAtUnixMs: null,
+    };
+    const { container } = render(<AiConversationNodeList nodes={[tool, approval]} />);
+    const toolRow = container.querySelector<HTMLElement>('.ai-tool-row')!;
+    const approvalRow = container.querySelector<HTMLElement>('.ai-transcript-notice[data-variant="approval"]')!;
+
+    expect(approvalRow).toHaveTextContent('Approved');
+    expect(approvalRow).toHaveClass('flex', 'h-6', 'items-center');
+    expect(approvalRow.querySelector('.ai-disclosure-leading')).toHaveClass('mr-1', 'size-4');
+    expect(approvalRow.querySelector('.ai-disclosure-title')).toHaveClass('shrink-0');
+    expect(getComputedStyle(approvalRow).lineHeight).toBe(getComputedStyle(toolRow.querySelector('.ai-disclosure-title')!).lineHeight);
+    expect(getComputedStyle(approvalRow.querySelector('svg')!).translate).toBe('0 -1px');
   });
 
   it('renders only real tail metrics and keeps long generic payloads bounded at narrow widths', async () => {

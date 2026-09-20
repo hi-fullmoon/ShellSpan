@@ -27,17 +27,22 @@
 }
 
 .ai-block-banner > svg,
-.ai-produced-files-label > svg,
+.ai-produced-files-label svg,
 .ai-turn-error > svg,
 .ai-artifact-summary > svg {
   width: 14px;
   height: 14px;
 }
 
-.ai-disclosure-leading > svg,
-.ai-transcript-notice > svg {
+.ai-disclosure-leading > svg {
   width: 14px;
   height: 14px;
+}
+
+/* Align the visible SVG strokes with the adjacent 13px label ink. */
+.ai-disclosure-leading > svg,
+.ai-produced-files-label svg {
+  translate: 0 -1px;
 }
 
 /* Match the separator to the text baseline; row icons use centered layout. */
