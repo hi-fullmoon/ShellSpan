@@ -183,7 +183,7 @@
             &request(
                 "run_terminal_command",
                 json!({
-                    "command": "node server.js &\ncurl http://127.0.0.1:3000/api",
+                    "command": "printf ok\u{001b}",
                     "explanation": "start and verify"
                 }),
             ),
@@ -192,7 +192,7 @@
             false,
         )
         .unwrap_err();
-        assert!(error.contains("multiline commands are not allowed"));
+        assert!(error.contains("unsupported control character"));
         assert!(error.contains("doNotRetry=true"));
         assert!(error.contains("suggestedTool=write_file"));
         assert!(error.contains("do not use cat, echo, heredocs"));
@@ -201,7 +201,7 @@
         let mut unrooted_request = request(
             "run_terminal_command",
             json!({
-                "command": "printf first\nprintf second",
+                "command": "printf first\u{0000}",
                 "explanation": "write generated content"
             }),
         );
@@ -211,6 +211,47 @@
             normalize_arguments(&unrooted_request, &unrooted_target, None, false).unwrap_err();
         assert!(error.contains("suggestedAction=split_bounded_commands"));
         assert!(!error.contains("suggestedTool=write_file"));
+    }
+
+    #[test]
+    fn complete_scripts_always_use_direct_execution_and_preserve_arguments() {
+        for command in [
+            "pwd\nls",
+            "cat <<'EOF'\nhello\nEOF",
+            "printf\tvalue",
+            "printf one\r\nprintf two",
+        ] {
+            for surface in [
+                AgentExecutionSurface::Direct,
+                AgentExecutionSurface::BoundTerminal,
+            ] {
+                for session_target in [local_target(), remote_target()] {
+                    let mut call = request(
+                        "run_terminal_command",
+                        json!({"command": command, "explanation": "execute a complete script", "timeoutMs": 12000}),
+                    );
+                    call.execution_surface = surface;
+                    call.target = session_target;
+                    assert!(terminal_command_requires_direct_lifecycle(&call).unwrap());
+                    let target = target_native(&call.target).unwrap();
+                    // Normalization itself must preserve this invariant even if
+                    // its caller has not precomputed the lifecycle requirement.
+                    let (name, arguments) = normalize_arguments(
+                        &call,
+                        &target,
+                        Some(TerminalVisibleCommandRoute::Unavailable),
+                        false,
+                    )
+                    .unwrap();
+                    assert_eq!(name, "exec_command");
+                    assert_eq!(arguments["command"], command);
+                    assert_eq!(arguments["timeoutMs"], 12000);
+                    assert_eq!(arguments["channel"], "direct");
+                    crate::agent_runtime::validate_tool_arguments_native(&name, &arguments)
+                        .unwrap();
+                }
+            }
+        }
     }
 
     #[test]

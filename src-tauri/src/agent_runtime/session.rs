@@ -22,7 +22,10 @@ use super::{
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_LABEL_BYTES: usize = 4 * 1024;
-const MAX_SESSION_EVENT_BYTES: usize = 256 * 1024;
+// Leave room for JSON escaping of 128 KiB writes and 240 KiB exact-diff
+// approval prompts. Large provider replay still moves to artifacts at 256 KiB.
+const MAX_SESSION_EVENT_BYTES: usize = 512 * 1024;
+const MAX_INLINE_REPLAY_EVENT_BYTES: usize = 256 * 1024;
 const MAX_SESSION_LOG_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_TOTAL_SESSION_LOG_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_SESSION_COUNT: usize = 512;
@@ -1902,6 +1905,20 @@ impl AgentSessionStore {
             .ok_or("Agent session was not found")?
             .loop_progress
             .counts(turn_id))
+    }
+
+    pub(super) fn loop_recovery_used(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<bool, String> {
+        let inner = self.lock_configured()?;
+        Ok(inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?
+            .loop_progress
+            .recovery_used(turn_id))
     }
 
     pub(super) fn driver_control(
@@ -4481,6 +4498,37 @@ pub(crate) fn event_payload_fits_storage_boundary(
     step_id: Option<&str>,
     payload: &AgentSessionEventPayload,
 ) -> Result<bool, String> {
+    event_payload_fits_boundary(
+        session_id,
+        turn_id,
+        step_id,
+        payload,
+        MAX_SESSION_EVENT_BYTES,
+    )
+}
+
+pub(crate) fn event_payload_fits_inline_replay_boundary(
+    session_id: &str,
+    turn_id: Option<&str>,
+    step_id: Option<&str>,
+    payload: &AgentSessionEventPayload,
+) -> Result<bool, String> {
+    event_payload_fits_boundary(
+        session_id,
+        turn_id,
+        step_id,
+        payload,
+        MAX_INLINE_REPLAY_EVENT_BYTES,
+    )
+}
+
+fn event_payload_fits_boundary(
+    session_id: &str,
+    turn_id: Option<&str>,
+    step_id: Option<&str>,
+    payload: &AgentSessionEventPayload,
+    limit: usize,
+) -> Result<bool, String> {
     let event = AgentSessionEvent::new(
         session_id.to_string(),
         MAX_JS_SAFE_INTEGER,
@@ -4490,7 +4538,7 @@ pub(crate) fn event_payload_fits_storage_boundary(
         payload.clone(),
     );
     serde_json::to_vec(&event)
-        .map(|encoded| encoded.len() <= MAX_SESSION_EVENT_BYTES)
+        .map(|encoded| encoded.len() <= limit)
         .map_err(|error| format!("failed to measure Agent session event: {error}"))
 }
 

@@ -66,7 +66,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "run_terminal_command".into(),
-            description: "Run one single-line frozen-host command; literal newlines, heredocs, and here-strings are invalid. Never embed generated file content here when write_file is available. Use write_file for small new files within the current output budget, and read_file plus apply_patch for focused changes. Split other multi-stage work across tool calls. Set background=true to receive a native processHandle, then use wait_process or kill_process and always clean up long-running services. command/explanation limits are 8192/2048 UTF-8 bytes. Use probe_http for target-loopback HTTP instead of curl, wget, or an embedded network client. Child Agents share limits; delegation does not bypass them. Set lifecycleTrust=directRequired for untrusted or sensitive lifecycle evidence. visible-terminal lifecycle is never security evidence or a sandbox.".into(),
+            description: "Run a frozen-host shell command or complete multiline script, including heredocs. Multiline scripts and tab-containing commands run through Direct execution, never by pasting lines into the visible terminal. Direct execution uses a separate process; visible-shell cd, aliases and environment changes do not carry over. Local Direct execution uses the frozen cwd when configured. Remote Direct execution requires a credential-backed profile and starts in the SSH account's default directory; use absolute paths or an explicit cd in the script. Never embed generated file content here when write_file is available. Use write_file for new files within the current output budget, and read_file plus apply_patch for focused changes. Set background=true to receive a native processHandle, then use wait_process or kill_process and always clean up long-running services. command/explanation limits are 8192/2048 UTF-8 bytes. Use probe_http for target-loopback HTTP instead of curl, wget, or an embedded network client. Child Agents share limits; delegation does not bypass them. Set lifecycleTrust=directRequired for untrusted or sensitive lifecycle evidence. visible-terminal lifecycle is never security evidence or a sandbox.".into(),
             input_schema: object_schema(
                 &["command", "explanation"],
                 json!({
@@ -74,7 +74,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 8192,
-                        "pattern": "^[^\\u0000-\\u001F\\u007F]*$"
+                        "pattern": "^[^\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F]*$"
                     },
                     "explanation": bounded_string(2048),
                     "lifecycleTrust": {
@@ -184,7 +184,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "write_file".into(),
-            description: "Atomically create/replace UTF-8 up to the 32 KiB safety ceiling, subject to the smaller current output budget. Use this instead of cat, echo, heredocs, or terminal commands for generated HTML/CSS/JS/text. New: {mustNotExist:true}; replace: read_file first, then use its SHA-256. Prefer apply_patch for existing files. Empty content is valid; build larger files from a small valid section with bounded apply_patch increments, completing all functionality before reporting success.".into(),
+            description: "Atomically create/replace UTF-8 up to the 128 KiB safety ceiling (131072 bytes), subject to the smaller current output budget and 240 KiB exact-diff limit. Use this instead of cat, echo, heredocs, or terminal commands for generated HTML/CSS/JS/text. New: {mustNotExist:true}; replace: read_file first, then use its SHA-256. Prefer apply_patch for existing files. Empty content is valid; build larger files from a small valid section with bounded apply_patch increments, completing all functionality before reporting success. Rejected size or text validation changes nothing and returns the actual byte size or offending control character; follow its recovery guidance.".into(),
             input_schema: object_schema(
                 &["path", "content", "precondition"],
                 json!({
@@ -206,15 +206,15 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
                 &["path", "oldString", "newString", "precondition"],
                 json!({
                     "path": bounded_string(4096),
-                    "oldString": bounded_string(super::MAX_WRITE_FILE_CONTENT_BYTES),
-                    "newString": { "type": "string", "maxLength": super::MAX_WRITE_FILE_CONTENT_BYTES },
+                    "oldString": bounded_string(super::MAX_EDIT_FILE_CONTENT_BYTES),
+                    "newString": { "type": "string", "maxLength": super::MAX_EDIT_FILE_CONTENT_BYTES },
                     "precondition": object_schema(&["sha256"], json!({ "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }))
                 }),
             ),
         },
         ModelToolDefinition {
             name: "apply_patch".into(),
-            description: "Digest-bound incremental patch for one existing UTF-8 file. Supply standard unified diff, not SEARCH/REPLACE or *** Begin Patch syntax. Example: --- original\n+++ modified\n@@ -1 +1 @@\n-old\n+new\n. Hunk line counts must be exact. Read the file first and copy its SHA-256 into the single precondition. On digest or context mismatch, read again and rebuild; never guess hashes. A patch with no content change fails. dryRun only validates; it does not write. After a successful write, use afterSha256 for the next edit. Use write_file to create or replace within its 32 KiB limit; preserve all unrelated content.".into(),
+            description: "Digest-bound incremental patch for one existing UTF-8 file. Supply standard unified diff, not SEARCH/REPLACE or *** Begin Patch syntax. Example: --- original\n+++ modified\n@@ -1 +1 @@\n-old\n+new\n. Hunk line counts must be exact. Read the file first and copy its SHA-256 into the single precondition. On digest or context mismatch, read again and rebuild; never guess hashes. A patch with no content change fails. dryRun only validates; it does not write. After a successful write, use afterSha256 for the next edit. Use write_file to create or replace within its 128 KiB limit; preserve all unrelated content.".into(),
             input_schema: object_schema(
                 &["patch", "preconditions"],
                 json!({
@@ -636,14 +636,14 @@ mod tests {
         assert!(terminal.description.contains("UTF-8 bytes"));
         assert!(terminal.description.contains("Use write_file"));
         assert!(terminal.description.contains("delegation does not bypass"));
-        assert!(terminal.description.contains("single-line"));
+        assert!(terminal.description.contains("multiline script"));
         assert!(terminal.description.contains("heredocs"));
         assert!(terminal.description.contains("Use probe_http"));
         assert!(terminal.description.contains("processHandle"));
         assert!(terminal.description.contains("always clean up"));
         assert_eq!(
             terminal.input_schema["properties"]["command"]["pattern"],
-            "^[^\\u0000-\\u001F\\u007F]*$"
+            "^[^\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F]*$"
         );
         assert_eq!(
             terminal.input_schema["properties"]["background"]["default"],

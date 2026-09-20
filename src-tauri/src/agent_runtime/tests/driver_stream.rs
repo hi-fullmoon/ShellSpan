@@ -23,8 +23,9 @@ fn incremental_loop_counts_match_full_history_for_long_and_alternating_turns() {
             );
         }
         assert_eq!(progress.counts("other-turn"), (0, 0));
+        let before = progress.counts("turn-1");
         progress.observe(&event(1_000, AgentSessionEventPayload::SessionResumed {}));
-        assert_eq!(progress.counts("turn-1"), (0, 0));
+        assert_eq!(progress.counts("turn-1"), before);
     }
     let mut progress = super::super::driver_progress::LoopProgress::default();
     let mut events = Vec::new();
@@ -185,6 +186,74 @@ async fn committed_loop_projection_survives_restart_and_rejected_batches() {
             .unwrap(),
         (0, 8)
     );
+}
+
+#[test]
+fn loop_recovery_is_durable_and_new_user_input_renews_it() {
+    let (root, sink) = persisted_stream();
+    let reason = Some("noProgress: repeated tool cycle".to_string());
+    assert!(recover_loop_if_possible(
+        &sink.sessions,
+        "stream-test",
+        "turn-1",
+        reason.clone(),
+        false
+    )
+    .unwrap()
+    .is_none());
+    assert!(sink
+        .sessions
+        .loop_recovery_used("stream-test", "turn-1")
+        .unwrap());
+    let reopened = AgentSessionStore::default();
+    reopened.configure(root.path().to_path_buf()).unwrap();
+    assert!(reopened
+        .loop_recovery_used("stream-test", "turn-1")
+        .unwrap());
+    assert_eq!(
+        recover_loop_if_possible(&reopened, "stream-test", "turn-1", reason.clone(), false)
+            .unwrap(),
+        reason
+    );
+    reopened
+        .read_events("stream-test", |events| {
+            let messages: Vec<_> = events
+                .iter()
+                .filter_map(|event| match &event.payload {
+                    AgentSessionEventPayload::UserMessage { message }
+                        if message.source.label == "loop-recovery" =>
+                    {
+                        Some(message)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(messages.len(), 1);
+            assert!(messages[0]
+                .content
+                .contains("materially different approach"));
+        })
+        .unwrap();
+    reopened
+        .append(
+            "stream-test",
+            Some("turn-1".into()),
+            Some("step-1".into()),
+            AgentSessionEventPayload::UserMessage {
+                message: AgentInboxMessage {
+                    message_id: "new-instruction".into(),
+                    client_submission_id: None,
+                    content: "Use a different approach".into(),
+                    source: AgentMessageSource::user(),
+                    images: Vec::new(),
+                    terminal_context: None,
+                },
+            },
+        )
+        .unwrap();
+    assert!(!reopened
+        .loop_recovery_used("stream-test", "turn-1")
+        .unwrap());
 }
 
 fn persisted_stream() -> (tempfile::TempDir, Arc<DurableModelStreamSink>) {

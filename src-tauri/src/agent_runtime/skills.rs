@@ -447,7 +447,8 @@ pub(crate) fn slash_candidates(
 ) -> Result<Vec<(String, Vec<String>)>, String> {
     let mut candidates: Vec<(String, Vec<String>)> = Vec::new();
     for message in messages.iter().filter(|m| direct_skill_input(m)) {
-        for token in message.content.split_whitespace() {
+        let prompt = crate::ai_attachment::user_prompt(&message.content);
+        for token in prompt.split_whitespace() {
             let Some(name) = token.strip_prefix('/').filter(|name| valid_name(name)) else {
                 continue;
             };
@@ -596,6 +597,22 @@ mod tests {
         m.content = (0..17).map(|i| format!("/s-{i} ")).collect();
         assert!(slash_candidates(&[m]).is_err());
     }
+    #[test]
+    fn skill_document_attachments_only_invoke_explicit_prompt_commands() {
+        let message = AgentInboxMessage {
+            images: Vec::new(),
+            message_id: "document-message".into(),
+            client_submission_id: Some("document-submission".into()),
+            content: r#"{"shellspanDocumentMessage":1,"text":"/review summarize this document","documents":[{"id":"notes","name":"notes.txt","size":18,"text":"Example /deploy command"}]}"#.into(),
+            source: super::super::AgentMessageSource::user(),
+            terminal_context: None,
+        };
+        assert_eq!(
+            slash_candidates(&[message]).unwrap(),
+            vec![("review".into(), vec!["document-message".into()])]
+        );
+    }
+
     #[test]
     fn skill_parser_file_and_metadata_bounds() {
         let prefix = b"---\nname: sample\ndescription: d\n---\n";

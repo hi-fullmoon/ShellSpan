@@ -755,9 +755,12 @@ fn compute_write_preview(
             }
         }
     }
-    if !write_file_content_is_valid(&arguments.content) {
-        return Err("write_file content failed native text bounds".into());
-    }
+    crate::agent_runtime::validate_file_text_native(
+        "write_file",
+        "content",
+        &arguments.content,
+        MAX_WRITE_FILE_CONTENT_BYTES,
+    )?;
     let before_text = match before.as_deref() {
         Some(bytes) => std::str::from_utf8(bytes)
             .map_err(|_| "write_file only replaces UTF-8 text files".to_string())?,
@@ -776,7 +779,7 @@ fn compute_write_preview(
         }
     } else {
         if exact_diff.len() > MAX_EXACT_DIFF_BYTES {
-            return Err("write_file exact diff exceeds the native output limit".into());
+            return Err(format!("write_file diff_too_large: exact diff has {} UTF-8 bytes; maximum is {MAX_EXACT_DIFF_BYTES}. No file was changed. Use read_file plus focused apply_patch or edit_file increments instead of replacing the whole file.", exact_diff.len()));
         }
         Some(exact_diff)
     };
@@ -789,13 +792,6 @@ fn compute_write_preview(
         diff,
         metadata,
     })
-}
-
-fn write_file_content_is_valid(value: &str) -> bool {
-    value.len() <= MAX_WRITE_FILE_CONTENT_BYTES
-        && !value
-            .chars()
-            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
 }
 
 #[derive(Clone)]
@@ -2410,8 +2406,8 @@ mod tests {
             session_id: "terminal".into(),
             cwd: Some(workspace.path().to_string_lossy().to_string()),
         };
-        let large_content = format!("<!doctype html>\n{}", "界".repeat(3_000));
-        assert!(large_content.len() > 8_192);
+        let large_content = format!("<!doctype html>\n{}", "<p>界面内容</p>\n".repeat(3_000));
+        assert!(large_content.len() > 32 * 1024);
         let create = AgentToolCallNative {
             request_id: "request".into(),
             call_id: "create".into(),

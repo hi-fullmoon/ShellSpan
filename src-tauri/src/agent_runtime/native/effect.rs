@@ -75,6 +75,35 @@ pub(crate) fn assess_effect_native(
 }
 
 fn classify_command_effect(command: &str) -> AgentEffectKindNative {
+    if let Some(commands) = super::shell_policy::literal_command_chain(command) {
+        return commands
+            .into_iter()
+            .map(classify_single_command_effect)
+            .max_by_key(|effect| effect_priority(*effect))
+            .unwrap_or(AgentEffectKindNative::StateChange);
+    }
+    let effect = classify_single_command_effect(command);
+    // Multiline syntax that cannot be safely split is a whole shell program,
+    // never a read based on its first command. Retain destructive classification.
+    if command.contains(['\n', '\r']) && effect != AgentEffectKindNative::Destructive {
+        AgentEffectKindNative::ExternalSideEffect
+    } else {
+        effect
+    }
+}
+
+fn effect_priority(effect: AgentEffectKindNative) -> u8 {
+    match effect {
+        AgentEffectKindNative::None => 0,
+        AgentEffectKindNative::ReadOnly => 1,
+        AgentEffectKindNative::SensitiveRead => 2,
+        AgentEffectKindNative::StateChange => 3,
+        AgentEffectKindNative::ExternalSideEffect => 4,
+        AgentEffectKindNative::Destructive => 5,
+    }
+}
+
+fn classify_single_command_effect(command: &str) -> AgentEffectKindNative {
     let normalized = command.trim().to_ascii_lowercase();
     let executable = command_word_name(
         normalized
@@ -393,6 +422,21 @@ fn is_plain_windows_discovery_command(command: &str) -> bool {
 }
 
 pub(crate) fn command_requires_direct_lifecycle_native(command: &str) -> bool {
+    if command.contains(['\n', '\r', '\t']) {
+        return true;
+    }
+    if let Some(commands) = super::shell_policy::literal_command_chain(command) {
+        if commands.into_iter().any(|part| {
+            matches!(
+                classify_single_command_effect(part),
+                AgentEffectKindNative::SensitiveRead
+                    | AgentEffectKindNative::Destructive
+                    | AgentEffectKindNative::ExternalSideEffect
+            )
+        }) {
+            return true;
+        }
+    }
     matches!(
         classify_command_effect(command),
         AgentEffectKindNative::SensitiveRead
@@ -486,6 +530,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn command_chains_retain_the_strongest_effect_and_complex_scripts_are_conservative() {
+        for (command, expected) in [
+            ("pwd\nls -la", AgentEffectKindNative::ReadOnly),
+            ("pwd && rm ./old", AgentEffectKindNative::Destructive),
+            ("pwd\nrm ./old", AgentEffectKindNative::Destructive),
+            (
+                "pwd\ncurl https://example.test",
+                AgentEffectKindNative::ExternalSideEffect,
+            ),
+            ("pwd\ncat ./config", AgentEffectKindNative::SensitiveRead),
+            ("pwd\ntouch ./new", AgentEffectKindNative::StateChange),
+            (
+                "cat <<'EOF'\nhello\nEOF",
+                AgentEffectKindNative::ExternalSideEffect,
+            ),
+            (
+                "pwd\nif true; then touch new; fi",
+                AgentEffectKindNative::ExternalSideEffect,
+            ),
+            (
+                "printf ok\necho $(touch new)",
+                AgentEffectKindNative::ExternalSideEffect,
+            ),
+        ] {
+            assert_eq!(classify_command_effect(command), expected, "{command}");
+        }
+    }
+
+    #[test]
     fn command_classifier_is_conservative_for_unknown_and_high_impact_commands() {
         assert_eq!(
             classify_command_effect("df -h"),
@@ -561,6 +634,8 @@ mod tests {
     fn security_sensitive_command_effects_require_direct_lifecycle_evidence() {
         for command in [
             "cat ~/.ssh/id_ed25519",
+            "cat ./config; touch ./new",
+            "pwd\nls",
             "/bin/cat ~/.ssh/id_ed25519",
             "rm -rf /tmp/example",
             "/bin/rm -rf /tmp/example",

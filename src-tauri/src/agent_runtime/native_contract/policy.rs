@@ -419,9 +419,12 @@ pub fn validate_tool_arguments_native(
     match tool_name {
         "exec_command" => {
             let value = decode_arguments::<ExecCommandArgumentsNative>(arguments)?;
-            if value.command.is_empty()
+            if value.command.trim().is_empty()
                 || value.command.len() > 8192
-                || value.command.chars().any(char::is_control)
+                || value
+                    .command
+                    .chars()
+                    .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
                 || value.explanation.trim().is_empty()
                 || value.explanation.len() > 2_048
                 || value
@@ -627,9 +630,12 @@ pub fn validate_tool_arguments_native(
         "write_file" => {
             let value = decode_arguments::<WriteFileArgumentsNative>(arguments)?;
             validate_path(&value.path)?;
-            if !write_file_content_is_valid(&value.content) {
-                return Err("invalid write_file content".into());
-            }
+            validate_file_text_native(
+                "write_file",
+                "content",
+                &value.content,
+                MAX_WRITE_FILE_CONTENT_BYTES,
+            )?;
             match value.precondition {
                 WriteFilePreconditionNative::MustNotExist(precondition)
                     if precondition.must_not_exist => {}
@@ -645,12 +651,19 @@ pub fn validate_tool_arguments_native(
             let value = decode_arguments::<EditFileArgumentsNative>(arguments)?;
             validate_path(&value.path)?;
             validate_sha256(&value.precondition.sha256)?;
-            if value.old_string.is_empty()
-                || value.old_string == value.new_string
-                || !write_file_content_is_valid(&value.old_string)
-                || !write_file_content_is_valid(&value.new_string)
-            {
+            if value.old_string.is_empty() || value.old_string == value.new_string {
                 return Err("edit_file requires distinct UTF-8 strings up to 32 KiB and a nonempty oldString".into());
+            }
+            for (field, text) in [
+                ("oldString", &value.old_string),
+                ("newString", &value.new_string),
+            ] {
+                validate_file_text_native(
+                    "edit_file",
+                    field,
+                    text,
+                    super::MAX_EDIT_FILE_CONTENT_BYTES,
+                )?;
             }
         }
         "apply_patch" => {
@@ -723,11 +736,22 @@ fn validate_sha256(value: &str) -> Result<(), String> {
     }
 }
 
-fn write_file_content_is_valid(value: &str) -> bool {
-    value.len() <= MAX_WRITE_FILE_CONTENT_BYTES
-        && !value
-            .chars()
-            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+pub(crate) fn validate_file_text_native(
+    tool: &str,
+    field: &str,
+    value: &str,
+    limit: usize,
+) -> Result<(), String> {
+    if value.len() > limit {
+        return Err(format!("{tool} content_too_large: {field} has {} UTF-8 bytes; maximum is {limit}. No file was changed. Do not retry the same content; use smaller write_file sections for a new file, then read_file plus apply_patch or edit_file increments. Keep the current digest and complete all sections.", value.len()));
+    }
+    if let Some((offset, character)) = value
+        .char_indices()
+        .find(|(_, c)| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+    {
+        return Err(format!("{tool} invalid_control_character: {field} contains U+{:04X} at UTF-8 byte offset {offset}. No file was changed. Remove that control character; newlines and tabs are allowed.", character as u32));
+    }
+    Ok(())
 }
 
 fn target_shape_is_valid(target: &AgentToolTargetNative) -> bool {
@@ -941,6 +965,44 @@ mod tests {
                 validate_tool_arguments_native("write_file", &arguments).is_err(),
                 "unexpectedly accepted {arguments}"
             );
+        }
+    }
+
+    #[test]
+    fn file_validation_reports_utf8_bytes_and_control_character_separately() {
+        let error = validate_tool_arguments_native("write_file", &json!({"path":"index.html", "content":"界".repeat(43691), "precondition":{"mustNotExist":true}})).unwrap_err();
+        assert!(error.contains("content_too_large"));
+        assert!(error.contains("131073 UTF-8 bytes"));
+        assert!(error.contains("131072"));
+        assert!(error.contains("No file was changed"));
+        assert!(error.contains("apply_patch"));
+        let error = validate_tool_arguments_native("write_file", &json!({"path":"index.html", "content":"界\u{001b}", "precondition":{"mustNotExist":true}})).unwrap_err();
+        assert!(error.contains("invalid_control_character"));
+        assert!(error.contains("U+001B"));
+        assert!(error.contains("byte offset 3"));
+        assert!(validate_tool_arguments_native("edit_file", &json!({"path":"index.html", "oldString":"x", "newString":"x".repeat(32769), "precondition":{"sha256":"0".repeat(64)}})).unwrap_err().contains("32768"));
+    }
+
+    #[test]
+    fn multiline_is_valid_only_for_direct_exec_and_other_controls_stay_rejected() {
+        for command in ["pwd\nls", "cat <<'EOF'\ntext\nEOF", "printf\tvalue"] {
+            assert!(validate_tool_arguments_native(
+                "exec_command",
+                &json!({"command":command,"explanation":"inspect", "channel":"direct"})
+            )
+            .is_ok());
+            assert!(validate_tool_arguments_native(
+                "terminal_execute",
+                &json!({"command":command,"explanation":"inspect"})
+            )
+            .is_err());
+        }
+        for command in [" \n\t", "pwd\u{0000}", "pwd\u{001b}", "pwd\u{0085}"] {
+            assert!(validate_tool_arguments_native(
+                "exec_command",
+                &json!({"command":command,"explanation":"inspect", "channel":"direct"})
+            )
+            .is_err());
         }
     }
 

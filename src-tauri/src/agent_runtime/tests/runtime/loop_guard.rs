@@ -92,7 +92,7 @@ async fn pending_user_steer_takes_priority_over_the_repetition_guard() {
 
 #[tokio::test]
 async fn repeated_identical_tool_results_stop_before_another_model_request() {
-    let scripts = (0..4)
+    let scripts = (0..7)
         .map(|index| tool_response(vec![repeated_read_call(index)]))
         .collect();
     let model = FakeAdapter::new(scripts);
@@ -113,8 +113,19 @@ async fn repeated_identical_tool_results_stop_before_another_model_request() {
     runtime.start(id, provider(), None).unwrap();
     runtime.await_idle(id).await.unwrap();
 
-    assert_eq!(model.request_count(), 3);
-    assert_eq!(native.executions.load(Ordering::Acquire), 3);
+    assert_eq!(model.request_count(), 6);
+    assert_eq!(native.executions.load(Ordering::Acquire), 6);
+    assert!(model.requests.lock().unwrap()[3]
+        .messages
+        .iter()
+        .any(|message| matches!(
+            message,
+            ModelMessage::User { content } if content.contains("Potential tool loop detected")
+        )));
+    assert_eq!(all_events(&runtime, id).iter().filter(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::UserMessage { message } if message.source.label == "loop-recovery"
+    )).count(), 1);
     assert_eq!(
         runtime.session(id).unwrap().status,
         AgentSessionStatus::Failed
@@ -127,8 +138,8 @@ async fn repeated_identical_tool_results_stop_before_another_model_request() {
 }
 
 #[tokio::test]
-async fn alternating_tool_cycle_is_stopped_before_a_seventh_request() {
-    let scripts = (0..7)
+async fn alternating_tool_cycle_gets_one_recovery_before_stopping() {
+    let scripts = (0..21)
         .map(|index| {
             let mut call = repeated_read_call(index);
             call.arguments = json!({ "path": if index % 2 == 0 { "." } else { "./" } });
@@ -148,7 +159,7 @@ async fn alternating_tool_cycle_is_stopped_before_a_seventh_request() {
         .unwrap();
     runtime.start(id, provider(), None).unwrap();
     runtime.await_idle(id).await.unwrap();
-    assert_eq!(model.request_count(), 6);
+    assert_eq!(model.request_count(), 20);
     assert_eq!(
         runtime.session(id).unwrap().status,
         AgentSessionStatus::Failed
