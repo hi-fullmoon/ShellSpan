@@ -14,9 +14,10 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::agent_runtime::{
-    AgentToolCallNative, AgentToolTargetNative, ApplyPatchArgumentsNative, EditFileArgumentsNative,
-    FileEncodingNative, ListDirectoryArgumentsNative, PatchPreconditionNative,
-    ReadFileArgumentsNative, SearchModeNative, SearchTextArgumentsNative, TransferDirectionNative,
+    decode_write_file_arguments_native, AgentToolCallNative, AgentToolTargetNative,
+    ApplyPatchArgumentsNative, EditFileArgumentsNative, FileEncodingNative,
+    ListDirectoryArgumentsNative, PatchPreconditionNative, ReadFileArgumentsNative,
+    SearchModeNative, SearchTextArgumentsNative, TransferDirectionNative,
     TransferFileArgumentsNative, WriteFileArgumentsNative, WriteFilePreconditionNative,
     MAX_WRITE_FILE_CONTENT_BYTES,
 };
@@ -143,9 +144,7 @@ pub(super) fn preview_file_call_native(
 ) -> Result<AgentCallPreviewNative, String> {
     match call.tool_name.as_str() {
         "write_file" => {
-            let arguments: WriteFileArgumentsNative =
-                serde_json::from_value(call.arguments.clone())
-                    .map_err(|error| format!("invalid write_file arguments: {error}"))?;
+            let arguments = decode_write_file_arguments_native(&call.arguments)?;
             let preview = compute_write_preview(
                 &call.target,
                 &arguments,
@@ -418,9 +417,7 @@ fn execute_write_file(
     operation: &FileOperationGuardNative,
 ) -> Result<FileToolOutputNative, String> {
     operation.ensure_active()?;
-    let arguments: WriteFileArgumentsNative =
-        serde_json::from_value(context.call.arguments.clone())
-            .map_err(|error| format!("invalid write_file arguments: {error}"))?;
+    let arguments = decode_write_file_arguments_native(&context.call.arguments)?;
     let preview = compute_write_preview(
         &context.call.target,
         &arguments,
