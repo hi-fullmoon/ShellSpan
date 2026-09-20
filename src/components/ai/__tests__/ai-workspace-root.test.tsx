@@ -454,7 +454,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       expect(screen.getByRole('textbox')).toBeVisible();
       expect(screen.getByRole('button', { name: 'Conversation history' })).toBeVisible();
       expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
-      expect(root?.querySelector('.ai-composer-add')).toBeNull();
+      expect(root?.querySelector('.ai-composer-add')).toBeInTheDocument();
       expect(root?.querySelector('[data-slot="message-scroller"]'))
         .toContainElement(root?.querySelector('[data-message-scroller-viewport]') ?? null);
       expect(root?.querySelectorAll('[data-message-scroller-viewport]')).toHaveLength(1);
@@ -645,7 +645,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     );
 
     expect(screen.getByTestId('ask-image-draft')).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Add images' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add images' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
   });
 
@@ -797,7 +797,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       expect(screen.getByRole('button', { name })).toBeInTheDocument();
     }
     expect(container.querySelectorAll('[data-base-ui-tooltip-trigger]').length).toBeGreaterThanOrEqual(5);
-    expect(container.querySelector('.ai-composer-add')).toBeNull();
+    expect(container.querySelector('.ai-composer-add')).toBeInTheDocument();
     expect(within(screen.getByRole('button', { name: 'Conversation history' })).queryByText(/./))
       .toBeNull();
   });
