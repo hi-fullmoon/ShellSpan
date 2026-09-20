@@ -1,5 +1,64 @@
     use super::*;
 
+    fn prepare_test_integration(
+        shell: TerminalShellKind,
+    ) -> (TempDir, PreparedLocalShellIntegration) {
+        let fixture = tempfile::tempdir().unwrap();
+        let data_dir = crate::shellspan_data_dir(&fixture.path().join("user home"));
+        let integration = PreparedLocalShellIntegration::prepare(shell, &data_dir).unwrap();
+        (fixture, integration)
+    }
+
+    #[test]
+    fn local_bootstraps_use_app_temporary_storage_and_clean_up_only_their_own_directory() {
+        let shell = if cfg!(windows) {
+            TerminalShellKind::WindowsPowerShell
+        } else {
+            TerminalShellKind::Bash
+        };
+        let (fixture, first) = prepare_test_integration(shell);
+        let data_dir = crate::shellspan_data_dir(&fixture.path().join("user home"));
+        let temporary_root = data_dir.join("tmp");
+        let second = PreparedLocalShellIntegration::prepare(shell, &data_dir).unwrap();
+        let first_root = first.bootstrap_root.path().to_path_buf();
+        let second_root = second.bootstrap_root.path().to_path_buf();
+        assert_eq!(first_root.parent(), Some(temporary_root.as_path()));
+        assert_eq!(second_root.parent(), Some(temporary_root.as_path()));
+        assert_ne!(first_root, second_root);
+        assert!(first.bootstrap_path.is_file());
+        assert!(second.bootstrap_path.is_file());
+        let unrelated = temporary_root.join("keep.txt");
+        fs::write(&unrelated, "keep").unwrap();
+
+        drop(first);
+        assert!(!first_root.exists());
+        assert!(second.bootstrap_path.is_file());
+        assert_eq!(fs::read_to_string(&unrelated).unwrap(), "keep");
+        drop(second);
+        assert!(!second_root.exists());
+        assert!(temporary_root.is_dir());
+    }
+
+    #[test]
+    fn unavailable_app_temporary_storage_fails_without_falling_back() {
+        let fixture = tempfile::tempdir().unwrap();
+        fs::write(fixture.path().join("tmp"), "occupied").unwrap();
+        let shell = if cfg!(windows) {
+            TerminalShellKind::WindowsPowerShell
+        } else {
+            TerminalShellKind::Bash
+        };
+        let error = PreparedLocalShellIntegration::prepare(shell, fixture.path())
+            .err()
+            .expect("a file blocking the temporary directory must reject setup");
+        assert!(error.starts_with("failed to create shell integration temporary root:"));
+        assert_eq!(fs::read_dir(fixture.path()).unwrap().count(), 1);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("tmp")).unwrap(),
+            "occupied"
+        );
+    }
+
     #[test]
     fn ssh_control_decoder_accepts_split_frames_and_rejects_raw_forgery_bytes() {
         let mut decoder = TerminalIntegrationStreamDecoder::default();
@@ -186,7 +245,7 @@
         use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 
         for shell in [TerminalShellKind::Bash, TerminalShellKind::Zsh] {
-            let integration = PreparedLocalShellIntegration::prepare(shell).unwrap();
+            let (_fixture, integration) = prepare_test_integration(shell);
             let root = integration.bootstrap_root.path().to_path_buf();
             let fifo = root.join("control");
             assert_eq!(
@@ -208,7 +267,7 @@
     fn posix_reader_stop_and_failure_cleanup_are_bounded() {
         use std::sync::mpsc;
 
-        let integration = PreparedLocalShellIntegration::prepare(TerminalShellKind::Bash).unwrap();
+        let (_fixture, integration) = prepare_test_integration(TerminalShellKind::Bash);
         let root = integration.bootstrap_root.path().to_path_buf();
         let mut handle = integration.start_reader(|_| Ok(()), |_| {});
         handle.stop();
@@ -216,13 +275,13 @@
         drop(handle);
         assert!(!root.exists(), "normal close leaked {}", root.display());
 
-        let integration = PreparedLocalShellIntegration::prepare(TerminalShellKind::Zsh).unwrap();
+        let (_fixture, integration) = prepare_test_integration(TerminalShellKind::Zsh);
         let root = integration.bootstrap_root.path().to_path_buf();
         let handle = integration.start_reader(|_| Ok(()), |_| {});
         drop(handle);
         assert!(!root.exists(), "disconnect leaked {}", root.display());
 
-        let integration = PreparedLocalShellIntegration::prepare(TerminalShellKind::Bash).unwrap();
+        let (_fixture, integration) = prepare_test_integration(TerminalShellKind::Bash);
         let root = integration.bootstrap_root.path().to_path_buf();
         let fifo = root.join("control");
         let (closed_tx, closed_rx) = mpsc::channel();
@@ -245,7 +304,7 @@
     #[cfg(unix)]
     #[test]
     fn posix_same_uid_reopen_is_documented_out_of_scope_tampering() {
-        let integration = PreparedLocalShellIntegration::prepare(TerminalShellKind::Zsh).unwrap();
+        let (_fixture, integration) = prepare_test_integration(TerminalShellKind::Zsh);
         let fifo = integration.bootstrap_root.path().join("control");
 
         let mut same_uid_writer = File::options().write(true).open(&fifo).unwrap();
@@ -289,7 +348,7 @@
             .unwrap();
         let mut reader = pair.master.try_clone_reader().unwrap();
         let writer = Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
-        let integration = PreparedLocalShellIntegration::prepare(shell).unwrap();
+        let (_fixture, integration) = prepare_test_integration(shell);
         let integration_root = integration.bootstrap_root.path().to_path_buf();
         let integration_id = integration.integration_id().to_string();
         broker
@@ -800,7 +859,7 @@
             .unwrap();
         let mut reader = pair.master.try_clone_reader().unwrap();
         let writer = Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
-        let integration = PreparedLocalShellIntegration::prepare(shell).unwrap();
+        let (_fixture, integration) = prepare_test_integration(shell);
         let _history_fixture = if shell == TerminalShellKind::WindowsPowerShell {
             let root = tempfile::tempdir().unwrap();
             let history_path = root.path().join("history.txt");

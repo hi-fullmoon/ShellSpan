@@ -229,13 +229,17 @@ pub(crate) struct PreparedLocalShellIntegration {
 }
 
 impl PreparedLocalShellIntegration {
-    pub(crate) fn prepare(shell: TerminalShellKind) -> Result<Self, String> {
+    pub(crate) fn prepare(shell: TerminalShellKind, data_dir: &Path) -> Result<Self, String> {
         if !shell.supported() {
             return Err("TERMINAL_INTEGRATION_UNSUPPORTED_SHELL".into());
         }
+        let temporary_root = data_dir.join("tmp");
+        fs::create_dir_all(&temporary_root).map_err(|error| {
+            format!("failed to create shell integration temporary root: {error}")
+        })?;
         let bootstrap_root = tempfile::Builder::new()
             .prefix("shellspan-terminal-integration-")
-            .tempdir()
+            .tempdir_in(&temporary_root)
             .map_err(|error| format!("failed to create shell integration root: {error}"))?;
         #[cfg(unix)]
         {
