@@ -150,17 +150,17 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
       ...(matches(t('ai.workspace.mentions.upload'), t('ai.workspace.addMenu.fileHint')) ? [{ key: 'upload', label: t('ai.workspace.mentions.upload'), detail: t('ai.workspace.mentions.localAttachment'), icon: <PaperclipIcon data-icon="inline-start" />, choose: () => { replaceToken(''); context.onUpload(); } }] : []),
       ...(query && matches(t('ai.workspace.mentions.project'), targetLabel ?? '') ? [{ key: 'project', label: t('ai.workspace.mentions.project'), detail: targetLabel, icon: <FolderOpenIcon data-icon="inline-start" />, choose: () => { setBrowsing(true); if (needsRoot) { setError(null); setRootOpen(true); } } }] : []),
     ] },
-    { label: t('ai.workspace.skills.title'), options: context.agent ? builtinSkills.filter(skill => matches(skill.name, skill.description, skill.descriptionZh)).map(skill => ({
+    ...(context.agent ? [{ label: t('ai.workspace.skills.title'), options: builtinSkills.filter(skill => matches(skill.name, skill.description, skill.descriptionZh)).map(skill => ({
       key: `skill:${skill.name}`, label: locale === 'zh-CN' ? skill.descriptionZh : skill.description, detail: `/${skill.name}`, icon: <BookOpenIcon data-icon="inline-start" />,
       choose: () => replaceToken(`/${skill.name} `),
-    })) : [], notice: context.agent ? undefined : t('ai.workspace.addMenu.agentOnly') },
+    })) }] : []),
     { label: t('ai.workspace.addMenu.history'), options: normalized && !context.sessionsLoading && !context.sessionsError && context.onSession
       ? (context.sessions ?? []).filter(session => session.id !== context.currentSessionId && !session.archived && isTopLevelAiSession(session, context.sessions ?? []) && matches(session.title))
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).map(session => ({ key: `chat:${session.id}`, label: session.title, detail: t('ai.workspace.addMenu.chat'), icon: <MessageCircleIcon data-icon="inline-start" />,
           choose: () => { replaceToken(''); requestAnimationFrame(() => context.onSession?.(session)); },
         }))
       : normalized && context.sessionsError ? [{ key: 'retry-history', label: t('ai.workspace.addMenu.retry'), icon: <RefreshCwIcon data-icon="inline-start" />, choose: () => context.onRefreshSessions?.() }] : [],
-      notice: !normalized ? t('ai.workspace.addMenu.searchHistoryHint') : context.sessionsLoading ? t('ai.workspace.addMenu.loading') : undefined,
+      notice: !normalized ? t(context.agent ? 'ai.workspace.addMenu.mentionSearchHint' : 'ai.workspace.addMenu.searchHistoryHint') : context.sessionsLoading ? t('ai.workspace.addMenu.loading') : undefined,
     },
     ...(showFiles ? [{ label: t('ai.workspace.mentions.project'), options: needsRoot
       ? [{ key: 'root', label: t('ai.workspace.files.chooseRoot'), detail: targetLabel, icon: <FolderOpenIcon data-icon="inline-start" />, choose: () => { setError(null); setRootOpen(true); } }]

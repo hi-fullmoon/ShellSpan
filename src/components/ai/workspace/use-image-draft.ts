@@ -24,6 +24,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
   const current = useRef<ImageDraft | null>(null);
   const epoch = useRef(0);
   const running = useRef(false);
+  const cancelling = useRef<number | null>(null);
   const ready = useRef(false);
   const saving = useRef<{ generation: number; promise: Promise<void> } | null>(null);
   useEffect(() => {
@@ -136,13 +137,15 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
         current.current = { owner: value.owner, revision: value.revision + 1, text: '', images: [] }; setDraft(current.current);
         accepted(value);
       }
-    } catch (e) { if (isCurrent(generation)) reportError(String(e)); }
+    } catch (e) { if (isCurrent(generation) && cancelling.current !== generation) reportError(String(e)); }
     finally { if (isCurrent(generation)) { running.current = false; setBusy(false); } }
   }
   async function cancel(): Promise<void> {
     const generation = epoch.current;
     const value = current.current;
     if (!value?.operation) { ++epoch.current; running.current = false; setBusy(false); setPendingFiles([]); return; }
+    if (cancelling.current === generation) return;
+    cancelling.current = generation;
     try {
       const committed = await invokeCancelAgentImageSubmission({ sessionId: value.operation.sessionId, clientOperationId: value.operation.id });
       if (!isCurrent(generation)) return;
@@ -153,6 +156,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       ++epoch.current;
       running.current = false; setBusy(false); reportError('IMAGE_CANCELLED');
     } catch (e) { if (isCurrent(generation)) reportError(String(e)); }
+    finally { if (cancelling.current === generation) cancelling.current = null; }
   }
   return { owner, draft, pendingFiles, busy, submittedOperationId, error, add, remove, send, cancel, locked: Boolean(draft?.operation), reportError };
 }

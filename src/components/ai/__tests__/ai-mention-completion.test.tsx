@@ -47,7 +47,7 @@ describe('grouped mention completion', () => {
     expect(await screen.findByRole('option', { name: 'Upload local files' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('group', { name: 'Skills' })).toBeVisible();
     expect(screen.queryByRole('group', { name: 'Chat history' })).toBeNull();
-    expect(screen.getByText('Type to search chat history')).toBeVisible();
+    expect(screen.getByText('Type @ followed by a keyword in the message input to search skills or chats')).toBeVisible();
     expect(editor).toHaveFocus();
     expect(screen.queryByText('Keep typing to search · ↑↓ to choose · Enter to insert · Esc to close')).toBeNull();
     expect(screen.getByRole('listbox')).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');

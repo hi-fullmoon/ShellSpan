@@ -91,9 +91,10 @@ describe('chat image previews', () => {
     const attachment = screen.getByRole('img', { name: image.name }).closest('[data-slot="attachment"]');
     expect(attachment).toHaveClass('has-data-[slot=attachment-media]:p-0');
     expect(attachment).not.toHaveClass('has-data-[slot=attachment-media]:p-2');
+    expect(attachment).toHaveClass('focus-within:ring-0');
+    expect(attachment).not.toHaveClass('focus-within:ring-1');
     const actions = screen.getByRole('button', { name: 'Remove image screenshot.png' }).closest('[data-slot="attachment-actions"]');
-    expect(actions).toHaveClass('group-data-[orientation=vertical]/attachment:top-0.75', 'group-data-[orientation=vertical]/attachment:right-0.75');
-    expect(actions).not.toHaveClass('group-data-[orientation=vertical]/attachment:top-3', 'group-data-[orientation=vertical]/attachment:right-3');
+    expect(actions).toHaveClass('absolute', 'group-data-[orientation=vertical]/attachment:top-0.75', 'group-data-[orientation=vertical]/attachment:right-0.75');
     const { dialog } = await openPreview();
     fireEvent.error(within(dialog).getByRole('img'));
     expect(within(dialog).getByRole('status')).toHaveTextContent('The image file is missing');
