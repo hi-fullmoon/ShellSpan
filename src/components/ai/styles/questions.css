@@ -1,4 +1,6 @@
-.ai-question-panel {
+.ai-question-panel,
+.ai-composer-add-menu,
+.ai-completion-popup {
   border-radius: 22px;
   background: var(--ai-surface);
   box-shadow: var(--ai-elevation-soft);
@@ -171,7 +173,9 @@
 }
 
 @media (max-width: 420px) {
-  .ai-question-panel {
+  .ai-question-panel,
+  .ai-composer-add-menu,
+  .ai-completion-popup {
     border-radius: 14px;
   }
 }

@@ -60,20 +60,21 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     await user.click(screen.getByRole('button', { name: 'Add file or folder' }));
     const file = await screen.findByRole('menuitem', { name: 'Add file' });
     expect(file).toBeVisible();
-    expect(file).toHaveClass('min-h-[34px]', 'gap-2', 'px-2');
-    expect(file.closest('[data-slot="dropdown-menu-content"]')).toHaveClass('ai-composer-add-menu', 'p-[3px]');
+    expect(file).toHaveClass('min-h-7', 'gap-1.5');
+    expect(file.closest('[data-slot="dropdown-menu-content"]')).toHaveClass('ai-composer-add-menu', 'min-h-0', 'overflow-hidden');
     expect(screen.getByRole('menuitem', { name: 'Add folder' })).toBeVisible();
-    expect(screen.queryByRole('menuitem', { name: 'Add images' })).toBeNull();
+    expect(screen.getByText('Skills')).toBeVisible();
+    expect(screen.getByText('Chat history')).toBeVisible();
   });
-  it('opens the image picker directly in Ask mode', async () => {
+  it('offers document and image uploads in Ask mode', async () => {
     const user = userEvent.setup();
     const { container } = render(<AiComposerSeat mode="ask" phase="active" status="idle" onPasteImages={vi.fn()} />);
-    expect(screen.getByRole('button', { name: 'Add images' })).toHaveClass('rounded-full');
-    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
-    const openPicker = vi.spyOn(input, 'click');
-    await user.click(screen.getByRole('button', { name: 'Add images' }));
-    expect(openPicker).toHaveBeenCalledOnce();
-    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add file or folder' })).toHaveClass('rounded-full');
+    expect(container.querySelector('input[accept*=".pdf"]')).toHaveAttribute('multiple');
+    expect(container.querySelector('input[accept*="image/png"]')).toHaveAttribute('multiple');
+    await user.click(screen.getByRole('button', { name: 'Add file or folder' }));
+    expect(await screen.findByRole('menuitem', { name: 'Add file' })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: 'Add folder' })).toHaveAttribute('aria-disabled', 'true');
   });
   it('allows typing during stop cleanup and enables sending after it settles', async () => {
     const user = userEvent.setup();
@@ -117,6 +118,14 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(screen.queryByRole('button', { name: 'Retry this turn' })).toBeNull();
   });
 
+  it.each(['en-US', 'zh-CN'] as const)('keeps the normal send control for a locked image draft in %s', async (locale) => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    render(<AiComposerSeat phase="active" status="failed" imageLocked hasImages />);
+    expect(screen.queryByRole('button', { name: /retry|重试/i })).toBeNull();
+    expect(screen.getByRole('button', { name: locale === 'zh-CN' ? '发送' : 'Send' })).toBeVisible();
+  });
+
   it('leaves availability notices to the workspace while retaining the accessible reference', () => {
     render(<AiComposerSeat phase="active" status="idle" unavailableReason="Connect a terminal" availabilityHintId="workspace-availability" />);
     expect(screen.queryByRole('status', { name: 'Agent is unavailable' })).toBeNull();
@@ -134,10 +143,9 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     const onSubmit = vi.fn();
     render(<AiComposerSeat phase="active" status="idle" defaultDraft="Describe this" onPasteImages={onPasteImages} onSubmit={onSubmit} />);
     const image = new File(['image'], 'screenshot.png', { type: 'image/png' });
-    const document = new File(['text'], 'notes.txt', { type: 'text/plain' });
     const accepted = fireEvent.paste(screen.getByRole('textbox'), {
       clipboardData: {
-        files: [image, document],
+        files: [image],
         items: [{ kind: 'file', type: image.type, getAsFile: () => image }],
       },
     });
@@ -162,7 +170,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
       clipboardData: { files: [image], items: [] },
     });
 
-    expect(screen.getByRole('button', { name: 'Add images' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Add file or folder' })).toBeVisible();
     expect(onPasteImages).toHaveBeenCalledOnce();
     expect(onPasteImages).toHaveBeenCalledWith([image]);
   });

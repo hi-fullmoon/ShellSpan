@@ -13,6 +13,7 @@ import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { agentSessionEventFixture } from '@/test/fixtures/agent-session';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
+import { taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
 
 function runningHierarchyView(): AiSessionView {
   const base = agentView('running');
@@ -116,7 +117,41 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const nodes = view.nodes.map(node => node.kind === 'turnTail'
       ? { ...node, endReason: 'stepBudgetReached: maximum 128 Steps per Turn' } : node);
     expect(nodes.some(node => node.kind === 'turnTail')).toBe(true);
-    render(<AiWorkspaceRoot scope="terminal" view={{ ...view, nodes }} onContinueBudgetedTurn={() => {}} />);
+    render(<AiWorkspaceRoot scope="terminal" view={{ ...view, nodes }} />);
+    expect(screen.queryByRole('button', { name: 'Continue task' })).toBeNull();
+  });
+
+  it.each([
+    ['en-US', 'This task reached its cumulative model token limit', 'Continue task', 'Task continuation summary'],
+    ['zh-CN', '本任务已达到累计模型用量上限', '继续任务', '任务续跑摘要'],
+  ] as const)('renders the persisted token failure without action buttons in %s', async (locale, title, action, artifact) => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const { container, rerender } = render(<AiWorkspaceRoot scope="workbench" mode="ask" view={taskTokenBudgetView()} canStartAgent />);
+    const error = container.querySelector('.ai-turn-error') as HTMLElement;
+    expect(error).not.toBeNull();
+    expect(within(error).getByText(title)).toBeVisible();
+    expect(error).not.toHaveTextContent('taskTokenBudgetExceeded:');
+    expect(screen.getByText(artifact)).toBeVisible();
+    expect(container.querySelector('[data-token-budget-notice]')).not.toBeNull();
+    const notice = container.querySelector('[data-token-budget-notice]') as HTMLElement;
+    expect(within(notice).queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('button', { name: action })).toBeNull();
+    expect(screen.getByRole('textbox')).toBeEnabled();
+    rerender(<AiWorkspaceRoot scope="workbench" mode="ask" view={taskTokenBudgetView(true)} canStartAgent />);
+    expect(screen.queryByRole('button', { name: action })).toBeNull();
+    expect(container.querySelector('[data-token-budget-notice]')).toBeNull();
+    expect(within(error).getByText(title)).toBeVisible();
+  });
+
+  it('does not offer continuation for archived or child sessions', () => {
+    const view = taskTokenBudgetView();
+    const { rerender } = render(<AiWorkspaceRoot scope="workbench" view={{ ...view,
+      summary: { ...view.summary, archived: true } }} canStartAgent />);
+    expect(screen.queryByRole('button', { name: 'Continue task' })).toBeNull();
+    rerender(<AiWorkspaceRoot scope="workbench" view={{ ...view, snapshot: { kind: 'agent', value: {
+      ...view.snapshot.value, header: { ...view.snapshot.value.header, parentSessionId: 'parent' },
+    } } }} canStartAgent />);
     expect(screen.queryByRole('button', { name: 'Continue task' })).toBeNull();
   });
 
@@ -161,7 +196,6 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       message: 'Committed Agent event 56 changed after publication',
       retryable: true,
     };
-    const retry = vi.fn();
 
     function ErrorWorkspace(): React.ReactNode {
       const [composerState, setComposerState] = useState(createAiComposerState({
@@ -175,7 +209,6 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
           view={null}
           scope="workbench"
           composerState={composerState}
-          onRetryFailedDraft={retry}
           onDismissError={() => setComposerState((current) => ({ ...current, lastError: null }))}
         />
       );
@@ -198,8 +231,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(screen.getAllByText('Action failed')[0]).toHaveClass('sr-only');
     expect(screen.getByRole('textbox').textContent).toBe('new input');
 
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(retry).toHaveBeenCalledWith('failed-1');
+    expect(screen.queryByRole('button', { name: /retry/i })).toBeNull();
     expect(screen.getByRole('textbox').textContent).toBe('new input');
 
     await user.click(screen.getByRole('button', { name: 'Dismiss error' }));
@@ -630,7 +662,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(screen.getByText('Read the frozen context. Answer directly.')).toBeVisible();
   });
 
-  it('keeps pasted image drafts available in Ask without an upload button', () => {
+  it('keeps pasted image drafts available in Ask with the attachment menu', () => {
     const onPasteImages = vi.fn();
     render(
       <AiWorkspaceRoot
@@ -645,7 +677,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     );
 
     expect(screen.getByTestId('ask-image-draft')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Add images' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Add file or folder' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
   });
 

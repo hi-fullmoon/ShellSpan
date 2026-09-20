@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { AtSignIcon, ChevronRightIcon, CornerDownLeftIcon, FileIcon, FolderIcon, FolderOpenIcon, InfoIcon, ServerIcon, XIcon } from 'lucide-react';
+import { AtSignIcon, BookOpenIcon, ChevronRightIcon, CornerDownLeftIcon, FileIcon, FolderIcon, FolderOpenIcon, InfoIcon, MessageCircleIcon, PaperclipIcon, RefreshCwIcon, ServerIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -13,12 +13,16 @@ import type { FileCandidate, FileReferenceList, ListFileReferences } from '@/typ
 import type { ComposerEditorHandle } from './ai-composer-editor';
 import { AiErrorNotice } from './ai-error-notice';
 import { AiProjectDirectoryInput } from './ai-project-directory-input';
+import { AiMentionPanel, type MentionContext, type MentionGroup, type MentionOption } from './ai-mention-panel';
+import { builtinSkills } from '@/lib/ai/builtin-skills';
+import { isTopLevelAiSession } from '@/lib/ai/session-list';
 
-export function useFileCompletion({ text, update, query, scopeKey, needsRoot, targetLabel, disabled }: {
+export function useFileCompletion({ text, update, query, scopeKey, needsRoot, targetLabel, disabled, context }: {
   text: string; update: (value: string) => void; query?: ListFileReferences; scopeKey?: string;
   needsRoot?: boolean; targetLabel?: string; disabled: boolean;
+  context?: MentionContext;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const editor = useRef<ComposerEditorHandle>(null);
   const [selection, setSelection] = useState<[number, number]>([0, 0]);
   const [focused, setFocused] = useState(false);
@@ -31,6 +35,8 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
   const [rootOpen, setRootOpen] = useState(false);
   const [root, setRoot] = useState('');
   const [binding, setBinding] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
+  const historyRequested = useRef(false);
   const rootAbort = useRef<AbortController | null>(null);
   const version = useRef(0);
   const id = useId();
@@ -40,13 +46,21 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
   // Dismiss only this visit to the token. Editing away must retire the old key,
   // otherwise returning to identical text keeps its list hidden indefinitely.
   useEffect(() => { setDismissed(previous => previous === key ? previous : null); }, [key]);
-  const open = Boolean(query && token && !disabled && !composing && focused && dismissed !== key);
+  const open = Boolean((query || context) && token && !disabled && !composing && focused && dismissed !== key);
   const queryText = token?.query ?? '';
+  const showFiles = Boolean(query && (!context || browsing || queryText));
+  useEffect(() => {
+    if (!open) { historyRequested.current = false; setBrowsing(false); return; }
+    if (context && queryText.trim() && !historyRequested.current) {
+      historyRequested.current = true;
+      context.onRefreshSessions?.();
+    }
+  }, [open, queryText, context]);
   useEffect(() => {
     const generation = ++version.current;
     const abort = new AbortController();
     setResult(null); setError(null); setIndex(0); setLoading(false);
-    if (!open || rootOpen || !query) return () => { abort.abort(); version.current++; };
+    if (!open || rootOpen || !query || !showFiles || (context && needsRoot)) return () => { abort.abort(); version.current++; };
     setLoading(true);
     const timer = setTimeout(() => {
       void query(queryText, abort.signal).then(value => {
@@ -58,7 +72,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
       });
     }, 100);
     return () => { clearTimeout(timer); abort.abort(); version.current++; };
-  }, [key, open, query, queryText, needsRoot, rootOpen]);
+  }, [key, open, query, queryText, needsRoot, rootOpen, showFiles, context !== undefined]);
   useEffect(() => { setRootOpen(false); setRoot(''); setBinding(false); rootAbort.current?.abort(); }, [scopeKey]);
   useEffect(() => () => { rootAbort.current?.abort(); }, []);
   const errorText = (code: string): string => {
@@ -93,7 +107,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
       const value = await query(queryText, abort.signal, root);
       if (abort.signal.aborted || currentKey.current !== expected) return;
       if (value.status === 'error') { setError(value.code ?? 'Unavailable'); return; }
-      setRootOpen(false); setFocused(true); editor.current?.focus();
+      setRootOpen(false); setBrowsing(true); setFocused(true); editor.current?.focus();
     } catch (failure) { if (!abort.signal.aborted && currentKey.current === expected) setError(String(failure)); }
     finally { if (!abort.signal.aborted && currentKey.current === expected) setBinding(false); }
   };
@@ -103,7 +117,59 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
   const targetDetails = target?.kind === 'remote'
     ? `${targetName} (${target.username}@${target.host}:${target.port})`
     : targetName;
+  const fileSource = target ? `${t(target.kind === 'remote' ? 'ai.workspace.mentions.remoteProject' : 'ai.workspace.mentions.localProject')} · ${targetName}` : targetLabel;
   const hasEntries = Boolean(result?.entries.length);
+  const replaceToken = (replacement: string) => {
+    if (!token) return;
+    const suffix = text.slice(token.end);
+    const inserted = /^\s/u.test(suffix) ? replacement.trimEnd() : replacement;
+    const next = text.slice(0, token.start) + inserted + suffix;
+    const caret = token.start + inserted.length;
+    setDismissed(JSON.stringify([scopeKey, next, caret, caret]));
+    update(next);
+    setSelection([caret, caret]);
+    requestAnimationFrame(() => {
+      if (editor.current?.value === next) { editor.current.focus(); editor.current.setSelectionRange(caret, caret); }
+    });
+  };
+  const browse = () => {
+    setBrowsing(true); setDismissed(null); setFocused(true);
+    const start = editor.current?.selectionStart ?? text.length;
+    const end = editor.current?.selectionEnd ?? start;
+    const active = activeFileToken(text, start, end);
+    const next = active ? text : `${text.slice(0, start)}${start && !/\s/u.test(text[start - 1]) ? ' ' : ''}@${text.slice(end)}`;
+    const caret = active ? start : next.length - text.slice(end).length;
+    if (!active) update(next);
+    setSelection([caret, caret]);
+    requestAnimationFrame(() => { if (editor.current?.value === next) { editor.current.focus(); editor.current.setSelectionRange(caret, caret); } });
+  };
+  const normalized = queryText.toLocaleLowerCase();
+  const matches = (...values: string[]) => values.join(' ').toLocaleLowerCase().includes(normalized);
+  const groups: MentionGroup[] = context ? [
+    { label: t('ai.workspace.addMenu.add'), options: [
+      ...(matches(t('ai.workspace.mentions.upload'), t('ai.workspace.addMenu.fileHint')) ? [{ key: 'upload', label: t('ai.workspace.mentions.upload'), detail: t('ai.workspace.mentions.localAttachment'), icon: <PaperclipIcon data-icon="inline-start" />, choose: () => { replaceToken(''); context.onUpload(); } }] : []),
+      ...(query && matches(t('ai.workspace.mentions.project'), targetLabel ?? '') ? [{ key: 'project', label: t('ai.workspace.mentions.project'), detail: targetLabel, icon: <FolderOpenIcon data-icon="inline-start" />, choose: () => { setBrowsing(true); if (needsRoot) { setError(null); setRootOpen(true); } } }] : []),
+    ] },
+    { label: t('ai.workspace.skills.title'), options: context.agent ? builtinSkills.filter(skill => matches(skill.name, skill.description, skill.descriptionZh)).map(skill => ({
+      key: `skill:${skill.name}`, label: locale === 'zh-CN' ? skill.descriptionZh : skill.description, detail: `/${skill.name}`, icon: <BookOpenIcon data-icon="inline-start" />,
+      choose: () => replaceToken(`/${skill.name} `),
+    })) : [], notice: context.agent ? undefined : t('ai.workspace.addMenu.agentOnly') },
+    { label: t('ai.workspace.addMenu.history'), options: normalized && !context.sessionsLoading && !context.sessionsError && context.onSession
+      ? (context.sessions ?? []).filter(session => session.id !== context.currentSessionId && !session.archived && isTopLevelAiSession(session, context.sessions ?? []) && matches(session.title))
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).map(session => ({ key: `chat:${session.id}`, label: session.title, detail: t('ai.workspace.addMenu.chat'), icon: <MessageCircleIcon data-icon="inline-start" />,
+          choose: () => { replaceToken(''); requestAnimationFrame(() => context.onSession?.(session)); },
+        }))
+      : normalized && context.sessionsError ? [{ key: 'retry-history', label: t('ai.workspace.addMenu.retry'), icon: <RefreshCwIcon data-icon="inline-start" />, choose: () => context.onRefreshSessions?.() }] : [],
+      notice: !normalized ? t('ai.workspace.addMenu.searchHistoryHint') : context.sessionsLoading ? t('ai.workspace.addMenu.loading') : undefined,
+    },
+    ...(showFiles ? [{ label: t('ai.workspace.mentions.project'), options: needsRoot
+      ? [{ key: 'root', label: t('ai.workspace.files.chooseRoot'), detail: targetLabel, icon: <FolderOpenIcon data-icon="inline-start" />, choose: () => { setError(null); setRootOpen(true); } }]
+      : (result?.entries ?? []).map(candidate => ({ key: `file:${candidate.path}`, label: `${candidate.path}${candidate.kind === 'directory' ? '/' : ''}`, detail: fileSource, icon: candidate.kind === 'directory' ? <FolderIcon data-icon="inline-start" /> : <FileIcon data-icon="inline-start" />, choose: () => choose(candidate) })),
+      notice: <>{targetDetails && <p>{targetDetails}</p>}{scope?.root && <p className="break-all">{scope.root}</p>}{loading && <p>{t('ai.workspace.files.loading')}</p>}{error && <p>{errorText(error)}</p>}{result?.status === 'truncated' && <p>{t('ai.workspace.files.truncated')}</p>}{Boolean(result?.excluded) && <p>{t('ai.workspace.files.excluded')}</p>}{result?.status === 'ready' && !hasEntries && <p>{t('ai.workspace.files.empty')}</p>}</>,
+    }] : []),
+  ] : [];
+  const options: readonly MentionOption[] = groups.flatMap(group => group.options);
+  const activeIndex = Math.min(index, Math.max(0, options.length - 1));
   const panel = open ? <div className="ai-file-completion flex min-h-0 min-w-0 flex-col" data-file-completion="">
       <PopoverHeader className="shrink-0 gap-1 px-3 py-2">
         <div className="flex items-center justify-between gap-3">
@@ -185,14 +251,14 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
         {error && <AiErrorNotice title={t('ai.workspace.recovery.title')}>{errorText(error)}</AiErrorNotice>}
       </DialogContent>
     </Dialog>;
-  return { panel, dialog, open, editor,
+  return { panel: context && open ? <AiMentionPanel id={id} groups={groups} index={activeIndex} empty={!options.length && !loading && !context.sessionsLoading && !error && !context.sessionsError} /> : panel, dialog, open, editor, browse,
     dismiss: () => setDismissed(key),
     editorProps: {
       ref: editor,
       'aria-autocomplete': 'list' as const,
       'aria-controls': open ? id : undefined,
       'aria-expanded': open,
-      'aria-activedescendant': open && result?.entries[index] ? `${id}-${index}` : undefined,
+      'aria-activedescendant': open && (context ? options[activeIndex] : result?.entries[index]) ? `${id}-${context ? activeIndex : index}` : undefined,
       onSelectionChange: () => { if (editor.current) readSelection(editor.current); },
       onFocus: () => { setFocused(true); if (editor.current) readSelection(editor.current); },
       onBlur: () => setFocused(false),
@@ -201,6 +267,18 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
     keyDown: (event: KeyboardEvent): boolean => {
       if (!open || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return false;
       if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) return false;
+      if (context) {
+        if (event.key === 'Tab' && !options.length) { setDismissed(key); return false; }
+        event.preventDefault(); event.stopPropagation();
+        if (event.key === 'Escape') { setDismissed(key); return true; }
+        if (event.repeat && (event.key === 'Enter' || event.key === 'Tab')) return true;
+        if (event.key === 'Enter' || event.key === 'Tab') options[activeIndex]?.choose();
+        else if (options.length) {
+          const next = (activeIndex + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+          setIndex(next); document.getElementById(`${id}-${next}`)?.scrollIntoView({ block: 'nearest' });
+        }
+        return true;
+      }
       if (event.key === 'Tab' && !needsRoot && (loading || !result?.entries.length)) { setDismissed(key); return false; }
       event.preventDefault(); event.stopPropagation();
       if (needsRoot && (event.key === 'Enter' || event.key === 'Tab')) { setError(null); setRootOpen(true); return true; }

@@ -410,12 +410,6 @@ export function AiSessionBrowser({
         <AiErrorNotice
           title={t('ai.workspace.recovery.title')}
           className="mx-[var(--ai-shell-clearance)] mb-1.5 w-auto"
-          action={(
-            <Button variant="ghost" size="xs" onClick={onRefresh} disabled={loading}>
-              <RefreshCwIcon data-icon="inline-start" />
-              {t('common.retry')}
-            </Button>
-          )}
         >
           {error}
         </AiErrorNotice>

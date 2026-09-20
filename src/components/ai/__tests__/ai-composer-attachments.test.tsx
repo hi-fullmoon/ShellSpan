@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import { useToastStore } from '@/stores/toastStore';
 import type { DragDropEvent } from '@tauri-apps/api/window';
 import type { Event as TauriEvent } from '@tauri-apps/api/event';
 
@@ -26,10 +27,11 @@ vi.mock('@/lib/ipc/tauri', async importOriginal => ({
 }));
 
 beforeEach(async () => {
-  state.pickFiles.mockReset().mockResolvedValue(['/project/docs/spec.pdf']);
+  state.pickFiles.mockReset().mockResolvedValue(['/project/build/module.wasm']);
   state.previewFile.mockReset();
   state.listDirectory.mockReset().mockRejectedValue(new Error('file'));
   useAppStore.setState({ locale: 'en-US' });
+  useToastStore.setState({ toasts: [] });
   await initI18n('en-US');
 });
 
@@ -46,15 +48,13 @@ describe('composer attachments', () => {
       expect.objectContaining({ name: 'example.png', type: 'image/png' }),
     ]));
   });
-  it('adds a selected PDF as a project file reference', async () => {
+  it('does not reinterpret an unsupported local upload as a target file reference', async () => {
     const user = userEvent.setup();
-    render(<AiComposerSeat phase="active" status="idle" onListFileReferences={async () => ({
-      entries: [], status: 'ready', code: null, excluded: 0,
-      scope: { root: '/project', rootIdentity: 'root', target: { kind: 'local', targetId: 'local', sessionId: 'session', cwd: '/project' } },
-    })} />);
+    render(<AiComposerSeat phase="active" status="idle" />);
     await user.click(screen.getByRole('button', { name: 'Add file or folder' }));
     await user.click(await screen.findByRole('menuitem', { name: 'Add file' }));
-    await waitFor(() => expect(screen.getByRole('textbox')).toHaveTextContent('@docs/spec.pdf'));
+    await waitFor(() => expect(useToastStore.getState().toasts[0]?.message).toContain('Unsupported format'));
+    expect(screen.getByRole('textbox').textContent).toBe('');
   });
   it('adds a dropped folder and shows the drop target', async () => {
     state.listDirectory.mockResolvedValue({ path: '/project/docs space', entries: [] });

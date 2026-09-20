@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, useContext, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from 'lucide-react';
 import { Attachment, AttachmentGroup, AttachmentMedia, AttachmentActions, AttachmentAction, AttachmentTrigger } from '@/components/ui/attachment';
 import { Button } from '@/components/ui/button';
@@ -7,7 +7,9 @@ import { Spinner } from '@/components/ui/spinner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useI18n } from '@/hooks/useI18n';
 import type { AgentImageUpload } from '@/types/agent-image';
-import { AiImagePreview } from './ai-image-preview';
+import { AiImagePreview, AiImagePreviewGroup } from './ai-image-preview';
+
+export const UnifiedAttachmentContext = createContext(false);
 
 function PendingImage({ file }: { file: File }) {
   const { t } = useI18n();
@@ -27,14 +29,9 @@ function PendingImage({ file }: { file: File }) {
   </Attachment></AiImagePreview>;
 }
 
-export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, error, onRemove }: {
-  images: readonly AgentImageUpload[]; busy: boolean; locked: boolean; error: boolean;
-  pendingFiles?: readonly File[];
-  onRemove: (index: number) => void;
-}) {
+export function AiDraftAttachmentRail({ children, count, unified = false }: { children: ReactNode; count: number; unified?: boolean }) {
   const { t } = useI18n();
   const rail = useRef<HTMLDivElement>(null);
-  const count = images.length + pendingFiles.length;
   const previousCount = useRef(count);
   const [edges, setEdges] = useState({ left: false, right: false });
   const updateEdges = useCallback(() => {
@@ -50,8 +47,20 @@ export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, erro
     if (count > previousCount.current) element.scrollLeft = element.scrollWidth;
     previousCount.current = count;
     updateEdges();
-    const observer = new ResizeObserver(updateEdges);
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updateEdges);
+    });
     observer.observe(element);
+    let cardCount = element.querySelectorAll('[data-slot="attachment"]').length;
+    const mutations = new MutationObserver(() => {
+      const nextCount = element.querySelectorAll('[data-slot="attachment"]').length;
+      if (nextCount > cardCount) element.scrollLeft = element.scrollWidth;
+      cardCount = nextCount;
+      updateEdges();
+    });
+    mutations.observe(element, { childList: true, subtree: true });
     // Vertical mouse wheels pan the thumbnail strip without scrolling the conversation.
     const wheel = (event: WheelEvent) => {
       if (!event.deltaY || element.scrollWidth <= element.clientWidth) return;
@@ -60,16 +69,38 @@ export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, erro
       element.scrollBy({ left: (event.deltaX || event.deltaY) * scale, behavior: 'auto' });
     };
     element.addEventListener('wheel', wheel, { passive: false });
-    return () => { observer.disconnect(); element.removeEventListener('wheel', wheel); };
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); mutations.disconnect(); element.removeEventListener('wheel', wheel); };
   }, [count, updateEdges]);
   const page = (direction: number) => rail.current?.scrollBy({
     left: direction * Math.max(rail.current.clientWidth - 64, 64),
     behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
   });
 
-  return <div className="ai-image-rail relative min-w-0 flex-1">
-    <AttachmentGroup ref={rail} className="ai-image-rail-viewport gap-2.5 overflow-y-hidden p-0" role="group" aria-label={t('ai.workspace.images.attachments')} onScroll={updateEdges}
-      onFocusCapture={event => event.target.closest('.ai-image-thumbnail')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })}>
+  return <div className="ai-image-rail relative min-w-0 flex-1" data-unified-attachments={unified || undefined}>
+    <AttachmentGroup ref={rail} className="ai-image-rail-viewport gap-2 overflow-y-hidden p-0" role="group" aria-label={t(unified ? 'ai.workspace.attachments.attached' : 'ai.workspace.images.attachments')} onScroll={updateEdges}
+      onFocusCapture={event => {
+        const card = event.target.closest('[data-slot="attachment"]');
+        if (!card || !event.currentTarget.contains(card)) return;
+        const bounds = card.getBoundingClientRect();
+        const viewport = event.currentTarget.getBoundingClientRect();
+        if (bounds.left < viewport.left) event.currentTarget.scrollLeft += bounds.left - viewport.left;
+        else if (bounds.right > viewport.right) event.currentTarget.scrollLeft += bounds.right - viewport.right;
+      }}>
+      {children}
+    </AttachmentGroup>
+    {edges.left && <Button variant="secondary" size="icon-xs" className="ai-image-rail-arrow ai-image-rail-previous absolute top-1/2 left-1 -translate-y-1/2" aria-label={t(unified ? 'ai.workspace.attachments.previous' : 'ai.workspace.images.previous')} onClick={() => page(-1)}><ChevronLeftIcon /></Button>}
+    {edges.right && <Button variant="secondary" size="icon-xs" className="ai-image-rail-arrow ai-image-rail-next absolute top-1/2 right-1 -translate-y-1/2" aria-label={t(unified ? 'ai.workspace.attachments.next' : 'ai.workspace.images.next')} onClick={() => page(1)}><ChevronRightIcon /></Button>}
+  </div>;
+}
+
+export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, error, onRemove }: {
+  images: readonly AgentImageUpload[]; busy: boolean; locked: boolean; error: boolean;
+  pendingFiles?: readonly File[];
+  onRemove: (index: number) => void;
+}) {
+  const { t } = useI18n();
+  const unified = useContext(UnifiedAttachmentContext);
+  const cards = <AiImagePreviewGroup>
       {images.map((image, index) => {
         const source = `data:${image.mediaType};base64,${image.data}`;
         return <AiImagePreview key={`${index}:${image.name}`} source={source} name={image.name}>
@@ -85,8 +116,6 @@ export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, erro
         </AiImagePreview>;
       })}
       {pendingFiles.map((file, index) => <PendingImage key={`pending:${index}:${file.name}`} file={file} />)}
-    </AttachmentGroup>
-    {edges.left && <Button variant="secondary" size="icon-xs" className="ai-image-rail-arrow ai-image-rail-previous absolute top-1/2 left-1 -translate-y-1/2" aria-label={t('ai.workspace.images.previous')} onClick={() => page(-1)}><ChevronLeftIcon /></Button>}
-    {edges.right && <Button variant="secondary" size="icon-xs" className="ai-image-rail-arrow ai-image-rail-next absolute top-1/2 right-1 -translate-y-1/2" aria-label={t('ai.workspace.images.next')} onClick={() => page(1)}><ChevronRightIcon /></Button>}
-  </div>;
+  </AiImagePreviewGroup>;
+  return unified ? cards : <AiDraftAttachmentRail count={images.length + pendingFiles.length}>{cards}</AiDraftAttachmentRail>;
 }

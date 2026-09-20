@@ -9,9 +9,6 @@ import {
   ChevronDownIcon,
   CornerUpLeftIcon,
   ListPlusIcon,
-  PlusIcon,
-  FilePlusIcon,
-  FolderPlusIcon,
   ShieldCheckIcon,
   SquareIcon,
 } from 'lucide-react';
@@ -22,7 +19,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuLabel,
-  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -36,7 +32,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import { formatFileMention } from '@/lib/ai/file-reference-grammar';
-import { invokeListLocalDirectory, invokePickLocalFiles, invokePickLocalFolder, invokePreviewLocalFile, isTauriRuntime } from '@/lib/ipc/tauri';
+import { invokeListLocalDirectory, invokePickLocalFiles, invokePreviewLocalFile, isTauriRuntime } from '@/lib/ipc/tauri';
 import { useToast } from '@/hooks/useToast';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
@@ -48,10 +44,17 @@ import { AiQuestionPanel } from './ai-question-panel';
 import { questionKey } from '@/types/agent-question';
 import { AiContextMeter } from './ai-context-meter';
 import { AiQueueDock } from './ai-queue-dock';
+import { useDocumentImport } from './use-document-import';
+import { DOCUMENT_ACCEPT, IMAGE_ACCEPT, documentErrorKey, isDocumentName } from '@/lib/ai/document-import';
+import { decodeDocumentMessage, encodeDocumentMessage } from '@/lib/ai/document-message';
+import { AiDocumentAttachments } from './ai-document-attachments';
+import { AiDraftAttachmentRail, UnifiedAttachmentContext } from './ai-image-draft-rail';
+import { Spinner } from '@/components/ui/spinner';
 import { AiTaskStrip } from './ai-task-strip';
+import { AiComposerAddMenu, type ComposerHistoryProps } from './ai-composer-add-menu';
 import type { AiQueueMutationState } from './use-ai-session-controller';
 
-export interface AiComposerSeatProps {
+export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly mode?: 'ask' | 'agent';
   readonly imageControls?: React.ReactNode;
   readonly onPasteImages?: (files: File[]) => void | Promise<void>;
@@ -79,6 +82,7 @@ export interface AiComposerSeatProps {
   readonly onListFileReferences?: import('@/types/agent-file-reference').ListFileReferences;
   readonly onListSkills?: (root?: string) => Promise<import('@/types/agent-skill').SkillUserList>;
   readonly skillsScopeKey?: string;
+  readonly attachmentScopeKey?: string;
   readonly skillsNeedsRoot?: boolean;
   readonly projectTargetLabel?: string;
   readonly onAnswerQuestion?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
@@ -99,7 +103,6 @@ export interface AiComposerSeatProps {
   readonly onSteerQueueItem?: (item: AiInboxItem) => void;
   readonly onResumeQueueItem?: (item: AiInboxItem) => void;
   readonly onReorderQueueLane?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
-  readonly onRetryQueueMutation?: () => void;
   readonly onOpenModel?: () => void;
   readonly onApprove?: () => void;
   readonly onReject?: () => void;
@@ -109,6 +112,7 @@ export interface AiComposerSeatProps {
 /** ShellSpan composer surface backed by the existing workspace state machine. */
 export function AiComposerSeat({
   mode = 'agent',
+  sessions, sessionsLoading, sessionsError, currentSessionId, onRefreshSessions, onReadSession,
   imageControls, onPasteImages, hasImages = false, imageBusy = false, imageLocked = false,
   phase,
   status,
@@ -131,6 +135,7 @@ export function AiComposerSeat({
   onListFileReferences,
   onListSkills,
   skillsScopeKey,
+  attachmentScopeKey,
   skillsNeedsRoot,
   projectTargetLabel,
   approvalDecision = null,
@@ -150,7 +155,6 @@ export function AiComposerSeat({
   onSteerQueueItem,
   onResumeQueueItem,
   onReorderQueueLane,
-  onRetryQueueMutation,
   onOpenModel,
   onApprove,
   onReject,
@@ -159,13 +163,20 @@ export function AiComposerSeat({
   const { t } = useI18n();
   const toast = useToast();
   const cardRef = useRef<HTMLDivElement>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [localDraft, setLocalDraft] = useState(defaultDraft);
   const composingRef = useRef(false);
   const composingUntilRef = useRef(0);
   const completionAnchor = useRef<HTMLDivElement>(null);
-  const draft = composerState?.draft ?? controlledDraft ?? localDraft;
+  const rawDraft = composerState?.draft ?? controlledDraft ?? localDraft;
+  const rawDraftRef = useRef(rawDraft);
+  rawDraftRef.current = rawDraft;
+  const attachmentOwner = JSON.stringify([mode, attachmentScopeKey, composerState?.sessionId, skillsScopeKey]);
+  const attachmentOwnerRef = useRef(attachmentOwner);
+  attachmentOwnerRef.current = attachmentOwner;
+  const message = useMemo(() => decodeDocumentMessage(rawDraft), [rawDraft]);
+  const draft = message.text;
   const running = status === 'running' || status === 'waiting';
   const waitingApproval = mode === 'agent' && composerState?.phase === 'waitingApproval';
   const waitingQuestion = Boolean(pendingQuestion) || composerState?.phase === 'waitingQuestion';
@@ -173,18 +184,32 @@ export function AiComposerSeat({
   const terminal = composerState?.terminal ?? false;
   const stopping = composerState?.phase === 'stopping';
   const unavailable = unavailableReason !== null;
-  const empty = draft.trim().length === 0 && !hasImages;
+  const updateRawDraft = (value: string): void => {
+    rawDraftRef.current = value;
+    if (composerState === undefined && controlledDraft === undefined) setLocalDraft(value);
+    onDraftChange?.(value);
+  };
+  const updateDraft = (value: string): void => {
+    try { updateRawDraft(encodeDocumentMessage(value, decodeDocumentMessage(rawDraftRef.current).documents, false)); }
+    catch (error) { toast.error(t(documentErrorKey(error))); }
+  };
+  const documents = useDocumentImport(
+    attachmentOwner,
+    rawDraft, updateRawDraft, terminal || waitingApproval || waitingQuestion || unavailable || submitting || imageLocked,
+  );
+  const empty = draft.trim().length === 0 && !hasImages && !message.documents.length;
   const stopPrimary = running && empty;
   const submitDisabled = terminal
     || stopping
     || submitting
+    || documents.busy
     || (!stopPrimary && (waitingQuestion || waitingApproval))
     || (mode === 'ask' && running && !empty)
     || (stopPrimary
       ? onStop === undefined
       : unavailable || empty || (onSubmitGesture === undefined && onSubmit === undefined));
   const busyPreference = composerState?.preferredBusyMode ?? 'queue';
-  const primaryLabel = imageLocked && !imageBusy ? t('common.retry') : stopPrimary
+  const primaryLabel = stopPrimary
     ? t('ai.workspace.stop')
     : running
       ? busyPreference === 'queue'
@@ -215,13 +240,9 @@ export function AiComposerSeat({
     return items;
   }, [composerState?.pendingSubmissions, inbox]);
 
-  const updateDraft = (value: string): void => {
-    if (composerState === undefined && controlledDraft === undefined) setLocalDraft(value);
-    onDraftChange?.(value);
-  };
-  const attachmentsEnabled = !terminal && !waitingApproval && !waitingQuestion && !unavailable && !submitting && !imageLocked;
+  const attachmentsEnabled = !terminal && !waitingApproval && !waitingQuestion && !unavailable && !submitting && !imageLocked && !documents.busy;
   const addPaths = async (paths: readonly string[], kind?: 'file' | 'directory'): Promise<void> => {
-    if (!attachmentsEnabled || !paths.length) return;
+    if (!attachmentsEnabled || !paths.length || attachmentOwnerRef.current !== attachmentOwner) return;
     try {
       const imagePaths = kind !== 'directory' && onPasteImages
         ? paths.filter(path => /\.(png|jpe?g|webp|gif)$/iu.test(path)) : [];
@@ -236,8 +257,10 @@ export function AiComposerSeat({
           const mediaType = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : extension === 'gif' ? 'image/gif' : 'image/jpeg';
           return new File([bytes], preview.name, { type: mediaType });
         }));
+        if (attachmentOwnerRef.current !== attachmentOwner) return;
         await onPasteImages?.(files);
       }
+      if (attachmentOwnerRef.current !== attachmentOwner) return;
       if (!referencePaths.length) return;
       if (mode === 'ask') throw new Error(t('ai.workspace.attachments.agentOnly'));
       const result = await onListFileReferences?.('', new AbortController().signal);
@@ -253,12 +276,33 @@ export function AiComposerSeat({
         return resolvedKind === 'directory' && mention?.startsWith('@"') ? `${mention}"` : mention;
       }));
       if (mentions.some(mention => !mention)) throw new Error(t('ai.workspace.attachments.outsideRoot'));
-      updateDraft(`${draft}${draft && !/\s$/u.test(draft) ? ' ' : ''}${mentions.join(' ')} `);
+      if (attachmentOwnerRef.current !== attachmentOwner) return;
+      const currentText = decodeDocumentMessage(rawDraftRef.current).text;
+      updateDraft(`${currentText}${currentText && !/\s$/u.test(currentText) ? ' ' : ''}${mentions.join(' ')} `);
       completion.editor.current?.focus();
     } catch (error) { toast.error(String(error)); }
   };
-  const dropState = useRef({ attachmentsEnabled, addPaths });
-  dropState.current = { attachmentsEnabled, addPaths };
+  const addDroppedPaths = async (paths: readonly string[]) => {
+    if (attachmentOwnerRef.current !== attachmentOwner) return;
+    const documentPaths = paths.filter(isDocumentName);
+    const otherPaths = paths.filter(path => !isDocumentName(path));
+    if (documentPaths.length && !await documents.addPaths(documentPaths)) return;
+    if (attachmentOwnerRef.current !== attachmentOwner) return;
+    if (otherPaths.length) await addPaths(otherPaths);
+  };
+  const addBrowserFiles = (files: readonly File[]) => {
+    if (!attachmentsEnabled) return;
+    const images = files.filter(file => file.type.startsWith('image/'));
+    const imported = files.filter(file => !file.type.startsWith('image/'));
+    if (images.length && !onPasteImages) { toast.error(t('ai.workspace.images.error.model')); return; }
+    const addImages = () => {
+      if (images.length && attachmentOwnerRef.current === attachmentOwner) void onPasteImages?.(images);
+    };
+    if (imported.length) void documents.addFiles(imported).then(accepted => { if (accepted) addImages(); });
+    else addImages();
+  };
+  const dropState = useRef({ attachmentsEnabled, addPaths: addDroppedPaths });
+  dropState.current = { attachmentsEnabled, addPaths: addDroppedPaths };
   useEffect(() => {
     if (!isTauriRuntime()) return;
     let disposed = false;
@@ -267,7 +311,8 @@ export function AiComposerSeat({
       const payload = event.payload;
       if (payload.type === 'leave') { setDragActive(false); return; }
       const rect = cardRef.current?.getBoundingClientRect();
-      const inside = Boolean(rect && payload.position.x >= rect.left && payload.position.x <= rect.right && payload.position.y >= rect.top && payload.position.y <= rect.bottom);
+      const scale = window.devicePixelRatio || 1;
+      const inside = Boolean(rect && payload.position.x / scale >= rect.left && payload.position.x / scale <= rect.right && payload.position.y / scale >= rect.top && payload.position.y / scale <= rect.bottom);
       if (payload.type === 'enter' || payload.type === 'over') setDragActive(inside && dropState.current.attachmentsEnabled);
       if (payload.type === 'drop') {
         setDragActive(false);
@@ -276,7 +321,24 @@ export function AiComposerSeat({
     });
     return () => { disposed = true; void listener.then(unlisten => unlisten()); };
   }, []);
-  const completion = useFileCompletion({ text: draft, update: updateDraft, query: onListFileReferences, scopeKey: skillsScopeKey, needsRoot: skillsNeedsRoot, targetLabel: projectTargetLabel, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
+  const uploadLocalFile = () => {
+    if (isTauriRuntime()) void invokePickLocalFiles().then(paths => {
+      if (attachmentOwnerRef.current !== attachmentOwner) return;
+      if (paths.some(path => !isDocumentName(path) && !/\.(png|jpe?g|webp|gif)$/iu.test(path))) {
+        toast.error(t('ai.workspace.documents.error.format')); return;
+      }
+      return addDroppedPaths(paths);
+    }).catch(error => toast.error(String(error)));
+    else documentInputRef.current?.click();
+  };
+  const referenceSession = onReadSession ? (summary: import('@/lib/ai/session-adapter').AiSessionSummary) => {
+    if (attachmentOwnerRef.current !== attachmentOwner) return;
+    void documents.addFrom(async signal => [await onReadSession(summary, signal)]);
+  } : undefined;
+  const completion = useFileCompletion({ text: draft, update: updateDraft, query: onListFileReferences, scopeKey: attachmentOwner, needsRoot: skillsNeedsRoot, targetLabel: projectTargetLabel, disabled: !attachmentsEnabled,
+    context: { agent: mode === 'agent', onUpload: uploadLocalFile, onSession: referenceSession,
+      sessions, sessionsLoading, sessionsError, currentSessionId: currentSessionId ?? composerState?.sessionId, onRefreshSessions },
+  });
   const skillCompletion = useSkillCompletion({ text: draft, update: updateDraft, query: onListSkills, scopeKey: skillsScopeKey, editor: completion.editor, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
   const wasStopping = useRef(false);
   useEffect(() => {
@@ -292,8 +354,10 @@ export function AiComposerSeat({
       if (gesture === 'primary') onStop?.();
       return;
     }
+    try { encodeDocumentMessage(draft, message.documents); }
+    catch (error) { toast.error(t(documentErrorKey(error))); return; }
     if (onSubmitGesture) onSubmitGesture(gesture, accelerated);
-    else void onSubmit?.(draft);
+    else void onSubmit?.(rawDraft);
   };
 
   return (
@@ -318,7 +382,6 @@ export function AiComposerSeat({
         onSteer={onSteerQueueItem}
         onResume={onResumeQueueItem}
         onReorder={onReorderQueueLane}
-        onRetry={onRetryQueueMutation}
       />}
       {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
       {
@@ -330,9 +393,18 @@ export function AiComposerSeat({
             waitingApproval && pendingApproval && 'invisible',
           )} data-composer-card="" aria-hidden={waitingApproval && pendingApproval ? true : undefined} onClick={event => {
             if (event.target === event.currentTarget) completion.editor.current?.focus();
+          }} onDragOver={event => {
+            if (!isTauriRuntime() && event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDragActive(attachmentsEnabled); }
+          }} onDragLeave={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false);
+          }} onDrop={event => {
+            if (isTauriRuntime()) return;
+            event.preventDefault(); setDragActive(false);
+            if (!attachmentsEnabled) return;
+            addBrowserFiles(Array.from(event.dataTransfer.files));
           }}>
             {dragActive && <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-background/90 text-sm font-medium text-foreground" role="status">
-              {t(mode === 'ask' ? 'ai.workspace.attachments.dropImages' : 'ai.workspace.attachments.drop')}
+              {t(mode === 'ask' ? 'ai.workspace.documents.drop' : 'ai.workspace.attachments.drop')}
             </div>}
             <AiComposerEditor
               {...completion.editorProps}
@@ -355,8 +427,7 @@ export function AiComposerSeat({
               historyKey={JSON.stringify([composerState?.sessionId, skillsScopeKey])}
               onChange={updateDraft}
               onPaste={(event) => {
-                if (!onPasteImages) return;
-                const files = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/'));
+                const files = Array.from(event.clipboardData.files);
                 if (!files.length) {
                   for (const item of Array.from(event.clipboardData.items)) {
                     if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
@@ -366,8 +437,8 @@ export function AiComposerSeat({
                 }
                 if (!files.length) return;
                 event.preventDefault();
-                if (terminal || waitingApproval || waitingQuestion || unavailable || submitting || imageLocked) return;
-                void onPasteImages(files);
+                if (!attachmentsEnabled) return;
+                addBrowserFiles(files);
               }}
               onCompositionStart={() => {
                 composingRef.current = true;
@@ -397,39 +468,39 @@ export function AiComposerSeat({
                 ? t('ai.workbench.composerPlaceholder')
                 : t('ai.workspace.composerPlaceholder')}
             />
-            {imageControls && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0 px-3">{imageControls}</InputGroupAddon>}
+            {(imageControls || message.documents.length > 0 || documents.pending.length > 0) && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0 px-3" onClick={event => event.stopPropagation()}>
+              <UnifiedAttachmentContext value={true}>
+              <AiDraftAttachmentRail unified count={message.documents.length + documents.pending.length}>
+              {imageControls}
+              <AiDocumentAttachments composer documents={message.documents} pending={documents.pending} locked={!attachmentsEnabled}
+                onRemove={id => updateRawDraft(encodeDocumentMessage(draft, message.documents.filter(document => document.id !== id)))} />
+              </AiDraftAttachmentRail>
+              </UnifiedAttachmentContext>
+            </InputGroupAddon>}
+            {documents.busy && <InputGroupAddon align="block-start" className="min-w-0 justify-between px-3">
+              <span role="status" className="flex min-w-0 items-center gap-2"><Spinner />{t('ai.workspace.documents.processing')}</span>
+              <InputGroupButton variant="ghost" size="xs" onClick={documents.cancel}>{t('common.cancel')}</InputGroupButton>
+            </InputGroupAddon>}
             <InputGroupAddon align="block-end" className="ai-composer-toolbar mt-3 min-h-10.5 min-w-0 justify-between gap-3 px-2 pt-0.5 pb-1.5 @max-[400px]/ai-workspace:gap-1 @max-[400px]/ai-workspace:px-[7px]" onClick={event => {
               // Portal menu clicks bubble through React without occurring inside the toolbar.
               if (!event.currentTarget.contains(event.target as Node)) return;
               if (!(event.target as HTMLElement).closest('button, [role="button"]')) completion.editor.current?.focus();
             }}>
               <div className="ai-composer-tools flex min-w-0 shrink-0 items-center gap-1">
-                {mode === 'ask' && <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple className="sr-only" tabIndex={-1} aria-hidden="true" onChange={event => {
+                <input ref={documentInputRef} type="file" accept={`${DOCUMENT_ACCEPT},${IMAGE_ACCEPT}`} multiple className="sr-only" tabIndex={-1} aria-label={t('ai.workspace.attachments.file')} onChange={event => {
                   const files = Array.from(event.currentTarget.files ?? []);
                   event.currentTarget.value = '';
-                  if (attachmentsEnabled && files.length) void onPasteImages?.(files);
-                }} />}
-                {mode === 'ask' ? (
-                  <InputGroupButton variant="ghost" size="icon-sm" className="ai-composer-add size-7 shrink-0 rounded-full" aria-label={t('ai.workspace.images.add')} disabled={!attachmentsEnabled || !onPasteImages} onClick={() => imageInputRef.current?.click()}>
-                    <PlusIcon />
-                  </InputGroupButton>
-                ) : (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger render={<InputGroupButton variant="ghost" size="icon-sm" className="ai-composer-add size-7 shrink-0 rounded-full" aria-label={t('ai.workspace.attachments.add')} disabled={!attachmentsEnabled} />}>
-                      <PlusIcon />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent side="top" sideOffset={8} align="start" className="ai-composer-add-menu w-max min-w-[200px] max-w-[calc(100vw-16px)] p-[3px]">
-                      <DropdownMenuGroup>
-                        <DropdownMenuItem className="min-h-[34px] gap-2 px-2 py-[5px] whitespace-nowrap" aria-description={t('ai.workspace.attachments.projectHint')} onClick={() => { void invokePickLocalFiles().then(paths => addPaths(paths)).catch(error => toast.error(String(error))); }}>
-                          <FilePlusIcon />{t('ai.workspace.attachments.file')}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="min-h-[34px] gap-2 px-2 py-[5px] whitespace-nowrap" aria-description={t('ai.workspace.attachments.projectHint')} onClick={() => { void invokePickLocalFolder(t('ai.workspace.attachments.folder')).then(paths => addPaths(paths, 'directory')).catch(error => toast.error(String(error))); }}>
-                          <FolderPlusIcon />{t('ai.workspace.attachments.folder')}
-                        </DropdownMenuItem>
-                      </DropdownMenuGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                  if (attachmentsEnabled && files.length) addBrowserFiles(files);
+                }} />
+                <AiComposerAddMenu key={attachmentOwner} disabled={!attachmentsEnabled} agent={mode === 'agent'} anchor={cardRef}
+                  onAddFile={uploadLocalFile}
+                  onAddFolder={() => completion.browse()}
+                  onSkill={name => {
+                    const current = decodeDocumentMessage(rawDraftRef.current).text;
+                    updateDraft(`${current}${current && !/\s$/u.test(current) ? ' ' : ''}/${name} `);
+                    requestAnimationFrame(() => { completion.editor.current?.focus(); completion.editor.current?.setSelectionRange(completion.editor.current.value.length, completion.editor.current.value.length); });
+                  }}
+                />
                 {mode === 'ask' ? (
                   <span className="ai-composer-mode-note flex min-w-0 items-center gap-[5px] overflow-hidden text-ellipsis whitespace-nowrap">
                     <ShieldCheckIcon aria-hidden="true" />
@@ -578,7 +649,7 @@ export function AiComposerSeat({
               />
             </div>
           )}
-          <AiCompletionPopover anchor={completionAnchor} onDismiss={() => {
+          <AiCompletionPopover anchor={completionAnchor} fixedHeight={completion.open && !skillCompletion.open} onDismiss={() => {
             skillCompletion.dismiss();
             completion.dismiss();
           }}>

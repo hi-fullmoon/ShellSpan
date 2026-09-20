@@ -1,4 +1,4 @@
-import { RotateCcwIcon, XIcon } from 'lucide-react';
+import { XIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
@@ -7,16 +7,12 @@ import { AiErrorNotice } from './ai-error-notice';
 
 export interface AiWorkspaceErrorNoticesProps {
   readonly composerState?: AiComposerState;
-  readonly submitting?: boolean;
-  readonly onRetryFailedDraft?: (failedDraftId: string) => void;
   readonly onDismissError?: () => void;
 }
 
 /** Workspace-level operation errors displayed below the session header. */
 export function AiWorkspaceErrorNotices({
   composerState,
-  submitting = false,
-  onRetryFailedDraft,
   onDismissError,
 }: AiWorkspaceErrorNoticesProps): React.ReactNode {
   const { t } = useI18n();
@@ -49,17 +45,6 @@ export function AiWorkspaceErrorNotices({
           key={failed.id}
           title={t('ai.workspace.recovery.title')}
           label={t('ai.workspace.failedDraft')}
-          action={(
-            <Button
-              variant="ghost"
-              size="xs"
-              disabled={submitting || !failed.error.retryable}
-              onClick={() => onRetryFailedDraft?.(failed.id)}
-            >
-              <RotateCcwIcon data-icon="inline-start" />
-              {t('common.retry')}
-            </Button>
-          )}
         >
           {failed.content}
         </AiErrorNotice>

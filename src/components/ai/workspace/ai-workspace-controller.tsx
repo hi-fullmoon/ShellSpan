@@ -146,17 +146,16 @@ export function AiWorkspaceController({
       onDraftChange={controller.setDraft}
       onSubmitGesture={controller.submit}
       onStop={controller.stop}
-      onContinueBudgetedTurn={controller.continueBudgetedTurn}
       onContinueOnReconnectedTerminal={controller.continueOnReconnectedTerminal ?? undefined}
       historicalContinuationAvailable={controller.historicalContinuationAvailable}
       historicalContinuationBusy={controller.historicalContinuationBusy}
       historicalContinuationError={controller.historicalContinuationError}
       onBusyPreferenceChange={controller.setBusyPreference}
-      onRetryFailedDraft={controller.retryFailedDraft}
       onDismissError={controller.dismissError}
       onOpenModel={openAiSettings}
       onHistory={controller.openSessions}
       onRefreshSessions={controller.refreshSessions}
+      onReadSession={controller.readSessionReference}
       onNewSession={controller.newSession}
       onOpenSession={controller.openSession}
       onArchiveSession={controller.archiveSession}
@@ -166,7 +165,6 @@ export function AiWorkspaceController({
       onSteerQueueItem={controller.steerQueueItem}
       onResumeQueueItem={controller.resumeQueueItem}
       onReorderQueueLane={controller.reorderQueueLane}
-      onRetryQueueMutation={controller.retryQueueMutation}
       onRenameSession={controller.renameSession}
       onBack={controller.back}
       onOpenTool={controller.openToolDetails}

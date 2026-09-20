@@ -24,6 +24,7 @@ let answer = '';
 let saved: AiScrollAnchor | undefined;
 let initialAnchor: AiScrollAnchor | undefined;
 let process: AiConversationNodeOf<'turnProcess'> | undefined;
+let followFromStart = false;
 
 function Row({ id, children }: {
   id: string;
@@ -38,7 +39,7 @@ function Row({ id, children }: {
 function render() {
   flushSync(() => root.render(
     <main className="ai-panel-shell h-dvh w-full min-w-0" data-ai-scope="workbench">
-      <MessageScroller key={revision} followKey={String(answer.length)} turnAnchorKey="user"
+      <MessageScroller key={revision} followKey={String(answer.length)} turnAnchorKey={followFromStart ? undefined : 'user'}
         initialAnchor={initialAnchor} onAnchorChange={(anchor) => { saved = anchor; }}>
         <Row key="history" id="history" scrollItemId="history">
           <AssistantMessageContent blocks={[{ type: 'text', text: history }]} streaming={false} />
@@ -72,6 +73,17 @@ Object.assign(window, {
     anchor() { return saved; },
     reset(content: string) {
       revision += 1;
+      followFromStart = false;
+      history = content;
+      answer = '';
+      initialAnchor = undefined;
+      saved = undefined;
+      process = undefined;
+      render();
+    },
+    resetFollowing(content: string) {
+      revision += 1;
+      followFromStart = true;
       history = content;
       answer = '';
       initialAnchor = undefined;

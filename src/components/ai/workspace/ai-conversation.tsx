@@ -12,7 +12,9 @@ import {
   type AiConversationNodeRendererMap,
 } from './ai-conversation-node-seat';
 
-const AskThinkingIndicator = memo(function AskThinkingIndicator() {
+const statusItemClassName = '[content-visibility:visible] [contain-intrinsic-size:none]';
+
+const AskThinkingIndicator = memo(function AskThinkingIndicator(_: { scrollItemClassName: string }) {
   const { t } = useI18n();
   return (
     <Marker
@@ -33,6 +35,7 @@ const AgentRunningIndicator = memo(function AgentRunningIndicator({
   status,
 }: {
   readonly status: AiSessionStatus;
+  readonly scrollItemClassName: string;
 }) {
   const { t } = useI18n();
   return (
@@ -159,10 +162,10 @@ export function AiConversation({
         />
       ))}
       {showAskThinking && (
-        <AskThinkingIndicator key="ask-thinking-indicator" />
+        <AskThinkingIndicator key="ask-thinking-indicator" scrollItemClassName={statusItemClassName} />
       )}
       {running && runningIndicator === 'agent' && (
-        <AgentRunningIndicator key="agent-running-indicator" status={status} />
+        <AgentRunningIndicator key="agent-running-indicator" status={status} scrollItemClassName={statusItemClassName} />
       )}
     </MessageScroller>
   );

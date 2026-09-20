@@ -263,6 +263,14 @@ export function latestTurnReachedStepBudget(nodes: readonly AiConversationNode[]
   return false;
 }
 
+export function latestTurnReachedTokenBudget(nodes: readonly AiConversationNode[]): boolean {
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    const node = nodes[index];
+    if (node?.kind === 'turnTail') return node.endReason.startsWith('taskTokenBudgetExceeded:');
+  }
+  return false;
+}
+
 export interface AiQuestionNode extends AiConversationNodeBase {
   readonly kind: 'question';
   readonly question: import('@/types/agent-question').AgentQuestionView;

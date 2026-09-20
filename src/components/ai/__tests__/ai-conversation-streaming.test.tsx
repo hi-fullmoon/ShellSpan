@@ -49,3 +49,17 @@ it('lays out the current turn immediately while retaining containment for histor
     expect(row).toHaveClass(index >= latestUser ? '[content-visibility:visible]' : '[content-visibility:auto]');
   });
 });
+
+it('uses the running indicator actual height while following streamed output', async () => {
+  await initI18n('zh-CN');
+  const { container, rerender } = render(
+    <AiConversation nodes={[]} status="running" throughSeq={null} />,
+  );
+  const indicator = container.querySelector('[data-ai-running-indicator]');
+  const row = indicator?.closest('[data-slot="message-scroller-item"]');
+  expect(row).toHaveClass('[content-visibility:visible]', '[contain-intrinsic-size:none]');
+
+  rerender(<AiConversation nodes={[]} status="waiting" throughSeq={null} />);
+  expect(container.querySelector('[data-ai-running-indicator]')?.closest('[data-slot="message-scroller-item"]'))
+    .toHaveClass('[content-visibility:visible]', '[contain-intrinsic-size:none]');
+});

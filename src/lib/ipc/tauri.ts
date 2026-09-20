@@ -676,6 +676,11 @@ export async function invokePreviewLocalFile(
   return invokeLogged('preview_local_file', { path });
 }
 
+/** Attachment bytes must never be included in IPC diagnostic logs. */
+export async function invokeReadAiAttachment(path: string): Promise<{ name: string; data: string }> {
+  return invoke('read_ai_attachment', { path });
+}
+
 export async function invokeUpdateRemotePermissions(
   request: UpdateRemotePermissionsRequest,
 ): Promise<void> {
