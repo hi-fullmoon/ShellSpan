@@ -1,4 +1,5 @@
     use super::*;
+    include!("driver_stream.rs");
 
     #[test]
     fn output_recovery_count_survives_successful_steps_but_is_scoped_to_turn() {
@@ -205,8 +206,20 @@
         ];
         assert_eq!(active_duration_ms(&events, 10_000), 300);
         assert_eq!(consumed_model_tokens(&events), 50);
+        let mut metrics = super::super::driver_metrics::DriverMetrics::default();
+        for recorded in &events {
+            metrics.observe(recorded);
+        }
+        assert_eq!(metrics.model_tokens, consumed_model_tokens(&events));
+        assert_eq!(
+            metrics.active_duration_ms(10_000),
+            active_duration_ms(&events, 10_000)
+        );
         let mut resumed = events;
         resumed.push(event(10_100, AgentSessionEventPayload::SessionResumed {}));
+        metrics.observe(resumed.last().unwrap());
+        assert_eq!(metrics.model_tokens, 0);
+        assert_eq!(metrics.active_duration_ms(10_200), 0);
         assert_eq!(active_duration_ms(&resumed, 10_200), 0);
         assert_eq!(consumed_model_tokens(&resumed), 0);
     }
@@ -441,6 +454,81 @@
         assert_eq!(repeated_tool_step_streak(&events, "turn-1"), 1);
         events.extend(repeated_step("step-4", "call-4", "81%", true, 40));
         assert_eq!(repeated_tool_step_streak(&events, "turn-1"), 1);
+    }
+
+    #[test]
+    fn identical_plan_versions_do_not_reset_repetition_but_changed_plans_do() {
+        let mut events = Vec::new();
+        let mut alternating = Vec::new();
+        for version in 1..=7 {
+            let steps = vec![super::super::AgentPlanStep {
+                id: "review".into(),
+                title: "Review agent loop".into(),
+                status: if version == 7 {
+                    super::super::AgentPlanStepStatus::Completed
+                } else {
+                    super::super::AgentPlanStepStatus::InProgress
+                },
+                detail: None,
+                evidence_refs: Vec::new(),
+            }];
+            let call_id = format!("plan-{version}");
+            let mut step = repeated_step(
+                &format!("step-{version}"),
+                &call_id,
+                "",
+                false,
+                version * 10,
+            );
+            for event in &mut step {
+                match &mut event.payload {
+                    AgentSessionEventPayload::ToolCall { call } => {
+                        call.name = "update_plan".into();
+                        call.arguments =
+                            serde_json::json!({"steps": steps, "planVersion": version});
+                    }
+                    AgentSessionEventPayload::ToolResult {
+                        name,
+                        summary,
+                        data,
+                        ..
+                    } => {
+                        *name = "update_plan".into();
+                        *summary = format!("Updated task plan (version {version})");
+                        *data = Some(serde_json::json!({"planVersion": version}));
+                    }
+                    _ => {}
+                }
+            }
+            let plan = super::super::AgentSessionEvent {
+                payload: AgentSessionEventPayload::TaskPlan { version, steps },
+                ..step[0].clone()
+            };
+            step.insert(1, plan);
+            alternating.extend(step.clone());
+            alternating.extend(repeated_step(
+                &format!("read-step-{version}"),
+                &format!("read-{version}"),
+                "unchanged",
+                false,
+                version * 10 + 5,
+            ));
+            events.extend(step);
+            assert_eq!(
+                repeated_tool_step_streak(&events, "turn-1"),
+                if version == 7 { 1 } else { version as usize }
+            );
+            if version == 6 {
+                assert!(
+                    no_progress_reason(&events, "turn-1", AgentDriverConfig::default()).is_some()
+                );
+                assert!(
+                    no_progress_reason(&alternating, "turn-1", AgentDriverConfig::default())
+                        .is_some()
+                );
+            }
+        }
+        assert!(no_progress_reason(&events, "turn-1", AgentDriverConfig::default()).is_none());
     }
 
     #[test]

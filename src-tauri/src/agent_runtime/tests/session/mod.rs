@@ -2,6 +2,89 @@ use super::*;
 include!("inbox_steer.rs");
 
 #[test]
+fn driver_metrics_and_snapshot_cache_follow_commits_and_replay() {
+    let (root, store) = configured();
+    create(&store);
+    begin_prepared_request(&store);
+    let before = store.snapshot("session-1").unwrap();
+    let cache = store.lock_configured().unwrap().sessions["session-1"]
+        .snapshot_cache
+        .clone();
+    assert!(cache.get().is_some());
+    assert_eq!(store.snapshot("session-1").unwrap(), before);
+    assert!(Arc::ptr_eq(
+        &cache,
+        &store.lock_configured().unwrap().sessions["session-1"].snapshot_cache
+    ));
+    let usage = AgentSessionEventPayload::RequestUsage {
+        request_id: "request-1".into(),
+        usage: super::super::AgentTokenUsage {
+            output_tokens: Some(32),
+            ..Default::default()
+        },
+        finish_reason: super::super::AgentStopReason::Stop,
+    };
+    // A rejected batch must not leak its provisional counters or snapshot.
+    assert!(store
+        .append_batch(
+            "session-1",
+            vec![
+                AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: usage.clone()
+                },
+                AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::StepEnd {
+                        reason: String::new()
+                    }
+                },
+            ]
+        )
+        .is_err());
+    assert_eq!(store.driver_metrics("session-1").unwrap().model_tokens, 0);
+    assert_eq!(store.snapshot("session-1").unwrap(), before);
+    store
+        .append(
+            "session-1",
+            Some("turn-1".into()),
+            Some("step-1".into()),
+            usage,
+        )
+        .unwrap();
+    let metrics = store.driver_metrics("session-1").unwrap();
+    assert_eq!(
+        (
+            metrics.model_tokens,
+            metrics.started_turns,
+            metrics.turn_steps
+        ),
+        (32, 1, 1)
+    );
+    assert!(!Arc::ptr_eq(
+        &cache,
+        &store.lock_configured().unwrap().sessions["session-1"].snapshot_cache
+    ));
+    let reopened = AgentSessionStore::default();
+    reopened.configure(root.path().to_path_buf()).unwrap();
+    let replayed = reopened.driver_metrics("session-1").unwrap();
+    assert_eq!(
+        (
+            replayed.model_tokens,
+            replayed.started_turns,
+            replayed.turn_steps
+        ),
+        (32, 1, 1)
+    );
+    assert_eq!(
+        reopened.snapshot("session-1").unwrap(),
+        store.snapshot("session-1").unwrap()
+    );
+}
+
+#[test]
 fn snapshot_uncertainty_tracks_dispatched_tools_until_their_exact_result() {
     let event = |seq, step: &str, payload| {
         AgentSessionEvent::new(
