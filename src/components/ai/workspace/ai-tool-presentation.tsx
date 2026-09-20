@@ -1,5 +1,5 @@
 import { useMemo, useState, type ComponentType } from 'react';
-import { parsePatch } from 'diff';
+import { diffLines, parsePatch } from 'diff';
 import {
   BracesIcon,
   CheckIcon,
@@ -53,6 +53,8 @@ type ToolNode = AiConversationNodeOf<'tool'>;
 type UnknownRecord = Record<string, unknown>;
 
 const DETAIL_LIMIT = 64 * 1024;
+const INLINE_DIFF_LIMIT = 32 * 1024;
+const INLINE_DIFF_TIMEOUT_MS = 50;
 
 function asRecord(value: unknown): UnknownRecord | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -286,7 +288,7 @@ function TerminalSurface({ node, compact, showCopyActions }: { node: ToolNode; c
     ?? '$';
   return (
     <div className="ai-terminal-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="terminal" data-running={node.state === 'running' || undefined}>
-      <div className="ai-terminal-header flex min-w-0 items-start gap-2 px-3.5 py-[9px]">
+      <div className="ai-terminal-header flex min-w-0 items-start gap-2 py-[9px] pr-1 pl-3.5">
         <span className={cn(AI_STATE_DOT_CLASS, 'mt-1.5')} data-state={node.state} aria-hidden="true" />
         <span className="ai-terminal-cwd shrink-0">{cwd}</span>
         <button
@@ -303,11 +305,11 @@ function TerminalSurface({ node, compact, showCopyActions }: { node: ToolNode; c
       </div>
       {node.state !== 'running' && (
         <div className="ai-terminal-output relative m-0 max-w-full">
-          <div className="max-h-65 max-w-full overflow-auto py-3 pr-11 pl-3.5 whitespace-pre">
+          <div className="max-h-65 max-w-full overflow-auto py-3 pr-9 pl-3.5 whitespace-pre">
             {output ? <CappedText text={output} maxLines={compact ? 8 : Number.POSITIVE_INFINITY} /> : t('ai.workspace.tool.noOutput')}
           </div>
           {showCopyActions && output && (
-            <div className="absolute top-2 right-3.5">
+            <div className="absolute top-2 right-1">
               <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} />
             </div>
           )}
@@ -404,8 +406,13 @@ function WebSurface({ node }: { node: ToolNode }) {
 
 interface DiffHunk {
   readonly path: string;
-  readonly oldText: string | null;
-  readonly newText: string;
+  readonly lines: readonly DiffLine[];
+  readonly exact: boolean;
+}
+
+interface DiffLine {
+  readonly kind: 'context' | 'removed' | 'added';
+  readonly text: string;
 }
 
 interface DiffModel {
@@ -418,18 +425,54 @@ function contentLines(text: string): readonly string[] {
   return (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n');
 }
 
-function contentLineCount(text: string): number {
-  return contentLines(text).length;
+function lineTokens(text: string): readonly string[] {
+  return text.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
 }
 
-function diffStat(node: ToolNode): string | null {
-  const model = diffModel(node);
+function textDiffLines(oldText: string | null, newText: string): Pick<DiffHunk, 'lines' | 'exact'> {
+  if (oldText === null) {
+    return { lines: contentLines(newText).map((text): DiffLine => ({ kind: 'added', text })), exact: true };
+  }
+  const oldTokens = lineTokens(oldText);
+  const newTokens = lineTokens(newText);
+  let prefix = 0;
+  while (prefix < oldTokens.length && prefix < newTokens.length && oldTokens[prefix] === newTokens[prefix]) {
+    prefix += 1;
+  }
+  let suffix = 0;
+  while (suffix < oldTokens.length - prefix && suffix < newTokens.length - prefix
+    && oldTokens[oldTokens.length - suffix - 1] === newTokens[newTokens.length - suffix - 1]) {
+    suffix += 1;
+  }
+  const contextLine = (token: string): DiffLine => ({
+    kind: 'context', text: token.endsWith('\n') ? token.slice(0, -1) : token,
+  });
+  const before = oldTokens.slice(0, prefix).map(contextLine);
+  const after = suffix === 0 ? [] : oldTokens.slice(-suffix).map(contextLine);
+  const oldMiddle = oldTokens.slice(prefix, oldTokens.length - suffix).join('');
+  const newMiddle = newTokens.slice(prefix, newTokens.length - suffix).join('');
+  const changes = oldMiddle.length + newMiddle.length > INLINE_DIFF_LIMIT
+    ? undefined
+    : diffLines(oldMiddle, newMiddle, { timeout: INLINE_DIFF_TIMEOUT_MS });
+  const middle = changes?.flatMap((change): DiffLine[] => {
+    const kind: DiffLine['kind'] = change.added ? 'added' : change.removed ? 'removed' : 'context';
+    return contentLines(change.value).map((text) => ({ kind, text }));
+  }) ?? [
+    ...contentLines(oldMiddle).map((text): DiffLine => ({ kind: 'removed', text })),
+    ...contentLines(newMiddle).map((text): DiffLine => ({ kind: 'added', text })),
+  ];
+  return { lines: [...before, ...middle, ...after], exact: changes !== undefined };
+}
+
+function diffStat(model: DiffModel): string | null {
   if (!model.totalsKnown || model.hunks.length === 0) return null;
   let added = 0;
   let removed = 0;
   for (const hunk of model.hunks) {
-    added += contentLineCount(hunk.newText);
-    if (hunk.oldText !== null) removed += contentLineCount(hunk.oldText);
+    for (const line of hunk.lines) {
+      if (line.kind === 'added') added += 1;
+      if (line.kind === 'removed') removed += 1;
+    }
   }
   return `+${added} -${removed}`;
 }
@@ -462,7 +505,7 @@ function structuredDiffHunks(node: ToolNode): readonly DiffHunk[] {
     const oldText = hunk?.oldText ?? hunk?.old_string ?? null;
     const newText = hunk?.newText ?? hunk?.new_string;
     return path && (oldText === null || typeof oldText === 'string') && typeof newText === 'string'
-      ? [{ path, oldText, newText }]
+      ? [{ path, ...textDiffLines(oldText, newText) }]
       : [];
   });
 }
@@ -475,12 +518,14 @@ function unifiedDiffHunks(node: ToolNode): readonly DiffHunk[] {
   try {
     const fallbackPath = toolFilePath(node);
     return parsePatch(unifiedDiff).flatMap((patch) => patch.hunks.map((hunk) => {
-      const removed = hunk.lines.flatMap((line) => line.startsWith('-') ? [line.slice(1)] : []);
-      const added = hunk.lines.flatMap((line) => line.startsWith('+') ? [line.slice(1)] : []);
       return {
         path: fallbackPath ?? patch.newFileName ?? patch.oldFileName ?? node.name,
-        oldText: removed.length > 0 ? removed.join('\n') : null,
-        newText: added.join('\n'),
+        exact: true,
+        lines: hunk.lines.flatMap((line): DiffLine[] => {
+          const kind = line.startsWith('-') ? 'removed' : line.startsWith('+') ? 'added'
+            : line.startsWith(' ') ? 'context' : null;
+          return kind ? [{ kind, text: line.slice(1) }] : [];
+        }),
       };
     }));
   } catch {
@@ -494,13 +539,13 @@ function directDiffHunks(node: ToolNode): readonly DiffHunk[] {
   const oldText = input?.old_string ?? input?.oldText ?? null;
   const newText = input?.new_string ?? input?.newText ?? input?.content;
   return path && (oldText === null || typeof oldText === 'string') && typeof newText === 'string'
-    ? [{ path, oldText, newText }]
+    ? [{ path, ...textDiffLines(oldText, newText) }]
     : [];
 }
 
 function diffModel(node: ToolNode): DiffModel {
   const structured = structuredDiffHunks(node);
-  if (structured.length > 0) return { hunks: structured, totalsKnown: true };
+  if (structured.length > 0) return { hunks: structured, totalsKnown: structured.every((hunk) => hunk.exact) };
   const unified = unifiedDiffHunks(node);
   if (unified.length > 0) return { hunks: unified, totalsKnown: true };
   const direct = directDiffHunks(node);
@@ -509,24 +554,45 @@ function diffModel(node: ToolNode): DiffModel {
   const precondition = asRecord(input?.precondition);
   const replacesUnknownContent = output?.operation === 'replace'
     || typeof precondition?.sha256 === 'string';
-  return { hunks: direct, totalsKnown: direct.length > 0 && !replacesUnknownContent };
+  return { hunks: direct, totalsKnown: direct.length > 0 && direct.every((hunk) => hunk.exact) && !replacesUnknownContent };
 }
 
-function DiffSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
-  const hunks = diffModel(node).hunks;
+function shownDiffLines(lines: readonly DiffLine[], compact: boolean): readonly DiffLine[] {
+  if (!compact || lines.length <= 16) return lines;
+  const firstChange = lines.findIndex((line) => line.kind !== 'context');
+  const start = Math.max(0, firstChange - 3);
+  const preview = lines.slice(start, start + 16);
+  if (preview.some((line) => line.kind === 'removed') && preview.some((line) => line.kind === 'added')) {
+    return preview;
+  }
+  const removed: number[] = [];
+  const added: number[] = [];
+  for (let index = 0; index < lines.length && (removed.length < 8 || added.length < 8); index += 1) {
+    if (lines[index].kind === 'removed' && removed.length < 8) removed.push(index);
+    if (lines[index].kind === 'added' && added.length < 8) added.push(index);
+  }
+  if (removed.length === 0 || added.length === 0) return preview;
+  return [...removed, ...added].sort((left, right) => left - right).map((index) => lines[index]);
+}
+
+function DiffSurface({ node, compact, model }: { node: ToolNode; compact: boolean; model?: DiffModel }) {
+  const { t } = useI18n();
+  const currentModel = useMemo(() => model ?? diffModel(node), [model, node]);
+  const hunks = currentModel.hunks;
   if (hunks.length === 0) return <IoSurface node={node} compact={compact} />;
   return (
     <div className="ai-diff-block my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-px overflow-hidden" data-ai-tool-view="diff">
       {hunks.map((hunk, index) => (
         <section key={`${hunk.path}:${index}`} className="min-w-0 max-w-full">
-          <div className="ai-block-banner flex min-w-0 items-center gap-2 truncate px-3.5 py-[9px]">{hunk.path}</div>
-          <pre className="ai-diff-body m-0 flex min-w-0 max-h-65 max-w-full flex-col overflow-auto px-3.5 py-3 whitespace-pre-wrap [overflow-wrap:anywhere]">
-            {(hunk.oldText === null ? [] : contentLines(hunk.oldText))
-              .slice(0, compact ? 8 : undefined).map((line, lineIndex) => (
-              <span key={`old-${lineIndex}`} data-diff="removed">- {line}</span>
-            ))}
-            {contentLines(hunk.newText).slice(0, compact ? 8 : undefined).map((line, lineIndex) => (
-              <span key={`new-${lineIndex}`} data-diff="added">+ {line}</span>
+          <div className="ai-block-banner flex min-w-0 items-center gap-2 truncate px-2.5 py-1.5">{hunk.path}</div>
+          {!hunk.exact && <div className="px-2.5 py-1 text-xs text-muted-foreground" data-diff-simplified>
+            {t('ai.workspace.tool.diffSimplified')}
+          </div>}
+          <pre className="ai-diff-body m-0 flex min-w-0 max-h-65 max-w-full flex-col overflow-auto px-2.5 py-2 whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {shownDiffLines(hunk.lines, compact).map((line, lineIndex) => (
+              <span key={lineIndex} data-diff={line.kind}>
+                {line.kind === 'added' ? '+ ' : line.kind === 'removed' ? '- ' : '  '}{line.text}
+              </span>
             ))}
           </pre>
         </section>
@@ -584,10 +650,12 @@ export function AiToolExpandedContent({
   node,
   compact = false,
   showCopyActions = true,
+  diffModel: precomputedDiff,
 }: {
   readonly node: ToolNode;
   readonly compact?: boolean;
   readonly showCopyActions?: boolean;
+  readonly diffModel?: DiffModel;
 }) {
   const variant = classifyAiTool(node.name, node.nativeName);
   switch (variant) {
@@ -596,7 +664,7 @@ export function AiToolExpandedContent({
     case 'search': return <SearchSurface node={node} compact={compact} />;
     case 'web': return <WebSurface node={node} />;
     case 'write':
-    case 'edit': return <DiffSurface node={node} compact={compact} />;
+    case 'edit': return <DiffSurface node={node} compact={compact} model={precomputedDiff} />;
     case 'code': return <CodeSurface node={node} showCopyActions={showCopyActions} />;
     case 'plan':
     case 'generic': return <IoSurface node={node} compact={compact} />;
@@ -617,7 +685,8 @@ export function AiToolRow({
   const stateKey = `ai.workspace.tool.${node.state}` as LocaleKey;
   const summary = toolSummary(node, variant);
   const title = toolTitle(node, variant, t);
-  const changeStat = variant === 'write' || variant === 'edit' ? diffStat(node) : null;
+  const model = useMemo(() => variant === 'write' || variant === 'edit' ? diffModel(node) : null, [node, variant]);
+  const changeStat = model ? diffStat(model) : null;
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
@@ -664,7 +733,7 @@ export function AiToolRow({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="ai-tool-body flex min-w-0 max-w-full flex-col">
-            <AiToolExpandedContent node={node} compact />
+            <AiToolExpandedContent node={node} compact diffModel={model ?? undefined} />
             {onInspect && (
               <Tooltip>
                 <TooltipTrigger

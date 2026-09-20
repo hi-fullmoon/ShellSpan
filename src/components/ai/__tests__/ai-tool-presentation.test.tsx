@@ -87,7 +87,9 @@ describe('AI tool presentation', () => {
     expect(outputCopy.closest('.ai-terminal-output')).toBeInTheDocument();
     expect(commandCopy).toHaveClass('ai-tool-copy-button');
     expect(outputCopy).toHaveClass('ai-tool-copy-button');
-    expect(outputCopy.parentElement).toHaveClass('right-3.5');
+    expect(commandCopy.closest('.ai-terminal-header')).toHaveClass('pr-1', 'pl-3.5');
+    expect(outputCopy.parentElement).toHaveClass('right-1');
+    expect(container.querySelector('.ai-terminal-output > div:first-child')).toHaveClass('pr-9');
     expect(container.querySelector('.ai-terminal-output')).toHaveTextContent('File contents');
 
     await user.click(commandCopy);

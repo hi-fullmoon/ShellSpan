@@ -367,9 +367,11 @@ function ArtifactNodeView({
   const titleKey = taskBudgetArtifactTitleKey(node.artifactKind);
   const title = titleKey ? t(titleKey) : node.title;
   return (
-    <div className="ai-produced-files grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-center gap-2">
-      <span className="ai-produced-files-label inline-flex items-center gap-1.5 whitespace-nowrap">
-        <FileOutputIcon aria-hidden="true" />
+    <div className="ai-produced-files grid min-h-6 min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-center gap-2">
+      <span className="ai-produced-files-label inline-flex items-center gap-1 whitespace-nowrap">
+        <span className="inline-flex size-4 shrink-0 items-center justify-center">
+          <FileOutputIcon aria-hidden="true" />
+        </span>
         {t('ai.workspace.artifact.produced')}
       </span>
       <button
@@ -391,10 +393,12 @@ function ApprovalMarkerNodeView({
 }: { readonly node: AiConversationNodeOf<'approvalMarker'> }) {
   const { t } = useI18n();
   return (
-    <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_max-content_minmax(0,1fr)] items-center gap-1 py-0.5" data-variant="approval" data-state={node.status}>
-      <ShieldAlertIcon aria-hidden="true" />
-      <span>{t(`ai.workspace.approval.${node.status}` as LocaleKey)}</span>
-      {node.prompt && <span className="ai-transcript-notice-detail min-w-0 truncate">{node.prompt}</span>}
+    <div className="ai-transcript-notice flex h-6 min-w-0 items-center gap-0" data-variant="approval" data-state={node.status}>
+      <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
+        <ShieldAlertIcon />
+      </span>
+      <span className={AI_DISCLOSURE_TITLE_CLASS}>{t(`ai.workspace.approval.${node.status}` as LocaleKey)}</span>
+      {node.prompt && <span className="ai-transcript-notice-detail ml-1 min-w-0 flex-1 truncate">{node.prompt}</span>}
     </div>
   );
 }
@@ -403,10 +407,12 @@ function RetryNodeView({ node }: { readonly node: AiConversationNodeOf<'retry'> 
   const { t } = useI18n();
   const outputRecovery = node.reason === 'outputLimitContinuation';
   return (
-    <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_max-content_minmax(0,1fr)] items-center gap-1 py-0.5" data-variant="retry" role="status">
-      <RefreshCwIcon aria-hidden="true" />
-      <span>{t(outputRecovery ? 'ai.workspace.outputLimitContinuation' : 'ai.workspace.retry', { attempt: node.attempt })}</span>
-      <span className="ai-transcript-notice-detail min-w-0 truncate">{outputRecovery ? t('ai.workspace.outputLimitContinuationDetail') : node.reason}</span>
+    <div className="ai-transcript-notice flex h-6 min-w-0 items-center gap-0" data-variant="retry" role="status">
+      <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
+        <RefreshCwIcon />
+      </span>
+      <span className={AI_DISCLOSURE_TITLE_CLASS}>{t(outputRecovery ? 'ai.workspace.outputLimitContinuation' : 'ai.workspace.retry', { attempt: node.attempt })}</span>
+      <span className="ai-transcript-notice-detail ml-1 min-w-0 flex-1 truncate">{outputRecovery ? t('ai.workspace.outputLimitContinuationDetail') : node.reason}</span>
     </div>
   );
 }
@@ -425,14 +431,16 @@ function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> 
   const { t } = useI18n();
   if (node.state === 'cancelled') {
     return (
-      <div className="ai-transcript-notice grid min-w-0 grid-cols-[16px_minmax(0,1fr)] items-center gap-1 py-0.5" data-variant="cancelled" role="status">
-        <SquareIcon aria-hidden="true" />
-        <span>{t('ai.workspace.stopped')}</span>
+      <div className="ai-transcript-notice flex h-6 min-w-0 items-center gap-0" data-variant="cancelled" role="status">
+        <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
+          <SquareIcon />
+        </span>
+        <span className={AI_DISCLOSURE_TITLE_CLASS}>{t('ai.workspace.stopped')}</span>
       </div>
     );
   }
   return (
-    <div className="ai-turn-error grid min-w-0 grid-cols-[14px_minmax(0,1fr)_auto] items-start gap-2 py-0.5" role="alert">
+    <div className="ai-turn-error grid min-w-0 grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-1 py-0.5" role="alert">
       <CircleAlertIcon aria-hidden="true" />
       <div className="ai-turn-error-copy block min-w-0 [overflow-wrap:anywhere]">
         <strong className="mr-1.5">{t('ai.requestFailed')}</strong>
