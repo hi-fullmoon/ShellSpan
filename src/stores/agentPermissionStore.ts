@@ -1,12 +1,11 @@
 import { create } from 'zustand';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import {
   AGENT_PERMISSION_MODES,
   type AgentPermissionMode,
   type AgentApprovalTarget,
 } from '@/types/agent-approval';
-
-const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = 'autoApproveReadOnly';
 
 export interface AgentPermissionBinding {
   readonly mode: AgentPermissionMode;
@@ -57,10 +56,9 @@ export const useAgentPermissionStore = create<AgentPermissionState>()((set, get)
   bindings: {},
   getMode: (sessionId) => {
     const binding = get().bindings[sessionId];
-    if (!binding || !sameTarget(binding.target, findLiveSession(sessionId))) {
-      return DEFAULT_AGENT_PERMISSION_MODE;
-    }
-    return binding.mode;
+    return binding?.mode === 'fullAccess' && sameTarget(binding.target, findLiveSession(sessionId))
+      ? 'fullAccess'
+      : useAiSettingsStore.getState().agentPermissionMode;
   },
   getBinding: (sessionId) => {
     const binding = get().bindings[sessionId];
@@ -82,11 +80,16 @@ export const useAgentPermissionStore = create<AgentPermissionState>()((set, get)
       });
       return false;
     }
+    if (mode !== 'fullAccess') {
+      get().resetSession(sessionId);
+      useAiSettingsStore.getState().setAgentPermissionMode(mode as Exclude<AgentPermissionMode, 'fullAccess'>);
+      return true;
+    }
     const target = targetFromSession(session);
     set((state) => ({
       bindings: {
         ...state.bindings,
-        [sessionId]: Object.freeze({ mode: mode as AgentPermissionMode, target }),
+        [sessionId]: Object.freeze({ mode: 'fullAccess', target }),
       },
     }));
     return true;

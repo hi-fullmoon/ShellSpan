@@ -17,6 +17,8 @@ import {
 } from '@/lib/ai/ai-reasoning';
 
 import { isProviderProfile, resolveProviderProfile } from '@/lib/ai/provider-contract';
+import type { AgentPermissionMode } from '@/types/agent-approval';
+import type { AgentExecutionSurface } from '@/types/agent-session';
 
 const logger = createLogger('aiSettingsStore');
 
@@ -111,6 +113,8 @@ interface AiPreferences {
   providers: AiProviderProfile[];
   defaultProviderId: string;
   contextLines: number;
+  agentPermissionMode: Exclude<AgentPermissionMode, 'fullAccess'>;
+  agentExecutionSurface: AgentExecutionSurface;
 }
 
 interface AiSettingsState extends AiPreferences {
@@ -125,6 +129,8 @@ interface AiSettingsState extends AiPreferences {
   removeProvider: (id: string) => void;
   setDefaultProvider: (id: string) => void;
   setContextLines: (lines: number) => void;
+  setAgentPermissionMode: (mode: Exclude<AgentPermissionMode, 'fullAccess'>) => void;
+  setAgentExecutionSurface: (surface: AgentExecutionSurface) => void;
   getProviderConfig: (id?: string) => AiProviderConfig;
 }
 
@@ -155,30 +161,34 @@ const defaults: AiPreferences = {
   providers: initialProviders,
   defaultProviderId: 'ollama',
   contextLines: 200,
+  agentPermissionMode: 'autoApproveReadOnly',
+  agentExecutionSurface: 'direct',
 };
 
 // RouteStore owns provider connections and model selection. This store persists
-// only the independent terminal-context preference.
-const PREFERENCE_KEYS = ['contextLines'] as const;
+// only independent composer and terminal-context preferences.
+const PREFERENCE_KEYS = ['contextLines', 'agentPermissionMode', 'agentExecutionSurface'] as const;
 
 function storageKey(key: keyof AiPreferences): string {
   return `ai.${key}`;
 }
 
 export function parseAiPreferences(entries: [string, string][]): AiPreferences {
-  const raw = entries.find(([key]) => key === storageKey('contextLines'))?.[1];
+  const read = (key: keyof AiPreferences): unknown => {
+    const raw = entries.find(([entryKey]) => entryKey === storageKey(key))?.[1];
+    if (raw === undefined) return undefined;
+    try { return JSON.parse(raw) as unknown; } catch { return undefined; }
+  };
   let contextLines = defaults.contextLines;
-  if (raw !== undefined) {
-    try {
-      const value: unknown = JSON.parse(raw);
-      if (typeof value === 'number') contextLines = value;
-    } catch {
-      // Invalid current preferences use the current default.
-    }
-  }
+  const contextValue = read('contextLines');
+  if (typeof contextValue === 'number') contextLines = contextValue;
+  const permissionValue = read('agentPermissionMode');
+  const surfaceValue = read('agentExecutionSurface');
   return {
     ...defaults,
     contextLines,
+    agentPermissionMode: permissionValue === 'requestApproval' ? permissionValue : defaults.agentPermissionMode,
+    agentExecutionSurface: surfaceValue === 'boundTerminal' ? surfaceValue : defaults.agentExecutionSurface,
   };
 }
 
@@ -297,6 +307,8 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         : state
     )),
     setContextLines: (contextLines) => set({ contextLines }),
+    setAgentPermissionMode: (agentPermissionMode) => set({ agentPermissionMode }),
+    setAgentExecutionSurface: (agentExecutionSurface) => set({ agentExecutionSurface }),
     getProviderConfig: (id) => {
       const state = get();
       const provider = state.providers.find((item) => item.id === (id ?? state.defaultProviderId))
@@ -321,13 +333,15 @@ export const useAiSettingsStore = create<AiSettingsState>()(
 );
 
 useAiSettingsStore.subscribe(
-  (state) => state.contextLines,
+  (state) => `${state.contextLines}:${state.agentPermissionMode}:${state.agentExecutionSurface}`,
   () => {
     const state = useAiSettingsStore.getState();
     if (state.initialized) schedulePreferencesSave({
       providers: state.providers,
       defaultProviderId: state.defaultProviderId,
       contextLines: state.contextLines,
+      agentPermissionMode: state.agentPermissionMode,
+      agentExecutionSurface: state.agentExecutionSurface,
     });
   },
 );

@@ -47,14 +47,39 @@ describe('aiSettingsStore', () => {
     expect(tauri.invokeSavePreferences).not.toHaveBeenCalled();
   });
 
-  it('loads only the current context preference', () => {
+  it('loads independent Agent defaults and ignores legacy provider settings', () => {
     const preferences = parseAiPreferences([
       preference('contextLines', 500),
+      preference('agentPermissionMode', 'requestApproval'),
+      preference('agentExecutionSurface', 'boundTerminal'),
       preference('providers', [{ id: 'ignored-old-provider' }]),
     ]);
     expect(preferences.contextLines).toBe(500);
+    expect(preferences.agentPermissionMode).toBe('requestApproval');
+    expect(preferences.agentExecutionSurface).toBe('boundTerminal');
     expect(preferences.providers).toEqual(initialState.providers);
     expect(preferences.defaultProviderId).toBe(initialState.defaultProviderId);
+  });
+
+  it('rejects persisted full access and invalid execution defaults', () => {
+    const preferences = parseAiPreferences([
+      preference('agentPermissionMode', 'fullAccess'),
+      preference('agentExecutionSurface', 'unknown'),
+    ]);
+    expect(preferences.agentPermissionMode).toBe('autoApproveReadOnly');
+    expect(preferences.agentExecutionSurface).toBe('direct');
+  });
+
+  it('saves Agent defaults for future sessions', async () => {
+    vi.useFakeTimers();
+    useAiSettingsStore.setState({ ...initialState, initialized: true }, true);
+    useAiSettingsStore.getState().setAgentPermissionMode('requestApproval');
+    useAiSettingsStore.getState().setAgentExecutionSurface('boundTerminal');
+    await flushAiSettingsPreferences();
+    expect(tauri.invokeSavePreferences).toHaveBeenCalledWith(expect.arrayContaining([
+      ['ai.agentPermissionMode', '"requestApproval"'],
+      ['ai.agentExecutionSurface', '"boundTerminal"'],
+    ]));
   });
 
   it('adds a preset and exposes it as the selected request config', () => {

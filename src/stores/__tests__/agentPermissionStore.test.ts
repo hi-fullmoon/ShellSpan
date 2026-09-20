@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useAgentPermissionStore } from '../agentPermissionStore';
+import { useAiSettingsStore } from '../aiSettingsStore';
 import { useTerminalStore } from '../terminalStore';
 
 const initialTerminalState = useTerminalStore.getState();
@@ -25,8 +26,28 @@ function connectSession(
 
 describe('connection-instance Agent permissions', () => {
   beforeEach(() => {
+    useAiSettingsStore.setState({ agentPermissionMode: 'autoApproveReadOnly' });
     useTerminalStore.setState(initialTerminalState, true);
     useAgentPermissionStore.setState(initialPermissionState, true);
+  });
+
+  it('uses a remembered safe preference for a new connection while full access remains connection-scoped', () => {
+    connectSession('session-a');
+    expect(useAgentPermissionStore.getState().setMode('session-a', 'requestApproval')).toBe(true);
+    connectSession('session-b');
+    expect(useAgentPermissionStore.getState().getMode('session-b')).toBe('requestApproval');
+    expect(useAgentPermissionStore.getState().setMode('session-a', 'fullAccess')).toBe(true);
+    expect(useAiSettingsStore.getState().agentPermissionMode).toBe('requestApproval');
+    expect(useAgentPermissionStore.getState().getMode('session-b')).toBe('requestApproval');
+  });
+
+  it('applies the latest safe Agent preference to future sessions on already connected targets', () => {
+    connectSession('session-a');
+    connectSession('session-b');
+    useAgentPermissionStore.getState().setMode('session-a', 'requestApproval');
+    expect(useAgentPermissionStore.getState().getMode('session-b')).toBe('requestApproval');
+    useAgentPermissionStore.getState().setMode('session-b', 'autoApproveReadOnly');
+    expect(useAgentPermissionStore.getState().getMode('session-a')).toBe('autoApproveReadOnly');
   });
 
   it('defaults every new connection to autoApproveReadOnly and isolates identical hosts', () => {
