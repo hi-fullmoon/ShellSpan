@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.hoisted(() => vi.fn());
+const loggerDebugMock = vi.hoisted(() => vi.fn());
 const loggerErrorMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@/lib/logger', () => ({
   createLogger: () => ({
-    debug: vi.fn(),
+    debug: loggerDebugMock,
     info: vi.fn(),
     error: loggerErrorMock,
     warn: vi.fn(),
@@ -23,8 +24,10 @@ import {
   invokeGetAiRouteApiKey,
   invokeGetTerminalBrokerSnapshot,
   invokeListKeyCredentials,
+  invokeListLogFiles,
   invokeListRemoteDirectory,
   invokeOpenRemoteFile,
+  invokeReadLogFile,
   invokeRevealPath,
   invokePreflightConnection,
   invokePreviewRemoteFile,
@@ -37,7 +40,33 @@ import type { ConnectionProfile } from '@/types';
 
 beforeEach(() => {
   invokeMock.mockReset();
+  loggerDebugMock.mockReset();
   loggerErrorMock.mockReset();
+});
+
+describe('log file reads', () => {
+  it('does not write successful log reads back into the log', async () => {
+    invokeMock.mockResolvedValueOnce([]).mockResolvedValueOnce('existing entry');
+
+    await expect(invokeListLogFiles()).resolves.toEqual([]);
+    await expect(invokeReadLogFile('frontend.log')).resolves.toBe('existing entry');
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'list_log_files', undefined);
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'read_log_file', {
+      name: 'frontend.log',
+    });
+    expect(loggerDebugMock).not.toHaveBeenCalled();
+  });
+
+  it('still records a failed log read', async () => {
+    const failure = new Error('file unavailable');
+    invokeMock.mockRejectedValueOnce(failure);
+
+    await expect(invokeReadLogFile('frontend.log')).rejects.toBe(failure);
+
+    expect(loggerDebugMock).not.toHaveBeenCalled();
+    expect(loggerErrorMock).toHaveBeenCalledOnce();
+  });
 });
 
 it('passes a local path unchanged to the reveal command', async () => {

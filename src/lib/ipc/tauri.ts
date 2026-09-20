@@ -139,12 +139,17 @@ function isCancelledRemoteFileRead(cmd: string, error: unknown): boolean {
 async function invokeLogged<T>(
   cmd: string,
   args?: Record<string, unknown>,
+  options?: { logLifecycle?: boolean },
 ): Promise<T> {
   const operationId = findOperationId(args) ?? createOperationId(cmd);
-  logger.debug(`invoke ${cmd} started operation_id=${operationId}`);
+  if (options?.logLifecycle !== false) {
+    logger.debug(`invoke ${cmd} started operation_id=${operationId}`);
+  }
   try {
     const result = await invoke<T>(cmd, args);
-    logger.debug(`invoke ${cmd} completed operation_id=${operationId}`);
+    if (options?.logLifecycle !== false) {
+      logger.debug(`invoke ${cmd} completed operation_id=${operationId}`);
+    }
     return result;
   } catch (error) {
     if (isSupersededDirectoryRequest(cmd, error)) {
@@ -734,11 +739,12 @@ export async function invokeRemoveKnownHost(
 }
 
 export async function invokeListLogFiles(): Promise<LogFileInfo[]> {
-  return invokeLogged('list_log_files');
+  // Reading the log must not append new entries to the same log.
+  return invokeLogged('list_log_files', undefined, { logLifecycle: false });
 }
 
 export async function invokeReadLogFile(name: string): Promise<string> {
-  return invokeLogged('read_log_file', { name });
+  return invokeLogged('read_log_file', { name }, { logLifecycle: false });
 }
 
 export async function invokeExportLogFile(
