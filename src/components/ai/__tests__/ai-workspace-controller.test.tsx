@@ -1193,7 +1193,7 @@ describe('AiWorkspaceController', () => {
     expect(screen.queryByRole('status', { name: 'Agent is unavailable' })).toBeNull();
     expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
     expect(screen.getByText('Q&A only · No terminal access')).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Add images' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add images' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
 
     await userEvent.setup().type(screen.getByRole('textbox'), 'Explain SSH keepalives');

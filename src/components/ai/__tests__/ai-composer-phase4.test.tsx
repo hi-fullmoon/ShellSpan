@@ -53,6 +53,28 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiComposerSeat Phase 4 behavior', () => {
+  it('matches the AI panel menu and offers file and folder actions', async () => {
+    const user = userEvent.setup();
+    render(<AiComposerSeat phase="active" status="idle" onPasteImages={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Add file or folder' })).toHaveClass('rounded-full');
+    await user.click(screen.getByRole('button', { name: 'Add file or folder' }));
+    const file = await screen.findByRole('menuitem', { name: 'Add file' });
+    expect(file).toBeVisible();
+    expect(file).toHaveClass('min-h-[34px]', 'gap-2', 'px-2');
+    expect(file.closest('[data-slot="dropdown-menu-content"]')).toHaveClass('ai-composer-add-menu', 'p-[3px]');
+    expect(screen.getByRole('menuitem', { name: 'Add folder' })).toBeVisible();
+    expect(screen.queryByRole('menuitem', { name: 'Add images' })).toBeNull();
+  });
+  it('opens the image picker directly in Ask mode', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<AiComposerSeat mode="ask" phase="active" status="idle" onPasteImages={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Add images' })).toHaveClass('rounded-full');
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const openPicker = vi.spyOn(input, 'click');
+    await user.click(screen.getByRole('button', { name: 'Add images' }));
+    expect(openPicker).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
   it('allows typing during stop cleanup and enables sending after it settles', async () => {
     const user = userEvent.setup();
     const onSubmitGesture = vi.fn();
@@ -125,7 +147,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('keeps image pasting available in Ask without an upload button', () => {
+  it('keeps image pasting available in Ask with the add menu', () => {
     const onPasteImages = vi.fn();
     render(
       <AiComposerSeat
@@ -140,7 +162,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
       clipboardData: { files: [image], items: [] },
     });
 
-    expect(screen.queryByRole('button', { name: 'Add images' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add images' })).toBeVisible();
     expect(onPasteImages).toHaveBeenCalledOnce();
     expect(onPasteImages).toHaveBeenCalledWith([image]);
   });
@@ -378,6 +400,30 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(screen.getByRole('textbox').textContent).toBe('keep this draft');
     expect(screen.queryByText('Waiting for approval')).toBeNull();
     expect(screen.queryByRole('button', { name: /approve/i })).toBeNull();
+  });
+
+  it('keeps internal step context out of the composer queue throughout consumption', () => {
+    const internal = {
+      id: 'runtime-verify-step-call', lane: 'nextStep' as const,
+      content: 'Native external side effect `run_terminal_command` completed on frozen target `terminal`. Verify its observed outcome before declaring the task complete.',
+      state: 'queued' as const, source: 'runtime' as const,
+    };
+    const userInput = {
+      id: 'user-next-step', lane: 'nextStep' as const, content: 'Do not restart the service',
+      state: 'queued' as const, source: 'user' as const,
+    };
+    const { rerender, container } = render(<AiComposerSeat phase="active" status="running" inbox={[]} />);
+    const composer = container.querySelector('[data-slot="ai-composer-seat"]')!;
+    const initialChildren = [...composer.children];
+    for (const inbox of [[internal], [{ ...internal, state: 'claimed' as const }], []]) {
+      rerender(<AiComposerSeat phase="active" status="running" inbox={inbox} />);
+      expect(screen.queryByRole('region', { name: 'Queued input' })).toBeNull();
+      expect([...composer.children]).toEqual(initialChildren);
+    }
+    rerender(<AiComposerSeat phase="active" status="running" inbox={[internal, userInput]} />);
+    expect(screen.getByText(userInput.content)).toBeVisible();
+    expect(screen.queryByText(internal.content)).toBeNull();
+    expect(screen.getByRole('region', { name: 'Queued input' }).querySelectorAll('li')).toHaveLength(1);
   });
 
   it('renders Runtime Inbox with lane, state, and Phase 6 mutation controls', () => {
