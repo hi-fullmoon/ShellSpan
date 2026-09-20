@@ -440,6 +440,20 @@ async fn image_bad_batch_write_failure_and_every_cancel_boundary_never_enqueue()
 }
 
 #[tokio::test]
+async fn cancelling_images_before_session_creation_keeps_the_submission_uncommitted() {
+    let (_storage, runtime, _) = setup();
+    let operation = ImageOperation {
+        session_id: "images".into(),
+        client_operation_id: "one".into(),
+    };
+
+    assert!(!runtime.cancel_image_submission(operation).unwrap());
+    runtime.start("images", vision_provider(), None).unwrap();
+    assert!(runtime.submit_images(input("one")).await.unwrap_err().contains("IMAGE_CANCELLED"));
+    assert!(runtime.session("images").unwrap().inbox.next_turn.is_empty());
+}
+
+#[tokio::test]
 async fn image_commit_wins_cancel_idempotency_raw_conflict_and_cross_session_preview() {
     let (_storage, runtime, model) = setup();
     runtime.start("images", vision_provider(), None).unwrap();
