@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Spinner } from '@/components/ui/empty-state';
+import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiPendingApproval } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
@@ -169,92 +170,95 @@ export function AiApprovalPanel({
 
   return (
     <Card
-      className="min-w-0 gap-0 py-0"
+      className="ai-approval-panel grid min-h-0 max-h-[min(600px,72dvh)] min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 py-0"
       size="sm"
-      variant="outline"
       role="group"
       aria-labelledby="ai-approval-title"
       aria-describedby="ai-approval-description"
       data-slot="ai-approval-panel"
       data-approval-id={approval.approvalId}
     >
-      <CardHeader className="px-3 py-2.5">
+      <CardHeader className="ai-approval-panel-header shrink-0 gap-2 px-4 py-3 has-data-[slot=card-action]:grid-cols-1 @min-[480px]/ai-workspace:has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
         <div className="flex min-w-0 items-start gap-2">
           <span className="flex size-7 shrink-0 items-center justify-center text-warning" aria-hidden="true">
             <ShieldAlertIcon />
           </span>
           <div className="flex min-w-0 flex-col gap-0.5">
-            <CardTitle>
+            <CardTitle className="ai-approval-panel-title">
               <h3 id="ai-approval-title" ref={headingRef} tabIndex={-1} className="outline-none">
                 {t(titleKey, { tool: approval.toolName })}
               </h3>
             </CardTitle>
-            <CardDescription id="ai-approval-description">
+            <CardDescription id="ai-approval-description" className="break-words">
               {t(descriptionKey, { target: targetLabel(approval) })}
             </CardDescription>
           </div>
         </div>
-        <CardAction>
+        <CardAction className="col-start-1 row-span-1 row-start-auto justify-self-start pl-9 @min-[480px]/ai-workspace:col-start-2 @min-[480px]/ai-workspace:row-start-1 @min-[480px]/ai-workspace:pl-0">
           <Badge variant={destructive ? 'destructive' : 'outline'}>{t(riskKeys.label)}</Badge>
         </CardAction>
       </CardHeader>
 
-      <CardContent className="flex min-w-0 flex-col gap-2 px-3 pb-2">
-        {exactValue && (
-          <div className="flex min-w-0 flex-col gap-1">
-            <p className="text-xs font-medium text-muted-foreground">{t(exactValueLabel)}</p>
-            <pre className="max-h-28 min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted px-2.5 py-2 font-mono text-xs leading-relaxed text-foreground">
-              <code>{exactValue}</code>
-            </pre>
-          </div>
-        )}
+      <ScrollArea className="min-h-0 min-w-0">
+        <ScrollAreaContent style={{ minWidth: 0 }}>
+          <CardContent className="flex min-w-0 flex-col gap-3 px-4 pb-2">
+            {exactValue && (
+              <div className="flex min-w-0 flex-col gap-1">
+                <p className="text-xs font-medium text-muted-foreground">{t(exactValueLabel)}</p>
+                <pre className="ai-approval-command min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] px-3 py-2.5">
+                  <code>{exactValue}</code>
+                </pre>
+              </div>
+            )}
 
-        {volatileArgumentsMissing && argumentsLoading && !volatileArgumentsError && (
-          <Alert variant="subtle" size="sm" role="status">
-            <Spinner data-icon="inline-start" />
-            <AlertDescription>{t('ai.workspace.approval.previewLoading')}</AlertDescription>
-          </Alert>
-        )}
+            {volatileArgumentsMissing && argumentsLoading && !volatileArgumentsError && (
+              <Alert variant="subtle" size="sm" role="status">
+                <Spinner data-icon="inline-start" />
+                <AlertDescription>{t('ai.workspace.approval.previewLoading')}</AlertDescription>
+              </Alert>
+            )}
 
-        {volatileArgumentsError && (
-          <AiErrorNotice title={t('ai.workspace.approval.previewUnavailableTitle')}>
-            {volatileArgumentsError}
-          </AiErrorNotice>
-        )}
+            {volatileArgumentsError && (
+              <AiErrorNotice title={t('ai.workspace.approval.previewUnavailableTitle')}>
+                {volatileArgumentsError}
+              </AiErrorNotice>
+            )}
 
-        {intent && (
-          <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2">
-            <p className="text-xs font-medium text-muted-foreground">{t('ai.workspace.approval.intent')}</p>
-            <p className="break-words text-sm">{intent}</p>
-          </div>
-        )}
+            {intent && (
+              <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2">
+                <p className="text-xs font-medium text-muted-foreground">{t('ai.workspace.approval.intent')}</p>
+                <p className="break-words text-sm">{intent}</p>
+              </div>
+            )}
 
-        <Alert
-          className="items-center [&>svg]:translate-y-0"
-          variant={destructive ? 'destructive' : 'warning'}
-          size="sm"
-          role="note"
-        >
-          <ShieldAlertIcon />
-          <AlertDescription className="flex flex-wrap items-center gap-x-1">
-            <span className="font-medium">{t('ai.workspace.approval.impact')}</span>
-            <span>{t(riskKeys.description)}</span>
-          </AlertDescription>
-        </Alert>
+            <Alert
+              className="items-center [&>svg]:translate-y-0"
+              variant={destructive ? 'destructive' : 'warning'}
+              size="sm"
+              role="note"
+            >
+              <ShieldAlertIcon />
+              <AlertDescription className="flex flex-wrap items-center gap-x-1">
+                <span className="font-medium">{t('ai.workspace.approval.impact')}</span>
+                <span>{t(riskKeys.description)}</span>
+              </AlertDescription>
+            </Alert>
 
-        <Button variant="ghost" size="xs" className="self-start" onClick={onOpenDetails}>
-          {t('ai.workspace.approval.fullParameters')}
-          <ChevronRightIcon data-icon="inline-end" />
-        </Button>
+            <Button variant="ghost" size="xs" className="self-start" onClick={onOpenDetails}>
+              {t('ai.workspace.approval.fullParameters')}
+              <ChevronRightIcon data-icon="inline-end" />
+            </Button>
 
-        {error && (
-          <AiErrorNotice title={t('ai.workspace.recovery.title')}>
-            {error}
-          </AiErrorNotice>
-        )}
-      </CardContent>
+            {error && (
+              <AiErrorNotice title={t('ai.workspace.recovery.title')}>
+                {error}
+              </AiErrorNotice>
+            )}
+          </CardContent>
+        </ScrollAreaContent>
+      </ScrollArea>
 
-      <CardFooter className="grid grid-cols-2 gap-2 px-3 py-2">
+      <CardFooter className="ai-approval-panel-footer shrink-0 justify-end gap-2 px-4 pt-2 pb-3">
         <Button size="sm" variant="outline" disabled={pending} onClick={onReject} aria-label={t('ai.workspace.approval.reject')}>
           {decision === 'reject' && <Spinner data-icon="inline-start" />}
           {t('ai.workspace.approval.reject')}

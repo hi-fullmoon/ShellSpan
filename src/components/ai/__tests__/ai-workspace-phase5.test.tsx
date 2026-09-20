@@ -195,6 +195,14 @@ describe('AI workspace Phase 5 workflows', () => {
     expect(composerAnchor).toContainElement(overlay);
     expect(composerAnchor).toContainElement(composerCard);
     expect(approval).toBeVisible();
+    const approvalBody = approval.querySelector<HTMLElement>('[data-slot="scroll-area"]');
+    const approvalFooter = approval.querySelector<HTMLElement>('[data-slot="card-footer"]');
+    expect(approval).toHaveClass('ai-approval-panel', 'min-h-0', 'grid-rows-[auto_minmax(0,1fr)_auto]');
+    expect(approvalBody).toHaveClass('min-h-0');
+    expect(approvalBody).toContainElement(within(approval).getByText('systemctl restart nginx'));
+    expect(approvalBody).not.toContainElement(approvalFooter);
+    expect(approvalFooter).toHaveClass('shrink-0');
+    expect(approvalFooter).toContainElement(screen.getByRole('button', { name: 'Allow once' }));
     expect(screen.getByText(/will run on Production/)).toBeVisible();
     expect(screen.getByText('systemctl restart nginx')).toBeVisible();
     expect(within(approval).getByText('Restart the web server to apply its new configuration.')).toBeVisible();
