@@ -93,7 +93,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const composer = container.querySelector('[data-slot="ai-composer-seat"]')!;
     const alert = notices.querySelector('[data-slot="alert"]');
     expect(alert).toHaveAttribute('data-size', 'sm');
-    expect(alert).toHaveClass('border', 'bg-card');
+    expect(alert).toHaveClass('border-primary/30', 'bg-primary/10');
     expect(notices).toHaveClass('gap-1.5', 'py-2');
     expect(notices.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(composer.querySelector('[data-slot="alert"]')).toBeNull();
@@ -111,9 +111,11 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(within(notices).getByText('Preparing the continued conversation…')).toBeVisible();
     expect(within(notices).getByText('Connection lost')).toBeVisible();
     expect(within(notices).getByText('Preparing the continued conversation…').closest('[data-slot="alert"]'))
-      .toHaveClass('border', 'bg-card');
+      .toHaveClass('border-primary/30', 'bg-primary/10');
     expect(within(notices).getByText('Connection lost').closest('[data-slot="alert"]'))
       .toHaveClass('border-destructive/20', 'bg-destructive/5');
+    expect(within(notices).getByText('Connect a terminal').closest('[data-slot="alert"]'))
+      .toHaveClass('border-primary/30', 'bg-primary/10');
     expect([...notices.querySelectorAll('[data-slot="alert"]')].every((alert) => alert.getAttribute('data-size') === 'sm'))
       .toBe(true);
     const availability = within(notices).getByRole('status', { name: 'Agent is unavailable' });

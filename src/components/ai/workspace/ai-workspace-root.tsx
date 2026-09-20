@@ -509,7 +509,7 @@ export function AiWorkspaceRoot({
         className="mx-auto flex w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] shrink-0 flex-col gap-1.5 px-[var(--ai-shell-clearance)] py-2 empty:hidden"
       >
         {historicalContinuationAvailable && (
-          <Alert size="sm" role="status">
+          <Alert variant="info" size="sm" role="status">
             <AlertDescription>{t(historicalContinuationBusy
               ? 'ai.workspace.sessions.continuePreparing'
               : 'ai.workspace.sessions.continueComposerHint')}</AlertDescription>
@@ -521,31 +521,31 @@ export function AiWorkspaceRoot({
           </Alert>
         )}
         {!readOnlySession && canResumeTokenBudgetedTask(view) && (
-          <Alert size="sm" role="status" data-token-budget-notice="">
+          <Alert variant="info" size="sm" role="status" data-token-budget-notice="">
             <AlertDescription>{t(view && hasTokenBudgetCheckpoint(view)
               ? 'ai.workspace.tokenBudget.checkpointSaved'
               : 'ai.workspace.tokenBudget.description')}</AlertDescription>
           </Alert>
         )}
         {activeComposerState?.phase === 'stopping' && (
-          <Alert size="sm" role="status">
+          <Alert variant="info" size="sm" role="status">
             <AlertDescription>{t('ai.workspace.stopping')}</AlertDescription>
           </Alert>
         )}
         {surfaceMode === 'agent' && activeComposerState?.phase === 'waitingApproval' && !view?.pendingApproval && (
-          <Alert size="sm">
+          <Alert variant="info" size="sm">
             <AlertTitle>{t('ai.workspace.approvalWaiting')}</AlertTitle>
             <AlertDescription>{t('ai.workspace.approvalPhase5')}</AlertDescription>
           </Alert>
         )}
         {activeComposerState?.phase === 'waitingQuestion' && !view?.pendingQuestion && (
-          <Alert size="sm">
+          <Alert variant="info" size="sm">
             <AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle>
             <AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>
           </Alert>
         )}
         {agentUnavailableReason && (
-          <Alert id={availabilityHintId} size="sm" role="status" aria-label={t('agent.availability.title')}>
+          <Alert id={availabilityHintId} variant="info" size="sm" role="status" aria-label={t('agent.availability.title')}>
             <AlertDescription className="min-w-0 break-words">{agentUnavailableReason}</AlertDescription>
           </Alert>
         )}
