@@ -74,7 +74,7 @@ const AgentTerminalLeaseBar: React.FC<{
 
   return (
     <div
-      className="agent-terminal-lease-bar grid min-h-10 shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 bg-app-surface px-3 py-2"
+      className="agent-terminal-lease-bar grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-y border-app-border/50 bg-app-surface px-2 py-[5px]"
       role="status"
       aria-live="polite"
       aria-atomic="true"
