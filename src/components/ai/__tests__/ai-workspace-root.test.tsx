@@ -91,7 +91,10 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const notices = container.querySelector('[data-slot="ai-workspace-status-notices"]')!;
     const body = container.querySelector('[data-slot="ai-workspace-body"]')!;
     const composer = container.querySelector('[data-slot="ai-composer-seat"]')!;
-    expect(notices.querySelector('[data-slot="alert"]')).not.toBeNull();
+    const alert = notices.querySelector('[data-slot="alert"]');
+    expect(alert).toHaveAttribute('data-size', 'sm');
+    expect(alert).toHaveClass('border', 'bg-card');
+    expect(notices).toHaveClass('gap-1.5', 'py-2');
     expect(notices.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(composer.querySelector('[data-slot="alert"]')).toBeNull();
     rerender(<AiWorkspaceRoot scope="terminal" view={agentView('idle')}
@@ -107,6 +110,12 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const notices = container.querySelector('[data-slot="ai-workspace-status-notices"]') as HTMLElement;
     expect(within(notices).getByText('Preparing the continued conversation…')).toBeVisible();
     expect(within(notices).getByText('Connection lost')).toBeVisible();
+    expect(within(notices).getByText('Preparing the continued conversation…').closest('[data-slot="alert"]'))
+      .toHaveClass('border', 'bg-card');
+    expect(within(notices).getByText('Connection lost').closest('[data-slot="alert"]'))
+      .toHaveClass('border-destructive/20', 'bg-destructive/5');
+    expect([...notices.querySelectorAll('[data-slot="alert"]')].every((alert) => alert.getAttribute('data-size') === 'sm'))
+      .toBe(true);
     const availability = within(notices).getByRole('status', { name: 'Agent is unavailable' });
     expect(screen.getByRole('textbox')).toHaveAttribute('aria-describedby', availability.id);
     expect(screen.queryByRole('button', { name: 'Continue in reconnected terminal' })).toBeNull();
