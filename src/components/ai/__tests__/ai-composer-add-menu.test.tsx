@@ -1,6 +1,6 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@/test/composer-editor-user';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { builtinSkills } from '@/lib/ai/builtin-skills';
 import { initI18n } from '@/locales';
@@ -60,5 +60,32 @@ describe('composer grouped add menu', () => {
     await user.type(screen.getByRole('textbox'), '@zzzzzz');
     expect(await screen.findByText('No matching items')).toBeVisible();
     expect(screen.getByRole('listbox').closest('[data-mention-completion]')).toHaveClass('text-muted-foreground');
+  });
+
+  it('keeps Ask menus focused on available files and chat history', async () => {
+    const user = userEvent.setup();
+    const listFiles = vi.fn();
+    const listSkills = vi.fn();
+    render(<AiComposerSeat mode="ask" phase="active" status="idle" onListFileReferences={listFiles} onListSkills={listSkills} />);
+    await user.click(screen.getByRole('button', { name: 'Add file or folder' }));
+    const menu = await screen.findByRole('menu');
+    expect(menu).not.toHaveClass('h-[360px]');
+    expect(screen.getAllByRole('menuitem')).toHaveLength(1);
+    expect(screen.getByRole('menuitem', { name: 'Add file' })).toBeVisible();
+    expect(screen.queryByRole('menuitem', { name: 'Add folder' })).toBeNull();
+    expect(screen.queryByText('Skills')).toBeNull();
+    expect(screen.getByText('Chat history')).toBeVisible();
+    await user.keyboard('{Escape}');
+    const editor = screen.getByRole('textbox');
+    await user.type(editor, '@');
+    expect(screen.getByRole('option', { name: 'Upload local files' })).toBeVisible();
+    expect(screen.queryByRole('group', { name: 'Skills' })).toBeNull();
+    expect(screen.queryByRole('option', { name: 'Project files and folders' })).toBeNull();
+    expect(screen.getByText('Type @ followed by a keyword in the message input to search chats')).toBeVisible();
+    expect(listFiles).not.toHaveBeenCalled();
+    await user.clear(editor);
+    await user.type(editor, '/');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(listSkills).not.toHaveBeenCalled();
   });
 });

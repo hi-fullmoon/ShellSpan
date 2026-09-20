@@ -1,7 +1,5 @@
 import { useContext, useEffect, useRef, useState } from 'react';
-import { XIcon } from 'lucide-react';
 import { Attachment, AttachmentGroup, AttachmentMedia, AttachmentTrigger } from '@/components/ui/attachment';
-import { Button } from '@/components/ui/button';
 import { DialogTrigger } from '@/components/ui/dialog';
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
@@ -26,15 +24,12 @@ export function AiImageDraftControls({ state, selection }: { state: ReturnType<t
     if (!previouslySupported.current && supported && state.error?.includes('IMAGE_MODEL_UNSUPPORTED')) state.reportError(null);
     previouslySupported.current = supported;
   }, [supported, state.error, state.reportError]);
-  return <div className={unified ? 'contents' : 'flex min-w-0 flex-col gap-2'} data-testid="image-draft" onClick={e => e.stopPropagation()}>
-    {!!(state.draft?.images.length || state.pendingFiles.length) && <>
-      <div className={unified ? 'contents' : 'flex min-w-0 items-center gap-2'}>
-        <AiImageDraftRail key={state.owner} images={state.draft?.images ?? []} pendingFiles={state.pendingFiles} busy={state.busy} locked={state.locked} error={Boolean(state.error)} onRemove={index => void state.remove(index)} />
-        {(state.busy || state.locked) && <Button variant="ghost" size="icon-xs" aria-label={t('common.cancel')} onClick={() => void state.cancel()}><XIcon /></Button>}
-      </div>
-      <span className="sr-only" role="status">{state.pendingFiles.length ? t('ai.workspace.images.processing', { count: state.pendingFiles.length }) : t(state.locked ? 'ai.workspace.images.unconfirmed' : 'ai.workspace.images.draft')}</span>
-    </>}
-  </div>;
+  if (!state.draft?.images.length && !state.pendingFiles.length) return null;
+  const content = <>
+    <AiImageDraftRail key={state.owner} images={state.draft?.images ?? []} pendingFiles={state.pendingFiles} busy={state.busy} locked={state.locked} error={Boolean(state.error)} onRemove={index => void state.remove(index)} onCancel={state.busy || state.locked ? () => void state.cancel() : undefined} />
+    <span className="sr-only" role="status">{state.pendingFiles.length ? t('ai.workspace.images.processing', { count: state.pendingFiles.length }) : t(state.locked ? 'ai.workspace.images.unconfirmed' : 'ai.workspace.images.draft')}</span>
+  </>;
+  return unified ? content : <div className="flex min-w-0 flex-col gap-2" data-testid="image-draft" onClick={e => e.stopPropagation()}>{content}</div>;
 }
 
 function CommittedImage({ sessionId, image }: { sessionId: string; image: AgentImageRef }) {

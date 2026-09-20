@@ -1,4 +1,5 @@
 .ai-image-rail-viewport {
+  scroll-snap-type: none;
   scrollbar-width: none;
 }
 
@@ -14,6 +15,18 @@
   border-radius: inherit;
 }
 
+.ai-image-thumbnail > [data-slot='attachment-media'] {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+.ai-image-thumbnail > [data-slot='attachment-actions'] {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+}
+
 [data-unified-attachments] .ai-image-thumbnail,
 [data-unified-attachments] .ai-composer-file-card {
   width: 120px;
@@ -25,29 +38,69 @@
   border-radius: var(--radius-lg);
 }
 
+.ai-composer-file-card {
+  --ai-file-color: var(--muted-foreground);
+  background: var(--card);
+}
+
+.ai-composer-file-card[data-file-kind='pdf'] {
+  --ai-file-color: var(--destructive);
+}
+
+.ai-composer-file-card[data-file-kind='word'] {
+  --ai-file-color: var(--primary);
+}
+
+.ai-composer-file-card:is([data-file-kind='excel'], [data-file-kind='spreadsheet']) {
+  --ai-file-color: var(--app-success);
+}
+
+.ai-composer-file-card[data-file-kind='markdown'] {
+  --ai-file-color: var(--primary);
+}
+
+.ai-composer-file-card:is([data-file-kind='json'], [data-file-kind='code']) {
+  --ai-file-color: var(--app-warning);
+}
+
 .ai-composer-file-card > [data-slot='attachment-media'] {
   width: 100%;
   height: 58px;
   aspect-ratio: auto;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: color-mix(in srgb, var(--muted) 25%, var(--card));
+  color: var(--ai-file-color);
+}
+
+.ai-composer-file-loading {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--card);
   color: var(--muted-foreground);
 }
 
 .ai-composer-file-card > [data-slot='attachment-content'] {
   display: flex;
   align-items: center;
-  gap: 6px;
   width: 100%;
   padding: 0 8px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
 }
 
-.ai-composer-file-card > [data-slot='attachment-content'] > svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
+.ai-composer-file-card > [data-slot='attachment-content'] > [data-slot='attachment-title'] {
+  font-size: 11px;
+  line-height: 14px;
 }
 
 .ai-composer-file-card > [data-slot='attachment-actions'] {
+  position: absolute;
   top: 3px;
   right: 3px;
 }
@@ -68,13 +121,16 @@
   border-radius: inherit;
 }
 
-.ai-image-thumbnail-remove {
+.ai-image-thumbnail-remove,
+.ai-composer-file-remove {
   border-radius: 50%;
   opacity: 0;
 }
 
 .ai-image-thumbnail:hover .ai-image-thumbnail-remove,
-.ai-image-thumbnail:focus-within .ai-image-thumbnail-remove {
+.ai-image-thumbnail:focus-within .ai-image-thumbnail-remove,
+.ai-composer-file-card:hover .ai-composer-file-remove,
+.ai-composer-file-card:focus-within .ai-composer-file-remove {
   opacity: 1;
 }
 
@@ -84,7 +140,8 @@
 }
 
 @media (pointer: coarse) {
-  .ai-image-thumbnail-remove {
+  .ai-image-thumbnail-remove,
+  .ai-composer-file-remove {
     opacity: 1;
   }
 }

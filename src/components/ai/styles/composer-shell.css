@@ -17,11 +17,6 @@
   pointer-events: none;
 }
 
-.ai-completion-popup > [data-slot='card'] {
-  min-height: 0;
-  max-height: inherit;
-}
-
 .ai-composer-input-anchor > [data-slot='input-group'] {
   --ai-elevation-stroke-color: var(--ai-border-soft);
   border: 0;

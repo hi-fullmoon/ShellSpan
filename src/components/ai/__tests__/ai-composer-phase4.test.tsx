@@ -74,7 +74,10 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(container.querySelector('input[accept*="image/png"]')).toHaveAttribute('multiple');
     await user.click(screen.getByRole('button', { name: 'Add file or folder' }));
     expect(await screen.findByRole('menuitem', { name: 'Add file' })).toBeVisible();
-    expect(screen.getByRole('menuitem', { name: 'Add folder' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByRole('menuitem', { name: 'Add folder' })).toBeNull();
+    expect(screen.queryByText('Skills')).toBeNull();
+    expect(screen.queryByText('Available in Agent mode')).toBeNull();
+    expect(screen.getByText('Type @ followed by a keyword in the message input to search chats')).toBeVisible();
   });
   it('allows typing during stop cleanup and enables sending after it settles', async () => {
     const user = userEvent.setup();

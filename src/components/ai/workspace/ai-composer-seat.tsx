@@ -49,7 +49,6 @@ import { DOCUMENT_ACCEPT, IMAGE_ACCEPT, documentErrorKey, isDocumentName } from 
 import { decodeDocumentMessage, encodeDocumentMessage } from '@/lib/ai/document-message';
 import { AiDocumentAttachments } from './ai-document-attachments';
 import { AiDraftAttachmentRail, UnifiedAttachmentContext } from './ai-image-draft-rail';
-import { Spinner } from '@/components/ui/spinner';
 import { AiTaskStrip } from './ai-task-strip';
 import { AiComposerAddMenu, type ComposerHistoryProps } from './ai-composer-add-menu';
 import type { AiQueueMutationState } from './use-ai-session-controller';
@@ -335,11 +334,11 @@ export function AiComposerSeat({
     if (attachmentOwnerRef.current !== attachmentOwner) return;
     void documents.addFrom(async signal => [await onReadSession(summary, signal)]);
   } : undefined;
-  const completion = useFileCompletion({ text: draft, update: updateDraft, query: onListFileReferences, scopeKey: attachmentOwner, needsRoot: skillsNeedsRoot, targetLabel: projectTargetLabel, disabled: !attachmentsEnabled,
+  const completion = useFileCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListFileReferences : undefined, scopeKey: attachmentOwner, needsRoot: skillsNeedsRoot, targetLabel: projectTargetLabel, disabled: !attachmentsEnabled,
     context: { agent: mode === 'agent', onUpload: uploadLocalFile, onSession: referenceSession,
       sessions, sessionsLoading, sessionsError, currentSessionId: currentSessionId ?? composerState?.sessionId, onRefreshSessions },
   });
-  const skillCompletion = useSkillCompletion({ text: draft, update: updateDraft, query: onListSkills, scopeKey: skillsScopeKey, editor: completion.editor, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
+  const skillCompletion = useSkillCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListSkills : undefined, scopeKey: skillsScopeKey, editor: completion.editor, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
   const wasStopping = useRef(false);
   useEffect(() => {
     if (wasStopping.current && !stopping) {
@@ -472,14 +471,10 @@ export function AiComposerSeat({
               <UnifiedAttachmentContext value={true}>
               <AiDraftAttachmentRail unified count={message.documents.length + documents.pending.length}>
               {imageControls}
-              <AiDocumentAttachments composer documents={message.documents} pending={documents.pending} locked={!attachmentsEnabled}
+              <AiDocumentAttachments composer documents={message.documents} pending={documents.pending} locked={!attachmentsEnabled} onCancel={documents.cancel}
                 onRemove={id => updateRawDraft(encodeDocumentMessage(draft, message.documents.filter(document => document.id !== id)))} />
               </AiDraftAttachmentRail>
               </UnifiedAttachmentContext>
-            </InputGroupAddon>}
-            {documents.busy && <InputGroupAddon align="block-start" className="min-w-0 justify-between px-3">
-              <span role="status" className="flex min-w-0 items-center gap-2"><Spinner />{t('ai.workspace.documents.processing')}</span>
-              <InputGroupButton variant="ghost" size="xs" onClick={documents.cancel}>{t('common.cancel')}</InputGroupButton>
             </InputGroupAddon>}
             <InputGroupAddon align="block-end" className="ai-composer-toolbar mt-3 min-h-10.5 min-w-0 justify-between gap-3 px-2 pt-0.5 pb-1.5 @max-[400px]/ai-workspace:gap-1 @max-[400px]/ai-workspace:px-[7px]" onClick={event => {
               // Portal menu clicks bubble through React without occurring inside the toolbar.
@@ -502,7 +497,7 @@ export function AiComposerSeat({
                   }}
                 />
                 {mode === 'ask' ? (
-                  <span className="ai-composer-mode-note flex min-w-0 items-center gap-[5px] overflow-hidden text-ellipsis whitespace-nowrap">
+                  <span className="ai-composer-mode-note flex min-w-0 items-center gap-[4px] overflow-hidden text-ellipsis whitespace-nowrap">
                     <ShieldCheckIcon aria-hidden="true" />
                     {t('ai.workbench.capabilityNote')}
                   </span>

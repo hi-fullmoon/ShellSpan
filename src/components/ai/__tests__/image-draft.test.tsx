@@ -79,6 +79,43 @@ describe('image draft count limit', async () => {
 });
 
 describe('image draft ownership and transaction boundaries', async () => {
+  it('keeps the draft and shows the cancellation message when a pending submission is cancelled', async () => {
+    mock.read.mockResolvedValue({ ...draft('A'), operation: { id: 'one', sessionId: 'new-session', mode: 'start' } });
+    const hook = renderHook(() => useImageDraft('A', 'text', vi.fn()));
+    await waitFor(() => expect(hook.result.current.locked).toBe(true));
+
+    await act(async () => hook.result.current.cancel());
+
+    expect(mock.cancel).toHaveBeenCalledWith({ sessionId: 'new-session', clientOperationId: 'one' });
+    expect(hook.result.current.locked).toBe(false);
+    expect(hook.result.current.draft?.images).toEqual([image]);
+    expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ message: 'The operation was cancelled. Your image draft is kept.' }),
+    ]);
+  });
+
+  it('does not report a submission failure while the user is cancelling it', async () => {
+    mock.read.mockResolvedValue({ ...draft('A'), operation: { id: 'one', sessionId: 'new-session', mode: 'start' } });
+    const hook = renderHook(() => useImageDraft('A', 'text', vi.fn()));
+    await waitFor(() => expect(hook.result.current.locked).toBe(true));
+    const submission = deferred<void>();
+    const cancellation = deferred<boolean>();
+    mock.cancel.mockImplementationOnce(() => cancellation.promise);
+    let sending!: Promise<void>;
+    act(() => { sending = hook.result.current.send(vi.fn(), () => submission.promise, vi.fn()); });
+    await waitFor(() => expect(hook.result.current.submittedOperationId).toBe('one'));
+
+    let cancelling!: Promise<void>;
+    act(() => { cancelling = hook.result.current.cancel(); });
+    await act(async () => { submission.reject(new Error('lost IPC response')); await sending; });
+    expect(useToastStore.getState().toasts).toEqual([]);
+
+    await act(async () => { cancellation.resolve(false); await cancelling; });
+    expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ message: 'The operation was cancelled. Your image draft is kept.' }),
+    ]);
+  });
+
   it('shows pending previews before file reading finishes and keeps saved images intact', async () => {
     const bytes = deferred<ArrayBuffer>();
     const hook = renderHook(() => useImageDraft('A', 'text', vi.fn()));

@@ -21,6 +21,9 @@ describe('slash skill menu', () => {
     await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(builtinSkillPreview.entries.length));
     expect(screen.getByRole('option', { name: /log-triage/ })).toBeVisible();
     expect(screen.getByRole('option', { name: /incident-triage/ })).toBeVisible();
+    const popup = screen.getByRole('listbox').closest('.ai-completion-popup');
+    expect(popup?.querySelector('[data-slot="card"]')).toBeNull();
+    expect(popup?.querySelector('[data-slot="popover-title"]')).toHaveTextContent('Skills');
     expect(screen.queryByRole('dialog')).toBeNull(); expect(query).toHaveBeenCalledWith();
     await user.type(editor, 'net');
     expect(screen.getAllByRole('option')).toHaveLength(1); expect(query).toHaveBeenCalledTimes(1);
