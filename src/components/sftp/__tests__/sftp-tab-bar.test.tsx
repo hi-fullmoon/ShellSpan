@@ -388,7 +388,7 @@ describe('SftpTabBar', () => {
     const { container } = render(<SftpTabBar />);
 
     const tabs = screen.getAllByRole('tab');
-    expect(container.firstChild).toHaveClass('h-8.5', 'my-0', 'py-0', 'bg-app-bg', 'px-1');
+    expect(container.firstChild).toHaveClass('h-8.5', 'my-0', 'py-0', 'bg-app-bg', 'px-[2px]');
     expect(container.firstChild).not.toHaveClass('border-b');
     expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass('h-8.5');
     expect(screen.getByRole('tablist')).toHaveClass('py-0');
