@@ -2,6 +2,7 @@
 
 mod agent_runtime;
 mod ai;
+mod ai_attachment;
 mod commands;
 mod connection;
 mod db;
@@ -401,6 +402,7 @@ pub fn run() {
             commands::pick_private_key_file,
             commands::open_remote_file,
             commands::preview_local_file,
+            ai_attachment::read_ai_attachment,
             commands::preview_remote_file,
             commands::cancel_remote_file_read,
             commands::update_remote_permissions,

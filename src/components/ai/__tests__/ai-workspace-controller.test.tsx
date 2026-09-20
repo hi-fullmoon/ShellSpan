@@ -394,7 +394,7 @@ it.each(['cancelled', 'failed', 'completed'] as const)('allows follow-up input i
   await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(view.summary.id, expect.objectContaining({ content: 'continue with these changes', mode: 'nextTurn' })));
 });
 
-it('continues an idle conversation after its step budget boundary', async () => {
+it('continues through normal composer input after its step budget boundary', async () => {
   connectedTerminal();
   const base = runningAgentView();
   const events = agentSessionBaselineScenarios.hello.events.map((event) => (
@@ -422,12 +422,13 @@ it('continues an idle conversation after its step budget boundary', async () => 
   act(() => result.current.openSession(view.summary));
   await waitFor(() => expect(result.current.view?.summary.id).toBe(view.summary.id));
 
-  act(() => result.current.continueBudgetedTurn());
+  act(() => result.current.setDraft('Continue from the saved progress'));
+  act(() => result.current.submit('keyboard'));
 
   await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(
     view.summary.id,
     expect.objectContaining({
-      content: 'Continue the previous request from the work already completed. Verify any uncertain outcomes first and do not repeat completed operations.',
+      content: 'Continue from the saved progress',
       mode: 'nextTurn',
     }),
   ));
@@ -1193,7 +1194,7 @@ describe('AiWorkspaceController', () => {
     expect(screen.queryByRole('status', { name: 'Agent is unavailable' })).toBeNull();
     expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
     expect(screen.getByText('Q&A only · No terminal access')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Add images' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Add file or folder' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
 
     await userEvent.setup().type(screen.getByRole('textbox'), 'Explain SSH keepalives');
@@ -1228,7 +1229,7 @@ describe('AiWorkspaceController', () => {
     expect(agent.submit).not.toHaveBeenCalled();
   });
 
-  it('retries Agent history through the single production adapter', async () => {
+  it('keeps history errors informational and uses the existing history refresh control', async () => {
     const agent = adapter({
       list: vi.fn()
         .mockResolvedValueOnce({ sessions: [] })
@@ -1240,7 +1241,9 @@ describe('AiWorkspaceController', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
     const history = await screen.findByRole('dialog', { name: 'Session history' });
     expect(await within(history).findByRole('alert')).toHaveTextContent('Agent history unavailable');
-    fireEvent.click(within(history).getByRole('button', { name: 'Retry' }));
+    expect(within(history).queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(within(await within(history).findByRole('alert')).queryByRole('button')).toBeNull();
+    fireEvent.click(within(history).getByRole('button', { name: 'Refresh' }));
 
     expect(await screen.findByText('Run checks')).toBeVisible();
     expect(agent.list).toHaveBeenCalledTimes(3);

@@ -4,6 +4,7 @@ import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
+import { canResumeTokenBudgetedTask, hasTokenBudgetCheckpoint, taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { findConversationTool } from '@/lib/ai/conversation-tool';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
@@ -45,12 +46,13 @@ function askConversationNodes(nodes: readonly AiConversationNode[]): readonly Ai
       || node.kind === 'error'
       || node.kind === 'reasoning'
       || node.kind === 'turnTail'
+      || (node.kind === 'artifact' && taskBudgetArtifactTitleKey(node.artifactKind) !== null)
     ) return [node];
     if (node.kind !== 'turnProcess') return [];
-    const questions = node.children.filter((child) => child.kind === 'question');
+    const questionsAndErrors = node.children.filter((child) => child.kind === 'question' || child.kind === 'error');
     const reasoning = node.children.filter((child) => child.kind === 'reasoning');
     const first = reasoning[0];
-    const visible: AiConversationNode[] = [...questions];
+    const visible: AiConversationNode[] = [...questionsAndErrors];
     if (first) visible.push({
       ...first,
       key: `ask-reasoning:${node.key}`,
@@ -239,18 +241,17 @@ export interface AiWorkspaceRootProps {
   readonly onSubmit?: (input: AiWorkspaceSubmitInput) => void | Promise<void>;
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
-  readonly onContinueBudgetedTurn?: () => void;
   readonly onContinueOnReconnectedTerminal?: () => void;
   readonly historicalContinuationAvailable?: boolean;
   readonly historicalContinuationBusy?: boolean;
   readonly historicalContinuationError?: string | null;
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
-  readonly onRetryFailedDraft?: (failedDraftId: string) => void;
   readonly onDismissError?: () => void;
   readonly onOpenModel?: () => void;
   readonly onNewSession?: () => void;
   readonly onHistory?: () => void;
   readonly onRefreshSessions?: () => void;
+  readonly onReadSession?: (summary: AiSessionSummary, signal: AbortSignal) => Promise<File>;
   readonly onClose?: () => void;
   readonly onOpenSession?: (summary: AiSessionSummary) => void;
   readonly onArchiveSession?: (summary: AiSessionSummary) => void;
@@ -260,7 +261,6 @@ export interface AiWorkspaceRootProps {
   readonly onSteerQueueItem?: (item: AiInboxItem) => void;
   readonly onResumeQueueItem?: (item: AiInboxItem) => void;
   readonly onReorderQueueLane?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
-  readonly onRetryQueueMutation?: () => void;
   readonly onRenameSession?: (summary: AiSessionSummary, title: string) => void;
   readonly onBack?: () => void;
   readonly onOpenTool?: (node: import('@/lib/ai/conversation-node').AiConversationNodeOf<'tool'>) => void;
@@ -323,12 +323,12 @@ export function AiWorkspaceRoot({
   historicalContinuationBusy = false,
   historicalContinuationError = null,
   onBusyPreferenceChange,
-  onRetryFailedDraft,
   onDismissError,
   onOpenModel,
   onNewSession,
   onHistory,
   onRefreshSessions,
+  onReadSession,
   onClose,
   onOpenSession,
   onArchiveSession,
@@ -338,7 +338,6 @@ export function AiWorkspaceRoot({
   onSteerQueueItem,
   onResumeQueueItem,
   onReorderQueueLane,
-  onRetryQueueMutation,
   onRenameSession,
   onBack,
   onOpenTool,
@@ -502,9 +501,6 @@ export function AiWorkspaceRoot({
 
       <AiWorkspaceErrorNotices
         composerState={activeComposerState}
-        submitting={activeComposerState?.phase === 'submitting'
-          || (surfaceMode === 'agent' && imageBusy)}
-        onRetryFailedDraft={readOnlySession ? undefined : onRetryFailedDraft}
         onDismissError={onDismissError}
       />
 
@@ -522,6 +518,13 @@ export function AiWorkspaceRoot({
         {historicalContinuationError && (
           <Alert variant="destructiveSubtle" size="sm">
             <AlertDescription>{historicalContinuationError}</AlertDescription>
+          </Alert>
+        )}
+        {!readOnlySession && canResumeTokenBudgetedTask(view) && (
+          <Alert variant="subtle" size="sm" role="status" data-token-budget-notice="">
+            <AlertDescription>{t(view && hasTokenBudgetCheckpoint(view)
+              ? 'ai.workspace.tokenBudget.checkpointSaved'
+              : 'ai.workspace.tokenBudget.description')}</AlertDescription>
           </Alert>
         )}
         {activeComposerState?.phase === 'stopping' && (
@@ -588,6 +591,12 @@ export function AiWorkspaceRoot({
         </div>
 
         <AiComposerSeat
+          sessions={sessions}
+          sessionsLoading={sessionsLoading}
+          sessionsError={sessionsError}
+          currentSessionId={selectedSessionId}
+          onRefreshSessions={onRefreshSessions}
+          onReadSession={onReadSession}
           mode={surfaceMode}
           imageControls={imageControls}
           onPasteImages={!readOnlySession
@@ -617,6 +626,7 @@ export function AiWorkspaceRoot({
           onListFileReferences={surfaceMode === 'agent' && !readOnlySession ? onListFileReferences : undefined}
           onListSkills={surfaceMode === 'agent' && !readOnlySession ? onListSkills : undefined}
           skillsScopeKey={skillsScopeKey}
+          attachmentScopeKey={sessionLedgerKey ?? skillsScopeKey}
           skillsNeedsRoot={skillsNeedsRoot}
           projectTargetLabel={projectTargetLabel}
           approvalDecision={approvalDecision}
@@ -637,7 +647,6 @@ export function AiWorkspaceRoot({
           onSteerQueueItem={surfaceMode === 'agent' && !readOnlySession ? onSteerQueueItem : undefined}
           onResumeQueueItem={surfaceMode === 'agent' && !readOnlySession ? onResumeQueueItem : undefined}
           onReorderQueueLane={surfaceMode === 'agent' && !readOnlySession ? onReorderQueueLane : undefined}
-          onRetryQueueMutation={surfaceMode === 'agent' && !readOnlySession ? onRetryQueueMutation : undefined}
           onOpenModel={onOpenModel}
           onApprove={surfaceMode === 'agent' && !readOnlySession ? onApprove : undefined}
           onReject={surfaceMode === 'agent' && !readOnlySession ? onReject : undefined}

@@ -650,4 +650,39 @@ describe('MessageScroller', () => {
     expect(viewport.scrollTop).toBe(120);
     expect(scrollTo).not.toHaveBeenCalled();
   });
+
+  it('aligns a growing streamed row in the render commit only while following', async () => {
+    let height = 300;
+    let scrollTop = 200;
+    const row = (text: string, key: string) => (
+      <MessageScroller followKey={key}>
+        <div data-ai-node-key="answer">{text}</div>
+      </MessageScroller>
+    );
+    const { container, rerender } = render(row('First line', '1'));
+    const viewport = container.querySelector<HTMLElement>('[data-message-scroller-viewport]')!;
+    const scrollTo = vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top ?? 0); });
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, get: () => height },
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+    await waitFor(() => expect(container.querySelector('[data-slot="message-scroller"]')).not.toHaveClass('invisible'));
+    scrollTo.mockClear();
+    viewport.removeAttribute('data-scrollable');
+
+    height = 324;
+    rerender(row('First line\nSecond line', '2'));
+    expect(scrollTop).toBe(224);
+    expect(scrollTo).toHaveBeenCalledWith({ top: 224, behavior: 'auto' });
+
+    scrollTop = 80;
+    viewport.dataset.scrollable = 'end';
+    scrollTo.mockClear();
+    height = 348;
+    rerender(row('First line\nSecond line\nThird line', '3'));
+    expect(scrollTop).toBe(80);
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
 });

@@ -2,10 +2,11 @@ import type { ReactNode, RefObject } from 'react';
 import { Popover, PopoverContent } from '@/components/ui/popover';
 
 /** Both completions share placement while keyboard focus stays in the editor. */
-export function AiCompletionPopover({ anchor, children, onDismiss }: {
+export function AiCompletionPopover({ anchor, children, onDismiss, fixedHeight = false }: {
   anchor: RefObject<HTMLDivElement | null>;
   children: ReactNode;
   onDismiss(): void;
+  fixedHeight?: boolean;
 }) {
   if (!children) return null;
   return (
@@ -26,10 +27,13 @@ export function AiCompletionPopover({ anchor, children, onDismiss }: {
         side="top"
         sideOffset={7}
         align="start"
+        collisionAvoidance={fixedHeight ? { side: 'none', align: 'shift', fallbackAxisSide: 'none' } : undefined}
         initialFocus={false}
         finalFocus={false}
         role="presentation"
-        className="ai-completion-popup max-h-[min(360px,var(--available-height))] w-[var(--anchor-width)] max-w-[var(--available-width)] overflow-y-auto p-0 data-open:animate-none data-closed:animate-none"
+        className={fixedHeight
+          ? 'ai-completion-popup h-[360px] max-h-(--available-height) w-(--anchor-width) max-w-[min(var(--available-width),calc(100vw-16px))] overflow-hidden p-0 data-open:animate-none data-closed:animate-none'
+          : 'ai-completion-popup max-h-[min(360px,var(--available-height))] w-[var(--anchor-width)] max-w-[var(--available-width)] overflow-y-auto p-0 data-open:animate-none data-closed:animate-none'}
       >
         {children}
       </PopoverContent>

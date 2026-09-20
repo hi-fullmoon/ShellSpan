@@ -24,7 +24,7 @@ describe('composer path completion', () => {
   it('navigates quoted directories, inserts a file with keyboard, then sends raw text once', async () => {
     const user=userEvent.setup(); const submit=vi.fn(); const query=vi.fn(async (q:string)=>q.includes('/') ? {...result,entries:[{path:'space dir/file name.txt',kind:'file' as const}]} : result);
     render(<AiComposerSeat phase="hero" status="idle" onListFileReferences={query} onSubmit={submit}/>);
-    const editor=screen.getByRole('textbox'); await user.type(editor,'hello @');
+    const editor=screen.getByRole('textbox'); await user.type(editor,'hello @space');
     await screen.findByRole('option',{name:'space dir/'}); await user.keyboard('{Enter}');
     expect(editor.textContent).toBe('hello @"space dir/'); expect(submit).not.toHaveBeenCalled();
     await screen.findByRole('option',{name:'space dir/file name.txt'}); await user.keyboard('{Tab}');
@@ -44,7 +44,7 @@ describe('composer path completion', () => {
     const user=userEvent.setup(); const calls:{signal:AbortSignal,work:ReturnType<typeof deferred<FileReferenceList>>}[]=[];
     const query=vi.fn((_q:string,signal:AbortSignal)=>{const work=deferred<FileReferenceList>();calls.push({signal,work});return work.promise;});
     const {rerender}=render(<AiComposerSeat phase="hero" status="idle" skillsScopeKey="A" onListFileReferences={query}/>);
-    await user.type(screen.getByRole('textbox'),'@'); await waitFor(()=>expect(calls).toHaveLength(1));
+    await user.type(screen.getByRole('textbox'),'@zz'); await waitFor(()=>expect(calls).toHaveLength(1));
     rerender(<AiComposerSeat phase="hero" status="idle" skillsScopeKey="B" onListFileReferences={query}/>); await waitFor(()=>expect(calls).toHaveLength(2));
     rerender(<AiComposerSeat phase="hero" status="idle" skillsScopeKey="A" onListFileReferences={query}/>); await waitFor(()=>expect(calls).toHaveLength(3));
     expect(calls[0].signal.aborted && calls[1].signal.aborted).toBe(true);
@@ -61,17 +61,16 @@ describe('composer path completion', () => {
     await user.click(await screen.findByRole('option',{name:'plain.txt'}));
     expect(editor.textContent!).toBe('email a@b.com and @plain.txt suffix');
   });
-  it('tries the shell root before offering explicit binding, and displays localized failures', async () => {
+  it('requires explicit project selection before binding a remote root', async () => {
     const user=userEvent.setup();const query=vi.fn(async(_q:string,_signal:AbortSignal,root?:string)=>({...result,status:'error' as const,code:root ? 'Denied' : 'RootRequired',entries:[]}));
     render(<AiComposerSeat phase="hero" status="idle" skillsNeedsRoot projectTargetLabel="Remote target" onListFileReferences={query}/>);
     await user.type(screen.getByRole('textbox'),'@');
-    await waitFor(()=>expect(query).toHaveBeenCalledWith('',expect.any(AbortSignal)));
-    expect(await screen.findByRole('alert')).toHaveTextContent('no frozen project directory');
-    await user.keyboard('{Enter}');
+    expect(query).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole('option', { name: 'Project files and folders' }));
     await user.type(screen.getByRole('textbox',{name:'Project directory'}),'/project');
     await user.click(screen.getByRole('button',{name:'Bind directory'})); expect(await screen.findByRole('alert')).toHaveTextContent('access was denied');
     expect(query.mock.calls[0]?.[0]).toBe('');
-    expect(query.mock.calls[1]?.[2]).toBe('/project');
+    expect(query.mock.calls[0]?.[2]).toBe('/project');
     expect(screen.getByTestId('ai-workspace-composer').textContent).toBe('@');
   });
 });

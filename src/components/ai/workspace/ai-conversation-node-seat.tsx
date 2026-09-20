@@ -33,6 +33,7 @@ import type {
 } from '@/lib/ai/conversation-node';
 import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
+import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { AiToolRow } from './ai-tool-presentation';
 import { AiTurnFooter } from './ai-turn-footer';
 import { AiQuestionHistory } from './ai-question-panel';
@@ -166,15 +167,19 @@ function ContextInjectionRow({
 }
 
 import { AiCommittedImages } from './ai-image-attachments';
+import { AiDocumentAttachments } from './ai-document-attachments';
+import { decodeDocumentMessage } from '@/lib/ai/document-message';
 
 function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'userMessage'> }) {
   const { t } = useI18n();
+  const message = decodeDocumentMessage(node.content);
   return (
     <Message role="user">
       <AiCommittedImages sessionId={node.sessionId} images={node.images} />
-      {(node.content || node.delivery !== 'committed') && (
+      <AiDocumentAttachments documents={message.documents} />
+      {(message.text || node.delivery !== 'committed') && (
         <Bubble role="user">
-          <span className="ai-user-message-text">{node.content}</span>
+          <span className="ai-user-message-text">{message.text}</span>
           {node.delivery !== 'committed' && (
             <span className="ai-user-delivery mt-0.5 block" data-state={node.delivery}>
               {node.delivery === 'failed'
@@ -184,7 +189,7 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
           )}
         </Bubble>
       )}
-      <MessageActions text={node.content} timestamp={node.timestamp} align="end" />
+      <MessageActions text={message.text} timestamp={node.timestamp} align="end" />
     </Message>
   );
 }
@@ -359,6 +364,8 @@ function ArtifactNodeView({
   readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
 }) {
   const { t } = useI18n();
+  const titleKey = taskBudgetArtifactTitleKey(node.artifactKind);
+  const title = titleKey ? t(titleKey) : node.title;
   return (
     <div className="ai-produced-files grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-center gap-2">
       <span className="ai-produced-files-label inline-flex items-center gap-1.5 whitespace-nowrap">
@@ -369,10 +376,10 @@ function ArtifactNodeView({
         type="button"
         className="ai-produced-file m-0 flex min-w-0 max-w-full cursor-pointer items-center justify-self-start gap-2 overflow-hidden px-2 py-0"
         data-ai-node-action=""
-        aria-label={t('ai.workspace.details.openArtifact', { artifact: node.title })}
+        aria-label={t('ai.workspace.details.openArtifact', { artifact: title })}
         onClick={() => onOpenArtifact?.(node)}
       >
-        <span className="min-w-0 truncate">{node.title}</span>
+        <span className="min-w-0 truncate">{title}</span>
         {node.sizeBytes !== null && <small className="shrink-0">{node.sizeBytes} B</small>}
       </button>
     </div>
@@ -408,6 +415,7 @@ function errorNodeMessage(
   node: AiConversationNodeOf<'error'>,
   t: (key: LocaleKey) => string,
 ): string {
+  if (node.message.startsWith('taskTokenBudgetExceeded:')) return t('ai.workspace.tokenBudget.title');
   return node.message === 'outputLimit' || node.message.startsWith('outputLimit:') || node.message.includes('code=OUTPUT_LIMIT')
     ? t('ai.error.outputLimit')
     : node.message;

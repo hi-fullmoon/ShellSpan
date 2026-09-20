@@ -1,0 +1,13 @@
+{
+  "maxFileBytes": 8388608,
+  "maxBatchBytes": 16777216,
+  "maxFiles": 10,
+  "maxCharacters": 100000,
+  "maxDraftCharacters": 150000,
+  "maxMessageBytes": 131072,
+  "maxPdfPages": 200,
+  "maxExpandedBytes": 33554432,
+  "timeoutMs": 30000,
+  "documentExtensions": ["pdf", "docx", "xlsx"],
+  "textExtensions": ["txt", "md", "markdown", "csv", "tsv", "json", "jsonl", "yaml", "yml", "xml", "html", "htm", "log", "ini", "toml", "conf", "css", "scss", "js", "jsx", "ts", "tsx", "py", "rs", "go", "java", "c", "h", "cpp", "hpp", "sh", "bash", "zsh", "sql", "vue", "svelte"]
+}

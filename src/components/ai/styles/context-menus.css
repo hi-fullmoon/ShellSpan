@@ -123,11 +123,18 @@
   color: var(--ai-text-muted);
 }
 
+.ai-composer-add-menu [data-slot='dropdown-menu-label'],
+.ai-completion-popup [data-mention-completion] [role='group'] > p {
+  color: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+}
+
 .ai-model-menu-cell,
 .ai-model-menu-option,
 .ai-permission-menu-option,
 .ai-execution-surface-menu-option,
-.ai-busy-preference-menu [data-slot='dropdown-menu-radio-item'] {
+.ai-busy-preference-menu [data-slot='dropdown-menu-radio-item'],
+.ai-composer-add-menu [data-slot='dropdown-menu-item'],
+.ai-completion-popup [data-mention-completion] [role='option'] {
   border-radius: 8px;
 }
 

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -111,8 +111,7 @@ describe('Phase 6 Queue Dock', () => {
     expect(update).toHaveBeenCalledExactlyOnceWith(queue[0], 'Saved text');
   });
 
-  it('shows pending and conflict retry without changing projected rows locally', async () => {
-    const retry = vi.fn();
+  it('shows pending and conflict feedback without retry buttons or changing projected rows locally', async () => {
     const { rerender } = render(
       <AiQueueDock
         items={queue}
@@ -120,7 +119,6 @@ describe('Phase 6 Queue Dock', () => {
           intent: { type: 'remove', itemId: 'item-a' },
           status: 'pending', error: null, conflict: false,
         }}
-        onRetry={retry}
       />,
     );
     expect(screen.getByLabelText('Updating queued input')).toBeVisible();
@@ -133,12 +131,11 @@ describe('Phase 6 Queue Dock', () => {
           intent: { type: 'remove', itemId: 'item-a' },
           status: 'failed', error: 'current revision 9', conflict: true,
         }}
-        onRetry={retry}
       />,
     );
     expect(screen.getByText('Queue changed elsewhere')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(within(screen.getByRole('alert')).queryByRole('button')).toBeNull();
   });
 });
 
@@ -398,12 +395,11 @@ describe('Queue steering controls', () => {
     expect(screen.queryByRole('button', { name: 'Steer now' })).toBeNull();
   });
 
-  it('keeps a failed operation visible and retryable after the queue becomes empty', async () => {
-    const retry = vi.fn();
-    render(<AiQueueDock items={[]} onRetry={retry} mutation={{ intent: { type: 'steer', itemId: 'gone' }, status: 'failed', error: 'receipt unavailable', conflict: false }} />);
+  it('keeps a failed operation visible without retry buttons after the queue becomes empty', async () => {
+    render(<AiQueueDock items={[]} mutation={{ intent: { type: 'steer', itemId: 'gone' }, status: 'failed', error: 'receipt unavailable', conflict: false }} />);
     expect(screen.getByRole('alert')).toHaveTextContent('receipt unavailable');
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(within(screen.getByRole('alert')).queryByRole('button')).toBeNull();
   });
 
   it('localizes the dedicated action and timing in Chinese', async () => {

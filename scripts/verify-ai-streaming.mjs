@@ -200,6 +200,40 @@ try {
           assert.ok(Math.abs((await metrics()).top - reading.top) < 3,
             'acknowledgement overrode reading position after a send');
         }
+        await page.evaluate((content) => window.streamingCheck.resetFollowing(content), history);
+        await settle();
+        await append(answer);
+        const immediateGaps = await page.evaluate(() => {
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          return ['\n\n#', ' Heading', '\n\nParagraph text.', '\n\n```ts\n', 'const value = 1;\n```']
+            .map((part) => {
+              window.streamingCheck.append(part);
+              return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+            });
+        });
+        assert.ok(immediateGaps.every((gap) => gap <= 8),
+          `${browserType.name()} ${width}: Markdown stream painted before bottom alignment: ${immediateGaps}`);
+        await settle();
+        await viewport.hover();
+        await page.mouse.wheel(0, -650);
+        await page.waitForFunction(() => {
+          const element = document.querySelector('[data-message-scroller-viewport]');
+          return element.scrollHeight - element.clientHeight - element.scrollTop > 100;
+        });
+        await viewport.focus();
+        await page.keyboard.press('End');
+        await page.waitForFunction(() => {
+          const element = document.querySelector('[data-message-scroller-viewport]');
+          return element.scrollHeight - element.clientHeight - element.scrollTop <= 8;
+        });
+        await settle();
+        const resumedGap = await page.evaluate((content) => {
+          window.streamingCheck.append('\n\n' + content);
+          const element = document.querySelector('[data-message-scroller-viewport]');
+          return element.scrollHeight - element.clientHeight - element.scrollTop;
+        }, answer.slice(0, 500));
+        assert.ok(resumedGap <= 8,
+          `${browserType.name()} ${width}: End returned to bottom without synchronous stream follow: ${resumedGap}`);
         assert.deepEqual(errors, []);
         process.stdout.write(`${browserType.name()} ${width}px: native scrollbar, text/image submission, stream, history, restore and animated process updates passed\n`);
         await page.close();

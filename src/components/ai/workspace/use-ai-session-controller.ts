@@ -25,7 +25,6 @@ import {
 import { normalizeAiSessionError, sessionArchiveErrorMessage } from '@/lib/ai/session-error';
 import { canContinueOnReconnectedTerminal, isDirectReconnectedTerminal } from '@/lib/ai/reconnected-terminal';
 import {
-  latestTurnReachedStepBudget,
   type AiConversationNode,
   type AiConversationNodeOf,
 } from '@/lib/ai/conversation-node';
@@ -50,6 +49,8 @@ import { t } from '@/locales';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAiDraftStore } from '@/stores/aiDraftStore';
+import { documentMessageSummary } from '@/lib/ai/document-message';
+import { chatReferenceFile } from '@/lib/ai/chat-reference';
 import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -129,7 +130,6 @@ export interface AiSessionController {
   readonly setBusyPreference: (value: 'queue' | 'steer') => void;
   readonly submit: (gesture: 'keyboard' | 'primary', accelerated?: boolean) => void;
   readonly stop: () => void;
-  readonly continueBudgetedTurn: () => void;
   readonly continueOnReconnectedTerminal: (() => void) | null;
   readonly historicalContinuationAvailable: boolean;
   readonly historicalContinuationBusy: boolean;
@@ -140,6 +140,7 @@ export interface AiSessionController {
   readonly openSession: (summary: AiSessionSummary) => void;
   readonly newSession: () => void;
   readonly refreshSessions: () => void;
+  readonly readSessionReference: (summary: AiSessionSummary, signal: AbortSignal) => Promise<File>;
   readonly archiveSession: (summary: AiSessionSummary) => void;
   readonly deleteSession: (summary: AiSessionSummary) => void;
   readonly updateQueueItem: (item: AiInboxItem, content: string) => void;
@@ -585,7 +586,7 @@ export function useAiSessionController({
   const createInputWithFrozenTargetRoot = useCallback(async (
     content: string,
   ): Promise<Extract<AiCreateSessionInput, { kind: 'agent' }>> => {
-    const input = createInput(content);
+    const input = createInput(documentMessageSummary(content));
     const target = input.request.target;
     if (!target || input.request.permissionMode !== 'operator'
       || (target.kind !== 'local' && target.kind !== 'remote')
@@ -1557,14 +1558,6 @@ export function useAiSessionController({
       });
     },
     stop: () => dispatch({ type: 'stop.requested' }),
-    continueBudgetedTurn: () => {
-      const current = viewRef.current;
-      if (!canStartAgent || current?.status !== 'idle'
-        || !latestTurnReachedStepBudget(current.nodes)) return;
-      dispatch({ type: 'submit.requested', gesture: 'primary', accelerated: false,
-        content: t('ai.workspace.continueBudgetedTurnPrompt'), clientOperationId: operationId(),
-        now: Date.now(), hasProvider, canCreateSession: canStartAgent });
-    },
     continueOnReconnectedTerminal: reconnectedSnapshot ? () => {
       const current = viewRef.current;
       if (current?.snapshot.kind !== 'agent'
@@ -1599,6 +1592,16 @@ export function useAiSessionController({
     openSession,
     newSession,
     refreshSessions: () => { void refreshSessions(); },
+    readSessionReference: async (summary, signal) => {
+      signal.throwIfAborted();
+      if (!sessions.some(session => session.id === summary.id && session.kind === summary.kind && !session.archived)) throw new Error('CHAT_REFERENCE_READ');
+      let referenced: AiSessionView;
+      try { referenced = await adapter.open(summary.id); }
+      catch { throw new Error('CHAT_REFERENCE_READ'); }
+      signal.throwIfAborted();
+      if (referenced.canLoadOlder) throw new Error('CHAT_REFERENCE_READ');
+      return chatReferenceFile(referenced.summary, referenced.nodes);
+    },
     archiveSession,
     deleteSession,
     updateQueueItem: (item, content) => executeQueueMutation({

@@ -14,6 +14,44 @@
   border-radius: inherit;
 }
 
+[data-unified-attachments] .ai-image-thumbnail,
+[data-unified-attachments] .ai-composer-file-card {
+  width: 120px;
+  min-width: 120px;
+  height: 92px;
+  padding: 0;
+  gap: 0;
+  flex-wrap: nowrap;
+  border-radius: var(--radius-lg);
+}
+
+.ai-composer-file-card > [data-slot='attachment-media'] {
+  width: 100%;
+  height: 58px;
+  aspect-ratio: auto;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  color: var(--muted-foreground);
+}
+
+.ai-composer-file-card > [data-slot='attachment-content'] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0 8px;
+}
+
+.ai-composer-file-card > [data-slot='attachment-content'] > svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.ai-composer-file-card > [data-slot='attachment-actions'] {
+  top: 3px;
+  right: 3px;
+}
+
 .ai-image-thumbnail-loading {
   border-radius: 50%;
   background: var(--popover);

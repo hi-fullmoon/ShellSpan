@@ -7,7 +7,6 @@ import {
   ChevronUpIcon,
   ListEndIcon,
   PencilIcon,
-  RotateCcwIcon,
   Trash2Icon,
   XIcon,
 } from 'lucide-react';
@@ -26,7 +25,10 @@ import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
+import { useToast } from '@/hooks/useToast';
 import type { AiInboxItem } from '@/lib/ai/session-adapter';
+import { decodeDocumentMessage, documentMessageSummary, encodeDocumentMessage } from '@/lib/ai/document-message';
+import { DOCUMENT_LIMITS, documentErrorKey } from '@/lib/ai/document-import';
 import type { LocaleKey } from '@/locales';
 import { AiErrorNotice } from './ai-error-notice';
 import type { AiQueueMutationState } from './use-ai-session-controller';
@@ -41,7 +43,6 @@ export interface AiQueueDockProps {
   readonly onSteer?: (item: AiInboxItem) => void;
   readonly onResume?: (item: AiInboxItem) => void;
   readonly onReorder?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
-  readonly onRetry?: () => void;
 }
 
 function IconAction({
@@ -97,9 +98,9 @@ export function AiQueueDock({
   onSteer,
   onResume,
   onReorder,
-  onRetry,
 }: AiQueueDockProps): React.ReactNode {
   const { t } = useI18n();
+  const toast = useToast();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [collapsed, setCollapsed] = useState(false);
@@ -167,6 +168,20 @@ export function AiQueueDock({
       )}
       {expanded && <ul className="ai-queue-list m-0 max-h-[180px] list-none overflow-y-auto p-0">
         {items.map((item) => {
+          const documentMessage = decodeDocumentMessage(item.content);
+          const canSave = Boolean(editValue.trim() || documentMessage.documents.length);
+          const save = (): void => {
+            if (!canSave) return;
+            let content: string;
+            try {
+              content = encodeDocumentMessage(editValue.trim(), documentMessage.documents);
+            } catch (error) {
+              toast.error(t(documentErrorKey(error)));
+              return;
+            }
+            onUpdate?.(item, content);
+            finishEditing();
+          };
           const laneItems = items.filter((candidate) => (
             candidate.lane === item.lane && candidate.state === 'queued'
           ));
@@ -182,21 +197,19 @@ export function AiQueueDock({
                   className="ai-queue-editor flex w-full min-w-0 items-center gap-2.5"
                   onSubmit={(event) => {
                     event.preventDefault();
-                    const content = editValue.trim();
-                    if (!content) return;
-                    onUpdate?.(item, content);
-                    finishEditing();
+                    save();
                   }}
                 >
                   <FieldGroup className="min-w-0 flex-1 gap-0">
-                    <Field data-invalid={!editValue.trim()}>
+                    <Field data-invalid={!canSave}>
                       <FieldLabel htmlFor={`queue-edit-${item.id}`} className="sr-only">
                         {t('ai.workspace.queue.editLabel')}
                       </FieldLabel>
                       <Input
                         id={`queue-edit-${item.id}`}
                         value={editValue}
-                        aria-invalid={!editValue.trim()}
+                        aria-invalid={!canSave}
+                        maxLength={documentMessage.documents.length ? DOCUMENT_LIMITS.maxDraftCharacters - documentMessage.documents.reduce((sum, document) => sum + document.text.length, 0) : undefined}
                         disabled={pending}
                         autoFocus
                         onChange={(event) => setEditValue(event.target.value)}
@@ -211,14 +224,8 @@ export function AiQueueDock({
                   </FieldGroup>
                   <IconAction
                     label={t('common.save')}
-                    disabled={pending || !editValue.trim()}
-                    onClick={() => {
-                      const content = editValue.trim();
-                      if (content) {
-                        onUpdate?.(item, content);
-                        finishEditing();
-                      }
-                    }}
+                    disabled={pending || !canSave}
+                    onClick={save}
                   >
                     <CheckIcon data-icon="inline-start" />
                   </IconAction>
@@ -228,7 +235,7 @@ export function AiQueueDock({
                 </form>
               ) : (
                 <div className="ai-queue-row-content flex w-full min-w-0 items-center gap-2.5">
-                  <span className="min-w-0 flex-1 truncate">{item.content}</span>
+                  <span className="min-w-0 flex-1 truncate">{documentMessageSummary(item.content)}</span>
                   {item.paused && <Badge variant="secondary">{t('ai.workspace.queue.paused')}</Badge>}
                   {item.lane === 'nextStep' && <Badge variant="secondary">{t('ai.workspace.queue.lane.nextStep')}</Badge>}
                   {item.state === 'pending' && (
@@ -268,7 +275,7 @@ export function AiQueueDock({
                         disabled={pending || onUpdate === undefined}
                         onClick={() => {
                           setEditingId(item.id);
-                          setEditValue(item.content);
+                          setEditValue(documentMessage.text);
                         }}
                       >
                         <PencilIcon data-icon="inline-start" />
@@ -307,12 +314,6 @@ export function AiQueueDock({
           label={mutation.conflict
             ? t('ai.workspace.queue.conflict')
             : t('ai.workspace.queue.failure')}
-          action={onRetry && (
-            <Button variant="ghost" size="xs" onClick={onRetry}>
-              <RotateCcwIcon data-icon="inline-start" />
-              {t('ai.workspace.queue.retry')}
-            </Button>
-          )}
         >
           {mutation.error}
         </AiErrorNotice>

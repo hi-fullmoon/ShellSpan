@@ -9,6 +9,7 @@ import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import type { AgentArtifactResponse } from '@/types/agent-session';
 import { AiRouteHeader } from './ai-route-header';
+import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 
 const ARTIFACT_PREVIEW_BYTES = 256 * 1024;
 
@@ -102,6 +103,7 @@ export function AiArtifactDetails({
   >({ kind: 'loading' });
   const artifactId = node?.artifactId;
   const artifactSha256 = node?.sha256;
+  const titleKey = node ? taskBudgetArtifactTitleKey(node.artifactKind) : null;
 
   // Streaming rebuilds conversation nodes; reload only when the artifact or its
   // content revision changes so an already visible preview stays mounted.
@@ -127,7 +129,7 @@ export function AiArtifactDetails({
   return (
     <div className="ai-details-root flex size-full min-h-0 min-w-0 flex-col" data-slot="ai-artifact-details">
       <AiRouteHeader
-        title={node?.title ?? t('ai.workspace.details.artifactTitle')}
+        title={titleKey ? t(titleKey) : node?.title ?? t('ai.workspace.details.artifactTitle')}
         description={t('ai.workspace.details.artifactDescription')}
         onBack={onBack}
         onClose={onClose}

@@ -3,9 +3,16 @@ import { resolve } from 'path';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { codeInspectorPlugin } from 'code-inspector-plugin';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 export default defineConfig({
-  plugins: [codeInspectorPlugin({ bundler: 'vite' }), tailwindcss(), react()],
+  plugins: [codeInspectorPlugin({ bundler: 'vite' }), tailwindcss(), react(), viteStaticCopy({
+    targets: ['cmaps', 'standard_fonts'].map(directory => ({
+      src: `node_modules/pdfjs-dist/${directory}/*`,
+      dest: `pdfjs/${directory}`,
+      rename: { stripBase: true as const },
+    })),
+  })],
   resolve: {
     alias: {
       '@': resolve(import.meta.dirname, './src'),

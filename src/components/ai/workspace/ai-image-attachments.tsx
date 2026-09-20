@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { XIcon } from 'lucide-react';
 import { Attachment, AttachmentGroup, AttachmentMedia, AttachmentTrigger } from '@/components/ui/attachment';
 import { Button } from '@/components/ui/button';
@@ -12,11 +12,12 @@ import { invokeAgentImagePreview } from '@/lib/ipc/tauri';
 import type { AiProviderConfig } from '@/types/ai';
 import type { AgentImageRef } from '@/types/agent-image';
 import type { useImageDraft } from './use-image-draft';
-import { AiImageDraftRail } from './ai-image-draft-rail';
-import { AiImagePreview } from './ai-image-preview';
+import { AiImageDraftRail, UnifiedAttachmentContext } from './ai-image-draft-rail';
+import { AiImagePreview, AiImagePreviewGroup } from './ai-image-preview';
 
 export function AiImageDraftControls({ state, selection }: { state: ReturnType<typeof useImageDraft>; selection?: AiProviderConfig }) {
   const { t } = useI18n();
+  const unified = useContext(UnifiedAttachmentContext);
   const provider = useAiSettingsStore(s => s.providers.find(p => p.id === s.defaultProviderId));
   const resolution = useResolvedModel(selection ?? provider);
   const supported = resolution.status === 'ready' && resolution.model.imageInput === 'supported';
@@ -25,9 +26,9 @@ export function AiImageDraftControls({ state, selection }: { state: ReturnType<t
     if (!previouslySupported.current && supported && state.error?.includes('IMAGE_MODEL_UNSUPPORTED')) state.reportError(null);
     previouslySupported.current = supported;
   }, [supported, state.error, state.reportError]);
-  return <div className="flex min-w-0 flex-col gap-2" data-testid="image-draft" onClick={e => e.stopPropagation()}>
+  return <div className={unified ? 'contents' : 'flex min-w-0 flex-col gap-2'} data-testid="image-draft" onClick={e => e.stopPropagation()}>
     {!!(state.draft?.images.length || state.pendingFiles.length) && <>
-      <div className="flex min-w-0 items-center gap-2">
+      <div className={unified ? 'contents' : 'flex min-w-0 items-center gap-2'}>
         <AiImageDraftRail key={state.owner} images={state.draft?.images ?? []} pendingFiles={state.pendingFiles} busy={state.busy} locked={state.locked} error={Boolean(state.error)} onRemove={index => void state.remove(index)} />
         {(state.busy || state.locked) && <Button variant="ghost" size="icon-xs" aria-label={t('common.cancel')} onClick={() => void state.cancel()}><XIcon /></Button>}
       </div>
@@ -56,5 +57,5 @@ function CommittedImage({ sessionId, image }: { sessionId: string; image: AgentI
   </Attachment></AiImagePreview>;
 }
 export function AiCommittedImages({ sessionId, images }: { sessionId: string; images?: readonly AgentImageRef[] }) {
-  return images?.length ? <AttachmentGroup className="max-w-[82%] gap-1.5">{images.map((image, i) => <CommittedImage key={`${sessionId}:${image.sha256}:${i}`} sessionId={sessionId} image={image} />)}</AttachmentGroup> : null;
+  return images?.length ? <AiImagePreviewGroup key={sessionId}><AttachmentGroup className="max-w-[82%] gap-1.5">{images.map((image, i) => <CommittedImage key={`${sessionId}:${image.sha256}:${i}`} sessionId={sessionId} image={image} />)}</AttachmentGroup></AiImagePreviewGroup> : null;
 }

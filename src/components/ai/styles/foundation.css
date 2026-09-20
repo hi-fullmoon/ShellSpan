@@ -1,4 +1,6 @@
 .ai-panel-shell,
+.ai-composer-add-menu,
+.ai-completion-popup,
 .ai-turn-stat-panel {
   --ai-font-family: var(--font-sans);
   --ai-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
@@ -52,6 +54,8 @@
 }
 
 .ai-panel-shell,
+.ai-composer-add-menu,
+.ai-completion-popup,
 .ai-panel-shell * {
   --ai-elevation-stroke: 0 0 0 0.5px var(--ai-elevation-stroke-color);
   --ai-elevation-panel: var(--ai-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.03), 0 0 16px 0 rgba(0, 0, 0, 0.02);
