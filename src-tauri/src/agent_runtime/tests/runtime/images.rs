@@ -449,8 +449,17 @@ async fn cancelling_images_before_session_creation_keeps_the_submission_uncommit
 
     assert!(!runtime.cancel_image_submission(operation).unwrap());
     runtime.start("images", vision_provider(), None).unwrap();
-    assert!(runtime.submit_images(input("one")).await.unwrap_err().contains("IMAGE_CANCELLED"));
-    assert!(runtime.session("images").unwrap().inbox.next_turn.is_empty());
+    assert!(runtime
+        .submit_images(input("one"))
+        .await
+        .unwrap_err()
+        .contains("IMAGE_CANCELLED"));
+    assert!(runtime
+        .session("images")
+        .unwrap()
+        .inbox
+        .next_turn
+        .is_empty());
 }
 
 #[tokio::test]
