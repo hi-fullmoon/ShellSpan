@@ -270,6 +270,7 @@ export function useAiSessionController({
   useEffect(()=>{if(isTauriRuntime()&&!routeSnapshot)void hydrateRoutes();},[routeSnapshot,hydrateRoutes]);
   const providers = useMemo(()=>routeSnapshot ? routeProviderConfigs(routeSnapshot,routeModels) : isTauriRuntime() ? [] : browserProviders,[routeSnapshot,routeModels,browserProviders]);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
+  const preferredAgentPermission = useAiSettingsStore((state) => state.agentPermissionMode);
   const provider = useMemo(() => {
     if (routeSnapshot) {
       if (!routeSnapshot.defaultSelection) return undefined;
@@ -282,6 +283,7 @@ export function useAiSessionController({
     return providers.find((item) => item.id === defaultProviderId) ?? providers[0];
   }, [defaultProviderId, providers, routeSnapshot]);
   const activeTerminal = terminalSessions.find((item) => item.sessionId === activeTerminalId);
+  const activePermissionBinding = useAgentPermissionStore((state) => state.bindings[activeTerminalId ?? '']);
   const historyScopeKey = activeTerminal ? terminalLoginScopeKey(activeTerminal) : null;
   // Session recovery depends on the terminal's durable target identity, not on
   // prompt/integration metadata. Those fields can change rapidly while menus
@@ -331,7 +333,9 @@ export function useAiSessionController({
   const composerRef = useRef(composer);
   const viewRef = useRef(view);
   const [settingsBusy, setSettingsBusy] = useState(false);
-  const [newExecutionSurface, setNewExecutionSurface] = useState<AgentExecutionSurface>('direct');
+  const [newExecutionSurface, setNewExecutionSurface] = useState<AgentExecutionSurface>(
+    () => useAiSettingsStore.getState().agentExecutionSurface,
+  );
   const settingsPending = useRef(false);
   const currentProviderConfig = useCallback((): AiProviderConfig => {
     const selection = viewRef.current?.snapshot.value.header.modelSelection;
@@ -785,7 +789,7 @@ export function useAiSessionController({
       return;
     }
     resetComposer();
-    setNewExecutionSurface('direct');
+    setNewExecutionSurface(useAiSettingsStore.getState().agentExecutionSurface);
     appliedWorkspaceRef.current = workspaceScopeKey;
     if (composerRef.current.draft) claimWorkspace();
     setOpenedSessionId(null);
@@ -1067,7 +1071,7 @@ export function useAiSessionController({
     setSkillNavigation((generation) => generation + 1);
     setSkillRoot(null);
     resetComposer();
-    setNewExecutionSurface('direct');
+    setNewExecutionSurface(useAiSettingsStore.getState().agentExecutionSurface);
     setOpenedSessionId(null);
     setView(null);
     setQueueMutation(null);
@@ -1410,7 +1414,9 @@ export function useAiSessionController({
     composer,
     selectedProvider: canContinueHistoricalView ? provider : sessionProviderResolution.provider,
     selectedPermission: canContinueHistoricalView || !visibleView
-      ? undefined
+      ? activeTerminal && activePermissionBinding
+        ? useAgentPermissionStore.getState().getMode(activeTerminal.sessionId)
+        : preferredAgentPermission
       : permissionModeForUi(visibleView.snapshot.value.header.permissionMode),
     selectedExecutionSurface: canContinueHistoricalView ? newExecutionSurface : visibleView?.snapshot.value.header.executionSurface
       ?? newExecutionSurface,
@@ -1422,23 +1428,34 @@ export function useAiSessionController({
     selectPermission: (mode) => changeSettings(async (sessionId) => {
       if (!adapter.setPermission) throw new Error('Permission selection is unavailable');
       await adapter.setPermission(sessionId, permissionMode(mode));
+      const terminalSessionId = activeTerminal?.sessionId;
+      if (scope === 'terminal' && viewRef.current?.summary.id === sessionId
+        && terminalSessionId
+        && viewRef.current.snapshot.value.header.target?.sessionId === terminalSessionId) {
+        useAgentPermissionStore.getState().setMode(terminalSessionId, mode);
+      }
     }),
     selectExecutionSurface: (surface) => {
       if (canContinueHistoricalView) {
         claimWorkspace();
         setNewExecutionSurface(surface);
+        useAiSettingsStore.getState().setAgentExecutionSurface(surface);
         return;
       }
       if (viewRef.current) {
         void changeSettings(async (sessionId) => {
           if (!adapter.setExecutionSurface) throw new Error('Execution surface selection is unavailable');
           await adapter.setExecutionSurface(sessionId, surface);
+          if (viewRef.current?.summary.id === sessionId) {
+            useAiSettingsStore.getState().setAgentExecutionSurface(surface);
+          }
         });
         return;
       }
       if (composerRef.current.sessionId) return;
       claimWorkspace();
       setNewExecutionSurface(surface);
+      useAiSettingsStore.getState().setAgentExecutionSurface(surface);
     },
     providerLabel: routeSnapshot?.routes.find((route) => route.id === (
       (canContinueHistoricalView ? undefined : visibleView?.snapshot.value.header.modelSelection?.routeId) ?? provider?.id

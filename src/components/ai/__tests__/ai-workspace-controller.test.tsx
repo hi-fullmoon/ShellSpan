@@ -132,7 +132,7 @@ function connectedLocalTerminal(sessionId = 'terminal-local'): void {
   });
 }
 
-it('allows changing model and permissions in a running conversation without changing defaults', async () => {
+it('remembers a confirmed permission for new Agent conversations without changing the model default', async () => {
   connectedTerminal();
   const user = userEvent.setup();
   const view = runningAgentView();
@@ -157,7 +157,7 @@ it('allows changing model and permissions in a running conversation without chan
   await user.click(await screen.findByRole('menuitemradio', { name: /^Full access/ }));
   await user.click(await screen.findByRole('button', { name: 'Allow full access' }));
   await waitFor(() => expect(agent.setPermission).toHaveBeenCalledWith(view.summary.id, 'operator'));
-  expect(useAgentPermissionStore.getState().getMode('terminal-1')).toBe('autoApproveReadOnly');
+  expect(useAgentPermissionStore.getState().getMode('terminal-1')).toBe('fullAccess');
 });
 
 it('allows changing model and permissions before retrying a failed conversation', async () => {
@@ -278,6 +278,60 @@ it('keeps request-approval distinct from scoped read-only auto approval', async 
   expect(result.current.selectedPermission).toBe('requestApproval');
 });
 
+it('uses remembered Agent controls for new sessions while historical sessions keep their own values', async () => {
+  connectedTerminal();
+  const base = runningAgentView();
+  const old: AiSessionView = {
+    ...base,
+    snapshot: { kind: 'agent', value: {
+      ...base.snapshot.value,
+      header: { ...base.snapshot.value.header, permissionMode: 'scopedAutopilot', executionSurface: 'direct' },
+    } },
+  };
+  const agent = adapter({
+    open: vi.fn(async () => old),
+    submit: vi.fn(async (_sessionId, input) => ({
+      sessionId: 'agent-new', clientOperationId: input.clientOperationId, mode: input.mode,
+    })),
+  });
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+  act(() => {
+    useAgentPermissionStore.getState().setMode('terminal-1', 'requestApproval');
+    result.current.selectExecutionSurface('boundTerminal');
+  });
+  act(() => result.current.openSession(old.summary));
+  await waitFor(() => expect(result.current.view?.summary.id).toBe(old.summary.id));
+  expect(result.current.selectedPermission).toBe('autoApproveReadOnly');
+  expect(result.current.selectedExecutionSurface).toBe('direct');
+
+  act(() => result.current.newSession());
+  expect(result.current.selectedPermission).toBe('requestApproval');
+  expect(result.current.selectedExecutionSurface).toBe('boundTerminal');
+  act(() => { result.current.setDraft('Check the service'); result.current.submit('primary'); });
+  await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({
+    create: expect.objectContaining({ request: expect.objectContaining({
+      permissionMode: 'requestApproval', executionSurface: 'boundTerminal',
+    }) }),
+  })));
+});
+
+it('keeps Ask session policy separate from remembered Agent controls', async () => {
+  useAiSettingsStore.getState().setAgentPermissionMode('autoApproveReadOnly');
+  useAiSettingsStore.getState().setAgentExecutionSurface('boundTerminal');
+  const agent = adapter({
+    submit: vi.fn(async (_sessionId, input) => ({
+      sessionId: 'ask-new', clientOperationId: input.clientOperationId, mode: input.mode,
+    })),
+  });
+  const { result } = renderHook(() => useAiSessionController({ scope: 'workbench', adapter: agent }));
+  act(() => { result.current.setDraft('What happened?'); result.current.submit('primary'); });
+  await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({
+    create: expect.objectContaining({ request: expect.objectContaining({
+      permissionMode: 'requestApproval', executionSurface: 'direct',
+    }) }),
+  })));
+});
+
 it('loads volatile arguments only for the currently pending approval', async () => {
   connectedTerminal();
   const base = runningAgentView();
@@ -365,6 +419,8 @@ beforeEach(async () => {
     providers: [provider],
     defaultProviderId: provider.id,
     contextLines: 200,
+    agentPermissionMode: 'autoApproveReadOnly',
+    agentExecutionSurface: 'direct',
   });
   useTerminalStore.setState({ sessions: [], activeSessionId: null });
   useLlmRoutesStore.setState({ snapshot: undefined, status: 'idle', error: undefined, modelsByRoute: {} });

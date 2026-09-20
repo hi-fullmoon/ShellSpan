@@ -22,6 +22,7 @@ import {
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import type { AgentPermissionMode } from '@/types/agent-approval';
 
@@ -99,6 +100,7 @@ export function AgentPermissionSelector({
 }: AgentPermissionSelectorProps): React.ReactNode {
   const { t } = useI18n();
   const binding = useAgentPermissionStore((state) => state.bindings[sessionId]);
+  const preferredMode = useAiSettingsStore((state) => state.agentPermissionMode);
   const setMode = useAgentPermissionStore((state) => state.setMode);
   const terminal = useTerminalStore((state) => state.sessions.find(
     (session) => session.sessionId === sessionId,
@@ -107,7 +109,7 @@ export function AgentPermissionSelector({
   const [fullAccessDialogOpen, setFullAccessDialogOpen] = useState(false);
   const [confirmationTarget, setConfirmationTarget] = useState<FullAccessConfirmationTarget | null>(null);
   const composer = variant === 'composer';
-  const mode = selectedMode ?? binding?.mode ?? DEFAULT_AGENT_PERMISSION_MODE;
+  const mode = selectedMode ?? binding?.mode ?? preferredMode;
   const changeMode = (nextMode: AgentPermissionMode): void => {
     if (onModeChange) void onModeChange(nextMode);
     else setMode(sessionId, nextMode);

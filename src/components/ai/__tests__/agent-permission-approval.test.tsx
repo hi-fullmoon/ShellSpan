@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentPermissionSelector } from '../agent-permission-selector';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -43,6 +44,7 @@ function connectSession(): void {
 
 describe('Agent permission selector', () => {
   beforeEach(() => {
+    useAiSettingsStore.setState({ agentPermissionMode: 'autoApproveReadOnly' });
     useTerminalStore.setState(initialTerminalState, true);
     useAgentPermissionStore.setState(initialPermissionState, true);
     connectSession();
