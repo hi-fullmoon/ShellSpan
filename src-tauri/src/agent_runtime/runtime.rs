@@ -379,7 +379,14 @@ impl AgentRuntime {
             .lock()
             .map_err(|_| "IMAGE_OPERATION_UNAVAILABLE")?;
         token.cancel();
-        Ok(self.sessions.all_events(&input.session_id)?.iter().any(|e| matches!(&e.payload,
+        // A new conversation may still be in creation when its image operation is
+        // cancelled. The cancelled token prevents a later submit from committing.
+        let events = match self.sessions.all_events(&input.session_id) {
+            Ok(events) => events,
+            Err(error) if error == "Agent session was not found" => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        Ok(events.iter().any(|e| matches!(&e.payload,
             super::AgentSessionEventPayload::InboxSpliced { operation: super::AgentInboxOperation::Enqueued, messages, .. }
                 if messages.iter().any(|m| m.client_submission_id.as_deref() == Some(&input.client_operation_id)))))
     }
