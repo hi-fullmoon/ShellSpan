@@ -506,10 +506,10 @@ export function AiWorkspaceRoot({
 
       <div
         data-slot="ai-workspace-status-notices"
-        className="mx-auto flex w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] shrink-0 flex-col gap-1.5 px-[var(--ai-shell-clearance)] pt-2 empty:hidden"
+        className="mx-auto flex w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] shrink-0 flex-col gap-1.5 px-[var(--ai-shell-clearance)] py-2 empty:hidden"
       >
         {historicalContinuationAvailable && (
-          <Alert variant="subtle" size="sm" role="status">
+          <Alert size="sm" role="status">
             <AlertDescription>{t(historicalContinuationBusy
               ? 'ai.workspace.sessions.continuePreparing'
               : 'ai.workspace.sessions.continueComposerHint')}</AlertDescription>
@@ -521,14 +521,14 @@ export function AiWorkspaceRoot({
           </Alert>
         )}
         {!readOnlySession && canResumeTokenBudgetedTask(view) && (
-          <Alert variant="subtle" size="sm" role="status" data-token-budget-notice="">
+          <Alert size="sm" role="status" data-token-budget-notice="">
             <AlertDescription>{t(view && hasTokenBudgetCheckpoint(view)
               ? 'ai.workspace.tokenBudget.checkpointSaved'
               : 'ai.workspace.tokenBudget.description')}</AlertDescription>
           </Alert>
         )}
         {activeComposerState?.phase === 'stopping' && (
-          <Alert size="sm" variant="subtle" role="status">
+          <Alert size="sm" role="status">
             <AlertDescription>{t('ai.workspace.stopping')}</AlertDescription>
           </Alert>
         )}
@@ -545,7 +545,7 @@ export function AiWorkspaceRoot({
           </Alert>
         )}
         {agentUnavailableReason && (
-          <Alert id={availabilityHintId} variant="subtle" size="sm" role="status" aria-label={t('agent.availability.title')}>
+          <Alert id={availabilityHintId} size="sm" role="status" aria-label={t('agent.availability.title')}>
             <AlertDescription className="min-w-0 break-words">{agentUnavailableReason}</AlertDescription>
           </Alert>
         )}
