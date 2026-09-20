@@ -412,6 +412,27 @@ fn decode_arguments<T: DeserializeOwned>(value: &serde_json::Value) -> Result<T,
     serde_json::from_value(value.clone()).map_err(|error| error.to_string())
 }
 
+const WRITE_FILE_PRECONDITION_ERROR: &str = "write_file precondition must be exactly {\"mustNotExist\":true} for a new file or {\"sha256\":\"<64 lowercase hex characters>\"} for an existing file; use one form with no extra fields. No file was changed. Do not retry unchanged arguments.";
+
+pub(crate) fn decode_write_file_arguments_native(
+    arguments: &serde_json::Value,
+) -> Result<WriteFileArgumentsNative, String> {
+    let precondition = arguments
+        .get("precondition")
+        .and_then(serde_json::Value::as_object)
+        .ok_or(WRITE_FILE_PRECONDITION_ERROR)?;
+    match precondition.len() {
+        1 if precondition.get("mustNotExist") == Some(&serde_json::Value::Bool(true)) => {}
+        1 if precondition
+            .get("sha256")
+            .and_then(serde_json::Value::as_str)
+            .is_some() => {}
+        _ => return Err(WRITE_FILE_PRECONDITION_ERROR.into()),
+    }
+    decode_arguments::<WriteFileArgumentsNative>(arguments)
+        .map_err(|error| format!("invalid write_file arguments: {error}"))
+}
+
 pub fn validate_tool_arguments_native(
     tool_name: &str,
     arguments: &serde_json::Value,
@@ -628,7 +649,7 @@ pub fn validate_tool_arguments_native(
             }
         }
         "write_file" => {
-            let value = decode_arguments::<WriteFileArgumentsNative>(arguments)?;
+            let value = decode_write_file_arguments_native(arguments)?;
             validate_path(&value.path)?;
             validate_file_text_native(
                 "write_file",
@@ -966,6 +987,34 @@ mod tests {
                 "unexpectedly accepted {arguments}"
             );
         }
+    }
+
+    #[test]
+    fn write_file_precondition_errors_explain_both_valid_forms_without_file_content() {
+        for precondition in [
+            json!(null),
+            json!({}),
+            json!({ "must_not_exist": true }),
+            json!({ "mustNotExist": "true" }),
+            json!({ "mustNotExist": false }),
+            json!({ "mustNotExist": true, "sha256": null }),
+            json!({ "sha256": null }),
+        ] {
+            let arguments = json!({
+                "path": "page.html",
+                "content": "private file content",
+                "precondition": precondition,
+            });
+            let error = validate_tool_arguments_native("write_file", &arguments).unwrap_err();
+            assert_eq!(error, WRITE_FILE_PRECONDITION_ERROR);
+            assert!(!error.contains("private file content"));
+        }
+        let error = validate_tool_arguments_native(
+            "write_file",
+            &json!({ "path": "page.html", "content": "private file content" }),
+        )
+        .unwrap_err();
+        assert_eq!(error, WRITE_FILE_PRECONDITION_ERROR);
     }
 
     #[test]

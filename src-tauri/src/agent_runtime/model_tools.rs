@@ -184,7 +184,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "write_file".into(),
-            description: "Atomically create/replace UTF-8 up to the 128 KiB safety ceiling (131072 bytes), subject to the smaller current output budget and 240 KiB exact-diff limit. Use this instead of cat, echo, heredocs, or terminal commands for generated HTML/CSS/JS/text. New: {mustNotExist:true}; replace: read_file first, then use its SHA-256. Prefer apply_patch for existing files. Empty content is valid; build larger files from a small valid section with bounded apply_patch increments, completing all functionality before reporting success. Rejected size or text validation changes nothing and returns the actual byte size or offending control character; follow its recovery guidance.".into(),
+            description: "Atomically create/replace UTF-8 up to the 128 KiB safety ceiling (131072 bytes), subject to the smaller current output budget and 240 KiB exact-diff limit. Use this instead of cat, echo, heredocs, or terminal commands for generated HTML/CSS/JS/text. New: precondition exactly {mustNotExist:true}; replace: read_file first, then use precondition exactly {sha256:<current digest>}. Never combine these fields or add null fields. Prefer apply_patch for existing files. Empty content is valid; build larger files from a small valid section with bounded apply_patch increments, completing all functionality before reporting success. Rejected size or text validation changes nothing and returns the actual byte size or offending control character; follow its recovery guidance.".into(),
             input_schema: object_schema(
                 &["path", "content", "precondition"],
                 json!({
@@ -666,6 +666,9 @@ mod tests {
             .find(|tool| tool.name == "write_file")
             .expect("write tool");
         assert!(write.description.contains("mustNotExist"));
+        assert!(write
+            .description
+            .contains("Never combine these fields or add null fields"));
         assert!(write.description.contains("read_file first"));
         assert!(write.description.contains("instead of cat, echo, heredocs"));
         assert_eq!(
