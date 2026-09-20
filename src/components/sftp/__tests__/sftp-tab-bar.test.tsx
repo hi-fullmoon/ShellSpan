@@ -388,8 +388,15 @@ describe('SftpTabBar', () => {
     const { container } = render(<SftpTabBar />);
 
     const tabs = screen.getAllByRole('tab');
-    expect(container.firstChild).toHaveClass('h-10', 'bg-app-bg', 'px-1');
-    expect(tabs[0]).toHaveClass('h-8', 'rounded-md', 'bg-app-tab-active', 'text-app-tab-accent');
+    expect(container.firstChild).toHaveClass('h-8.5', 'my-0', 'py-0', 'bg-app-bg', 'px-1');
+    expect(container.firstChild).not.toHaveClass('border-b');
+    expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass('h-8.5');
+    expect(screen.getByRole('tablist')).toHaveClass('py-0');
+    for (const tab of tabs) {
+      expect(tab.parentElement).toHaveClass('h-8.5', 'py-0.5');
+      expect(tab).toHaveClass('h-7.5');
+    }
+    expect(tabs[0]).toHaveClass('h-7.5', 'rounded-md', 'bg-app-tab-active', 'text-app-tab-accent');
     expect(tabs[1]).toHaveClass('bg-transparent', 'hover:bg-app-surface-muted');
   });
 

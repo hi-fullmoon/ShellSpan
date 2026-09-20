@@ -260,14 +260,22 @@ describe('TerminalTabBar', () => {
     expect(onNewTabClick).toHaveBeenCalledTimes(1);
   });
 
-  it('uses inset rounded tabs with a bordered active state', () => {
+  it('uses the terminal surface without a bottom border and preserves the bordered active tab', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     useTerminalStore.getState().setActiveSession('s1');
     const { container } = render(<TerminalTabBar />);
 
-    expect(container.querySelector('[data-terminal-tab-bar]')).toHaveClass('h-10', 'bg-app-bg', 'px-1');
-    expect(screen.getAllByRole('tab')[0]).toHaveClass('h-8', 'rounded-md', 'bg-app-tab-active', 'text-app-tab-accent');
+    const tabBar = container.querySelector('[data-terminal-tab-bar]');
+    expect(tabBar).toHaveClass('h-8.5', 'my-0', 'py-0', 'bg-app-surface', 'px-[2px]');
+    expect(tabBar?.querySelector('[data-slot="scroll-area"]')).toHaveClass('h-8.5');
+    expect(screen.getByRole('tablist')).toHaveClass('py-0');
+    for (const tab of screen.getAllByRole('tab')) {
+      expect(tab.parentElement).toHaveClass('h-8.5', 'py-0.5');
+      expect(tab).toHaveClass('h-7.5', 'w-42');
+    }
+    expect(tabBar).not.toHaveClass('border-b', 'border-app-border/40', 'bg-app-bg');
+    expect(screen.getAllByRole('tab')[0]).toHaveClass('h-7.5', 'rounded-md', 'bg-app-tab-active', 'text-app-tab-accent');
     expect(screen.getAllByRole('tab')[1]).toHaveClass('bg-transparent', 'hover:bg-app-surface-muted');
 
     expect(screen.queryByRole('button', { name: 'terminal.newTab' })).not.toBeInTheDocument();
