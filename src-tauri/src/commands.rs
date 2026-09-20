@@ -507,7 +507,17 @@ pub(crate) fn create_local_session(
             .ok_or_else(|| "terminal broker runtime is unavailable".to_string())?
             .terminal_shell_integration_enabled()?;
     let prepared_integration = if shell_integration_enabled && shell_kind.supported() {
-        match PreparedLocalShellIntegration::prepare(shell_kind) {
+        let prepared = app
+            .path()
+            .home_dir()
+            .map_err(|error| format!("failed to resolve shell integration home directory: {error}"))
+            .and_then(|home| {
+                PreparedLocalShellIntegration::prepare(
+                    shell_kind,
+                    &crate::shellspan_data_dir(&home),
+                )
+            });
+        match prepared {
             Ok(integration) => Some(integration),
             Err(error) => {
                 warn!(

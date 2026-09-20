@@ -529,6 +529,15 @@ content, credentials, or nonces, and MUST NOT enter Agent Session persistence.
 
 ## Phase 3 local integration candidate profile
 
+Local integration bootstrap files and control endpoints live in unique
+`shellspan-terminal-integration-*` directories under `~/.shellspan/tmp/`
+(`~/.shellspan-dev/tmp/` for development builds), rather than the system
+temporary directory. The backend retains each directory for its shell generation
+and removes it on normal teardown or startup rollback. Abnormal process exit
+can leave a directory behind. If the application temporary directory cannot be
+created, integration setup fails through the existing degraded-terminal path.
+Remote integration continues to use its private directory under `/tmp`.
+
 The local candidate binds every control reader to a backend-only
 `integrationId`; the identifier is never sent through the PTY. Bash and zsh
 write NUL-framed lifecycle records to a mode-`0600` FIFO inside a private
