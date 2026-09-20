@@ -1,5 +1,6 @@
     use super::*;
     include!("driver_stream.rs");
+    include!("task_token_budget.rs");
 
     #[test]
     fn output_recovery_count_survives_successful_steps_but_is_scoped_to_turn() {
@@ -287,7 +288,7 @@
     }
 
     #[test]
-    fn failed_file_edits_stop_despite_changing_arguments_and_interleaved_reads() {
+    fn changed_file_edit_arguments_allow_recovery_attempts() {
         let mut events = Vec::new();
         for index in 0..3 {
             events.extend(file_edit_step(index, "index.html", false));
@@ -300,11 +301,7 @@
             ));
         }
         assert_eq!(failed_file_edit_streak(&events, "turn-1"), 3);
-        assert!(
-            no_progress_reason(&events, "turn-1", AgentDriverConfig::default())
-                .unwrap()
-                .contains("3 edits to the same file failed")
-        );
+        assert!(no_progress_reason(&events, "turn-1", AgentDriverConfig::default()).is_none());
         assert_eq!(failed_file_edit_streak(&events, "other-turn"), 0);
 
         // A completed edit on a different file cannot hide these failures.
@@ -340,7 +337,7 @@
             }
             events.extend(step);
         }
-        assert!(no_progress_reason(&events, "turn-1", AgentDriverConfig::default()).is_some());
+        assert!(no_progress_reason(&events, "turn-1", AgentDriverConfig::default()).is_none());
         for event in &mut events {
             if let AgentSessionEventPayload::ToolResult { summary, .. } = &mut event.payload {
                 *summary = "Tool not started: permission denied".into();
@@ -457,7 +454,7 @@
     }
 
     #[test]
-    fn identical_plan_versions_do_not_reset_repetition_but_changed_plans_do() {
+    fn plan_updates_do_not_reset_repetition() {
         let mut events = Vec::new();
         let mut alternating = Vec::new();
         for version in 1..=7 {
@@ -516,7 +513,7 @@
             events.extend(step);
             assert_eq!(
                 repeated_tool_step_streak(&events, "turn-1"),
-                if version == 7 { 1 } else { version as usize }
+                version as usize
             );
             if version == 6 {
                 assert!(
@@ -528,7 +525,7 @@
                 );
             }
         }
-        assert!(no_progress_reason(&events, "turn-1", AgentDriverConfig::default()).is_none());
+        assert!(no_progress_reason(&events, "turn-1", AgentDriverConfig::default()).is_some());
     }
 
     #[test]

@@ -1324,6 +1324,32 @@ mod tests {
         assert!(snapshot.process_handle.starts_with("proc-"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn direct_multiline_script_preserves_heredoc_cwd_and_exit_status() {
+        let workspace = tempfile::tempdir().unwrap();
+        let command = "cat <<'EOF' > result.txt\n界面\nliteral $HOME and $(pwd)\nEOF\ncat result.txt\nprintf diagnostic >&2\nexit 7";
+        crate::agent_runtime::validate_tool_arguments_native("exec_command", &serde_json::json!({"command":command, "explanation":"check complete script", "channel":"direct"})).unwrap();
+        let process = spawn_local_process_native(
+            "script-task".into(),
+            "script-request".into(),
+            "script-target".into(),
+            command,
+            Some(workspace.path()),
+            Duration::from_secs(10),
+        )
+        .unwrap();
+        let snapshot = process.wait(Duration::from_secs(10)).unwrap();
+        assert_eq!(snapshot.state, ProcessLifecycleNative::Exited);
+        assert_eq!(snapshot.exit_code, Some(7));
+        assert_eq!(snapshot.stdout, "界面\nliteral $HOME and $(pwd)\n");
+        assert_eq!(snapshot.stderr, "diagnostic");
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join("result.txt")).unwrap(),
+            snapshot.stdout
+        );
+    }
+
     #[test]
     fn local_background_process_accepts_stdin_and_has_one_terminal_state() {
         let command = if cfg!(target_os = "windows") {
@@ -1344,6 +1370,44 @@ mod tests {
         let snapshot = process.wait(Duration::from_secs(10)).unwrap();
         assert_eq!(snapshot.state, ProcessLifecycleNative::Exited);
         assert_eq!(snapshot.stdout.trim(), "hello");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn multiline_scripts_keep_timeout_and_cancellation_boundaries() {
+        for cancel in [false, true] {
+            let workspace = tempfile::tempdir().unwrap();
+            let process = spawn_local_process_native(
+                "bounded-script".into(),
+                "bounded-request".into(),
+                "local-script".into(),
+                "printf started\nsleep 10\nprintf late > should-not-exist",
+                Some(workspace.path()),
+                if cancel {
+                    Duration::from_secs(20)
+                } else {
+                    Duration::from_millis(100)
+                },
+            )
+            .unwrap();
+            let snapshot = if cancel {
+                process
+                    .kill(ProcessSignalNative::Kill, Duration::from_secs(5))
+                    .unwrap()
+            } else {
+                process.wait(Duration::from_secs(5)).unwrap()
+            };
+            assert_eq!(
+                snapshot.state,
+                if cancel {
+                    ProcessLifecycleNative::Cancelled
+                } else {
+                    ProcessLifecycleNative::TimedOut
+                }
+            );
+            assert!(snapshot.termination_confirmed);
+            assert!(!workspace.path().join("should-not-exist").exists());
+        }
     }
 
     #[test]

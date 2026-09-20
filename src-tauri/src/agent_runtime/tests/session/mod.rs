@@ -1611,6 +1611,53 @@ fn oversized_event_is_rejected_before_persistence() {
 }
 
 #[test]
+fn maximum_escaped_write_arguments_survive_session_reload() {
+    let (root, store) = configured();
+    create(&store);
+    let content = "\\".repeat(crate::agent_runtime::MAX_WRITE_FILE_CONTENT_BYTES);
+    let payload = AgentSessionEventPayload::ToolCall {
+        call: RecordedToolCall {
+            call_id: "large-write".into(),
+            provider_call_id: None,
+            name: "write_file".into(),
+            native_name: Some("write_file".into()),
+            arguments: serde_json::json!({"path":"page.html", "content": content, "precondition":{"mustNotExist":true}}),
+            title: None,
+            effect: None,
+            target: None,
+        },
+    };
+    assert!(event_payload_fits_storage_boundary(
+        "session-1",
+        Some("turn-1"),
+        Some("step-1"),
+        &payload
+    )
+    .unwrap());
+    assert!(!event_payload_fits_inline_replay_boundary(
+        "session-1",
+        Some("turn-1"),
+        Some("step-1"),
+        &payload
+    )
+    .unwrap());
+    store
+        .append(
+            "session-1",
+            Some("turn-1".into()),
+            Some("step-1".into()),
+            payload,
+        )
+        .unwrap();
+    let reopened = AgentSessionStore::default();
+    reopened.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(
+        reopened.snapshot("session-1").unwrap(),
+        store.snapshot("session-1").unwrap()
+    );
+}
+
+#[test]
 fn cancel_discards_both_lanes_before_the_terminal_event() {
     let (_root, store) = configured();
     create(&store);

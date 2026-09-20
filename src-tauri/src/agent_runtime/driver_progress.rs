@@ -8,16 +8,16 @@ struct StepProgress {
     changed: bool,
 }
 
-/// Only the three preceding signatures are needed to extend periods 1, 2 and 3.
+/// Five preceding signatures extend cycles of one through five tool steps.
 #[derive(Debug, Clone, Default)]
 struct Repetitions {
     history: VecDeque<String>,
-    lengths: [usize; 3],
+    lengths: [usize; 5],
 }
 
 impl Repetitions {
     fn push(&mut self, signature: String) {
-        for period in 1..=3 {
+        for period in 1..=5 {
             self.lengths[period - 1] = if self.history.len() >= period
                 && self.history[self.history.len() - period] == signature
             {
@@ -27,7 +27,7 @@ impl Repetitions {
             };
         }
         self.history.push_back(signature);
-        if self.history.len() > 3 {
+        if self.history.len() > 5 {
             self.history.pop_front();
         }
     }
@@ -37,9 +37,28 @@ impl Repetitions {
             .iter()
             .enumerate()
             .filter(|(index, length)| **length >= 2 * (index + 1))
-            .map(|(_, length)| *length)
+            .map(|(index, length)| *length / (index + 1))
             .max()
             .unwrap_or(usize::from(!self.history.is_empty()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Repetitions;
+
+    #[test]
+    fn requires_five_complete_cycles_for_every_supported_period() {
+        for period in 1..=5 {
+            let mut repetitions = Repetitions::default();
+            for index in 0..5 * period {
+                repetitions.push((index % period).to_string());
+                assert_eq!(repetitions.count() >= 5, index + 1 == 5 * period);
+            }
+            repetitions.push("new observation".into());
+            assert_eq!(repetitions.count(), 1);
+            assert!(repetitions.history.len() <= 5);
+        }
     }
 }
 
@@ -49,12 +68,12 @@ type FileKey = (Option<String>, String);
 pub(super) struct LoopProgress {
     turn_id: Option<String>,
     steps: HashMap<String, StepProgress>,
-    previous_plan: Option<String>,
     evidence: HashSet<String>,
     repetitions: Repetitions,
     edits: HashMap<(String, String), (String, FileKey)>,
     failures: HashMap<FileKey, usize>,
     failure_counts: BTreeMap<usize, usize>,
+    recovery_used: bool,
 }
 
 fn digest(value: &impl serde::Serialize) -> String {
@@ -64,10 +83,6 @@ fn digest(value: &impl serde::Serialize) -> String {
 
 impl LoopProgress {
     pub(super) fn observe(&mut self, event: &AgentSessionEvent) {
-        if matches!(event.payload, Payload::SessionResumed {}) {
-            *self = Self::default();
-            return;
-        }
         if matches!(event.payload, Payload::TurnStart) {
             *self = Self {
                 turn_id: event.turn_id.clone(),
@@ -83,18 +98,21 @@ impl LoopProgress {
         if self.turn_id.as_deref() != Some(turn_id) {
             return;
         }
+        if let Payload::UserMessage { message } = &event.payload {
+            if message.source.kind == super::AgentMessageSourceKind::User {
+                self.recovery_used = false;
+                self.repetitions = Repetitions::default();
+            } else if message.source == super::AgentMessageSource::runtime("loop-recovery".into()) {
+                self.recovery_used = true;
+                self.repetitions = Repetitions::default();
+            }
+        }
         let Some(step_id) = event.step_id.as_deref() else {
             return;
         };
 
         self.observe_edit(event, step_id);
         let changed = match &event.payload {
-            Payload::TaskPlan { steps, .. } => {
-                let next = digest(steps);
-                let changed = self.previous_plan.as_ref() != Some(&next);
-                self.previous_plan = Some(next);
-                changed
-            }
             Payload::TaskEvidence { kind, summary, .. } => {
                 self.evidence.insert(digest(&(kind, summary)))
             }
@@ -148,6 +166,10 @@ impl LoopProgress {
                 .map_or(0, |(count, _)| *count),
             self.repetitions.count(),
         )
+    }
+
+    pub(super) fn recovery_used(&self, turn_id: &str) -> bool {
+        self.turn_id.as_deref() == Some(turn_id) && self.recovery_used
     }
 
     fn set_failures(&mut self, key: FileKey, count: usize) {

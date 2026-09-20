@@ -105,6 +105,7 @@ fn model_exposes_only_strict_runtime_pipeline_tools() {
             "list_directory",
             "search_text",
             "write_file",
+            "edit_file",
             "apply_patch",
             "transfer_file",
             "call_mcp_tool",

@@ -10,6 +10,7 @@ mod process;
 mod registry;
 mod runtime;
 pub(crate) mod scoped_read;
+mod shell_policy;
 mod terminal_execute;
 mod terminal_interactive;
 mod terminal_lease;

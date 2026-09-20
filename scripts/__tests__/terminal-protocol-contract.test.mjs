@@ -282,6 +282,28 @@ describe('terminal execution Phase 0 protocol contract', () => {
     }), validator.errorsText(validate.errors)).toBe(true);
   });
 
+  it('accepts complete scripts only on Direct execution and rejects terminal controls', async () => {
+    const schema = await readJson('tool-contract.schema.json');
+    const validator = new Ajv2020({ allErrors: true, strict: true });
+    const validate = validator.compile(schema);
+    const base = {
+      requestId: 'request-script',
+      callId: 'call-script',
+      target: { kind: 'local', targetId: 'target-1', sessionId: 'transport-1' },
+      capabilityId: 'capability-script',
+    };
+    for (const command of ['pwd\nls', "cat <<'EOF'\nhello\nEOF", 'printf\tvalue']) {
+      expect(validate({ ...base, toolName: 'exec_command', arguments: { command, explanation: 'inspect', channel: 'direct' } }), validator.errorsText(validate.errors)).toBe(true);
+      expect(validate({ ...base, toolName: 'terminal_execute', arguments: { command, explanation: 'inspect' } })).toBe(false);
+    }
+    for (const command of ['pwd\u0000', 'pwd\u001b', 'pwd\u0085']) {
+      expect(validate({ ...base, toolName: 'exec_command', arguments: { command, explanation: 'inspect', channel: 'direct' } })).toBe(false);
+    }
+    for (const [size, accepted] of [[65536, true], [131072, true], [131073, false]]) {
+      expect(validate({ ...base, toolName: 'write_file', arguments: { path: 'page.html', content: 'x'.repeat(size), precondition: { mustNotExist: true } } })).toBe(accepted);
+    }
+  });
+
   it('validates atomic write_file creation, replacement, and result contracts', async () => {
     const schema = await readJson('tool-contract.schema.json');
     const validator = new Ajv2020({ allErrors: true, strict: true });

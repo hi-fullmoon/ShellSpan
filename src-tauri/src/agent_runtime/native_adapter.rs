@@ -620,10 +620,14 @@ fn normalize_arguments(
                 "run_terminal_command schema rejected command: it must not be empty".into(),
             );
         }
-        if arguments.command.chars().any(char::is_control) {
+        if arguments
+            .command
+            .chars()
+            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+        {
             let recovery = terminal_command_recovery(target);
             return Err(format!(
-                "run_terminal_command schema rejected command: control characters and multiline commands are not allowed; doNotRetry=true; {recovery}; use probe_http for target-loopback HTTP"
+                "run_terminal_command schema rejected command: unsupported control character; newlines and tabs are allowed; no command was executed; doNotRetry=true; {recovery}; use probe_http for target-loopback HTTP"
             ));
         }
         if arguments.command.len() > 8_192 {
@@ -665,7 +669,7 @@ fn normalize_arguments(
                 })),
             )),
             super::AgentExecutionSurface::BoundTerminal
-                if direct_lifecycle_required || background => Ok((
+                if direct_lifecycle_required || background || arguments.command.contains(['\n', '\r', '\t']) => Ok((
                 "exec_command".into(),
                 omit_null_fields(json!({
                     "command": arguments.command,
@@ -763,8 +767,8 @@ fn terminal_command_recovery(target: &AgentToolTargetNative) -> &'static str {
             profile_id: Some(_),
             root_path: Some(_),
             ..
-        } => "suggestedTool=write_file; do not use cat, echo, heredocs, or terminal commands for file content; use write_file for files up to 32 KiB and bounded read_file plus apply_patch increments for larger files",
-        _ => "suggestedAction=split_bounded_commands; no native filesystem root is available, so use one single-line command per call below the limit",
+        } => "suggestedTool=write_file; do not use cat, echo, heredocs, or terminal commands for file content; use write_file for files up to 128 KiB and bounded read_file plus apply_patch increments for larger files",
+        _ => "suggestedAction=split_bounded_commands; use smaller complete scripts below the limit; native file tools require a filesystem root and remote Direct execution requires a credential-backed profile",
     }
 }
 
@@ -787,6 +791,7 @@ fn terminal_command_requires_direct_lifecycle(request: &NativeToolRequest) -> Re
         serde_json::from_value(request.model_call.arguments.clone())
             .map_err(|error| format!("run_terminal_command schema rejected arguments: {error}"))?;
     Ok(arguments.background
+        || arguments.command.contains(['\n', '\r', '\t'])
         || arguments.lifecycle_trust == TerminalLifecycleTrust::DirectRequired
         || super::native::command_requires_direct_lifecycle_native(&arguments.command))
 }

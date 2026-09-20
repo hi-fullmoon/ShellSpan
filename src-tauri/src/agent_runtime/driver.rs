@@ -19,7 +19,6 @@ use super::{
 use super::{AgentInboxLane, AgentInboxMessage, AgentMessageSource};
 
 const DEFAULT_MAX_STEPS_PER_TURN: usize = 128;
-const MAX_FAILED_FILE_EDITS: usize = 3;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AgentDriverConfig {
@@ -43,7 +42,7 @@ impl Default for AgentDriverConfig {
             // One-shot children retain their explicit single-turn contract.
             max_steps_per_turn: Some(DEFAULT_MAX_STEPS_PER_TURN),
             max_turns_per_session: 64,
-            max_identical_tool_steps: 6,
+            max_identical_tool_steps: 5,
             max_model_tokens_per_session: 2_000_000,
             max_active_duration_ms: 60 * 60 * 1_000,
             max_model_stream_duration_ms: 15 * 60 * 1_000,
@@ -171,7 +170,13 @@ async fn drive_agent_inner(
                         .iter()
                         .any(|message| message.source.kind == super::AgentMessageSourceKind::User)
             });
-            if let Some(reason) = reason {
+            if let Some(reason) = recover_loop_if_possible(
+                sessions,
+                &entry.session_id,
+                &scope.turn_id,
+                reason,
+                !inbox.next_turn.is_empty(),
+            )? {
                 close_open_scope(sessions, entry, &reason)?;
                 if !inbox.next_turn.is_empty() {
                     continue;
@@ -344,7 +349,13 @@ async fn drive_agent_inner(
                         .iter()
                         .any(|message| message.source.kind == super::AgentMessageSourceKind::User)
             });
-            if let Some(reason) = reason {
+            if let Some(reason) = recover_loop_if_possible(
+                sessions,
+                &entry.session_id,
+                &turn_id,
+                reason,
+                !inbox.next_turn.is_empty(),
+            )? {
                 close_open_scope(sessions, entry, &reason)?;
                 if !sessions
                     .driver_control(&entry.session_id)?
@@ -678,6 +689,16 @@ async fn run_step(
         if let Some(reason) =
             task_budget_failure(&sessions.driver_metrics(&entry.session_id)?, config)?
         {
+            if reason.starts_with("taskTokenBudgetExceeded:") {
+                return Ok(stop_for_token_budget(
+                    &compactions,
+                    &entry.session_id,
+                    turn_id,
+                    step_id,
+                    config.max_model_tokens_per_session,
+                    &entry.cancellation(),
+                ));
+            }
             return Ok(StepSettlement::Failed(reason));
         }
         let request_id = format!("request-{}", Uuid::new_v4().simple());
@@ -826,16 +847,51 @@ async fn run_step(
                 ));
             }
         }
-        let projected_tokens = sessions
+        match sessions
             .driver_metrics(&entry.session_id)?
-            .model_tokens
-            .saturating_add(budget.estimated_input_tokens)
-            .saturating_add(budget.output_reserve_tokens);
-        if projected_tokens > config.max_model_tokens_per_session {
-            return Ok(StepSettlement::Failed(format!(
-                "taskTokenBudgetExceeded: maximum {} estimated model tokens",
-                config.max_model_tokens_per_session
-            )));
+            .token_budget_decision(
+                budget
+                    .estimated_input_tokens
+                    .saturating_add(budget.output_reserve_tokens),
+                config.max_model_tokens_per_session,
+            ) {
+            super::driver_metrics::TaskTokenBudgetDecision::Stop => {
+                return Ok(stop_for_token_budget(
+                    &compactions,
+                    &entry.session_id,
+                    turn_id,
+                    step_id,
+                    config.max_model_tokens_per_session,
+                    &entry.cancellation(),
+                ));
+            }
+            super::driver_metrics::TaskTokenBudgetDecision::Checkpoint => {
+                if compactions
+                    .checkpoint_task_budget(
+                        &entry.session_id,
+                        turn_id,
+                        step_id,
+                        config.max_model_tokens_per_session,
+                        super::TaskBudgetCheckpointStage::Approaching,
+                        &entry.cancellation(),
+                    )
+                    .is_err()
+                {
+                    if entry.cancellation().is_cancelled() {
+                        return Ok(StepSettlement::Cancelled);
+                    }
+                    // Existing committed history remains the recovery source.
+                    // Record the failed attempt so a storage error cannot cause
+                    // an unbounded checkpoint retry on every subsequent step.
+                    append_status(
+                        sessions,
+                        entry,
+                        AgentSessionStatus::Running,
+                        Some("taskBudgetCheckpointUnavailable".into()),
+                    )?;
+                }
+            }
+            super::driver_metrics::TaskTokenBudgetDecision::Continue => {}
         }
         if prepared_call.is_none() {
             prepared_call = Some(model.prepare_request(request, "step", &entry.cancellation())?);
@@ -1441,6 +1497,36 @@ fn task_budget_failure(
     Ok(None)
 }
 
+fn stop_for_token_budget(
+    compactions: &AgentCompactionManager,
+    session_id: &str,
+    turn_id: &str,
+    step_id: &str,
+    maximum_tokens: u64,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> StepSettlement {
+    let checkpoint = compactions.checkpoint_task_budget(
+        session_id,
+        turn_id,
+        step_id,
+        maximum_tokens,
+        super::TaskBudgetCheckpointStage::Exhausted,
+        cancellation,
+    );
+    if cancellation.is_cancelled() {
+        return StepSettlement::Cancelled;
+    }
+    StepSettlement::Failed(format!(
+        "taskTokenBudgetExceeded: maximum {} estimated model tokens{}",
+        maximum_tokens,
+        if checkpoint.is_err() {
+            "; checkpointUnavailable"
+        } else {
+            ""
+        },
+    ))
+}
+
 #[cfg(test)]
 fn no_progress_reason(
     events: &[super::AgentSessionEvent],
@@ -1458,22 +1544,50 @@ fn no_progress_reason(
 }
 
 fn no_progress_from_counts(
-    (failures, repetitions): (usize, usize),
+    (_failures, repetitions): (usize, usize),
     config: AgentDriverConfig,
 ) -> Option<String> {
-    if failures >= MAX_FAILED_FILE_EDITS {
-        return Some(format!(
-            "noProgress: {MAX_FAILED_FILE_EDITS} edits to the same file failed without a verified change; automatic retries stopped. Review the file and tool errors before continuing."
-        ));
-    }
     (config.max_identical_tool_steps > 0 && repetitions >= config.max_identical_tool_steps).then(
         || {
             format!(
-                "noProgress: {} repeated tool steps produced no new evidence",
+                "noProgress: a tool cycle repeated {} times without new results",
                 config.max_identical_tool_steps
             )
         },
     )
+}
+
+fn recover_loop_if_possible(
+    sessions: &AgentSessionStore,
+    session_id: &str,
+    turn_id: &str,
+    reason: Option<String>,
+    queued_turn: bool,
+) -> Result<Option<String>, String> {
+    let Some(reason) = reason else {
+        return Ok(None);
+    };
+    if queued_turn || sessions.loop_recovery_used(session_id, turn_id)? {
+        return Ok(Some(reason));
+    }
+    let step_id = sessions
+        .read_turn_events(session_id, |events| {
+            events
+                .iter()
+                .rev()
+                .find(|event| event.turn_id.as_deref() == Some(turn_id) && event.step_id.is_some())
+                .and_then(|event| event.step_id.clone())
+        })?
+        .ok_or("Loop recovery requires a recorded tool step")?;
+    sessions.append(session_id, Some(turn_id.into()), Some(step_id), AgentSessionEventPayload::UserMessage {
+        message: super::AgentInboxMessage {
+            images: Vec::new(), message_id: format!("message-{}", Uuid::new_v4().simple()),
+            client_submission_id: None,
+            content: "Potential tool loop detected: the same calls and results have repeated. Review the tool errors and choose a materially different approach that makes progress. For oversized writes, create a smaller initial file and apply focused patches within the tool limits. Avoid repeating unchanged reads or failed edits. If blocked, explain the blocker. Another detected loop will stop this run.".into(),
+            source: super::AgentMessageSource::runtime("loop-recovery".into()), terminal_context: None,
+        }
+    })?;
+    Ok(None)
 }
 
 // File reads, plan updates and changing patch syntax are not successful edits.
@@ -1567,7 +1681,7 @@ fn failed_file_edit_streak(events: &[super::AgentSessionEvent], turn_id: &str) -
 
 #[cfg(test)]
 fn repeated_tool_step_streak(events: &[super::AgentSessionEvent], turn_id: &str) -> usize {
-    repeated_tool_step_streak_bounded(events, turn_id, 6)
+    repeated_tool_step_streak_bounded(events, turn_id, usize::MAX)
 }
 
 #[cfg(test)]
@@ -1580,7 +1694,6 @@ fn repeated_tool_step_streak_bounded(
     let mut signatures = std::collections::VecDeque::new();
     let mut steps: BTreeMap<&str, Vec<&super::AgentSessionEvent>> = BTreeMap::new();
     let mut progress = std::collections::HashSet::new();
-    let mut previous_plan = None;
     let mut evidence = std::collections::HashSet::new();
     for event in events {
         if event.turn_id.as_deref() != Some(turn_id) {
@@ -1590,11 +1703,6 @@ fn repeated_tool_step_streak_bounded(
             continue;
         };
         let made_progress = match &event.payload {
-            AgentSessionEventPayload::TaskPlan { steps, .. } => {
-                let changed = previous_plan != Some(steps);
-                previous_plan = Some(steps);
-                changed
-            }
             AgentSessionEventPayload::TaskEvidence { kind, summary, .. } => {
                 evidence.insert((kind, summary))
             }
@@ -1637,14 +1745,14 @@ fn repeated_tool_step_streak_bounded(
         }
     }
     let mut longest = 0;
-    for period in 1..=3.min(signatures.len() / 2) {
+    for period in 1..=5.min(signatures.len() / 2) {
         let count = signatures
             .iter()
             .enumerate()
             .take_while(|(index, signature)| *signature == &signatures[index % period])
             .count();
         if count >= 2 * period {
-            longest = longest.max(count);
+            longest = longest.max(count / period);
         }
     }
     longest.max(signatures.len().min(1))
@@ -1654,7 +1762,7 @@ pub(super) fn tool_step_signature(
     step_events: &[&super::AgentSessionEvent],
 ) -> Option<Vec<serde_json::Value>> {
     let mut signature = Vec::new();
-    for (index, event) in step_events.iter().enumerate() {
+    for event in step_events {
         let AgentSessionEventPayload::ToolCall { call } = &event.payload else {
             continue;
         };
@@ -1672,17 +1780,8 @@ pub(super) fn tool_step_signature(
                 _ => None,
             })?;
         if call.name == "update_plan" && *result.1 == super::AgentToolResultStatus::Completed {
-            // Version, explanation and version-bearing summaries are bookkeeping,
-            // not evidence that the task advanced. Match the committed plan body.
-            let plan =
-                step_events
-                    .iter()
-                    .skip(index + 1)
-                    .find_map(|event| match &event.payload {
-                        AgentSessionEventPayload::TaskPlan { steps, .. } => Some(steps),
-                        _ => None,
-                    })?;
-            signature.push(serde_json::json!([call.name, plan, result.1]));
+            // Plan bookkeeping alone is not observable tool progress.
+            signature.push(serde_json::json!([call.name, result.1]));
             continue;
         }
         signature.push(serde_json::json!([
@@ -1963,7 +2062,7 @@ async fn commit_response(
         replay: (!has_ephemeral_tool_arguments)
             .then(|| super::AgentStoredReplay::inline(replay.clone())),
     };
-    if !super::event_payload_fits_storage_boundary(
+    if !super::event_payload_fits_inline_replay_boundary(
         &entry.session_id,
         Some(turn_id),
         Some(step_id),

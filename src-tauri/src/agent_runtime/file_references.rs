@@ -1,4 +1,5 @@
-//! Path-only discovery. One live directory per query; no content reads or background index.
+//! Path-only discovery. Remote directory snapshots are briefly cached; no content reads.
+mod cache;
 use super::{
     native::scoped_read::*, skills::SkillScope, AgentSessionEventPayload, AgentSessionStore,
     AgentSessionTarget, NativeToolRuntime,
@@ -123,7 +124,11 @@ pub(crate) fn discover(
         reader.check_root()?;
         let (directory, prefix) = query_parts(&request.query)?;
         // An over-budget enumeration is an explicit refusal; never return an arbitrary OS-order prefix.
-        let entries = reader.list_paths(directory, MAX_ENTRIES, &control)?;
+        let entries = if request.target.kind == "remote" {
+            cache::remote_entries(reader, &scope, directory, &control)?
+        } else {
+            reader.list_paths(directory, MAX_ENTRIES, &control)?
+        };
         let mut result = FileReferenceList {
             entries: vec![],
             scope: Some(scope),

@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const NATIVE_TOOL_CONTRACT_VERSION: u8 = 3;
-pub const MAX_WRITE_FILE_CONTENT_BYTES: usize = 32 * 1024;
+pub const MAX_WRITE_FILE_CONTENT_BYTES: usize = 128 * 1024;
+pub const MAX_EDIT_FILE_CONTENT_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
