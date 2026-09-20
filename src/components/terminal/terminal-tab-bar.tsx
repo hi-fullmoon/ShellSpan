@@ -113,10 +113,8 @@ const SessionTab: React.FC<SessionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-8 w-40 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-left text-xs outline-none transition-[background-color,border-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
-        active
-          ? 'bg-app-tab-active text-app-tab-accent'
-          : 'bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
+        'group relative flex h-7.5 w-42 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-left text-xs outline-none transition-[background-color,border-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
+        active ? 'bg-app-tab-active text-app-tab-accent' : 'bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
       style={session.color ? { backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, transparent)` } : undefined}
@@ -155,43 +153,41 @@ const SessionTab: React.FC<SessionTabProps> = ({
         {session.pendingConnection ? (
           <Spinner className="size-3 shrink-0 text-app-warning" />
         ) : (
-          <span
-            aria-hidden="true"
-            className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))}
-          />
+          <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))} />
         )}
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
       </div>
-      {!session.pendingConnection && (session.pinned ? (
-        <button
-          type="button"
-          aria-label="unpin"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onTogglePin?.(session.sessionId);
-          }}
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
-        >
-          <PinIcon className="size-3" strokeWidth={1.5} />
-        </button>
-      ) : (
-        <button
-          type="button"
-          aria-label="close"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onClose(session.sessionId);
-          }}
-          className={cn(
-            'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
-            !dragging && active ? 'flex' : 'hidden group-hover:flex',
-          )}
-        >
-          <XIcon className="h-3 w-3" strokeWidth={1.5} />
-        </button>
-      ))}
+      {!session.pendingConnection &&
+        (session.pinned ? (
+          <button
+            type="button"
+            aria-label="unpin"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePin?.(session.sessionId);
+            }}
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
+          >
+            <PinIcon className="size-3" strokeWidth={1.5} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label="close"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose(session.sessionId);
+            }}
+            className={cn(
+              'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
+              !dragging && active ? 'flex' : 'hidden group-hover:flex',
+            )}
+          >
+            <XIcon className="h-3 w-3" strokeWidth={1.5} />
+          </button>
+        ))}
     </div>
   );
 };
@@ -227,6 +223,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
   return (
     <div
       ref={setNodeRef}
+      className="h-8.5 shrink-0 py-0.5"
       {...attributes}
       {...listeners}
       style={{
@@ -270,9 +267,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const storeSessions = useTerminalStore((state) => state.sessions);
   const storeActiveSessionId = useTerminalStore((state) => state.activeSessionId);
   const sessions = controlledSessions ?? storeSessions;
-  const activeSessionId = controlledActiveSessionId === undefined
-    ? storeActiveSessionId
-    : controlledActiveSessionId;
+  const activeSessionId = controlledActiveSessionId === undefined ? storeActiveSessionId : controlledActiveSessionId;
   const setActiveSession = useTerminalStore((state) => state.setActiveSession);
   const removeSession = useTerminalStore((state) => state.removeSession);
   const reorderSessions = useTerminalStore((state) => state.reorderSessions);
@@ -345,9 +340,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
       if (requestedId && !sessions.some((session) => session.sessionId === requestedId)) return;
       if (!requestedId && !activeGroup) return;
       const closeId = requestedId ?? activeSessionId;
-      if (sessions.some((session) => (
-        session.sessionId === closeId && session.pendingConnection
-      ))) return;
+      if (sessions.some((session) => session.sessionId === closeId && session.pendingConnection)) return;
       if (closeId) setClosingSessionId(closeId);
     };
     document.addEventListener('shellspan:close-terminal-tab', handleCloseTabRequest);
@@ -380,13 +373,11 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   // lastPointerDownTabRef). Listeners run in the capture phase so they see the
   // events before the close/pin buttons can stop their propagation.
   useEffect(() => {
-    const getElement = (target: EventTarget | null): Element | null =>
-      target instanceof Element ? target : null;
+    const getElement = (target: EventTarget | null): Element | null => (target instanceof Element ? target : null);
     const isInteractiveControl = (target: EventTarget | null): boolean =>
       Boolean(getElement(target)?.closest('button, a[href], input, select, textarea'));
     const getTabId = (target: EventTarget | null): string | null =>
-      getElement(target)?.closest('[data-session-tab]')
-        ?.getAttribute('data-session-tab') ?? null;
+      getElement(target)?.closest('[data-session-tab]')?.getAttribute('data-session-tab') ?? null;
 
     const handlePointerDown = (event: PointerEvent): void => {
       lastPointerDownTabRef.current = getTabId(event.target);
@@ -431,9 +422,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   };
 
   const handleCloseSession = (sessionId: string): void => {
-    if (sessions.some((session) => (
-      session.sessionId === sessionId && session.pendingConnection
-    ))) return;
+    if (sessions.some((session) => session.sessionId === sessionId && session.pendingConnection)) return;
     setClosingSessionId(sessionId);
   };
 
@@ -455,8 +444,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const handleDragStart = (event: DragStartEvent): void => {
     const nextId = String(event.active.id);
     setDraggingSessionId(nextId);
-    const isKeyboardDrag = typeof KeyboardEvent !== 'undefined'
-      && event.activatorEvent instanceof KeyboardEvent;
+    const isKeyboardDrag = typeof KeyboardEvent !== 'undefined' && event.activatorEvent instanceof KeyboardEvent;
     keyboardDragRef.current = isKeyboardDrag;
     const activatorEvent = event.activatorEvent as PointerEvent;
     dragPointerStartRef.current = {
@@ -479,11 +467,11 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         dragOverlayOffsetRef.current = isKeyboardDrag
           ? { x: 0, y: 0 }
           : {
-            // Keep the overlay 2px down and right from the pointer hotspot so
-            // the cursor remains visibly separate from the dragged tab.
-            x: dragPointerStartRef.current.x - rect.left + DRAG_OVERLAY_CURSOR_GAP,
-            y: dragPointerStartRef.current.y - rect.top + DRAG_OVERLAY_CURSOR_GAP,
-          };
+              // Keep the overlay 2px down and right from the pointer hotspot so
+              // the cursor remains visibly separate from the dragged tab.
+              x: dragPointerStartRef.current.x - rect.left + DRAG_OVERLAY_CURSOR_GAP,
+              y: dragPointerStartRef.current.y - rect.top + DRAG_OVERLAY_CURSOR_GAP,
+            };
       }
     }
   };
@@ -522,27 +510,14 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     }
 
     const tabBarRect = tabBarRef.current?.getBoundingClientRect();
-    const tabs = container
-      ? Array.from(container.querySelectorAll<HTMLElement>('[data-session-tab]'))
-      : [];
+    const tabs = container ? Array.from(container.querySelectorAll<HTMLElement>('[data-session-tab]')) : [];
     const tabRects = tabs.map((tab) => tab.getBoundingClientRect());
     const isInsideTabBar = isKeyboardDrag
       ? true
       : tabBarRect && tabBarRect.width > 0 && tabBarRect.height > 0
-        ? pointerX >= tabBarRect.left
-          && pointerX <= tabBarRect.right
-          && pointerY >= tabBarRect.top
-          && pointerY <= tabBarRect.bottom
-        : tabRects.some((rect) => (
-          pointerX >= rect.left
-          && pointerX <= rect.right
-          && pointerY >= rect.top
-          && pointerY <= rect.bottom
-        ));
-    if (
-      !container
-      || !isInsideTabBar
-    ) {
+        ? pointerX >= tabBarRect.left && pointerX <= tabBarRect.right && pointerY >= tabBarRect.top && pointerY <= tabBarRect.bottom
+        : tabRects.some((rect) => pointerX >= rect.left && pointerX <= rect.right && pointerY >= rect.top && pointerY <= rect.bottom);
+    if (!container || !isInsideTabBar) {
       setInsertIndex(null);
       return;
     }
@@ -581,11 +556,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     const scrollDeltaX = (scrollRef.current?.scrollLeft ?? dragStartScrollLeftRef.current) - dragStartScrollLeftRef.current;
     const splitHandled = keyboardDragRef.current
       ? false
-      : onTabDragEnd?.(
-        activeId,
-        dragPointerStartRef.current.x + event.delta.x - scrollDeltaX,
-        dragPointerStartRef.current.y + event.delta.y,
-      ) ?? false;
+      : (onTabDragEnd?.(activeId, dragPointerStartRef.current.x + event.delta.x - scrollDeltaX, dragPointerStartRef.current.y + event.delta.y) ??
+        false);
     if (!splitHandled && insertIndex !== null) {
       const draggedSession = sessions.find((s) => s.sessionId === activeId);
       const pinnedCount = sessions.filter((s) => s.pinned).length;
@@ -613,25 +585,14 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
 
   const visibleTabCount = sessions.length - (draggingSessionId ? 1 : 0);
   const visibleSessions = draggingSessionId ? sessions.filter((session) => session.sessionId !== draggingSessionId) : sessions;
-  const displayedInsertIndex = externalInsertIndex !== null
-    ? externalInsertIndex
-    : draggingSessionId
-      ? insertIndex
-      : null;
+  const displayedInsertIndex = externalInsertIndex !== null ? externalInsertIndex : draggingSessionId ? insertIndex : null;
   // Dropping back into the dragged tab's own slot is a no-op, so suppress the
   // indicator that would otherwise sit between the dragged tab and its right
   // neighbor.
-  const draggedOriginalIndex = draggingSessionId
-    ? sessions.findIndex((s) => s.sessionId === draggingSessionId)
-    : -1;
-  const effectiveInsertIndex = displayedInsertIndex !== null && displayedInsertIndex === draggedOriginalIndex
-    ? null
-    : displayedInsertIndex;
+  const draggedOriginalIndex = draggingSessionId ? sessions.findIndex((s) => s.sessionId === draggingSessionId) : -1;
+  const effectiveInsertIndex = displayedInsertIndex !== null && displayedInsertIndex === draggedOriginalIndex ? null : displayedInsertIndex;
 
-  const shouldHide = !forceVisible
-    && sessions.length === 1
-    && terminalHideSingleTabBar
-    && !sessions[0]?.pendingConnection;
+  const shouldHide = !forceVisible && sessions.length === 1 && terminalHideSingleTabBar && !sessions[0]?.pendingConnection;
 
   return (
     <div
@@ -644,7 +605,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         if ((e.target as HTMLElement).closest('[data-session-tab]')) return;
         onNewTabClick();
       }}
-      className={cn('group/tabbar relative flex h-10 items-start border-b border-app-border/40 bg-app-bg px-1', shouldHide && 'h-0 overflow-hidden border-0 px-0')}
+      className={cn('group/tabbar relative my-0 flex h-8.5 items-start bg-app-surface px-[2px] py-0', shouldHide && 'h-0 overflow-hidden px-0')}
     >
       <DndContext
         sensors={sensors}
@@ -656,40 +617,32 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={sessions.map((s) => s.sessionId)} strategy={() => null}>
-          <ScrollArea
-            viewportRef={scrollRef}
-            horizontal
-            vertical={false}
-            size="thin"
-            onWheel={handleWheel}
-            className="h-10 min-w-0 flex-1"
-          >
-            <div role="tablist" className="flex min-w-0 items-center gap-[5px] py-1">
+          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" onWheel={handleWheel} className="h-8.5 min-w-0 flex-1">
+            <div role="tablist" className="flex min-w-0 items-center gap-[4px] py-0">
               {sessions.map((session, index) => {
-              const isDragging = draggingSessionId === session.sessionId;
-              const draggedIndex = draggingSessionId ? sessions.findIndex((s) => s.sessionId === draggingSessionId) : -1;
-              const visibleIndex = isDragging ? -1 : index - (draggedIndex >= 0 && draggedIndex < index ? 1 : 0);
-              const isLastVisible = visibleIndex === visibleTabCount - 1;
-              const isActive = activeSessionId === session.sessionId;
-              const nextVisibleSession = visibleIndex >= 0 ? visibleSessions[visibleIndex + 1] : undefined;
-              const showSeparatorAfter = !!nextVisibleSession
-                && effectiveInsertIndex !== visibleIndex + 1;
+                const isDragging = draggingSessionId === session.sessionId;
+                const draggedIndex = draggingSessionId ? sessions.findIndex((s) => s.sessionId === draggingSessionId) : -1;
+                const visibleIndex = isDragging ? -1 : index - (draggedIndex >= 0 && draggedIndex < index ? 1 : 0);
+                const isLastVisible = visibleIndex === visibleTabCount - 1;
+                const isActive = activeSessionId === session.sessionId;
+                const nextVisibleSession = visibleIndex >= 0 ? visibleSessions[visibleIndex + 1] : undefined;
+                const showSeparatorAfter = !!nextVisibleSession && effectiveInsertIndex !== visibleIndex + 1;
 
-              return (
-                <SortableTab
-                  key={session.sessionId}
-                  session={session}
-                  active={isActive}
-                  onActivate={onTabActivate ?? setActiveSession}
-                  onContextMenu={(s, x, y) => onTabContextMenu?.(s, x, y)}
-                  onClose={handleCloseSession}
-                  onTogglePin={togglePin}
-                  showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
-                  showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
-                  showSeparatorAfter={showSeparatorAfter}
-                />
-              );
-            })}
+                return (
+                  <SortableTab
+                    key={session.sessionId}
+                    session={session}
+                    active={isActive}
+                    onActivate={onTabActivate ?? setActiveSession}
+                    onContextMenu={(s, x, y) => onTabContextMenu?.(s, x, y)}
+                    onClose={handleCloseSession}
+                    onTogglePin={togglePin}
+                    showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
+                    showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
+                    showSeparatorAfter={showSeparatorAfter}
+                  />
+                );
+              })}
             </div>
           </ScrollArea>
         </SortableContext>

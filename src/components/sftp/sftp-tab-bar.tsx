@@ -91,7 +91,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-8 w-42 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-left text-xs outline-none transition-[background-color,border-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
+        'group relative flex h-7.5 w-42 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-left text-xs outline-none transition-[background-color,border-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
         active ? 'bg-app-tab-active text-app-tab-accent' : 'bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
@@ -122,41 +122,40 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         />
       )}
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        {connection.pendingConnection && (
-          <Spinner className="size-3 text-app-warning" />
-        )}
+        {connection.pendingConnection && <Spinner className="size-3 text-app-warning" />}
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{connection.title}</span>
       </div>
-      {!connection.pendingConnection && (connection.pinned ? (
-        <button
-          type="button"
-          aria-label="unpin"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onTogglePin?.(connection.id);
-          }}
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
-        >
-          <PinIcon className="size-3" strokeWidth={1.5} />
-        </button>
-      ) : (
-        <button
-          type="button"
-          aria-label="close"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onClose(connection.id);
-          }}
-          className={cn(
-            'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
-            !dragging && active ? 'flex' : 'hidden group-hover:flex',
-          )}
-        >
-          <XIcon className="h-3 w-3" strokeWidth={1.5} />
-        </button>
-      ))}
+      {!connection.pendingConnection &&
+        (connection.pinned ? (
+          <button
+            type="button"
+            aria-label="unpin"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePin?.(connection.id);
+            }}
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
+          >
+            <PinIcon className="size-3" strokeWidth={1.5} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label="close"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose(connection.id);
+            }}
+            className={cn(
+              'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
+              !dragging && active ? 'flex' : 'hidden group-hover:flex',
+            )}
+          >
+            <XIcon className="h-3 w-3" strokeWidth={1.5} />
+          </button>
+        ))}
     </div>
   );
 };
@@ -192,6 +191,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
   return (
     <div
       ref={setNodeRef}
+      className="h-8.5 shrink-0 py-0.5"
       {...attributes}
       {...listeners}
       style={{
@@ -225,13 +225,8 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const removeConnection = useSftpStore((state) => state.removeConnection);
   const reorderConnections = useSftpStore((state) => state.reorderConnections);
   const togglePin = useSftpStore((state) => state.togglePin);
-  const pathOccupancyRevision = useTransferStore(
-    (state) => state.pathOccupancyRevision,
-  );
-  const transferOperations = React.useMemo(
-    () => useTransferStore.getState().operations,
-    [pathOccupancyRevision],
-  );
+  const pathOccupancyRevision = useTransferStore((state) => state.pathOccupancyRevision);
+  const transferOperations = React.useMemo(() => useTransferStore.getState().operations, [pathOccupancyRevision]);
 
   // macOS tap-to-click in WKWebView can drop the pointerdown of a tap that
   // immediately follows another one (the single-tap gesture recognizer stays
@@ -476,26 +471,19 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   // indicator that would otherwise sit between the dragged tab and its right
   // neighbor.
   const draggedOriginalIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;
-  const effectiveInsertIndex = draggingConnectionId
-    && insertIndex !== null
-    && insertIndex !== draggedOriginalIndex
-    ? insertIndex
-    : null;
+  const effectiveInsertIndex = draggingConnectionId && insertIndex !== null && insertIndex !== draggedOriginalIndex ? insertIndex : null;
 
   if (connections.length === 0) {
     return null;
   }
 
-  if (
-    connections.length === 1
-    && sftpHideSingleTabBar
-    && !connections[0]?.pendingConnection
-  ) {
+  if (connections.length === 1 && sftpHideSingleTabBar && !connections[0]?.pendingConnection) {
     return null;
   }
 
   return (
     <div
+      data-sftp-tab-bar
       // Double-clicking empty tab bar space opens a new tab; ignore events
       // coming from inside a tab itself.
       onDoubleClick={(e) => {
@@ -503,7 +491,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         if ((e.target as HTMLElement).closest('[data-sftp-tab]')) return;
         onNewTabClick();
       }}
-      className="group/tabbar relative flex h-10 items-start border-b border-app-border/40 bg-app-bg px-1"
+      className="group/tabbar relative my-0 flex h-8.5 items-start bg-app-bg px-[2px] py-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-app-border/40"
     >
       <DndContext
         sensors={sensors}
@@ -514,8 +502,8 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={connections.map((c) => c.id)} strategy={() => null}>
-          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" className="h-10 min-w-0 flex-1">
-            <div role="tablist" className="flex min-w-0 items-center gap-[5px] py-1">
+          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" className="h-8.5 min-w-0 flex-1">
+            <div role="tablist" className="flex min-w-0 items-center gap-[5px] py-0">
               {connections.map((connection, index) => {
                 const isDragging = draggingConnectionId === connection.id;
                 const draggedIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;
@@ -523,8 +511,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
                 const isLastVisible = visibleIndex === visibleTabCount - 1;
                 const isActive = activeConnectionId === connection.id;
                 const nextVisibleConnection = visibleIndex >= 0 ? visibleConnections[visibleIndex + 1] : undefined;
-                const showSeparatorAfter = !!nextVisibleConnection
-                  && effectiveInsertIndex !== visibleIndex + 1;
+                const showSeparatorAfter = !!nextVisibleConnection && effectiveInsertIndex !== visibleIndex + 1;
 
                 return (
                   <SortableTab
@@ -569,14 +556,16 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
           if (!open) setClosingConnectionId(null);
         }}
         title={t('sftp.tab.closeConfirmTitle')}
-        description={closingConnection
-          ? closingTransferCount > 0
-            ? t('sftp.tab.closeTransferWarning', {
-                title: closingConnection.title,
-                count: closingTransferCount,
-              })
-            : t('sftp.tab.closeConfirmMessage', { title: closingConnection.title })
-          : ''}
+        description={
+          closingConnection
+            ? closingTransferCount > 0
+              ? t('sftp.tab.closeTransferWarning', {
+                  title: closingConnection.title,
+                  count: closingTransferCount,
+                })
+              : t('sftp.tab.closeConfirmMessage', { title: closingConnection.title })
+            : ''
+        }
         confirmLabel={t('common.close')}
         confirmVariant="destructive"
         onConfirm={confirmCloseConnection}
