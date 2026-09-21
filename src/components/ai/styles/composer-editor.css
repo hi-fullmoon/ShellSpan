@@ -18,7 +18,8 @@
   cursor: not-allowed;
 }
 
-.ai-composer-chat-reference {
+.ai-composer-chat-reference,
+.ai-composer-directory-reference {
   color: var(--ai-reference);
   background: color-mix(in srgb, var(--ai-reference) 12%, transparent);
 }
