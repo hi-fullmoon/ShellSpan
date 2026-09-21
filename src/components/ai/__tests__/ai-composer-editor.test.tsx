@@ -37,6 +37,45 @@ describe('composer layout', () => {
 });
 
 describe('rich composer commands', () => {
+  it('highlights directory references while keeping following prose editable', async () => {
+    const user = userEvent.setup();
+    render(<AiComposerSeat phase="hero" status="idle" defaultDraft={'/system-status @zhengbiwen/.nvm/'} />);
+    const editor = screen.getByRole('textbox');
+    expect(editor.querySelector('[data-composer-directory]')).toHaveClass('ai-composer-command', 'ai-composer-directory-reference');
+    expect(editor.querySelector('[data-composer-directory]')).toHaveTextContent('@zhengbiwen/.nvm/');
+    await user.click(editor);
+    await act(async () => selectEditorText(editor, editor.textContent!.length, editor.textContent!.length));
+    await user.type(editor, 'cache/');
+    expect(editor.textContent).toBe('/system-status @zhengbiwen/.nvm/cache/');
+    expect(editor.querySelector('[data-composer-directory]')).toHaveTextContent('@zhengbiwen/.nvm/');
+    await act(async () => selectEditorText(editor, editor.textContent!.length - 1, editor.textContent!.length));
+    await user.keyboard('{Backspace}');
+    expect(editor.textContent).toBe('/system-status @zhengbiwen/.nvm/cache');
+  });
+
+  it.each(['@.abu/skills/', '@"space dir/skills/"'])('deletes the whole directory %s and restores it with undo', async reference => {
+    const user = userEvent.setup();
+    const draft = `before ${reference} after`;
+    render(<AiComposerSeat phase="hero" status="idle" defaultDraft={draft} />);
+    const editor = screen.getByRole('textbox');
+    await user.click(editor);
+    const end = 'before '.length + reference.length;
+    await act(async () => selectEditorText(editor, end - 1, end));
+    await user.keyboard('{Backspace}');
+    expect(editor.textContent).toBe('before  after');
+    expect(editor.querySelector('[data-composer-directory]')).toBeNull();
+    await user.keyboard('{Control>}z{/Control}');
+    expect(editor.textContent).toBe(draft);
+    expect(editor.querySelector('[data-composer-directory]')).toHaveTextContent(reference);
+  });
+
+  it('highlights quoted directory paths without decorating ordinary paths or email addresses', () => {
+    render(<AiComposerSeat phase="hero" status="idle" defaultDraft={'/var/log/ person@example.com/ @"project files/source/'} />);
+    const editor = screen.getByRole('textbox');
+    expect(editor.querySelectorAll('[data-composer-directory]')).toHaveLength(1);
+    expect(editor.querySelector('[data-composer-directory]')).toHaveTextContent('@"project files/source/');
+  });
+
   it.each(['session', 'workspace'] as const)('isolates undo and redo when the %s changes', async kind => {
     const user = userEvent.setup();
     const props = (owner: string, draft: string) => ({

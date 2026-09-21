@@ -38,7 +38,7 @@ describe('composer grouped add menu', () => {
     render(<AiComposerSeat phase="active" status="idle" defaultDraft="Inspect this host" onSubmit={() => { submissions++; }} />);
     await user.click(screen.getByRole('button', { name: 'Add file or folder' }));
     expect((await screen.findAllByRole('menuitem')).length).toBe(builtinSkills.length + 2);
-    for (const item of screen.getAllByRole('menuitem')) expect(item).toHaveClass('min-h-7', 'gap-1.5');
+    for (const item of screen.getAllByRole('menuitem')) expect(item).toHaveClass('min-h-7', 'gap-1');
     await user.click(screen.getByRole('menuitem', { name: '/network-diagnosis' }));
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
     expect(screen.getByRole('textbox')).toHaveTextContent('Inspect this host /network-diagnosis');
@@ -78,9 +78,9 @@ describe('composer grouped add menu', () => {
     await user.keyboard('{Escape}');
     const editor = screen.getByRole('textbox');
     await user.type(editor, '@');
-    expect(screen.getByRole('option', { name: 'Upload local files' })).toBeVisible();
+    expect(screen.getByRole('option', { name: 'Add file' })).toBeVisible();
     expect(screen.queryByRole('group', { name: 'Skills' })).toBeNull();
-    expect(screen.queryByRole('option', { name: 'Project files and folders' })).toBeNull();
+    expect(screen.queryByRole('option', { name: 'Add folder' })).toBeNull();
     expect(screen.getByText('Type @ followed by a keyword in the message input to search chats')).toBeVisible();
     expect(listFiles).not.toHaveBeenCalled();
     await user.clear(editor);
