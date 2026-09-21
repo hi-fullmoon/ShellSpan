@@ -28,8 +28,9 @@ export interface MentionGroup {
   readonly showEmptyLabel?: boolean;
 }
 
-export function AiMentionPanel({ id, groups, index, empty, header }: {
+export function AiMentionPanel({ id, groups, index, onIndexChange, empty, header }: {
   readonly id: string; readonly groups: readonly MentionGroup[]; readonly index: number;
+  readonly onIndexChange: (index: number) => void;
   readonly empty: boolean;
   readonly header?: ReactNode;
 }) {
@@ -49,6 +50,7 @@ export function AiMentionPanel({ id, groups, index, empty, header }: {
             aria-label={option.label} aria-description={option.detail} aria-selected={position === index}
             variant={position === index ? 'secondary' : 'ghost'} size="sm"
             className="h-auto min-h-7 w-full min-w-0 justify-start gap-1 px-1.5 py-1 text-sm leading-5 font-normal"
+            onMouseEnter={() => onIndexChange(position)}
             onMouseDown={event => event.preventDefault()} onClick={option.choose}>
             <AiComposerMenuRow option={option} />
           </Button>;
