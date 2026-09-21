@@ -120,6 +120,15 @@
   font: inherit;
 }
 
+/* Keep the original Markdown block spacing across cached stream chunks. */
+.ai-reasoning-body > .ai-assistant-markdown + .ai-assistant-markdown {
+  margin-top: 16px;
+}
+
+.ai-reasoning-body > .ai-assistant-markdown + .ai-assistant-markdown:has(> :is(h1, h2, h3):first-child) {
+  margin-top: 32px;
+}
+
 :is(
   .ai-semantic-note,
   .ai-reasoning-row,

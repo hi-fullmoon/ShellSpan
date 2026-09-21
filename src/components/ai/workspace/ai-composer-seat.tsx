@@ -176,7 +176,16 @@ export function AiComposerSeat({
   const attachmentOwnerRef = useRef(attachmentOwner);
   attachmentOwnerRef.current = attachmentOwner;
   const message = useMemo(() => decodeDocumentMessage(rawDraft), [rawDraft]);
-  const draft = message.text;
+  const chatReferences = useRef({ owner: attachmentOwner, documents: new Map<string, (typeof message.documents)[number]>() });
+  if (chatReferences.current.owner !== attachmentOwner) {
+    chatReferences.current = { owner: attachmentOwner, documents: new Map() };
+  }
+  for (const document of message.documents) {
+    if (document.chatTitle !== undefined) chatReferences.current.documents.set(document.id, document);
+  }
+  const fileDocuments = message.documents.filter(document => document.chatTitle === undefined);
+  const missingChatTitles = message.documents.flatMap(document => document.chatTitle && !message.text.includes(document.chatTitle) ? [document.chatTitle] : []);
+  const draft = missingChatTitles.length ? `${[message.text, ...missingChatTitles].filter(Boolean).join(' ')} ` : message.text;
   const running = status === 'running' || status === 'waiting';
   const waitingApproval = mode === 'agent' && composerState?.phase === 'waitingApproval';
   const waitingQuestion = Boolean(pendingQuestion) || composerState?.phase === 'waitingQuestion';
@@ -190,7 +199,11 @@ export function AiComposerSeat({
     onDraftChange?.(value);
   };
   const updateDraft = (value: string): void => {
-    try { updateRawDraft(encodeDocumentMessage(value, decodeDocumentMessage(rawDraftRef.current).documents, false)); }
+    try {
+      const files = decodeDocumentMessage(rawDraftRef.current).documents.filter(document => document.chatTitle === undefined);
+      const references = [...chatReferences.current.documents.values()].filter(document => document.chatTitle && value.includes(document.chatTitle));
+      updateRawDraft(encodeDocumentMessage(value, [...files, ...references], false));
+    }
     catch (error) { toast.error(t(documentErrorKey(error))); }
   };
   const documents = useDocumentImport(
@@ -335,7 +348,7 @@ export function AiComposerSeat({
   };
   const referenceSession = onReadSession ? (summary: import('@/lib/ai/session-adapter').AiSessionSummary) => {
     if (attachmentOwnerRef.current !== attachmentOwner) return;
-    void documents.addFrom(async signal => [await onReadSession(summary, signal)]);
+    void documents.addFrom(async signal => [await onReadSession(summary, signal)], summary.title);
   } : undefined;
   const completion = useFileCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListFileReferences : undefined, scopeKey: attachmentOwner, needsRoot: skillsNeedsRoot, targetLabel: projectTargetLabel, disabled: !attachmentsEnabled,
     context: { agent: mode === 'agent', onUpload: uploadLocalFile, onSession: referenceSession,
@@ -440,6 +453,7 @@ export function AiComposerSeat({
               )}
               aria-describedby={unavailableReason ? availabilityHintId : undefined}
               value={draft}
+              chatTitles={[...chatReferences.current.documents.values()].map(document => document.chatTitle!)}
               historyKey={JSON.stringify([composerState?.sessionId, skillsScopeKey])}
               onChange={updateDraft}
               onPaste={(event) => {
@@ -484,11 +498,11 @@ export function AiComposerSeat({
                 ? t('ai.workbench.composerPlaceholder')
                 : t('ai.workspace.composerPlaceholder')}
             />
-            {(imageControls || message.documents.length > 0 || documents.pending.length > 0) && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0 px-3" onClick={event => event.stopPropagation()}>
+            {(imageControls || fileDocuments.length > 0 || documents.pending.length > 0) && <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0 px-3" onClick={event => event.stopPropagation()}>
               <UnifiedAttachmentContext value={true}>
-              <AiDraftAttachmentRail unified count={message.documents.length + documents.pending.length}>
+              <AiDraftAttachmentRail unified count={fileDocuments.length + documents.pending.length}>
               {imageControls}
-              <AiDocumentAttachments composer documents={message.documents} pending={documents.pending} locked={!attachmentsEnabled} onCancel={documents.cancel}
+              <AiDocumentAttachments composer documents={fileDocuments} pending={documents.pending} locked={!attachmentsEnabled} onCancel={documents.cancel}
                 onRemove={id => updateRawDraft(encodeDocumentMessage(draft, message.documents.filter(document => document.id !== id)))} />
               </AiDraftAttachmentRail>
               </UnifiedAttachmentContext>

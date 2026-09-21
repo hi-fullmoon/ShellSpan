@@ -35,6 +35,21 @@ class CommandNode extends TextNode {
   isTextEntity() { return true; }
 }
 
+class ChatReferenceNode extends TextNode {
+  static getType() { return 'composer-chat-reference'; }
+  static clone(node: ChatReferenceNode) { return new ChatReferenceNode(node.__text, node.__key); }
+  constructor(text: string, key?: NodeKey) { super(text, key); }
+  static importJSON(json: SerializedTextNode) { return new ChatReferenceNode(json.text).updateFromJSON(json); }
+  exportJSON(): SerializedTextNode { return { ...super.exportJSON(), type: ChatReferenceNode.getType() }; }
+  createDOM(config: EditorConfig) {
+    const element = super.createDOM(config);
+    element.classList.add('ai-composer-command', 'ai-composer-chat-reference');
+    element.dataset.composerChatReference = this.getTextContent();
+    return element;
+  }
+  isTextEntity() { return true; }
+}
+
 function leaves(): LexicalNode[] {
   const result: LexicalNode[] = [];
   const visit = (node: LexicalNode) => {
@@ -87,18 +102,19 @@ interface Props extends Omit<HTMLAttributes<HTMLDivElement>, 'onChange' | 'onSel
   disabled?: boolean;
   placeholder: string;
   commandNames: readonly string[];
+  chatTitles?: readonly string[];
   onKeyDown?(event: KeyboardEvent): void;
   onChange(value: string): void;
   onSelectionChange(): void;
 }
 
 /** Lexical owns editing, history and token selection; persisted drafts remain plain text. */
-export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder, commandNames, onChange, onSelectionChange, onKeyDown, onPaste, className, ...props }: Props) {
+export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder, commandNames, chatTitles = [], onChange, onSelectionChange, onKeyDown, onPaste, className, ...props }: Props) {
   const element = useRef<HTMLDivElement>(null);
-  const latest = useRef({ onChange, onSelectionChange, onKeyDown, commandNames });
-  latest.current = { onChange, onSelectionChange, onKeyDown, commandNames };
+  const latest = useRef({ onChange, onSelectionChange, onKeyDown, commandNames, chatTitles });
+  latest.current = { onChange, onSelectionChange, onKeyDown, commandNames, chatTitles };
   const [editor] = useState(() => createEditor({
-    namespace: 'ai-composer', nodes: [CommandNode], onError: error => { throw error; },
+    namespace: 'ai-composer', nodes: [CommandNode, ChatReferenceNode], onError: error => { throw error; },
   }));
   const [empty, setEmpty] = useState(!value);
   const offsets = useRef<[number, number]>([0, 0]);
@@ -112,8 +128,16 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
       return event.defaultPrevented;
     }, COMMAND_PRIORITY_CRITICAL);
     const removeTransform = editor.registerNodeTransform(TextNode, node => {
-      if (node instanceof CommandNode || !node.isSimpleText() || editor.isComposing()) return;
+      if (node instanceof CommandNode || node instanceof ChatReferenceNode || !node.isSimpleText() || editor.isComposing()) return;
       const content = node.getTextContent();
+      for (const title of latest.current.chatTitles) {
+        if (!title) continue;
+        const start = content.indexOf(title);
+        if (start < 0) continue;
+        const pieces = node.splitText(start, start + title.length);
+        pieces[start === 0 ? 0 : 1].replace(new ChatReferenceNode(title).setMode('token'));
+        return;
+      }
       const names = new Set(latest.current.commandNames);
       for (const match of content.matchAll(/(^|\s)(\/[\p{L}\p{N}-]+)(?=\s)/gu)) {
         if (!names.has(match[2].slice(1))) continue;
@@ -148,6 +172,13 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
     };
   }, [editor, ref]);
   useLayoutEffect(() => { editor.setEditable(!disabled); }, [editor, disabled]);
+  const chatTitlesKey = JSON.stringify(chatTitles);
+  useLayoutEffect(() => {
+    // The reference payload can finish loading after its label was inserted.
+    editor.update(() => {
+      for (const node of leaves()) if ($isTextNode(node) && node.isSimpleText()) node.markDirty();
+    }, { discrete: true });
+  }, [editor, chatTitlesKey]);
   useLayoutEffect(() => {
     if (editor.getEditorState().read(() => $getRoot().getChildrenSize() > 0 && $getRoot().getTextContent() === value)) return;
     text.current = value;

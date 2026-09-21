@@ -208,13 +208,16 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   copiedLabel,
   copyLabel,
   showCodeBlockActions,
+  initialSource = '',
 }: {
   children: string;
   copiedLabel: string;
   copyLabel: string;
   showCodeBlockActions: boolean;
+  /** Previously displayed source moved here by a streaming chunk split. */
+  initialSource?: string;
 }): React.JSX.Element {
-  const previousSource = useRef('');
+  const previousSource = useRef(initialSource);
   const revealFrom = children.startsWith(previousSource.current) ? previousSource.current.length : children.length;
   useLayoutEffect(() => { previousSource.current = children; }, [children]);
   // Stable element types preserve code/table DOM (focus and horizontal scroll)
@@ -269,9 +272,9 @@ const STREAMING_TEXT_PLUGINS = [rehypeStreamingText];
 const LARGE_MARKDOWN_CHUNK = 8_192;
 const MARKDOWN_UPDATE_INTERVAL_MS = 80;
 
-const StreamingMarkdownContent = React.memo(function StreamingMarkdownContent({
-  children, streaming, ...props
-}: React.ComponentProps<typeof MarkdownContent> & { streaming: boolean }) {
+export const StreamingMarkdownContent = React.memo(function StreamingMarkdownContent({
+  children, streaming, animateText = true, ...props
+}: React.ComponentProps<typeof MarkdownContent> & { streaming: boolean; animateText?: boolean }) {
   const [layoutRevision, publish] = useState(0);
   const published = useRef(children);
   const latest = useRef(children);
@@ -301,7 +304,7 @@ const StreamingMarkdownContent = React.memo(function StreamingMarkdownContent({
   }, []);
   useMessageLayoutCommit(layoutRevision);
   return (
-    <StreamingTextContext.Provider value={streaming}>
+    <StreamingTextContext.Provider value={streaming && animateText}>
       <MarkdownContent {...props}>{shown}</MarkdownContent>
     </StreamingTextContext.Provider>
   );

@@ -1,4 +1,5 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AiConversationNodeList, aiAskConversationNodeRenderers } from '../workspace/ai-conversation-node-seat';
@@ -12,6 +13,39 @@ import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-bas
 afterEach(() => cleanup());
 
 describe('terminal reasoning display', () => {
+  it.each(['agent', 'ask'] as const)('keeps completed %s Markdown chunks mounted as reasoning grows', async (mode) => {
+    useAppStore.setState({ locale: 'en-US' });
+    await initI18n('en-US');
+    const user = userEvent.setup();
+    const content = readFileSync('AGENTS.md', 'utf8');
+    const node: AiConversationNodeOf<'reasoning'> = {
+      kind: 'reasoning', key: 'reasoning:chunks', sourceKind: 'agent',
+      sessionId: 'reasoning-chunks', turnId: 'turn-1', stepId: 'step-1',
+      firstSeq: 1, lastSeq: 2, timestamp: '2026-09-21T00:00:00.000Z',
+      requestId: 'request-1', summary: '', content, state: 'streaming',
+    };
+    const renderers = mode === 'ask' ? aiAskConversationNodeRenderers : undefined;
+    const view = render(<AiConversationNodeList nodes={[node]} renderers={renderers} />);
+    const trigger = screen.getByRole('button');
+    if (trigger.getAttribute('aria-expanded') === 'false') await user.click(trigger);
+    await act(async () => {});
+    const chunks = view.container.querySelectorAll('.ai-reasoning-body > .ai-assistant-markdown');
+    expect(chunks.length).toBeGreaterThan(1);
+    const firstParagraph = chunks[0].querySelector('p');
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver(records => mutations.push(...records));
+    observer.observe(chunks[0], { subtree: true, childList: true, characterData: true });
+    const appended = `${content}\n\n${readFileSync('CONTRIBUTING.md', 'utf8')}`;
+    await act(async () => {
+      view.rerender(<AiConversationNodeList nodes={[{ ...node, content: appended, lastSeq: 3 }]} renderers={renderers} />);
+    });
+    expect(view.container.querySelector('.ai-reasoning-body p')).toBe(firstParagraph);
+    expect(mutations).toHaveLength(0);
+    expect(view.container.querySelector('.ai-reasoning-body [data-reveal]')).not.toBeNull();
+    expect(view.container.querySelector('.ai-reasoning-body')).toHaveTextContent('许可证');
+    observer.disconnect();
+  });
+
   it.each(['agent', 'ask'] as const)('renders %s reasoning with Markdown soft breaks and preserves structured content', async (mode) => {
     await initI18n('en-US');
     const user = userEvent.setup();
@@ -86,6 +120,7 @@ describe('terminal reasoning display', () => {
       expect(row.querySelector('.ai-reasoning-body')).toHaveTextContent(
         'Read the frozen context. Prepare a concise answer.',
       );
+      expect(row.querySelector('.ai-reasoning-body [data-reveal]')).toBeNull();
       const details = within(screen.getByRole('alert')).getByRole('button');
       if (details.getAttribute('aria-expanded') !== 'true') await user.click(details);
       expect(screen.getByText(reason)).toBeVisible();
