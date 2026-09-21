@@ -565,14 +565,19 @@ pub(crate) fn execute_reviewed_ssh_command(
             );
         }
     };
-    execute_reviewed_ssh_command_with_handle(
+    let result = execute_reviewed_ssh_command_with_handle(
         database,
         credentials,
         known_hosts_path,
         request,
-        cancellation,
+        cancellation.clone(),
         started_at,
-    )
+    );
+    // A cancelled or timed-out worker can retain its handle during teardown.
+    // This standalone entry owns the registration and must release it before
+    // returning, independently of the worker's remaining lifetime.
+    cancellation.remove_registration();
+    result
 }
 
 /// Executes a reviewed request using a cancellation registration owned by a
