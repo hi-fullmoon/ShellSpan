@@ -240,29 +240,7 @@ fn normalize(
     let profile = decoder.icc_profile().map_err(color::error)?;
     let profile = profile.as_deref().map(color::parse).transpose()?;
     if format == ImageFormat::Png {
-        color::validate_png(&bytes, profile.is_some())?;
-        let mut offset = 8usize;
-        let mut ended = false;
-        while offset + 12 <= bytes.len() {
-            let len = u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
-            let end = offset
-                .checked_add(12)
-                .and_then(|n| n.checked_add(len))
-                .filter(|n| *n <= bytes.len())
-                .ok_or("IMAGE_INVALID_PNG_CHUNK")?;
-            let tag = &bytes[offset + 4..offset + 8];
-            if tag == b"acTL" {
-                return Err("IMAGE_ANIMATION_UNSUPPORTED".into());
-            }
-            offset = end;
-            if tag == b"IEND" {
-                ended = true;
-                break;
-            }
-        }
-        if !ended || offset != bytes.len() {
-            return Err("IMAGE_INVALID_PNG_END".into());
-        }
+        color::validate_png(&bytes, profile.is_some(), token)?;
     }
     if format == ImageFormat::WebP
         && image::codecs::webp::WebPDecoder::new(Cursor::new(&bytes))
