@@ -27,8 +27,12 @@ export async function listProjectDirectories(session: TerminalSession, value: st
     else {
       const profile = session.profileId ? useProfileStore.getState().getProfile(session.profileId) : undefined;
       if (!profile || profile.host !== session.host || profile.port !== session.port || profile.username !== session.username) throw new Error('Unavailable');
+      // Stored profiles omit secrets; restore them from the keychain just as SFTP does.
+      const authenticatedProfile = await useProfileStore.getState().ensurePassword(profile);
+      if (signal.aborted) return [];
+      if (authenticatedProfile.host !== session.host || authenticatedProfile.port !== session.port || authenticatedProfile.username !== session.username) throw new Error('Unavailable');
       signal.addEventListener('abort', cancel, { once: true });
-      listing = await invokeListRemoteDirectory({ ...buildRemoteConnectionRequest(profile), path: query.parent, requestKey, requestId });
+      listing = await invokeListRemoteDirectory({ ...buildRemoteConnectionRequest(authenticatedProfile), path: query.parent, requestKey, requestId });
     }
     if (signal.aborted) return [];
     return listing.entries.filter(entry => entry.kind === 'directory' && entry.name.startsWith(query.prefix))
