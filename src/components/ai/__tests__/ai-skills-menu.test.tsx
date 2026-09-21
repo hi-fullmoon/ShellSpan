@@ -96,6 +96,15 @@ describe('slash skill menu', () => {
     await act(async () => resolve(builtinSkillPreview)); await screen.findByText('No matching skills');
     await user.keyboard('{Enter}'); expect(submit).not.toHaveBeenCalled();
   });
+  it('keeps an unavailable-skills notice inset from the popup edge', async () => {
+    const user = userEvent.setup();
+    render(<AiComposerSeat phase="hero" status="idle" onListSkills={async () => ({
+      sessionId: 'session', status: 'unavailable', revision: null, entries: [], diagnostics: [],
+    })} />);
+    await user.type(screen.getByRole('textbox'), '/');
+    const notice = await screen.findByText('Skills unavailable for this target');
+    expect(notice.closest('[role="status"]')).toHaveClass('px-2', 'pt-2');
+  });
   it('drops old results across scope changes including A to B to A', async () => {
     const calls: ((value: SkillUserList) => void)[] = [];
     const query = vi.fn(() => new Promise<SkillUserList>(resolve => calls.push(resolve)));

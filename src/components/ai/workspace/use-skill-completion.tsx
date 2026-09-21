@@ -83,7 +83,7 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
   };
   const panel = open ? <div className="flex h-full min-h-0 w-full min-w-0 flex-col" data-skill-completion="">
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div role="status" aria-live="polite" className="shrink-0 px-2 empty:hidden">
+      <div role="status" aria-live="polite" className="shrink-0 px-2 pt-2 empty:hidden">
         {(error || result?.status === 'unavailable') && <AiErrorNotice title={t('ai.workspace.recovery.title')}>{t('ai.workspace.skills.unavailable')}</AiErrorNotice>}
         {result?.status === 'stale' && <Alert><AlertDescription>{t('ai.workspace.skills.stale')}</AlertDescription></Alert>}
         {result && !loading && result.status !== 'unavailable' && entries.length === 0 && <EmptyState title={t('ai.workspace.skills.noMatch')} />}

@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/ui/empty-state';
+import { PanelEmptyState } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
+import { cn } from '@/lib/utils';
 import type { ComposerHistoryProps } from './ai-composer-add-menu';
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
 import { AiComposerMenuRow } from './ai-composer-menu-content';
@@ -42,7 +43,7 @@ export function AiMentionPanel({ id, groups, index, onIndexChange, empty, header
   return <div data-mention-completion="" className="flex h-full min-h-0 flex-col text-muted-foreground">
     {header && <div className="shrink-0 px-3.5 pt-3 pb-1 text-xs text-muted-foreground">{header}</div>}
     <div id={id} role="listbox" aria-label={label ?? t('ai.workspace.mentions.title')} className="min-h-0 flex-1 overflow-y-auto">
-      <div className="flex flex-col gap-1 p-2">
+      <div className={cn('flex min-h-full flex-col gap-1 p-2', empty && 'justify-center')}>
       {groups.map(group => group.options.length === 0 && !group.showEmptyLabel
         ? group.notice && <div key={group.label} role="status" className="px-1.5 py-1 text-xs text-muted-foreground">{group.notice}</div>
         : <div key={group.label} role="group" aria-label={group.label}>
@@ -60,7 +61,7 @@ export function AiMentionPanel({ id, groups, index, onIndexChange, empty, header
         })}
         {group.notice && <div role="status" className="px-1.5 py-1 text-xs text-muted-foreground">{group.notice}</div>}
       </div>)}
-      {empty && <EmptyState title={t('ai.workspace.addMenu.noMatch')} />}
+      {empty && <PanelEmptyState title={t('ai.workspace.addMenu.noMatch')} size="sm" />}
       </div>
     </div>
   </div>;

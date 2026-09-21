@@ -113,7 +113,12 @@ describe('grouped mention completion', () => {
     expect(screen.getByRole('listbox')).toBeVisible();
     expect(within(screen.getByRole('listbox')).queryAllByRole('group')).toHaveLength(0);
     expect(screen.queryAllByRole('option')).toHaveLength(0);
-    expect(screen.getByText('No matching items')).toBeVisible();
+    const emptyTitle = screen.getByText('No matching items');
+    expect(emptyTitle).toBeVisible();
+    expect(emptyTitle).toHaveClass('text-xs', 'leading-5', 'font-normal', 'text-muted-foreground');
+    expect(emptyTitle.closest('[data-slot="empty-state"]')).toHaveAttribute('data-size', 'sm');
+    expect(emptyTitle.closest('[data-slot="panel-empty-state"]')).toHaveClass('min-h-0', 'flex-1', 'items-center', 'justify-center');
+    expect(emptyTitle.closest('[data-slot="panel-empty-state"]')?.parentElement).toHaveClass('min-h-full', 'justify-center');
     expect(screen.getByRole('textbox')).not.toHaveAttribute('aria-activedescendant');
   });
   it.each(['en-US', 'zh-CN'] as const)('shows only the file empty notice for an unmatched project search in %s', async locale => {
