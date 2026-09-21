@@ -2655,6 +2655,44 @@ fn validate_event_transition(
         _ if record.events.is_empty() => {
             Err("Agent session log must begin with session/created".into())
         }
+        AgentSessionEventPayload::SessionProjectRootBound { root } => {
+            if record.header.subagent.is_some()
+                || record.status != AgentSessionStatus::Idle
+                || record.ended
+                || record.archived
+                || !record.inbox.is_empty()
+            {
+                return Err(
+                    "Busy: project binding requires an idle root Session with an empty inbox"
+                        .into(),
+                );
+            }
+            let target = record
+                .header
+                .target
+                .as_ref()
+                .ok_or("Unavailable: missing target")?;
+            let existing = match target.kind.as_str() {
+                "local" => &target.cwd,
+                "remote" => &target.root_path,
+                _ => return Err("Unavailable: unsupported target".into()),
+            };
+            if existing
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                return Err("Denied: project directory is already bound".into());
+            }
+            let absolute = if target.kind == "local" {
+                std::path::Path::new(root).is_absolute()
+            } else {
+                root.starts_with('/')
+            };
+            if !absolute || root.chars().any(char::is_control) {
+                return Err("InvalidRequest: project directory must be absolute".into());
+            }
+            Ok(())
+        }
         AgentSessionEventPayload::SessionExecutionSurfaceChanged { .. } => {
             if record.header.subagent.is_some() || record.status != AgentSessionStatus::Idle {
                 return Err("execution surface change requires an idle root Session".into());
@@ -3200,6 +3238,15 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
         AgentSessionEventPayload::SessionExecutionSurfaceChanged { surface } => {
             record.header.execution_surface = *surface;
         }
+        AgentSessionEventPayload::SessionProjectRootBound { root } => {
+            if let Some(target) = record.header.target.as_mut() {
+                if target.kind == "local" {
+                    target.cwd = Some(root.clone());
+                } else {
+                    target.root_path = Some(root.clone());
+                }
+            }
+        }
         AgentSessionEventPayload::SessionRenamed { title, .. } => {
             record.header.title = Some(title.clone())
         }
@@ -3355,6 +3402,10 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
         }
         Payload::SessionPermissionChanged { .. } => {
             require_scope(event, false, false)?;
+        }
+        Payload::SessionProjectRootBound { root } => {
+            require_scope(event, false, false)?;
+            validate_text(root, "project root", false, 4096)?;
         }
         Payload::SessionExecutionSurfaceChanged { .. } => {
             require_scope(event, false, false)?;

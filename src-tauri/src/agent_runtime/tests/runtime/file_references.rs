@@ -21,6 +21,101 @@ fn setup() -> (tempfile::TempDir, tempfile::TempDir, AgentRuntime) {
     (storage, project, runtime)
 }
 #[tokio::test]
+async fn file_reference_bind_existing_project_root_is_durable_and_one_time() {
+    let (storage, project, runtime) = setup();
+    let mut target = runtime
+        .sessions
+        .snapshot("files")
+        .unwrap()
+        .header
+        .target
+        .unwrap();
+    target.cwd = None;
+    let request = CreateAgentSessionRequest {
+        session_id: "unbound".into(),
+        task_id: "task-unbound".into(),
+        goal: "Browse project".into(),
+        parent_session_id: None,
+        continued_from_session_id: None,
+        target: Some(target.clone()),
+        permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
+        execution_surface: AgentExecutionSurface::Direct,
+        success_criteria: vec!["Browse project".into()],
+        capability_scope: None,
+        subagent: None,
+    };
+    runtime.create_session(request.clone()).unwrap();
+    assert_eq!(
+        runtime
+            .file_references
+            .list(input("unbound", ""))
+            .await
+            .unwrap()
+            .code
+            .as_deref(),
+        Some("RootRequired")
+    );
+    for invalid in ["relative", "/tmp/\n"] {
+        assert!(runtime
+            .bind_project_root("unbound", invalid.into())
+            .is_err());
+    }
+    let root = fs::canonicalize(project.path())
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let bound = runtime.bind_project_root("unbound", root.clone()).unwrap();
+    assert_eq!(bound.header.session_id, "unbound");
+    assert_eq!(bound.header.goal, request.goal);
+    target.cwd = Some(root.clone());
+    assert_eq!(bound.header.target, Some(target));
+    assert_eq!(
+        runtime
+            .file_references
+            .list(input("unbound", ""))
+            .await
+            .unwrap()
+            .status,
+        "ready"
+    );
+    assert!(runtime.bind_project_root("unbound", root.clone()).is_err());
+    runtime
+        .create_session(CreateAgentSessionRequest {
+            session_id: "queued-root".into(),
+            task_id: "task-queued-root".into(),
+            ..request
+        })
+        .unwrap();
+    let queued = runtime
+        .followup(
+            "queued-root",
+            "queued-message".into(),
+            "Read the project".into(),
+        )
+        .unwrap();
+    assert!(runtime
+        .bind_project_root("queued-root", root.clone())
+        .unwrap_err()
+        .contains("Busy"));
+    let unchanged = runtime.sessions.snapshot("queued-root").unwrap();
+    assert_eq!(unchanged.header.target, queued.header.target);
+    assert_eq!(unchanged.inbox, queued.inbox);
+    let reopened = AgentRuntime::default();
+    reopened.configure(storage.path().into()).unwrap();
+    assert_eq!(
+        reopened
+            .sessions
+            .snapshot("unbound")
+            .unwrap()
+            .header
+            .target
+            .unwrap()
+            .cwd,
+        Some(root)
+    );
+}
+#[tokio::test]
 async fn file_reference_live_tree_navigation_empty_and_deterministic_truncation() {
     let (_s, p, runtime) = setup();
     fs::create_dir(p.path().join("space dir")).unwrap();

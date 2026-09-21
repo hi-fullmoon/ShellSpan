@@ -48,6 +48,7 @@
         "session/model_selected",
         "session/permission_changed",
         "session/execution_surface_changed",
+        "session/project_root_bound",
         "session/renamed",
         "step/input_claim",
         "file_reference/scope_bound",
@@ -932,6 +933,26 @@
                 ]
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session/project_root_bound"
+          }
+        }
+      },
+      "then": {
+        "required": ["data"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["root"],
+            "properties": { "root": { "type": "string", "minLength": 1, "maxLength": 4096 } }
           }
         }
       }

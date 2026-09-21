@@ -398,6 +398,7 @@ export type AgentSessionEvent =
   | AgentSessionEventWithData<'session/model_selected', { provider: AgentSubagentModel }>
   | AgentSessionEventWithData<'session/permission_changed', { mode: AgentSessionPermissionMode }>
   | AgentSessionEventWithData<'session/execution_surface_changed', { surface: AgentExecutionSurface }>
+  | AgentSessionEventWithData<'session/project_root_bound', { root: string }>
   | AgentSessionEventWithData<'session/renamed', {
       title: string;
       previousRevision: number;

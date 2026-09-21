@@ -25,6 +25,7 @@ import {
   invokeSelectAgentRuntimeModel,
   invokeSetAgentRuntimePermission,
   invokeSetAgentRuntimeExecutionSurface,
+  invokeBindAgentProjectRoot,
   invokeSendAgentRuntimeChildInput,
 } from '@/lib/ipc/tauri';
 import { createAgentActivityProjector, projectAgentActivity } from '@/lib/ai/agent-session-projection';
@@ -625,6 +626,13 @@ export function createAgentSessionAdapter(
     async setExecutionSurface(sessionId, surface) {
       await resumeEndedSession(sessionId);
       await (dependencies.setExecutionSurface ?? invokeSetAgentRuntimeExecutionSurface)({ sessionId, surface });
+      const entry = ensureEntry(sessionId);
+      entry.view = entry.project(await entry.client.reconnect());
+      for (const listener of entry.listeners) listener(entry.view);
+    },
+    async bindProjectRoot(sessionId, root) {
+      await resumeEndedSession(sessionId);
+      await invokeBindAgentProjectRoot({ sessionId, root });
       const entry = ensureEntry(sessionId);
       entry.view = entry.project(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
