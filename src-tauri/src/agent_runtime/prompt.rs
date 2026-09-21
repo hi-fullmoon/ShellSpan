@@ -50,13 +50,14 @@ pub(crate) fn assemble_model_input(
         ("Response format", RESPONSE_FORMAT.to_string()),
         (
             "Permission policy",
-            permission_prompt(header.permission_mode),
+            permission_prompt(header.permission_mode, &tools),
         ),
         (
             "Workspace policy",
             workspace_prompt(header.target.as_ref(), &tools),
         ),
         ("Structured tools", tools_prompt(&tools)),
+        ("Diagnostics and delegation", diagnostics_prompt(&tools)),
         ("Runtime capabilities", runtime_capabilities_prompt(header)),
     ];
     if tools.iter().any(|t| t.name == "read_file") {
@@ -86,12 +87,38 @@ pub(crate) fn assemble_model_input(
     }
 }
 
-fn permission_prompt(mode: Option<AgentSessionPermissionMode>) -> String {
+fn permission_prompt(
+    mode: Option<AgentSessionPermissionMode>,
+    tools: &[AgentRequestToolSchema],
+) -> String {
     match mode.unwrap_or(AgentSessionPermissionMode::RequestApproval) {
         AgentSessionPermissionMode::RequestApproval => "The Session is in request-approval mode. ShellSpan requires user authorization before every native tool call, including read-only inspection.".into(),
         AgentSessionPermissionMode::ScopedAutopilot => "The Session is in scoped-autopilot mode. Only ordinary read-only effects may run automatically; sensitive reads, state changes, destructive operations, and external side effects require approval. Use only effects and targets in the frozen capability scope.".into(),
-        AgentSessionPermissionMode::Operator => "The Session is in full-access operator mode. Native tool calls run without per-call approval. Shell commands can access files outside the workspace and use the network with the connected account's permissions, without a workspace sandbox. Use only the frozen target and respect each structured tool's contract; target identity, cancellation, and audit checks remain enforced.".into(),
+        AgentSessionPermissionMode::Operator => {
+            let mut prompt = "The Session is in full-access operator mode. Supplied native tool calls run without per-call approval. This does not grant missing tools or expand a child Agent's role capabilities. Structured file tools remain confined to the frozen root and deny symlink traversal. Use only the frozen target; target identity, cancellation, and audit checks remain enforced.".to_string();
+            if tools.iter().any(|tool| tool.name == "run_terminal_command") {
+                prompt.push_str(" Shell commands can access files outside the workspace and use the network with the connected account's permissions, without a workspace sandbox.");
+            }
+            prompt
+        },
     }
+}
+
+fn diagnostics_prompt(tools: &[AgentRequestToolSchema]) -> String {
+    let mut prompt = "Before collecting system metrics, establish the frozen target's identity and operating system. Never substitute local observations for remote-host evidence or assume Linux paths such as /proc or /etc/os-release exist. File tools are confined to the frozen root and deny symlink traversal. A root escape or symlink denial is an access limitation; a missing file is not evidence of host failure. Stop equivalent path retries after an access denial. Report collection status separately from host health: uncollected metrics leave health unknown.".to_string();
+    if !tools.iter().any(|tool| tool.name == "run_terminal_command") {
+        prompt.push_str(" Terminal command execution is unavailable in this request. Do not attempt system-wide collection through workspace file tools. If required evidence is unavailable, return the missing capability, target, uncollected metrics and collected evidence to the parent; do not claim successful diagnosis.");
+    }
+    if tools.iter().any(|tool| {
+        matches!(
+            tool.name.as_str(),
+            "spawn_one_shot_agent" | "spawn_continuable_agent"
+        )
+    }) {
+        prompt.push_str(" Before delegation, declare requiredTools and check role capabilities. Explorer, diagnostician, verifier and reviewer roles cannot execute terminal commands. For system metric collection, execute on the authorized target yourself or delegate collection to an operator with run_terminal_command, then pass the evidence to the diagnostician. If a child reports missing capability, take over collection within your supplied tools or use a capable child; do not repeat the same incapable delegation or ask for permissions already granted. Never infer completion or server failure from a child's inability to collect evidence.");
+        prompt.push_str(" After any failed or partial child settlement, inspect stopReason, usage, plan and saved tool evidence, then collect the other child outcomes. Continue the same child only when continuable is true and useful work remains. Otherwise take over only missing work within your authorized tools and remaining task budget, or report concrete gaps. Never replay completed side effects, restart cancelled work, or spawn replacements to bypass exhausted budgets. A child error alone does not complete the parent task; update its plan and explain verified results and remaining work to the user.");
+    }
+    prompt
 }
 
 fn workspace_prompt(
@@ -231,6 +258,7 @@ fn runtime_context(header: &AgentSessionHeader, tools: &[AgentRequestToolSchema]
             "cwd": target.cwd,
             "rootPath": target.root_path,
             "localRoot": target.local_root,
+            "operatingSystem": if target.kind == "local" { Some(std::env::consts::OS) } else { None },
         })
     });
     let scope = header.capability_scope.as_ref().map(|scope| {
@@ -338,6 +366,74 @@ mod tests {
 
     fn normalize_line_endings(value: &str) -> String {
         value.replace("\r\n", "\n")
+    }
+
+    #[test]
+    fn full_access_describes_only_supplied_terminal_capability() {
+        let mut header = header();
+        header.permission_mode = Some(AgentSessionPermissionMode::Operator);
+        let restricted = assemble_model_input(&header, tools());
+        assert!(!restricted
+            .system_prompt
+            .contains("Shell commands can access"));
+        assert!(restricted
+            .system_prompt
+            .contains("Terminal command execution is unavailable"));
+        assert!(restricted
+            .system_prompt
+            .contains("return the missing capability"));
+        assert!(restricted.system_prompt.contains("health unknown"));
+        let capable = assemble_model_input(&header, crate::agent_runtime::default_model_tools());
+        assert!(capable.system_prompt.contains("Shell commands can access"));
+        assert!(!capable
+            .system_prompt
+            .contains("Terminal command execution is unavailable"));
+        assert!(capable.system_prompt.contains("declare requiredTools"));
+        assert!(capable.system_prompt.contains("take over collection"));
+        assert!(capable
+            .system_prompt
+            .contains("After any failed or partial child settlement"));
+        assert!(capable.system_prompt.contains("remaining task budget"));
+        assert!(capable
+            .system_prompt
+            .contains("Never replay completed side effects"));
+        assert!(!restricted
+            .system_prompt
+            .contains("After any failed or partial child settlement"));
+    }
+
+    #[test]
+    fn remote_context_never_inherits_local_operating_system() {
+        let mut header = header();
+        let local = runtime_context(&header, &tools());
+        let parse = |text: &str| {
+            serde_json::from_str::<serde_json::Value>(text.split_once("\n\n").unwrap().1).unwrap()
+        };
+        assert_eq!(
+            parse(&local)["target"]["operatingSystem"],
+            std::env::consts::OS
+        );
+        header.target.as_mut().unwrap().kind = "remote".into();
+        assert!(parse(&runtime_context(&header, &tools()))["target"]["operatingSystem"].is_null());
+    }
+
+    #[test]
+    fn delegation_preflight_checks_scope_and_target_tools() {
+        let mut header = header();
+        let mut scope = header.capability_scope.clone().unwrap();
+        let required = vec!["run_terminal_command".into()];
+        let check =
+            |header: &AgentSessionHeader, scope: &AgentCapabilityScope, required: &[String]| {
+                super::super::subagent::validate_required_tools(header, scope, required)
+            };
+        assert!(check(&header, &scope, &required)
+            .unwrap_err()
+            .contains("No child was created"));
+        scope.tool_names.push("run_terminal_command".into());
+        assert!(check(&header, &scope, &required).is_ok());
+        header.target = None;
+        assert!(check(&header, &scope, &required).is_err());
+        assert!(check(&header, &scope, &[]).is_ok());
     }
 
     #[test]

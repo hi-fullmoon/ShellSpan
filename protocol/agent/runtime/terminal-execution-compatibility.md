@@ -121,9 +121,16 @@ later input for the released operation. Raw text and paste payloads remain
 ephemeral: durable call records retain only input kind, key when applicable,
 byte length, and `contentPersisted = false`.
 When later model requests project those durable receipts back into tool-call
-history, they replace the omitted text with a schema-valid omission marker and
-remove persistence-only metadata. Audit fields therefore never become callable
-arguments that a model can copy into a subsequent terminal tool request.
+history, they use a non-executable `historicalInput` receipt with
+`available = false` and `replayable = false`, preserving the call/result pair.
+Historical receipts intentionally do not satisfy the live tool input schema;
+they never substitute omission markers or empty strings for executable input.
+Live calls containing receipts or legacy omission markers are rejected before
+dispatch with `ephemeralInputUnavailable`, `executed = false`, and
+`retryable = false`. The model may read current state and reconstruct real input.
+A second such rejection in the same turn stops admission, closes that turn,
+and moves the task to Waiting with `ephemeralInputRecoveryRequired`; it cannot complete successfully
+from repeated rejected input. A new user turn gets a fresh recovery attempt.
 Rendered title/content from read and wait results is injected only into the
 current in-memory model turn. Durable tool results retain an allowlisted screen
 metadata receipt with `transientObservation = true` and

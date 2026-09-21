@@ -1436,6 +1436,73 @@ impl AgentSessionStore {
         Ok(snapshot)
     }
 
+    /// Only the first committed human submission can request an automatic title.
+    /// Model selection and the draft used when creating a session are unrelated.
+    pub(crate) fn title_submission(
+        &self,
+        session_id: &str,
+        submission_id: &str,
+    ) -> Result<Option<String>, String> {
+        let inner = self.lock_configured()?;
+        let record = inner.sessions.get(session_id).ok_or("Session not found")?;
+        if record.header.title.is_some()
+            || record.header.parent_session_id.is_some()
+            || record.archived
+            || record.ended
+            || record.status.is_terminal()
+        {
+            return Ok(None);
+        }
+        let first = record.events.iter().find_map(|event| match &event.payload {
+            AgentSessionEventPayload::InboxSpliced {
+                operation: AgentInboxOperation::Enqueued,
+                messages,
+                ..
+            } => messages
+                .iter()
+                .find(|message| message.source.kind == AgentMessageSourceKind::User),
+            _ => None,
+        });
+        Ok(first
+            .filter(|message| message.client_submission_id.as_deref() == Some(submission_id))
+            .map(|message| message.content.clone()))
+    }
+
+    /// Check and commit under one lock: a late title must never replace a user rename.
+    pub(crate) fn set_generated_title(
+        &self,
+        session_id: &str,
+        title: String,
+    ) -> Result<(), String> {
+        validate_session_title(&title)?;
+        let mut inner = self.lock_configured()?;
+        let record = inner.sessions.get(session_id).ok_or("Session not found")?;
+        if record.header.title.is_some()
+            || record.archived
+            || record.ended
+            || record.status.is_terminal()
+        {
+            return Ok(());
+        }
+        let previous_revision = record.events.len() as u64;
+        let (events, publisher) = append_payloads_locked(
+            &mut inner,
+            session_id,
+            vec![(
+                None,
+                None,
+                AgentSessionEventPayload::SessionRenamed {
+                    title,
+                    previous_revision,
+                    client_operation_id: format!("auto-title-{}", Uuid::new_v4().simple()),
+                },
+            )],
+        )?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(())
+    }
+
     pub(crate) fn rename(
         &self,
         input: AgentSessionRenameInput,

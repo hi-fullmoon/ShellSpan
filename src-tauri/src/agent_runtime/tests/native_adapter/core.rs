@@ -424,6 +424,28 @@
         );
         key.execution_surface = AgentExecutionSurface::BoundTerminal;
         assert!(normalize_arguments(&key, &target, None, false).is_ok());
+        let mut fresh = request(
+            "write_terminal_input",
+            json!({ "inputKind": "text", "text": "pwd\n" }),
+        );
+        fresh.execution_surface = AgentExecutionSurface::BoundTerminal;
+        let (_, normalized) = normalize_arguments(&fresh, &target, None, false).unwrap();
+        assert_eq!(normalized["text"], "pwd\n");
+        for name in [
+            "write_terminal_input",
+            "wait_terminal",
+            "write_process_input",
+            "run_terminal_command",
+            "exec_command",
+        ] {
+            let receipt = request(
+                name,
+                json!({"historicalInput": {"available": false, "replayable": false}}),
+            );
+            assert!(normalize_arguments(&receipt, &target, None, false)
+                .unwrap_err()
+                .starts_with("ephemeralInputUnavailable:"));
+        }
     }
 
     #[test]

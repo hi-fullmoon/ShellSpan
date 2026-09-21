@@ -47,6 +47,7 @@ pub(crate) struct AgentEntry {
     cancellation: CancellationToken,
     admitting: AtomicBool,
     driver_active: AtomicBool,
+    title_started: AtomicBool,
     phase: Mutex<AgentLifecyclePhase>,
     scope: Mutex<Option<AgentActiveScope>>,
     idle: Notify,
@@ -74,6 +75,7 @@ impl AgentEntry {
             cancellation: CancellationToken::new(),
             admitting: AtomicBool::new(true),
             driver_active: AtomicBool::new(false),
+            title_started: AtomicBool::new(false),
             phase: Mutex::new(initial_phase),
             scope: Mutex::new(None),
             idle: Notify::new(),
@@ -84,6 +86,10 @@ impl AgentEntry {
 
     pub(crate) fn cancellation(&self) -> CancellationToken {
         self.cancellation.clone()
+    }
+
+    pub(crate) fn claim_title_generation(&self) -> bool {
+        !self.title_started.swap(true, Ordering::AcqRel)
     }
 
     pub(crate) fn prepare_model(&self) -> Result<crate::llm::runtime::PreparedModel, String> {

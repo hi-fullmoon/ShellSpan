@@ -115,6 +115,8 @@ struct SpawnArguments {
     inheritance_mode: String,
     target_ids: Vec<String>,
     #[serde(default)]
+    required_tools: Vec<String>,
+    #[serde(default)]
     budget: Option<AgentSubagentBudget>,
 }
 
@@ -199,6 +201,34 @@ pub(crate) struct SubAgentManager {
     driver_config: AgentDriverConfig,
     credentials: Arc<Mutex<Option<CredentialManager>>>,
     fleets: Arc<Mutex<HashMap<String, FleetRuntime>>>,
+}
+
+struct ChildSettlement {
+    snapshot: AgentSessionSnapshot,
+    timeout_reason: Option<String>,
+}
+
+enum ChildWaitOutcome<T> {
+    Settled(T),
+    Cancelled,
+    TimedOut,
+}
+
+async fn wait_for_child<T>(
+    wait: impl std::future::Future<Output = T>,
+    cancellation: &CancellationToken,
+    timeout_ms: u64,
+) -> ChildWaitOutcome<T> {
+    tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => ChildWaitOutcome::Cancelled,
+        result = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), wait) => {
+            match result {
+                Ok(result) => ChildWaitOutcome::Settled(result),
+                Err(_) => ChildWaitOutcome::TimedOut,
+            }
+        }
+    }
 }
 
 impl SubAgentManager {
@@ -692,9 +722,10 @@ impl SubAgentManager {
         child_session_id: &str,
         cancellation: CancellationToken,
     ) -> Result<AgentSessionSnapshot, String> {
-        let mut snapshot = self
+        let settlement = self
             .await_settlement(child_session_id, cancellation)
             .await?;
+        let mut snapshot = settlement.snapshot;
         if snapshot.status == AgentSessionStatus::Idle {
             let incomplete = last_turn_incomplete(&self.sessions.all_events(child_session_id)?);
             snapshot = self.sessions.terminate(
@@ -717,7 +748,10 @@ impl SubAgentManager {
             .subagent
             .clone()
             .ok_or_else(|| "Fleet child lost subagent metadata".to_string())?;
-        let summary = assistant_summary(&self.sessions.all_events(child_session_id)?)
+        let events = self.sessions.all_events(child_session_id)?;
+        let summary = settlement
+            .timeout_reason
+            .or_else(|| assistant_summary(&events))
             .unwrap_or_else(|| format!("Fleet child settled as {:?}", snapshot.status));
         self.sessions.commit_subagent_settlement(
             parent_session_id,
@@ -1085,7 +1119,7 @@ impl SubAgentManager {
         &self,
         child_session_id: &str,
         cancellation: CancellationToken,
-    ) -> Result<AgentSessionSnapshot, String> {
+    ) -> Result<ChildSettlement, String> {
         let entry = self
             .agents
             .get(child_session_id)?
@@ -1105,24 +1139,37 @@ impl SubAgentManager {
                         && snapshot.inbox.next_turn.is_empty()
                         && snapshot.inbox.next_step.is_empty())
                 {
-                    return Ok(snapshot);
+                    return Ok::<_, String>(snapshot);
                 }
                 tokio::task::yield_now().await;
             }
         };
-        tokio::select! {
-            _ = cancellation.cancelled() => {
+        let created = self
+            .sessions
+            .snapshot(child_session_id)?
+            .header
+            .created_at_unix_ms;
+        let remaining_ms =
+            timeout_ms.saturating_sub(super::driver::current_unix_ms()?.saturating_sub(created));
+        match wait_for_child(wait, &cancellation, remaining_ms).await {
+            ChildWaitOutcome::Settled(snapshot) => Ok(ChildSettlement {
+                snapshot: snapshot?,
+                timeout_reason: None,
+            }),
+            ChildWaitOutcome::Cancelled => {
                 self.cancel_tree(child_session_id).await?;
-                self.sessions.snapshot(child_session_id)
+                Ok(ChildSettlement {
+                    snapshot: self.sessions.snapshot(child_session_id)?,
+                    timeout_reason: None,
+                })
             }
-            result = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), wait) => {
-                match result {
-                    Ok(snapshot) => snapshot,
-                    Err(_) => {
-                        self.cancel_tree(child_session_id).await?;
-                        Err(format!("subagentTimeout: child exceeded {timeout_ms} ms"))
-                    }
-                }
+            ChildWaitOutcome::TimedOut => {
+                self.cancel_tree(child_session_id).await?;
+                Ok(ChildSettlement {
+                    snapshot: self.sessions.snapshot(child_session_id)?,
+                    timeout_reason: (!cancellation.is_cancelled())
+                        .then(|| format!("subagentTimeout: child exceeded {timeout_ms} ms")),
+                })
             }
         }
     }
@@ -1300,11 +1347,11 @@ impl SubAgentManager {
         cancellation: CancellationToken,
     ) -> Result<OrchestrationToolResult, String> {
         let child = self.await_settlement(child_session_id, cancellation).await;
-        let mut snapshot = match child {
+        let settlement = match child {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 return Ok(OrchestrationToolResult {
-                    status: AgentToolResultStatus::TimedOut,
+                    status: AgentToolResultStatus::Failed,
                     summary: error,
                     data: Some(json!({ "childSessionId": child_session_id })),
                     evidence_refs: Vec::new(),
@@ -1312,6 +1359,8 @@ impl SubAgentManager {
                 })
             }
         };
+        let timeout_reason = settlement.timeout_reason;
+        let mut snapshot = settlement.snapshot;
         let incomplete = last_turn_incomplete(&self.sessions.all_events(child_session_id)?);
         if !continuable && snapshot.status == AgentSessionStatus::Idle {
             snapshot = self.sessions.terminate(
@@ -1332,8 +1381,10 @@ impl SubAgentManager {
         let events = self.sessions.all_events(child_session_id)?;
         let mut summary = assistant_summary(&events)
             .unwrap_or_else(|| format!("Child Agent settled with status {:?}", snapshot.status));
-        let budget_reason = last_step_budget_reason(&events);
-        if let Some(reason) = budget_reason {
+        let stop_reason = timeout_reason
+            .as_deref()
+            .or_else(|| child_stop_reason(&events));
+        if let Some(reason) = stop_reason {
             let report = events
                 .iter()
                 .rev()
@@ -1347,15 +1398,19 @@ impl SubAgentManager {
                 .unwrap_or_else(|| "No final report; inspect saved tool results and plan.".into());
             summary = format!("Partial child result: {reason}. Progress is saved; this is not task completion. Latest report: {report}");
         }
-        let tool_status = match snapshot.status {
-            AgentSessionStatus::Idle if incomplete => AgentToolResultStatus::Failed,
-            AgentSessionStatus::Idle | AgentSessionStatus::Completed => {
-                AgentToolResultStatus::Completed
-            }
-            AgentSessionStatus::Cancelled => AgentToolResultStatus::Cancelled,
-            AgentSessionStatus::Failed => AgentToolResultStatus::Failed,
-            AgentSessionStatus::Running | AgentSessionStatus::Waiting => {
-                AgentToolResultStatus::Failed
+        let tool_status = if timeout_reason.is_some() {
+            AgentToolResultStatus::TimedOut
+        } else {
+            match snapshot.status {
+                AgentSessionStatus::Idle if incomplete => AgentToolResultStatus::Failed,
+                AgentSessionStatus::Idle | AgentSessionStatus::Completed => {
+                    AgentToolResultStatus::Completed
+                }
+                AgentSessionStatus::Cancelled => AgentToolResultStatus::Cancelled,
+                AgentSessionStatus::Failed => AgentToolResultStatus::Failed,
+                AgentSessionStatus::Running | AgentSessionStatus::Waiting => {
+                    AgentToolResultStatus::Failed
+                }
             }
         };
         let subagent = snapshot
@@ -1364,6 +1419,7 @@ impl SubAgentManager {
             .clone()
             .ok_or_else(|| "child Session lost subagent metadata".to_string())?;
         let can_continue = continuable
+            && timeout_reason.is_none()
             && snapshot.status == AgentSessionStatus::Idle
             && !snapshot.ended
             && child_has_remaining_budget(
@@ -1372,36 +1428,13 @@ impl SubAgentManager {
                 self.driver_config.max_turns_per_session,
                 super::driver::current_unix_ms()?,
             );
-        let latest_plan = events.iter().rev().find_map(|event| match &event.payload {
-            AgentSessionEventPayload::TaskPlan { steps, .. } => Some(
-                steps
-                    .iter()
-                    .map(|step| {
-                        json!({
-                            "id": step.id, "title": step.title, "status": step.status,
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-            _ => None,
-        });
-        let data = json!({
-            "childSessionId": child_session_id,
-            "descriptorId": subagent.descriptor_id,
-            "continuable": can_continue,
-            "status": snapshot.status,
-            "partial": budget_reason.is_some() || incomplete,
-            "stopReason": budget_reason,
-            "plan": latest_plan,
-            "recentToolResults": if budget_reason.is_some() { partial_tool_results(&events) } else { Vec::new() },
-            "nextAction": if budget_reason.is_none() && !incomplete {
-                "Inspect the child outcome and evidence."
-            } else if can_continue {
-                "Inspect progress; if useful work remains, use send_child_input with this childSessionId. Continue from saved state without repeating completed actions."
-            } else {
-                "Inspect saved progress and take over or report remaining work. Do not create replacement children to bypass the exhausted budget."
-            },
-        });
+        let data = child_handoff_data(
+            &snapshot,
+            &events,
+            can_continue,
+            super::driver::current_unix_ms()?,
+            timeout_reason.as_deref(),
+        )?;
         let parent_closing = self
             .agents
             .get(&request.parent_session_id)?
@@ -1464,6 +1497,15 @@ impl OrchestrationToolRuntime for SubAgentManager {
                     serde_json::from_value(request.call.arguments.clone())
                         .map_err(|error| format!("invalid subagent spawn arguments: {error}"))?;
                 let continuable = request.call.name == "spawn_continuable_agent";
+                let parent = self.sessions.snapshot(&request.parent_session_id)?;
+                let scope = delegated_scope(&parent, arguments.role, &arguments.target_ids)?;
+                let mut child_header = parent.header.clone();
+                child_header.target = arguments
+                    .target_ids
+                    .first()
+                    .map(|id| self.sessions.target_by_id(id))
+                    .transpose()?;
+                validate_required_tools(&child_header, &scope, &arguments.required_tools)?;
                 let child_session_id = self
                     .spawn_child(
                         &request.parent_session_id,
@@ -1699,6 +1741,26 @@ fn delegated_scope(
     })
 }
 
+pub(super) fn validate_required_tools(
+    header: &super::AgentSessionHeader,
+    scope: &AgentCapabilityScope,
+    required_tools: &[String],
+) -> Result<(), String> {
+    let available = super::prompt::assemble_model_input(header, default_model_tools()).tools;
+    let missing = required_tools
+        .iter()
+        .filter(|name| {
+            !scope.tool_names.contains(name) || !available.iter().any(|tool| &tool.name == *name)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("subagent capability unavailable: {}. No child was created. Collect evidence with the parent's authorized tools or select a capable role; diagnostician/explorer/verifier/reviewer cannot execute terminal commands. Collection is incomplete; host health is unknown.", missing.join(", ")))
+    }
+}
+
 fn default_subagent_budget() -> AgentSubagentBudget {
     AgentSubagentBudget {
         max_steps_per_turn: 6,
@@ -1751,17 +1813,120 @@ fn last_turn_incomplete(events: &[super::AgentSessionEvent]) -> bool {
         .unwrap_or(false)
 }
 
-fn last_step_budget_reason(events: &[super::AgentSessionEvent]) -> Option<&str> {
-    events
-        .iter()
-        .rev()
-        .find_map(|event| match &event.payload {
-            AgentSessionEventPayload::TurnEnd { reason } => Some(reason.as_str()),
-            _ => None,
-        })
-        .filter(|reason| {
-            reason.starts_with("stepBudgetReached:") || reason.starts_with("stepLimitExceeded:")
-        })
+fn child_stop_reason(events: &[super::AgentSessionEvent]) -> Option<&str> {
+    for event in events.iter().rev() {
+        match &event.payload {
+            AgentSessionEventPayload::SessionEnded { status, reason } => {
+                if matches!(
+                    status,
+                    AgentSessionStatus::Failed | AgentSessionStatus::Cancelled
+                ) {
+                    return reason.as_deref();
+                }
+                return None;
+            }
+            AgentSessionEventPayload::TurnEnd { reason } => {
+                return (reason != "completed").then_some(reason.as_str());
+            }
+            AgentSessionEventPayload::TurnStart => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ChildBudgetUsage {
+    pub(super) reported_tokens: u64,
+    pub(super) tool_calls: u32,
+    pub(super) turns: usize,
+    pub(super) elapsed_ms: u64,
+}
+
+pub(super) fn child_budget_usage(
+    events: &[super::AgentSessionEvent],
+    now: u64,
+) -> ChildBudgetUsage {
+    ChildBudgetUsage {
+        reported_tokens: events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                AgentSessionEventPayload::RequestUsage { usage, .. } => usage.total_tokens,
+                _ => None,
+            })
+            .fold(0_u64, u64::saturating_add),
+        tool_calls: super::tool_pipeline::admitted_tool_calls(events),
+        turns: events
+            .iter()
+            .filter(|event| matches!(event.payload, AgentSessionEventPayload::TurnStart))
+            .count(),
+        elapsed_ms: events
+            .first()
+            .map_or(0, |event| now.saturating_sub(event.time_unix_ms)),
+    }
+}
+
+fn child_handoff_data(
+    snapshot: &AgentSessionSnapshot,
+    events: &[super::AgentSessionEvent],
+    can_continue: bool,
+    now: u64,
+    timeout_reason: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let subagent = snapshot
+        .header
+        .subagent
+        .as_ref()
+        .ok_or_else(|| "child Session lost subagent metadata".to_string())?;
+    let stop_reason = timeout_reason.or_else(|| child_stop_reason(events));
+    let partial = stop_reason.is_some()
+        || last_turn_incomplete(events)
+        || matches!(
+            snapshot.status,
+            AgentSessionStatus::Failed | AgentSessionStatus::Cancelled
+        );
+    let plan = events.iter().rev().find_map(|event| match &event.payload {
+        AgentSessionEventPayload::TaskPlan { steps, .. } => Some(steps.iter().map(|step| json!({
+            "id": step.id, "title": step.title, "status": step.status,
+            "detail": step.detail.as_ref().map(|detail| detail.chars().take(1_024).collect::<String>()),
+            "evidenceRefs": step.evidence_refs,
+        })).collect::<Vec<_>>()),
+        _ => None,
+    });
+    let has_partial_results = events.iter().any(|event| match &event.payload {
+        AgentSessionEventPayload::ToolResult {
+            status: AgentToolResultStatus::Completed,
+            ..
+        } => true,
+        AgentSessionEventPayload::AssistantMessage { content, .. } => {
+            !super::assistant_content_text(content).trim().is_empty()
+        }
+        _ => false,
+    });
+    Ok(json!({
+        "childSessionId": snapshot.header.session_id,
+        "descriptorId": subagent.descriptor_id,
+        "continuable": can_continue,
+        "status": snapshot.status,
+        "timedOut": timeout_reason.is_some(),
+        "partial": partial,
+        "hasPartialResults": partial && has_partial_results,
+        "stopReason": stop_reason,
+        "budget": subagent.budget,
+        "usage": child_budget_usage(events, now),
+        "plan": plan,
+        "recentToolResults": if partial { partial_tool_results(events) } else { Vec::new() },
+        "nextAction": if snapshot.status == AgentSessionStatus::Cancelled && timeout_reason.is_none() {
+            "Preserve saved evidence and respect cancellation. Do not automatically restart cancelled work."
+        } else if !partial {
+            "Inspect the child outcome and evidence."
+        } else if can_continue {
+            "Inspect progress; if useful work remains, use send_child_input with this childSessionId. Continue from saved state without repeating completed actions."
+        } else {
+            "Inspect saved progress and other child outcomes. Take over only the remaining work within the parent's authorized tools and remaining budget, or report specific gaps. Do not repeat completed actions or create replacement children to bypass the exhausted budget. A child failure is not evidence that the target is unhealthy."
+        },
+    }))
 }
 
 fn child_has_remaining_budget(
@@ -1799,10 +1964,12 @@ fn partial_tool_results(events: &[super::AgentSessionEvent]) -> Vec<serde_json::
                 name,
                 status,
                 summary,
+                evidence_refs,
                 ..
             } => Some(json!({
                 "callId": call_id, "name": name, "status": status,
                 "summary": summary.chars().take(1_024).collect::<String>(),
+                "evidenceRefs": evidence_refs,
             })),
             _ => None,
         })
@@ -1936,6 +2103,67 @@ fn fleet_tool_result(
 mod retry_policy_tests {
     use super::*;
 
+    #[test]
+    fn diagnostic_preflight_preserves_role_and_parent_boundaries() {
+        let root = tempfile::tempdir().unwrap();
+        let store = AgentSessionStore::default();
+        store.configure(root.path().to_path_buf()).unwrap();
+        let mut parent = store
+            .create(CreateAgentSessionRequest {
+                session_id: "diagnostic-parent".into(),
+                task_id: "diagnostic-task".into(),
+                goal: "Collect system metrics".into(),
+                parent_session_id: None,
+                continued_from_session_id: None,
+                target: Some(super::super::AgentSessionTarget {
+                    kind: "local".into(),
+                    target_id: "diagnostic-target".into(),
+                    session_id: "diagnostic-terminal".into(),
+                    label: None,
+                    profile_id: None,
+                    host: None,
+                    port: None,
+                    username: None,
+                    cwd: Some(root.path().to_string_lossy().into_owned()),
+                    root_path: None,
+                    local_root: None,
+                }),
+                permission_mode: Some(super::super::AgentSessionPermissionMode::Operator),
+                execution_surface: super::super::AgentExecutionSurface::Direct,
+                success_criteria: Vec::new(),
+                capability_scope: None,
+                subagent: None,
+            })
+            .unwrap();
+        let targets = vec!["diagnostic-target".into()];
+        let required = vec!["run_terminal_command".into()];
+        for role in [
+            AgentSubagentRole::Diagnostician,
+            AgentSubagentRole::Explorer,
+            AgentSubagentRole::Verifier,
+            AgentSubagentRole::Reviewer,
+        ] {
+            let scope = delegated_scope(&parent, role, &targets).unwrap();
+            assert!(validate_required_tools(&parent.header, &scope, &required).is_err());
+            assert!(validate_required_tools(&parent.header, &scope, &["read_file".into()]).is_ok());
+        }
+        let operator = delegated_scope(&parent, AgentSubagentRole::Operator, &targets).unwrap();
+        assert!(validate_required_tools(&parent.header, &operator, &required).is_ok());
+        let mut restricted = operator;
+        restricted
+            .tool_names
+            .retain(|name| name != "run_terminal_command");
+        parent.header.capability_scope = Some(restricted);
+        let operator = delegated_scope(&parent, AgentSubagentRole::Operator, &targets).unwrap();
+        assert!(validate_required_tools(&parent.header, &operator, &required).is_err());
+        assert!(delegated_scope(
+            &parent,
+            AgentSubagentRole::Operator,
+            &["another-target".into()]
+        )
+        .is_err());
+    }
+
     fn budget_event(
         seq: u64,
         payload: AgentSessionEventPayload,
@@ -2016,6 +2244,11 @@ mod retry_policy_tests {
         for reason in [
             "stepBudgetReached: maximum 8 Steps per Turn",
             "stepLimitExceeded: maximum 8 Steps per Turn",
+            "subagentTokenBudgetExceeded: maximum 32000 tokens",
+            "subagentToolBudgetExceeded: maximum 25 calls",
+            "subagentTimeout: maximum 300000 ms",
+            "turnLimitExceeded: maximum 1 Turns per Session",
+            "providerUnavailable",
         ] {
             let mut events = vec![budget_event(
                 0,
@@ -2023,14 +2256,165 @@ mod retry_policy_tests {
                     reason: reason.into(),
                 },
             )];
-            assert_eq!(last_step_budget_reason(&events), Some(reason));
+            assert_eq!(child_stop_reason(&events), Some(reason));
             events.push(budget_event(
                 1,
                 AgentSessionEventPayload::TurnEnd {
                     reason: "completed".into(),
                 },
             ));
-            assert_eq!(last_step_budget_reason(&events), None);
+            assert_eq!(child_stop_reason(&events), None);
+        }
+    }
+
+    #[tokio::test]
+    async fn terminal_budget_handoff_survives_store_reload_without_a_model_call() {
+        for (status, reason) in [
+            (
+                AgentSessionStatus::Failed,
+                "subagentTokenBudgetExceeded: maximum 32000 tokens",
+            ),
+            (
+                AgentSessionStatus::Failed,
+                "subagentToolBudgetExceeded: maximum 25 calls",
+            ),
+            (
+                AgentSessionStatus::Failed,
+                "subagentTimeout: maximum 300000 ms",
+            ),
+            (
+                AgentSessionStatus::Failed,
+                "turnLimitExceeded: maximum 1 Turns per Session",
+            ),
+            (AgentSessionStatus::Failed, "providerUnavailable"),
+            (AgentSessionStatus::Cancelled, "cancelled"),
+            (AgentSessionStatus::Completed, "oneShotTurnCompleted"),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let store = AgentSessionStore::default();
+            store.configure(root.path().to_path_buf()).unwrap();
+            let target = super::super::AgentSessionTarget {
+                kind: "local".into(),
+                target_id: "handoff-target".into(),
+                session_id: "handoff-terminal".into(),
+                label: None,
+                profile_id: None,
+                host: None,
+                port: None,
+                username: None,
+                cwd: Some(root.path().to_string_lossy().into_owned()),
+                root_path: None,
+                local_root: None,
+            };
+            let scope = AgentCapabilityScope {
+                tool_names: vec!["list_directory".into()],
+                effects: vec![AgentSessionEffect::ReadOnly],
+                target_ids: vec![target.target_id.clone()],
+            };
+            store
+                .create(CreateAgentSessionRequest {
+                    session_id: "handoff-child".into(),
+                    task_id: "handoff-task".into(),
+                    goal: "Inspect saved progress".into(),
+                    parent_session_id: Some("handoff-parent".into()),
+                    continued_from_session_id: None,
+                    target: Some(target.clone()),
+                    permission_mode: None,
+                    execution_surface: super::super::AgentExecutionSurface::Direct,
+                    success_criteria: Vec::new(),
+                    capability_scope: Some(scope.clone()),
+                    subagent: Some(AgentSubagentSession {
+                        descriptor_id: "handoff-descriptor".into(),
+                        parent_task_id: "parent-task".into(),
+                        role: AgentSubagentRole::Explorer,
+                        continuable: false,
+                        depth: 1,
+                        inheritance: AgentSubagentInheritance::Blank,
+                        capability_scope: scope,
+                        target_scope: vec![target],
+                        budget: default_subagent_budget(),
+                        provider: AgentSubagentModel {
+                            route_id: "route".into(),
+                            model_id: "model".into(),
+                            reasoning_effort: None,
+                            route_revision: None,
+                        },
+                    }),
+                })
+                .unwrap();
+            store
+                .terminate("handoff-child", status, reason.into())
+                .unwrap();
+            drop(store);
+            let store = AgentSessionStore::default();
+            store.configure(root.path().to_path_buf()).unwrap();
+            let snapshot = store.snapshot("handoff-child").unwrap();
+            let events = store.all_events("handoff-child").unwrap();
+            let data = child_handoff_data(
+                &snapshot,
+                &events,
+                false,
+                super::super::driver::current_unix_ms().unwrap(),
+                None,
+            )
+            .unwrap();
+            assert_eq!(data["partial"], status != AgentSessionStatus::Completed);
+            assert_eq!(data["continuable"], false);
+            assert_eq!(data["hasPartialResults"], false);
+            assert_eq!(data["usage"]["reportedTokens"], 0);
+            assert_eq!(
+                data["budget"]["maxTokens"],
+                default_subagent_budget().max_tokens
+            );
+            if status == AgentSessionStatus::Completed {
+                assert!(data["stopReason"].is_null());
+            } else {
+                assert_eq!(data["stopReason"], reason);
+            }
+            let action = data["nextAction"].as_str().unwrap();
+            if status == AgentSessionStatus::Cancelled {
+                assert!(action.contains("Do not automatically restart"));
+                let signal = tokio::sync::Notify::new();
+                let cancellation = CancellationToken::new();
+                assert!(matches!(
+                    wait_for_child(signal.notified(), &cancellation, 1).await,
+                    ChildWaitOutcome::TimedOut
+                ));
+                let timeout = "subagentTimeout: child exceeded 1 ms";
+                let timed_out = child_handoff_data(
+                    &snapshot,
+                    &events,
+                    false,
+                    super::super::driver::current_unix_ms().unwrap(),
+                    Some(timeout),
+                )
+                .unwrap();
+                assert_eq!(timed_out["timedOut"], true);
+                assert_eq!(timed_out["partial"], true);
+                assert_eq!(timed_out["stopReason"], timeout);
+                assert!(timed_out["nextAction"]
+                    .as_str()
+                    .unwrap()
+                    .contains("remaining work"));
+                assert!(!timed_out["nextAction"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Do not automatically restart"));
+                cancellation.cancel();
+                assert!(matches!(
+                    wait_for_child(signal.notified(), &cancellation, 0).await,
+                    ChildWaitOutcome::Cancelled
+                ));
+                let finished = async { store.snapshot("handoff-child").unwrap() };
+                assert!(matches!(
+                    wait_for_child(finished, &CancellationToken::new(), 100).await,
+                    ChildWaitOutcome::Settled(_)
+                ));
+            } else if status == AgentSessionStatus::Failed {
+                assert!(action.contains("remaining work"));
+                assert!(action.contains("remaining budget"));
+                assert!(action.contains("Do not repeat completed actions"));
+            }
         }
     }
 

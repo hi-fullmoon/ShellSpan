@@ -23,7 +23,7 @@ impl ModelRequest {
         mut system_prompt: String,
         tools: Vec<AgentRequestToolSchema>,
     ) -> Self {
-        system_prompt.push_str("\nHistorical tool arguments containing [ephemeral terminal input omitted], [ephemeral terminal match text omitted], or [ephemeral process input omitted] are privacy receipts, not commands or literal input. Only historical content was omitted; new tool input is passed unchanged. Never copy these markers into tool calls. Read current terminal/process state and reconstruct the intended command from the task; if the original input is required and unavailable, report that limitation instead of guessing.");
+        system_prompt.push_str("\nHistorical tool arguments with historicalInput are non-executable privacy receipts: the original input was not saved. Only historical content was omitted; new tool input is passed unchanged. Never copy these receipts or legacy omission markers into tool calls. An ephemeralInputUnavailable rejection happens before execution, not in the shell. Read current terminal/process state and reconstruct the intended command from the task; if the original input is required and unavailable, report that limitation instead of guessing. Do not repeat rejected input; a second rejection in the same turn pauses the task for user input.");
         let mut messages = Vec::with_capacity(surface.messages.len());
         for message in &surface.messages {
             match message {
@@ -406,107 +406,36 @@ pub(crate) fn reject_omitted_input_replay(
         "run_terminal_command" | "exec_command" => "command",
         _ => return Ok(()),
     };
-    if arguments
-        .get(field)
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|text| {
-            [
-                OMITTED_TERMINAL_INPUT,
-                OMITTED_TERMINAL_MATCH,
-                OMITTED_PROCESS_INPUT,
-            ]
-            .iter()
-            .any(|placeholder| text.contains(placeholder))
-        })
+    if arguments.get("historicalInput").is_some()
+        || arguments
+            .get(field)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|text| {
+                [
+                    OMITTED_TERMINAL_INPUT,
+                    OMITTED_TERMINAL_MATCH,
+                    OMITTED_PROCESS_INPUT,
+                ]
+                .iter()
+                .any(|placeholder| text.contains(placeholder))
+                    || serde_json::from_str::<serde_json::Value>(text)
+                        .is_ok_and(|value| value.get("historicalInput").is_some())
+            })
     {
-        return Err("ephemeralInputUnavailable: omitted history text is not executable input; do not replay it. Read the current terminal state and supply the actual intended input, or report that the input is unavailable.".into());
+        return Err("ephemeralInputUnavailable: no input was executed; historical input is unavailable. Do not retry these arguments. Read current terminal/process state and reconstruct actual input from the task, or report that the input is unavailable.".into());
     }
     Ok(())
 }
 
 fn model_history_tool_arguments(call: &RecordedToolCall) -> serde_json::Value {
-    if !recorded_tool_call_omits_replay(call) {
+    if !recorded_tool_call_omits_replay(call)
+        && reject_omitted_input_replay(&call.name, &call.arguments).is_ok()
+    {
         return call.arguments.clone();
     }
-    match call.name.as_str() {
-        "write_terminal_input" => {
-            let fallback = serde_json::json!({
-                "inputKind": "text",
-                "text": OMITTED_TERMINAL_INPUT,
-            });
-            let projected = match call
-                .arguments
-                .get("inputKind")
-                .and_then(serde_json::Value::as_str)
-            {
-                Some("key") => call
-                    .arguments
-                    .get("key")
-                    .and_then(serde_json::Value::as_str)
-                    .map(|key| serde_json::json!({ "inputKind": "key", "key": key }))
-                    .unwrap_or_else(|| fallback.clone()),
-                Some("interrupt") => serde_json::json!({ "inputKind": "interrupt" }),
-                Some("paste") => serde_json::json!({
-                    "inputKind": "paste",
-                    "text": OMITTED_TERMINAL_INPUT,
-                }),
-                Some("text") | Some(_) | None => fallback.clone(),
-            };
-            validated_terminal_history_arguments("write_terminal_input", projected, fallback)
-        }
-        "wait_terminal" => {
-            let mut projected = serde_json::Map::new();
-            if let Some(arguments) = call.arguments.as_object() {
-                for key in [
-                    "afterScreenVersion",
-                    "afterOutputSequence",
-                    "afterLifecycleSequence",
-                    "caseSensitive",
-                    "idleMs",
-                    "timeoutMs",
-                ] {
-                    if let Some(value) = arguments.get(key) {
-                        projected.insert(key.into(), value.clone());
-                    }
-                }
-            }
-            projected.insert("text".into(), OMITTED_TERMINAL_MATCH.into());
-            let fallback = serde_json::json!({ "text": OMITTED_TERMINAL_MATCH });
-            validated_terminal_history_arguments(
-                "wait_terminal",
-                serde_json::Value::Object(projected),
-                fallback,
-            )
-        }
-        "write_process_input" => {
-            let mut projected = serde_json::Map::new();
-            if let Some(handle) = call.arguments.get("processHandle") {
-                projected.insert("processHandle".into(), handle.clone());
-            }
-            projected.insert("input".into(), OMITTED_PROCESS_INPUT.into());
-            if let Some(close) = call
-                .arguments
-                .get("close")
-                .and_then(serde_json::Value::as_bool)
-            {
-                projected.insert("close".into(), close.into());
-            }
-            serde_json::Value::Object(projected)
-        }
-        _ => call.arguments.clone(),
-    }
-}
-
-fn validated_terminal_history_arguments(
-    tool_name: &str,
-    arguments: serde_json::Value,
-    fallback: serde_json::Value,
-) -> serde_json::Value {
-    if super::validate_tool_arguments_native(tool_name, &arguments).is_ok() {
-        arguments
-    } else {
-        fallback
-    }
+    // History preserves the call/result identity, not an executable tool payload.
+    // Never put an omission marker (or an empty substitute) in an input field.
+    serde_json::json!({ "historicalInput": { "available": false, "replayable": false } })
 }
 
 #[cfg(test)]
@@ -514,6 +443,28 @@ mod stage_c_tests {
     use super::*;
     use crate::llm::routes::{ModelSelection, ProviderRoute, RouteAuth, RouteStore, RouteTimeouts};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn rejected_legacy_commands_do_not_reintroduce_omission_markers_into_history() {
+        let mut call = recorded_tool_call(ModelToolCall {
+            call_id: "legacy-rejection".into(),
+            provider_call_id: None,
+            name: "exec_command".into(),
+            arguments: serde_json::json!({ "command": OMITTED_TERMINAL_INPUT }),
+        });
+        let receipt = model_history_tool_arguments(&call);
+        assert!(receipt.get("historicalInput").is_some());
+        assert!(receipt.get("command").is_none());
+        assert!(reject_omitted_input_replay(
+            "write_terminal_input",
+            &serde_json::json!({
+                "inputKind": "text", "text": receipt.to_string(),
+            })
+        )
+        .is_err());
+        call.arguments = serde_json::json!({ "command": "pwd" });
+        assert_eq!(model_history_tool_arguments(&call), call.arguments);
+    }
 
     #[test]
     fn terminal_input_and_wait_text_are_not_retained_in_recorded_tool_calls() {
@@ -559,7 +510,7 @@ mod stage_c_tests {
     }
 
     #[test]
-    fn process_input_is_ephemeral_but_keeps_its_handle_in_model_history() {
+    fn process_input_history_contains_only_a_non_executable_receipt() {
         let call = recorded_tool_call(ModelToolCall {
             call_id: "process-input".into(),
             provider_call_id: None,
@@ -580,15 +531,13 @@ mod stage_c_tests {
         assert_eq!(
             model_history_tool_arguments(&call),
             serde_json::json!({
-                "processHandle": "proc-0123456789abcdef0123456789abcdef",
-                "input": OMITTED_PROCESS_INPUT,
-                "close": true,
+                "historicalInput": { "available": false, "replayable": false },
             })
         );
     }
 
     #[test]
-    fn ephemeral_terminal_receipts_project_as_schema_safe_model_history() {
+    fn ephemeral_terminal_receipts_preserve_pairs_without_executable_input() {
         let write = recorded_tool_call(ModelToolCall {
             call_id: "write".into(),
             provider_call_id: None,
@@ -682,42 +631,25 @@ mod stage_c_tests {
         assert!(request
             .system_prompt
             .contains("Only historical content was omitted"));
-        assert!(request.system_prompt.contains("Never copy these markers"));
+        assert!(request.system_prompt.contains("Never copy these receipts"));
         let ModelMessage::Assistant { content, .. } = &request.messages[0] else {
             panic!("expected assistant history")
         };
-        assert!(matches!(
-            &content[0],
-            ModelContentBlock::ToolCall { call }
-                if call.arguments == serde_json::json!({
-                    "inputKind": "paste",
-                    "text": OMITTED_TERMINAL_INPUT,
+        for (index, block) in content.iter().enumerate() {
+            let ModelContentBlock::ToolCall { call } = block else {
+                panic!("expected historical tool call");
+            };
+            assert_eq!(
+                call.arguments,
+                serde_json::json!({
+                    "historicalInput": { "available": false, "replayable": false },
                 })
-        ));
-        assert!(matches!(
-            &content[1],
-            ModelContentBlock::ToolCall { call }
-                if call.arguments == serde_json::json!({
-                    "text": OMITTED_TERMINAL_MATCH,
-                    "caseSensitive": true,
-                    "timeoutMs": 1000,
-                })
-        ));
-        assert!(matches!(
-            &content[2],
-            ModelContentBlock::ToolCall { call }
-                if call.arguments == serde_json::json!({
-                    "inputKind": "text",
-                    "text": OMITTED_TERMINAL_INPUT,
-                })
-        ));
-        assert!(matches!(
-            &content[3],
-            ModelContentBlock::ToolCall { call }
-                if call.arguments == serde_json::json!({
-                    "text": OMITTED_TERMINAL_MATCH,
-                })
-        ));
+            );
+            assert!(reject_omitted_input_replay(&call.name, &call.arguments).is_err());
+            assert!(
+                matches!(&request.messages[index + 1], ModelMessage::Tool { call_id, .. } if call_id == &call.call_id)
+            );
+        }
         let encoded = serde_json::to_string(&request.messages).unwrap();
         assert!(!encoded.contains("private-terminal-input"));
         assert!(!encoded.contains("private-terminal-match"));
@@ -727,6 +659,8 @@ mod stage_c_tests {
         assert!(!encoded.contains("contentPersisted"));
         assert!(!encoded.contains("textProvided"));
         assert!(!encoded.contains("textByteLength"));
+        assert!(!encoded.contains(OMITTED_TERMINAL_INPUT));
+        assert!(!encoded.contains(OMITTED_TERMINAL_MATCH));
     }
 
     #[test]

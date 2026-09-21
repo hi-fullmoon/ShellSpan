@@ -25,6 +25,16 @@ const MAX_EPHEMERAL_TERMINAL_RESULTS: usize = 16;
 const MAX_EPHEMERAL_TERMINAL_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_PARALLEL_TOOL_CALLS: usize = 4;
 const MAX_PARALLEL_TOOL_CALLS: usize = 16;
+const EPHEMERAL_INPUT_RECOVERY_REQUIRED: &str = "ephemeralInputRecoveryRequired: repeated historical input was rejected before execution. Automatic retries stopped; provide the intended command or clarify the task to continue.";
+
+fn has_ephemeral_input_rejection(events: &[super::AgentSessionEvent], turn_id: &str) -> bool {
+    events.iter().any(|event| {
+        event.turn_id.as_deref() == Some(turn_id)
+            && matches!(&event.payload,
+                AgentSessionEventPayload::ToolResult { status: AgentToolResultStatus::Rejected, summary, .. }
+                if summary.starts_with("ephemeralInputUnavailable:"))
+    })
+}
 
 /// Owns registry cleanup until execution consumes the token or pending approval takes ownership.
 struct PreparedLease {
@@ -588,6 +598,25 @@ impl AgentToolPipeline {
         entry: &AgentEntry,
         message: &str,
     ) -> Result<(), String> {
+        self.mark_tool_recovery(entry, message, "toolSchedulerRecoveryRequired")
+    }
+
+    pub(crate) fn mark_ephemeral_input_failure(
+        &self,
+        entry: &Arc<AgentEntry>,
+        message: &str,
+    ) -> Result<(), String> {
+        entry.set_phase(AgentLifecyclePhase::Waiting)?;
+        super::driver::close_open_scope(&self.sessions, entry, "ephemeralInputRecoveryRequired")?;
+        self.mark_tool_recovery(entry, message, "ephemeralInputRecoveryRequired")
+    }
+
+    fn mark_tool_recovery(
+        &self,
+        entry: &AgentEntry,
+        message: &str,
+        reason: &str,
+    ) -> Result<(), String> {
         let scope = entry.scope()?;
         let mut payloads = Vec::new();
         if let Some(scope) = &scope {
@@ -596,7 +625,7 @@ impl AgentToolPipeline {
                     turn_id: Some(scope.turn_id.clone()),
                     step_id: Some(step_id.clone()),
                     payload: AgentSessionEventPayload::StepEnd {
-                        reason: "toolSchedulerRecoveryRequired".into(),
+                        reason: reason.into(),
                     },
                 });
             }
@@ -621,7 +650,7 @@ impl AgentToolPipeline {
                 step_id: None,
                 payload: AgentSessionEventPayload::AgentStatus {
                     status: AgentSessionStatus::Waiting,
-                    reason: Some("toolSchedulerRecoveryRequired".into()),
+                    reason: Some(reason.into()),
                 },
             },
         ]);
@@ -925,6 +954,8 @@ impl AgentToolPipeline {
                                     is_terminal_target_unavailable(error)
                                 }) {
                                     "terminalTargetUnavailable"
+                                } else if outcome.as_ref().is_err_and(|error| error.starts_with("ephemeralInputRecoveryRequired:")) {
+                                    "ephemeralInputRecoveryRequired"
                                 } else {
                                     "schedulerFailure"
                                 },
@@ -939,6 +970,9 @@ impl AgentToolPipeline {
         let settlement = match outcome {
             Ok(value) => value,
             Err(error) if error.starts_with("subagentToolBudgetExceeded:") => return Err(error),
+            Err(error) if error.starts_with("ephemeralInputRecoveryRequired:") => {
+                return Err(error)
+            }
             Err(error) if is_terminal_target_unavailable(&error) => return Err(error),
             Err(error) => return Err(format!("toolSchedulerFailure: {error}")),
         };
@@ -1448,6 +1482,10 @@ impl AgentToolPipeline {
     }
 
     fn prepare_native(&self, request: &NativeToolRequest) -> Result<NativeToolPreparation, String> {
+        super::model::reject_omitted_input_replay(
+            &request.model_call.name,
+            &request.model_call.arguments,
+        )?;
         let preparation = self.native.prepare(request.clone())?;
         if let Err(error) = self.validate_preparation(request, &preparation) {
             self.native.abandon(&preparation.token);
@@ -1644,6 +1682,12 @@ impl AgentToolPipeline {
         request: &NativeToolRequest,
         reason: &str,
     ) -> Result<ToolPipelineSettlement, String> {
+        let ephemeral = reason.starts_with("ephemeralInputUnavailable:");
+        let repeated = ephemeral
+            && has_ephemeral_input_rejection(
+                &self.sessions.all_events(&request.session_id)?,
+                &request.turn_id,
+            );
         let call = RecordedToolCall {
             call_id: request.model_call.call_id.clone(),
             provider_call_id: request.model_call.provider_call_id.clone(),
@@ -1669,14 +1713,22 @@ impl AgentToolPipeline {
                         call_id: request.model_call.call_id.clone(),
                         name: request.model_call.name.clone(),
                         status: AgentToolResultStatus::Rejected,
-                        summary: reason.to_string(),
-                        data: None,
+                        summary: if repeated { EPHEMERAL_INPUT_RECOVERY_REQUIRED } else { reason }.to_string(),
+                        data: ephemeral.then(|| serde_json::json!({
+                            "code": "ephemeralInputUnavailable",
+                            "executed": false,
+                            "retryable": false,
+                            "recoveryAction": if repeated { "requestUserInput" } else { "readCurrentStateAndReconstructInput" },
+                        })),
                         duration_ms: None,
                         evidence_refs: Vec::new(),
                     },
                 },
             ],
         )?;
+        if repeated {
+            return Err(EPHEMERAL_INPUT_RECOVERY_REQUIRED.into());
+        }
         Ok(ToolPipelineSettlement::Completed)
     }
 
@@ -2859,6 +2911,158 @@ fn current_unix_ms() -> u64 {
 #[cfg(test)]
 mod ephemeral_terminal_result_tests {
     use super::*;
+
+    #[test]
+    fn ephemeral_input_recovery_stops_repeat_and_resets_for_new_turn() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = AgentSessionStore::default();
+        sessions.configure(root.path().to_path_buf()).unwrap();
+        let target: AgentSessionTarget = serde_json::from_value(serde_json::json!({
+            "kind": "local", "targetId": "local", "sessionId": "terminal",
+        }))
+        .unwrap();
+        sessions
+            .create(super::super::CreateAgentSessionRequest {
+                session_id: "input-recovery".into(),
+                task_id: "input-recovery-task".into(),
+                goal: "Inspect current directory".into(),
+                parent_session_id: None,
+                continued_from_session_id: None,
+                target: Some(target.clone()),
+                permission_mode: Some(super::super::AgentSessionPermissionMode::RequestApproval),
+                execution_surface: super::super::AgentExecutionSurface::BoundTerminal,
+                success_criteria: vec![],
+                capability_scope: None,
+                subagent: None,
+            })
+            .unwrap();
+        let pipeline = AgentToolPipeline::new(
+            Default::default(),
+            sessions.clone(),
+            Default::default(),
+            Arc::new(NativeToolRuntimeSlot::default()),
+            Default::default(),
+            Default::default(),
+        );
+        let mut request = NativeToolRequest {
+            session_id: "input-recovery".into(),
+            task_id: "input-recovery-task".into(),
+            goal: "Inspect current directory".into(),
+            success_criteria: vec![],
+            turn_id: "turn-1".into(),
+            step_id: "step-1".into(),
+            request_id: "request-1".into(),
+            model_call: ModelToolCall {
+                call_id: "call-1".into(),
+                provider_call_id: None,
+                name: "write_terminal_input".into(),
+                arguments: serde_json::json!({"inputKind": "text", "text": "[ephemeral terminal input omitted]"}),
+            },
+            target,
+            permission_mode: super::super::AgentSessionPermissionMode::RequestApproval,
+            execution_surface: super::super::AgentExecutionSurface::BoundTerminal,
+        };
+        // The real admission guard runs before the unconfigured native runtime.
+        let error = pipeline.prepare_native(&request).unwrap_err();
+        assert!(error.starts_with("ephemeralInputUnavailable:"));
+        assert_eq!(
+            pipeline.commit_prepare_failure(&request, &error).unwrap(),
+            ToolPipelineSettlement::Completed
+        );
+        request.model_call.call_id = "call-2".into();
+        request.step_id = "step-2".into();
+        request.model_call.name = "exec_command".into();
+        request.model_call.arguments =
+            serde_json::json!({"command": "[ephemeral process input omitted]"});
+        let error = pipeline.prepare_native(&request).unwrap_err();
+        assert!(pipeline
+            .commit_prepare_failure(&request, &error)
+            .unwrap_err()
+            .starts_with("ephemeralInputRecoveryRequired:"));
+        let events = sessions.all_events("input-recovery").unwrap();
+        assert!(!events.iter().any(|event| matches!(
+            event.payload,
+            AgentSessionEventPayload::ToolExecution { .. }
+        )));
+        let results: Vec<_> = events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                AgentSessionEventPayload::ToolResult {
+                    data: Some(data), ..
+                } => Some(data),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(results.len(), 2);
+        for data in &results {
+            assert_eq!(data["executed"], false);
+            assert_eq!(data["retryable"], false);
+        }
+        assert_eq!(
+            results[0]["recoveryAction"],
+            "readCurrentStateAndReconstructInput"
+        );
+        assert_eq!(results[1]["recoveryAction"], "requestUserInput");
+        // Use the production adapter and registry without issuing a model request.
+        // Recovery must leave a resumable Waiting task, never a completed task.
+        use crate::llm::adapter::ModelAdapterFactory;
+        let provider = crate::ai::AiProviderConfig {
+            model_definition: Some(crate::llm::catalog::fixture_definition(
+                crate::ai::AiProviderKind::Ollama,
+                32768,
+            )),
+            retry_policy: None,
+            profile: "ollama".into(),
+            id: "local".into(),
+            kind: crate::ai::AiProviderKind::Ollama,
+            base_url: "http://127.0.0.1:11434".into(),
+            model: "llama3.2".into(),
+            reasoning_effort: None,
+            requires_api_key: false,
+            api_key: None,
+        };
+        let adapter = crate::llm::registry::HttpModelAdapterFactory
+            .create(provider.clone(), None)
+            .unwrap();
+        let handle = pipeline
+            .agents
+            .attach(
+                sessions.clone(),
+                request.session_id.clone(),
+                provider,
+                adapter,
+            )
+            .unwrap();
+        let entry = handle.entry();
+        entry
+            .set_scope(Some(AgentActiveScope {
+                turn_id: request.turn_id.clone(),
+                step_id: Some(request.step_id.clone()),
+            }))
+            .unwrap();
+        pipeline
+            .mark_ephemeral_input_failure(&entry, EPHEMERAL_INPUT_RECOVERY_REQUIRED)
+            .unwrap();
+        let snapshot = sessions.snapshot(&request.session_id).unwrap();
+        assert_eq!(snapshot.status, AgentSessionStatus::Waiting);
+        assert!(!snapshot.ended);
+        assert_eq!(
+            snapshot.task.recovery.unwrap().status,
+            AgentRecoveryStatus::Required
+        );
+        assert_eq!(entry.phase().unwrap(), AgentLifecyclePhase::Waiting);
+        assert!(entry.scope().unwrap().is_none());
+        assert!(sessions.all_events(&request.session_id).unwrap().iter().any(|event| matches!(
+            &event.payload, AgentSessionEventPayload::TurnEnd { reason } if reason == "ephemeralInputRecoveryRequired"
+        )));
+        request.turn_id = "turn-2".into();
+        request.step_id = "step-3".into();
+        request.model_call.call_id = "call-3".into();
+        assert_eq!(
+            pipeline.commit_prepare_failure(&request, &error).unwrap(),
+            ToolPipelineSettlement::Completed
+        );
+    }
 
     #[test]
     fn terminal_screen_content_is_ephemeral_but_reaches_the_current_model_turn() {
