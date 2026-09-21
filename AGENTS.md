@@ -42,6 +42,7 @@ pnpm check:llm:catalog
 
 - 优先使用 `src/components/ui/` 中已有的 shadcn 组件、尺寸和变体，不为单个页面硬编码颜色、边框、圆角或控件高度。工作台中的紧凑卡片优先使用 `size="sm"`、`radius="compact"`；需要清晰边界时使用 `variant="outline"`。
 - 工作台中同级 Card 的横向和纵向间距统一使用 `gap-3`（12px）；Card 内部字段、按钮或指标可按组件语义使用更小或更大的间距，但不得用内部间距替代卡片容器间距。
+- 同行图标与其对应文字的间距统一为 4px，适用于按钮、菜单、标签、提示条、Toast、状态行和文件列表等。优先使用 `gap-1`，网格布局使用 `gap-x-1`；各尺寸和变体保持一致，清理图标自带的横向 margin，避免与 gap 叠加。优先在共享组件中统一，并检查调用处的间距覆盖；控件组、卡片和上下排列的空态布局仍按各自布局规范设置间距。修改后使用实际渲染检查图标与文字边界之间的距离，并覆盖宽、窄容器。
 - 同一操作行中的 Input、Select 和 Button 必须视觉等高。不要假设不同组件的同名 `size` 天然一致；检查共享组件定义和实际渲染尺寸。若差异属于全局设计系统问题，修正共享 primitive 并增加组件测试。
 - 工作台页面顶部统一使用 `WorkbenchPageHeader` 的默认内边距和高度结构，不做页面级 padding 覆盖。窄容器中的 Header 操作区应尽量保持单行；搜索框需使用 `min-w-0 flex-1` 允许收缩，并在宽容器断点恢复固定宽度，避免页面切换时因按钮换行产生高度跳动。
 - Select 的 `value` 只用于状态与提交，用户界面必须显示可读 label，不能直接暴露数据库 ID、内部枚举或 `all`、`none` 等原始值。Base UI Select 应向根组件传入同源的 `{ value, label }` `items` 映射，触发器和选项列表共用该映射；所有 label 遵循 i18n。
@@ -72,4 +73,4 @@ pnpm check:llm:catalog
 - UI 改动检查双语文案、键盘与焦点、空态、加载态和错误态。
 - 除非用户明确要求，否则不要创建 commit、tag 或推送。
 
-提交信息使用英文 Conventional Commits。`pnpm version` 会修改版本、创建 commit 并打 tag，只能在用户明确要求发布时运行。
+提交信息使用英文 Conventional Commits。统一使用 `pnpm release:prepare` 准备版本文件和待审核说明，不创建 commit 或 tag；仅在用户明确要求准备发布时运行。不要使用包管理器内置的 `pnpm version` 或 `npm version`，`preversion` 会在其修改版本之前拒绝执行。审核后执行 `pnpm changelog` 同步当前版本说明、`pnpm release:check` 校验。发布细节见 `docs/releasing.md`。

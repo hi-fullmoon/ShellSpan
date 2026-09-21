@@ -5,3 +5,7 @@ src-tauri/target
 .env
 .env.local
 .worktrees/
+/release-inputs/
+/release-output/
+/release-artifact/
+/tauri-ci-override.json

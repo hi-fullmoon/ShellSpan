@@ -1,51 +1,34 @@
-# git-cliff ~ configuration file
-# https://git-cliff.org/docs/configuration
-
+# Candidate notes only. Reviewed release-notes/*.md are the publication source.
 [changelog]
-header = "# Changelog\n\nAll notable changes to ShellSpan are documented in this file.\n\n"
+header = ""
 body = """
-{% if not version %}
-## [Unreleased]
-{% else %}
-## [{{ version }}](https://github.com/zhengbiwen/ShellSpan/releases/tag/{{ version }}) - {{ timestamp | date(format="%Y-%m-%d") }}
-{% endif %}
 {% for group, commits in commits | group_by(attribute="group") %}
-### {{ group | upper_first() }}
-{% for commit in commits | sort(attribute="message") %}
-- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | trim }}{% if commit.breaking %}\n  - ⚠️ **BREAKING CHANGE:** {{ commit.breaking_description }}{% endif %}
+### {{ group }}
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | trim }}{% if commit.breaking_description %} — {{ commit.breaking_description }}{% endif %} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/hi-fullmoon/ShellSpan/commit/{{ commit.id }}))
 {%- endfor %}
 {% endfor %}
 """
 trim = true
-postprocessors = [
-  { pattern = '\\(#(\d+)\\)', replace = "([#$1](https://github.com/zhengbiwen/ShellSpan/pull/$1))" },
-]
 
 [git]
 conventional_commits = true
-filter_unconventional = true
+filter_unconventional = false
+protect_breaking_commits = true
 split_commits = false
 sort_commits = "oldest"
-
-# Map commit types to display groups
-# Order matters: specific patterns first, then generic catch-all
 commit_parsers = [
-  { message = "^feat", group = "Features" },
-  { message = "^fix", group = "Bug Fixes" },
-  { message = "^refactor", group = "Refactoring" },
-  { message = "^style", group = "Style" },
-  { message = "^docs", group = "Documentation" },
-  { message = "^perf", group = "Performance" },
-  { message = "^test", group = "Testing" },
-  { message = "^ci", group = "CI/CD" },
-  { message = "^build", group = "Build System" },
-  { message = "^revert", group = "Revert" },
-  # Skip version bump commits
-  { message = "^chore\\(release\\)", skip = true },
-  { message = "^chore\\(build\\)", skip = true },
-  { message = "^chore", group = "Chore" },
-  { message = ".*", group = "Other" },
+  { body = "BREAKING[ -]CHANGE:", group = "升级注意事项" },
+  { message = "^[a-z]+(\\([^)]*\\))?!:", group = "升级注意事项" },
+  { message = "^feat", group = "新增功能" },
+  { message = "^fix", group = "问题修复" },
+  { message = "^perf", group = "性能优化" },
+  { message = "^revert", group = "行为调整" },
+  { body = "Release-Note:", group = "体验改进" },
+  { message = "^(chore|ci|build|test|docs|style|refactor)(\\(|:)", skip = true },
+  { message = ".*", group = "待分类" },
 ]
 
-[git.remote]
-origin = "https://github.com/zhengbiwen/ShellSpan"
+[remote.github]
+owner = "hi-fullmoon"
+repo = "ShellSpan"
