@@ -1,5 +1,6 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const UPDATER_ARCHIVE_PATTERNS = [
   '.app.tar.gz',
@@ -9,7 +10,7 @@ const UPDATER_ARCHIVE_PATTERNS = [
   '.exe.zip',
 ];
 
-async function walkFiles(rootDir) {
+export async function walkFiles(rootDir) {
   const entries = await readdir(rootDir, { withFileTypes: true });
   const files = await Promise.all(
     entries.map(async (entry) => {
@@ -55,7 +56,9 @@ export async function buildUpdaterManifest({
   notes,
   repoSlug,
   tag,
+  expectedPlatforms,
 }) {
+  if (!notes?.trim()) throw new Error('Release notes are required');
   const allFiles = await walkFiles(artifactsRootDir);
   const metadataFiles = allFiles.filter((filePath) =>
     filePath.endsWith('release-metadata.json'),
@@ -65,10 +68,11 @@ export async function buildUpdaterManifest({
     throw new Error(`No release metadata found in ${artifactsRootDir}`);
   }
 
-  const platforms = {};
+  const platforms = Object.create(null);
 
   for (const metadataPath of metadataFiles) {
     const metadata = await readArtifactMetadata(metadataPath);
+    if (Object.hasOwn(platforms, metadata.platform)) throw new Error(`Duplicate platform: ${metadata.platform}`);
     const artifactDir = path.dirname(metadataPath);
     const bundleDir = path.join(artifactDir, 'bundle');
     const bundleFiles = allFiles.filter((filePath) =>
@@ -82,6 +86,7 @@ export async function buildUpdaterManifest({
 
     const signaturePath = `${updaterArchive}.sig`;
     const signature = (await readFile(signaturePath, 'utf8')).trim();
+    if (!signature) throw new Error(`Empty signature for ${metadata.platform}`);
 
     platforms[metadata.platform] = {
       signature,
@@ -89,9 +94,14 @@ export async function buildUpdaterManifest({
     };
   }
 
+  if (expectedPlatforms && (Object.keys(platforms).length !== expectedPlatforms.length
+    || expectedPlatforms.some(platform => !Object.hasOwn(platforms, platform)))) {
+    throw new Error(`Expected release platforms: ${expectedPlatforms.join(', ')}`);
+  }
+
   return {
     version: tag,
-    notes: notes || `Release ${tag}`,
+    notes,
     pub_date: new Date().toISOString(),
     platforms,
   };
@@ -149,9 +159,9 @@ function parseArgs(argv) {
   return options;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const options = parseArgs(process.argv.slice(2));
-  const manifest = await buildUpdaterManifest(options);
+  const manifest = await buildUpdaterManifest({ ...options, expectedPlatforms: ['darwin-aarch64', 'windows-x86_64'] });
   await writeFile(options.output, `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(`Generated ${options.output}`);
 }

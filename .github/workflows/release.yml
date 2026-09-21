@@ -7,12 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to rebuild (for example v2.0.7 or v2.0.7-test.1)
+        description: Unpublished release tag to build (for example v2.1.0 or v2.1.0-rc.1)
         required: true
-        type: string
-      release_notes:
-        description: Optional release notes override
-        required: false
         type: string
 
 permissions:
@@ -22,7 +18,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -34,101 +30,38 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       notes: ${{ steps.meta.outputs.notes }}
+      sha: ${{ steps.meta.outputs.sha }}
     steps:
       - name: Checkout release tag
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
 
-      - name: Validate tag and versions
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release and reviewed notes
         id: meta
-        shell: bash
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-          RELEASE_NOTES: ${{ inputs.release_notes }}
-        run: |
-          node - "$RELEASE_TAG" <<'NODE'
-          const fs = require('fs');
-          const tag = process.argv[2];
-          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          const tauri = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
-          const cargoToml = fs.readFileSync('src-tauri/Cargo.toml', 'utf8');
-          const cargoLock = fs.readFileSync('src-tauri/Cargo.lock', 'utf8');
-          const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
-          const lockVersion = cargoLock.match(/\[\[package\]\]\s*\nname\s*=\s*"ShellSpan"\s*\nversion\s*=\s*"([^"]+)"/m)?.[1];
-          const expectedTag = `v${pkg.version}`;
-          // 允许在仓库版本之上追加 semver 预发布后缀的测试 tag
-          // （如 package.json 为 2.0.30 时的 v2.0.30-test.1），无需 bump 仓库版本
-          // 后缀必须是严格 semver：纯数字标识符不允许前导零（test.1 合法，test.01 非法）
-          const prereleaseIdentifier = /^(0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)$/;
-          const suffix = tag.startsWith(`${expectedTag}-`) ? tag.slice(expectedTag.length + 1) : null;
-          const prereleaseTag = suffix !== null && suffix.split('.').every((id) => prereleaseIdentifier.test(id));
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-preflight.mjs
 
-          if (tag !== expectedTag && !prereleaseTag) {
-            console.error(`Release tag/version mismatch: tag=${tag}, expected=${expectedTag} (a strict-semver prerelease suffix like ${expectedTag}-test.1 is also allowed; numeric identifiers must not have leading zeros)`);
-            process.exit(1);
-          }
-
-          const versions = {
-            package: pkg.version,
-            tauri: tauri.version,
-            cargo: cargoVersion,
-            lock: lockVersion,
-          };
-          const mismatches = Object.entries(versions).filter(([, version]) => version !== pkg.version);
-          if (mismatches.length > 0) {
-            console.error(`Release versions are not aligned: ${JSON.stringify(versions)}`);
-            process.exit(1);
-          }
-          NODE
-
-          APP_VERSION="${RELEASE_TAG#v}"
-          IS_PRERELEASE=false
-          if [[ "$APP_VERSION" == *-* ]]; then
-            IS_PRERELEASE=true
-          fi
-
-          # 从 CHANGELOG.md 中提取指定 tag 对应的段落，并去掉首尾空行
-          extract_notes() {
-            awk -v tag="$1" '
-              BEGIN { header = "## [" tag "]" }
-              index($0, header) == 1 { found = 1; next }
-              found && /^## \[/ { exit }
-              found {
-                if ($0 ~ /^[[:space:]]*$/) { if (started) pending = pending "\n"; next }
-                started = 1
-                printf "%s%s\n", pending, $0
-                pending = ""
-              }
-            ' CHANGELOG.md
-          }
-
-          NOTES="$RELEASE_NOTES"
-          if [[ -z "$NOTES" ]]; then
-            NOTES="$(extract_notes "$RELEASE_TAG")"
-          fi
-          if [[ -z "$NOTES" && "$RELEASE_TAG" == *-* ]]; then
-            # 测试 tag（如 v2.0.30-test.1）没有独立段落时，回退到基础版本的段落
-            NOTES="$(extract_notes "${RELEASE_TAG%%-*}")"
-          fi
-          if [[ -z "$NOTES" ]]; then
-            NOTES="Release $RELEASE_TAG"
-          fi
-
-          {
-            echo "tag=$RELEASE_TAG"
-            echo "version=$APP_VERSION"
-            echo "prerelease=$IS_PRERELEASE"
-            delimiter="release_notes_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
-            echo "notes<<$delimiter"
-            echo "$NOTES"
-            echo "$delimiter"
-          } >> "$GITHUB_OUTPUT"
+  quality:
+    name: Release Quality Gate
+    needs: preflight
+    uses: ./.github/workflows/quality-gate.yml
+    with:
+      ref: ${{ needs.preflight.outputs.sha }}
 
   build-frontend:
     name: Test and Build Frontend
@@ -138,7 +71,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ needs.preflight.outputs.tag }}
+          ref: ${{ needs.preflight.outputs.sha }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
@@ -179,6 +112,7 @@ jobs:
     needs:
       - preflight
       - build-frontend
+      - quality
     strategy:
       fail-fast: false
       matrix:
@@ -198,7 +132,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ needs.preflight.outputs.tag }}
+          ref: ${{ needs.preflight.outputs.sha }}
 
       - name: Download frontend dist
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -367,6 +301,10 @@ jobs:
     needs:
       - preflight
       - build
+      - quality
+    concurrency:
+      group: publish-release
+      cancel-in-progress: false
     permissions:
       contents: write
 
@@ -374,7 +312,11 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ needs.preflight.outputs.tag }}
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -386,108 +328,17 @@ jobs:
         with:
           path: release-inputs
 
-      - name: Generate combined updater manifest
-        shell: bash
-        env:
-          RELEASE_NOTES: ${{ needs.preflight.outputs.notes }}
-          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
-        run: |
-          mkdir -p release-output
-          printf '%s\n' "$RELEASE_NOTES" > release-output/release-notes.md
-          node scripts/build-updater-json.mjs \
-            --artifacts-root release-inputs \
-            --repo "$GITHUB_REPOSITORY" \
-            --tag "$RELEASE_TAG" \
-            --notes "$RELEASE_NOTES" \
-            --output release-output/latest.json
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Publish release assets
-        shell: bash
+      - name: Install updater signature verifier
+        run: sudo apt-get update && sudo apt-get install -y minisign
+
+      - name: Test signature verification against real signed bytes
+        run: node --test scripts/release-signatures.integration.mjs
+
+      - name: Verify assets, publish draft, and promote Latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          IS_PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
           RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
-        run: |
-          mapfile -t assets < <(find release-inputs -type f \( \
-            -name '*.dmg' -o \
-            -name '*.exe' -o \
-            -name '*.app.tar.gz' -o \
-            -name '*.nsis.zip' -o \
-            -name '*.exe.zip' -o \
-            -name '*.app.tar.gz.sig' -o \
-            -name '*.nsis.zip.sig' -o \
-            -name '*.exe.zip.sig' \
-          \) | sort)
-          assets+=(release-output/latest.json)
-
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
-            if [[ "$IS_PRERELEASE" == "true" ]]; then
-              gh release edit "$RELEASE_TAG" \
-                --prerelease \
-                --latest=false \
-                --title "ShellSpan $RELEASE_TAG" \
-                --notes-file release-output/release-notes.md
-            else
-              gh release edit "$RELEASE_TAG" \
-                --prerelease=false \
-                --title "ShellSpan $RELEASE_TAG" \
-                --notes-file release-output/release-notes.md
-            fi
-          else
-            release_args=(--verify-tag)
-            if [[ "$IS_PRERELEASE" == "true" ]]; then
-              release_args+=(--prerelease --latest=false)
-            fi
-
-            gh release create "$RELEASE_TAG" "${assets[@]}" \
-              "${release_args[@]}" \
-              --title "ShellSpan $RELEASE_TAG" \
-              --notes-file release-output/release-notes.md
-          fi
-
-      - name: Verify published updater manifest
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
-        run: |
-          endpoint="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/latest.json"
-          manifest_file="$(mktemp)"
-          for _ in {1..12}; do
-            if curl -fsSL "$endpoint" -o "$manifest_file"; then
-              break
-            fi
-            sleep 3
-          done
-
-          node - "$manifest_file" "$RELEASE_TAG" <<'NODE'
-          const fs = require('fs');
-          const [manifestPath, tag] = process.argv.slice(2);
-          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-          const expectedPlatforms = ['darwin-aarch64', 'windows-x86_64'];
-
-          if (manifest.version !== tag) {
-            throw new Error(`Unexpected updater version: ${manifest.version}, expected ${tag}`);
-          }
-
-          for (const platform of expectedPlatforms) {
-            const update = manifest.platforms?.[platform];
-            if (!update?.signature || !update?.url) {
-              throw new Error(`Incomplete updater entry for ${platform}`);
-            }
-            if (!update.url.includes(`/releases/download/${tag}/`)) {
-              throw new Error(`Updater URL for ${platform} points at the wrong tag: ${update.url}`);
-            }
-            console.log(update.url);
-          }
-          NODE
-
-          while IFS= read -r url; do
-            curl -fsSIL "$url" >/dev/null
-          done < <(node -e '
-            const fs = require("fs");
-            const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-            for (const update of Object.values(manifest.platforms)) console.log(update.url);
-          ' "$manifest_file")
-
-          echo "Updater manifest and assets are reachable: $endpoint"
+        run: node scripts/publish-release.mjs
