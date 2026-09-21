@@ -60,7 +60,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     await user.click(screen.getByRole('button', { name: 'Add file or folder' }));
     const file = await screen.findByRole('menuitem', { name: 'Add file' });
     expect(file).toBeVisible();
-    expect(file).toHaveClass('min-h-7', 'gap-1.5');
+    expect(file).toHaveClass('min-h-7', 'gap-1');
     expect(file.closest('[data-slot="dropdown-menu-content"]')).toHaveClass('ai-composer-add-menu', 'min-h-0', 'overflow-hidden');
     expect(screen.getByRole('menuitem', { name: 'Add folder' })).toBeVisible();
     expect(screen.getByText('Skills')).toBeVisible();

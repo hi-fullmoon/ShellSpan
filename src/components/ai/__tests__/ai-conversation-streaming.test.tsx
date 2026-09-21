@@ -35,18 +35,16 @@ it('preserves the process panel, focus and disclosure state across model request
   expect(trigger).toHaveAttribute('aria-expanded', 'false');
 });
 
-it('lays out the current turn immediately while retaining containment for history', async () => {
+it('lays out every row immediately after history has been paged', async () => {
   await initI18n('en-US');
   const { events } = agentSessionBaselineScenarios.pagination;
   const nodes = projectAgentChatNodes(events);
   const { container } = render(<AiConversation nodes={nodes} status="completed" throughSeq={null} />);
-  const latestUser = nodes.map((node) => node.kind).lastIndexOf('userMessage');
-  expect(latestUser).toBeGreaterThan(0);
-  nodes.forEach((node, index) => {
+  nodes.forEach((node) => {
     const row = Array.from(container.querySelectorAll<HTMLElement>('[data-ai-node-key]'))
       .find((element) => element.dataset.aiNodeKey === node.key)!
       .closest('[data-slot="message-scroller-item"]');
-    expect(row).toHaveClass(index >= latestUser ? '[content-visibility:visible]' : '[content-visibility:auto]');
+    expect(row).toHaveClass('[content-visibility:visible]', '[contain-intrinsic-size:none]');
   });
 });
 
