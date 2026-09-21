@@ -244,6 +244,7 @@ export interface AiWorkspaceRootProps {
   readonly approvalArgumentsLoading?: boolean;
   readonly approvalArgumentsError?: string | null;
   readonly onListFileReferences?: import('@/types/agent-file-reference').ListFileReferences;
+  readonly onListProjectDirectories?: import('@/types/agent-file-reference').ListProjectDirectories;
   readonly onListSkills?: (root?: string) => Promise<import('@/types/agent-skill').SkillUserList>;
   readonly skillsScopeKey?: string;
   readonly skillsNeedsRoot?: boolean;
@@ -325,6 +326,7 @@ export function AiWorkspaceRoot({
   approvalArgumentsError = null,
   onAnswerQuestion,
   onListFileReferences,
+  onListProjectDirectories,
   onListSkills,
   skillsScopeKey,
   skillsNeedsRoot,
@@ -675,6 +677,7 @@ export function AiWorkspaceRoot({
           pendingQuestion={readOnlySession ? undefined : view?.pendingQuestion}
           onAnswerQuestion={readOnlySession ? undefined : onAnswerQuestion}
           onListFileReferences={surfaceMode === 'agent' && !readOnlySession ? onListFileReferences : undefined}
+          onListProjectDirectories={surfaceMode === 'agent' && !readOnlySession ? onListProjectDirectories : undefined}
           onListSkills={surfaceMode === 'agent' && !readOnlySession ? onListSkills : undefined}
           skillsScopeKey={skillsScopeKey}
           attachmentScopeKey={sessionLedgerKey ?? skillsScopeKey}

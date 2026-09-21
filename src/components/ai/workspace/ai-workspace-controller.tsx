@@ -88,6 +88,7 @@ export function AiWorkspaceController({
       submissionContext={controller.submissionContext}
       onAnswerQuestion={controller.answerQuestion}
       onListFileReferences={controller.listFileReferences}
+      onListProjectDirectories={controller.listProjectDirectories}
       onListSkills={controller.listSkills}
       skillsScopeKey={controller.skillsScopeKey}
       skillsNeedsRoot={controller.skillsNeedsRoot}
