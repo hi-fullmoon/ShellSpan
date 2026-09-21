@@ -91,8 +91,6 @@
 
 .ai-turn-process-trigger > .ai-disclosure-leading > .ai-disclosure-chevron {
   opacity: 1;
-  /* Match the visible text center; keep rotation independent of this correction. */
-  translate: 0 -1px;
 }
 
 .ai-turn-process-trigger[aria-expanded='false'] > .ai-disclosure-leading > .ai-disclosure-chevron {
@@ -129,13 +127,7 @@
   margin-top: 32px;
 }
 
-:is(
-  .ai-semantic-note,
-  .ai-reasoning-row,
-  .ai-turn-process,
-  .ai-tool-row-root,
-  .ai-question-history
-) > [data-slot='collapsible-content'] {
+:is(.ai-semantic-note, .ai-reasoning-row, .ai-turn-process, .ai-tool-row-root, .ai-question-history) > [data-slot='collapsible-content'] {
   height: var(--collapsible-panel-height);
   overflow: hidden;
   opacity: 1;
@@ -145,13 +137,7 @@
   will-change: height, opacity;
 }
 
-:is(
-    .ai-semantic-note,
-    .ai-reasoning-row,
-    .ai-turn-process,
-    .ai-tool-row-root,
-    .ai-question-history
-  )
+:is(.ai-semantic-note, .ai-reasoning-row, .ai-turn-process, .ai-tool-row-root, .ai-question-history)
   > [data-slot='collapsible-content']:is([data-starting-style], [data-ending-style]) {
   height: 0;
   opacity: 0;
@@ -179,20 +165,20 @@
   inset-block: 0;
   left: -300px;
   width: 300px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    color-mix(in srgb, var(--ai-canvas) 60%, transparent) 55%,
-    transparent 100%
-  );
+  background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--ai-canvas) 60%, transparent) 55%, transparent 100%);
   content: '';
   pointer-events: none;
   animation: ai-tool-row-sweep 2.6s ease-out infinite;
 }
 
 @keyframes ai-tool-row-sweep {
-  0% { left: -300px; }
-  90%, 100% { left: 100%; }
+  0% {
+    left: -300px;
+  }
+  90%,
+  100% {
+    left: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
