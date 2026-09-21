@@ -1,6 +1,7 @@
 import { readFile, access } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 import {
   includedRustFiles,
   rustIncludeSourceIsFormatted,
@@ -8,6 +9,21 @@ import {
 
 const root = path.resolve(import.meta.dirname, '../..');
 describe('quality gate wiring', () => {
+  it.each(['quality-gate.yml', 'release.yml'])('prepares rustfmt before frontend tests in %s', async workflow => {
+    const ci = parse(await readFile(path.join(root, '.github/workflows', workflow), 'utf8'));
+    const toolchain = await readFile(path.join(root, 'rust-toolchain.toml'), 'utf8');
+    let testedJobs = 0;
+    for (const job of Object.values(ci.jobs)) {
+      const testIndex = job.steps.findIndex(step => /\bpnpm (test|review:frontend)\b/.test(step.run ?? ''));
+      if (testIndex === -1) continue;
+      testedJobs += 1;
+      const setup = job.steps.slice(0, testIndex).find(step => step.uses?.startsWith('dtolnay/rust-toolchain@'));
+      expect(setup, `${workflow}: ${job.name} needs Rust before tests`).toBeDefined();
+      expect(setup.with.components).toContain('rustfmt');
+      expect(toolchain).toContain(`channel = "${setup.with.toolchain}"`);
+    }
+    expect(testedJobs).toBeGreaterThan(0);
+  });
   it('resolves every package script named by quality CI and every referenced script file', async () => {
     const { scripts } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
     const ci = await readFile(path.join(root, '.github/workflows/quality-gate.yml'), 'utf8');

@@ -300,6 +300,29 @@ mod tests {
     }
 
     #[test]
+    fn explicit_cleanup_releases_registration_while_worker_retains_handle() {
+        let registry = ExecutionCancellationRegistry::default();
+        let owner = registry.register("execution:worker-cleanup").unwrap();
+        let worker = owner.clone();
+        registry.cancel("execution:worker-cleanup").unwrap();
+
+        owner.remove_registration();
+        assert_eq!(
+            registry
+                .cancel("execution:worker-cleanup")
+                .unwrap_err()
+                .kind,
+            ExecutionCancellationErrorKind::OperationNotFound
+        );
+        let replacement = registry.register("execution:worker-cleanup").unwrap();
+        worker.remove_registration();
+        drop(owner);
+        drop(worker);
+        registry.cancel("execution:worker-cleanup").unwrap();
+        assert!(replacement.is_cancelled());
+    }
+
+    #[test]
     fn invalid_operation_ids_never_enter_the_registry() {
         let registry = ExecutionCancellationRegistry::default();
         for invalid in ["", "contains spaces", "contains/slash"] {
