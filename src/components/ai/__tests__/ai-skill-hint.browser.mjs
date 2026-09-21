@@ -33,7 +33,7 @@ try {
       const editor = page.getByRole('textbox');
       await editor.fill('/');
       await page.getByRole('option', { name: /system-status/ }).waitFor();
-      const hint = page.locator('[data-skill-completion] [data-slot="popover-description"]');
+      const hint = page.locator('[data-skill-completion] [role="group"] > p');
       const typography = await hint.evaluate(element => {
         const style = getComputedStyle(element);
         const detail = getComputedStyle(document.querySelector('[data-skill-completion] [role="option"] .text-xs'));
@@ -42,10 +42,23 @@ try {
           fits: element.scrollWidth <= element.clientWidth };
       });
       assert.equal(typography.size, typography.detailSize, 'Hint uses the existing auxiliary text size');
-      assert.equal(typography.weight, '400', 'Hint has regular font weight');
+      assert.equal(typography.weight, '500', 'Skills use the shared group heading weight');
       assert.equal(typography.family, typography.detailFamily, 'Hint uses the system font');
-      assert.equal(typography.color, typography.detailColor, 'Hint retains the muted text color');
+      assert.equal(await page.locator('[data-skill-completion] [data-slot="popover-header"]').count(), 0, 'Old skill popup header is removed');
       assert.ok(typography.fits, 'Hint fits narrow and wide containers');
+      const list = page.getByRole('listbox');
+      const bounds = await list.boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, 'Skills stay inside the viewport');
+      const option = page.getByRole('option', { name: '/disk-cleanup', exact: true });
+      await option.hover();
+      assert.equal(await page.getByRole('option', { selected: true }).count(), 1);
+      assert.equal(await editor.getAttribute('aria-activedescendant'), await option.getAttribute('id'));
+      const spacing = await option.evaluate(element => {
+        const icon = element.querySelector('svg').getBoundingClientRect();
+        const label = element.querySelector('span').getBoundingClientRect();
+        return label.left - icon.right;
+      });
+      assert.equal(spacing, 4, 'Skill icon and label have the shared 4px spacing');
       await page.screenshot({ path: `/tmp/shellspan-skill-hint-${locale}-${width}.png` });
       assert.equal(await editor.evaluate(element => element === document.activeElement), true);
       await editor.press('Escape');

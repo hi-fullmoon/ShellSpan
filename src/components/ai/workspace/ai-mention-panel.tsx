@@ -14,6 +14,7 @@ export interface MentionContext extends Omit<ComposerHistoryProps, 'onReadSessio
 export interface MentionOption {
   readonly key: string;
   readonly label: string;
+  readonly accessibleLabel?: string;
   readonly detail?: string;
   readonly inlineDetail?: boolean;
   readonly searchText?: string;
@@ -49,7 +50,7 @@ export function AiMentionPanel({ id, groups, index, onIndexChange, empty, header
         {group.options.map(option => {
           const position = offset++;
           return <Button key={option.key} id={`${id}-${position}`} type="button" role="option" tabIndex={-1}
-            aria-label={option.label} aria-description={option.detail} aria-selected={position === index}
+            aria-label={option.accessibleLabel ?? option.label} aria-description={option.detail} aria-selected={position === index}
             variant={position === index ? 'secondary' : 'ghost'} size="sm"
             className="h-auto min-h-7 w-full min-w-0 justify-start gap-1 px-1.5 py-1 text-sm leading-5 font-normal"
             onMouseEnter={() => onIndexChange(position)}
