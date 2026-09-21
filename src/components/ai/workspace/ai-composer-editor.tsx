@@ -9,6 +9,7 @@ import {
 } from 'lexical';
 
 import { cn } from '@/lib/utils';
+import { activeFileToken } from '@/lib/ai/file-reference-grammar';
 
 /** Plain-text offsets shared by the editor and completion menus. */
 export interface ComposerEditorHandle {
@@ -33,6 +34,24 @@ class CommandNode extends TextNode {
     return element;
   }
   isTextEntity() { return true; }
+}
+
+class DirectoryReferenceNode extends TextNode {
+  static getType() { return 'composer-directory-reference'; }
+  static clone(node: DirectoryReferenceNode) { return new DirectoryReferenceNode(node.__text, node.__key); }
+  constructor(text: string, key?: NodeKey) { super(text, key); }
+  static importJSON(json: SerializedTextNode) { return new DirectoryReferenceNode(json.text).updateFromJSON(json); }
+  exportJSON(): SerializedTextNode { return { ...super.exportJSON(), type: DirectoryReferenceNode.getType() }; }
+  canInsertTextBefore() { return false; }
+  canInsertTextAfter() { return false; }
+  isTextEntity() { return true; }
+  createDOM(config: EditorConfig) {
+    const element = super.createDOM(config);
+    element.classList.add('ai-composer-command');
+    element.classList.add('ai-composer-directory-reference');
+    element.dataset.composerDirectory = '';
+    return element;
+  }
 }
 
 class ChatReferenceNode extends TextNode {
@@ -114,7 +133,7 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
   const latest = useRef({ onChange, onSelectionChange, onKeyDown, commandNames, chatTitles });
   latest.current = { onChange, onSelectionChange, onKeyDown, commandNames, chatTitles };
   const [editor] = useState(() => createEditor({
-    namespace: 'ai-composer', nodes: [CommandNode, ChatReferenceNode], onError: error => { throw error; },
+    namespace: 'ai-composer', nodes: [CommandNode, ChatReferenceNode, DirectoryReferenceNode], onError: error => { throw error; },
   }));
   const [empty, setEmpty] = useState(!value);
   const offsets = useRef<[number, number]>([0, 0]);
@@ -127,9 +146,23 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
       latest.current.onKeyDown?.(event);
       return event.defaultPrevented;
     }, COMMAND_PRIORITY_CRITICAL);
-    const removeTransform = editor.registerNodeTransform(TextNode, node => {
-      if (node instanceof CommandNode || node instanceof ChatReferenceNode || !node.isSimpleText() || editor.isComposing()) return;
+    const transformText = (node: TextNode) => {
+      if (editor.isComposing()) return;
+      if (node instanceof DirectoryReferenceNode) {
+        return;
+      }
+      if (node instanceof CommandNode || node instanceof ChatReferenceNode || !node.isSimpleText()) return;
       const content = node.getTextContent();
+      // Directory references are atomic, just like selected skill commands.
+      for (let end = content.length; end > 0; end--) {
+        if (content[end - 1] !== '/') continue;
+        const token = activeFileToken(content, end);
+        if (!token || token.query.length <= 1) continue;
+        const referenceEnd = token.quoted && content[end] === '"' ? end + 1 : end;
+        const pieces = node.splitText(token.start, referenceEnd);
+        pieces[token.start === 0 ? 0 : 1].replace(new DirectoryReferenceNode(content.slice(token.start, referenceEnd)).setMode('token'));
+        return;
+      }
       for (const title of latest.current.chatTitles) {
         if (!title) continue;
         const start = content.indexOf(title);
@@ -147,7 +180,8 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
         target.replace(new CommandNode(match[2]).setMode('token'));
         return;
       }
-    });
+    };
+    const removeTransform = editor.registerNodeTransform(TextNode, transformText);
     const removeUpdate = editor.registerUpdateListener(({ editorState }) => {
       editorState.read(() => {
         const next = $getRoot().getTextContent();

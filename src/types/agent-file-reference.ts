@@ -8,3 +8,4 @@ export interface FileReferenceList {
   readonly excluded: number;
 }
 export type ListFileReferences = (query: string, signal: AbortSignal, root?: string) => Promise<FileReferenceList>;
+export type ListProjectDirectories = (query: string, signal: AbortSignal) => Promise<readonly string[]>;

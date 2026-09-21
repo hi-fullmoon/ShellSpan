@@ -27,10 +27,17 @@ export function formatFileMention(candidate: FileCandidate, preserveQuote = fals
   const directory = candidate.kind === 'directory';
   return `@${quoted ? '"' : ''}${path}${directory ? '/' : quoted ? '"' : ''}`;
 }
-export function insertFileMention(text: string, token: ActiveFileToken, candidate: FileCandidate): { text: string; caret: number } | null {
+export function insertFileMention(text: string, token: ActiveFileToken, candidate: FileCandidate, mode: 'select' | 'browse' = 'select'): { text: string; caret: number } | null {
   const mention = formatFileMention(candidate, token.quoted);
   if (mention === null) return null;
   const suffix = text.slice(token.end);
-  const inserted = mention + (candidate.kind === 'file' && (!suffix || !/^\s/u.test(suffix)) ? ' ' : '');
-  return { text: text.slice(0, token.start) + inserted + suffix, caret: token.start + inserted.length };
+  const directory = candidate.kind === 'directory';
+  if (directory && mode === 'browse') {
+    return { text: text.slice(0, token.start) + mention + suffix, caret: token.start + mention.length };
+  }
+  const completed = mention + (directory && mention.startsWith('@"') ? '"' : '');
+  const hasSeparator = /^\s/u.test(suffix);
+  const inserted = completed + (hasSeparator ? '' : ' ');
+  return { text: text.slice(0, token.start) + inserted + suffix,
+    caret: token.start + inserted.length + (directory && hasSeparator ? 1 : 0) };
 }

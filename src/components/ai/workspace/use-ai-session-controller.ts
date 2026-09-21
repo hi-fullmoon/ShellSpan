@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { createAgentSessionAdapter } from '@/lib/ai/agent-session-adapter';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
+import { listProjectDirectories as readProjectDirectories } from '@/lib/ai/project-directory-completion';
 import { questionKey } from '@/types/agent-question';
 import { useImageDraft } from './use-image-draft';
 import { sessionProviderConfig } from '@/lib/ai/session-settings';
@@ -98,6 +99,7 @@ export interface AiSessionController {
   /** Changes on navigation/reset, but not when a submission creates its session. */
   readonly submissionContext?: object;
   readonly listFileReferences: import('@/types/agent-file-reference').ListFileReferences;
+  readonly listProjectDirectories: import('@/types/agent-file-reference').ListProjectDirectories;
   readonly listSkills: (root?: string) => Promise<import('@/types/agent-skill').SkillUserList>;
   readonly skillsScopeKey: string;
   readonly skillsNeedsRoot: boolean;
@@ -662,6 +664,10 @@ export function useAiSessionController({
     const sessionId = await ensureProjectSession(root);
     return adapter.listSkills(sessionId);
   }, [activeTerminal, adapter, ensureProjectSession, openedSessionId, scope, t]);
+  const listProjectDirectories = useCallback<import('@/types/agent-file-reference').ListProjectDirectories>(async (query, signal) => {
+    if (scope !== 'terminal' || activeTerminal?.status !== 'connected') return [];
+    return readProjectDirectories(activeTerminal, query, signal);
+  }, [scope, activeTerminal]);
   const listFileReferences = useCallback<import('@/types/agent-file-reference').ListFileReferences>(async (query, signal, root) => {
     const epoch = projectEpoch.current;
     if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
@@ -1404,6 +1410,7 @@ export function useAiSessionController({
       cancel: () => { claimWorkspace(); return imageDraft.cancel(); },
     },
     listFileReferences,
+    listProjectDirectories,
     listSkills,
     projectTargetLabel: (() => {
       const target = visibleView?.snapshot.kind === 'agent' ? visibleView.snapshot.value.header.target : null;

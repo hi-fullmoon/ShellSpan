@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { AtSignIcon, BookOpenIcon, ChevronRightIcon, CornerDownLeftIcon, FileIcon, FolderIcon, FolderOpenIcon, InfoIcon, MessageCircleIcon, PaperclipIcon, RefreshCwIcon, ServerIcon, XIcon } from 'lucide-react';
+import { AtSignIcon, ChevronRightIcon, CornerDownLeftIcon, FileIcon, FolderIcon, FolderOpenIcon, InfoIcon, MessageCircleIcon, RefreshCwIcon, ServerIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Field, FieldLabel } from '@/components/ui/field';
+import { ProjectDirectoryInput } from './project-directory-input';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { PopoverHeader, PopoverTitle } from '@/components/ui/popover';
@@ -12,17 +14,17 @@ import { activeFileToken, insertFileMention } from '@/lib/ai/file-reference-gram
 import type { FileCandidate, FileReferenceList, ListFileReferences } from '@/types/agent-file-reference';
 import type { ComposerEditorHandle } from './ai-composer-editor';
 import { AiErrorNotice } from './ai-error-notice';
-import { AiProjectDirectoryInput } from './ai-project-directory-input';
 import { AiMentionPanel, type MentionContext, type MentionGroup, type MentionOption } from './ai-mention-panel';
-import { builtinSkills } from '@/lib/ai/builtin-skills';
+import { useComposerMenuGroups } from './ai-composer-menu-content';
 import { isTopLevelAiSession } from '@/lib/ai/session-list';
 
-export function useFileCompletion({ text, update, query, scopeKey, needsRoot, targetLabel, disabled, context }: {
+export function useFileCompletion({ text, update, query, listDirectories, scopeKey, needsRoot, targetLabel, disabled, context }: {
   text: string; update: (value: string) => void; query?: ListFileReferences; scopeKey?: string;
   needsRoot?: boolean; targetLabel?: string; disabled: boolean;
+  listDirectories?: import('@/types/agent-file-reference').ListProjectDirectories;
   context?: MentionContext;
 }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const editor = useRef<ComposerEditorHandle>(null);
   const [selection, setSelection] = useState<[number, number]>([0, 0]);
   const [focused, setFocused] = useState(false);
@@ -86,9 +88,9 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
     return t('ai.workspace.files.unavailable');
   };
   const readSelection = (element: ComposerEditorHandle) => setSelection([element.selectionStart, element.selectionEnd]);
-  const choose = (candidate: FileCandidate) => {
+  const choose = (candidate: FileCandidate, mode: 'select' | 'browse' = 'select') => {
     if (!token || !open || loading) return;
-    const next = insertFileMention(text, token, candidate);
+    const next = insertFileMention(text, token, candidate, mode);
     if (!next) return;
     version.current++;
     setResult(null);
@@ -118,7 +120,9 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
     ? `${targetName} (${target.username}@${target.host}:${target.port})`
     : targetName;
   const fileSource = target ? `${t(target.kind === 'remote' ? 'ai.workspace.mentions.remoteProject' : 'ai.workspace.mentions.localProject')} · ${targetName}` : targetLabel;
-  const hasEntries = Boolean(result?.entries.length);
+  const foldersOnly = browsing || queryText.includes('/');
+  const candidates = (result?.entries ?? []).filter(candidate => !foldersOnly || candidate.kind === 'directory');
+  const hasEntries = candidates.length > 0;
   const replaceToken = (replacement: string) => {
     if (!token) return;
     const suffix = text.slice(token.end);
@@ -134,6 +138,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
   };
   const browse = () => {
     setBrowsing(true); setDismissed(null); setFocused(true);
+    if (needsRoot) { setError(null); setRootOpen(true); }
     const start = editor.current?.selectionStart ?? text.length;
     const end = editor.current?.selectionEnd ?? start;
     const active = activeFileToken(text, start, end);
@@ -141,19 +146,24 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
     const caret = active ? start : next.length - text.slice(end).length;
     if (!active) update(next);
     setSelection([caret, caret]);
-    requestAnimationFrame(() => { if (editor.current?.value === next) { editor.current.focus(); editor.current.setSelectionRange(caret, caret); } });
+    requestAnimationFrame(() => {
+      if (!needsRoot && editor.current?.value === next) {
+        editor.current.element?.focus({ preventScroll: true });
+        editor.current.focus(); editor.current.setSelectionRange(caret, caret);
+        setSelection([caret, caret]); setBrowsing(true);
+      }
+    });
   };
   const normalized = queryText.toLocaleLowerCase();
   const matches = (...values: string[]) => values.join(' ').toLocaleLowerCase().includes(normalized);
+  const menuGroups = useComposerMenuGroups({ agent: Boolean(context?.agent),
+    onAddFile: () => { replaceToken(''); context?.onUpload(); },
+    onAddFolder: browse,
+    onSkill: name => replaceToken(`/${name} `),
+  });
   const groups: MentionGroup[] = context ? [
-    { label: t('ai.workspace.addMenu.add'), options: [
-      ...(matches(t('ai.workspace.mentions.upload'), t('ai.workspace.addMenu.fileHint')) ? [{ key: 'upload', label: t('ai.workspace.mentions.upload'), detail: t('ai.workspace.mentions.localAttachment'), icon: <PaperclipIcon data-icon="inline-start" />, choose: () => { replaceToken(''); context.onUpload(); } }] : []),
-      ...(query && matches(t('ai.workspace.mentions.project'), targetLabel ?? '') ? [{ key: 'project', label: t('ai.workspace.mentions.project'), detail: targetLabel, icon: <FolderOpenIcon data-icon="inline-start" />, choose: () => { setBrowsing(true); if (needsRoot) { setError(null); setRootOpen(true); } } }] : []),
-    ] },
-    ...(context.agent ? [{ label: t('ai.workspace.skills.title'), options: builtinSkills.filter(skill => matches(skill.name, skill.description, skill.descriptionZh)).map(skill => ({
-      key: `skill:${skill.name}`, label: locale === 'zh-CN' ? skill.descriptionZh : skill.description, detail: `/${skill.name}`, icon: <BookOpenIcon data-icon="inline-start" />,
-      choose: () => replaceToken(`/${skill.name} `),
-    })) }] : []),
+    ...(!browsing ? [
+    ...menuGroups.slice(0, -1).map(group => ({ ...group, options: group.options.filter(option => matches(option.label, option.detail ?? '', option.searchText ?? '')) })),
     { label: t('ai.workspace.addMenu.history'), options: normalized && !context.sessionsLoading && !context.sessionsError && context.onSession
       ? (context.sessions ?? []).filter(session => session.id !== context.currentSessionId && !session.archived && isTopLevelAiSession(session, context.sessions ?? []) && matches(session.title))
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).map(session => ({ key: `chat:${session.id}`, label: session.title, detail: t('ai.workspace.addMenu.chat'), icon: <MessageCircleIcon data-icon="inline-start" />,
@@ -161,11 +171,13 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
         }))
       : normalized && context.sessionsError ? [{ key: 'retry-history', label: t('ai.workspace.addMenu.retry'), icon: <RefreshCwIcon data-icon="inline-start" />, choose: () => context.onRefreshSessions?.() }] : [],
       notice: !normalized ? t(context.agent ? 'ai.workspace.addMenu.mentionSearchHint' : 'ai.workspace.addMenu.searchHistoryHint') : context.sessionsLoading ? t('ai.workspace.addMenu.loading') : undefined,
+      showEmptyLabel: !normalized,
     },
-    ...(showFiles ? [{ label: t('ai.workspace.mentions.project'), options: needsRoot
+    ] satisfies MentionGroup[] : []),
+    ...(showFiles ? [{ label: t(foldersOnly ? 'ai.workspace.mentions.folders' : 'ai.workspace.mentions.project'), options: needsRoot
       ? [{ key: 'root', label: t('ai.workspace.files.chooseRoot'), detail: targetLabel, icon: <FolderOpenIcon data-icon="inline-start" />, choose: () => { setError(null); setRootOpen(true); } }]
-      : (result?.entries ?? []).map(candidate => ({ key: `file:${candidate.path}`, label: `${candidate.path}${candidate.kind === 'directory' ? '/' : ''}`, detail: fileSource, icon: candidate.kind === 'directory' ? <FolderIcon data-icon="inline-start" /> : <FileIcon data-icon="inline-start" />, choose: () => choose(candidate) })),
-      notice: <>{targetDetails && <p>{targetDetails}</p>}{scope?.root && <p className="break-all">{scope.root}</p>}{loading && <p>{t('ai.workspace.files.loading')}</p>}{error && <p>{errorText(error)}</p>}{result?.status === 'truncated' && <p>{t('ai.workspace.files.truncated')}</p>}{Boolean(result?.excluded) && <p>{t('ai.workspace.files.excluded')}</p>}{result?.status === 'ready' && !hasEntries && <p>{t('ai.workspace.files.empty')}</p>}</>,
+      : candidates.map(candidate => ({ key: `file:${candidate.path}`, label: `${candidate.path}${candidate.kind === 'directory' ? '/' : ''}`, detail: fileSource, icon: candidate.kind === 'directory' ? <FolderIcon data-icon="inline-start" /> : <FileIcon data-icon="inline-start" />, choose: () => choose(candidate), enterDirectory: candidate.kind === 'directory' ? () => choose(candidate, 'browse') : undefined })),
+      notice: <>{loading && <p>{t('ai.workspace.files.loading')}</p>}{error && <p>{errorText(error)}</p>}{result?.status === 'truncated' && <p>{t('ai.workspace.files.truncated')}</p>}{Boolean(result?.excluded) && <p>{t('ai.workspace.files.excluded')}</p>}{result?.status === 'ready' && !hasEntries && <p>{t('ai.workspace.files.empty')}</p>}</>,
     }] : []),
   ] : [];
   const options: readonly MentionOption[] = groups.flatMap(group => group.options);
@@ -209,10 +221,10 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
           {error && <AiErrorNotice title={t('ai.workspace.recovery.title')}>{errorText(error)}</AiErrorNotice>}
           {result?.status === 'truncated' && <p>{t('ai.workspace.files.truncated')}</p>}
           {Boolean(result?.excluded) && <p>{t('ai.workspace.files.excluded')}</p>}
-          {result?.status === 'ready' && result.entries.length === 0 && <EmptyState title={t('ai.workspace.files.empty')} />}
+          {result?.status === 'ready' && !hasEntries && <EmptyState title={t('ai.workspace.files.empty')} />}
         </div>
         <div id={id} role="listbox" aria-label={t('ai.workspace.files.title')} className="flex min-h-0 min-w-0 shrink-0 flex-col gap-0.5">
-          {result?.entries.map((candidate, i) => {
+          {candidates.map((candidate, i) => {
             const directory = candidate.kind === 'directory';
             const label = `${candidate.path}${directory ? '/' : ''}`;
             const slash = candidate.path.lastIndexOf('/');
@@ -244,21 +256,44 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
       </div>
     </div> : null;
   const dialog = <Dialog open={rootOpen} onOpenChange={value => { setRootOpen(value); if (!value) { rootAbort.current?.abort(); setBinding(false); } }}>
-      <DialogContent finalFocus={() => editor.current?.element ?? null} onClick={event => event.stopPropagation()}>
-        <DialogTitle>{t('ai.workspace.files.chooseRoot')}</DialogTitle>
-        <DialogDescription className="break-all">{targetLabel}</DialogDescription>
-        <AiProjectDirectoryInput value={root} onChange={setRoot} onConfirm={() => void confirmRoot()} loading={binding} actionLabel={t('ai.workspace.files.bind')} />
+      <DialogContent className="w-[calc(100%-2rem)]" finalFocus={() => editor.current?.element ?? null} onClick={event => event.stopPropagation()}>
+        <DialogHeader className="pr-6">
+          <DialogTitle>{t('ai.workspace.files.chooseRoot')}</DialogTitle>
+          {targetLabel && <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+            <ServerIcon aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="min-w-0 break-all">{targetLabel}</span>
+          </div>}
+          <DialogDescription>{t('ai.workspace.skills.rootHint')}</DialogDescription>
+        </DialogHeader>
+        <Field>
+          <FieldLabel htmlFor={`${id}-project-root`}>{t('ai.workspace.skills.root')}</FieldLabel>
+          {rootOpen && <ProjectDirectoryInput key={scopeKey} id={`${id}-project-root`} value={root} disabled={binding}
+            onChange={setRoot} list={listDirectories} onConfirm={() => void confirmRoot()} />}
+        </Field>
         {error && <AiErrorNotice title={t('ai.workspace.recovery.title')}>{errorText(error)}</AiErrorNotice>}
+        <DialogFooter className="flex-row justify-end">
+          <DialogClose render={<Button variant="outline" />}>{t('common.cancel')}</DialogClose>
+          <Button disabled={binding || !root.trim()} onClick={() => void confirmRoot()}>
+            {binding && <Spinner data-icon="inline-start" />}
+            {t('ai.workspace.files.bind')}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>;
-  return { panel: context && open ? <AiMentionPanel id={id} groups={groups} index={activeIndex} empty={!options.length && !loading && !context.sessionsLoading && !error && !context.sessionsError} /> : panel, dialog, open, editor, browse,
+  return { panel: context && open ? <AiMentionPanel id={id} groups={groups} index={activeIndex}
+    header={showFiles && (targetDetails || scope?.root) ? <div className="flex min-w-0 items-center gap-1">
+      {targetDetails && <span className="max-w-[50%] truncate" title={targetDetails}>{targetDetails}</span>}
+      {targetDetails && scope?.root && <span aria-hidden="true" className="shrink-0">·</span>}
+      {scope?.root && <span className="min-w-0 flex-1 truncate" title={scope.root}>{scope.root}</span>}
+    </div> : undefined}
+    empty={!options.length && !loading && !context.sessionsLoading && !error && !context.sessionsError} /> : panel, dialog, open, editor, browse,
     dismiss: () => setDismissed(key),
     editorProps: {
       ref: editor,
       'aria-autocomplete': 'list' as const,
       'aria-controls': open ? id : undefined,
       'aria-expanded': open,
-      'aria-activedescendant': open && (context ? options[activeIndex] : result?.entries[index]) ? `${id}-${context ? activeIndex : index}` : undefined,
+      'aria-activedescendant': open && (context ? options[activeIndex] : candidates[index]) ? `${id}-${context ? activeIndex : index}` : undefined,
       onSelectionChange: () => { if (editor.current) readSelection(editor.current); },
       onFocus: () => { setFocused(true); if (editor.current) readSelection(editor.current); },
       onBlur: () => setFocused(false),
@@ -272,21 +307,25 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
         event.preventDefault(); event.stopPropagation();
         if (event.key === 'Escape') { setDismissed(key); return true; }
         if (event.repeat && (event.key === 'Enter' || event.key === 'Tab')) return true;
-        if (event.key === 'Enter' || event.key === 'Tab') options[activeIndex]?.choose();
+        if (event.key === 'Enter' || event.key === 'Tab') {
+          const option = options[activeIndex];
+          if (event.key === 'Tab' && option?.enterDirectory) option.enterDirectory();
+          else option?.choose();
+        }
         else if (options.length) {
           const next = (activeIndex + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
           setIndex(next); document.getElementById(`${id}-${next}`)?.scrollIntoView({ block: 'nearest' });
         }
         return true;
       }
-      if (event.key === 'Tab' && !needsRoot && (loading || !result?.entries.length)) { setDismissed(key); return false; }
+      if (event.key === 'Tab' && !needsRoot && (loading || !hasEntries)) { setDismissed(key); return false; }
       event.preventDefault(); event.stopPropagation();
       if (needsRoot && (event.key === 'Enter' || event.key === 'Tab')) { setError(null); setRootOpen(true); return true; }
       if (event.key === 'Escape') { setDismissed(key); setResult(null); return true; }
       if (event.repeat && (event.key === 'Enter' || event.key === 'Tab')) return true;
-      const entries = result?.entries ?? [];
+      const entries = candidates;
       if (entries.length && !loading) {
-        if (event.key === 'Enter' || event.key === 'Tab') choose(entries[index]);
+        if (event.key === 'Enter' || event.key === 'Tab') choose(entries[index], event.key === 'Tab' ? 'browse' : 'select');
         else {
           const next = (index + (event.key === 'ArrowDown' ? 1 : -1) + entries.length) % entries.length;
           setIndex(next); document.getElementById(`${id}-${next}`)?.scrollIntoView({ block: 'nearest' });

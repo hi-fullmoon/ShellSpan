@@ -138,7 +138,8 @@
   border-radius: 8px;
 }
 
-.ai-composer-add-menu [data-slot='dropdown-menu-item'] > svg {
+.ai-composer-add-menu [data-slot='dropdown-menu-item'] > svg,
+.ai-completion-popup [data-mention-completion] [role='option'] > svg {
   width: 14px;
   height: 14px;
 }

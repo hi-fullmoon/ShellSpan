@@ -80,6 +80,7 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly pendingApproval?: AiPendingApproval | null;
   readonly pendingQuestion?: import('@/types/agent-question').AgentQuestionView | null;
   readonly onListFileReferences?: import('@/types/agent-file-reference').ListFileReferences;
+  readonly onListProjectDirectories?: import('@/types/agent-file-reference').ListProjectDirectories;
   readonly onListSkills?: (root?: string) => Promise<import('@/types/agent-skill').SkillUserList>;
   readonly skillsScopeKey?: string;
   readonly attachmentScopeKey?: string;
@@ -133,6 +134,7 @@ export function AiComposerSeat({
   pendingQuestion,
   onAnswerQuestion,
   onListFileReferences,
+  onListProjectDirectories,
   onListSkills,
   skillsScopeKey,
   attachmentScopeKey,
@@ -350,7 +352,7 @@ export function AiComposerSeat({
     if (attachmentOwnerRef.current !== attachmentOwner) return;
     void documents.addFrom(async signal => [await onReadSession(summary, signal)], summary.title);
   } : undefined;
-  const completion = useFileCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListFileReferences : undefined, scopeKey: attachmentOwner, needsRoot: skillsNeedsRoot, targetLabel: projectTargetLabel, disabled: !attachmentsEnabled,
+  const completion = useFileCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListFileReferences : undefined, listDirectories: onListProjectDirectories, scopeKey: attachmentOwner, needsRoot: skillsNeedsRoot, targetLabel: projectTargetLabel, disabled: !attachmentsEnabled,
     context: { agent: mode === 'agent', onUpload: uploadLocalFile, onSession: referenceSession,
       sessions, sessionsLoading, sessionsError, currentSessionId: currentSessionId ?? composerState?.sessionId, onRefreshSessions },
   });
@@ -678,7 +680,7 @@ export function AiComposerSeat({
               />
             </div>
           )}
-          <AiCompletionPopover anchor={completionAnchor} fixedHeight={completion.open && !skillCompletion.open} onDismiss={() => {
+          <AiCompletionPopover anchor={completionAnchor} fixedHeight={mode === 'agent' && completion.open && !skillCompletion.open} onDismiss={() => {
             skillCompletion.dismiss();
             completion.dismiss();
           }}>

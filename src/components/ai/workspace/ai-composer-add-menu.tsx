@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { BookOpenIcon, FilePlusIcon, FolderPlusIcon, PlusIcon } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { PlusIcon } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { InputGroupButton } from '@/components/ui/input-group';
 import { useI18n } from '@/hooks/useI18n';
-import { builtinSkills } from '@/lib/ai/builtin-skills';
+import { AiComposerMenuRow, useComposerMenuGroups } from './ai-composer-menu-content';
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
 import { cn } from '@/lib/utils';
 
@@ -38,10 +38,20 @@ export function AiComposerAddMenu({
   readonly onAddFolder: () => void;
   readonly onSkill: (name: string) => void;
 }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const pendingFolder = useRef(false);
+  const groups = useComposerMenuGroups({ agent, onAddFile, onSkill,
+    onAddFolder: () => { pendingFolder.current = true; setOpen(false); },
+  });
   return (
-    <DropdownMenu open={open && !disabled} onOpenChange={setOpen}>
+    <DropdownMenu open={open && !disabled} onOpenChange={setOpen}
+      onOpenChangeComplete={value => {
+        if (!value && pendingFolder.current) {
+          pendingFolder.current = false;
+          if (!disabled) onAddFolder();
+        }
+      }}>
       <DropdownMenuTrigger
         render={
           <InputGroupButton
@@ -56,6 +66,7 @@ export function AiComposerAddMenu({
         <PlusIcon nonScalingStroke strokeWidth={1.2} />
       </DropdownMenuTrigger>
       <DropdownMenuContent
+        finalFocus={() => !pendingFolder.current}
         side="top"
         sideOffset={8}
         align="start"
@@ -70,55 +81,18 @@ export function AiComposerAddMenu({
       >
         <div className="min-h-0 flex-1 overflow-y-auto" data-composer-menu-scroll="">
           <div className="flex flex-col gap-1 p-2">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel className="py-0.5">{t('ai.workspace.addMenu.add')}</DropdownMenuLabel>
-              <DropdownMenuItem
-                className="min-h-7 gap-1"
-                onClick={onAddFile}
-                aria-label={t('ai.workspace.attachments.file')}
-                aria-description={`${t('ai.workspace.documents.hint')} ${t('ai.workspace.documents.limits')} ${t('ai.workspace.documents.imageHint')}`}
-              >
-                <FilePlusIcon />
-                <span className="shrink-0">{t('ai.workspace.attachments.file')}</span>
-                <span className="truncate text-xs text-muted-foreground">{t('ai.workspace.addMenu.fileHint')}</span>
-              </DropdownMenuItem>
-              {agent && (
-                <DropdownMenuItem
-                  className="min-h-7 gap-1"
-                  onClick={onAddFolder}
-                  aria-label={t('ai.workspace.attachments.folder')}
-                  aria-description={t('ai.workspace.attachments.projectHint')}
-                >
-                  <FolderPlusIcon />
-                  <span className="shrink-0">{t('ai.workspace.attachments.folder')}</span>
-                  <span className="truncate text-xs text-muted-foreground">{t('ai.workspace.addMenu.folderHint')}</span>
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuGroup>
-            {agent && (
-              <DropdownMenuGroup>
-                <DropdownMenuLabel className="py-0.5">{t('ai.workspace.skills.title')}</DropdownMenuLabel>
-                {builtinSkills.map((skill) => (
-                  <DropdownMenuItem
-                    key={skill.name}
-                    className="min-h-7 gap-1"
-                    aria-label={`/${skill.name}`}
-                    aria-description={locale === 'zh-CN' ? skill.descriptionZh : skill.description}
-                    onClick={() => onSkill(skill.name)}
-                  >
-                    <BookOpenIcon />
-                    <span className="min-w-0 flex-1 truncate">{locale === 'zh-CN' ? skill.descriptionZh : skill.description}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">/{skill.name}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            )}
-            <DropdownMenuGroup>
-              <DropdownMenuLabel className="py-0.5">{t('ai.workspace.addMenu.history')}</DropdownMenuLabel>
-              <p className="px-1.5 py-1 text-xs text-muted-foreground">
-                {t(agent ? 'ai.workspace.addMenu.mentionSearchHint' : 'ai.workspace.addMenu.searchHistoryHint')}
-              </p>
-            </DropdownMenuGroup>
+            {groups.map(group => <DropdownMenuGroup key={group.label}>
+              <DropdownMenuLabel className="py-0.5">{group.label}</DropdownMenuLabel>
+              {group.options.map(option => <DropdownMenuItem key={option.key} className="min-h-7 gap-1"
+                onClick={option.choose}
+                aria-label={option.key.startsWith('skill:') ? option.detail : option.label}
+                aria-description={option.key === 'upload'
+                  ? `${t('ai.workspace.documents.hint')} ${t('ai.workspace.documents.limits')} ${t('ai.workspace.documents.imageHint')}`
+                  : option.key === 'project' ? t('ai.workspace.attachments.projectHint') : option.label}>
+                <AiComposerMenuRow option={option} />
+              </DropdownMenuItem>)}
+              {group.notice && <p className="px-1.5 py-1 text-xs text-muted-foreground">{group.notice}</p>}
+            </DropdownMenuGroup>)}
           </div>
         </div>
       </DropdownMenuContent>

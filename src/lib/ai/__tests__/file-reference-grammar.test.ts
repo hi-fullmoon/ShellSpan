@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { activeFileToken, formatFileMention, insertFileMention } from '../file-reference-grammar';
 describe('file reference grammar', () => {
+  it.each(['src', 'space dir'])('keeps %s active when browsing with Tab', path => {
+    const next = insertFileMention('@di', activeFileToken('@di', 3)!, { path, kind: 'directory' }, 'browse')!;
+    expect(next.text).toBe(path.includes(' ') ? '@"space dir/' : '@src/');
+    expect(activeFileToken(next.text, next.caret)?.query).toBe(`${path}/`);
+  });
+  it.each(['.docker', 'space dir'])('separates the selected directory %s from following prose', path => {
+    const next = insertFileMention('@di', activeFileToken('@di', 3)!, { path, kind: 'directory' })!;
+    expect(next.text).toBe(path.includes(' ') ? '@"space dir/" ' : '@.docker/ ');
+    expect(next.caret).toBe(next.text.length);
+    expect(activeFileToken(next.text, next.caret)).toBeNull();
+  });
+  it('reuses the following space and places the caret after it', () => {
+    const text = '@di next';
+    expect(insertFileMention(text, activeFileToken(text, 3)!, { path: '.docker', kind: 'directory' }))
+      .toEqual({ text: '@.docker/ next', caret: 10 });
+  });
   it.each(['a@b.com', 'hello a@b', '@"done" ', 'text', '@bad"name', '@x\ny'])('does not activate %s at end', text => expect(activeFileToken(text, text.length)).toBeNull());
   it.each(['@', 'use @src', '🙂\n@"space dir/', 'text @"space path'])('activates only a token at its caret: %s', text => expect(activeFileToken(text, text.length)).not.toBeNull());
   it('keeps surrounding text and replaces complete token when caret is in its middle', () => {

@@ -75,7 +75,7 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
   const panel = open ? <div className="flex max-h-[inherit] min-h-0 w-full min-w-0 flex-col" data-skill-completion="">
     <PopoverHeader className="shrink-0 gap-0.5 px-3 py-2">
       <PopoverTitle>{t('ai.workspace.skills.title')}</PopoverTitle>
-      <PopoverDescription>{t('ai.workspace.skills.hint')}</PopoverDescription>
+      <PopoverDescription className="text-xs font-normal">{t('ai.workspace.skills.hint')}</PopoverDescription>
     </PopoverHeader>
     <div className="flex min-h-0 min-w-0 flex-col gap-1 overflow-y-auto px-2 pb-2">
       <div role="status" aria-live="polite" className="shrink-0 px-2 empty:hidden">
