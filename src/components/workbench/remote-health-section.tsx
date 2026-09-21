@@ -107,7 +107,7 @@ function RemoteMetricCard({
   return (
     <Card size="sm" radius="compact">
       <CardHeader>
-        <CardDescription className="flex items-center gap-2">
+        <CardDescription className="flex items-center gap-1">
           <Icon className="size-3.5" aria-hidden />
           {label}
         </CardDescription>

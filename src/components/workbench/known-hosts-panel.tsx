@@ -180,7 +180,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
                     />
                   </IconActionButton>
                 </div>
-                <div className="flex items-start gap-2 rounded-md border border-app-border/60 bg-muted/60 px-2.5 py-2">
+                <div className="flex items-start gap-1 rounded-md border border-app-border/60 bg-muted/60 px-2.5 py-2">
                   <FingerprintIcon className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
                     <div className="text-[10px] font-medium uppercase leading-tight tracking-[0.08em] text-muted-foreground">

@@ -49,7 +49,7 @@ function MetricCard({
   return (
     <Card size="sm">
       <CardHeader>
-        <CardDescription className="flex items-center gap-2">
+        <CardDescription className="flex items-center gap-1">
           <Icon />
           {label}
         </CardDescription>

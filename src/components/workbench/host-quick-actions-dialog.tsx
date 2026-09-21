@@ -394,7 +394,7 @@ export function HostQuickActionsDialog({
               return (
                 <Card key={action.id} size="sm">
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
+                    <CardTitle className="flex items-center gap-1">
                       <Icon className="size-4 text-muted-foreground" />
                       <span className="truncate">{action.label}</span>
                     </CardTitle>

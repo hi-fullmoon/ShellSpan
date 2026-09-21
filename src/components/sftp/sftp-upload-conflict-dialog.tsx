@@ -54,7 +54,7 @@ export const SftpUploadConflictDialog: React.FC<SftpUploadConflictDialogProps> =
           <DialogDescription className="min-w-0 break-words text-app-text">
             {t('sftp.conflict.message', { name: displayConflict.targetName })}
           </DialogDescription>
-          <div className="flex min-w-0 items-center gap-3 overflow-hidden rounded-lg border border-app-border bg-app-surface-muted/45 p-3">
+          <div className="flex min-w-0 items-center gap-1 overflow-hidden rounded-lg border border-app-border bg-app-surface-muted/45 p-3">
             <FileWarningIcon className="size-5 shrink-0 text-app-text-soft" aria-hidden="true" />
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span className="block w-full truncate text-sm font-medium text-app-text">

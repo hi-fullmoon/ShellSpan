@@ -162,7 +162,7 @@ const ProcessTrend: React.FC<{
 }> = ({ icon: Icon, label, value, detail, data, tone = 'primary' }) => (
   <div className="flex min-h-28 min-w-0 flex-col gap-1.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5">
     <div className="flex items-start justify-between gap-3">
-      <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
+      <div className="flex min-w-0 items-center gap-1 text-xs font-medium text-muted-foreground">
         <Icon aria-hidden />
         <span className="truncate">{label}</span>
       </div>
@@ -199,7 +199,7 @@ const ResourceRow: React.FC<{
 }> = ({ icon: Icon, label, value, percent, tone = 'ok', hint }) => (
   <div className="flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/30 p-3">
     <div className="flex min-w-0 items-center justify-between gap-3">
-      <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
+      <div className="flex min-w-0 items-center gap-1 text-sm font-medium text-foreground">
         <Icon aria-hidden />
         <span className="truncate">{label}</span>
       </div>

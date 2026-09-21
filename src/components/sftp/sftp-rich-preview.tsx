@@ -228,7 +228,7 @@ export const ArchivePreview: React.FC<{ content: string; extension: string; fall
   if (!entries) return <>{fallback}</>;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-10 items-center gap-2 border-b px-3 text-xs text-muted-foreground">
+      <div className="flex min-h-10 items-center gap-1 border-b px-3 text-xs text-muted-foreground">
         <FileArchiveIcon className="size-4" />
         <span>{t('sftp.preview.archive.summary', { count: entries.length })}</span>
       </div>
@@ -245,7 +245,7 @@ export const ArchivePreview: React.FC<{ content: string; extension: string; fall
             {entries.map((entry, index) => (
               <TableRow key={`${entry.name}-${index}`}>
                 <TableCell className="max-w-xl">
-                  <span className="flex min-w-0 items-center gap-2">
+                  <span className="flex min-w-0 items-center gap-1">
                     {entry.isDirectory ? <FolderIcon className="size-4 shrink-0 text-muted-foreground" /> : <FileArchiveIcon className="size-4 shrink-0 text-muted-foreground" />}
                     <span className="truncate" title={entry.name}>{entry.name}</span>
                   </span>

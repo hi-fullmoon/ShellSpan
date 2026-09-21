@@ -70,7 +70,7 @@ function PreflightStepRow({
   const canTrust = step.trustable && step.host && step.port !== undefined;
 
   return (
-    <li className="grid grid-cols-[auto_1fr_auto] items-start gap-2 rounded-lg border border-app-border p-3">
+    <li className="grid grid-cols-[auto_1fr_auto] items-start gap-1 rounded-lg border border-app-border p-3">
       <StepIcon status={step.status} />
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">

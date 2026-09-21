@@ -153,7 +153,7 @@ export const TransferProgress: React.FC = () => {
           <div
             key={op.operationId}
             data-error-category={op.errorCategory}
-            className="relative flex h-8 items-center gap-2 border-b border-app-border/50 bg-app-surface-muted/60 px-2 text-xs last:border-b-0"
+            className="relative flex h-8 items-center gap-1 border-b border-app-border/50 bg-app-surface-muted/60 px-2 text-xs last:border-b-0"
           >
             {op.kind === 'delete' ? (
               <Trash2Icon
@@ -177,7 +177,7 @@ export const TransferProgress: React.FC = () => {
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <span className="mr-2 flex cursor-help items-center gap-1.5 text-destructive">
+                      <span className="mr-2 flex cursor-help items-center gap-1 text-destructive">
                         <CircleAlertIcon className="size-4" aria-hidden="true" />
                         {t(
                           op.kind === 'delete'
