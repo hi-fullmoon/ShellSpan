@@ -240,7 +240,7 @@ export const SftpFileListRow = React.memo(function SftpFileListRow({
       <div
         data-sftp-file-cell
         className={cn(
-          'flex h-full min-w-0 items-center gap-1.5 -ml-2 pr-2 pl-2',
+          'flex h-full min-w-0 items-center gap-1 -ml-2 pr-2 pl-2',
           cellStateClass,
           selected ? 'text-app-primary' : 'text-app-text',
         )}

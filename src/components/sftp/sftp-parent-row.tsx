@@ -43,7 +43,7 @@ export const SftpParentRow: React.FC<SftpParentRowProps> = ({
       }}
       data-testid="sftp-parent-row"
     >
-      <div data-sftp-file-cell className={cn(cellClass, 'min-w-0 gap-1.5 -ml-2 pr-2 pl-2 text-app-text')}>
+      <div data-sftp-file-cell className={cn(cellClass, 'min-w-0 gap-1 -ml-2 pr-2 pl-2 text-app-text')}>
         {batchMode && <div className="h-3.5 w-3.5 shrink-0" />}
         <FolderUpIcon className="h-4 w-4 shrink-0 text-app-primary" />
         <span className="truncate text-[13px] font-medium">..</span>

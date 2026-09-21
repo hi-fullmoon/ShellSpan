@@ -128,17 +128,6 @@ describe('ConnectionList', () => {
   });
 
   it('renders the profile list in a grid capped at three columns', () => {
-    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-      width: 1200,
-      height: 0,
-      x: 0,
-      y: 0,
-      top: 0,
-      right: 1200,
-      bottom: 0,
-      left: 0,
-      toJSON: () => ({}),
-    });
     const { container } = render(
       <ConnectionList
         profiles={[makeProfile()]}
@@ -160,12 +149,11 @@ describe('ConnectionList', () => {
       screen.queryByText('workbench.connections.empty'),
     ).not.toBeInTheDocument();
 
-    const grid = container.querySelector('[style*="grid-template-columns"]');
-    expect(grid).toHaveStyle({
-      gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-    });
+    const grid = container.querySelector('.grid');
+    expect(grid).toHaveClass('grid-cols-1', 'gap-3', '@min-[640px]/connections:grid-cols-2', '@min-[900px]/connections:grid-cols-3');
+    expect(grid?.parentElement).toHaveClass('@container/connections');
+    expect(grid).not.toHaveAttribute('style');
     expect(grid).not.toHaveClass('items-start');
-    rectSpy.mockRestore();
   });
 
   it('keeps connection-card actions aligned at the bottom of equal-height rows', () => {

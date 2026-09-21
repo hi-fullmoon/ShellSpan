@@ -311,7 +311,7 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, co
       <SftpDialogContent className="h-[min(84vh,780px)] max-w-5xl">
         <SftpDialogHeader
           title={
-            <span className="flex min-w-0 items-center gap-2">
+            <span className="flex min-w-0 items-center gap-1">
               <FileTypeIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
               <Tooltip>
                 <TooltipTrigger render={<span className="truncate" />}>{displayTarget.name}</TooltipTrigger>

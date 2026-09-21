@@ -91,8 +91,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
         toastOptions={{
           classNames: {
             toast:
-              'w-fit! min-w-48! max-w-[var(--width)]! gap-2! px-4! py-1.5! text-sm! shadow-[var(--shadow-toast)]!',
-            icon: 'mt-[3px]! self-start!',
+              'w-fit! min-w-48! max-w-[var(--width)]! gap-1! px-4! py-1.5! text-sm! shadow-[var(--shadow-toast)]!',
+            icon: 'mx-0! mt-[3px]! self-start!',
             title: 'font-normal!',
           },
         }}

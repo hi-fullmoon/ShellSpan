@@ -43,6 +43,7 @@ describe('Toaster', () => {
       expect(document.querySelector('[data-icon]')).toHaveClass(
         'mt-[3px]!',
         'self-start!',
+        'mx-0!',
       );
     });
   });
@@ -55,6 +56,7 @@ describe('Toaster', () => {
       'w-fit!',
       'min-w-48!',
       'max-w-[var(--width)]!',
+      'gap-1!',
     );
   });
 

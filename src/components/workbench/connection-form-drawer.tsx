@@ -796,7 +796,7 @@ interface FormSectionProps {
 const FormSection: React.FC<FormSectionProps> = ({ icon: Icon, title, children }) => {
   return (
     <section className="flex flex-col gap-2.5">
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1">
         <Icon className="size-3.5 text-muted-foreground" />
         <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{title}</span>
       </div>

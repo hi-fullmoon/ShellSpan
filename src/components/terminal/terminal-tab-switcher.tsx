@@ -200,7 +200,7 @@ export const TerminalTabSwitcher: React.FC<TerminalTabSwitcherProps> = ({
                       className={cn('size-2 shrink-0 rounded-full', statusDotClass(session.status))}
                     />
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="flex min-w-0 items-center gap-1">
                         <span className="truncate text-sm font-medium">{session.title}</span>
                         {current && (
                           <Badge variant="outline" size="sm">

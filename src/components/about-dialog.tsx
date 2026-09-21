@@ -56,7 +56,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({ open, onClose }) => {
       <CompactDialogContent className="max-w-md">
         <CompactDialogHeader
           title={(
-            <span className="flex items-center gap-2">
+            <span className="flex items-center gap-1">
               <ShellSpanMark className="size-6" data-slot="about-shellspan-mark" />
               {t('about.title')}
             </span>

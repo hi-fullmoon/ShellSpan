@@ -3,7 +3,6 @@ import { useI18n } from '@/hooks/useI18n';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Button } from '@/components/ui/button';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
-import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
@@ -46,10 +45,14 @@ import {
 import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchSearchInput, WorkbenchPageToolbar } from './workbench-page';
 
 const CARD_ACTION_DEBOUNCE_MS = 500;
-const CONNECTION_CARD_BREAKPOINTS = [
-  { minWidth: 640, columns: 2 },
-  { minWidth: 900, columns: 3 },
-] as const;
+// Keep column changes in the same layout pass as AI-panel resizing.
+export const ConnectionCardGrid = ({ children }: { children: React.ReactNode }) => (
+  <div className="@container/connections w-full">
+    <div className="grid grid-cols-1 gap-3 @min-[640px]/connections:grid-cols-2 @min-[900px]/connections:grid-cols-3">
+      {children}
+    </div>
+  </div>
+);
 const CONNECTION_MENU_ITEM_CLASS =
   'gap-2 px-2.5 py-1.5 text-xs text-app-text focus:bg-app-primary/10 focus:text-app-primary [&_svg]:text-muted-foreground focus:[&_svg]:text-app-primary';
 const CONNECTION_MENU_DESTRUCTIVE_ITEM_CLASS = 'gap-2 px-2.5 py-1.5 text-xs';
@@ -224,7 +227,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 icon={<SearchXIcon className="size-5" />}
               />
             ) : (
-              <ResponsiveCardGrid columns={1} breakpoints={CONNECTION_CARD_BREAKPOINTS} gap="0.75rem">
+              <ConnectionCardGrid>
                 {filteredProfiles.map((profile) => (
                   <ConnectionCard
                     key={profile.id}
@@ -242,7 +245,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                     onQuickActions={setQuickActionProfile}
                   />
                 ))}
-              </ResponsiveCardGrid>
+              </ConnectionCardGrid>
             )}
           </WorkbenchPageContent>
         </ScrollArea>
@@ -338,7 +341,7 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
               <MonitorIcon />
             </ManagementCardIcon>
             <div className="flex min-w-0 flex-col">
-              <span className="flex min-w-0 items-center gap-1.5">
+              <span className="flex min-w-0 items-center gap-1">
                 <span className="truncate text-sm font-medium text-app-text">{profile.name}</span>
                 {profile.favorite && (
                   <StarIcon className="size-3.5 shrink-0 fill-current text-app-warning" aria-label={t('workbench.connections.filter.favorites')} />

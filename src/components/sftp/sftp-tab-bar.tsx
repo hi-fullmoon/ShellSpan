@@ -121,7 +121,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
           className="pointer-events-none absolute right-[-3.5px] top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary"
         />
       )}
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      <div className="flex min-w-0 flex-1 items-center gap-1">
         {connection.pendingConnection && <Spinner className="size-3 text-app-warning" />}
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{connection.title}</span>
       </div>
