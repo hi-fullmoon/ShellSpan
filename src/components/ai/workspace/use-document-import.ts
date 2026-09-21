@@ -20,7 +20,7 @@ export function useDocumentImport(scope: string, draft: string, update: (text: s
     return () => { operation.current?.abort(); operation.current = null; };
   }, [scope]);
 
-  async function run(load: (signal: AbortSignal) => Promise<readonly File[]>): Promise<boolean> {
+  async function run(load: (signal: AbortSignal) => Promise<readonly File[]>, chatTitle?: string): Promise<boolean> {
     if (operation.current || latest.current.disabled) return false;
     const controller = new AbortController();
     operation.current = controller;
@@ -35,16 +35,18 @@ export function useDocumentImport(scope: string, draft: string, update: (text: s
       validateDocumentBatch(files);
       const existing = decodeDocumentMessage(latest.current.draft);
       validateDocumentBatch([...existing.documents, ...files]);
-      setPending(files);
+      if (chatTitle === undefined) setPending(files);
       const documents: DocumentAttachment[] = [];
       for (const file of files) {
-        documents.push({ id: crypto.randomUUID(), name: file.name, size: file.size, text: await extractDocument(file, controller.signal) });
+        documents.push({ id: crypto.randomUUID(), name: file.name, size: file.size, text: await extractDocument(file, controller.signal),
+          ...(chatTitle !== undefined ? { chatTitle } : {}) });
         if (!isCurrent()) return false;
         // Enforce aggregate limits before parsing another file, without truncation.
         const current = decodeDocumentMessage(latest.current.draft);
         encodeDocumentMessage(current.text, [...current.documents, ...documents]);
       }
       const current = decodeDocumentMessage(latest.current.draft);
+      if (chatTitle !== undefined && !current.text.includes(chatTitle)) return false;
       latest.current.update(encodeDocumentMessage(current.text, [...current.documents, ...documents]));
       return true;
     } catch (error) {
