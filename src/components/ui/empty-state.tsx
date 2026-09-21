@@ -6,15 +6,22 @@ export interface EmptyStateProps {
   description?: string;
   icon?: React.ReactNode;
   action?: React.ReactNode;
+  size?: 'default' | 'sm';
   className?: string;
 }
 
-export const EmptyState: React.FC<EmptyStateProps> = ({ title, description, icon, action, className }) => {
+export const EmptyState: React.FC<EmptyStateProps> = ({ title, description, icon, action, size = 'default', className }) => {
   return (
-    <div data-slot="empty-state" className={cn('flex flex-col items-center justify-center gap-3 p-4 text-muted-foreground', className)}>
-      <div data-slot="empty-state-heading" className="flex flex-col items-center gap-3">
+    <div data-slot="empty-state" data-size={size} className={cn(
+      'flex flex-col items-center justify-center text-muted-foreground',
+      size === 'sm' ? 'gap-1 p-2' : 'gap-3 p-4',
+      className,
+    )}>
+      <div data-slot="empty-state-heading" className={cn('flex flex-col items-center', size === 'sm' ? 'gap-1' : 'gap-3')}>
         {icon && <div data-slot="empty-state-icon" className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">{icon}</div>}
-        <span data-slot="empty-state-title" className="text-sm font-medium text-foreground">{title}</span>
+        <span data-slot="empty-state-title" className={cn(
+          size === 'sm' ? 'text-xs leading-5 font-normal text-muted-foreground' : 'text-sm font-medium text-foreground',
+        )}>{title}</span>
       </div>
       {description && <span data-slot="empty-state-description" className="max-w-sm text-center text-xs leading-5 text-muted-foreground">{description}</span>}
       {action && <div data-slot="empty-state-action">{action}</div>}

@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { PanelEmptyState } from '../empty-state';
+import { EmptyState, PanelEmptyState } from '../empty-state';
 
 describe('PanelEmptyState', () => {
   it('grows into the available panel height so its content is vertically centered', () => {
@@ -16,5 +16,17 @@ describe('PanelEmptyState', () => {
     );
     expect(panel).not.toHaveClass('h-full');
     expect(screen.getByText('Nothing here')).toBeInTheDocument();
+  });
+
+  it('uses compact, muted typography on small surfaces', () => {
+    const { container } = render(<EmptyState title="No matches" size="sm" />);
+
+    expect(container.querySelector('[data-slot="empty-state"]')).toHaveClass('gap-1', 'p-2');
+    expect(screen.getByText('No matches')).toHaveClass(
+      'text-xs',
+      'leading-5',
+      'font-normal',
+      'text-muted-foreground',
+    );
   });
 });
