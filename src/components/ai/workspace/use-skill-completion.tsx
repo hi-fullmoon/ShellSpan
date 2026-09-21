@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
 import { BookOpenIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AiMentionPanel } from './ai-mention-panel';
@@ -20,12 +20,15 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
   const [focused, setFocused] = useState(false);
   const [composing, setComposing] = useState(false);
   const [dismissed, setDismissed] = useState<string | null>(null);
-  const [result, setResult] = useState<SkillUserList | null>(null);
-  const [error, setError] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const cache = useMemo(() => ({
+    query, scopeKey, result: null as SkillUserList | null, error: false,
+    pending: null as Promise<void> | null, updatedAt: 0,
+  }), [query, scopeKey]);
+  const [, refresh] = useReducer(value => value + 1, 0);
+  const { result, error } = cache;
+  const loading = Boolean(query && !result && !error);
   const [index, setIndex] = useState(0);
   const id = useId();
-  const version = useRef(0);
   const knownCommands = useRef({ scopeKey, names: new Set(builtinSkills.map(skill => skill.name)) });
   if (knownCommands.current.scopeKey !== scopeKey) {
     knownCommands.current = { scopeKey, names: new Set(builtinSkills.map(skill => skill.name)) };
@@ -35,20 +38,27 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
   useEffect(() => { setDismissed(previous => previous === key ? previous : null); }, [key]);
   const open = Boolean(query && token && focused && !disabled && !composing && dismissed !== key);
   useEffect(() => {
-    const generation = ++version.current;
-    setResult(null); setError(false); setLoading(false);
-    if (!open || !query) return;
-    setLoading(true);
-    void query().then(value => {
-      if (generation === version.current) {
-        value.entries.filter(skill => skill.userInvocable).forEach(skill => knownCommands.current.names.add(skill.name));
-        setResult(value); setLoading(false);
-      }
-    }, () => {
-      if (generation === version.current) { setError(true); setLoading(false); }
+    if (!cache.query || disabled) return;
+    // Preload once per scope; reopening within 30 seconds reuses the same result.
+    // An expired result remains selectable while its replacement is fetched.
+    if (!cache.pending && (!cache.updatedAt || (open && Date.now() - cache.updatedAt >= 30_000))) {
+      const request = cache.query;
+      cache.pending = Promise.resolve().then(() => request()).then(value => {
+        cache.result = value;
+        cache.error = false;
+      }, () => { cache.error = true; }).finally(() => {
+        cache.updatedAt = Date.now();
+        cache.pending = null;
+      });
+    }
+    let active = true;
+    void cache.pending?.then(() => {
+      if (!active) return;
+      cache.result?.entries.filter(skill => skill.userInvocable).forEach(skill => knownCommands.current.names.add(skill.name));
+      refresh();
     });
-    return () => { version.current++; };
-  }, [open, query, scopeKey]);
+    return () => { active = false; };
+  }, [open, cache, disabled]);
   const description = (skill: SkillEntry): string => locale === 'zh-CN' && skill.resourceBase === 'builtin'
     ? builtinSkills.find(item => item.name === skill.name)?.descriptionZh ?? skill.description
     : skill.description;
@@ -74,13 +84,14 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
   const panel = open ? <div className="flex h-full min-h-0 w-full min-w-0 flex-col" data-skill-completion="">
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div role="status" aria-live="polite" className="shrink-0 px-2 empty:hidden">
-        {loading && <span className="flex items-center gap-1"><Spinner />{t('ai.workspace.skills.loading')}</span>}
         {(error || result?.status === 'unavailable') && <AiErrorNotice title={t('ai.workspace.recovery.title')}>{t('ai.workspace.skills.unavailable')}</AiErrorNotice>}
         {result?.status === 'stale' && <Alert><AlertDescription>{t('ai.workspace.skills.stale')}</AlertDescription></Alert>}
         {result && !loading && result.status !== 'unavailable' && entries.length === 0 && <EmptyState title={t('ai.workspace.skills.noMatch')} />}
       </div>
       <AiMentionPanel id={id} label={t('ai.workspace.skills.title')} index={index} onIndexChange={setIndex} empty={false}
-        groups={[{ label: t('ai.workspace.skills.title'), showEmptyLabel: true, options: entries.map(skill => ({
+        groups={[{ label: t('ai.workspace.skills.title'), showEmptyLabel: true,
+          notice: loading ? <span className="flex items-center gap-1"><Spinner />{t('ai.workspace.skills.loading')}</span> : undefined,
+          options: entries.map(skill => ({
           key: `skill:${skill.name}`, label: description(skill), detail: `/${skill.name}`, accessibleLabel: `/${skill.name}`,
           icon: <BookOpenIcon />, choose: () => choose(skill),
         })) }]} />

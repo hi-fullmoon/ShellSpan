@@ -12,6 +12,23 @@ beforeEach(async () => { Element.prototype.scrollIntoView = vi.fn(); useAppStore
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('slash skill menu', () => {
+  it('preloads before opening and reuses the result across repeated openings', async () => {
+    let requests = 0;
+    const query = async () => { requests++; return builtinSkillPreview; };
+    const user = userEvent.setup();
+    render(<AiComposerSeat phase="hero" status="idle" onListSkills={query} />);
+    await waitFor(() => expect(requests).toBe(1));
+    expect(screen.queryByRole('listbox')).toBeNull();
+    const editor = screen.getByRole('textbox');
+    for (let count = 0; count < 3; count++) {
+      await user.clear(editor);
+      await user.type(editor, '/');
+      expect(screen.getAllByRole('option')).toHaveLength(builtinSkillPreview.entries.length);
+      expect(screen.queryByText('Loading skills…')).toBeNull();
+      await user.keyboard('{Escape}');
+    }
+    expect(requests).toBe(1);
+  });
   it('lists without a directory, filters locally, inserts with keyboard and sends only after selection', async () => {
     const user = userEvent.setup(); const query = vi.fn(async () => builtinSkillPreview); const submit = vi.fn();
     render(<AiComposerSeat phase="hero" status="idle" skillsNeedsRoot onListSkills={query} onSubmit={submit} />);
@@ -68,6 +85,11 @@ describe('slash skill menu', () => {
     const user = userEvent.setup(); const submit = vi.fn();
     render(<AiComposerSeat phase="hero" status="idle" onListSkills={() => pending} onSubmit={submit} />);
     const editor = screen.getByRole('textbox'); await user.type(editor, '/missing'); await user.keyboard('{Enter}');
+    const group = screen.getByRole('group', { name: 'Skills' });
+    const loading = screen.getByText('Loading skills…');
+    expect(group).toContainElement(loading);
+    expect(group.firstElementChild).toHaveTextContent('Skills');
+    expect(loading.closest('[role="status"]')).toHaveClass('px-1.5', 'py-1', 'text-xs');
     expect(submit).not.toHaveBeenCalled();
     fireEvent.compositionStart(editor); fireEvent.keyDown(editor, { key: 'Enter', isComposing: true, keyCode: 229 });
     expect(submit).not.toHaveBeenCalled(); fireEvent.compositionEnd(editor);
