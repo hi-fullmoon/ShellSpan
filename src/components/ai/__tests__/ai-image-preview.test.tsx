@@ -29,13 +29,24 @@ async function openPreview() {
 }
 
 describe('chat image previews', () => {
-  it('opens committed images, zooms within bounds, resets, closes with Escape, and restores focus', async () => {
+  it('keeps committed image previews without hover highlighting or pointer focus rings', async () => {
     render(<AiCommittedImages sessionId="session-a" images={[image]} />);
-    const attachment = (await screen.findByRole('img', { name: image.name })).closest('[data-slot="attachment"]');
+    const thumbnail = await screen.findByRole('img', { name: image.name });
+    const attachment = thumbnail.closest('[data-slot="attachment"]');
+    expect(thumbnail).toHaveAttribute('src', source);
+    expect(attachment).not.toHaveClass('focus-within:ring-1', 'has-[>a,>button]:hover:bg-muted/50');
+    expect(attachment).toHaveClass('has-[:focus-visible]:ring-1');
+    await openPreview();
+    expect(screen.getByRole('dialog')).toBeVisible();
+    expect(preview).toHaveBeenCalledWith({ sessionId: 'session-a', sha256: image.sha256 });
+  });
+
+  it('opens draft images, zooms within bounds, resets, closes with Escape, and restores focus', async () => {
+    render(<AiImageDraftRail images={[{ name: image.name, mediaType: 'image/png', data: 'aGVsbG8=' }]} busy={false} locked={false} error={false} onRemove={() => {}} />);
+    const attachment = screen.getByRole('img', { name: image.name }).closest('[data-slot="attachment"]');
     expect(attachment).toHaveClass('has-data-[slot=attachment-media]:p-0');
     expect(attachment).not.toHaveClass('has-data-[slot=attachment-media]:p-2');
     const { dialog, trigger } = await openPreview();
-    expect(preview).toHaveBeenCalledWith({ sessionId: 'session-a', sha256: image.sha256 });
     expect(within(dialog).getByRole('img')).toHaveAttribute('src', source);
     const zoomIn = within(dialog).getByRole('button', { name: 'Zoom in' });
     const zoomOut = within(dialog).getByRole('button', { name: 'Zoom out' });

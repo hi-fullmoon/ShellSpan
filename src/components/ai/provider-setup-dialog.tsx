@@ -814,7 +814,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                   />
                 )}
               >
-                <span className="flex min-w-0 items-center gap-2">
+                <span className="flex min-w-0 items-center gap-1">
                   <Settings2Icon data-icon="inline-start" />
                   <span className="flex min-w-0 flex-col items-start gap-0.5">
                     <span>{t('settings.ai.advancedSettings')}</span>

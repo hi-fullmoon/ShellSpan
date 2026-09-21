@@ -34,6 +34,7 @@ describe('document attachment surfaces', () => {
     render(<AiDocumentAttachments composer documents={[{ id: name, name, size: 1024, text: 'Content' }]} />);
     const card = screen.getByText(name).closest('[data-slot="attachment"]');
     expect(card).toHaveAttribute('data-file-kind', kind);
+    expect(card?.querySelector('[title]')).toBeNull();
     const mediaIcon = card?.querySelector('[data-slot="attachment-media"] [data-slot="document-kind-icon"]');
     expect(mediaIcon).toHaveAttribute('aria-hidden', 'true');
     expect(mediaIcon?.tagName.toLowerCase()).toBe('svg');
@@ -122,7 +123,7 @@ describe('document attachment surfaces', () => {
     expect(scrollLeft).toBe(24);
   });
 
-  it('renders committed attachments as previewable cards without exposing their transport', async () => {
+  it('keeps committed document previews without hover highlighting or pointer focus rings', async () => {
     const user = userEvent.setup();
     const UserMessage = aiConversationNodeRenderers.userMessage;
     render(<UserMessage node={{ kind: 'userMessage', key: 'message', sourceKind: 'agent', sessionId: 'session',
@@ -130,6 +131,16 @@ describe('document attachment surfaces', () => {
       delivery: 'committed', content: encodeDocumentMessage('Explain this project', documents) }} />);
     expect(screen.getByText('Explain this project')).toBeVisible();
     expect(screen.queryByText(/shellspanDocumentMessage/)).toBeNull();
+    const card = screen.getByText('README.md').closest('[data-slot="attachment"]');
+    expect(card).not.toHaveClass('focus-within:ring-1', 'has-[>a,>button]:hover:bg-muted/50');
+    expect(card).toHaveAttribute('data-orientation', 'vertical');
+    expect(card).toHaveClass('ai-composer-file-card');
+    const rail = screen.getByRole('group', { name: 'Attachments' });
+    expect(rail).toHaveClass('overflow-x-auto', 'overflow-y-hidden');
+    expect(card?.parentElement).toBe(rail);
+    expect(rail.parentElement).toHaveAttribute('data-unified-attachments', 'true');
+    expect(screen.queryByRole('button', { name: 'Remove README.md' })).toBeNull();
+    expect(card).toHaveClass('has-[:focus-visible]:ring-1');
     await user.click(screen.getByRole('button', { name: 'Preview README.md' }));
     const dialog = await screen.findByRole('dialog');
     expect(dialog).toHaveTextContent('# ShellSpan');

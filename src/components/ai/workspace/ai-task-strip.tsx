@@ -81,7 +81,7 @@ export function AiTaskStrip({ steps, active = true }: AiTaskStripProps): React.R
       <CollapsibleContent>
         <ul className="ai-task-strip-list m-0 flex max-h-[180px] list-none flex-col gap-2 overflow-y-auto px-3 pt-0.5 pb-1.5">
           {steps.map((step) => (
-            <li className="flex min-h-5 min-w-0 shrink-0 items-center gap-2.5" key={step.id} data-status={displayStatus(step)}>
+            <li className="flex min-h-5 min-w-0 shrink-0 items-center gap-1" key={step.id} data-status={displayStatus(step)}>
               <span className="ai-task-strip-status grid size-4 shrink-0 place-items-center" aria-hidden="true">
                 <TaskStatusIcon status={displayStatus(step)} />
               </span>

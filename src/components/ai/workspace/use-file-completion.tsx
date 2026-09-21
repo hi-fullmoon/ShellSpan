@@ -173,7 +173,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
   const panel = open ? <div className="ai-file-completion flex min-h-0 min-w-0 flex-col" data-file-completion="">
       <PopoverHeader className="shrink-0 gap-1 px-3 py-2">
         <div className="flex items-center justify-between gap-3">
-          <PopoverTitle className="flex items-center gap-2">
+          <PopoverTitle className="flex items-center gap-1">
             <AtSignIcon aria-hidden="true" className="size-4 text-muted-foreground" />
             {t('ai.workspace.files.title')}
           </PopoverTitle>
@@ -182,11 +182,11 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
             <XIcon />
           </Button>
         </div>
-        {targetName && <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={targetDetails}>
+        {targetName && <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground" aria-description={targetDetails}>
           <ServerIcon aria-hidden="true" className="size-3 shrink-0" />
           <span className="truncate">{targetName}</span>
         </div>}
-        {scope?.root && <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={scope.root}>
+        {scope?.root && <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
           <FolderIcon aria-hidden="true" className="size-3 shrink-0" />
           <span className="truncate font-mono">{scope.root}</span>
         </div>}
@@ -205,7 +205,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
           <Kbd aria-hidden="true">↵</Kbd>
         </Button>}
         <div aria-live="polite" role="status" className="shrink-0 px-2 py-2 text-xs leading-5 text-muted-foreground empty:hidden">
-          {loading && <span className="flex items-center gap-2"><Spinner />{t('ai.workspace.files.loading')}</span>}
+          {loading && <span className="flex items-center gap-1"><Spinner />{t('ai.workspace.files.loading')}</span>}
           {error && <AiErrorNotice title={t('ai.workspace.recovery.title')}>{errorText(error)}</AiErrorNotice>}
           {result?.status === 'truncated' && <p>{t('ai.workspace.files.truncated')}</p>}
           {Boolean(result?.excluded) && <p>{t('ai.workspace.files.excluded')}</p>}
@@ -221,7 +221,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
             return <Button key={candidate.path} id={`${id}-${i}`} type="button" role="option" aria-label={label}
               aria-selected={i === index} tabIndex={-1} variant={i === index ? 'secondary' : 'ghost'}
               className="h-auto min-h-10 w-full min-w-0 shrink-0 justify-start gap-1 px-2.5 py-2"
-              title={label} onMouseDown={event => event.preventDefault()} onClick={() => choose(candidate)}>
+              onMouseDown={event => event.preventDefault()} onClick={() => choose(candidate)}>
               {directory ? <FolderIcon data-icon="inline-start" /> : <FileIcon data-icon="inline-start" />}
               <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
                 <span className="truncate text-[13px] leading-4">{name}{directory ? '/' : ''}</span>
@@ -235,7 +235,7 @@ export function useFileCompletion({ text, update, query, scopeKey, needsRoot, ta
       </div>
       <Separator />
       <div className="flex shrink-0 flex-col gap-2 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
-        <p className="flex items-start gap-1.5"><InfoIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0" />{t('ai.workspace.files.hint')}</p>
+        <p className="flex items-start gap-1"><InfoIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0" />{t('ai.workspace.files.hint')}</p>
         {hasEntries && <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
           <span className="flex items-center gap-1.5"><KbdGroup><Kbd>↑</Kbd><Kbd>↓</Kbd></KbdGroup>{t('ai.workspace.files.navigate')}</span>
           <span className="flex items-center gap-1.5"><Kbd>↵</Kbd>{t('ai.workspace.files.select')}</span>

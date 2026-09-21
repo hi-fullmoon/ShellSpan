@@ -39,8 +39,8 @@
   height: 14px;
 }
 
-/* Align the visible SVG strokes with the adjacent 13px label ink. */
-.ai-disclosure-leading > svg,
+/* Content icons retain their optical offset; hover chevrons stay centered. */
+.ai-disclosure-leading > svg:not(.ai-disclosure-chevron),
 .ai-produced-files-label svg {
   translate: 0 -1px;
 }
@@ -91,6 +91,8 @@
 
 .ai-turn-process-trigger > .ai-disclosure-leading > .ai-disclosure-chevron {
   opacity: 1;
+  /* Match the visible text center; keep rotation independent of this correction. */
+  translate: 0 -1px;
 }
 
 .ai-turn-process-trigger[aria-expanded='false'] > .ai-disclosure-leading > .ai-disclosure-chevron {
@@ -111,6 +113,11 @@
   color: var(--ai-text-muted);
   font-size: 13px;
   line-height: 20px;
+}
+
+.ai-reasoning-body > .ai-assistant-markdown {
+  color: inherit;
+  font: inherit;
 }
 
 :is(

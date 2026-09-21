@@ -2,6 +2,7 @@ import { XIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
+import { aiErrorMessage } from '@/lib/ai/error-message';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import { AiErrorNotice } from './ai-error-notice';
 
@@ -37,7 +38,7 @@ export function AiWorkspaceErrorNotices({
             </Button>
           )}
         >
-          {composerState.lastError.message}
+          {aiErrorMessage(composerState.lastError.message, t)}
         </AiErrorNotice>
       )}
       {composerState.failedDrafts.map((failed) => (

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -208,13 +209,15 @@ export function AiComposerSeat({
       ? onStop === undefined
       : unavailable || empty || (onSubmitGesture === undefined && onSubmit === undefined));
   const busyPreference = composerState?.preferredBusyMode ?? 'queue';
-  const primaryLabel = stopPrimary
-    ? t('ai.workspace.stop')
-    : running
-      ? busyPreference === 'queue'
-        ? t('ai.workspace.queue.action')
-        : t('ai.workspace.steer.action')
-      : t('ai.send');
+  const primaryLabel = submitting
+    ? t('ai.workspace.messagePending')
+    : stopPrimary
+      ? t('ai.workspace.stop')
+      : running
+        ? busyPreference === 'queue'
+          ? t('ai.workspace.queue.action')
+          : t('ai.workspace.steer.action')
+        : t('ai.send');
   const queueItems = useMemo<readonly AiInboxItem[]>(() => {
     // Internal context (for example after-tool verification reminders) is
     // consumed between steps and must not briefly expand the user's queue.
@@ -340,6 +343,10 @@ export function AiComposerSeat({
   });
   const skillCompletion = useSkillCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListSkills : undefined, scopeKey: skillsScopeKey, editor: completion.editor, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
   const wasStopping = useRef(false);
+  const blockedSubmitReason = submitting ? 'ai.workspace.announce.submitting'
+    : mode === 'ask' && running ? 'ai.workspace.announce.askRunning' : null;
+  const announcedBlock = useRef<string | null>(null);
+  useEffect(() => { announcedBlock.current = null; }, [blockedSubmitReason, attachmentOwner]);
   useEffect(() => {
     if (wasStopping.current && !stopping) {
       completion.editor.current?.element?.focus({ preventScroll: true });
@@ -348,13 +355,23 @@ export function AiComposerSeat({
     wasStopping.current = stopping;
   }, [stopping, completion.editor]);
   const submit = (gesture: 'keyboard' | 'primary', accelerated = false): void => {
-    if (submitDisabled) return;
+    if (submitDisabled) {
+      if (gesture === 'keyboard' && !empty && blockedSubmitReason && announcedBlock.current !== blockedSubmitReason) {
+        announcedBlock.current = blockedSubmitReason;
+        toast.info(t(blockedSubmitReason));
+      }
+      return;
+    }
     if (stopPrimary) {
       if (gesture === 'primary') onStop?.();
       return;
     }
     try { encodeDocumentMessage(draft, message.documents); }
     catch (error) { toast.error(t(documentErrorKey(error))); return; }
+    // Focus synchronously while the user's gesture still owns focus. A later
+    // receipt must never pull focus away from another control or the terminal.
+    completion.editor.current?.element?.focus({ preventScroll: true });
+    completion.editor.current?.focus();
     if (onSubmitGesture) onSubmitGesture(gesture, accelerated);
     else void onSubmit?.(rawDraft);
   };
@@ -603,11 +620,14 @@ export function AiComposerSeat({
                         onClick={() => submit('primary')}
                         disabled={submitDisabled}
                         aria-label={primaryLabel}
+                        aria-busy={submitting || undefined}
                         aria-describedby={unavailableReason ? availabilityHintId : undefined}
                       />
                     )}
                   >
-                    {stopPrimary
+                    {submitting
+                      ? <Spinner aria-hidden="true" />
+                      : stopPrimary
                       ? <SquareIcon className="ai-composer-stop-icon" fill="currentColor" />
                       : <ArrowUpIcon />}
                   </TooltipTrigger>
@@ -652,6 +672,9 @@ export function AiComposerSeat({
           </AiCompletionPopover>
         </div>
       }
+      <p className="m-0 shrink-0 text-center text-[11px] leading-4 text-[var(--ai-text-caption)] opacity-70" data-slot="ai-composer-disclaimer">
+        {t('ai.workspace.composerDisclaimer')}
+      </p>
       <span className="sr-only" aria-live="polite">
         {announcement ? t(`ai.workspace.announce.${announcement}` as LocaleKey) : null}
       </span>

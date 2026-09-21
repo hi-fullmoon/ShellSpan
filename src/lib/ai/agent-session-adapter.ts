@@ -1,5 +1,6 @@
 import { AgentSessionCommittedClient, type AgentSessionStreamState } from '@/lib/ai/agent-session-client';
 import { createCommittedEventProjection } from './committed-event-projection';
+import { fallbackSessionTitle } from './session-title';
 import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeListAgentFileReferences } from '@/lib/ipc/tauri';
 import { projectQuestions } from './question-projection';
 import { invokeSubmitAgentImages } from '@/lib/ipc/tauri';
@@ -181,7 +182,7 @@ function sessionSummary(
     kind: 'agent',
     title: [...metadataEvents].reverse().find((event) => event.type === 'session/renamed')?.data.title
       ?? snapshot.header.title
-      ?? snapshot.header.goal,
+      ?? fallbackSessionTitle(snapshot.header.goal),
     updatedAt: new Date(lastEvent?.timeUnixMs ?? snapshot.header.createdAtUnixMs).toISOString(),
     status,
     scopeKey: sessionScopeKey(snapshot.header.target, snapshot.header.sessionId),
@@ -377,6 +378,8 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
 
 /** A session-owned incremental projection, discarded together with its client. */
 export function createAgentSessionViewProjector(): (state: AgentSessionStreamState) => AiSessionView {
+  let previous: AgentSessionStreamState | undefined;
+  let view: AiSessionView | undefined;
   const chat = createAgentChatProjector();
   const activity = createAgentActivityProjector();
   // Chunks affect chat and Activity, but never inbox/configuration/question state.
@@ -387,16 +390,25 @@ export function createAgentSessionViewProjector(): (state: AgentSessionStreamSta
       snapshot() { return events; },
     };
   });
-  return (state) => agentSessionView(state, {
-    activity: activity(state.events), nodes: chat(state.events), metadataEvents: metadata(state.events),
-  });
+  return (state) => {
+    // connect() publishes and returns the same committed window. Preserve the
+    // view identity so both consumers can reuse it without replaying metadata.
+    if (view && previous && previous.snapshot === state.snapshot && previous.events === state.events
+      && previous.lastCommittedSeq === state.lastCommittedSeq
+      && previous.hasTerminalEvent === state.hasTerminalEvent) return view;
+    view = agentSessionView(state, {
+      activity: activity(state.events), nodes: chat(state.events), metadataEvents: metadata(state.events),
+    });
+    previous = state;
+    return view;
+  };
 }
 
 function listSummary(page: AgentSessionListPage): readonly AiSessionSummary[] {
   return page.sessions.map((session) => ({
     id: session.header.sessionId,
     kind: 'agent',
-    title: session.header.title ?? session.header.goal,
+    title: session.header.title ?? fallbackSessionTitle(session.header.goal),
     updatedAt: new Date(session.header.createdAtUnixMs).toISOString(),
     status: session.status,
     scopeKey: sessionScopeKey(session.header.target, session.header.sessionId),

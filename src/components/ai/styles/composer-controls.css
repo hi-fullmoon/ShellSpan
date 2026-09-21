@@ -161,6 +161,9 @@
 
 .ai-composer-seat[data-ai-mode='ask'] .ai-composer-input-anchor > [data-slot='input-group'] {
   border-radius: 18px;
+}
+
+.ai-composer-seat[data-ai-mode='ask'] .ai-composer-input-anchor > [data-slot='input-group']:not(:has([data-slot='input-group-control']:focus)) {
   box-shadow:
     0 0 0 0.5px var(--ai-border-soft),
     0 8px 28px color-mix(in srgb, var(--primary) 8%, transparent);

@@ -3,6 +3,7 @@ import {
   invokeGetCommittedAgentRuntimeEvents,
   listenToAgentRuntimeSession,
 } from '@/lib/ipc/tauri';
+import { CommittedEventBuffer } from './committed-event-buffer';
 import {
   isSupportedAgentSessionEventVersion,
   type AgentCommittedEventsRequest,
@@ -42,7 +43,7 @@ const defaultTransport: AgentSessionStreamTransport = {
  * and never derives a terminal event from a snapshot alone.
  */
 export class AgentSessionCommittedClient {
-  private readonly events: AgentSessionEvent[] = [];
+  private readonly events = new CommittedEventBuffer();
   private readonly listeners = new Set<(state: AgentSessionStreamState) => void>();
   private snapshotValue?: AgentSessionSnapshot;
   private hasTerminalEventValue = false;
@@ -59,10 +60,10 @@ export class AgentSessionCommittedClient {
   ) {}
 
   state(): AgentSessionStreamState {
-    const last = this.events[this.events.length - 1];
+    const last = this.events.last;
     return {
       snapshot: this.snapshotValue,
-      events: [...this.events],
+      events: this.events.snapshot(),
       lastCommittedSeq: last?.seq,
       hasTerminalEvent: this.hasTerminalEventValue,
     };
@@ -86,7 +87,7 @@ export class AgentSessionCommittedClient {
     });
     try {
       this.snapshotValue = await this.transport.snapshot(this.sessionId);
-      await this.fetchAfter(this.events[this.events.length - 1]?.seq);
+      await this.fetchAfter(this.events.last?.seq);
       this.buffering = false;
       const buffered = this.buffered.sort((left, right) => left.seq - right.seq);
       this.buffered = [];
@@ -129,9 +130,9 @@ export class AgentSessionCommittedClient {
 
   private async ingestLive(event: AgentSessionEvent): Promise<void> {
     this.validateEnvelope(event);
-    const last = this.events[this.events.length - 1];
+    const last = this.events.last;
     if (last && event.seq <= last.seq) {
-      const existing = this.events[event.seq];
+      const existing = this.events.get(event.seq);
       if (JSON.stringify(existing) !== JSON.stringify(event)) {
         throw new Error(`Committed Agent event ${event.seq} changed after publication`);
       }
@@ -145,7 +146,7 @@ export class AgentSessionCommittedClient {
         await this.fullResync();
       }
     }
-    if ((this.events[this.events.length - 1]?.seq ?? -1) + 1 < event.seq) {
+    if ((this.events.last?.seq ?? -1) + 1 < event.seq) {
       await this.fullResync();
     }
     this.merge(event);
@@ -169,7 +170,7 @@ export class AgentSessionCommittedClient {
 
   private async fullResync(): Promise<void> {
     this.snapshotValue = await this.transport.snapshot(this.sessionId);
-    this.events.length = 0;
+    this.events.clear();
     this.hasTerminalEventValue = false;
     await this.fetchAfter(undefined);
   }
@@ -178,7 +179,7 @@ export class AgentSessionCommittedClient {
     this.validateEnvelope(event);
     const expected = this.events.length;
     if (event.seq < expected) {
-      if (JSON.stringify(this.events[event.seq]) !== JSON.stringify(event)) {
+      if (JSON.stringify(this.events.get(event.seq)) !== JSON.stringify(event)) {
         throw new Error(`Committed Agent event ${event.seq} changed during backfill`);
       }
       return;
@@ -186,7 +187,7 @@ export class AgentSessionCommittedClient {
     if (event.seq !== expected) {
       throw new Error(`Committed Agent stream has a gap before seq ${event.seq}`);
     }
-    this.events.push(event);
+    this.events.append(event);
     if (event.type === 'session/ended') this.hasTerminalEventValue = true;
     if (event.type === 'session/resumed') this.hasTerminalEventValue = false;
   }

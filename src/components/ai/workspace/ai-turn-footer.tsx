@@ -56,14 +56,14 @@ function StatPopover({ icon, label, title, total, children }: {
       <Popover.Trigger
         render={<Button type="button" variant="plain" size="sm" className="ai-turn-stat-trigger h-7 px-[7px]" />}
       >
-        {icon}<span>{label}</span>
+        {icon}<span className="translate-y-px">{label}</span>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner side="top" align="start" sideOffset={8} collisionPadding={8} className="z-50">
           <Popover.Popup className="ai-turn-stat-panel max-h-[var(--available-height)] w-[300px] max-w-[calc(100vw-16px)] overflow-auto px-[15px] py-3" initialFocus={false}>
             <div className="ai-turn-stat-heading mb-2.5 flex items-center justify-between gap-3">
-              <Popover.Title className="m-0 flex items-center gap-1.5">{icon}<span>{title}</span></Popover.Title>
-              {total && <strong className="whitespace-nowrap">{total}</strong>}
+              <Popover.Title className="m-0 flex items-center gap-1">{icon}<span className="translate-y-px">{title}</span></Popover.Title>
+              {total && <strong className="translate-y-px whitespace-nowrap">{total}</strong>}
             </div>
             <Separator className="-mx-1 w-[calc(100%+8px)]" />
             {children}

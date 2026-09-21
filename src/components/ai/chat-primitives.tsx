@@ -32,9 +32,12 @@ import type { AiScrollAnchor } from '@/lib/ai/panel-route';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { MessageLayoutContext } from './message-layout-context';
+import { useTurnScrollTransition } from './workspace/use-turn-scroll-transition';
 
 interface MessageScrollerProps {
   children: React.ReactNode;
+  header?: React.ReactNode;
   followKey: string;
   turnAnchorKey?: string;
   /** New local submission/message identities resume following once per identity. */
@@ -44,6 +47,7 @@ interface MessageScrollerProps {
   ariaLabel?: string;
   initialAnchor?: AiScrollAnchor;
   onAnchorChange?: (anchor: AiScrollAnchor) => void;
+  onFollowLatest?: () => void;
 }
 
 interface ConversationScrollerProps extends MessageScrollerProps {
@@ -93,6 +97,7 @@ export const MessageScroller: React.FC<MessageScrollerProps> = (props) => {
 
 const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   children,
+  header,
   followKey,
   turnAnchorKey,
   scrollToBottomKeys,
@@ -101,6 +106,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   ariaLabel,
   initialAnchor,
   onAnchorChange,
+  onFollowLatest,
   restoreToEnd = false,
 }) => {
   const { t } = useI18n();
@@ -118,13 +124,18 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const { scrollToEnd, scrollToMessage, scrollToStart } = useMessageScroller();
   const observedBottomKeys = useRef(new Set(scrollToBottomKeys));
   const childItems = React.Children.toArray(children);
+  const turnAnchor = [...childItems].reverse().find(wantsScrollAnchor);
+  useTurnScrollTransition(viewportRef, turnAnchor ? messageItemId(turnAnchor, childItems.indexOf(turnAnchor)) : undefined);
   const observedAnchorItemsRef = useRef(new Set(childItems.filter(wantsScrollAnchor).map(messageItemId)));
   const messageItems = childItems.map((child, index) => {
     const itemKey = React.isValidElement(child) && child.key !== null ? child.key : index;
     const messageId = messageItemId(child, index);
     return (
       <MessageScrollerItem key={itemKey} messageId={messageId} scrollAnchor={wantsScrollAnchor(child)}
-        className={messageItemClassName(child)}>
+        // History is already paged by AiConversation. Estimate-free row layout
+        // keeps the scroll range stable while wheel/scrollbar gestures expose
+        // long Markdown rows, including after the panel width changes.
+        className={cn(messageItemClassName(child), '[content-visibility:visible] [contain-intrinsic-size:none]')}>
         {child}
       </MessageScrollerItem>
     );
@@ -157,20 +168,14 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     restoredAnchorRef.current = true;
     suppressProgrammaticFollowRef.current = false;
     followIntentRef.current = true;
+    onFollowLatest?.();
     pointerScrollStartRef.current = null;
     scrollToEnd();
-    // Sending also clears/resizes the composer. Finish positioning after its
-    // effects and the browser's deferred row layout have settled, just as on
-    // initial restoration. Real scroll input cancels these frames below.
-    restoreFrameRef.current = requestAnimationFrame(() => {
-      scrollToEnd();
-      restoreFrameRef.current = requestAnimationFrame(() => {
-        restoreFrameRef.current = null;
-        scrollToEnd();
-      });
-    });
+    // Resume the primitive's bottom-follow mode once. It observes subsequent
+    // composer/content resizes; replaying the jump on later frames competes
+    // with that adjustment and can override the user's next scroll gesture.
     setPositionReady(true);
-  }, [cancelRestore, scrollToBottomKeys, scrollToEnd]);
+  }, [cancelRestore, onFollowLatest, scrollToBottomKeys, scrollToEnd]);
 
   const handlePointerDown = useCallback(() => {
     interruptRestore();
@@ -253,6 +258,14 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     restoredAnchorRef.current = false;
   }, [cancelRestore]);
 
+  const commitMessageLayout = useCallback(() => {
+    // A throttled child can commit without changing children/followKey here.
+    // Use the recorded user intent, not geometry after the text has grown.
+    if (positionReady && followIntentRef.current && !suppressProgrammaticFollowRef.current) {
+      scrollToEnd();
+    }
+  }, [positionReady, scrollToEnd]);
+
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     for (const [index, child] of childItems.entries()) {
@@ -276,8 +289,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     const viewportTop = scrollport.getBoundingClientRect().top;
     const rows = content.children;
     const count = rows.length - (content.lastElementChild?.hasAttribute('data-message-scroller-spacer') ? 1 : 0);
-    // Measure only the containment boundaries. Reading an offscreen message's
-    // descendants forces the browser to lay out content-visibility:auto rows.
+    // Search row boundaries rather than measuring every message descendant.
     let low = 0;
     let high = count;
     while (low < high) {
@@ -338,8 +350,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       };
     }
     restoreAnchor();
-    // content-visibility initially estimates row heights. Keep the scroller's
-    // layout, but reveal it only after the visible rows and position are settled.
+    // Reveal after the primitive's initial layout and scroll position settle.
     restoreFrameRef.current = requestAnimationFrame(() => {
       restoreFrameRef.current = requestAnimationFrame(() => {
         restoreFrameRef.current = null;
@@ -360,6 +371,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       aria-label={ariaLabel}
       onPointerDownCapture={handlePointerDown}
     >
+      {header && <div className="shrink-0">{header}</div>}
       <MessageScrollerViewport
         ref={viewportRef}
         onScrollCapture={handleScrollCapture}
@@ -398,7 +410,9 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
         }}
       >
         <MessageScrollerContent ref={contentRef} className={cn('gap-4 px-3 py-4', contentClassName)}>
-          {messageItems}
+          <MessageLayoutContext.Provider value={commitMessageLayout}>
+            {messageItems}
+          </MessageLayoutContext.Provider>
         </MessageScrollerContent>
       </MessageScrollerViewport>
       <Tooltip>
@@ -407,6 +421,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
           onClick={() => {
             suppressProgrammaticFollowRef.current = false;
             followIntentRef.current = true;
+            onFollowLatest?.();
           }}
         />}>
           <ArrowDownIcon />

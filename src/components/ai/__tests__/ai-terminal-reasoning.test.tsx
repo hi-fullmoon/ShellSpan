@@ -1,7 +1,8 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AiConversationNodeList } from '../workspace/ai-conversation-node-seat';
+import { AiConversationNodeList, aiAskConversationNodeRenderers } from '../workspace/ai-conversation-node-seat';
+import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
@@ -11,6 +12,37 @@ import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-bas
 afterEach(() => cleanup());
 
 describe('terminal reasoning display', () => {
+  it.each(['agent', 'ask'] as const)('renders %s reasoning with Markdown soft breaks and preserves structured content', async (mode) => {
+    await initI18n('en-US');
+    const user = userEvent.setup();
+    const content = 'We\n need\n continue\n,\n gather\n macOS\n compatible\n ps\n.\n\nNext paragraph.\n\n- Inspect CPU\n- Inspect memory\n\n```sh\nvm_stat\nsysctl hw.memsize\n```\n\nFirst line  \nSecond line';
+    const node: AiConversationNodeOf<'reasoning'> = {
+      kind: 'reasoning', key: 'reasoning:markdown', sourceKind: 'agent',
+      sessionId: 'session-markdown', turnId: 'turn-1', stepId: 'step-1',
+      firstSeq: 1, lastSeq: 2, timestamp: '2026-09-21T00:00:00.000Z',
+      requestId: 'request-1', summary: 'We', content: 'We\n need', state: 'streaming',
+    };
+    const renderers = mode === 'ask' ? aiAskConversationNodeRenderers : undefined;
+    const view = render(<AiConversationNodeList nodes={[node]} renderers={renderers} />);
+    const trigger = screen.getByRole('button');
+    if (trigger.getAttribute('aria-expanded') === 'false') await user.click(trigger);
+    expect(view.container.querySelector('.ai-reasoning-body p')).toHaveTextContent('We need');
+    view.rerender(<AiConversationNodeList nodes={[{ ...node, content, lastSeq: 3 }]} renderers={renderers} />);
+    const body = view.container.querySelector('.ai-reasoning-body')!;
+    expect(body).toHaveClass('whitespace-normal', 'min-w-0');
+    expect(body.querySelector('p')).toHaveTextContent('We need continue , gather macOS compatible ps .');
+    expect(body.querySelector('p')!.querySelector('br')).toBeNull();
+    expect(body.querySelectorAll('ul > li')).toHaveLength(2);
+    expect(body.querySelector('pre code')!.textContent).toBe('vm_stat\nsysctl hw.memsize\n');
+    expect(body.querySelector('pre')).toHaveClass('whitespace-pre-wrap');
+    expect(body.querySelectorAll('br')).toHaveLength(1);
+    expect(body.querySelectorAll('p')).toHaveLength(3);
+    view.rerender(<AiConversationNodeList nodes={[{ ...node, content, lastSeq: 4, state: 'completed' }]} renderers={renderers} />);
+    if (trigger.getAttribute('aria-expanded') === 'false') await user.click(trigger);
+    expect(view.container.querySelector('.ai-reasoning-body pre code')!.textContent).toBe('vm_stat\nsysctl hw.memsize\n');
+    expect(node.content).toBe('We\n need');
+  });
+
   it.each([
     ['zh-CN', '思考中…', '思考已中断', '处理失败'],
     ['en-US', 'Thinking…', 'Thinking interrupted', 'Process failed'],
@@ -54,6 +86,8 @@ describe('terminal reasoning display', () => {
       expect(row.querySelector('.ai-reasoning-body')).toHaveTextContent(
         'Read the frozen context. Prepare a concise answer.',
       );
+      const details = within(screen.getByRole('alert')).getByRole('button');
+      if (details.getAttribute('aria-expanded') !== 'true') await user.click(details);
       expect(screen.getByText(reason)).toBeVisible();
     }
 

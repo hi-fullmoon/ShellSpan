@@ -57,6 +57,28 @@ function snapshot(ended = false): AgentSessionSnapshot {
   };
 }
 
+it('bounds the untitled goal and preserves explicit and live renamed titles', () => {
+  const persisted = snapshot();
+  const goal = '排查服务启动失败。'.repeat(20);
+  const state = {
+    snapshot: { ...persisted, header: { ...persisted.header, goal } },
+    events: [] as AgentSessionEvent[], lastCommittedSeq: 0, hasTerminalEvent: false,
+  };
+  const fallback = agentSessionView(state);
+  expect(Array.from(fallback.summary.title)).toHaveLength(48);
+  expect(fallback.summary.title.endsWith('…')).toBe(true);
+  expect(fallback.snapshot.value.header.goal).toBe(goal);
+  const manual = '用户指定的完整标题'.repeat(8);
+  expect(agentSessionView({
+    ...state, snapshot: { ...state.snapshot, header: { ...state.snapshot.header, title: manual } },
+  }).summary.title).toBe(manual);
+  const event: AgentSessionEvent = {
+    ...agentSessionEventFixture[0]!, type: 'session/renamed',
+    data: { title: '排查服务启动失败', previousRevision: 0, clientOperationId: 'auto-title-test' },
+  };
+  expect(agentSessionView({ ...state, events: [event] }).summary.title).toBe('排查服务启动失败');
+});
+
 it('projects model, permission, and execution surface changes over an older snapshot', () => {
   const selected = {
     routeId: 'other', modelId: 'gpt-5.6',

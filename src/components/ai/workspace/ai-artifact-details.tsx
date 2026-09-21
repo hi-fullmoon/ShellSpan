@@ -146,7 +146,7 @@ export function AiArtifactDetails({
           {state.kind === 'error' && <p className="ai-detail-error m-0 py-2 [overflow-wrap:anywhere]" role="alert">{state.message}</p>}
           {state.kind === 'loaded' && (
             <>
-              <div className="ai-artifact-summary mb-4 flex min-w-0 items-center gap-2">
+              <div className="ai-artifact-summary mb-4 flex min-w-0 items-center gap-1">
                 <FileOutputIcon aria-hidden="true" />
                 <span className="min-w-0 truncate">{state.artifact.metadata.kind}</span>
                 <small className="shrink-0">{state.artifact.metadata.mediaType}</small>

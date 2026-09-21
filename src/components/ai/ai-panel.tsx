@@ -129,6 +129,9 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
   scope,
   onOpenChange,
 }) => {
+  const [hasOpened, setHasOpened] = useState(open);
+  if (open && !hasOpened) setHasOpened(true);
+  const panelVisible = open && visible;
   const [panelWidth, setPanelWidth] = useState(() => initialAiPanelWidth(scope));
   const [containerWidth, setContainerWidth] = useState(() => window.innerWidth);
   const [resizing, setResizing] = useState(false);
@@ -175,7 +178,7 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
   }, [applyPendingPanelWidth]);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!panelVisible) return;
     const applyContainerWidth = (nextWidth: number): void => {
       const width = nextWidth > 0 ? nextWidth : window.innerWidth;
       setContainerWidth((current) => Math.abs(current - width) < 1 ? current : width);
@@ -196,7 +199,7 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
 
     window.addEventListener('resize', handleWindowResize);
     return () => window.removeEventListener('resize', handleWindowResize);
-  }, [compactViewport, measureContainerWidth, open, visible]);
+  }, [compactViewport, measureContainerWidth, panelVisible]);
 
   useEffect(() => () => {
     if (resizeFrameRef.current !== null) {
@@ -213,7 +216,9 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
     if ((!open || !visible) && resizeStartRef.current) finishPanelResize();
   }, [finishPanelResize, open, visible]);
 
-  if (!open) return null;
+  // Preserve the loaded workbench session across closes, without eagerly
+  // mounting a controller before the user first opens the panel.
+  if (!open && (scope !== 'workbench' || !hasOpened)) return null;
 
   const panelWidthBounds = getAiPanelWidthBounds(containerWidth);
   const panelContent = (
@@ -225,7 +230,7 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
       className="ai-panel-shell relative flex h-full min-w-0 max-w-full shrink-0 flex-col overflow-hidden border-l-0 bg-card font-sans text-sm leading-[22px] text-foreground"
       style={{ width: compactViewport ? '100%' : panelWidth }}
       aria-label={panelTitle}
-      hidden={!visible}
+      hidden={!panelVisible}
     >
       {!compactViewport && (
         <AiPanelResizeHandle
@@ -288,7 +293,7 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
   return (
     <TooltipProvider>
       {compactViewport ? (
-        <Drawer open={visible} onOpenChange={onOpenChange}>
+        <Drawer open={panelVisible} onOpenChange={onOpenChange}>
           <DrawerContent
             keepMounted
             showCloseButton={false}

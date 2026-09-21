@@ -41,7 +41,7 @@ export function AiMentionPanel({ id, groups, index, empty }: {
           return <Button key={option.key} id={`${id}-${position}`} type="button" role="option" tabIndex={-1}
             aria-label={option.label} aria-description={option.detail} aria-selected={position === index}
             variant={position === index ? 'secondary' : 'ghost'} size="sm"
-            className="h-7 w-full min-w-0 justify-start gap-1.5 px-1.5"
+            className="h-7 w-full min-w-0 justify-start gap-1 px-1.5"
             onMouseDown={event => event.preventDefault()} onClick={option.choose}>
             {option.icon}<span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
             {option.detail && <span className="ml-auto max-w-[45%] shrink-0 truncate text-xs font-normal text-muted-foreground">{option.detail}</span>}

@@ -4,6 +4,8 @@ import { flushSync } from 'react-dom';
 import { MessageScroller, Message } from '@/components/ai/chat-primitives';
 import { AssistantMessageContent } from '@/components/ai/assistant-message-content';
 import { AiConversationNodeSeat } from '@/components/ai/workspace/ai-conversation-node-seat';
+import { AiConversation } from '@/components/ai/workspace/ai-conversation';
+import { taskTokenBudgetEvidence } from '@/test/fixtures/task-token-budget';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
@@ -21,10 +23,23 @@ const root = createRoot(document.getElementById('root')!);
 let revision = 0;
 let history = '';
 let answer = '';
+let streaming = true;
 let saved: AiScrollAnchor | undefined;
 let initialAnchor: AiScrollAnchor | undefined;
 let process: AiConversationNodeOf<'turnProcess'> | undefined;
 let followFromStart = false;
+
+const recordedNodes = projectAgentChatNodes(taskTokenBudgetEvidence.events);
+function HistoryCheck() {
+  const [start, setStart] = React.useState(1);
+  const nodes = React.useMemo(() => recordedNodes.slice(start), [start]);
+  return (
+    <main className="ai-panel-shell flex h-dvh min-h-0 w-full flex-col" data-ai-scope="workbench">
+      <AiConversation nodes={nodes} status="failed" throughSeq={null}
+        canLoadOlder={start > 0} onLoadOlder={() => setStart(0)} />
+    </main>
+  );
+}
 
 function Row({ id, children }: {
   id: string;
@@ -50,7 +65,7 @@ function render() {
         </Row>
         <Row key="answer" id="answer" scrollItemId="answer"
           scrollItemClassName="[content-visibility:visible]">
-          <AssistantMessageContent blocks={[{ type: 'text', text: answer }]} streaming />
+          <AssistantMessageContent blocks={[{ type: 'text', text: answer }]} streaming={streaming} />
         </Row>
         {process && <Row key="process" id="process" scrollItemId="process"
           scrollItemClassName="[content-visibility:visible]">
@@ -64,6 +79,10 @@ function render() {
 await initI18n('en-US');
 Object.assign(window, {
   streamingCheck: {
+    historyCase() {
+      revision += 1;
+      flushSync(() => root.render(<HistoryCheck key={revision} />));
+    },
     async submissionCase(queue: boolean, image?: AgentImageUpload) {
       revision += 1;
       const imageOwner = image ? `submission-check:${crypto.randomUUID()}` : undefined;
@@ -76,6 +95,7 @@ Object.assign(window, {
       followFromStart = false;
       history = content;
       answer = '';
+      streaming = true;
       initialAnchor = undefined;
       saved = undefined;
       process = undefined;
@@ -86,6 +106,7 @@ Object.assign(window, {
       followFromStart = true;
       history = content;
       answer = '';
+      streaming = true;
       initialAnchor = undefined;
       saved = undefined;
       process = undefined;
@@ -93,6 +114,7 @@ Object.assign(window, {
     },
     append(content: string) { answer += content; render(); },
     replaceAnswer(content: string) { answer = content; render(); },
+    finishAnswer(content: string) { answer = content; streaming = false; render(); },
     reopen() { initialAnchor = saved; revision += 1; render(); },
     processEventCount(scenario: 'multiple-tools' | 'retry-success') {
       return agentSessionBaselineScenarios[scenario].events.length;

@@ -190,7 +190,7 @@ export function AiQueueDock({
           const steering = pending && mutation.intent.type === 'steer' && mutation.intent.itemId === item.id;
           const editing = editingId === item.id;
           return (
-            <li key={item.id} className="ai-queue-row flex h-9 w-full min-w-0 items-center gap-2.5 box-border py-1 pr-[5px] pl-3" data-state={item.state}>
+            <li key={item.id} className="ai-queue-row flex h-9 w-full min-w-0 items-center gap-1 box-border py-1 pr-[5px] pl-3" data-state={item.state}>
               {items.length === 1 && <ListEndIcon aria-hidden="true" />}
               {editing ? (
                 <form

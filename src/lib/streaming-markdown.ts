@@ -1,5 +1,28 @@
 export const STREAMING_MARKDOWN_CHUNK_TARGET = 2048;
 
+/** Per-message cache; edits and late reference definitions invalidate the prefix. */
+export function createStreamingMarkdownSplitter(targetSize = STREAMING_MARKDOWN_CHUNK_TARGET) {
+  let previous = '';
+  let chunks: string[] = [];
+  let stableLength = 0;
+  let referenceDefinition = false;
+  return (content: string): string[] => {
+    if (content === previous) return chunks;
+    const appending = content.startsWith(previous);
+    // Check the whole unfinished block: definitions can span lines and affect
+    // links in already completed blocks.
+    const referenceStart = appending ? stableLength : 0;
+    referenceDefinition = (appending && referenceDefinition)
+      || /^ {0,3}\[[^\]\n]+\]:\s*\S+/m.test(content.slice(referenceStart));
+    if (!appending || referenceDefinition) stableLength = 0;
+    const stable = stableLength > 0 ? chunks.slice(0, -1) : [];
+    chunks = [...stable, ...splitStreamingMarkdown(content.slice(stableLength), targetSize)];
+    stableLength = content.length - (chunks[chunks.length - 1]?.length ?? 0);
+    previous = content;
+    return chunks;
+  };
+}
+
 type MarkdownBlockKind = 'list' | 'quote' | 'indentedCode' | 'other';
 
 interface MarkdownLine {

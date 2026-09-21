@@ -1,8 +1,10 @@
 import { useEffect, useId, useMemo, useRef } from 'react';
-import { MessageCircleQuestionIcon } from 'lucide-react';
+import { CircleAlertIcon, InfoIcon, MessageCircleQuestionIcon } from 'lucide-react';
 import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
+import { Spinner } from '@/components/ui/spinner';
 
 import { useI18n } from '@/hooks/useI18n';
+import { aiErrorMessage } from '@/lib/ai/error-message';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import { canResumeTokenBudgetedTask, hasTokenBudgetCheckpoint, taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -19,6 +21,7 @@ import {
 import type { AgentArtifactResponse } from '@/types/agent-session';
 import type { AppSection } from '@/types';
 import { AiComposerSeat } from './ai-composer-seat';
+import { useFirstSubmitTransition } from './use-first-submit-transition';
 import { AiEmptyHero } from './ai-empty-hero';
 import { AiConversation } from './ai-conversation';
 import { aiAskConversationNodeRenderers } from './ai-conversation-node-seat';
@@ -90,6 +93,21 @@ function omitApprovedMarkers(nodes: readonly AiConversationNode[]): readonly AiC
 
 function omitSystemPrompts(nodes: readonly AiConversationNode[]): readonly AiConversationNode[] {
   return nodes.filter((node) => node.kind !== 'systemPrompt');
+}
+
+function historicalOutput<Node extends AiConversationNode>(node: Node): Node {
+  if (node.kind === 'turnProcess') {
+    return {
+      ...node,
+      status: node.status === 'running' ? 'incomplete' : node.status,
+      children: node.children.map(historicalOutput),
+    };
+  }
+  if ((node.kind === 'reasoning' && (node.state === 'streaming' || node.state === 'settled'))
+    || (node.kind === 'assistantMessage' && node.state === 'streaming')) {
+    return { ...node, state: 'interrupted' };
+  }
+  return node;
 }
 
 interface AiSubagentLineage {
@@ -199,7 +217,9 @@ export interface AiWorkspaceRootProps {
   readonly imageBusy?: boolean;
   readonly imageSubmissionId?: string;
   readonly imageLocked?: boolean;
+  readonly submissionContext?: object;
   readonly view: AiSessionView | null;
+  readonly restoringSession?: boolean;
   readonly scope: Extract<AppSection, 'terminal' | 'workbench'>;
   readonly title?: string;
   readonly draft?: string;
@@ -237,6 +257,7 @@ export interface AiWorkspaceRootProps {
   readonly agentUnavailableReason?: string | null;
   readonly historyScopeLabel?: string | null;
   readonly readOnlySession?: boolean;
+  readonly historicalTargetUnavailable?: boolean;
   readonly onDraftChange?: (value: string) => void;
   readonly onSubmit?: (input: AiWorkspaceSubmitInput) => void | Promise<void>;
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
@@ -276,7 +297,9 @@ export interface AiWorkspaceRootProps {
 export function AiWorkspaceRoot({
   mode,
   imageControls, onPasteImages, hasImages, imageBusy, imageSubmissionId, imageLocked,
+  submissionContext,
   view,
+  restoringSession = false,
   scope,
   title,
   draft,
@@ -311,9 +334,10 @@ export function AiWorkspaceRoot({
   renamingSessionId = null,
   renameError = null,
   canStartAgent = false,
-  agentUnavailableReason = null,
+  agentUnavailableReason: rawAgentUnavailableReason = null,
   historyScopeLabel = null,
   readOnlySession = false,
+  historicalTargetUnavailable = false,
   onDraftChange,
   onSubmit,
   onSubmitGesture,
@@ -350,6 +374,8 @@ export function AiWorkspaceRoot({
   loadArtifact,
 }: AiWorkspaceRootProps): React.ReactNode {
   const { t } = useI18n();
+  const agentUnavailableReason = rawAgentUnavailableReason === null
+    ? null : aiErrorMessage(rawAgentUnavailableReason, t);
   const rootRef = useRef<HTMLElement>(null);
   const route = navigation.route;
   const sessionKind = view?.summary.kind ?? 'agent';
@@ -357,7 +383,7 @@ export function AiWorkspaceRoot({
   const visibleNodes = view?.nodes ?? pendingNodes;
   const selectedSessionId = view?.summary.id ?? composerState?.sessionId
     ?? (route.kind === 'conversation' ? route.sessionId : null);
-  const sessionLoading = !view && selectedSessionId !== null && visibleNodes.length === 0;
+  const sessionLoading = !view && (restoringSession || selectedSessionId !== null) && visibleNodes.length === 0;
   const taskSteps = view?.snapshot.kind === 'agent'
     ? view.snapshot.value.task.plan?.steps ?? []
     : [];
@@ -389,17 +415,24 @@ export function AiWorkspaceRoot({
   } : composerState;
   const pendingSubmissions = activeComposerState?.pendingSubmissions;
   const submittedOperationId = pendingSubmissions?.[pendingSubmissions.length - 1]?.clientOperationId;
-  const conversationNodes = useMemo(() => (
-    surfaceMode === 'ask'
-      ? askConversationNodes(visibleNodes)
-      : omitSystemPrompts(
-        view?.snapshot.kind === 'agent' && view.snapshot.value.header.permissionMode === 'operator'
-          ? omitApprovedMarkers(visibleNodes)
-          : visibleNodes,
-      )
-  ), [surfaceMode, view?.snapshot, visibleNodes]);
+  const conversationNodes = useMemo(() => {
+    // A detached historical session may have no final event (for example after
+    // process exit). Preserve its output without presenting it as still live.
+    // One-shot subagents are read-only even while their output is still live.
+    const nodes = historicalTargetUnavailable ? visibleNodes.map(historicalOutput) : visibleNodes;
+    return (
+      surfaceMode === 'ask'
+        ? askConversationNodes(nodes)
+        : omitSystemPrompts(
+          view?.snapshot.kind === 'agent' && view.snapshot.value.header.permissionMode === 'operator'
+            ? omitApprovedMarkers(nodes)
+            : nodes,
+        )
+    );
+  }, [historicalTargetUnavailable, surfaceMode, view?.snapshot, visibleNodes]);
   const hero = !sessionLoading && conversationNodes.length === 0
     && status === 'idle' && composerState?.phase !== 'submitting';
+  const firstSubmitTransition = useFirstSubmitTransition(hero, imageBusy, submissionContext);
   const sessionLedgerKey = view ? sessionRouteKey(view.summary.kind, view.summary.id) : null;
   const scrollAnchor = sessionLedgerKey
     ? navigation.scrollAnchorBySession[sessionLedgerKey]
@@ -510,18 +543,21 @@ export function AiWorkspaceRoot({
       >
         {historicalContinuationAvailable && (
           <Alert variant="info" size="sm" role="status">
+            <InfoIcon aria-hidden="true" />
             <AlertDescription>{t(historicalContinuationBusy
               ? 'ai.workspace.sessions.continuePreparing'
               : 'ai.workspace.sessions.continueComposerHint')}</AlertDescription>
           </Alert>
         )}
         {historicalContinuationError && (
-          <Alert variant="destructiveSubtle" size="sm">
+          <Alert variant="destructiveSubtle" size="sm" className="items-center">
+            <CircleAlertIcon aria-hidden="true" />
             <AlertDescription>{historicalContinuationError}</AlertDescription>
           </Alert>
         )}
         {!readOnlySession && canResumeTokenBudgetedTask(view) && (
           <Alert variant="info" size="sm" role="status" data-token-budget-notice="">
+            <InfoIcon aria-hidden="true" />
             <AlertDescription>{t(view && hasTokenBudgetCheckpoint(view)
               ? 'ai.workspace.tokenBudget.checkpointSaved'
               : 'ai.workspace.tokenBudget.description')}</AlertDescription>
@@ -529,29 +565,34 @@ export function AiWorkspaceRoot({
         )}
         {activeComposerState?.phase === 'stopping' && (
           <Alert variant="info" size="sm" role="status">
+            <InfoIcon aria-hidden="true" />
             <AlertDescription>{t('ai.workspace.stopping')}</AlertDescription>
           </Alert>
         )}
         {surfaceMode === 'agent' && activeComposerState?.phase === 'waitingApproval' && !view?.pendingApproval && (
           <Alert variant="info" size="sm">
+            <InfoIcon aria-hidden="true" />
             <AlertTitle>{t('ai.workspace.approvalWaiting')}</AlertTitle>
             <AlertDescription>{t('ai.workspace.approvalPhase5')}</AlertDescription>
           </Alert>
         )}
         {activeComposerState?.phase === 'waitingQuestion' && !view?.pendingQuestion && (
           <Alert variant="info" size="sm">
+            <InfoIcon aria-hidden="true" />
             <AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle>
             <AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>
           </Alert>
         )}
         {agentUnavailableReason && (
           <Alert id={availabilityHintId} variant="info" size="sm" role="status" aria-label={t('agent.availability.title')}>
+            <InfoIcon aria-hidden="true" />
             <AlertDescription className="min-w-0 break-words">{agentUnavailableReason}</AlertDescription>
           </Alert>
         )}
       </div>
 
       <div
+        ref={firstSubmitTransition.bodyRef}
         data-slot="ai-workspace-body"
         className="ai-workspace-body relative flex min-h-0 min-w-0 flex-1 flex-col"
       >
@@ -560,7 +601,16 @@ export function AiWorkspaceRoot({
           className="ai-workspace-content flex min-h-0 min-w-0 flex-1 flex-col"
           aria-busy={sessionLoading || undefined}
         >
-          {sessionLoading ? null : hero ? (
+          {sessionLoading ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex min-h-0 flex-1 items-center justify-center gap-1 p-4 text-sm text-muted-foreground"
+            >
+              <Spinner aria-hidden="true" />
+              <span>{t('ai.workspace.loadingSession')}</span>
+            </div>
+          ) : hero ? (
             <AiEmptyHero
               title={heroTitle}
               description={heroDescription}
@@ -573,8 +623,9 @@ export function AiWorkspaceRoot({
               key={sessionLedgerKey ?? 'pending'}
               nodes={conversationNodes}
               renderers={surfaceMode === 'ask' ? aiAskConversationNodeRenderers : undefined}
-              runningIndicator={readOnlySession ? 'none' : surfaceMode}
-              pending={surfaceMode === 'ask' && composerState?.phase === 'submitting'}
+              runningIndicator={historicalTargetUnavailable ? 'none' : surfaceMode}
+              pending={activeComposerState?.phase === 'submitting'
+                || Boolean(pendingSubmissions?.some(submission => submission.startsTurn))}
               submittedOperationId={submittedOperationId}
               imageSubmissionId={imageSubmissionId}
               status={status}
@@ -637,8 +688,14 @@ export function AiWorkspaceRoot({
           unavailableReason={agentUnavailableReason}
           availabilityHintId={availabilityHintId}
           onDraftChange={onDraftChange}
-          onSubmit={onSubmit ? (content) => onSubmit({ content }) : undefined}
-          onSubmitGesture={onSubmitGesture}
+          onSubmit={onSubmit ? (content) => {
+            firstSubmitTransition.prepare();
+            return onSubmit({ content });
+          } : undefined}
+          onSubmitGesture={onSubmitGesture ? (gesture, accelerated) => {
+            firstSubmitTransition.prepare();
+            onSubmitGesture(gesture, accelerated);
+          } : undefined}
           onStop={readOnlySession ? undefined : onStop}
           onBusyPreferenceChange={surfaceMode === 'agent' && !readOnlySession
             && !view?.snapshot.value.header.subagent ? onBusyPreferenceChange : undefined}

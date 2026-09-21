@@ -138,6 +138,11 @@
   border-radius: 8px;
 }
 
+.ai-composer-add-menu [data-slot='dropdown-menu-item'] > svg {
+  width: 14px;
+  height: 14px;
+}
+
 .ai-permission-menu-option > svg,
 .ai-execution-surface-menu-option > svg {
   width: 16px;

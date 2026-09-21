@@ -186,7 +186,7 @@ function aggregateUsage(stats: AiDurableTurnStats): AgentSessionTokenUsage | nul
 }
 
 function sumComplete(
-  stats: readonly AiDurableTurnStats[],
+  stats: readonly (AiDurableTurnStats | AiDurableSessionStats)[],
   field: 'uncachedInputTokens' | 'cacheReadTokens' | 'cacheWriteTokens'
     | 'outputTokens' | 'reasoningTokens' | 'totalTokens',
 ): number | null {
@@ -196,7 +196,7 @@ function sumComplete(
 
 /** Aggregate the same durable facts used by each Turn tail into a session-wide reading. */
 export function aggregateDurableSessionStats(
-  turns: readonly AiDurableTurnStats[],
+  turns: readonly (AiDurableTurnStats | AiDurableSessionStats)[],
   historyComplete = true,
 ): AiDurableSessionStats {
   const timeToFirstTokenCount = turns.reduce(
@@ -227,7 +227,7 @@ export function aggregateDurableSessionStats(
     : turns.reduce((sum, value) => sum + (value.toolDurationMs ?? 0), 0);
   return {
     historyComplete,
-    turnCount: turns.length,
+    turnCount: turns.reduce((sum, value) => sum + value.turnCount, 0),
     stepCount: turns.reduce((sum, value) => sum + value.stepCount, 0),
     requestCount,
     toolCount,
@@ -283,6 +283,13 @@ export function createAgentChatProjector(): (events: readonly AgentSessionEvent[
 function createChatProjection() {
   const projectQuestions = createQuestionProjector();
   const turns = new Map<string, TurnState>();
+  const dirtyTurns = new Set<string>();
+  const turnSnapshots = new Map<string, {
+    process: AiTurnProcessNode;
+    closing?: AiAssistantMessageNode;
+    tail?: AiTurnTailNode;
+    previousStats: AiDurableSessionStats | undefined;
+  }>();
   const userMessages = new Map<string, AiUserMessageNode>();
   const systemPrompts = new Map<string, AiSystemPromptNode>();
   let latestPromptKey: string | undefined;
@@ -297,6 +304,7 @@ function createChatProjection() {
   const ensureTurn = (event: RuntimeEventLike, explicitTurnId = event.turnId): TurnState | null => {
     const id = explicitTurnId ?? null;
     if (id === null) return null;
+    dirtyTurns.add(id);
     latestTurnId = id;
     const existing = turns.get(id);
     if (existing) {
@@ -328,7 +336,11 @@ function createChatProjection() {
       return;
     }
     const turn = turns.get(turnId);
-    if (turn) turn.children.set(node.key, node);
+    if (turn) {
+      turn.children.set(node.key, node);
+      turn.lastSeq = Math.max(turn.lastSeq, node.lastSeq);
+      dirtyTurns.add(turnId);
+    }
   };
 
   const putAssistant = (turnId: string | null, node: AiAssistantMessageNode): void => {
@@ -347,6 +359,7 @@ function createChatProjection() {
   ): void => {
     const request = requests.get(requestId);
     if (!request) return;
+    if (request.turnId) dirtyTurns.add(request.turnId);
     request.usage = usage;
     if (stopReason !== undefined) request.stopReason = stopReason;
     if (completedAt !== undefined) request.completedAt = completedAt;
@@ -480,6 +493,7 @@ function createChatProjection() {
     const scopedTurns = scope === 'session' ? turns.values() : currentTurn ? [currentTurn] : [];
     const nodeMaps: Map<string, AiConversationNode>[] = [unscopedNodes];
     for (const turn of scopedTurns) {
+      dirtyTurns.add(turn.id);
       nodeMaps.push(turn.children, turn.assistants);
       if (scope === 'session' && turn.endSeq === undefined) {
         turn.status = status;
@@ -503,6 +517,10 @@ function createChatProjection() {
             lastSeq: event.seq,
             state: status === 'failed' || status === 'cancelled' ? status : 'interrupted',
           });
+        if (node.turnId) {
+          const turn = turns.get(node.turnId);
+          if (turn) turn.lastSeq = Math.max(turn.lastSeq, event.seq);
+        }
       }
     }
   };
@@ -531,6 +549,15 @@ function createChatProjection() {
 
   const apply = (event: AgentSessionEvent): void => {
     if (event.turnId) ensureTurn(event);
+    // Usage can arrive after turn/end, without a turnId on the envelope.
+    if (event.data && 'requestId' in event.data && typeof event.data.requestId === 'string') {
+      const requestTurn = requests.get(event.data.requestId)?.turnId;
+      const turn = requestTurn ? turns.get(requestTurn) : undefined;
+      if (turn) {
+        turn.lastSeq = Math.max(turn.lastSeq, event.seq);
+        dirtyTurns.add(turn.id);
+      }
+    }
     switch (event.type) {
       case 'session/created':
       case 'session/resumed':
@@ -797,7 +824,14 @@ function createChatProjection() {
         const previous = event.data.previousRequestId
           ? requests.get(event.data.previousRequestId)
           : undefined;
-        if (previous && previous.completedAt === undefined) previous.completedAt = event.timeUnixMs;
+        if (previous && previous.completedAt === undefined) {
+          previous.completedAt = event.timeUnixMs;
+          const turn = previous.turnId ? turns.get(previous.turnId) : undefined;
+          if (turn) {
+            turn.lastSeq = Math.max(turn.lastSeq, event.seq);
+            dirtyTurns.add(turn.id);
+          }
+        }
         const node: AiRetryNode = {
           kind: 'retry',
           key: `retry:${event.data.requestId}:${event.data.attempt}`,
@@ -1197,18 +1231,36 @@ function createChatProjection() {
     }));
     for (const question of questionNodes) {
       const turn = question.turnId === null ? undefined : turns.get(question.turnId);
-      if (turn) turn.children.set(question.key, question);
-      else projectedUnscoped.set(question.key, question);
+      if (turn) {
+        if (turn.children.get(question.key)?.lastSeq !== question.lastSeq) {
+          turn.children.set(question.key, question);
+          turn.lastSeq = Math.max(turn.lastSeq, question.lastSeq);
+          dirtyTurns.add(turn.id);
+        }
+      } else projectedUnscoped.set(question.key, question);
     }
 
     const nodes: AiConversationNode[] = [...projectedUnscoped.values()].sort(topLevelSort);
     const orderedTurns = [...turns.values()].sort((left, right) => (
       left.firstSeq - right.firstSeq || left.id.localeCompare(right.id)
     ));
-    const settledTurnStats: AiDurableTurnStats[] = [];
+    let sessionStats: AiDurableSessionStats | undefined;
     for (const turn of orderedTurns) {
       nodes.push(...(scopedPrompts.get(turn.id) ?? []).sort(topLevelSort));
       nodes.push(...(scopedUsers.get(turn.id) ?? []).sort(topLevelSort));
+
+      const cached = turnSnapshots.get(turn.id);
+      if (cached && !dirtyTurns.has(turn.id) && cached.previousStats === sessionStats) {
+        nodes.push(cached.process);
+        if (cached.closing) nodes.push(cached.closing);
+        nodes.push(...(scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort));
+        if (cached.tail) {
+          nodes.push(cached.tail);
+          sessionStats = cached.tail.sessionStats;
+        }
+        continue;
+      }
+      const previousStats = sessionStats;
 
       const assistants = [...turn.assistants.values()].sort(topLevelSort);
       const closing = [...assistants].reverse().find((assistant) => (
@@ -1234,7 +1286,7 @@ function createChatProjection() {
         turnId: turn.id,
         stepId: null,
         firstSeq: turn.startSeq ?? turn.firstSeq,
-        lastSeq: turn.endSeq ?? turn.lastSeq,
+        lastSeq: turn.lastSeq,
         timestamp: turn.timestamp,
         status,
         answerGeneration,
@@ -1246,17 +1298,23 @@ function createChatProjection() {
       nodes.push(process);
       const hasTurnTail = turn.startSeq !== undefined && turn.endSeq !== undefined
         && Boolean(turn.endReason && turn.endTimestamp);
-      if (closing) nodes.push(hasTurnTail ? { ...closing, hasTurnTail: true } : closing);
+      const closingNode = closing && (hasTurnTail ? { ...closing, hasTurnTail: true } : closing);
+      if (closingNode) nodes.push(closingNode);
       nodes.push(...(scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort));
 
+      let tail: AiTurnTailNode | undefined;
       if (turn.startSeq !== undefined && turn.endSeq !== undefined && turn.endReason && turn.endTimestamp) {
         const stats = completedStats(turn);
-        settledTurnStats.push(stats);
+        // Each prefix is folded once, rather than rescanning every earlier turn
+        // for every footer. Unchanged prefixes are shared between publications.
+        sessionStats = aggregateDurableSessionStats(
+          previousStats ? [previousStats, stats] : [stats], events[0]?.seq === 0,
+        );
         const latestRequest = [...turn.requestIds]
           .reverse()
           .map((requestId) => requests.get(requestId))
           .find((request) => request !== undefined);
-        const tail: AiTurnTailNode = {
+        tail = {
           kind: 'turnTail',
           key: `turn-tail:${turn.id}`,
           sourceKind: 'agent',
@@ -1264,14 +1322,14 @@ function createChatProjection() {
           turnId: turn.id,
           stepId: null,
           firstSeq: turn.endSeq,
-          lastSeq: turn.endSeq,
+          lastSeq: turn.lastSeq,
           timestamp: turn.endTimestamp,
           status: turn.status ?? 'completed',
           endReason: turn.endReason,
           stopReason: latestRequest?.stopReason ?? null,
           usage: aggregateUsage(stats),
           stats,
-          sessionStats: aggregateDurableSessionStats(settledTurnStats, events[0]?.seq === 0),
+          sessionStats,
           summaryText: closing ? textContent(closing.blocks) : undefined,
           durationMs: turn.startedAt === undefined ? undefined
             : Math.max(0, Date.parse(turn.endTimestamp) - turn.startedAt),
@@ -1284,8 +1342,10 @@ function createChatProjection() {
         };
         nodes.push(tail);
       }
+      turnSnapshots.set(turn.id, { process, closing: closingNode, tail, previousStats });
     }
 
+    dirtyTurns.clear();
     return nodes;
   };
   return { apply, snapshot };

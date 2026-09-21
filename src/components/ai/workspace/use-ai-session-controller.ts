@@ -95,6 +95,8 @@ export interface AiSessionController {
   readonly selectPermission: (mode: AgentPermissionMode) => Promise<void>;
   readonly selectExecutionSurface: (surface: AgentExecutionSurface) => void;
   readonly imageDraft: ReturnType<typeof useImageDraft>;
+  /** Changes on navigation/reset, but not when a submission creates its session. */
+  readonly submissionContext?: object;
   readonly listFileReferences: import('@/types/agent-file-reference').ListFileReferences;
   readonly listSkills: (root?: string) => Promise<import('@/types/agent-skill').SkillUserList>;
   readonly skillsScopeKey: string;
@@ -102,6 +104,7 @@ export interface AiSessionController {
   readonly projectTargetLabel: string;
   readonly answerQuestion: AiSessionAdapter['answerQuestion'];
   readonly view: AiSessionView | null;
+  readonly restoringSession: boolean;
   readonly pendingNodes: readonly AiConversationNode[];
   readonly composer: AiComposerState;
   readonly providerLabel: string;
@@ -110,6 +113,7 @@ export interface AiSessionController {
   readonly agentUnavailableReason: string | null;
   readonly historyScopeLabel: string | null;
   readonly readOnlySession: boolean;
+  readonly historicalTargetUnavailable: boolean;
   readonly announcement: AiAnnouncement | null;
   readonly navigation: AiWorkspaceNavigationState;
   readonly sessions: readonly AiSessionSummary[];
@@ -417,6 +421,7 @@ export function useAiSessionController({
   // Initial history is only a convenience. It must never claim a workspace after
   // the user has begun a draft, chosen a project, or explicitly navigated.
   const automaticRestore = useRef({ key: workspaceScopeKey, eligible: true });
+  const [completedRestore, setCompletedRestore] = useState<object | null>(null);
   if (automaticRestore.current.key !== workspaceScopeKey) {
     automaticRestore.current = { key: workspaceScopeKey, eligible: true };
   }
@@ -835,6 +840,8 @@ export function useAiSessionController({
     };
     void open().catch((error: unknown) => {
       if (canPublish()) dispatch({ type: 'stop.failed', error: normalizeAiSessionError(error) });
+    }).finally(() => {
+      if (alive && automaticRestore.current === restore) setCompletedRestore(restore);
     });
     return () => {
       alive = false;
@@ -1389,6 +1396,7 @@ export function useAiSessionController({
     ? visibleView.snapshot.value : null;
 
   return {
+    submissionContext: submissionContextRef.current,
     imageDraft: {
       ...imageDraft,
       add: files => { claimWorkspace(); return imageDraft.add(files); },
@@ -1405,6 +1413,8 @@ export function useAiSessionController({
     skillsNeedsRoot: !visibleView && !openedSessionId && !skillRoot,
     skillsScopeKey: `${workspaceScopeKey}:${openedSessionId ?? "new"}:${skillNavigation}`,
     view: displayView,
+    restoringSession: scope === 'workbench' && canRestoreWorkbench && !displayView
+      && automaticRestore.current.eligible && completedRestore !== automaticRestore.current,
     answerQuestion: async (input) => {
       const current = viewRef.current?.pendingQuestion;
       if (!current || questionKey(current.identity) !== questionKey(input.identity)) throw new Error('Question is no longer active');
@@ -1469,6 +1479,7 @@ export function useAiSessionController({
     historyScopeLabel: scope === 'terminal' && activeTerminal
       ? terminalLoginLabel(activeTerminal) : null,
     readOnlySession,
+    historicalTargetUnavailable,
     announcement,
     navigation: { ...navigation, scrollAnchorBySession: scrollAnchorsRef.current },
     sessions,

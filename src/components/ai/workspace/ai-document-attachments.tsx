@@ -60,7 +60,7 @@ export function AiDocumentAttachments({ documents, pending = [], onRemove, onCan
       <Attachment size="sm" orientation={composer ? 'vertical' : 'horizontal'} className={composer ? 'ai-composer-file-card focus-within:ring-0' : 'max-w-64'} data-document-name={document.name} data-file-kind={documentKind(document.name)}>
         <AttachmentMedia><DocumentKindIcon kind={documentKind(document.name)} /></AttachmentMedia>
         <AttachmentContent>
-          <AttachmentTitle title={document.name}>{document.name}</AttachmentTitle>
+          <AttachmentTitle>{document.name}</AttachmentTitle>
           <AttachmentDescription className={composer ? 'sr-only' : undefined}>{description(document)} · {t('ai.workspace.documents.ready')}</AttachmentDescription>
         </AttachmentContent>
         <DialogTrigger render={<AttachmentTrigger aria-label={t('ai.workspace.documents.preview', { name: document.name })} />} />

@@ -139,7 +139,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     );
     expect(getComputedStyle(reasoningPanel!).transitionProperty).toBe('height, opacity');
     expect((await screen.findAllByText('Read the frozen context. Answer directly.'))
-      .some((element) => element.classList.contains('ai-reasoning-body'))).toBe(true);
+      .some((element) => element.closest('.ai-reasoning-body'))).toBe(true);
     expect(screen.getByText('Hello! How can I help?')).toBeVisible();
   });
 
@@ -382,7 +382,12 @@ describe('AI Phase 4 Turn Process renderer', () => {
       'turnTail',
     );
     await user.click(process);
-    if (!hasAnswer) expect(await screen.findByText(answer)).toBeVisible();
+    if (!hasAnswer) {
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('Request failed');
+      await user.click(within(alert).getByRole('button', { name: 'View error details' }));
+      expect(await screen.findByText(answer)).toBeVisible();
+    }
   });
 
   it('shows an unfinished plan as incomplete instead of completed', () => {
