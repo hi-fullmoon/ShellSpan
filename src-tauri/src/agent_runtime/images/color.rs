@@ -1,7 +1,6 @@
 //! Colour management for admitted images. Keep metadata until the pixels are converted.
 use image::{DynamicImage, RgbaImage};
 use moxcms::{ColorProfile, DataColorSpace, Layout, ParsingOptions, TransformExecutor};
-use std::io::Cursor;
 use tokio_util::sync::CancellationToken;
 
 use super::{cancelled, image_error, VISION};
@@ -21,15 +20,55 @@ pub(super) fn parse(bytes: &[u8]) -> Result<ColorProfile, String> {
     .map_err(error)
 }
 
-pub(super) fn validate_png(bytes: &[u8], has_icc: bool) -> Result<(), String> {
-    let decoder = png::Decoder::new_with_limits(
-        Cursor::new(bytes),
-        png::Limits {
-            bytes: VISION.max_decode_bytes as usize,
-        },
-    );
-    let reader = decoder.read_info().map_err(image_error)?;
-    let info = reader.info();
+pub(super) fn validate_png(
+    bytes: &[u8],
+    has_icc: bool,
+    token: &CancellationToken,
+) -> Result<(), String> {
+    // The high-level reader hides BadAncillaryChunk and stops at IDAT. Inspect all
+    // chunks with the library's streaming parser, without decoding the pixels twice.
+    let mut decoder = png::StreamingDecoder::new();
+    decoder.set_ignore_text_chunk(true);
+    // ICC decompression/parsing already ran through the bounded image decoder.
+    // Skip it here to avoid unbounded decompression in StreamingDecoder.
+    decoder.set_ignore_iccp_chunk(true);
+    let mut remaining = bytes;
+    let mut seen_data = false;
+    let mut seen_colors = Vec::new();
+    let mut ended = false;
+    while !remaining.is_empty() {
+        cancelled(token)?;
+        let (consumed, event) = decoder.update(remaining, None).map_err(image_error)?;
+        remaining = &remaining[consumed..];
+        match event {
+            png::Decoded::ChunkBegin(_, tag) if is_color_chunk(tag) => {
+                if seen_data || seen_colors.contains(&tag) {
+                    return Err(error("misplaced or duplicate PNG colour declaration"));
+                }
+                seen_colors.push(tag);
+                if tag == png::chunk::iCCP && !has_icc {
+                    return Err(error("PNG ICC declaration could not be decoded"));
+                }
+            }
+            png::Decoded::ChunkBegin(_, png::chunk::IDAT) => seen_data = true,
+            png::Decoded::ChunkBegin(_, png::chunk::acTL) => {
+                return Err("IMAGE_ANIMATION_UNSUPPORTED".into());
+            }
+            png::Decoded::BadAncillaryChunk(tag) if is_color_chunk(tag) => {
+                return Err(error("invalid PNG colour declaration"));
+            }
+            png::Decoded::ChunkComplete(png::chunk::IEND) => {
+                ended = true;
+                break;
+            }
+            png::Decoded::Nothing if consumed == 0 => break,
+            _ => {}
+        }
+    }
+    if !ended || !remaining.is_empty() {
+        return Err("IMAGE_INVALID_PNG_END".into());
+    }
+    let info = decoder.info().ok_or("IMAGE_INVALID_PNG_HEADER")?;
     // cICP takes precedence over ICC. Do not silently discard unsupported HDR/video semantics.
     if info.coding_independent_code_points.is_some() {
         return Err(error("unsupported PNG cICP declaration"));
@@ -50,6 +89,17 @@ pub(super) fn validate_png(bytes: &[u8], has_icc: bool) -> Result<(), String> {
         return Err(error("PNG requires an ICC profile for this colour space"));
     }
     Ok(())
+}
+
+fn is_color_chunk(tag: png::chunk::ChunkType) -> bool {
+    matches!(
+        tag,
+        png::chunk::gAMA
+            | png::chunk::cHRM
+            | png::chunk::sRGB
+            | png::chunk::iCCP
+            | png::chunk::cICP
+    )
 }
 
 pub(super) fn to_srgb(

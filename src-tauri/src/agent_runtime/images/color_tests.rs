@@ -229,3 +229,102 @@ fn image_icc_cancelled_conversion_does_not_return_pixels() {
         "IMAGE_CANCELLED"
     );
 }
+
+fn png_with_color_chunk(
+    tag: png::chunk::ChunkType,
+    data: &[u8],
+    after_pixels: bool,
+    with_icc: bool,
+) -> ImageUpload {
+    let mut info = png_info();
+    if with_icc {
+        info.icc_profile = Some(Cow::Owned(ColorProfile::new_srgb().encode().unwrap()));
+    }
+    let mut bytes = Vec::new();
+    let encoder = png::Encoder::with_info(&mut bytes, info).unwrap();
+    let mut writer = encoder.write_header().unwrap();
+    if !after_pixels {
+        writer.write_chunk(tag, data).unwrap();
+    }
+    writer.write_image_data(&[128, 64, 32]).unwrap();
+    if after_pixels {
+        writer.write_chunk(tag, data).unwrap();
+    }
+    writer.finish().unwrap();
+    ImageUpload {
+        media_type: "image/png".into(),
+        data: STANDARD.encode(bytes),
+        name: "colour-declaration.png".into(),
+    }
+}
+
+#[test]
+fn image_png_invalid_color_chunks_are_rejected_even_with_icc() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ImageStore::default();
+    store.configure(dir.path()).unwrap();
+    for with_icc in [false, true] {
+        for (tag, data) in [
+            (png::chunk::gAMA, vec![0; 4]),
+            (png::chunk::cHRM, vec![0; 2]),
+            (png::chunk::sRGB, vec![255]),
+            (png::chunk::cICP, vec![1, 13]),
+        ] {
+            let upload = png_with_color_chunk(tag, &data, false, with_icc);
+            let result = store.import(&[upload], &CancellationToken::new());
+            assert!(
+                result
+                    .unwrap_err()
+                    .contains("IMAGE_COLOR_PROFILE_UNSUPPORTED"),
+                "{tag:?}"
+            );
+        }
+    }
+    assert_eq!(
+        fs::read_dir(dir.path().join("agent-runtime/images-v1"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn image_png_late_color_declarations_are_rejected_even_with_icc() {
+    for with_icc in [false, true] {
+        for (tag, data) in [
+            (png::chunk::gAMA, 100000u32.to_be_bytes().to_vec()),
+            (png::chunk::sRGB, vec![0]),
+            (png::chunk::cICP, vec![1, 13, 0, 1]),
+        ] {
+            let upload = png_with_color_chunk(tag, &data, true, with_icc);
+            assert!(
+                normalize(&upload, &CancellationToken::new())
+                    .unwrap_err()
+                    .contains("IMAGE_COLOR_PROFILE_UNSUPPORTED"),
+                "{tag:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn image_png_invalid_icc_container_and_trailing_bytes_are_rejected() {
+    // A broken compressed iCCP payload must not be treated as absent metadata.
+    let upload = png_with_color_chunk(png::chunk::iCCP, b"profile\0\0broken", false, false);
+    assert!(normalize(&upload, &CancellationToken::new())
+        .unwrap_err()
+        .contains("IMAGE_COLOR_PROFILE_UNSUPPORTED"));
+    let mut upload = png_upload(png_info());
+    let mut bytes = STANDARD.decode(&upload.data).unwrap();
+    bytes.extend(b"trailing");
+    upload.data = STANDARD.encode(bytes);
+    assert!(normalize(&upload, &CancellationToken::new())
+        .unwrap_err()
+        .contains("IMAGE_INVALID_PNG_END"));
+}
+
+#[test]
+fn image_png_valid_ancillary_metadata_after_pixels_remains_accepted() {
+    let upload = png_with_color_chunk(png::chunk::tEXt, b"Description\0Screenshot", true, false);
+    assert_pixel(import(upload).get_pixel(0, 0), [128, 64, 32, 255], 0);
+}
