@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { BookOpenIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+import { AiMentionPanel } from './ai-mention-panel';
 import { PopoverHeader, PopoverTitle, PopoverDescription } from '@/components/ui/popover';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Spinner } from '@/components/ui/spinner';
@@ -72,28 +72,23 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
       }
     });
   };
-  const panel = open ? <div className="flex max-h-[inherit] min-h-0 w-full min-w-0 flex-col" data-skill-completion="">
+  const panel = open ? <div className="flex h-full min-h-0 w-full min-w-0 flex-col" data-skill-completion="">
     <PopoverHeader className="shrink-0 gap-0.5 px-3 py-2">
       <PopoverTitle>{t('ai.workspace.skills.title')}</PopoverTitle>
       <PopoverDescription className="text-xs font-normal">{t('ai.workspace.skills.hint')}</PopoverDescription>
     </PopoverHeader>
-    <div className="flex min-h-0 min-w-0 flex-col gap-1 overflow-y-auto px-2 pb-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div role="status" aria-live="polite" className="shrink-0 px-2 empty:hidden">
         {loading && <span className="flex items-center gap-1"><Spinner />{t('ai.workspace.skills.loading')}</span>}
         {(error || result?.status === 'unavailable') && <AiErrorNotice title={t('ai.workspace.recovery.title')}>{t('ai.workspace.skills.unavailable')}</AiErrorNotice>}
         {result?.status === 'stale' && <Alert><AlertDescription>{t('ai.workspace.skills.stale')}</AlertDescription></Alert>}
         {result && !loading && result.status !== 'unavailable' && entries.length === 0 && <EmptyState title={t('ai.workspace.skills.noMatch')} />}
       </div>
-      <div id={id} role="listbox" aria-label={t('ai.workspace.skills.title')} className="flex min-w-0 shrink-0 flex-col gap-0.5">
-        {entries.map((skill, i) => <Button key={skill.name} id={`${id}-${i}`} type="button" role="option" aria-selected={i === index} tabIndex={-1}
-          variant={i === index ? 'secondary' : 'ghost'} className="h-auto w-full min-w-0 shrink-0 justify-start px-2 py-1.5" onMouseDown={event => event.preventDefault()} onClick={() => choose(skill)}>
-          <BookOpenIcon data-icon="inline-start" />
-          <span className="flex min-w-0 flex-col items-start gap-0.5 text-left">
-            <span className="truncate">/{skill.name}</span>
-            <span className="whitespace-normal break-words text-xs text-muted-foreground">{description(skill)}</span>
-          </span>
-        </Button>)}
-      </div>
+      <AiMentionPanel id={id} label={t('ai.workspace.skills.title')} index={index} onIndexChange={setIndex} empty={false}
+        groups={[{ label: t('ai.workspace.skills.title'), hideLabel: true, options: entries.map(skill => ({
+          key: `skill:${skill.name}`, label: description(skill), detail: `/${skill.name}`,
+          icon: <BookOpenIcon />, choose: () => choose(skill),
+        })) }]} />
     </div>
   </div> : null;
   return {
