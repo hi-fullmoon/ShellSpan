@@ -1,4 +1,6 @@
 import { selectEditorText } from '@/test/composer-editor-user';
+import { readdir } from 'node:fs/promises';
+import path from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +13,30 @@ const deferred = <T,>() => { let resolve!: (v:T)=>void; let reject!: (e: unknown
 beforeEach(async () => { useAppStore.setState({locale:'en-US'}); await initI18n('en-US'); });
 afterEach(cleanup);
 describe('composer path completion', () => {
+  it('enters directories with Tab repeatedly and confirms the final directory with Enter', async () => {
+    const user = userEvent.setup();
+    const query = async (value: string): Promise<FileReferenceList> => {
+      const directory = value.endsWith('/') ? value : '';
+      const entries = await readdir(path.resolve(process.cwd(), directory), { withFileTypes: true });
+      return { entries: entries.filter(entry => entry.isDirectory() && `${directory}${entry.name}`.startsWith(value))
+        .map(entry => ({ path: `${directory}${entry.name}`, kind: 'directory' })), scope: null, status: 'ready', code: null, excluded: 0 };
+    };
+    render(<AiComposerSeat phase="hero" status="idle" onListFileReferences={query} />);
+    const editor = screen.getByRole('textbox');
+    await user.type(editor, '@src');
+    await screen.findByRole('option', { name: 'src/' });
+    await user.keyboard('{Tab}');
+    expect(editor.textContent).toBe('@src/');
+    const children = await screen.findAllByRole('option');
+    const child = children[0].getAttribute('aria-label')!;
+    await user.keyboard('{Tab}');
+    expect(editor.textContent).toBe(`@${child}`);
+    const descendants = await screen.findAllByRole('option');
+    const selected = descendants[0].getAttribute('aria-label')!;
+    await user.keyboard('{Enter}');
+    expect(editor.textContent).toBe(`@${selected} `);
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
   it('reopens a dismissed query after editing away and returning to the same text', async () => {
     const user=userEvent.setup(); const query=vi.fn(async()=>result);
     render(<AiComposerSeat phase="hero" status="idle" onListFileReferences={query}/>);
@@ -21,15 +47,16 @@ describe('composer path completion', () => {
     await user.clear(editor); await user.type(editor,'@plain');
     expect(await screen.findByRole('option',{name:'plain.txt'})).toBeVisible();
   });
-  it('navigates quoted directories, inserts a file with keyboard, then sends raw text once', async () => {
+  it('completes quoted directories with a space, then sends raw text once', async () => {
     const user=userEvent.setup(); const submit=vi.fn(); const query=vi.fn(async (q:string)=>q.includes('/') ? {...result,entries:[{path:'space dir/file name.txt',kind:'file' as const}]} : result);
     render(<AiComposerSeat phase="hero" status="idle" onListFileReferences={query} onSubmit={submit}/>);
     const editor=screen.getByRole('textbox'); await user.type(editor,'hello @space');
     await screen.findByRole('option',{name:'space dir/'}); await user.keyboard('{Enter}');
-    expect(editor.textContent).toBe('hello @"space dir/'); expect(submit).not.toHaveBeenCalled();
-    await screen.findByRole('option',{name:'space dir/file name.txt'}); await user.keyboard('{Tab}');
-    expect(editor.textContent).toBe('hello @"space dir/file name.txt" '); await user.keyboard('{Enter}');
-    expect(submit).toHaveBeenCalledExactlyOnceWith('hello @"space dir/file name.txt" ');
+    expect(editor.textContent).toBe('hello @"space dir/" '); expect(submit).not.toHaveBeenCalled();
+    expect(screen.queryByRole('listbox')).toBeNull();
+    await user.type(editor, 'check');
+    expect(editor.textContent).toBe('hello @"space dir/" check'); await user.keyboard('{Enter}');
+    expect(submit).toHaveBeenCalledExactlyOnceWith('hello @"space dir/" check');
   });
   it('does not send during loading, empty/error results, or IME, and Escape dismisses', async () => {
     const user=userEvent.setup(); const pending=deferred<FileReferenceList>(); const submit=vi.fn(); const query=vi.fn(()=>pending.promise);
@@ -66,7 +93,7 @@ describe('composer path completion', () => {
     render(<AiComposerSeat phase="hero" status="idle" skillsNeedsRoot projectTargetLabel="Remote target" onListFileReferences={query}/>);
     await user.type(screen.getByRole('textbox'),'@');
     expect(query).not.toHaveBeenCalled();
-    await user.click(await screen.findByRole('option', { name: 'Project files and folders' }));
+    await user.click(await screen.findByRole('option', { name: 'Add folder' }));
     await user.type(screen.getByRole('textbox',{name:'Project directory'}),'/project');
     await user.click(screen.getByRole('button',{name:'Bind directory'})); expect(await screen.findByRole('alert')).toHaveTextContent('access was denied');
     expect(query.mock.calls[0]?.[0]).toBe('');
