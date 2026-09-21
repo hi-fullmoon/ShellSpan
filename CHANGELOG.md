@@ -2,6 +2,15 @@
 
 All notable changes to ShellSpan are documented in this file.
 
+## [v2.0.59](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.0.59) - 2026-09-21
+
+### Bug Fixes
+
+- Install the pinned Rust toolchain and rustfmt before frontend tests in release and quality workflows.
+- Release standalone SSH execution registrations immediately after cancellation or timeout, allowing safe operation ID reuse while workers finish cleanup.
+
+Includes the changes from v2.0.58, whose release did not complete.
+
 
 ## [v2.0.58](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.58) - 2026-09-21
 
