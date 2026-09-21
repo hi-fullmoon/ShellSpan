@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   BrainIcon,
   ChevronDownIcon,
@@ -11,7 +11,7 @@ import {
   SquareIcon,
 } from 'lucide-react';
 
-import { AssistantMessageContent, MarkdownContent } from '@/components/ai/assistant-message-content';
+import { AssistantMessageContent, StreamingMarkdownContent } from '@/components/ai/assistant-message-content';
 import { Bubble, Message, MessageActions } from '@/components/ai/chat-primitives';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,6 +33,7 @@ import type {
 } from '@/lib/ai/conversation-node';
 import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
+import { createStreamingMarkdownSplitter } from '@/lib/streaming-markdown';
 import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { requestErrorMessageKey } from '@/lib/ai/request-error';
 import { AiToolRow } from './ai-tool-presentation';
@@ -235,17 +236,34 @@ function AssistantMessageNodeView({
   );
 }
 
-function ReasoningContent({ children }: { readonly children: string }) {
+function ReasoningContent({ children, streaming }: { readonly children: string; readonly streaming: boolean }) {
   const { t } = useI18n();
+  const splitMarkdown = useMemo(() => createStreamingMarkdownSplitter(), []);
+  const chunks = useMemo(() => splitMarkdown(children), [children, splitMarkdown]);
+  const previousSource = useRef('');
+  const previous = children.startsWith(previousSource.current) ? previousSource.current : '';
+  useLayoutEffect(() => { previousSource.current = children; }, [children]);
+  let offset = 0;
   return (
     <div className="ai-reasoning-body min-w-0 py-1 pl-[22px] whitespace-normal [overflow-wrap:anywhere]">
-      <MarkdownContent
-        copiedLabel={t('common.copied')}
-        copyLabel={t('common.copy')}
-        showCodeBlockActions={false}
-      >
-        {children}
-      </MarkdownContent>
+      {chunks.map((chunk, index) => {
+        // A completed look-ahead line can move already visible text into a new
+        // chunk. Seed its reveal baseline instead of replaying its entrance.
+        const initialSource = previous.slice(offset, offset + chunk.length);
+        offset += chunk.length;
+        return (
+          <StreamingMarkdownContent
+            key={index}
+            initialSource={initialSource}
+            copiedLabel={t('common.copied')}
+            copyLabel={t('common.copy')}
+            showCodeBlockActions={false}
+            streaming={streaming && index === chunks.length - 1}
+          >
+            {chunk}
+          </StreamingMarkdownContent>
+        );
+      })}
     </div>
   );
 }
@@ -305,7 +323,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
           )}
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <ReasoningContent>{node.content || node.summary}</ReasoningContent>
+          <ReasoningContent streaming={isStreaming}>{node.content || node.summary}</ReasoningContent>
         </CollapsibleContent>
       </div>
     </Collapsible>
@@ -360,7 +378,7 @@ function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'r
           <span className={cn(AI_DISCLOSURE_TITLE_CLASS, isStreaming && 'shimmer')}>{title}</span>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <ReasoningContent>{node.content || node.summary}</ReasoningContent>
+          <ReasoningContent streaming={isStreaming}>{node.content || node.summary}</ReasoningContent>
         </CollapsibleContent>
       </div>
     </Collapsible>

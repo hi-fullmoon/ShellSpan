@@ -8,6 +8,10 @@
   color: var(--ai-text);
 }
 
+.ai-workspace-root.ai-session-records-detail {
+  --ai-chat-content-max-width: 100%;
+}
+
 .ai-session-mode-icon .ai-session-status-dot {
   border: 1.5px solid var(--background);
 }

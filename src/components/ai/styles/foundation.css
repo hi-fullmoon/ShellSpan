@@ -40,6 +40,7 @@
   --ai-syntax-keyword: light-dark(#7c20e8, #c792ea);
   --ai-syntax-number: light-dark(#ad5100, #f5b775);
   --ai-syntax-title: light-dark(#1659bf, #82aaff);
+  --ai-reference: light-dark(#285bb5, #82aaff);
   --ai-bubble: color-mix(in srgb, var(--primary) 9%, var(--card));
   --ai-input: var(--card);
   --ai-menu: var(--popover);
