@@ -226,6 +226,7 @@ function createActivityNodesProjection() {
       case 'session/model_selected':
       case 'session/permission_changed':
       case 'session/execution_surface_changed':
+      case 'session/project_root_bound':
         break;
       case 'session/created':
         taskKey = `activity:task:${event.data.taskId}`;

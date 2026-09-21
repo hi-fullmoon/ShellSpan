@@ -353,6 +353,23 @@ pub(crate) fn agent_runtime_set_permission(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentProjectRootInput {
+    session_id: String,
+    root: String,
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_bind_project_root(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentProjectRootInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.bind_project_root(&input.session_id, input.root)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentExecutionSurfaceInput {
     session_id: String,
     surface: super::AgentExecutionSurface,

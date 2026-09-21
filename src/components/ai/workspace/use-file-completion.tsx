@@ -50,6 +50,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
   useEffect(() => { setDismissed(previous => previous === key ? previous : null); }, [key]);
   const open = Boolean((query || context) && token && !disabled && !composing && focused && dismissed !== key);
   const queryText = token?.query ?? '';
+  const rootRequired = needsRoot || Boolean(error && /RootRequired/.test(error));
   const showFiles = Boolean(query && (!context || browsing || queryText));
   useEffect(() => {
     if (!open) { historyRequested.current = false; setBrowsing(false); return; }
@@ -138,7 +139,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
   };
   const browse = () => {
     setBrowsing(true); setDismissed(null); setFocused(true);
-    if (needsRoot) { setError(null); setRootOpen(true); }
+    if (rootRequired) { setError(null); setRootOpen(true); }
     const start = editor.current?.selectionStart ?? text.length;
     const end = editor.current?.selectionEnd ?? start;
     const active = activeFileToken(text, start, end);
@@ -147,7 +148,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
     if (!active) update(next);
     setSelection([caret, caret]);
     requestAnimationFrame(() => {
-      if (!needsRoot && editor.current?.value === next) {
+      if (!rootRequired && editor.current?.value === next) {
         editor.current.element?.focus({ preventScroll: true });
         editor.current.focus(); editor.current.setSelectionRange(caret, caret);
         setSelection([caret, caret]); setBrowsing(true);
@@ -174,7 +175,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
       showEmptyLabel: !normalized,
     },
     ] satisfies MentionGroup[] : []),
-    ...(showFiles ? [{ label: t(foldersOnly ? 'ai.workspace.mentions.folders' : 'ai.workspace.mentions.project'), options: needsRoot
+    ...(showFiles ? [{ label: t(foldersOnly ? 'ai.workspace.mentions.folders' : 'ai.workspace.mentions.project'), options: rootRequired
       ? [{ key: 'root', label: t('ai.workspace.files.chooseRoot'), detail: targetLabel, icon: <FolderOpenIcon data-icon="inline-start" />, choose: () => { setError(null); setRootOpen(true); } }]
       : candidates.map(candidate => ({ key: `file:${candidate.path}`, label: `${candidate.path}${candidate.kind === 'directory' ? '/' : ''}`, detail: fileSource, icon: candidate.kind === 'directory' ? <FolderIcon data-icon="inline-start" /> : <FileIcon data-icon="inline-start" />, choose: () => choose(candidate), enterDirectory: candidate.kind === 'directory' ? () => choose(candidate, 'browse') : undefined })),
       notice: <>{loading && <p>{t('ai.workspace.files.loading')}</p>}{error && <p>{errorText(error)}</p>}{result?.status === 'truncated' && <p>{t('ai.workspace.files.truncated')}</p>}{Boolean(result?.excluded) && <p>{t('ai.workspace.files.excluded')}</p>}{result?.status === 'ready' && !hasEntries && <p>{t('ai.workspace.files.empty')}</p>}</>,
@@ -204,7 +205,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
         </div>}
       </PopoverHeader>
       <div className="flex min-h-14 min-w-0 flex-col overflow-y-auto px-1.5 pb-1.5">
-        {needsRoot && <Button type="button" variant="secondary" className="h-auto w-full min-w-0 shrink-0 justify-start gap-1 px-3 py-2"
+        {rootRequired && <Button type="button" variant="secondary" className="h-auto w-full min-w-0 shrink-0 justify-start gap-1 px-3 py-2"
           aria-label={t('ai.workspace.files.chooseRoot')} aria-describedby={`${id}-root-hint`}
           onMouseDown={event => event.preventDefault()} onClick={() => { setError(null); setRootOpen(true); }}>
           <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">
@@ -318,9 +319,9 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
         }
         return true;
       }
-      if (event.key === 'Tab' && !needsRoot && (loading || !hasEntries)) { setDismissed(key); return false; }
+      if (event.key === 'Tab' && !rootRequired && (loading || !hasEntries)) { setDismissed(key); return false; }
       event.preventDefault(); event.stopPropagation();
-      if (needsRoot && (event.key === 'Enter' || event.key === 'Tab')) { setError(null); setRootOpen(true); return true; }
+      if (rootRequired && (event.key === 'Enter' || event.key === 'Tab')) { setError(null); setRootOpen(true); return true; }
       if (event.key === 'Escape') { setDismissed(key); setResult(null); return true; }
       if (event.repeat && (event.key === 'Enter' || event.key === 'Tab')) return true;
       const entries = candidates;

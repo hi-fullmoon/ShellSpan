@@ -621,6 +621,14 @@ export function useAiSessionController({
   const ensureProjectSession = useCallback(async (root?: string): Promise<string> => {
     const epoch = projectEpoch.current;
     let sessionId = viewRef.current?.summary.id ?? openedSessionId;
+    if (sessionId && root !== undefined) {
+      const selectedRoot = normalizedWorkspaceRoot(root.trim());
+      if (!selectedRoot) throw new Error(`InvalidRequest: ${t('ai.workspace.skills.absoluteRoot')}`);
+      if (!adapter.bindProjectRoot) throw new Error('Unavailable');
+      await adapter.bindProjectRoot(sessionId, selectedRoot);
+      if (projectEpoch.current !== epoch) throw new Error('Cancelled');
+      setSkillRoot(selectedRoot);
+    }
     if (!sessionId) {
       if (!coldSkillSession.current) {
         const explicitRoot = root?.trim();
@@ -1417,7 +1425,7 @@ export function useAiSessionController({
       if (target) return `${target.label ?? target.targetId} (${target.kind === 'local' ? 'local' : `${target.username}@${target.host}:${target.port}`}) · ${target.kind === 'local' ? target.cwd ?? '' : target.rootPath ?? ''}`;
       return activeTerminal ? `${activeTerminal.title} (${activeTerminal.host === 'local' ? 'local' : `${activeTerminal.username}@${activeTerminal.host}:${activeTerminal.port}`})${skillRoot ? ` · ${skillRoot}` : ''}` : '';
     })(),
-    skillsNeedsRoot: !visibleView && !openedSessionId && !skillRoot,
+    skillsNeedsRoot: !skillRoot && !(visibleView?.snapshot.value.header.target?.cwd || visibleView?.snapshot.value.header.target?.rootPath),
     skillsScopeKey: `${workspaceScopeKey}:${openedSessionId ?? "new"}:${skillNavigation}`,
     view: displayView,
     restoringSession: scope === 'workbench' && canRestoreWorkbench && !displayView

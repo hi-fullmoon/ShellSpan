@@ -891,6 +891,45 @@ impl AgentRuntime {
         self.sessions.snapshot(session_id)
     }
 
+    pub(crate) fn bind_project_root(
+        &self,
+        session_id: &str,
+        root: String,
+    ) -> Result<AgentSessionSnapshot, String> {
+        let entry = self.agents.get(session_id)?;
+        let _reserved = if let Some(entry) = &entry {
+            if !entry.try_acquire_archive() {
+                return Err("Busy: wait for the current operation to finish".into());
+            }
+            Some(ActiveDriverLease(Arc::clone(entry)))
+        } else {
+            None
+        };
+        let snapshot = self.sessions.snapshot(session_id)?;
+        if snapshot.uncertain_native_effects
+            || snapshot.recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval
+        {
+            return Err("Busy: resolve pending recovery before binding a directory".into());
+        }
+        if let Some(agent) = &entry {
+            if agent.phase()? != AgentLifecyclePhase::Idle || agent.scope()?.is_some() {
+                return Err("Busy: wait for the Agent to become idle".into());
+            }
+        }
+        if let Some(target) = &snapshot.header.target {
+            if self.native_engine.has_terminal_lease(&target.session_id)? {
+                return Err("Busy: wait for the terminal lease to be released".into());
+            }
+        }
+        self.sessions.append(
+            session_id,
+            None,
+            None,
+            super::AgentSessionEventPayload::SessionProjectRootBound { root },
+        )?;
+        self.sessions.snapshot(session_id)
+    }
+
     pub(crate) fn set_execution_surface(
         &self,
         session_id: &str,

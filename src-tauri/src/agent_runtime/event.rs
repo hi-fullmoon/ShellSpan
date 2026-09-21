@@ -680,6 +680,8 @@ pub(crate) enum AgentSessionEventPayload {
     SessionPermissionChanged { mode: AgentSessionPermissionMode },
     #[serde(rename = "session/execution_surface_changed")]
     SessionExecutionSurfaceChanged { surface: AgentExecutionSurface },
+    #[serde(rename = "session/project_root_bound")]
+    SessionProjectRootBound { root: String },
     #[serde(rename = "session/renamed")]
     SessionRenamed {
         title: String,

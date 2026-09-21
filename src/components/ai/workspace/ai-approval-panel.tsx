@@ -62,6 +62,14 @@ function intentLabel(approval: AiPendingApproval): string | null {
   return prompt && !isMachinePrompt(prompt) ? prompt : null;
 }
 
+const APPROVAL_ACTION_KEYS: Readonly<Record<string, LocaleKey>> = {
+  list_directory: 'ai.workspace.approval.action.listDirectory',
+  read_file: 'ai.workspace.approval.action.readFile',
+  write_file: 'ai.workspace.approval.action.writeFile',
+  edit_file: 'ai.workspace.approval.action.editFile',
+  search_text: 'ai.workspace.approval.action.searchText',
+};
+
 const APPROVAL_RISK_KEYS = {
   none: {
     label: 'ai.workspace.approval.risk.none',
@@ -153,6 +161,11 @@ export function AiApprovalPanel({
       ? t('ai.workspace.approval.previewUnavailable')
       : null);
   const exactValue = command ?? terminalInput ?? terminalMatch;
+  const action = t(APPROVAL_ACTION_KEYS[approval.toolName] ?? 'ai.workspace.approval.action.tool', {
+    tool: approval.toolName,
+  });
+  const actionPath = argumentString(approval, 'path');
+  const searchQuery = approval.toolName === 'search_text' ? argumentString(approval, 'query') : null;
   const exactValueLabel = command
     ? 'ai.workspace.approval.command'
     : terminalMatch
@@ -202,6 +215,26 @@ export function AiApprovalPanel({
       <ScrollArea className="min-h-0 min-w-0">
         <ScrollAreaContent style={{ minWidth: 0 }}>
           <CardContent className="flex min-w-0 flex-col gap-3 px-4 pb-2">
+            {!exactValue && (
+              <div className="flex min-w-0 flex-col gap-1" data-slot="ai-approval-action">
+                <p className="text-xs font-medium text-muted-foreground">{t('ai.workspace.approval.action')}</p>
+                <p className="break-words text-sm">{action}</p>
+                {actionPath && (
+                  <pre className="ai-approval-command min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] px-3 py-2.5">
+                    <code>{actionPath}</code>
+                  </pre>
+                )}
+                {searchQuery && <p className="whitespace-pre-wrap break-words text-sm">{t('ai.workspace.approval.query', { query: searchQuery })}</p>}
+              </div>
+            )}
+
+            {!command && approval.target && (
+              <div className="flex min-w-0 flex-col gap-1">
+                <p className="text-xs font-medium text-muted-foreground">{t('ai.workspace.approval.target')}</p>
+                <p className="break-words text-sm">{targetLabel(approval)}</p>
+              </div>
+            )}
+
             {exactValue && (
               <div className="flex min-w-0 flex-col gap-1">
                 <p className="text-xs font-medium text-muted-foreground">{t(exactValueLabel)}</p>

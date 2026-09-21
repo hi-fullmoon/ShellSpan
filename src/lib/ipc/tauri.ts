@@ -330,6 +330,13 @@ export async function invokeSetAgentRuntimeExecutionSurface(input: {
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_set_execution_surface', { input });
 }
 
+export async function invokeBindAgentProjectRoot(input: {
+  sessionId: string;
+  root: string;
+}): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_bind_project_root', { input });
+}
+
 export async function invokeSpawnAgentRuntimeSubagent(
   request: AgentSubagentSpawnRequest,
 ): Promise<AgentSessionSnapshot> {

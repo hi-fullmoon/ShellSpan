@@ -569,6 +569,7 @@ function createChatProjection() {
       case 'session/model_selected':
       case 'session/permission_changed':
       case 'session/execution_surface_changed':
+      case 'session/project_root_bound':
       case 'session/renamed':
       case 'request/context':
       case 'compaction/start':

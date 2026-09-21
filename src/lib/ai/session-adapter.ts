@@ -185,6 +185,7 @@ export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
   selectModel?(sessionId: string, provider: AiProviderConfig): Promise<void>;
   setPermission?(sessionId: string, mode: import('@/types/agent-session').AgentSessionPermissionMode): Promise<void>;
   setExecutionSurface?(sessionId: string, surface: import('@/types/agent-session').AgentExecutionSurface): Promise<void>;
+  bindProjectRoot?(sessionId: string, root: string): Promise<void>;
   subscribe(sessionId: string, listener: AiSessionListener): () => void;
   submit(sessionId: string | null, input: AiSubmitInput<Kind>): Promise<AiSubmitReceipt>;
   stop(sessionId: string): Promise<void>;
