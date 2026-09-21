@@ -234,6 +234,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
             return <Button key={candidate.path} id={`${id}-${i}`} type="button" role="option" aria-label={label}
               aria-selected={i === index} tabIndex={-1} variant={i === index ? 'secondary' : 'ghost'}
               className="h-auto min-h-10 w-full min-w-0 shrink-0 justify-start gap-1 px-2.5 py-2"
+              onMouseEnter={() => setIndex(i)}
               onMouseDown={event => event.preventDefault()} onClick={() => choose(candidate)}>
               {directory ? <FolderIcon data-icon="inline-start" /> : <FileIcon data-icon="inline-start" />}
               <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
@@ -281,13 +282,14 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
         </DialogFooter>
       </DialogContent>
     </Dialog>;
-  return { panel: context && open ? <AiMentionPanel id={id} groups={groups} index={activeIndex}
+  return { panel: context && open ? <AiMentionPanel id={id} groups={groups} index={activeIndex} onIndexChange={setIndex}
     header={showFiles && (targetDetails || scope?.root) ? <div className="flex min-w-0 items-center gap-1">
       {targetDetails && <span className="max-w-[50%] truncate" title={targetDetails}>{targetDetails}</span>}
       {targetDetails && scope?.root && <span aria-hidden="true" className="shrink-0">·</span>}
       {scope?.root && <span className="min-w-0 flex-1 truncate" title={scope.root}>{scope.root}</span>}
     </div> : undefined}
-    empty={!options.length && !loading && !context.sessionsLoading && !error && !context.sessionsError} /> : panel, dialog, open, editor, browse,
+    empty={!options.length && !loading && !context.sessionsLoading && !error && !context.sessionsError
+      && !(showFiles && result?.status === 'ready' && !hasEntries)} /> : panel, dialog, open, editor, browse,
     dismiss: () => setDismissed(key),
     editorProps: {
       ref: editor,

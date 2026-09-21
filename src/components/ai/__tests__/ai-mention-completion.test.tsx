@@ -10,6 +10,28 @@ import { readdir } from 'node:fs/promises';
 beforeEach(async () => { useAppStore.setState({ locale: 'en-US' }); await initI18n('en-US'); });
 afterEach(cleanup);
 describe('grouped mention completion', () => {
+  it('activates a hovered folder and selects it with Enter while retaining editor focus', async () => {
+    const user = userEvent.setup();
+    render(<AiComposerSeat phase="active" status="idle" onListFileReferences={async (query, signal) => {
+      signal.throwIfAborted();
+      const parent = query.slice(0, query.lastIndexOf('/') + 1);
+      const entries = await readdir(`${process.cwd()}/${parent}`, { withFileTypes: true });
+      return { status: 'ready', code: null, excluded: 0, scope: null,
+        entries: entries.map(entry => ({ path: parent + entry.name, kind: entry.isDirectory() ? 'directory' : 'file' })),
+      };
+    }} />);
+    const editor = screen.getByRole('textbox');
+    await user.type(editor, '@src/');
+    const folder = await screen.findByRole('option', { name: 'src/hooks/' });
+    await user.hover(folder);
+    expect(screen.getAllByRole('option', { selected: true })).toEqual([folder]);
+    expect(editor).toHaveAttribute('aria-activedescendant', folder.id);
+    expect(editor).toHaveFocus();
+    expect(editor.textContent).toBe('@src/');
+    await user.keyboard('{Enter}');
+    expect(editor.textContent).toBe('@src/hooks/ ');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
   it('filters files when typing a directory directly and reopening its completion', async () => {
     const user = userEvent.setup();
     render(<AiComposerSeat phase="active" status="idle" onListFileReferences={async (query, signal) => {
@@ -91,7 +113,31 @@ describe('grouped mention completion', () => {
     expect(screen.getByRole('listbox')).toBeVisible();
     expect(within(screen.getByRole('listbox')).queryAllByRole('group')).toHaveLength(0);
     expect(screen.queryAllByRole('option')).toHaveLength(0);
+    expect(screen.getByText('No matching items')).toBeVisible();
     expect(screen.getByRole('textbox')).not.toHaveAttribute('aria-activedescendant');
+  });
+  it.each(['en-US', 'zh-CN'] as const)('shows only the file empty notice for an unmatched project search in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const user = userEvent.setup();
+    render(<AiComposerSeat phase="active" status="idle" onListFileReferences={async (query, signal) => {
+      signal.throwIfAborted();
+      const entries = await readdir(process.cwd(), { withFileTypes: true });
+      return { status: 'ready', code: null, excluded: 0, scope: null,
+        entries: entries.filter(entry => entry.name.includes(query)).map(entry => ({ path: entry.name, kind: entry.isDirectory() ? 'directory' : 'file' })),
+      };
+    }} />);
+    const editor = screen.getByRole('textbox');
+    await user.type(editor, '@no-matching-project-entry');
+    const fileNotice = locale === 'en-US' ? 'No matching files or directories' : '没有匹配的文件或目录';
+    expect(await screen.findByText(fileNotice)).toBeVisible();
+    expect(screen.getAllByText(fileNotice)).toHaveLength(1);
+    expect(screen.queryByText(locale === 'en-US' ? 'No matching items' : '没有匹配的项目')).toBeNull();
+    expect(screen.queryAllByRole('option')).toHaveLength(0);
+    expect(editor).toHaveFocus();
+    expect(editor).not.toHaveAttribute('aria-activedescendant');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('listbox')).toBeNull();
   });
   it('lists actual project files with their target and inserts a relative reference', async () => {
     const user = userEvent.setup();
