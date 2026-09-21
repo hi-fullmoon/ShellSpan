@@ -35,6 +35,8 @@ sha1 = "0.11"
 hex = "0.4.3"
 base64 = "0.23"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+moxcms = "0.8.1"
+png = "0.18"
 diffy = "0.5"
 tree-sitter = "0.27"
 tree-sitter-bash = "0.25.1"
