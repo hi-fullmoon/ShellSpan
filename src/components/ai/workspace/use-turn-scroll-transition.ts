@@ -24,7 +24,11 @@ export function useTurnScrollTransition(viewportRef: RefObject<HTMLDivElement | 
       const top = viewport.scrollTop;
       finish();
       // Cancel the browser's in-flight animation before applying user input.
-      viewport.scrollTo({ top, behavior: 'instant' });
+      if (typeof viewport.scrollTo === 'function') {
+        viewport.scrollTo({ top, behavior: 'instant' });
+      } else {
+        viewport.scrollTop = top;
+      }
     };
     const keyDown = (event: KeyboardEvent) => {
       if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) interrupt();

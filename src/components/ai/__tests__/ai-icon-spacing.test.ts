@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('AI inline icon spacing', () => {
   it.each([
-    ['ai-mention-panel.tsx', 'h-7 w-full min-w-0 justify-start gap-1 px-1.5'],
+    ['ai-mention-panel.tsx', 'h-auto min-h-7 w-full min-w-0 justify-start gap-1 px-1.5 py-1 text-sm leading-5 font-normal'],
     ['ai-task-strip.tsx', 'flex min-h-5 min-w-0 shrink-0 items-center gap-1'],
     ['ai-context-meter.tsx', 'flex min-w-0 items-center gap-1'],
   ])('%s keeps icon labels centered with the shared gap', (file, classes) => {

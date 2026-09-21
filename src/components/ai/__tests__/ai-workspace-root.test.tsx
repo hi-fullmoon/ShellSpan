@@ -772,7 +772,8 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     const thinking = screen.getByRole('button', { name: 'Thinking…' });
     expect(thinking).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('Read the frozen context. Prepare a concise answer.')).toBeVisible();
+    expect(container.querySelector('.ai-reasoning-body'))
+      .toHaveTextContent('Read the frozen context. Prepare a concise answer.');
     expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
     expect(screen.queryByText('Working…')).toBeNull();
 
@@ -799,7 +800,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     expect(screen.getByRole('button', { name: 'Thought' }))
       .toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText('Read the frozen context. Prepare a concise answer.')).toBeNull();
+    expect(container.querySelector('.ai-reasoning-body')).toBeNull();
   });
 
   it('shows immediate Ask feedback before the first model output arrives', () => {
