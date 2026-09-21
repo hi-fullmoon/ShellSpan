@@ -3,6 +3,200 @@
 All notable changes to ShellSpan are documented in this file.
 
 
+## [v2.0.58](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.58) - 2026-09-21
+
+
+### Bug Fixes
+
+- **agent:** allow image cancellation before session creation
+- **logs:** avoid logging successful log reads
+- **ai-session:** avoid restarting session recovery on ephemeral metadata
+- **agent-runtime:** generalize ephemeral terminal wording to tool
+- **workbench:** keep known-hosts search responsive
+- **terminal:** keep local integration files in app storage
+- **ai:** keep transcript follow state and trim trailing output line
+- **workbench:** let known-hosts search shrink in narrow headers
+- **terminal:** preserve integration and input state
+- refine agent permission localization copy
+- **ai:** suppress programmatic follow during top-aligned turn scroll
+- **agent:** validate exact write file preconditions
+
+### Build System
+
+- **deps:** add diff dependency
+
+### Chore
+
+- **deps:** add notify-rust and tar crates plus node manifests
+- **deploy:** adjust artifact builder and add SSH e2e and deployment-center design
+- **deps:** bump runtime and tooling dependencies
+- **deps:** bump tauri backend dependencies and adapt callers
+- bump version to 0.0.3
+- merge terminal execution updates
+- refresh icon assets and gradient palette
+- **icons:** regenerate Windows/Android/iOS icons from updated script
+- **protocol:** sync catalog and resolved model fixtures
+- **i18n:** sync en-US and zh-CN locale strings
+- **e2e:** update SSH e2e test Dockerfile
+- update dependencies in package.json and Cargo manifests
+- **locales:** update en-US and zh-CN translations
+- **i18n:** update locale message bundles and key set test
+- update root AGENTS.md and package.json test wiring
+- update tauri deps and drop stray qc/queryex files
+- **vite:** use import.meta.dirname in vite config
+
+### Documentation
+
+- add LLM adapter module README
+- add Phase-8 deployment acceptance and v1/v2 protocol specs
+- **terminal-protocol:** add RFC, roadmap, compatibility, acceptance specs
+- **terminal:** add execution protocol, acceptance criteria, and harness tests
+- add terminal execution phase 4 pause handoff protocol
+- **protocol:** add terminal execution protocol artifacts and RFC
+- **rfc:** add terminal protocol RFC
+- **agent:** clarify spawn_agent vs spawn_continuable_agent
+- **design:** document agent-visible terminal execution plan
+- **deployment:** document center-based deployment workflow
+- **protocol:** include remote boundTerminal reuse plan
+- **protocol:** mark terminal phase 4 as PASS and phase 5 as ready
+- revise agent-runtime protocol specs and manifest
+- revise terminal protocol RFC, roadmap, and contract docs
+- **deployment:** simplify workflow design and add phase 4-6 evidence
+- update AGENTS.md for confirmation dialog and AI permissions
+- **design:** update deployment workflow xyflow refactor design
+
+### Features
+
+- **ui:** add Select primitive and Sonner toast wrapper
+- **workbench:** add TerminalPane, connection list, sidebar, command palette
+- **ai:** add agent runtime budget limits and two triage skills
+- **types:** add agent-session types and extend terminal-workspace library
+- **ai:** add bounded network recovery and incomplete-turn continuation
+- **deployment-ui:** add center-based deployment frontend workflow
+- **ui:** add confirmPending state to ConfirmationDialog
+- add deployment experience component and shared types
+- add deployment localization keys to en-US and zh-CN
+- **agent-runtime:** add direct shell execution plan with gates
+- **agent:** add edit_file native tool with output budget guidance
+- **ai:** add file and folder attachments to composer
+- **ui:** add icon and media slot to confirmation dialog
+- add image draft IndexedDB verification harness
+- **ui:** add info variant to alert component
+- **terminal:** add native agent terminal runtime and refactor adapters
+- **agent-runtime:** add native module, adapter, and contract with protocol updates
+- **port-forward:** add port forwarding module and tests
+- **ai:** add question panel and conversation node seat components
+- **scripts:** add rustIncludeSourceIsFormatted helper
+- **ai-workspace:** add subagent catalog and expand controller coverage
+- **frontend:** add terminal IPC layer, toast store, and shared types
+- **tauri:** add terminal broker backend and Tauri command layer
+- **ui:** add terminal controller, pane, tab bar, and workspace components
+- **terminal:** add terminal execution protocol with schemas and tests
+- **frontend:** add terminal session hooks, store, and IPC wiring
+- **i18n:** add terminal translation keys and parity test
+- **ui:** add title-bar component with test
+- **styles:** add warning and destructive media slot utilities
+- add workbench deployment center, run history, and store
+- **deployment:** add workflow compiler, stores and workbench UI
+- **deployment:** add workflow foundation and migrate schema to v10
+- **ai:** apply semantic confirmation dialogs in settings and session UI
+- **ai:** automatically continue turns after model output limit
+- **remote-health:** bound snapshot collection with timeout
+- **ai:** clarify tool diffs and result rows
+- **ai:** continue terminal history across reconnects and manage records
+- **workbench:** drop deployment center menu entry from sidebar
+- **agent-runtime:** enable Windows terminal rollout
+- **agent-runtime:** enable macOS terminal rollout
+- **agent:** expand native file and shell execution tools
+- **port-forward:** expand port forwarding implementation and tests
+- **agent-runtime:** expand session and terminal lease handling
+- **ai:** follow optimistic user submissions with near-bottom threshold
+- **terminal:** gate presentation by integrationStateRevision
+- **agent:** guard against omitted ephemeral input replay
+- **terminal-execution:** implement Rust backend with SSH, broker, schema, runtime
+- **ai:** improve runtime recovery and workspace presentation
+- introduce deployment subsystem (approval, artifact, audit, planner)
+- **deployment:** introduce v3 deployment workflow editor and runtime
+- **deployment:** introduce workflow canvas with React Flow
+- **i18n:** localize permission, session, and dialog strings
+- **llm:** mark MiniMax M3 as native image input capable
+- **term:** measure initial terminal dimensions before session creation
+- **ai:** overhaul tool call presentation with native name and title
+- **ai:** pipe bounded terminal snapshot into agent runtime
+- **agent:** recover from continuable subagent step-budget boundary
+- **ai:** refine composer attachments and completion
+- **brand:** refresh ShellSpan icons and mark
+- **ai-session:** refresh projections, adapters and session list
+- **agent:** remember safe session defaults
+- **ai:** render tool copy actions in aligned section headers
+- **agent-runtime:** require scoped direct shell for operator commands
+- **ai:** support document attachments in composer
+- **ai:** surface warning media in agent permission selectors
+- **terminal:** update terminal pane and add tests
+- **ai:** update workspace UI components, styles, and tests
+- **llm:** validate chat completions reasoningDetails
+
+### Refactoring
+
+- adjust deployment dialog sizing classes
+- **deployment:** align deployment modules with center workflow
+- **agent-runtime:** classify shell network commands as external side effects
+- **agent-runtime:** consolidate modules across compaction and tool pipeline
+- **ai:** consolidate scroll follow and continuation handling
+- **ai-workspace:** drop ai-composer-seat, split root/controller tests
+- drop compatibility naming from terminal broker tests and protocol
+- extract agent_runtime tests into dedicated test directories
+- extract inline tests into dedicated test directories
+- **agent-runtime:** introduce AgentStoredReplay envelope across modules
+- **ui:** introduce resize divider color tokens
+- **agent:** project driver metrics and progress from committed events
+- **sftp:** refactor SFTP source and connection lifecycle hook
+- **terminal:** remove Agent lease duration timer
+- remove native::pty module and rewire native runtime to ansi
+- rename terminal test APIs (admit_terminal_input, Unavailable)
+- replace degraded terminal surface state with ready semantics
+- **terminal:** replace ephemeral agent-owned terminal with busy/promptReady
+- **ui:** resize terminal and sftp tab bars to compact dimensions
+- rework AI workspace session controller and UI
+- **ai:** simplify latestUserKey with nullish coalescing
+- **terminal-broker:** split candidate attachment from promotion
+- **ai:** update conversation projection logic
+- **ipc:** update tauri IPC module and tests
+- **ui:** update terminal controller, workspace surface, and monitor hook
+- **tauri:** wire session and terminal broker to native terminal pipeline
+- **agent:** wrap session projections with committed event factory
+
+### Style
+
+- **ai:** align task strip text
+- **ai:** clarify workspace status notices
+- **terminal:** compact agent lease bar
+- **ui:** compact workbench cards and refine palette scrolling
+- **agent:** format image cancellation test
+- **ai:** keep approval actions visible in narrow panels
+- standardize workbench card spacing to gap-3
+- **ai:** tighten disclosure and transcript notice icon spacing
+- **ai:** tighten disclosure icon spacing
+- **ui:** tighten icon and label spacing
+- **ai:** use field-sizing and min-width on question input
+
+### Testing
+
+- **perf:** add ai streaming performance verification suite
+- **ai:** add assistant link click navigation coverage
+- **terminal-broker:** add contract tests and Docker-based test infrastructure
+- add deployment e2e fixtures (Docker, compose, shell)
+- **terminal-protocol:** add node contract test and SSH runner script
+- **ai:** add tool detail copy verification
+- **workbench:** assert collect button disabled during collecting phase
+- **perf:** cover image submission and tidy scrollbar checks
+- expand AI workspace component coverage
+- extend agent-runtime protocol test scripts
+- **sftp:** match compact tab bar padding
+- **ai:** mock getBoundingClientRect in scroll-follow tests
+- **ai:** mock scrollTo in MessageScroller tests
+- **terminal-registry:** update terminal registry and tests
+
 ## [v2.0.57](https://github.com/zhengbiwen/ShellSpan/releases/tag/v2.0.57) - 2026-09-11
 
 
