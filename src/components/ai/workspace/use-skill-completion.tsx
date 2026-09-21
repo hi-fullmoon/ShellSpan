@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { BookOpenIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AiMentionPanel } from './ai-mention-panel';
-import { PopoverHeader, PopoverTitle, PopoverDescription } from '@/components/ui/popover';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
@@ -73,10 +72,6 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
     });
   };
   const panel = open ? <div className="flex h-full min-h-0 w-full min-w-0 flex-col" data-skill-completion="">
-    <PopoverHeader className="shrink-0 gap-0.5 px-3 py-2">
-      <PopoverTitle>{t('ai.workspace.skills.title')}</PopoverTitle>
-      <PopoverDescription className="text-xs font-normal">{t('ai.workspace.skills.hint')}</PopoverDescription>
-    </PopoverHeader>
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div role="status" aria-live="polite" className="shrink-0 px-2 empty:hidden">
         {loading && <span className="flex items-center gap-1"><Spinner />{t('ai.workspace.skills.loading')}</span>}
@@ -85,8 +80,8 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
         {result && !loading && result.status !== 'unavailable' && entries.length === 0 && <EmptyState title={t('ai.workspace.skills.noMatch')} />}
       </div>
       <AiMentionPanel id={id} label={t('ai.workspace.skills.title')} index={index} onIndexChange={setIndex} empty={false}
-        groups={[{ label: t('ai.workspace.skills.title'), hideLabel: true, options: entries.map(skill => ({
-          key: `skill:${skill.name}`, label: description(skill), detail: `/${skill.name}`,
+        groups={[{ label: t('ai.workspace.skills.title'), showEmptyLabel: true, options: entries.map(skill => ({
+          key: `skill:${skill.name}`, label: description(skill), detail: `/${skill.name}`, accessibleLabel: `/${skill.name}`,
           icon: <BookOpenIcon />, choose: () => choose(skill),
         })) }]} />
     </div>

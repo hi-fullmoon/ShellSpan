@@ -23,7 +23,15 @@ describe('slash skill menu', () => {
     expect(screen.getByRole('option', { name: /incident-triage/ })).toBeVisible();
     const popup = screen.getByRole('listbox').closest('.ai-completion-popup');
     expect(popup?.querySelector('[data-slot="card"]')).toBeNull();
-    expect(popup?.querySelector('[data-slot="popover-title"]')).toHaveTextContent('Skills');
+    expect(popup?.querySelector('[data-slot="popover-header"]')).toBeNull();
+    expect(screen.getByRole('group', { name: 'Skills' })).toBeVisible();
+    expect(popup).toHaveClass('h-[360px]', 'overflow-hidden');
+    expect(screen.getByRole('listbox')).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
+    expect(screen.getByRole('listbox').closest('[data-mention-completion]')).not.toBeNull();
+    const hovered = screen.getByRole('option', { name: '/disk-cleanup' });
+    await user.hover(hovered);
+    expect(screen.getAllByRole('option', { selected: true })).toEqual([hovered]);
+    expect(editor).toHaveAttribute('aria-activedescendant', hovered.id);
     expect(screen.queryByRole('dialog')).toBeNull(); expect(query).toHaveBeenCalledWith();
     await user.type(editor, 'net');
     expect(screen.getAllByRole('option')).toHaveLength(1); expect(query).toHaveBeenCalledTimes(1);
