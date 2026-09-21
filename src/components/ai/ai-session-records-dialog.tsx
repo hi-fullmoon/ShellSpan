@@ -1,30 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeftIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from 'lucide-react';
+import { ChevronLeftIcon, EyeIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { CompactDialogHeader } from '@/components/ui/compact-dialog';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
-import { listAllAgentSessionRecords } from '@/lib/ai/session-records';
+import { deleteAgentSessionRecord, listAllAgentSessionRecords } from '@/lib/ai/session-records';
 import { loadHistoricalSources, withHistoricalConversation } from '@/lib/ai/historical-continuation';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import type { AiSessionAdapter, AiSessionView } from '@/lib/ai/session-adapter';
-import {
-  invokeArchiveAgentRuntimeSession,
-  invokeCancelAgentRuntime,
-  invokeDeleteAgentRuntimeSession,
-} from '@/lib/ipc/tauri';
 import type { LocaleKey } from '@/locales';
 import type { AgentSessionListItem } from '@/types/agent-session';
 import { AiConversation } from './workspace/ai-conversation';
 import { AiToolDetails } from './workspace/ai-tool-details';
 import { AiArtifactDetails } from './workspace/ai-artifact-details';
+import { AiSessionRecordsList } from './ai-session-records-list';
+import { AiSessionRecordsDeleteAll } from './ai-session-records-delete-all';
 
 type RecordFilter = 'all' | 'terminal' | 'workbench' | 'archived';
 type RecordDetail =
@@ -48,6 +45,62 @@ function recordStatus(item: AgentSessionListItem, t: (key: LocaleKey) => string)
   return t(`agent.outcome.${item.status}`);
 }
 
+export function AiSessionRecordRow({ item, locale, t, disabled, onView, onDelete }: {
+  readonly item: AgentSessionListItem;
+  readonly locale: string;
+  readonly t: ReturnType<typeof useI18n>['t'];
+  readonly disabled: boolean;
+  readonly onView: (item: AgentSessionListItem) => void;
+  readonly onDelete: (item: AgentSessionListItem) => void;
+}) {
+  const title = recordTitle(item);
+  const target = item.header.target;
+  const scope = recordScope(item);
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-3 rounded-md border px-2 py-1.5">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{title}</p>
+        <p className="mt-1 truncate text-xs text-muted-foreground">
+          {t(`settings.ai.records.filter.${scope}`)}
+          {target?.label ? ` · ${target.label}` : ''}
+          {' · '}{new Date(item.header.createdAtUnixMs).toLocaleString(locale)}
+          {' · '}{recordStatus(item, t)}
+        </p>
+      </div>
+      <Tooltip>
+        <TooltipTrigger render={<Button variant="ghost" size="icon-sm" onClick={() => onView(item)} disabled={disabled} aria-label={t('settings.ai.records.view')} />}>
+          <EyeIcon data-icon="inline-start" />
+        </TooltipTrigger>
+        <TooltipContent>{t('settings.ai.records.view')}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger render={<Button
+          variant="ghost"
+          className="text-destructive hover:text-destructive"
+          size="icon-sm"
+          disabled={disabled}
+          onClick={() => onDelete(item)}
+          aria-label={t('settings.ai.records.deleteNamed', { title })}
+        />}>
+          <Trash2Icon data-icon="inline-start" />
+        </TooltipTrigger>
+        <TooltipContent>{t('common.delete')}</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+export function AiSessionRecordLoading({ label }: { readonly label: string }) {
+  return (
+    <div role="status" aria-live="polite" className="flex min-h-0 flex-1 items-center justify-center p-4 text-sm text-muted-foreground">
+      <span className="inline-flex items-center gap-1">
+        <Spinner aria-hidden="true" />
+        <span>{label}</span>
+      </span>
+    </div>
+  );
+}
+
 export function AiSessionRecordsDialog({ onOpenChange }: {
   readonly onOpenChange: (open: boolean) => void;
 }) {
@@ -65,6 +118,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
   const [detail, setDetail] = useState<RecordDetail | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AgentSessionListItem | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [deletingAll, setDeletingAll] = useState(false);
   const adapterRef = useRef<AiSessionAdapter<'agent'> | null>(null);
   const requestRef = useRef(0);
   const viewRequestRef = useRef(0);
@@ -126,7 +180,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
 
   const deleteRecord = useCallback(async () => {
     const target = deleteTarget;
-    if (!target || busyId) return;
+    if (!target || busyId || deletingAll) return;
     setDeleteTarget(null);
     const sessionId = target.header.sessionId;
     if (records.some((item) => item.header.continuedFromSessionId === sessionId)) {
@@ -135,11 +189,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
     }
     setBusyId(sessionId);
     try {
-      if (!target.archived) {
-        if (!target.ended) await invokeCancelAgentRuntime({ sessionId });
-        await invokeArchiveAgentRuntimeSession({ sessionId });
-      }
-      await invokeDeleteAgentRuntimeSession({ sessionId });
+      await deleteAgentSessionRecord(target);
       if (selected?.header.sessionId === sessionId) closeView();
       window.dispatchEvent(new CustomEvent('shellspan:ai-session-deleted', { detail: { sessionId } }));
       setRecords((current) => current.filter((item) => item.header.sessionId !== sessionId));
@@ -151,7 +201,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
     } finally {
       setBusyId(null);
     }
-  }, [busyId, closeView, deleteTarget, records, refresh, selected?.header.sessionId, showError, showSuccess, t]);
+  }, [busyId, closeView, deleteTarget, deletingAll, records, refresh, selected?.header.sessionId, showError, showSuccess, t]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase(locale);
@@ -165,7 +215,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
   }, [filter, locale, query, records]);
 
   return (
-    <Dialog open onOpenChange={onOpenChange}>
+    <Dialog open onOpenChange={(open) => { if (!deletingAll) onOpenChange(open); }}>
       <DialogContent className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=dialog-close]]:size-8 sm:rounded-xl">
         <CompactDialogHeader
           title={t('settings.ai.records.title')}
@@ -184,7 +234,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
                 {t('common.delete')}
               </Button>
             </div>
-            <div className="ai-panel-shell ai-workspace-root min-h-0 flex-1">
+            <div className="ai-panel-shell ai-workspace-root ai-session-records-detail flex min-h-0 min-w-0 flex-1 flex-col">
               {detail?.kind === 'tool' ? (
                 <AiToolDetails node={detail.node} onBack={() => setDetail(null)} />
               ) : detail?.kind === 'artifact' ? (
@@ -195,7 +245,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
                     ?? Promise.reject(new Error('Session viewer closed'))}
                   onBack={() => setDetail(null)}
                 />
-              ) : viewLoading ? <div className="flex flex-1 items-center justify-center"><Spinner /></div>
+              ) : viewLoading ? <AiSessionRecordLoading label={t('common.loading')} />
                 : viewError ? <p role="alert" className="p-4 text-sm text-destructive">{t('settings.ai.records.viewFailed')}</p>
                   : view ? (
                     <AiConversation
@@ -211,12 +261,12 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
           </div>
         ) : (
           <>
-            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-3">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
               <div className="relative min-w-44 flex-1">
-                <SearchIcon className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" aria-hidden />
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
                 <Input
                   type="search"
-                  className="pl-8"
+                  className="h-8 pl-8"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={t('settings.ai.records.search')}
@@ -224,7 +274,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
                 />
               </div>
               <Select value={filter} onValueChange={(value) => setFilter(value as RecordFilter)}>
-                <SelectTrigger aria-label={t('settings.ai.records.filter')} className="w-36">
+                <SelectTrigger size="sm" aria-label={t('settings.ai.records.filter')} className="w-36">
                   <SelectValue>{t(`settings.ai.records.filter.${filter}`)}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -235,49 +285,40 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="icon" onClick={() => void refresh()} disabled={loading} aria-label={t('common.refresh')}>
+              <Button variant="outline" size="icon-sm" onClick={() => void refresh()} disabled={loading || deletingAll || busyId !== null} aria-label={t('common.refresh')}>
                 {loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
               </Button>
+              <AiSessionRecordsDeleteAll
+                records={records}
+                disabled={loading || error || busyId !== null}
+                t={t}
+                onBusyChange={setDeletingAll}
+                onDeleted={(sessionId) => {
+                  setRecords((current) => current.filter((item) => item.header.sessionId !== sessionId));
+                  window.dispatchEvent(new CustomEvent('shellspan:ai-session-deleted', { detail: { sessionId } }));
+                }}
+                onSettled={refresh}
+              />
             </div>
-            <ScrollArea className="min-h-0 flex-1">
-              <ScrollAreaContent className="flex flex-col gap-2 p-4" style={{ minWidth: 0 }}>
-                {loading && records.length === 0 && <div role="status" className="py-8 text-center text-sm text-muted-foreground">{t('common.loading')}</div>}
-                {error && <p role="alert" className="text-sm text-destructive">{t('settings.ai.records.loadFailed')}</p>}
-                {!loading && !error && visible.length === 0 && (
-                  <p className="py-8 text-center text-sm text-muted-foreground">{t('settings.ai.records.empty')}</p>
-                )}
-                {visible.map((item) => {
-                  const title = recordTitle(item);
-                  const target = item.header.target;
-                  const scope = recordScope(item);
-                  return (
-                    <div key={item.header.sessionId} className="flex min-w-0 flex-wrap items-center gap-3 rounded-md border px-3 py-2.5">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{title}</p>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">
-                          {t(`settings.ai.records.filter.${scope}`)}
-                          {target?.label ? ` · ${target.label}` : ''}
-                          {' · '}{new Date(item.header.createdAtUnixMs).toLocaleString(locale)}
-                          {' · '}{recordStatus(item, t)}
-                        </p>
-                      </div>
-                      <Button variant="outline" size="sm" onClick={() => void openView(item)} disabled={busyId !== null}>
-                        {t('settings.ai.records.view')}
-                      </Button>
-                      <Button
-                        variant="destructiveOutline"
-                        size="sm"
-                        disabled={busyId !== null}
-                        onClick={() => setDeleteTarget(item)}
-                        aria-label={t('settings.ai.records.deleteNamed', { title })}
-                      >
-                        {t('common.delete')}
-                      </Button>
-                    </div>
-                  );
-                })}
-              </ScrollAreaContent>
-            </ScrollArea>
+            <AiSessionRecordsList
+              key={JSON.stringify([query, filter])}
+              records={visible}
+              notices={[
+                loading && records.length === 0 && <div key="loading" role="status" className="py-8 text-center text-sm text-muted-foreground">{t('common.loading')}</div>,
+                error && <p key="error" role="alert" className="text-sm text-destructive">{t('settings.ai.records.loadFailed')}</p>,
+                !loading && !error && visible.length === 0 && <p key="empty" className="py-8 text-center text-sm text-muted-foreground">{t('settings.ai.records.empty')}</p>,
+              ].filter(Boolean)}
+              renderRecord={(item) => (
+                <AiSessionRecordRow
+                  item={item}
+                  locale={locale}
+                  t={t}
+                  disabled={busyId !== null || deletingAll}
+                  onView={openView}
+                  onDelete={setDeleteTarget}
+                />
+              )}
+            />
           </>
         )}
       </DialogContent>
