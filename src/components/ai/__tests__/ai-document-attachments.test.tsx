@@ -17,7 +17,10 @@ beforeEach(async () => {
   useAppStore.setState({ locale: 'en-US' });
   await initI18n('en-US');
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe('document attachment surfaces', () => {
   it.each([
@@ -59,6 +62,41 @@ describe('document attachment surfaces', () => {
       expect(card?.querySelector('[data-slot="attachment-media"] svg[data-slot="document-kind-icon"]')).toBeInTheDocument();
       expect(card?.querySelector('[data-slot="attachment-content"] svg')).toBeNull();
     }
+  });
+
+  it('shows the full composer attachment title in a tooltip only when it is truncated', async () => {
+    const user = userEvent.setup();
+    const name = '2026-08-05-project-delivery-report.pdf';
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function getScrollWidth(this: HTMLElement) {
+      return this.textContent === name ? 240 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function getClientWidth(this: HTMLElement) {
+      return this.textContent === name ? 80 : 0;
+    });
+
+    render(<AiDocumentAttachments composer documents={[{ id: name, name, size: 1024, text: 'Content' }]} />);
+    const preview = screen.getByRole('button', { name: `Preview ${name}` });
+    await user.hover(preview);
+
+    await expect.poll(() => document.querySelector('[data-slot="tooltip-content"]')?.textContent).toBe(name);
+    await user.click(preview);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('keeps the composer attachment title tooltip disabled when the full name fits', async () => {
+    const user = userEvent.setup();
+    const name = 'report.pdf';
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function getScrollWidth(this: HTMLElement) {
+      return this.textContent === name ? 80 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function getClientWidth(this: HTMLElement) {
+      return this.textContent === name ? 80 : 0;
+    });
+
+    render(<AiDocumentAttachments composer documents={[{ id: name, name, size: 1024, text: 'Content' }]} />);
+    await user.hover(screen.getByRole('button', { name: `Preview ${name}` }));
+
+    expect(document.querySelector('[data-slot="tooltip-content"]')).not.toBeInTheDocument();
   });
 
   it('places the import cancellation inside the pending attachment card', async () => {

@@ -33,6 +33,8 @@ try {
         await card.waitFor();
         const style = await card.evaluate(element => {
           const content = element.querySelector('[data-slot="attachment-content"]');
+          const media = element.querySelector('[data-slot="attachment-media"]');
+          const title = element.querySelector('[data-slot="attachment-title"]');
           const cardStyle = getComputedStyle(element);
           return {
             background: getComputedStyle(content).backgroundColor,
@@ -40,6 +42,9 @@ try {
             radius: parseFloat(cardStyle.borderBottomLeftRadius),
             width: element.getBoundingClientRect().width,
             height: element.getBoundingClientRect().height,
+            contentHeight: content.getBoundingClientRect().height,
+            mediaHeight: media.getBoundingClientRect().height,
+            titleFontSize: getComputedStyle(title).fontSize,
           };
         });
         assert.equal(style.background, 'rgba(0, 0, 0, 0)', 'Filename background must not paint over the rounded bottom border');
@@ -47,6 +52,9 @@ try {
         assert.ok(style.radius > 0);
         assert.equal(style.width, 96);
         assert.equal(style.height, 76);
+        assert.equal(style.contentHeight, 24);
+        assert.equal(style.mediaHeight, 52);
+        assert.equal(style.titleFontSize, '10px');
         await page.screenshot({ path: `/tmp/shellspan-attachment-border-${engine.name()}-${width}.png` });
         await page.getByRole('button', { name: /README.md/ }).click();
         await page.getByRole('dialog').waitFor();

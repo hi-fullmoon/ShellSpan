@@ -1,9 +1,10 @@
-import { Fragment } from 'react';
+import { Fragment, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { FileTextIcon, FileCodeIcon, FileCogIcon, FileSpreadsheetIcon, MessageCircleIcon, XIcon } from 'lucide-react';
 import { Attachment, AttachmentAction, AttachmentActions, AttachmentContent, AttachmentDescription, AttachmentGroup, AttachmentMedia, AttachmentTitle, AttachmentTrigger } from '@/components/ui/attachment';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { DocumentAttachment } from '@/lib/ai/document-message';
 import { documentExtension } from '@/lib/ai/document-import';
@@ -43,6 +44,44 @@ function DocumentKindIcon({ kind }: { kind: DocumentKind }) {
   return <Icon data-slot="document-kind-icon" aria-hidden="true" />;
 }
 
+function DocumentPreviewTrigger({ title, label, overflowTooltip }: {
+  title: string;
+  label: string;
+  overflowTooltip: boolean;
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [isTitleTruncated, setIsTitleTruncated] = useState(false);
+
+  const updateTruncation = useCallback(() => {
+    const titleElement = triggerRef.current
+      ?.closest('[data-slot="attachment"]')
+      ?.querySelector<HTMLElement>('[data-slot="attachment-title"]');
+    if (!titleElement) return;
+    const nextIsTruncated = titleElement.scrollWidth > titleElement.clientWidth;
+    setIsTitleTruncated(current => current === nextIsTruncated ? current : nextIsTruncated);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!overflowTooltip) return;
+    updateTruncation();
+    const titleElement = triggerRef.current
+      ?.closest('[data-slot="attachment"]')
+      ?.querySelector<HTMLElement>('[data-slot="attachment-title"]');
+    if (!titleElement || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updateTruncation);
+    observer.observe(titleElement);
+    return () => observer.disconnect();
+  }, [overflowTooltip, title, updateTruncation]);
+
+  const trigger = <DialogTrigger render={<AttachmentTrigger ref={triggerRef} aria-label={label} />} />;
+  if (!overflowTooltip) return trigger;
+
+  return <Tooltip disabled={!isTitleTruncated}>
+    <TooltipTrigger render={trigger} onFocus={updateTruncation} onMouseEnter={updateTruncation} />
+    <TooltipContent className="max-w-sm break-all">{title}</TooltipContent>
+  </Tooltip>;
+}
+
 export function AiDocumentAttachments({ documents, pending = [], onRemove, onCancel, locked = false, composer = false }: {
   composer?: boolean;
   documents: readonly DocumentAttachment[];
@@ -66,7 +105,7 @@ export function AiDocumentAttachments({ documents, pending = [], onRemove, onCan
           <AttachmentTitle>{title}</AttachmentTitle>
           <AttachmentDescription className={composer || chat ? 'sr-only' : undefined}>{description(document)} · {t('ai.workspace.documents.ready')}</AttachmentDescription>
         </AttachmentContent>
-        <DialogTrigger render={<AttachmentTrigger aria-label={t('ai.workspace.documents.preview', { name: title })} />} />
+        <DocumentPreviewTrigger title={title} label={t('ai.workspace.documents.preview', { name: title })} overflowTooltip={composer && !chat} />
         {onRemove && <AttachmentActions className={composer && !chat ? 'absolute' : undefined}><AttachmentAction variant={composer && !chat ? 'secondary' : undefined} className={composer ? 'ai-composer-file-remove size-5' : undefined} disabled={locked} aria-label={t('ai.workspace.documents.remove', { name: title })} onClick={() => onRemove(document.id)}><XIcon /></AttachmentAction></AttachmentActions>}
       </Attachment>
       <DialogContent className="flex h-[90dvh] w-[calc(100vw-2rem)] max-w-[960px] min-h-0 flex-col overflow-hidden p-0">
