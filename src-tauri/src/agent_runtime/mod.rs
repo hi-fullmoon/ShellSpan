@@ -25,6 +25,7 @@ mod request_log;
 mod retry;
 mod runtime;
 mod session;
+mod session_title;
 pub(crate) mod skill_runtime;
 pub(crate) mod skills;
 mod stream_writer;

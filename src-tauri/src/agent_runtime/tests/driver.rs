@@ -123,6 +123,54 @@
         assert!(step_budget_recoverable(Some(&child)));
         child.continuable = false;
         assert!(!step_budget_recoverable(Some(&child)));
+        let events = vec![event(1_000, AgentSessionEventPayload::TurnStart)];
+        assert!(!child_budget_requires_handoff(
+            Some(&child),
+            &events,
+            "turn",
+            1_001
+        ));
+        assert!(child_budget_requires_handoff(
+            Some(&child),
+            &events,
+            "turn",
+            49_000
+        ));
+        assert!(!child_budget_requires_handoff(
+            None, &events, "turn", 49_000
+        ));
+        for status in [
+            super::super::AgentPlanStepStatus::Completed,
+            super::super::AgentPlanStepStatus::Pending,
+            super::super::AgentPlanStepStatus::Blocked,
+        ] {
+            let mut with_plan = events.clone();
+            let mut plan = event(
+                2_000,
+                AgentSessionEventPayload::TaskPlan {
+                    version: 1,
+                    steps: vec![super::super::AgentPlanStep {
+                        id: "check".into(),
+                        title: "Check remaining work".into(),
+                        status,
+                        detail: None,
+                        evidence_refs: Vec::new(),
+                    }],
+                },
+            );
+            plan.turn_id = Some("turn".into());
+            with_plan.push(plan);
+            assert_eq!(
+                child_budget_requires_handoff(Some(&child), &with_plan, "turn", 49_000),
+                status != super::super::AgentPlanStepStatus::Completed,
+            );
+            assert!(child_budget_requires_handoff(
+                Some(&child),
+                &with_plan,
+                "next-turn",
+                49_000
+            ));
+        }
     }
 
     #[test]
@@ -131,6 +179,38 @@
         assert!(notice.contains("step 6 of 8; 2 further model steps"));
         assert!(notice.contains("Do not claim unfinished work is complete"));
         assert!(step_budget_notice(8, 8).contains("0 further model steps"));
+    }
+
+    #[test]
+    fn child_cumulative_budget_warns_before_each_hard_boundary() {
+        let budget = super::super::AgentSubagentBudget {
+            max_steps_per_turn: 8,
+            max_turns: 1,
+            max_tool_calls: 10,
+            max_tokens: 32_000,
+            timeout_ms: 300_000,
+        };
+        for (tokens, calls, elapsed, warning) in [
+            (25_599, 7, 239_999, false),
+            (25_600, 0, 0, true),
+            (0, 8, 0, true),
+            (0, 0, 240_000, true),
+            (33_000, 11, 300_001, true),
+        ] {
+            let notice = child_cumulative_budget_notice(
+                &budget,
+                &super::super::subagent::ChildBudgetUsage {
+                    reported_tokens: tokens,
+                    tool_calls: calls,
+                    turns: 1,
+                    elapsed_ms: elapsed,
+                },
+            );
+            assert_eq!(notice.contains("A cumulative limit is near"), warning);
+            assert!(notice.contains("/ 32000 provider-reported total tokens"));
+            assert!(notice.contains("missing provider usage is unknown"));
+            assert!(notice.contains("never reset on continuation"));
+        }
     }
 
     fn event(

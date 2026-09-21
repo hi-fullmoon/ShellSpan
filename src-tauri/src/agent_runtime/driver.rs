@@ -73,6 +73,10 @@ pub(crate) async fn drive_agent(
 ) -> AgentDriverSettlement {
     match drive_agent_inner(&sessions, &entry, &hooks, &tools, &compactions, config).await {
         Ok(settlement) => settlement,
+        Err(message) if message.starts_with("ephemeralInputRecoveryRequired:") => {
+            let _ = tools.mark_ephemeral_input_failure(&entry, &message);
+            AgentDriverSettlement::Waiting
+        }
         Err(message) if message.starts_with("toolSchedulerFailure:") => {
             let _ = tools.mark_scheduler_failure(&entry, &message);
             AgentDriverSettlement::Waiting
@@ -462,6 +466,50 @@ fn step_budget_reason(limit: usize, recoverable: bool) -> String {
     }
 }
 
+fn child_cumulative_budget_notice(
+    budget: &super::AgentSubagentBudget,
+    usage: &super::subagent::ChildBudgetUsage,
+) -> String {
+    let mut notice = format!(
+        "\nCumulative child budget: {} / {} provider-reported total tokens, {} / {} admitted tool calls, {} / {} turns, {} / {} ms elapsed. Tokens include repeated model inputs, not just the final answer; missing provider usage is unknown, not free. These counters never reset on continuation. Keep tool output bounded and reserve budget for a concise handoff.",
+        usage.reported_tokens, budget.max_tokens, usage.tool_calls, budget.max_tool_calls,
+        usage.turns, budget.max_turns, usage.elapsed_ms, budget.timeout_ms,
+    );
+    if child_budget_near_limit(budget, usage) {
+        notice.push_str(" A cumulative limit is near. Finish with the evidence already collected, completed checks, remaining work and blockers now; avoid starting new exploratory work. Never claim unchecked work is complete. Unless the current turn has an explicitly completed task plan, this handoff is recorded as incomplete even when no plan exists.");
+    }
+    notice
+}
+
+fn child_budget_near_limit(
+    budget: &super::AgentSubagentBudget,
+    usage: &super::subagent::ChildBudgetUsage,
+) -> bool {
+    let near_limit = |used: u64, limit: u64| used >= limit.saturating_sub(limit / 5);
+    near_limit(usage.reported_tokens, budget.max_tokens)
+        || near_limit(
+            u64::from(usage.tool_calls),
+            u64::from(budget.max_tool_calls),
+        )
+        || near_limit(usage.elapsed_ms, budget.timeout_ms)
+}
+
+fn child_budget_requires_handoff(
+    child: Option<&super::AgentSubagentSession>,
+    events: &[super::AgentSessionEvent],
+    turn_id: &str,
+    now: u64,
+) -> bool {
+    let Some(child) = child else {
+        return false;
+    };
+    let plan = latest_plan_for_turn(events, turn_id);
+    child_budget_near_limit(
+        &child.budget,
+        &super::subagent::child_budget_usage(events, now),
+    ) && (plan.is_empty() || incomplete_plan_for_turn(events, turn_id))
+}
+
 async fn apply_pre_step_hooks(
     sessions: &AgentSessionStore,
     entry: &Arc<AgentEntry>,
@@ -811,12 +859,19 @@ async fn run_step(
                     output_limit_continuation_count(events, turn_id)
                 })?,
             );
-            if entry.subagent.is_some() {
+            if let Some(child) = &entry.subagent {
                 if let Some(limit) = config.max_steps_per_turn {
                     request
                         .system_prompt
                         .push_str(&step_budget_notice(limit, step_index));
                 }
+                let now = current_unix_ms()?;
+                let usage = sessions.read_events(&entry.session_id, |events| {
+                    super::subagent::child_budget_usage(events, now)
+                })?;
+                request
+                    .system_prompt
+                    .push_str(&child_cumulative_budget_notice(&child.budget, &usage));
             }
             request
         };
@@ -2110,6 +2165,10 @@ async fn commit_response(
         return Ok(StepSettlement::Cancelled);
     }
     if tool_calls.is_empty() {
+        let now = current_unix_ms()?;
+        let budget_handoff = sessions.read_events(&entry.session_id, |events| {
+            child_budget_requires_handoff(entry.subagent.as_ref(), events, turn_id, now)
+        })?;
         let (incomplete, continue_plan) =
             sessions.read_turn_events(&entry.session_id, |events| {
                 let incomplete = incomplete_plan_for_turn(events, turn_id);
@@ -2120,8 +2179,8 @@ async fn commit_response(
                     _ => false,
                 });
                 (
-                    incomplete,
-                    plan_needs_completion_check(events, turn_id) && !checked,
+                    incomplete || budget_handoff,
+                    !budget_handoff && plan_needs_completion_check(events, turn_id) && !checked,
                 )
             })?;
         if continue_plan {

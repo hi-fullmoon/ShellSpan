@@ -14,6 +14,7 @@ describe('quality gate wiring', () => {
     const toolchain = await readFile(path.join(root, 'rust-toolchain.toml'), 'utf8');
     let testedJobs = 0;
     for (const job of Object.values(ci.jobs)) {
+      if (!job.steps) continue;
       const testIndex = job.steps.findIndex(step => /\bpnpm (test|review:frontend)\b/.test(step.run ?? ''));
       if (testIndex === -1) continue;
       testedJobs += 1;

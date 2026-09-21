@@ -90,7 +90,11 @@ pub(crate) async fn agent_runtime_submit_images(
     input: super::images::ImageSubmission,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
-    runtime.submit_images(input).await
+    let session_id = input.session_id.clone();
+    let submission_id = input.client_operation_id.clone();
+    let snapshot = runtime.submit_images(input).await?;
+    runtime.generate_session_title(&session_id, submission_id);
+    Ok(snapshot)
 }
 #[tauri::command]
 pub(crate) fn agent_runtime_cancel_image_submission(
@@ -386,13 +390,15 @@ pub(crate) fn agent_runtime_followup(
     let client_submission_id = input
         .client_submission_id
         .unwrap_or_else(|| input.message_id.clone());
-    runtime.followup_submission(
+    let snapshot = runtime.followup_submission(
         &input.session_id,
         input.message_id,
-        client_submission_id,
+        client_submission_id.clone(),
         input.content,
         input.terminal_context,
-    )
+    )?;
+    runtime.generate_session_title(&input.session_id, client_submission_id);
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -405,13 +411,15 @@ pub(crate) fn agent_runtime_steer(
     let client_submission_id = input
         .client_submission_id
         .unwrap_or_else(|| input.message_id.clone());
-    runtime.steer_submission(
+    let snapshot = runtime.steer_submission(
         &input.session_id,
         input.message_id,
-        client_submission_id,
+        client_submission_id.clone(),
         input.content,
         input.terminal_context,
-    )
+    )?;
+    runtime.generate_session_title(&input.session_id, client_submission_id);
+    Ok(snapshot)
 }
 
 #[tauri::command]

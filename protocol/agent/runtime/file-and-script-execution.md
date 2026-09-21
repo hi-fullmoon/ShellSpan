@@ -1,5 +1,22 @@
 # File edits and complete shell scripts
 
+## Diagnostic delegation
+
+Model-facing spawn tools accept optional `requiredTools`. Before creating a child,
+the runtime checks these tools against the delegated role/parent intersection and
+the selected target's available tools. Missing tools fail without creating a child.
+Existing callers omitting this field remain compatible. Explorer, diagnostician,
+verifier and reviewer roles do not receive terminal execution; system collection
+should run in the parent or an authorized operator child before diagnostic analysis.
+Full access changes approval policy, not role tool availability or structured file
+root/symlink restrictions. The model context reports the host OS only for local
+targets; remote OS remains unknown until observed on that target. Agents must report
+missing collection separately from host health and return missing capabilities to
+their parent instead of repeatedly attempting blocked file paths. Parent takeover
+is model guidance, not automatic execution or an expansion of authorization.
+
+## File and script limits
+
 `write_file` accepts up to 128 KiB (131072 UTF-8 bytes). This is a native safety
 ceiling, not a generation target; the current model output budget still applies.
 `edit_file` retains its 32 KiB per-string ceiling. Existing files should normally

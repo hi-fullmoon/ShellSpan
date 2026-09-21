@@ -175,6 +175,199 @@ fn stream_delta_validation_accepts_provider_whitespace_but_rejects_oversized_chu
     );
 }
 
+#[test]
+fn generated_title_is_durable_and_preserves_goal() {
+    let (root, store) = configured();
+    create(&store);
+    store
+        .set_generated_title("session-1", "排查 Nginx".into())
+        .unwrap();
+    store
+        .set_generated_title("session-1", "重复结果".into())
+        .unwrap();
+    let snapshot = store.snapshot("session-1").unwrap();
+    assert_eq!(snapshot.header.title.as_deref(), Some("排查 Nginx"));
+    assert_eq!(snapshot.header.goal, "Inspect nginx");
+    let restored = AgentSessionStore::default();
+    restored.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(
+        restored.snapshot("session-1").unwrap().header.title,
+        snapshot.header.title
+    );
+    store
+        .rename(AgentSessionRenameInput {
+            session_id: "session-1".into(),
+            expected_revision: snapshot.event_count,
+            client_operation_id: "manual-after-auto".into(),
+            title: "我的标题".into(),
+        })
+        .unwrap();
+    store
+        .set_generated_title("session-1", "过期结果".into())
+        .unwrap();
+    assert_eq!(
+        store.snapshot("session-1").unwrap().header.title.as_deref(),
+        Some("我的标题")
+    );
+}
+
+#[test]
+fn generated_title_does_not_modify_archived_or_ended_sessions() {
+    let (_root, store) = configured();
+    create(&store);
+    let ended = store
+        .end("session-1", AgentSessionStatus::Completed, None)
+        .unwrap();
+    store
+        .set_generated_title("session-1", "延迟摘要".into())
+        .unwrap();
+    assert_eq!(
+        store.snapshot("session-1").unwrap().event_count,
+        ended.event_count
+    );
+    let archived = store.archive("session-1").unwrap();
+    store
+        .set_generated_title("session-1", "延迟摘要".into())
+        .unwrap();
+    let snapshot = store.snapshot("session-1").unwrap();
+    assert_eq!(snapshot.event_count, archived.event_count);
+    assert!(snapshot.header.title.is_none());
+}
+
+#[test]
+fn generated_title_never_overwrites_a_manual_rename() {
+    let (_root, store) = configured();
+    create(&store);
+    let revision = store.snapshot("session-1").unwrap().event_count;
+    store
+        .rename(AgentSessionRenameInput {
+            session_id: "session-1".into(),
+            expected_revision: revision,
+            client_operation_id: "manual-before-auto".into(),
+            title: "用户标题".into(),
+        })
+        .unwrap();
+    store
+        .set_generated_title("session-1", "后台摘要".into())
+        .unwrap();
+    let snapshot = store.snapshot("session-1").unwrap();
+    assert_eq!(snapshot.header.title.as_deref(), Some("用户标题"));
+    assert_eq!(snapshot.event_count, revision + 1);
+}
+
+#[test]
+fn title_submission_uses_committed_message_after_preselecting_model() {
+    let (_root, store) = configured();
+    create(&store);
+    assert_eq!(store.title_submission("session-1", "first").unwrap(), None);
+    store
+        .append(
+            "session-1",
+            None,
+            None,
+            AgentSessionEventPayload::SessionModelSelected {
+                provider: super::super::AgentSubagentModel {
+                    route_id: "route-1".into(),
+                    model_id: "model-1".into(),
+                    reasoning_effort: None,
+                    route_revision: None,
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(store.title_submission("session-1", "first").unwrap(), None);
+    store
+        .enqueue(
+            "session-1",
+            AgentInboxLane::NextTurn,
+            message("first", "检查磁盘空间并清理缓存"),
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .title_submission("session-1", "first")
+            .unwrap()
+            .as_deref(),
+        Some("检查磁盘空间并清理缓存")
+    );
+    assert_eq!(
+        store.snapshot("session-1").unwrap().header.goal,
+        "Inspect nginx"
+    );
+}
+
+#[test]
+fn title_submission_identity_survives_claim_retry_and_restart() {
+    let (root, store) = configured();
+    create(&store);
+    store
+        .enqueue(
+            "session-1",
+            AgentInboxLane::NextTurn,
+            message("first", "排查 Nginx"),
+        )
+        .unwrap();
+    store.claim_turn("session-1").unwrap();
+    store
+        .enqueue(
+            "session-1",
+            AgentInboxLane::NextTurn,
+            message("second", "检查磁盘空间"),
+        )
+        .unwrap();
+    let revision = store.snapshot("session-1").unwrap().event_count;
+    store
+        .enqueue(
+            "session-1",
+            AgentInboxLane::NextTurn,
+            message("first", "排查 Nginx"),
+        )
+        .unwrap();
+    assert_eq!(store.snapshot("session-1").unwrap().event_count, revision);
+    let restored = AgentSessionStore::default();
+    restored.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(
+        restored
+            .title_submission("session-1", "first")
+            .unwrap()
+            .as_deref(),
+        Some("排查 Nginx")
+    );
+    assert_eq!(
+        restored.title_submission("session-1", "second").unwrap(),
+        None
+    );
+    assert_eq!(
+        restored
+            .title_submission("session-1", "uncommitted")
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn title_submission_skips_explicit_titles_before_requesting_a_model() {
+    let (_root, store) = configured();
+    create(&store);
+    store
+        .enqueue(
+            "session-1",
+            AgentInboxLane::NextTurn,
+            message("first", "排查 Nginx"),
+        )
+        .unwrap();
+    let revision = store.snapshot("session-1").unwrap().event_count;
+    store
+        .rename(AgentSessionRenameInput {
+            session_id: "session-1".into(),
+            expected_revision: revision,
+            client_operation_id: "rename-before-request".into(),
+            title: "我的会话".into(),
+        })
+        .unwrap();
+    assert_eq!(store.title_submission("session-1", "first").unwrap(), None);
+}
+
 fn configured() -> (tempfile::TempDir, AgentSessionStore) {
     let root = tempfile::tempdir().unwrap();
     let store = AgentSessionStore::default();

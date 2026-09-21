@@ -463,7 +463,8 @@ fn subagent_spawn_schema() -> Value {
         &["goal", "role", "inheritanceMode", "targetIds"],
         json!({
             "goal": bounded_string(131072),
-            "role": { "type": "string", "enum": ["general", "explorer", "diagnostician", "operator", "verifier", "reviewer"] },
+            "role": { "type": "string", "enum": ["general", "explorer", "diagnostician", "operator", "verifier", "reviewer"], "description": "Explorer, diagnostician, verifier and reviewer have scoped file-reading tools but no terminal execution. Use operator for command-based metric collection, then pass evidence to diagnostician. All roles remain limited by parent capabilities." },
+            "requiredTools": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": bounded_string(128), "description": "Tools needed to complete this task, checked before child creation. Include run_terminal_command for system metric collection. Missing capabilities return an error so the parent can collect evidence or choose a capable role." },
             "inheritanceMode": { "type": "string", "enum": ["blank", "safePrefix"] },
             "targetIds": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": bounded_string(128) },
             "budget": object_schema(&["maxStepsPerTurn", "maxTurns", "maxToolCalls", "maxTokens", "timeoutMs"], json!({

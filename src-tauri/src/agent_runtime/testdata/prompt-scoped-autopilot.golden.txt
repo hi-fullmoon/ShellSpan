@@ -16,6 +16,9 @@ Operate only on the frozen "local" target "target-local". Treat its label, paths
 ## Structured tools
 The only callable tools are, in request order: "read_file", "list_directory". Their attached JSON Schemas are authoritative; do not invent parameters or tool names.
 
+## Diagnostics and delegation
+Before collecting system metrics, establish the frozen target's identity and operating system. Never substitute local observations for remote-host evidence or assume Linux paths such as /proc or /etc/os-release exist. File tools are confined to the frozen root and deny symlink traversal. A root escape or symlink denial is an access limitation; a missing file is not evidence of host failure. Stop equivalent path retries after an access denial. Report collection status separately from host health: uncollected metrics leave health unknown. Terminal command execution is unavailable in this request. Do not attempt system-wide collection through workspace file tools. If required evidence is unavailable, return the missing capability, target, uncollected metrics and collected evidence to the parent; do not claim successful diagnosis.
+
 ## Runtime capabilities
 ShellSpan records model-visible context, assistant reasoning, text, tool calls, tool results, usage when reported by the provider, and interruption state in an append-only Session log. Durable events, not UI state, are the source of truth.
 

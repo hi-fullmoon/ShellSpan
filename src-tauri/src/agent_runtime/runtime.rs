@@ -1028,6 +1028,12 @@ impl AgentRuntime {
         self.sessions.snapshot(session_id)
     }
 
+    pub(crate) fn generate_session_title(&self, session_id: &str, submission_id: String) {
+        if let Ok(Some(entry)) = self.agents.get(session_id) {
+            super::session_title::spawn(self.sessions.clone(), entry, submission_id);
+        }
+    }
+
     fn prepare_terminal_context(
         &self,
         session_id: &str,
