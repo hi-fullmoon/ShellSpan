@@ -680,7 +680,7 @@ export function AiComposerSeat({
               />
             </div>
           )}
-          <AiCompletionPopover anchor={completionAnchor} fixedHeight={mode === 'agent' && completion.open && !skillCompletion.open} onDismiss={() => {
+          <AiCompletionPopover anchor={completionAnchor} fixedHeight={mode === 'agent' && (completion.open || skillCompletion.open)} onDismiss={() => {
             skillCompletion.dismiss();
             completion.dismiss();
           }}>

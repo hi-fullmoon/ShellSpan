@@ -303,8 +303,13 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
     },
     composition: setComposing,
     keyDown: (event: KeyboardEvent): boolean => {
-      if (!open || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return false;
-      if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) return false;
+      if (!open || event.isComposing || event.shiftKey || event.metaKey || event.altKey) return false;
+      const controlKey = event.ctrlKey ? event.key.toLowerCase() : null;
+      if (controlKey !== null && controlKey !== 'n' && controlKey !== 'p') return false;
+      const direction = event.ctrlKey
+        ? (controlKey === 'n' ? 1 : -1)
+        : event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+      if (!direction && !['Enter', 'Tab', 'Escape'].includes(event.key)) return false;
       if (context) {
         if (event.key === 'Tab' && !options.length) { setDismissed(key); return false; }
         event.preventDefault(); event.stopPropagation();
@@ -316,7 +321,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
           else option?.choose();
         }
         else if (options.length) {
-          const next = (activeIndex + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+          const next = (activeIndex + direction + options.length) % options.length;
           setIndex(next); document.getElementById(`${id}-${next}`)?.scrollIntoView({ block: 'nearest' });
         }
         return true;
@@ -330,7 +335,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
       if (entries.length && !loading) {
         if (event.key === 'Enter' || event.key === 'Tab') choose(entries[index], event.key === 'Tab' ? 'browse' : 'select');
         else {
-          const next = (index + (event.key === 'ArrowDown' ? 1 : -1) + entries.length) % entries.length;
+          const next = (index + direction + entries.length) % entries.length;
           setIndex(next); document.getElementById(`${id}-${next}`)?.scrollIntoView({ block: 'nearest' });
         }
       }
