@@ -5,6 +5,7 @@ export interface DocumentAttachment {
   readonly name: string;
   readonly size: number;
   readonly text: string;
+  readonly chatTitle?: string;
 }
 export interface DocumentMessage {
   readonly text: string;
@@ -46,7 +47,9 @@ export function decodeDocumentMessage(content: string): DocumentMessage {
         || !('name' in value) || typeof value.name !== 'string' || value.name.length > 255 || !isDocumentName(value.name)
         || !('size' in value) || typeof value.size !== 'number' || !Number.isSafeInteger(value.size) || value.size <= 0
         || !('text' in value) || typeof value.text !== 'string') return plain;
-      documents.push({ id: value.id, name: value.name, size: value.size, text: value.text });
+      if ('chatTitle' in value && (typeof value.chatTitle !== 'string' || value.chatTitle.length > 4096)) return plain;
+      documents.push({ id: value.id, name: value.name, size: value.size, text: value.text,
+        ...('chatTitle' in value ? { chatTitle: value.chatTitle as string } : {}) });
     }
     if (new Set(documents.map(document => document.id)).size !== documents.length) return plain;
     encodeDocumentMessage(parsed.text, documents, false);

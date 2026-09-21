@@ -98,6 +98,11 @@ JSON content envelope:
 
 The encoder emits the version property first. The decoder only recognizes that
 prefix and validates every attachment; arbitrary JSON remains ordinary text.
+History mentions may include an optional `chatTitle` string (up to 4096 characters)
+on the attachment. The composer inserts this title at the mention's position as
+an inline token, using the same editing behavior as skill tokens. Removing the
+token removes its reference payload, and undo restores both. This is display metadata;
+the filename and extracted text retain their existing provider semantics.
 The complete envelope travels through the existing message content transaction,
 so draft navigation, queued submissions, failure restoration, images, persistence
 and conversation replay retain the same attachment set. Queue editing changes only
