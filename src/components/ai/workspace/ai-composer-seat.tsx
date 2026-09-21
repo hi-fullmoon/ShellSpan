@@ -514,7 +514,7 @@ export function AiComposerSeat({
               if (!event.currentTarget.contains(event.target as Node)) return;
               if (!(event.target as HTMLElement).closest('button, [role="button"]')) completion.editor.current?.focus();
             }}>
-              <div className="ai-composer-tools flex min-w-0 shrink-0 items-center gap-1">
+              <div className="ai-composer-tools flex min-w-0 flex-[0_1_auto] items-center gap-1">
                 <input ref={documentInputRef} type="file" accept={`${DOCUMENT_ACCEPT},${IMAGE_ACCEPT}`} multiple className="sr-only" tabIndex={-1} aria-label={t('ai.workspace.attachments.file')} onChange={event => {
                   const files = Array.from(event.currentTarget.files ?? []);
                   event.currentTarget.value = '';
@@ -598,7 +598,7 @@ export function AiComposerSeat({
                   <Button
                     variant="ghost"
                     size="xs"
-                    className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] overflow-hidden pr-1.5 pl-2"
+                    className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] overflow-hidden pr-1.5 pl-2 @min-[481px]/ai-workspace:shrink-0"
                     disabled={!onOpenModel}
                     onClick={onOpenModel}
                     aria-label={t('ai.workspace.model.trigger', { selection: modelLabel })}

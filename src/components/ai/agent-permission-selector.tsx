@@ -162,7 +162,7 @@ export function AgentPermissionSelector({
             <Button
               variant={composer ? 'ghost' : 'outline'}
               size={composer ? 'xs' : 'sm'}
-              className={cn(composer && 'ai-permission-trigger h-7 min-w-0 max-w-[154px] px-[7px] @max-[480px]/ai-workspace:size-7 @max-[480px]/ai-workspace:shrink-0 @max-[480px]/ai-workspace:p-0 @max-[480px]/ai-workspace:[&_[data-icon=inline-end]]:hidden')}
+              className={cn(composer && 'ai-permission-trigger h-7 min-w-0 max-w-[154px] shrink-0 px-[7px] @max-[480px]/ai-workspace:size-7 @max-[480px]/ai-workspace:p-0 @max-[480px]/ai-workspace:[&_[data-icon=inline-end]]:hidden')}
               disabled={disabled || !connected}
               aria-label={composer
                 ? t('agent.permission.composerAria', { mode: t(triggerLabel) })
@@ -173,7 +173,7 @@ export function AgentPermissionSelector({
           <span
             data-slot="agent-permission-trigger-content"
             className={cn(
-              'flex items-center gap-1 leading-none',
+              'ai-composer-control-content inline-flex items-center gap-1 leading-none',
               composer && 'min-w-0',
               visibleMode === 'fullAccess' && 'text-app-warning',
             )}
@@ -183,7 +183,7 @@ export function AgentPermissionSelector({
               strokeWidth={1.75}
               className={cn(visibleMode === 'fullAccess' && 'text-app-warning')}
             />
-            <span className={cn('leading-none', composer && 'ai-permission-trigger-label truncate @max-[480px]/ai-workspace:hidden')}>
+            <span className={cn(composer && 'ai-permission-trigger-label truncate @max-[480px]/ai-workspace:hidden')}>
               {t(triggerLabel)}
             </span>
             <ChevronDownIcon data-icon="inline-end" />
