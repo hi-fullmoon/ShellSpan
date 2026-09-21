@@ -68,7 +68,8 @@ function CatalogRows({
             <Button
               type="button"
               variant="ghost"
-              className="h-auto w-full min-w-0 justify-start px-2 py-2 text-left whitespace-normal"
+              size="sm"
+              className="h-auto w-full min-w-0 items-start justify-start gap-1 px-2 py-2 text-left whitespace-normal"
               aria-label={t('ai.workspace.subagents.open', {
                 title: entry.summary.title,
                 role,
@@ -84,7 +85,7 @@ function CatalogRows({
               {Array.from({ length: Math.min(Math.max(entry.depth - 1, 0), 8) }, (_, index) => (
                 <span key={index} className="w-3 shrink-0" aria-hidden="true" />
               ))}
-              <span className="relative grid size-7 shrink-0 place-items-center" aria-hidden="true">
+              <span className="relative grid size-4 shrink-0 place-items-center" aria-hidden="true">
                 <BotIcon data-icon="inline-start" />
                 <span
                   className="ai-session-status-dot absolute right-0 bottom-0 size-2"
@@ -92,12 +93,12 @@ function CatalogRows({
                 />
               </span>
               <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                <span className="flex min-w-0 max-w-full items-center gap-1.5">
-                  <span className="truncate font-medium">{entry.summary.title}</span>
+                <span className="flex w-full min-w-0 items-center gap-1.5">
+                  <span className="truncate font-medium leading-4">{entry.summary.title}</span>
                   <Badge variant="outline" size="sm">{role}</Badge>
                   {current && <Badge variant="secondary" size="sm">{t('ai.workspace.subagents.current')}</Badge>}
                 </span>
-                <span className="truncate text-xs text-muted-foreground">
+                <span className="max-w-full truncate text-xs font-normal leading-4 text-muted-foreground">
                   {mode} · {status}
                 </span>
                 {entry.detail && entry.detail !== entry.summary.title && (
@@ -106,7 +107,11 @@ function CatalogRows({
                   </span>
                 )}
               </span>
-              {!current && <ChevronRightIcon data-icon="inline-end" aria-hidden="true" />}
+              {!current && (
+                <span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
+                  <ChevronRightIcon data-icon="inline-end" />
+                </span>
+              )}
             </Button>
           </div>
         );
@@ -200,23 +205,26 @@ export function AiSubagentCatalog({
         )}
         <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={8} className="w-80">
-        <PopoverHeader>
-          <PopoverTitle>{t('ai.workspace.subagents.title')}</PopoverTitle>
+      <PopoverContent align="end" sideOffset={8} className="w-80 max-w-[calc(100vw-1rem)] gap-1 p-1">
+        <PopoverHeader className="px-2 py-1.5">
+          <PopoverTitle className="text-xs text-muted-foreground">{t('ai.workspace.subagents.title')}</PopoverTitle>
         </PopoverHeader>
         {root.id !== current.id && (
           <Button
             type="button"
             variant="ghost"
-            className="h-auto w-full min-w-0 justify-start px-2 py-2 text-left"
+            size="sm"
+            className="h-auto w-full min-w-0 items-start justify-start gap-1 px-2 py-2 text-left"
             aria-label={t('ai.workspace.subagents.openRoot', { title: root.title })}
             onClick={() => {
               setOpen(false);
               onOpen(root);
             }}
           >
-            <HouseIcon data-icon="inline-start" />
-            <span className="min-w-0 flex-1 truncate">{root.title}</span>
+            <span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
+              <HouseIcon data-icon="inline-start" />
+            </span>
+            <span className="min-w-0 flex-1 truncate leading-4">{root.title}</span>
             <Badge variant="secondary" size="sm">{t('ai.workspace.subagents.root')}</Badge>
           </Button>
         )}

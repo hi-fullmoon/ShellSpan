@@ -76,6 +76,7 @@ export function AiWorkspaceController({
     <AiWorkspaceRoot
       mode={scope === 'workbench' ? 'ask' : 'agent'}
       view={controller.view}
+      restoringSession={controller.restoringSession}
       imageControls={imageDraftVisible
         ? <AiImageDraftControls state={controller.imageDraft} selection={controller.selectedProvider} />
         : null}
@@ -84,6 +85,7 @@ export function AiWorkspaceController({
       imageBusy={controller.imageDraft.busy}
       imageSubmissionId={controller.imageDraft.submittedOperationId}
       imageLocked={controller.imageDraft.locked}
+      submissionContext={controller.submissionContext}
       onAnswerQuestion={controller.answerQuestion}
       onListFileReferences={controller.listFileReferences}
       onListSkills={controller.listSkills}
@@ -113,6 +115,7 @@ export function AiWorkspaceController({
       agentUnavailableReason={controller.agentUnavailableReason}
       historyScopeLabel={controller.historyScopeLabel}
       readOnlySession={controller.readOnlySession}
+      historicalTargetUnavailable={controller.historicalTargetUnavailable}
       providerLabel={controller.providerLabel}
       modelLabel={controller.modelLabel}
       modelControl={(

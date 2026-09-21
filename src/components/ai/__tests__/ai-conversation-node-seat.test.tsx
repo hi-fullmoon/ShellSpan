@@ -176,6 +176,12 @@ describe('AiConversationNodeList', () => {
     )).toBeVisible();
     expect(screen.queryByText(/maxAttempts/)).not.toBeInTheDocument();
     expect(container.querySelector('.ai-turn-error')).toHaveClass('grid-cols-[16px_minmax(0,1fr)_auto]', 'gap-1');
+    expect(container.querySelector('.ai-turn-error strong')).toBeNull();
+    const details = screen.getByRole('button', { name: 'View error details' });
+    expect(details).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(details);
+    expect(details).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(message)).toBeVisible();
   });
 
   it('renders output-limit continuation as a readable status without an error count', () => {
@@ -503,19 +509,18 @@ describe('AiConversationNodeList', () => {
     expect(Array.from(diff.querySelectorAll('[data-diff]'), (line) => [
       line.getAttribute('data-diff'), line.textContent,
     ])).toEqual([
-      ['removed', '- old'],
-      ['added', '+ new'],
-      ['context', '  kept'],
-      ['added', `+ ${longLine}`],
+      ['removed', '1old'],
+      ['added', '1new'],
+      ['context', '2kept'],
+      ['added', `3${longLine}`],
     ]);
     expect(diff.querySelector('section')).toHaveClass('min-w-0', 'max-w-full');
     expect(diff.querySelector('.ai-block-banner')).toHaveClass('px-2.5', 'py-1.5');
     expect(diff.querySelector('.ai-diff-body')).toHaveClass(
-      'min-w-0', 'max-w-full', 'overflow-auto', 'px-2.5', 'py-2',
-      'whitespace-pre-wrap', '[overflow-wrap:anywhere]',
+      'min-w-0', 'max-w-full', 'overflow-auto', 'whitespace-pre',
     );
-    expect(diff.querySelector('.ai-diff-body')).not.toHaveClass('whitespace-pre');
-    expect(diff.querySelectorAll('[data-diff="added"]')[1]?.textContent).toBe(`+ ${longLine}`);
+    expect(diff.querySelector('.ai-diff-body')).not.toHaveClass('whitespace-pre-wrap');
+    expect(diff.querySelectorAll('[data-diff="added"]')[1]?.textContent).toBe(`3${longLine}`);
 
     const replaceSeat = container.querySelector('[data-ai-node-key="tool:replace"]') as HTMLElement;
     const replaceRow = within(replaceSeat).getByRole('button', {
@@ -525,6 +530,21 @@ describe('AiConversationNodeList', () => {
     expect(within(container.querySelector('[data-ai-node-key="tool:orchestration"]') as HTMLElement)
       .getByRole('button', { name: 'Agent orchestration: Delegate repository inspection' }))
       .toBeVisible();
+  });
+
+  it('highlights code safely and preserves offset patch line numbers', async () => {
+    const user = userEvent.setup();
+    const patch = '--- a/example.ts\n+++ b/example.ts\n@@ -124,2 +124,2 @@\n-const value = 1;\n+const value = "<img src=x onerror=alert(1)>";\n keep\n';
+    const edit = toolNode({ name: 'apply_patch', nativeName: 'apply_patch', state: 'succeeded', input: { patch }, output: { diff: patch } });
+    const { container } = render(<AiConversationNodeList nodes={[edit]} />);
+    await user.click(container.querySelector('.ai-tool-row') ?? screen.getAllByRole('button')[0]);
+    const diff = container.querySelector('[data-ai-tool-view="diff"]') as HTMLElement;
+    expect(Array.from(diff.querySelectorAll('.ai-diff-line-number'), (line) => line.textContent)).toEqual(['124', '124', '125']);
+    expect(diff.querySelector('.hljs-keyword')).toHaveTextContent('const');
+    expect(diff.querySelector('.hljs-string')).toHaveTextContent('<img src=x onerror=alert(1)>');
+    expect(diff.querySelector('img')).toBeNull();
+    expect(diff.querySelector('[data-diff-count="added"]')).toHaveTextContent('+1');
+    expect(diff.querySelector('[data-diff-count="removed"]')).toHaveTextContent('-1');
   });
 
   it('shows only changed lines in structured edit totals while keeping context and deletions in order', async () => {
@@ -549,11 +569,11 @@ describe('AiConversationNodeList', () => {
     expect(Array.from(container.querySelectorAll('[data-ai-tool-view="diff"] [data-diff]'), (line) => [
       line.getAttribute('data-diff'), line.textContent,
     ])).toEqual([
-      ['context', '  same'],
-      ['removed', '- old'],
-      ['added', '+ new'],
-      ['context', '  keep'],
-      ['removed', '- remove'],
+      ['context', '1same'],
+      ['removed', '2old'],
+      ['added', '2new'],
+      ['context', '3keep'],
+      ['removed', '4remove'],
     ]);
   });
 
@@ -570,7 +590,7 @@ describe('AiConversationNodeList', () => {
 
     const diff = container.querySelector('[data-ai-tool-view="diff"]') as HTMLElement;
     const visible = Array.from(diff.querySelectorAll('[data-diff]'), (line) => line.textContent);
-    expect(visible).toEqual(['  same-1797', '  same-1798', '  same-1799', '- old', '+ new', '  end']);
+    expect(visible).toEqual(['1798same-1797', '1799same-1798', '1800same-1799', '1801old', '1801new', '1802end']);
     expect(diff.querySelector('[data-diff-simplified]')).toBeNull();
   });
 

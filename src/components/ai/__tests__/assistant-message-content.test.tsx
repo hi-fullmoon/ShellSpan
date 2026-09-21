@@ -50,7 +50,8 @@ describe('AssistantMessageContent', () => {
     expect(path).toHaveClass('ai-markdown-local-path');
     expect(path).toHaveAttribute('role', 'link');
     expect(path).toHaveAttribute('tabindex', '0');
-    expect(path).toHaveAttribute('title', 'ai.path.openWithCtrl');
+    expect(path).not.toHaveAttribute('title');
+    expect(path).toHaveAttribute('aria-description', 'ai.path.openWithCtrl');
     fireEvent.click(path);
     fireEvent.click(path, { metaKey: true });
     expect(invokeOpenPath).not.toHaveBeenCalled();
@@ -81,7 +82,8 @@ describe('AssistantMessageContent', () => {
     );
 
     const path = screen.getByText('/Users/tester/todo.html');
-    expect(path).toHaveAttribute('title', 'ai.path.openWithCommand');
+    expect(path).not.toHaveAttribute('title');
+    expect(path).toHaveAttribute('aria-description', 'ai.path.openWithCommand');
     fireEvent.click(path);
     fireEvent.click(path, { ctrlKey: true });
     expect(invokeOpenPath).not.toHaveBeenCalled();

@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useI18n } from '@/hooks/useI18n';
+import { aiErrorMessage } from '@/lib/ai/error-message';
 import {
   effectiveReasoningEffort,
   reasoningEffortOptions,
@@ -176,7 +177,7 @@ export function AiComposerModelSelector({
           setPane('root');
         }}
       >
-        {(routeStatus==='error'||selectionError||(routeSnapshot && !resolved)) && <DropdownMenuGroup><DropdownMenuLabel role="status">{routeStatus==='error' ? routeError : selectionError ?? t('settings.ai.capabilitiesLoading')}</DropdownMenuLabel></DropdownMenuGroup>}
+        {(routeStatus==='error'||selectionError||(routeSnapshot && !resolved)) && <DropdownMenuGroup><DropdownMenuLabel role="status">{aiErrorMessage((routeStatus==='error' ? routeError : selectionError) ?? t('settings.ai.capabilitiesLoading'), t)}</DropdownMenuLabel></DropdownMenuGroup>}
         {pane === 'root' && (
           <DropdownMenuGroup>
             <DropdownMenuItem

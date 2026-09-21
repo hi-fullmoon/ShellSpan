@@ -86,13 +86,40 @@
 
 .ai-diff-body [data-diff='removed'] {
   background: color-mix(in srgb, var(--ai-error) 9%, transparent);
-  color: var(--ai-error);
 }
 
 .ai-diff-body [data-diff='added'] {
   background: color-mix(in srgb, var(--ai-success) 9%, transparent);
-  color: var(--ai-success);
 }
+
+.ai-diff-block { background: var(--background); }
+.ai-diff-lines { display: table; min-width: 100%; font: inherit; }
+.ai-diff-lines > [data-diff] { display: table-row; }
+.ai-diff-line-number {
+  display: table-cell;
+  width: 1%;
+  min-width: 4ch;
+  padding: 0 8px;
+  border-right: 4px solid var(--background);
+  text-align: right;
+  color: var(--ai-text-muted);
+  user-select: none;
+}
+.ai-diff-body [data-diff='removed'] .ai-diff-line-number,
+.ai-diff-counts [data-diff-count='removed'] { color: var(--ai-error); }
+.ai-diff-body [data-diff='added'] .ai-diff-line-number,
+.ai-diff-counts [data-diff-count='added'] { color: var(--ai-success); }
+.ai-diff-code .hljs-keyword,
+.ai-diff-code .hljs-selector-tag { color: var(--ai-syntax-keyword); }
+.ai-diff-code .hljs-string,
+.ai-diff-code .hljs-regexp,
+.ai-diff-code .hljs-attr { color: var(--ai-success); }
+.ai-diff-code .hljs-number,
+.ai-diff-code .hljs-literal,
+.ai-diff-code .hljs-built_in { color: var(--ai-syntax-number); }
+.ai-diff-code .hljs-title,
+.ai-diff-code .hljs-name { color: var(--ai-syntax-title); }
+.ai-diff-code .hljs-comment { color: var(--ai-text-muted); }
 
 .ai-io-label {
   position: sticky;
@@ -146,6 +173,10 @@
   color: var(--ai-warning);
 }
 
+.ai-transcript-notice[data-variant='cancelled'] .ai-disclosure-leading > svg {
+  translate: 0 0;
+}
+
 .ai-transcript-notice-detail {
   color: var(--ai-text-muted);
 }
@@ -161,9 +192,9 @@
   color: var(--ai-error);
 }
 
-.ai-turn-error-copy strong {
+.ai-turn-error-copy .ai-turn-error-title {
   color: var(--ai-error);
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .ai-turn-error-copy span {

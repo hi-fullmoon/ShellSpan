@@ -32,8 +32,10 @@
   --ai-elevation-stroke-color: var(--ai-border);
 }
 
-.ai-composer-input-anchor > [data-slot='input-group']:has([data-slot='input-group-control']:focus-visible) {
+.ai-composer-input-anchor > [data-slot='input-group']:has([data-slot='input-group-control']:focus) {
+  --ai-elevation-stroke-color: var(--ai-accent);
   box-shadow:
+    0 0 0 1px var(--ai-accent),
     0 0 0 3px color-mix(in srgb, var(--ai-accent) 10%, transparent),
     var(--ai-elevation-soft);
 }
@@ -56,4 +58,3 @@
 .ai-panel-shell .ai-composer-seat [data-slot='input-group-control']:focus-visible {
   outline: none;
 }
-

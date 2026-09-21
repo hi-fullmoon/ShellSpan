@@ -11,7 +11,7 @@ import {
   SquareIcon,
 } from 'lucide-react';
 
-import { AssistantMessageContent } from '@/components/ai/assistant-message-content';
+import { AssistantMessageContent, MarkdownContent } from '@/components/ai/assistant-message-content';
 import { Bubble, Message, MessageActions } from '@/components/ai/chat-primitives';
 import { Button } from '@/components/ui/button';
 import {
@@ -34,6 +34,7 @@ import type {
 import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
 import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
+import { requestErrorMessageKey } from '@/lib/ai/request-error';
 import { AiToolRow } from './ai-tool-presentation';
 import { AiTurnFooter } from './ai-turn-footer';
 import { AiQuestionHistory } from './ai-question-panel';
@@ -168,6 +169,7 @@ function ContextInjectionRow({
 
 import { AiCommittedImages } from './ai-image-attachments';
 import { AiDocumentAttachments } from './ai-document-attachments';
+import { AiDraftAttachmentRail, UnifiedAttachmentContext } from './ai-image-draft-rail';
 import { decodeDocumentMessage } from '@/lib/ai/document-message';
 
 function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'userMessage'> }) {
@@ -175,8 +177,14 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
   const message = decodeDocumentMessage(node.content);
   return (
     <Message role="user">
-      <AiCommittedImages sessionId={node.sessionId} images={node.images} />
-      <AiDocumentAttachments documents={message.documents} />
+      {Boolean(node.images?.length || message.documents.length) && <div className="w-max min-w-0 max-w-full">
+        <UnifiedAttachmentContext value={true}>
+          <AiDraftAttachmentRail unified count={(node.images?.length ?? 0) + message.documents.length}>
+            <AiCommittedImages sessionId={node.sessionId} images={node.images} />
+            <AiDocumentAttachments composer documents={message.documents} />
+          </AiDraftAttachmentRail>
+        </UnifiedAttachmentContext>
+      </div>}
       {(message.text || node.delivery !== 'committed') && (
         <Bubble role="user">
           <span className="ai-user-message-text">{message.text}</span>
@@ -224,6 +232,21 @@ function AssistantMessageNodeView({
         />
       )}
     </Message>
+  );
+}
+
+function ReasoningContent({ children }: { readonly children: string }) {
+  const { t } = useI18n();
+  return (
+    <div className="ai-reasoning-body min-w-0 py-1 pl-[22px] whitespace-normal [overflow-wrap:anywhere]">
+      <MarkdownContent
+        copiedLabel={t('common.copied')}
+        copyLabel={t('common.copy')}
+        showCodeBlockActions={false}
+      >
+        {children}
+      </MarkdownContent>
+    </div>
   );
 }
 
@@ -282,7 +305,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
           )}
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="ai-reasoning-body py-1 pl-[22px] whitespace-pre-wrap [overflow-wrap:anywhere]">{node.content || node.summary}</div>
+          <ReasoningContent>{node.content || node.summary}</ReasoningContent>
         </CollapsibleContent>
       </div>
     </Collapsible>
@@ -337,7 +360,7 @@ function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'r
           <span className={cn(AI_DISCLOSURE_TITLE_CLASS, isStreaming && 'shimmer')}>{title}</span>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="ai-reasoning-body py-1 pl-[22px] whitespace-pre-wrap [overflow-wrap:anywhere]">{node.content || node.summary}</div>
+          <ReasoningContent>{node.content || node.summary}</ReasoningContent>
         </CollapsibleContent>
       </div>
     </Collapsible>
@@ -424,7 +447,7 @@ function errorNodeMessage(
   if (node.message.startsWith('taskTokenBudgetExceeded:')) return t('ai.workspace.tokenBudget.title');
   return node.message === 'outputLimit' || node.message.startsWith('outputLimit:') || node.message.includes('code=OUTPUT_LIMIT')
     ? t('ai.error.outputLimit')
-    : node.message;
+    : t(requestErrorMessageKey(node.message));
 }
 
 function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> }) {
@@ -442,11 +465,21 @@ function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> 
   return (
     <div className="ai-turn-error grid min-w-0 grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-1 py-0.5" role="alert">
       <CircleAlertIcon aria-hidden="true" />
-      <div className="ai-turn-error-copy block min-w-0 [overflow-wrap:anywhere]">
-        <strong className="mr-1.5">{t('ai.requestFailed')}</strong>
+      <div className="ai-turn-error-copy block min-w-0 translate-y-px [overflow-wrap:anywhere]">
+        <span className="ai-turn-error-title mr-1.5">{t('ai.requestFailed')}</span>
         <span>{errorNodeMessage(node, t)}</span>
+        <Collapsible>
+          <CollapsibleTrigger className="text-muted-foreground underline underline-offset-4">
+            {t('ai.error.details')}
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">
+              {node.message}
+              {node.code && <code className="block">{node.code}</code>}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       </div>
-      {node.code && <code>{node.code}</code>}
     </div>
   );
 }
@@ -583,7 +616,13 @@ function TurnProcessDisclosure({
                 data-ai-process-child={child.kind}
                 data-ai-process-child-key={child.key}
               >
-                {renderNode(child, renderers, onOpenTool, onOpenArtifact, true)}
+                <ConversationNodeContent
+                  node={child}
+                  renderers={renderers}
+                  onOpenTool={onOpenTool}
+                  onOpenArtifact={onOpenArtifact}
+                  inTurnProcess
+                />
               </div>
             ))}
           </div>
@@ -689,6 +728,31 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
   }
 }
 
+const ConversationNodeContent = React.memo(function ConversationNodeContent({
+  node, renderers, onOpenTool, onOpenArtifact, inTurnProcess,
+}: {
+  readonly node: AiConversationNode;
+  readonly renderers: AiConversationNodeRendererMap;
+  readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
+  readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
+  readonly inTurnProcess?: boolean;
+}) {
+  return renderNode(node, renderers, onOpenTool, onOpenArtifact, inTurnProcess);
+}, (previous, next) => (
+  previous.renderers === next.renderers
+  && previous.onOpenTool === next.onOpenTool
+  && previous.onOpenArtifact === next.onOpenArtifact
+  && previous.inTurnProcess === next.inTurnProcess
+  && sameConversationNode(previous.node, next.node)
+));
+
+function sameConversationNode(previous: AiConversationNode, next: AiConversationNode): boolean {
+  // An earlier turn can receive late usage without changing this tail's seq.
+  if (previous.kind === 'turnTail' && next.kind === 'turnTail'
+    && previous.sessionStats !== next.sessionStats) return false;
+  return aiConversationNodeRevision(previous) === aiConversationNodeRevision(next);
+}
+
 export const AiConversationNodeSeat = React.memo(function AiConversationNodeSeat({
   node,
   renderers = aiConversationNodeRenderers,
@@ -717,7 +781,7 @@ export const AiConversationNodeSeat = React.memo(function AiConversationNodeSeat
   previous.renderers === next.renderers
   && previous.onOpenTool === next.onOpenTool
   && previous.onOpenArtifact === next.onOpenArtifact
-  && aiConversationNodeRevision(previous.node) === aiConversationNodeRevision(next.node)
+  && sameConversationNode(previous.node, next.node)
 ));
 AiConversationNodeSeat.displayName = 'AiConversationNodeSeat';
 

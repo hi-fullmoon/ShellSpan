@@ -52,5 +52,7 @@ function CommittedImage({ sessionId, image }: { sessionId: string; image: AgentI
   </Attachment></AiImagePreview>;
 }
 export function AiCommittedImages({ sessionId, images }: { sessionId: string; images?: readonly AgentImageRef[] }) {
-  return images?.length ? <AiImagePreviewGroup key={sessionId}><AttachmentGroup className="max-w-[82%] gap-1.5">{images.map((image, i) => <CommittedImage key={`${sessionId}:${image.sha256}:${i}`} sessionId={sessionId} image={image} />)}</AttachmentGroup></AiImagePreviewGroup> : null;
+  const unified = useContext(UnifiedAttachmentContext);
+  const cards = images?.map((image, i) => <CommittedImage key={`${sessionId}:${image.sha256}:${i}`} sessionId={sessionId} image={image} />);
+  return images?.length ? <AiImagePreviewGroup key={sessionId}>{unified ? cards : <AttachmentGroup className="max-w-[82%] gap-1.5">{cards}</AttachmentGroup>}</AiImagePreviewGroup> : null;
 }

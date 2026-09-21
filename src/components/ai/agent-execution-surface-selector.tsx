@@ -112,7 +112,6 @@ export function AgentExecutionSurfaceSelector({
             disabled={disabled}
             aria-label={`${t('agent.executionSurface')}: ${t(current.label)}`}
             aria-description={accessibleDescription}
-            title={disabledHint}
           />
         )}
       >
@@ -154,7 +153,7 @@ export function AgentExecutionSurfaceSelector({
                   closeOnClick
                   disabled={option.surface === 'boundTerminal'
                     && presentation.realTerminalState !== 'ready'}
-                  className="ai-execution-surface-menu-option min-h-12 items-start gap-2 py-2 pr-8 pl-2"
+                  className="ai-execution-surface-menu-option min-h-12 items-start gap-1 py-2 pr-8 pl-2"
                   aria-description={t(description)}
                 >
                   <Icon className="mt-0.5" strokeWidth={1.6} />

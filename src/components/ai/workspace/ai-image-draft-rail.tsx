@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, useContext, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from 'lucide-react';
 import { Attachment, AttachmentGroup, AttachmentMedia, AttachmentActions, AttachmentAction, AttachmentTrigger } from '@/components/ui/attachment';
 import { Button } from '@/components/ui/button';
@@ -107,9 +107,11 @@ export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, erro
 }) {
   const { t } = useI18n();
   const unified = useContext(UnifiedAttachmentContext);
+  // Keep large data URLs stable across submission state and editor updates.
+  const sources = useMemo(() => images.map(image => `data:${image.mediaType};base64,${image.data}`), [images]);
   const cards = <AiImagePreviewGroup>
       {images.map((image, index) => {
-        const source = `data:${image.mediaType};base64,${image.data}`;
+        const source = sources[index];
         return <AiImagePreview key={`${index}:${image.name}`} source={source} name={image.name}>
           <Attachment orientation="vertical" className="ai-image-thumbnail isolate size-16 min-w-16 focus-within:ring-0 has-data-[slot=attachment-media]:p-0" state={error ? 'error' : 'done'}>
             <AttachmentMedia variant="image" className="ai-image-thumbnail-media size-full">
@@ -118,7 +120,7 @@ export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, erro
             <DialogTrigger render={<AttachmentTrigger className="ai-image-thumbnail-open cursor-zoom-in" aria-label={`${t('ai.workspace.images.preview')} ${image.name}`} />} />
             {(onCancel && !pendingFiles.length || !busy && !locked) && <AttachmentActions className="ai-image-thumbnail-actions absolute group-data-[orientation=vertical]/attachment:top-0.75 group-data-[orientation=vertical]/attachment:right-0.75">
               {onCancel && !pendingFiles.length
-                ? <AttachmentAction variant="secondary" className="size-5 rounded-full" aria-label={t('common.cancel')} onClick={onCancel}><XIcon /></AttachmentAction>
+                ? <AttachmentAction variant="secondary" className="ai-image-thumbnail-remove size-5" aria-label={t('common.cancel')} onClick={onCancel}><XIcon /></AttachmentAction>
                 : <AttachmentAction variant="secondary" className="ai-image-thumbnail-remove size-5" aria-label={`${t('ai.workspace.images.remove')} ${image.name}`} onClick={() => onRemove(index)}><XIcon /></AttachmentAction>}
             </AttachmentActions>}
           </Attachment>

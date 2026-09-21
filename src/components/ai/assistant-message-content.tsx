@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -21,9 +22,11 @@ import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import { invokeOpenPath, invokeOpenUrl, invokeRevealPath, isTauriRuntime } from '@/lib/ipc/tauri';
 import { getPlatform } from '@/lib/platform';
-import { splitStreamingMarkdown } from '@/lib/streaming-markdown';
+import { createStreamingMarkdownSplitter } from '@/lib/streaming-markdown';
 import type { AgentSessionAssistantContentBlock } from '@/types/agent-session';
 import { cn } from '@/lib/utils';
+import { useMessageLayoutCommit } from './message-layout-context';
+import { rehypeStreamingText, StreamingText, StreamingTextBoundaryContext, StreamingTextContext } from './streaming-text';
 
 function textFromNode(node: React.ReactNode): string {
   if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -114,7 +117,7 @@ function MarkdownInlineCode({ children, className }: { children: React.ReactNode
       className={cn(!className && 'ai-markdown-inline-code', isLocalPath && 'ai-markdown-local-path', className)}
       role={isLocalPath ? 'link' : undefined}
       tabIndex={isLocalPath ? 0 : undefined}
-      title={isLocalPath ? openShortcut : undefined}
+      aria-description={isLocalPath ? openShortcut : undefined}
       onClick={isLocalPath ? (event) => {
         if (platform === 'macos' ? event.metaKey : event.ctrlKey) openPath();
       } : undefined}
@@ -200,7 +203,7 @@ function MarkdownCodeBlock({
   );
 }
 
-const MarkdownContent = React.memo(function MarkdownContent({
+export const MarkdownContent = React.memo(function MarkdownContent({
   children,
   copiedLabel,
   copyLabel,
@@ -211,9 +214,17 @@ const MarkdownContent = React.memo(function MarkdownContent({
   copyLabel: string;
   showCodeBlockActions: boolean;
 }): React.JSX.Element {
+  const previousSource = useRef('');
+  const revealFrom = children.startsWith(previousSource.current) ? previousSource.current.length : children.length;
+  useLayoutEffect(() => { previousSource.current = children; }, [children]);
   // Stable element types preserve code/table DOM (focus and horizontal scroll)
   // when the growing chunk is parsed again.
   const components = useMemo<Components>(() => ({
+    span: ({ children: textChildren, node, ...spanProps }) => (
+      node?.properties.dataStreamText && typeof textChildren === 'string'
+        ? <StreamingText sourceStart={node.position?.start.offset}>{textChildren}</StreamingText>
+        : <span {...spanProps}>{textChildren}</span>
+    ),
     a: ({ children: linkChildren, href }) => <MarkdownLink href={href}>{linkChildren}</MarkdownLink>,
     blockquote: ({ children: quoteChildren }) => <blockquote>{quoteChildren}</blockquote>,
     code: ({ children: codeChildren, className }) => (
@@ -238,18 +249,63 @@ const MarkdownContent = React.memo(function MarkdownContent({
   }), [copiedLabel, copyLabel, showCodeBlockActions]);
   return (
     <div className="ai-assistant-markdown min-w-0 max-w-full [overflow-wrap:anywhere]">
-      <Markdown
-        remarkPlugins={MARKDOWN_PLUGINS}
-        skipHtml
-        components={components}
-      >
-        {children}
-      </Markdown>
+      <StreamingTextBoundaryContext.Provider value={revealFrom}>
+        <Markdown
+          remarkPlugins={MARKDOWN_PLUGINS}
+          rehypePlugins={STREAMING_TEXT_PLUGINS}
+          skipHtml
+          components={components}
+        >
+          {children}
+        </Markdown>
+      </StreamingTextBoundaryContext.Provider>
     </div>
   );
 });
 
 const MARKDOWN_PLUGINS = [remarkGfm];
+const STREAMING_TEXT_PLUGINS = [rehypeStreamingText];
+
+const LARGE_MARKDOWN_CHUNK = 8_192;
+const MARKDOWN_UPDATE_INTERVAL_MS = 80;
+
+const StreamingMarkdownContent = React.memo(function StreamingMarkdownContent({
+  children, streaming, ...props
+}: React.ComponentProps<typeof MarkdownContent> & { streaming: boolean }) {
+  const [layoutRevision, publish] = useState(0);
+  const published = useRef(children);
+  const latest = useRef(children);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const throttled = streaming && children.length >= LARGE_MARKDOWN_CHUNK;
+  const shown = throttled && children.startsWith(published.current) ? published.current : children;
+  useLayoutEffect(() => {
+    latest.current = children;
+    published.current = shown;
+    if (!throttled) {
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = null;
+      return;
+    }
+    if (children === shown || timer.current !== null) return;
+    // Keep one deadline while tokens arrive, so continuous output cannot starve
+    // the preview. A final commit bypasses the timer in the render below.
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      published.current = latest.current;
+      publish((revision) => revision + 1);
+    }, MARKDOWN_UPDATE_INTERVAL_MS);
+  }, [children, shown, throttled]);
+  useEffect(() => () => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+  }, []);
+  useMessageLayoutCommit(layoutRevision);
+  return (
+    <StreamingTextContext.Provider value={streaming}>
+      <MarkdownContent {...props}>{shown}</MarkdownContent>
+    </StreamingTextContext.Provider>
+  );
+});
 
 function answerFromBlocks(blocks: readonly AgentSessionAssistantContentBlock[]): string {
   return blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('');
@@ -262,9 +318,8 @@ const AssistantMessageContentComponent: React.FC<{
 }> = ({ blocks, streaming, showCodeBlockActions = true }) => {
   const { t } = useI18n();
   const answer = useMemo(() => answerFromBlocks(blocks), [blocks]);
-  // The session client already batches streaming updates per animation frame.
-  // Commit text with that frame so scroll measurements see the displayed text.
-  const answerChunks = useMemo(() => splitStreamingMarkdown(answer), [answer]);
+  const splitMarkdown = useMemo(() => createStreamingMarkdownSplitter(), []);
+  const answerChunks = useMemo(() => splitMarkdown(answer), [answer, splitMarkdown]);
 
   if (!answer) {
     return streaming
@@ -276,14 +331,15 @@ const AssistantMessageContentComponent: React.FC<{
     <div className="ai-assistant-content flex min-w-0 max-w-full flex-col gap-4" data-streaming={streaming || undefined}>
       <div className="ai-assistant-answer flex min-w-0 max-w-full flex-col gap-4">
         {answerChunks.map((chunk, index) => (
-          <MarkdownContent
+          <StreamingMarkdownContent
             key={index}
             copiedLabel={t('common.copied')}
             copyLabel={t('common.copy')}
             showCodeBlockActions={showCodeBlockActions}
+            streaming={streaming && index === answerChunks.length - 1}
           >
             {chunk}
-          </MarkdownContent>
+          </StreamingMarkdownContent>
         ))}
       </div>
     </div>

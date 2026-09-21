@@ -61,7 +61,6 @@ export function AiSessionHeader({
         <span className="ai-session-heading flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1">
             <h2 className="ai-session-title min-w-0 truncate text-sm font-medium leading-5 text-foreground">{title}</h2>
-            {lineage}
           </span>
           <span className="ai-session-context truncate text-[11px] leading-[15px] text-muted-foreground">{context}</span>
         </span>
@@ -69,6 +68,7 @@ export function AiSessionHeader({
       </div>
 
       <div className="ai-session-actions flex min-w-0 shrink-0 items-center gap-1 @min-[400px]/ai-workspace:gap-2">
+        {lineage}
         {(onHistory || historyOpen) && (
           <Popover
             open={historyOpen}

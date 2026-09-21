@@ -300,6 +300,7 @@ it('allows human follow-up only for a continuable subagent', async () => {
   const record = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: oneShotAgent }));
   await waitFor(() => expect(record.result.current.view?.summary.id).toBe(oneShot.summary.id));
   expect(record.result.current.readOnlySession).toBe(true);
+  expect(record.result.current.historicalTargetUnavailable).toBe(false);
   expect(record.result.current.composer.terminal).toBe(true);
   expect(record.result.current.agentUnavailableReason).toBe(
     'This is a one-shot subagent execution record and cannot accept follow-up messages.',

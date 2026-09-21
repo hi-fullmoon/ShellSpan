@@ -26,6 +26,7 @@ if (!address || typeof address === 'string') throw new Error('Vite did not expos
 const url = `http://127.0.0.1:${address.port}/__ai-streaming-check`;
 const history = await readFile(new URL('../README.md', import.meta.url), 'utf8');
 const answer = await readFile(new URL('../AGENTS.md', import.meta.url), 'utf8');
+const codeDocument = await readFile(new URL('../src/lib/ai/conversation-projection.ts', import.meta.url), 'utf8');
 const image = { name: '32x32.png', mediaType: 'image/png',
   data: (await readFile(new URL('../src-tauri/icons/32x32.png', import.meta.url))).toString('base64') };
 
@@ -184,9 +185,18 @@ try {
             assert.equal(await page.evaluate(() => window.submissionCheck.imageError), null);
           }
           await settle();
-          assert.ok((await metrics()).gap <= 8, `Enter (${queue ? 'queue' : 'send'}) did not return from history to bottom`);
-          assert.equal(await page.locator('[data-scroll-anchor="true"]').count(), 0,
-            'top anchoring can override send-to-bottom');
+          if (queue || withImage) {
+            // Neither case inserts a transcript row before acknowledgement.
+            // A submission ID alone must not pull the reader to an old turn.
+            assert.ok((await metrics()).gap > 100, 'Submission without a new row moved the reader');
+          } else {
+            await page.waitForFunction(() => document.querySelector('[data-message-scroller-viewport]').style.scrollBehavior !== 'smooth');
+            const anchorOffset = await page.locator('[data-scroll-anchor="true"]').evaluate(element =>
+              element.getBoundingClientRect().top
+                - element.closest('[data-message-scroller-viewport]').getBoundingClientRect().top);
+            assert.ok(Math.abs(anchorOffset - 20) < 3,
+              `Enter did not align the new turn: ${anchorOffset}`);
+          }
           await viewport.hover();
           await page.mouse.wheel(0, -400);
           await page.waitForFunction(() => {
@@ -234,6 +244,73 @@ try {
         }, answer.slice(0, 500));
         assert.ok(resumedGap <= 8,
           `${browserType.name()} ${width}: End returned to bottom without synchronous stream follow: ${resumedGap}`);
+        await page.evaluate(() => window.streamingCheck.resetFollowing(''));
+        await settle();
+        const largeCode = '```typescript\n' + codeDocument;
+        await page.evaluate((content) => window.streamingCheck.replaceAnswer(content), largeCode.slice(0, 8_000));
+        const codeBeforeThreshold = await page.locator('[data-ai-node-key="answer"] pre').textContent();
+        const codeAtThreshold = await page.evaluate((content) => {
+          window.streamingCheck.replaceAnswer(content);
+          return document.querySelector('[data-ai-node-key="answer"] pre')?.textContent;
+        }, largeCode.slice(0, 8_400));
+        assert.ok(codeAtThreshold.length >= codeBeforeThreshold.length,
+          'Entering the parse throttle must not shrink already visible code');
+        await page.waitForFunction((text) => document.querySelector('[data-ai-node-key="answer"] pre')?.textContent
+          .includes(text), codeDocument.slice(8_100, 8_300));
+        const deferredFrames = await page.evaluate((content) => new Promise((resolve) => {
+          const element = document.querySelector('[data-message-scroller-viewport]');
+          const frames = [];
+          const started = performance.now();
+          window.streamingCheck.replaceAnswer(content);
+          const sample = () => {
+            frames.push(element.scrollHeight - element.clientHeight - element.scrollTop);
+            if (performance.now() - started < 350) requestAnimationFrame(sample);
+            else resolve(frames);
+          };
+          requestAnimationFrame(sample);
+        }), largeCode.slice(0, 18_000));
+        assert.ok(deferredFrames.every((gap) => gap <= 8),
+          `${browserType.name()} ${width}: deferred Markdown painted before bottom alignment: ${deferredFrames}`);
+        await viewport.hover();
+        await page.mouse.wheel(0, -600);
+        await page.waitForFunction(() => {
+          const element = document.querySelector('[data-message-scroller-viewport]');
+          return element.scrollHeight - element.clientHeight - element.scrollTop > 100;
+        });
+        await settle();
+        const readingTop = (await metrics()).top;
+        await page.evaluate((content) => window.streamingCheck.replaceAnswer(content), largeCode);
+        await page.waitForFunction((text) => document.querySelector('[data-ai-node-key="answer"] pre')?.textContent
+          .includes(text), codeDocument.slice(-150).trimEnd());
+        assert.ok(Math.abs((await metrics()).top - readingTop) < 3,
+          'A deferred Markdown commit must preserve a detached reader');
+        await viewport.focus();
+        await page.keyboard.press('End');
+        await page.waitForFunction(() => {
+          const element = document.querySelector('[data-message-scroller-viewport]');
+          return element.scrollHeight - element.clientHeight - element.scrollTop <= 8;
+        });
+        await settle();
+        const finalCode = await page.evaluate((content) => {
+          window.streamingCheck.finishAnswer(content + '\n```');
+          return document.querySelector('[data-ai-node-key="answer"] pre')?.textContent;
+        }, largeCode);
+        assert.ok(finalCode.includes(codeDocument.trimEnd()), 'Completion must synchronously publish the entire code block');
+        await settle();
+        assert.ok((await metrics()).gap <= 8, 'Large Markdown final commit lost bottom following');
+        await page.evaluate(() => window.streamingCheck.historyCase());
+        await settle();
+        const loadButton = page.locator('.ai-load-older button');
+        assert.equal(await loadButton.count(), 1);
+        assert.equal(await viewport.locator('.ai-load-older').count(), 0,
+          'History controls must not block the primitive from detecting prepended rows');
+        const oldFirst = await page.locator('[data-ai-node-key]').first().getAttribute('data-ai-node-key');
+        const beforeRows = await page.locator('[data-slot="message-scroller-item"]').count();
+        await loadButton.click();
+        await settle();
+        assert.equal(await page.locator('[data-slot="message-scroller-item"]').count(), beforeRows + 1);
+        assert.equal(await page.locator(`[data-ai-node-key="${oldFirst}"]`).count(), 1);
+        assert.equal(await loadButton.count(), 0);
         assert.deepEqual(errors, []);
         process.stdout.write(`${browserType.name()} ${width}px: native scrollbar, text/image submission, stream, history, restore and animated process updates passed\n`);
         await page.close();

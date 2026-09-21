@@ -1,4 +1,5 @@
-.ai-transcript-flow-item:empty {
+.ai-transcript-flow-item:empty,
+[data-slot='message-scroller-item']:has(> .ai-transcript-flow-item:only-child:empty) {
   display: none;
 }
 
@@ -250,4 +251,21 @@
 
 .ai-assistant-stopped[data-state='failed'] {
   color: var(--ai-error);
+}
+
+@keyframes ai-stream-text-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ai-stream-text-fragment[data-reveal]:not([data-staggered]),
+.ai-stream-text-fragment[data-reveal] > .ai-stream-text-run {
+  animation: ai-stream-text-reveal 420ms cubic-bezier(0.22, 0.1, 0.35, 1) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-stream-text-fragment[data-reveal]:not([data-staggered]),
+  .ai-stream-text-fragment[data-reveal] > .ai-stream-text-run {
+    animation: none;
+  }
 }

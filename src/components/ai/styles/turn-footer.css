@@ -32,6 +32,9 @@
 
 .ai-turn-stats time {
   font-size: 12px;
+  line-height: 20px;
+  /* Match the optical correction on the adjacent usage and duration labels. */
+  translate: 0 1px;
 }
 
 .ai-turn-stat-panel {
@@ -99,6 +102,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.ai-turn-status[data-ai-thinking-indicator] [data-slot='marker-icon'],
+.ai-turn-status[data-ai-thinking-indicator] [data-slot='marker-icon'] > svg {
+  width: 14px;
+  height: 14px;
 }
 
 .ai-load-older [data-slot='button'] {

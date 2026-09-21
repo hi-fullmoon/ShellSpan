@@ -1,5 +1,6 @@
 import { useMemo, useState, type ComponentType } from 'react';
 import { diffLines, parsePatch } from 'diff';
+import hljs from 'highlight.js/lib/common';
 import {
   BracesIcon,
   CheckIcon,
@@ -27,6 +28,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
+import { aiErrorMessage } from '@/lib/ai/error-message';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import {
@@ -198,6 +200,7 @@ function toolTitle(
   variant: AiToolVariant,
   t: ReturnType<typeof useI18n>['t'],
 ): string {
+  if (node.title === 'Agent orchestration') return t('ai.workspace.tool.title.orchestration');
   if (variant !== 'generic' || !node.title || node.title === node.name || node.title === node.nativeName) {
     return t(titleKey(variant));
   }
@@ -350,7 +353,7 @@ function SearchSurface({ node, compact }: { node: ToolNode; compact: boolean }) 
     : lines;
   return (
     <div className="ai-search-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="search">
-      <div className="ai-block-banner flex min-w-0 items-center gap-2 truncate px-3.5 py-[9px]"><SearchIcon aria-hidden="true" />{query}</div>
+      <div className="ai-block-banner flex min-w-0 items-center gap-1 truncate px-3.5 py-[9px]"><SearchIcon aria-hidden="true" />{query}</div>
       <div className="ai-search-results m-0 flex max-h-65 max-w-full flex-col gap-1 overflow-auto px-3.5 py-3">
         {shown.map((line, index) => <div key={index} className="ai-search-result min-w-0 [overflow-wrap:anywhere]">{line}</div>)}
       </div>
@@ -386,7 +389,7 @@ function WebSurface({ node }: { node: ToolNode }) {
   const answer = firstString(asRecord(node.output), ['answer', 'summary']);
   return (
     <div className="ai-web-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="web">
-      <div className="ai-block-banner flex min-w-0 items-center gap-2 truncate px-3.5 py-[9px]"><GlobeIcon aria-hidden="true" />{url ?? node.summary ?? node.name}</div>
+      <div className="ai-block-banner flex min-w-0 items-center gap-1 truncate px-3.5 py-[9px]"><GlobeIcon aria-hidden="true" />{url ?? node.summary ?? node.name}</div>
       {answer && <p className="ai-web-answer m-0 px-3.5 pt-3 pb-1">{answer}</p>}
       {sources.length > 0 ? (
         <div className="ai-web-sources flex min-w-0 flex-col p-2">
@@ -405,12 +408,15 @@ function WebSurface({ node }: { node: ToolNode }) {
 }
 
 interface DiffHunk {
+  readonly oldStart?: number;
+  readonly newStart?: number;
   readonly path: string;
   readonly lines: readonly DiffLine[];
   readonly exact: boolean;
 }
 
 interface DiffLine {
+  readonly number?: number;
   readonly kind: 'context' | 'removed' | 'added';
   readonly text: string;
 }
@@ -521,6 +527,8 @@ function unifiedDiffHunks(node: ToolNode): readonly DiffHunk[] {
       return {
         path: fallbackPath ?? patch.newFileName ?? patch.oldFileName ?? node.name,
         exact: true,
+        oldStart: hunk.oldStart,
+        newStart: hunk.newStart,
         lines: hunk.lines.flatMap((line): DiffLine[] => {
           const kind = line.startsWith('-') ? 'removed' : line.startsWith('+') ? 'added'
             : line.startsWith(' ') ? 'context' : null;
@@ -578,27 +586,57 @@ function shownDiffLines(lines: readonly DiffLine[], compact: boolean): readonly 
 function DiffSurface({ node, compact, model }: { node: ToolNode; compact: boolean; model?: DiffModel }) {
   const { t } = useI18n();
   const currentModel = useMemo(() => model ?? diffModel(node), [model, node]);
-  const hunks = currentModel.hunks;
+  const hunks = useMemo(() => currentModel.hunks.map((hunk) => {
+    let oldNumber = hunk.oldStart ?? 1;
+    let newNumber = hunk.newStart ?? 1;
+    return { ...hunk, lines: hunk.lines.map((line) => {
+      const number = line.kind === 'removed' ? oldNumber : newNumber;
+      if (line.kind !== 'added') oldNumber += 1;
+      if (line.kind !== 'removed') newNumber += 1;
+      return { ...line, number };
+    }) };
+  }), [currentModel]);
   if (hunks.length === 0) return <IoSurface node={node} compact={compact} />;
   return (
     <div className="ai-diff-block my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-px overflow-hidden" data-ai-tool-view="diff">
       {hunks.map((hunk, index) => (
         <section key={`${hunk.path}:${index}`} className="min-w-0 max-w-full">
-          <div className="ai-block-banner flex min-w-0 items-center gap-2 truncate px-2.5 py-1.5">{hunk.path}</div>
+          <div className="ai-block-banner flex min-w-0 items-center gap-2 px-2.5 py-1.5">
+            <span className="min-w-0 flex-1 truncate">{hunk.path}</span>
+            {hunk.exact && currentModel.totalsKnown && <span className="ai-diff-counts shrink-0">
+              <span data-diff-count="added">+{hunk.lines.filter((line) => line.kind === 'added').length}</span>{' '}
+              <span data-diff-count="removed">-{hunk.lines.filter((line) => line.kind === 'removed').length}</span>
+            </span>}
+          </div>
           {!hunk.exact && <div className="px-2.5 py-1 text-xs text-muted-foreground" data-diff-simplified>
             {t('ai.workspace.tool.diffSimplified')}
           </div>}
-          <pre className="ai-diff-body m-0 flex min-w-0 max-h-65 max-w-full flex-col overflow-auto px-2.5 py-2 whitespace-pre-wrap [overflow-wrap:anywhere]">
+          <pre className="ai-diff-body m-0 min-w-0 max-h-65 max-w-full overflow-auto whitespace-pre" tabIndex={0}>
+            <code className="ai-diff-lines">
             {shownDiffLines(hunk.lines, compact).map((line, lineIndex) => (
               <span key={lineIndex} data-diff={line.kind}>
-                {line.kind === 'added' ? '+ ' : line.kind === 'removed' ? '- ' : '  '}{line.text}
+                <span className="ai-diff-line-number" aria-hidden="true">{line.number}</span>
+                <DiffCode text={line.text} path={hunk.path} />
               </span>
             ))}
+            </code>
           </pre>
         </section>
       ))}
     </div>
   );
+}
+
+function DiffCode({ text, path }: { text: string; path: string }) {
+  const html = useMemo(() => {
+    const extension = path.split('.').pop()?.toLowerCase() ?? '';
+    const language = ({ tsx: 'typescript', jsx: 'javascript', vue: 'xml', svg: 'xml', mjs: 'javascript', cjs: 'javascript' } as Record<string, string>)[extension] ?? extension;
+    if (text.length > 10_000 || !hljs.getLanguage(language)) return null;
+    return hljs.highlight(text, { language, ignoreIllegals: true }).value;
+  }, [text, path]);
+  // Only highlight.js-generated, escaped markup is inserted; unknown languages stay plain text.
+  return html === null ? <span className="ai-diff-code table-cell px-3">{text || '\u00a0'}</span>
+    : <span className="ai-diff-code table-cell px-3" dangerouslySetInnerHTML={{ __html: html || '&nbsp;' }} />;
 }
 
 function CodeSurface({ node, showCopyActions }: { node: ToolNode; showCopyActions: boolean }) {
@@ -683,7 +721,12 @@ export function AiToolRow({
   const variant = classifyAiTool(node.name, node.nativeName);
   const Icon = iconFor(variant);
   const stateKey = `ai.workspace.tool.${node.state}` as LocaleKey;
-  const summary = toolSummary(node, variant);
+  const rawSummary = toolSummary(node, variant);
+  const summary = node.state === 'failed' || node.state === 'rejected'
+    ? aiErrorMessage(rawSummary, t)
+    : rawSummary === 'Agent orchestration'
+      ? t('ai.workspace.tool.title.orchestration')
+      : rawSummary;
   const title = toolTitle(node, variant, t);
   const model = useMemo(() => variant === 'write' || variant === 'edit' ? diffModel(node) : null, [node, variant]);
   const changeStat = model ? diffStat(model) : null;

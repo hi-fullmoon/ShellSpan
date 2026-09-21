@@ -79,7 +79,7 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
     </PopoverHeader>
     <div className="flex min-h-0 min-w-0 flex-col gap-1 overflow-y-auto px-2 pb-2">
       <div role="status" aria-live="polite" className="shrink-0 px-2 empty:hidden">
-        {loading && <span className="flex items-center gap-2"><Spinner />{t('ai.workspace.skills.loading')}</span>}
+        {loading && <span className="flex items-center gap-1"><Spinner />{t('ai.workspace.skills.loading')}</span>}
         {(error || result?.status === 'unavailable') && <AiErrorNotice title={t('ai.workspace.recovery.title')}>{t('ai.workspace.skills.unavailable')}</AiErrorNotice>}
         {result?.status === 'stale' && <Alert><AlertDescription>{t('ai.workspace.skills.stale')}</AlertDescription></Alert>}
         {result && !loading && result.status !== 'unavailable' && entries.length === 0 && <EmptyState title={t('ai.workspace.skills.noMatch')} />}

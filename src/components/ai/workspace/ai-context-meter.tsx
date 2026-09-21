@@ -163,8 +163,8 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
             <dl className="ai-context-meter-rows mt-1 mb-0">
               {BREAKDOWN_ROWS.map((row) => (
                 <div className="flex items-center justify-between gap-3 py-0.5" key={row.key}>
-                  <dt className="min-w-0">
-                    <span className="mr-1.5 inline-block size-2 align-baseline" data-color={row.color} aria-hidden="true" />
+                  <dt className="flex min-w-0 items-center gap-1">
+                    <span className="size-2 shrink-0" data-color={row.color} aria-hidden="true" />
                     {t(row.label)}
                   </dt>
                   <dd className="m-0">~{formatTokens(usage.breakdown![row.key])}</dd>

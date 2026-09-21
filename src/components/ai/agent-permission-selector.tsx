@@ -173,8 +173,8 @@ export function AgentPermissionSelector({
           <span
             data-slot="agent-permission-trigger-content"
             className={cn(
-              'flex items-center leading-none',
-              composer ? 'min-w-0 gap-1' : 'gap-2',
+              'flex items-center gap-1 leading-none',
+              composer && 'min-w-0',
               visibleMode === 'fullAccess' && 'text-app-warning',
             )}
           >
@@ -213,8 +213,8 @@ export function AgentPermissionSelector({
                     closeOnClick
                     className={cn(
                       composer
-                        ? 'ai-permission-menu-option min-h-12 items-start gap-2 py-2 pr-8 pl-2'
-                        : 'items-start gap-2.5 py-2 text-[13px]',
+                        ? 'ai-permission-menu-option min-h-12 items-start gap-1 py-2 pr-8 pl-2'
+                        : 'items-start gap-1 py-2 text-[13px]',
                     )}
                     aria-description={composer ? t(option.description) : undefined}
                   >

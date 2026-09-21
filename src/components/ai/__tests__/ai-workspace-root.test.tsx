@@ -94,6 +94,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const alert = notices.querySelector('[data-slot="alert"]');
     expect(alert).toHaveAttribute('data-size', 'sm');
     expect(alert).toHaveClass('border-primary/30', 'bg-primary/10');
+    expect(alert?.querySelector(':scope > svg')).toHaveAttribute('aria-hidden', 'true');
     expect(notices).toHaveClass('gap-1.5', 'py-2');
     expect(notices.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(composer.querySelector('[data-slot="alert"]')).toBeNull();
@@ -118,6 +119,10 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       .toHaveClass('border-primary/30', 'bg-primary/10');
     expect([...notices.querySelectorAll('[data-slot="alert"]')].every((alert) => alert.getAttribute('data-size') === 'sm'))
       .toBe(true);
+    for (const notice of notices.querySelectorAll('[data-slot="alert"]')) {
+      expect(notice.querySelectorAll(':scope > svg')).toHaveLength(1);
+      expect(notice.querySelector(':scope > svg')).toHaveAttribute('aria-hidden', 'true');
+    }
     const availability = within(notices).getByRole('status', { name: 'Agent is unavailable' });
     expect(screen.getByRole('textbox')).toHaveAttribute('aria-describedby', availability.id);
     expect(screen.queryByRole('button', { name: 'Continue in reconnected terminal' })).toBeNull();
@@ -173,12 +178,16 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     );
 
     expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('Waiting');
-    rerender(<AiWorkspaceRoot view={view} scope="terminal" readOnlySession />);
+    rerender(<AiWorkspaceRoot view={view} scope="terminal" readOnlySession historicalTargetUnavailable />);
     expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
     expect(screen.getByText('Check nginx now.')).toBeVisible();
   });
 
-  it('keeps the conversation layout and title while a history entry loads', async () => {
+  it.each([
+    ['en-US', 'Loading conversation…'],
+    ['zh-CN', '正在加载历史会话…'],
+  ] as const)('shows localized loading feedback and preserves the layout in %s', async (locale, label) => {
+    await initI18n(locale);
     const view = agentView();
     const navigation = createAiWorkspaceNavigationState(view.summary.id);
     const { container, rerender } = render(
@@ -190,6 +199,11 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(container.querySelector('[data-slot="ai-empty-hero"]')).toBeNull();
     expect(screen.getByRole('heading', { name: view.summary.title })).toBeVisible();
     expect(container.querySelector('[data-slot="ai-workspace-content"]')).toHaveAttribute('aria-busy', 'true');
+    const loading = screen.getByText(label).closest('[role="status"]');
+    expect(loading).toBeVisible();
+    expect(loading).toHaveAttribute('aria-live', 'polite');
+    expect(loading).toHaveClass('min-h-0', 'flex-1');
+    expect(loading?.querySelector('[data-slot="spinner"]')).toHaveAttribute('aria-hidden', 'true');
     // Mount the scroller only with the transcript so its initial anchor is available.
     expect(container.querySelector('[data-message-scroller-viewport]')).toBeNull();
 
@@ -198,6 +212,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(screen.getByTestId('ai-workspace-composer')).toBe(composer);
     await waitFor(() => expect(screen.getByText('Check nginx now.')).toBeVisible());
     expect(container.querySelector('[data-slot="ai-workspace-content"]')).not.toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText(label)).toBeNull();
   });
 
   it('places dismissible operation errors below the header instead of beside the composer', async () => {
@@ -220,6 +235,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
           view={null}
           scope="workbench"
           composerState={composerState}
+          agentUnavailableReason="INVALID_MODEL_SELECTION: route-8e7d5ff7-25b5-4526-a8fa-df932c19228c/k3"
           onDismissError={() => setComposerState((current) => ({ ...current, lastError: null }))}
         />
       );
@@ -237,7 +253,12 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(notices.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(composer).not.toContainElement(notices);
     const operationError = screen.getByText(error.message).closest('[role="alert"]');
-    expect(operationError).toHaveAttribute('data-size', 'xs');
+    expect(operationError).toHaveAttribute('data-size', 'sm');
+    const availabilityNotice = screen.getByText(/The current model configuration/).closest('[role="status"]');
+    expect(availabilityNotice).toHaveAttribute('data-size', 'sm');
+    const dismiss = screen.getByRole('button', { name: 'Dismiss error' });
+    expect(dismiss.closest('[data-slot="alert-action"]')).toHaveClass('absolute', 'top-1/2', '-translate-y-1/2');
+    expect(operationError?.querySelector('[data-slot="alert-description"]')).not.toContainElement(dismiss);
     expect(operationError).toHaveClass('bg-destructive/5', 'items-center');
     expect(screen.getAllByText('Action failed')[0]).toHaveClass('sr-only');
     expect(screen.getByRole('textbox').textContent).toBe('new input');
@@ -592,10 +613,12 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       />,
     );
 
-    expect(container.querySelector('[data-ai-running-indicator]')).toBe(runningIndicator);
+    expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
+    expect(container.querySelector('[data-ai-running-indicator]')?.closest('[data-slot="message-scroller-item"]'))
+      .toContainElement(container.querySelector('[data-ai-node-key="test:additional-flow-node"]'));
   });
 
-  it('returns to the bottom for a new user message and preserves its row on commit', async () => {
+  it('anchors a new user message and preserves its row on commit', async () => {
     const view = agentView('running');
     const previousUser = view.nodes.find((node) => node.kind === 'userMessage');
     if (!previousUser) throw new Error('Agent fixture has no user message');
@@ -627,16 +650,17 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, nextUser] }} scope="terminal" />);
     const optimisticItem = container.querySelector(`[data-ai-node-key="${nextUser.key}"]`)
       ?.closest('[data-slot="message-scroller-item"]');
-    expect(optimisticItem).toHaveAttribute('data-scroll-anchor', 'false');
+    expect(optimisticItem).toHaveAttribute('data-scroll-anchor', 'true');
     expect(optimisticItem).toHaveAttribute('data-message-id', 'user:next-submission');
-    expect(scrollTop).toBe(500);
+    // Browser coverage checks actual top alignment and spacer geometry.
+    expect(container.querySelectorAll('[data-scroll-anchor="true"]')).toHaveLength(1);
 
     const committedUser = { ...nextUser, key: 'user:next-submission', clientSubmissionId: undefined, delivery: 'committed' as const };
     rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, committedUser] }} scope="terminal" />);
     const committedItem = container.querySelector(`[data-ai-node-key="${committedUser.key}"]`)
       ?.closest('[data-slot="message-scroller-item"]');
     expect(committedItem).toBe(optimisticItem);
-    expect(committedItem).toHaveAttribute('data-scroll-anchor', 'false');
+    expect(committedItem).toHaveAttribute('data-scroll-anchor', 'true');
     expect(committedItem).toHaveAttribute('data-message-id', 'user:next-submission');
   });
 
@@ -654,7 +678,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(reasoning).toHaveAttribute('aria-expanded', 'false');
     expect(reasoning.querySelector('.lucide-brain')).toBeInTheDocument();
     expect(container.querySelector('[data-ai-node-kind="userMessage"]')?.closest('[data-slot="message-scroller-item"]'))
-      .toHaveAttribute('data-scroll-anchor', 'false');
+      .toHaveAttribute('data-scroll-anchor', 'true');
     expect(container.querySelector('[data-ai-node-kind="turnProcess"]')).toBeNull();
     const turnTail = container.querySelector('[data-ai-node-kind="turnTail"]');
     expect(turnTail).toBeInTheDocument();
@@ -690,6 +714,48 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(screen.getByTestId('ask-image-draft')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Add file or folder' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it.each(['agent', 'ask'] as const)('stops unfinished %s reasoning in read-only history without mutating live nodes', (mode) => {
+    const view = {
+      ...agentView('running'),
+      nodes: projectAgentChatNodes(agentSessionBaselineScenarios['streaming-reasoning'].events),
+    };
+    const { container, rerender } = render(
+      <AiWorkspaceRoot view={view} scope="terminal" mode={mode} />,
+    );
+    expect(screen.getByText('Thinking…')).toBeInTheDocument();
+    rerender(<AiWorkspaceRoot view={view} scope="terminal" mode={mode} readOnlySession historicalTargetUnavailable />);
+    expect(screen.queryByText('Thinking…')).toBeNull();
+    expect(screen.getByText('Thinking interrupted')).not.toHaveClass('shimmer');
+    expect(container.querySelector('.ai-reasoning-row')).toHaveAttribute('data-state', 'interrupted');
+    expect(container.querySelector('.ai-reasoning-row')).not.toHaveAttribute('role', 'status');
+    expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+    rerender(<AiWorkspaceRoot view={view} scope="terminal" mode={mode} />);
+    expect(screen.getByText('Thinking…')).toBeInTheDocument();
+  });
+
+  it.each(['agent', 'ask'] as const)('preserves live %s reasoning in a read-only one-shot subagent', (mode) => {
+    const base = agentView('running');
+    const events = agentSessionBaselineScenarios['streaming-reasoning'].events;
+    const view = {
+      ...base,
+      summary: {
+        ...base.summary,
+        subagent: { descriptorId: 'diagnostic', role: 'explorer' as const, continuable: false, depth: 1 },
+      },
+      nodes: projectAgentChatNodes(events.slice(0, -1)),
+    };
+    const { container, rerender } = render(
+      <AiWorkspaceRoot view={view} scope="terminal" mode={mode} readOnlySession />,
+    );
+    expect(screen.getByText('Thinking…')).toHaveClass('shimmer');
+    rerender(<AiWorkspaceRoot view={{ ...view, nodes: projectAgentChatNodes(events) }}
+      scope="terminal" mode={mode} readOnlySession />);
+    expect(screen.getByText('Thinking…')).toHaveClass('shimmer');
+    expect(screen.queryByText('Thinking interrupted')).toBeNull();
+    expect(container.querySelector('.ai-reasoning-row')).toHaveAttribute('data-state', 'running');
+    expect(container.querySelector('.ai-reasoning-row')).toHaveAttribute('role', 'status');
   });
 
   it('expands Ask reasoning while streaming and collapses it when thinking settles', () => {
