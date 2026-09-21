@@ -16,6 +16,10 @@ use tokio_util::sync::CancellationToken;
 use super::{ModelMessage, ModelRequest};
 use crate::ai::AiProviderConfig;
 
+mod color;
+#[cfg(test)]
+mod color_tests;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct VisionContract {
@@ -159,9 +163,9 @@ fn image_error(error: impl std::fmt::Display) -> String {
     format!("IMAGE_INVALID: {error}")
 }
 
-/// Reject animation, unsupported colour profiles and oversized decoded data before raster allocation.
-/// Unprofiled RGB/gray samples are interpreted as sRGB; EXIF orientation is applied, descriptive
-/// metadata removed, 16-bit samples reduced to RGBA8. Never reinterpret a non-sRGB ICC profile.
+/// Bound decoding and reject animation; convert supported ICC profiles to sRGB before resizing.
+/// Unprofiled RGB/gray samples default to sRGB. Apply EXIF orientation and remove metadata only
+/// after colour conversion; the persisted representation remains an 8-bit RGBA PNG.
 fn normalize(
     upload: &ImageUpload,
     token: &CancellationToken,
@@ -233,12 +237,10 @@ fn normalize(
     {
         return Err("IMAGE_PIXEL_LIMIT".into());
     }
-    if decoder.icc_profile().map_err(image_error)?.is_some() {
-        return Err("IMAGE_COLOR_PROFILE_UNSUPPORTED: export as unprofiled sRGB first".into());
-    }
-    // PNG gamma/chromaticity/cICP are not safely interpreted by every decoder. Fail closed for
-    // non-sRGB declarations rather than strip a profile and silently change visual meaning.
+    let profile = decoder.icc_profile().map_err(color::error)?;
+    let profile = profile.as_deref().map(color::parse).transpose()?;
     if format == ImageFormat::Png {
+        color::validate_png(&bytes, profile.is_some())?;
         let mut offset = 8usize;
         let mut ended = false;
         while offset + 12 <= bytes.len() {
@@ -249,15 +251,8 @@ fn normalize(
                 .filter(|n| *n <= bytes.len())
                 .ok_or("IMAGE_INVALID_PNG_CHUNK")?;
             let tag = &bytes[offset + 4..offset + 8];
-            let data = &bytes[offset + 8..end - 4];
             if tag == b"acTL" {
                 return Err("IMAGE_ANIMATION_UNSUPPORTED".into());
-            }
-            if tag == b"cICP"
-                || tag == b"cHRM"
-                || (tag == b"gAMA" && data != 45455u32.to_be_bytes())
-            {
-                return Err("IMAGE_COLOR_PROFILE_UNSUPPORTED".into());
             }
             offset = end;
             if tag == b"IEND" {
@@ -292,6 +287,9 @@ fn normalize(
     let orientation = decoder.orientation().map_err(image_error)?;
     let mut raster = DynamicImage::from_decoder(decoder).map_err(image_error)?;
     cancelled(token)?;
+    if let Some(profile) = profile {
+        raster = color::to_srgb(raster, &profile, token)?;
+    }
     raster.apply_orientation(orientation);
     let scale = ((VISION.max_normalized_pixels as f64
         / (raster.width() as f64 * raster.height() as f64))
