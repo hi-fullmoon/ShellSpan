@@ -77,6 +77,13 @@ describe('Agent permission selector', () => {
       'data-variant',
       'composer',
     );
+    expect(container.querySelector('[data-slot="agent-permission-trigger-content"]')).toHaveClass(
+      'ai-composer-control-content',
+      'inline-flex',
+      'items-center',
+      'gap-1',
+      'leading-none',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'agent.permission.composerAria' }));
     const options = await screen.findAllByRole('menuitemradio');
     expect(options).toHaveLength(3);
