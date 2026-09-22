@@ -1303,6 +1303,8 @@ export default {
   'ai.workspace.model.trigger': 'Model selection: {selection}',
   'ai.workspace.model.menu': 'Model and reasoning selection',
   'ai.workspace.model.model': 'Model',
+  'ai.workspace.model.search': 'Search models or providers',
+  'ai.workspace.model.noResults': 'No matching models',
   'ai.workspace.model.reasoning': 'Reasoning effort',
   'ai.workspace.tasks.title': 'Tasks',
   'ai.workspace.tasks.completed': '{count} completed',
