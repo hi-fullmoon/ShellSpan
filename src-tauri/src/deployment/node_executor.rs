@@ -130,7 +130,7 @@ impl NodeFailure {
 pub(crate) enum NodeReconcileResult {
     NotStarted,
     SafeToRetry,
-    Succeeded(NodeExecutionResult),
+    Succeeded(Box<NodeExecutionResult>),
     // Part of the executor contract even though the current built-in executor
     // only reports retryable, successful, or unknown reconciliation outcomes.
     #[allow(dead_code)]

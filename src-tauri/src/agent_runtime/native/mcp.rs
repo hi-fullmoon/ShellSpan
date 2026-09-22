@@ -436,8 +436,10 @@ fn is_mcp_runtime_environment_name(name: &OsStr) -> bool {
     )
 }
 
+type McpWriteRequest = (Vec<u8>, mpsc::SyncSender<Result<(), String>>);
+
 fn send_json(
-    writer: &mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<(), String>>)>,
+    writer: &mpsc::Sender<McpWriteRequest>,
     value: &Value,
     deadline: Instant,
     cancellation: &CancellationToken,

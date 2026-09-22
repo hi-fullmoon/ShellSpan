@@ -3123,7 +3123,7 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                 .and_then(Value::as_str)
                 .ok_or_else(|| NodeFailure::definite("config", "targetId is missing"))?;
             match self.read_ledger(&input, target_id).await {
-                Ok(Some(result)) => return Ok(NodeReconcileResult::Succeeded(result)),
+                Ok(Some(result)) => return Ok(NodeReconcileResult::Succeeded(Box::new(result))),
                 Ok(None) => {}
                 Err(error)
                     if error.disposition
@@ -3142,9 +3142,9 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                 Ok(Some(link))
                     if link == format!("releases/{}", plan.target_release.release_id) =>
                 {
-                    Ok(NodeReconcileResult::Succeeded(
+                    Ok(NodeReconcileResult::Succeeded(Box::new(
                         Self::static_activation_result(&input, target_id)?,
-                    ))
+                    )))
                 }
                 Ok(observed)
                     if observed
@@ -3170,7 +3170,7 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                 .and_then(Value::as_str)
                 .ok_or_else(|| NodeFailure::definite("config", "targetId is missing"))?;
             return match self.read_ledger(&input, target_id).await {
-                Ok(Some(result)) => Ok(NodeReconcileResult::Succeeded(result)),
+                Ok(Some(result)) => Ok(NodeReconcileResult::Succeeded(Box::new(result))),
                 Ok(None) => Ok(NodeReconcileResult::NotStarted),
                 Err(error)
                     if error.disposition
@@ -3631,11 +3631,7 @@ mod tests {
         write_remote_file(
             &sftp,
             &format!("{root}/releases/release-one/.prepared"),
-            format!(
-                "{first_digest}\n{}\nrelease-one\n",
-                format!("sha256:{}", "a".repeat(64))
-            )
-            .as_bytes(),
+            format!("{first_digest}\nsha256:{}\nrelease-one\n", "a".repeat(64)).as_bytes(),
             false,
         )
         .unwrap();
@@ -3683,11 +3679,7 @@ mod tests {
         write_remote_file(
             &sftp,
             &format!("{root}/releases/release-two/.prepared"),
-            format!(
-                "{second_digest}\n{}\nrelease-two\n",
-                format!("sha256:{}", "b".repeat(64))
-            )
-            .as_bytes(),
+            format!("{second_digest}\nsha256:{}\nrelease-two\n", "b".repeat(64)).as_bytes(),
             false,
         )
         .unwrap();

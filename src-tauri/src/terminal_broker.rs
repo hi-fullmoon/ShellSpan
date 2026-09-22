@@ -53,6 +53,10 @@ const SYSTEM_OWNER_ID: &str = "shellspan-runtime";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "Transport variants preserve the serialized PTY protocol names"
+)]
 pub(crate) enum TerminalTransportKind {
     LocalPty,
     WindowsConPty,

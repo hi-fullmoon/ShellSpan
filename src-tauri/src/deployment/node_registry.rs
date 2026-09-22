@@ -247,7 +247,7 @@ struct SpecInput<'a> {
 }
 
 fn spec(input: SpecInput<'_>) -> DeploymentNodeTypeSpec {
-    let key = input.type_name.replace('.', "_").replace('-', "_");
+    let key = input.type_name.replace(['.', '-'], "_");
     DeploymentNodeTypeSpec {
         type_name: input.type_name.into(),
         type_version: input.type_version,

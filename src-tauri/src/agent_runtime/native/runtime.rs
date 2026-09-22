@@ -1137,7 +1137,7 @@ impl NativeToolEngine {
             )
         });
         match stage {
-            TerminalExecuteValidationStage::BeforeLease => {
+            TerminalExecuteValidationStage::LeaseAcquisition => {
                 if !terminal
                     .lease
                     .as_ref()
@@ -1149,7 +1149,7 @@ impl NativeToolEngine {
                     return Err("TERMINAL_VISIBLE_COMMAND_BUSY".into());
                 }
             }
-            TerminalExecuteValidationStage::BeforeCommand => {
+            TerminalExecuteValidationStage::CommandCreation => {
                 if !lease_matches_agent {
                     return Err("TERMINAL_BROKER_LEASE_IDENTITY_MISMATCH".into());
                 }
@@ -1157,7 +1157,7 @@ impl NativeToolEngine {
                     return Err("TERMINAL_VISIBLE_COMMAND_BUSY".into());
                 }
             }
-            TerminalExecuteValidationStage::BeforeWrite => {
+            TerminalExecuteValidationStage::InputWrite => {
                 if !lease_matches_agent {
                     return Err("TERMINAL_BROKER_LEASE_IDENTITY_MISMATCH".into());
                 }

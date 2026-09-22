@@ -118,7 +118,7 @@
 
     #[test]
     fn control_protocol_is_binary_framed_and_preserves_newlines_and_unicode() {
-        let bytes = b"R\0zsh\0P\0/tmp/\xe7\xbb\x88\xe7\xab\xaf\0Q\0S\0printf one; printf two\0/tmp\0E\07\0/tmp\0";
+        let bytes = b"R\0zsh\0P\0/tmp/\xe7\xbb\x88\xe7\xab\xaf\0Q\0S\0printf one; printf two\0/tmp\0E\x007\0/tmp\0";
         let mut events = Vec::new();
         read_control_events(&mut bytes.as_slice(), &mut |event| {
             events.push(event);

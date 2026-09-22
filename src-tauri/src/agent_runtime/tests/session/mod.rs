@@ -118,7 +118,9 @@ fn snapshot_uncertainty_tracks_dispatched_tools_until_their_exact_result() {
             evidence_refs: Vec::new(),
         },
     );
-    assert!(has_uncertain_tool_executions(&[dispatched.clone()]));
+    assert!(has_uncertain_tool_executions(std::slice::from_ref(
+        &dispatched
+    )));
     assert!(!has_uncertain_tool_executions(&[
         dispatched.clone(),
         result.clone()

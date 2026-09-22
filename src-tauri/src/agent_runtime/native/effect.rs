@@ -212,9 +212,9 @@ fn classify_single_command_effect(command: &str) -> AgentEffectKindNative {
         AgentEffectKindNative::Destructive
     } else if is_bounded_journal_command(&normalized) {
         AgentEffectKindNative::SensitiveRead
-    } else if is_bounded_diagnostic_command(&normalized) {
-        AgentEffectKindNative::ReadOnly
-    } else if is_plain_windows_discovery_command(&normalized) {
+    } else if is_bounded_diagnostic_command(&normalized)
+        || is_plain_windows_discovery_command(&normalized)
+    {
         AgentEffectKindNative::ReadOnly
     } else if (SENSITIVE_READ.contains(&executable.as_str())
         || executable_names
@@ -300,15 +300,14 @@ fn command_executable_names(command: &str) -> Vec<String> {
         }
         for (index, word) in words.iter().enumerate() {
             let marker = word.to_ascii_lowercase();
-            let nested = if marker == "-exec" || marker == "-execdir" {
-                words.get(index + 1)
-            } else if marker == "-c"
-                && index > 0
-                && matches!(
-                    command_word_name(words[index - 1]).as_str(),
-                    "sh" | "bash" | "zsh" | "dash" | "ksh" | "cmd" | "powershell" | "pwsh"
-                )
-            {
+            let nested = if marker == "-exec"
+                || marker == "-execdir"
+                || (marker == "-c"
+                    && index > 0
+                    && matches!(
+                        command_word_name(words[index - 1]).as_str(),
+                        "sh" | "bash" | "zsh" | "dash" | "ksh" | "cmd" | "powershell" | "pwsh"
+                    )) {
                 words.get(index + 1)
             } else {
                 None
