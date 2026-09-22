@@ -55,13 +55,15 @@ pnpm exec git-cliff --offline --ignore-tags '.*' --strip all BASE_SHA..HEAD
 CI 发布顺序：
 
 1. 校验版本、已审核说明、基线和 tag SHA；拒绝重建已公开版本。
-2. 对固定 SHA 运行完整 Quality Gate：前端、macOS/Windows Rust 测试、Clippy、格式检查及 SSH/SFTP E2E。
-3. 构建 macOS ARM64、Windows x64；所有产物来自同一 SHA。
+2. 对固定 SHA 运行前端测试和构建，将 dist 保存为本次运行的 artifact。
+3. 并行运行 macOS ARM64、Windows x64 打包与 Quality Gate（双平台 Rust 测试、Clippy、格式检查及 SSH/SFTP E2E）。打包和 Rust 检查共用本次已通过测试的前端 dist，避免重复前端测试和构建；所有产物来自同一 SHA。打包和全部检查均成功后才能发布。
 4. 在共享发布锁内检查双平台资产完整性，用配置中的更新公钥执行真实 minisign 签名验证，生成 `SHA256SUMS`。
 5. 上传到 GitHub 草稿，重新下载并校验每个资产的 SHA-256。
 6. 公开版本但暂不切换 Latest；验证公开更新清单和下载地址后，才将稳定版设为 Latest。预发布始终不设为 Latest。
 
 正式发布不接受临时覆盖说明参数。要调整说明，应在发布前修改版本 Markdown。
+
+main 和 PR 的独立 Quality Gate 仍执行原有前端及双平台检查。发布流程仅复用同一次运行内的前端产物，不跨提交或跨运行复用检查结果。并行打包可缩短等待时间，但后端检查失败时已经执行的打包会消耗额外 runner 时间，产物不会公开。
 
 ## 失败和恢复
 
