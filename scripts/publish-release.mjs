@@ -15,6 +15,12 @@ export function assertDraft(release) {
   if (release && !release.draft) throw new Error('Published releases are immutable; publish a new version instead');
 }
 
+export function findReleaseByTag(tag) {
+  // GitHub's by-tag endpoint excludes drafts, even for an authenticated writer.
+  const releases = JSON.parse(command('gh', ['api', '--paginate', '--slurp', `repos/${REPOSITORY}/releases?per_page=100`])).flat();
+  return releases.find(release => release.tag_name === tag);
+}
+
 export async function sha256(file) {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(file)) hash.update(chunk);
@@ -86,8 +92,7 @@ async function publish() {
   if (process.env.RELEASE_TAG !== tag) throw new Error('Release tag/version mismatch');
   const { meta, notes } = checkNotes(version);
   assertBaseline(meta, latestStable());
-  const releases = JSON.parse(command('gh', ['api', '--paginate', '--slurp', `repos/${REPOSITORY}/releases?per_page=100`])).flat();
-  let release = releases.find(item => item.tag_name === tag);
+  let release = findReleaseByTag(tag);
   assertDraft(release);
   const tauri = JSON.parse(await readFile('src-tauri/tauri.conf.json', 'utf8'));
   const assets = await stageAssets({ artifactsRootDir: 'release-inputs', outputDir: 'release-output/assets', tag, notes, publicKey: tauri.plugins.updater.pubkey });
@@ -115,7 +120,8 @@ async function publish() {
   // Recheck immediately before publication under the workflow's shared publish lock.
   assertBaseline(meta, latestStable());
   assertRemoteTag(tag);
-  release = JSON.parse(command('gh', ['api', `repos/${REPOSITORY}/releases/tags/${tag}`]));
+  release = findReleaseByTag(tag);
+  if (!release) throw new Error('Release draft disappeared before publication');
   assertDraft(release);
   const prerelease = version.includes('-');
   gh(['release', 'edit', tag, '--draft=false', `--prerelease=${prerelease}`, '--latest=false', '--notes-file', notesFile]);

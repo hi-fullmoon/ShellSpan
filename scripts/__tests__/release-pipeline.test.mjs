@@ -6,7 +6,7 @@ import { parse } from 'yaml';
 import { parse as parseToml } from 'smol-toml';
 import { editTomlVersion, generateCandidates } from '../bump-version.mjs';
 import { command, validateNotes, updateChangelog, changelogSection, assertBaseline, validVersion, readVersions, REVIEW_MARKER } from '../release-notes.mjs';
-import { assertDraft } from '../publish-release.mjs';
+import { assertDraft, findReleaseByTag } from '../publish-release.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const directories = [];
@@ -108,6 +108,17 @@ describe('release notes', () => {
 });
 
 describe('release publication gates', () => {
+  it.skipIf(!process.env.SHELLSPAN_DRAFT_RELEASE_TAG)('finds an existing real GitHub draft before publication', () => {
+    const release = findReleaseByTag(process.env.SHELLSPAN_DRAFT_RELEASE_TAG);
+    expect(release).toBeDefined();
+    expect(release.tag_name).toBe(process.env.SHELLSPAN_DRAFT_RELEASE_TAG);
+    expect(release.draft).toBe(true);
+    expect(() => assertDraft(release)).not.toThrow();
+    const byId = JSON.parse(command('gh', ['api', `repos/hi-fullmoon/ShellSpan/releases/${release.id}`]));
+    expect(byId.id).toBe(release.id);
+    expect(byId.draft).toBe(true);
+  }, 30_000);
+
   it('allows drafts but refuses to replace any published release', () => {
     expect(() => assertDraft(undefined)).not.toThrow();
     expect(() => assertDraft({ draft: true })).not.toThrow();
