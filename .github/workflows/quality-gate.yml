@@ -102,7 +102,9 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings
       - name: Run Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --all-features --no-fail-fast --locked
+        # Real shell/process and wall-clock tests share the runner. Match the
+        # native acceptance runners so unrelated tests cannot starve deadlines.
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-features --no-fail-fast --locked -- --test-threads=1
 
   ssh-e2e:
     name: Isolated SSH/SFTP E2E

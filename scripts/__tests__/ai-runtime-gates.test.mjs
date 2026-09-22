@@ -39,6 +39,15 @@ describe('quality gate wiring', () => {
     expect(ci).toContain('--all-targets --all-features');
     expect(ci).toContain('--all-features --no-fail-fast');
   });
+  it('runs the full native suite serially without filtering or ignoring tests', async () => {
+    const ci = parse(await readFile(path.join(root, '.github/workflows/quality-gate.yml'), 'utf8'));
+    const step = ci.jobs.rust.steps.find(step => step.name === 'Run Rust tests');
+    expect(step.run.trim().split(/\s+/)).toEqual([
+      'cargo', 'test', '--manifest-path', 'src-tauri/Cargo.toml',
+      '--all-features', '--no-fail-fast', '--locked', '--', '--test-threads=1',
+    ]);
+    expect(step['continue-on-error']).toBeUndefined();
+  });
   it('discovers all handoff test modules which cargo fmt cannot discover through include!', async () => {
     const files = (await includedRustFiles(path.join(root, 'src-tauri/src')))
       .map(file => path.relative(root, file).split(path.sep).join('/'));
