@@ -269,7 +269,7 @@ async fn execute_with_retry(
                             node_id: frozen.node.id.clone(),
                             planned,
                             attempt,
-                            result,
+                            result: *result,
                         })
                     }
                     Ok(NodeReconcileResult::NotStarted | NodeReconcileResult::SafeToRetry) => {}
@@ -1641,7 +1641,7 @@ async fn persist_and_execute_node(
                             node_id: node.id.clone(),
                             planned,
                             attempt,
-                            result,
+                            result: *result,
                         });
                     }
                     Ok(NodeReconcileResult::NotStarted | NodeReconcileResult::SafeToRetry) => {}
@@ -3367,7 +3367,7 @@ mod tests {
                 .unwrap()
                 .get(&input.idempotency_key)
                 .cloned()
-                .map(NodeReconcileResult::Succeeded)
+                .map(|result| NodeReconcileResult::Succeeded(Box::new(result)))
                 .unwrap_or(NodeReconcileResult::NotStarted))
         }
 

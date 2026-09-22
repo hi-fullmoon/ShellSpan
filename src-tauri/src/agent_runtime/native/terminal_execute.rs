@@ -19,9 +19,9 @@ const WAIT_SLICE: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TerminalExecuteValidationStage {
-    BeforeLease,
-    BeforeCommand,
-    BeforeWrite,
+    LeaseAcquisition,
+    CommandCreation,
+    InputWrite,
 }
 
 #[derive(Clone)]
@@ -92,7 +92,7 @@ impl TerminalExecuteRegistry {
         enter: &str,
         mut revalidate: impl FnMut(TerminalExecuteValidationStage) -> Result<(), String>,
     ) -> Result<Arc<TerminalCommandOperation>, String> {
-        revalidate(TerminalExecuteValidationStage::BeforeLease)?;
+        revalidate(TerminalExecuteValidationStage::LeaseAcquisition)?;
         self.leases
             .acquire(session_id, agent_session_id, task_id, operation_id, None)?;
         if let Err(error) = self.leases.wait_frontend_ready(
@@ -134,7 +134,7 @@ impl TerminalExecuteRegistry {
             );
             return Err("TERMINAL_EXECUTE_NOT_CONNECTED".into());
         }
-        if let Err(error) = revalidate(TerminalExecuteValidationStage::BeforeCommand) {
+        if let Err(error) = revalidate(TerminalExecuteValidationStage::CommandCreation) {
             let _ = self.leases.release(
                 session_id,
                 agent_session_id,
@@ -199,7 +199,7 @@ impl TerminalExecuteRegistry {
             );
         }
 
-        if let Err(error) = revalidate(TerminalExecuteValidationStage::BeforeWrite) {
+        if let Err(error) = revalidate(TerminalExecuteValidationStage::InputWrite) {
             let command_id = operation.command_id()?;
             let _ = self.broker.mark_command_uncertain(session_id, &command_id);
             let _ = self.finish_registration(

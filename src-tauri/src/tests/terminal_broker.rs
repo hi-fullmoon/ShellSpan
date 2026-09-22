@@ -1050,7 +1050,7 @@
             .unwrap()
             .unwrap();
         let second = broker
-            .observe_raw_output("transport-1", &[b'a', b'\r', b'\n'])
+            .observe_raw_output("transport-1", b"a\r\n")
             .unwrap()
             .unwrap();
         assert_eq!((first.sequence, first.byte_offset), (1, 0));
@@ -1597,7 +1597,10 @@
         let broker = ready_phase3_broker();
         let operation = begin_phase3_command(&broker, "operation-1", "printf cooperative");
         broker
-            .observe_raw_output("transport-1", b"commandEnd\0exitCode\00\0prompt-looking $ ")
+            .observe_raw_output(
+                "transport-1",
+                b"commandEnd\0exitCode\x000\0prompt-looking $ ",
+            )
             .unwrap();
         assert_eq!(
             operation.snapshot().unwrap().state,
@@ -1762,11 +1765,7 @@
         );
         assert_eq!(
             broker.visible_command_route("transport-2").unwrap(),
-            if cfg!(any(target_os = "macos", target_os = "windows")) {
-                TerminalVisibleCommandRoute::Unavailable
-            } else {
-                TerminalVisibleCommandRoute::Unavailable
-            }
+            TerminalVisibleCommandRoute::Unavailable
         );
 
         let broker = ready_phase3_broker();
@@ -1803,11 +1802,7 @@
         assert!(!snapshot.terminal_execute_rollout.enabled);
         assert_eq!(
             broker.visible_command_route("transport-1").unwrap(),
-            if cfg!(any(target_os = "macos", target_os = "windows")) {
-                TerminalVisibleCommandRoute::Unavailable
-            } else {
-                TerminalVisibleCommandRoute::Unavailable
-            }
+            TerminalVisibleCommandRoute::Unavailable
         );
 
         broker

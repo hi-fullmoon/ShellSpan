@@ -115,10 +115,7 @@ impl TerminalIntegrationStreamDecoder {
         }
 
         let mut events = Vec::new();
-        loop {
-            let Some(kind) = self.pending_fields.first().map(String::as_str) else {
-                break;
-            };
+        while let Some(kind) = self.pending_fields.first().map(String::as_str) {
             let field_count = match kind {
                 "R" | "P" | "X" => 2,
                 "Q" | "T" => 1,
@@ -193,19 +190,19 @@ pub(crate) struct TerminalIntegrationControlHandle {
 
 impl TerminalIntegrationControlHandle {
     pub(crate) fn stop(&mut self) {
-        if self.stopped.swap(true, Ordering::AcqRel) {
-            return;
-        }
+        let _already_stopped = self.stopped.swap(true, Ordering::AcqRel);
         #[cfg(unix)]
-        if let Some(path) = self.wake_path.take() {
-            use std::os::unix::fs::OpenOptionsExt;
+        if !_already_stopped {
+            if let Some(path) = self.wake_path.take() {
+                use std::os::unix::fs::OpenOptionsExt;
 
-            if let Ok(mut writer) = File::options()
-                .write(true)
-                .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
-                .open(path)
-            {
-                let _ = writer.write_all(b"T\0");
+                if let Ok(mut writer) = File::options()
+                    .write(true)
+                    .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+                    .open(path)
+                {
+                    let _ = writer.write_all(b"T\0");
+                }
             }
         }
     }

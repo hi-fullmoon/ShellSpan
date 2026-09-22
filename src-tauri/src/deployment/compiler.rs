@@ -856,9 +856,9 @@ fn reachable(start: &str, graph: &BTreeMap<String, BTreeSet<String>>) -> BTreeSe
     found
 }
 
-fn validate_artifact_flow<'a>(
+fn validate_artifact_flow(
     definition: &DeploymentWorkflowDefinition,
-    spec_by_node: &BTreeMap<String, &'a DeploymentNodeTypeSpec>,
+    spec_by_node: &BTreeMap<String, &DeploymentNodeTypeSpec>,
     config_by_node: &BTreeMap<String, ValidatedNodeConfig>,
     topology_layers: &[Vec<String>],
     errors: &mut Vec<WorkflowValidationError>,
@@ -932,9 +932,9 @@ fn validate_artifact_flow<'a>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn validate_graph_semantics<'a>(
+fn validate_graph_semantics(
     definition: &DeploymentWorkflowDefinition,
-    spec_by_node: &BTreeMap<String, &'a DeploymentNodeTypeSpec>,
+    spec_by_node: &BTreeMap<String, &DeploymentNodeTypeSpec>,
     config_by_node: &BTreeMap<String, ValidatedNodeConfig>,
     adjacency: &BTreeMap<String, BTreeSet<String>>,
     reverse: &BTreeMap<String, BTreeSet<String>>,
@@ -1136,9 +1136,9 @@ fn validate_graph_semantics<'a>(
     }
 }
 
-fn build_plan<'a>(
+fn build_plan(
     definition: &DeploymentWorkflowDefinition,
-    spec_by_node: &BTreeMap<String, &'a DeploymentNodeTypeSpec>,
+    spec_by_node: &BTreeMap<String, &DeploymentNodeTypeSpec>,
     config_by_node: &BTreeMap<String, ValidatedNodeConfig>,
     topology_layers: Vec<Vec<String>>,
 ) -> Result<CompiledRunPlanDraft, WorkflowValidationErrors> {
@@ -1179,7 +1179,7 @@ fn build_plan<'a>(
                 effect_class: spec.effect_class,
                 summary_key: format!(
                     "deployment.risk.{}",
-                    spec.type_name.replace('.', "_").replace('-', "_")
+                    spec.type_name.replace(['.', '-'], "_")
                 ),
             });
         }

@@ -562,7 +562,7 @@ fn attempt_status(value: NodeAttemptStatus) -> &'static str {
 }
 
 fn validate_workflow_name(name: &str) -> Result<(), String> {
-    if name.is_empty() || name.as_bytes().len() > MAX_WORKFLOW_NAME_BYTES || name.trim() != name {
+    if name.is_empty() || name.len() > MAX_WORKFLOW_NAME_BYTES || name.trim() != name {
         return Err("DEPLOYMENT_WORKFLOW_INVALID_NAME".into());
     }
     Ok(())
@@ -605,9 +605,7 @@ fn parse_layout(json: Option<String>) -> Result<Option<DeploymentWorkflowLayout>
     .transpose()
 }
 
-fn workflow_record(
-    row: &Row<'_>,
-) -> rusqlite::Result<(
+type RawWorkflowRecord = (
     String,
     String,
     i64,
@@ -619,7 +617,9 @@ fn workflow_record(
     Option<String>,
     i64,
     i64,
-)> {
+);
+
+fn workflow_record(row: &Row<'_>) -> rusqlite::Result<RawWorkflowRecord> {
     Ok((
         row.get(0)?,
         row.get(1)?,
@@ -635,21 +635,7 @@ fn workflow_record(
     ))
 }
 
-fn decode_workflow_record(
-    raw: (
-        String,
-        String,
-        i64,
-        i64,
-        i64,
-        String,
-        String,
-        i64,
-        Option<String>,
-        i64,
-        i64,
-    ),
-) -> Result<DeploymentWorkflowRecord, String> {
+fn decode_workflow_record(raw: RawWorkflowRecord) -> Result<DeploymentWorkflowRecord, String> {
     let (
         id,
         name,

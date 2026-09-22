@@ -84,20 +84,20 @@ fn secure_directory(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn secure_file(path: &Path) -> Result<(), String> {
+fn secure_file(_path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        fs::set_permissions(_path, fs::Permissions::from_mode(0o600))
             .map_err(|error| format!("failed to secure deployment artifact file: {error}"))?;
     }
     Ok(())
 }
 
-fn sync_directory(path: &Path) -> Result<(), String> {
+fn sync_directory(_path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
-        File::open(path)
+        File::open(_path)
             .and_then(|directory| directory.sync_all())
             .map_err(|error| format!("failed to fsync deployment artifact directory: {error}"))?;
     }

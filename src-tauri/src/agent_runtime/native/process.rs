@@ -451,7 +451,9 @@ pub(crate) fn spawn_local_process_native(
     )
 }
 
-pub(crate) fn spawn_workspace_scoped_local_process_native(
+// The scoped launcher currently serves the sandbox contract tests only.
+#[cfg(test)]
+fn spawn_workspace_scoped_local_process_native(
     task_id: String,
     request_id: String,
     owner_target_id: String,
@@ -473,6 +475,7 @@ pub(crate) fn spawn_workspace_scoped_local_process_native(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LocalFilesystemScopeNative {
     Unrestricted,
+    #[cfg(test)]
     WorkspaceOnly,
 }
 
@@ -485,8 +488,9 @@ fn spawn_local_process_with_scope_native(
     timeout: Duration,
     filesystem_scope: LocalFilesystemScopeNative,
 ) -> Result<Arc<ManagedProcessNative>, String> {
-    let (mut child, sandbox_temp) = match filesystem_scope {
+    let (mut child, sandbox_temp): (Command, Option<tempfile::TempDir>) = match filesystem_scope {
         LocalFilesystemScopeNative::Unrestricted => (local_shell_command(command), None),
+        #[cfg(test)]
         LocalFilesystemScopeNative::WorkspaceOnly => {
             let root = cwd.ok_or_else(|| {
                 "operator execution requires a frozen local workspace root".to_string()
@@ -548,6 +552,7 @@ fn spawn_local_process_with_scope_native(
     Ok(process)
 }
 
+#[cfg(test)]
 fn canonical_workspace_root_native(root: &Path) -> Result<PathBuf, String> {
     let metadata = std::fs::symlink_metadata(root)
         .map_err(|error| format!("failed to inspect operator workspace root: {error}"))?;
@@ -562,6 +567,7 @@ fn canonical_workspace_root_native(root: &Path) -> Result<PathBuf, String> {
     Ok(canonical)
 }
 
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 fn sandbox_temp_native() -> Result<tempfile::TempDir, String> {
     tempfile::Builder::new()
         .prefix("shellspan-agent-")
@@ -570,6 +576,7 @@ fn sandbox_temp_native() -> Result<tempfile::TempDir, String> {
 }
 
 #[cfg(target_os = "macos")]
+#[cfg(test)]
 fn workspace_scoped_local_shell_command(
     command: &str,
     root: &Path,
@@ -592,6 +599,7 @@ fn workspace_scoped_local_shell_command(
 }
 
 #[cfg(target_os = "macos")]
+#[cfg(test)]
 fn seatbelt_string_native(path: &Path) -> Result<String, String> {
     let value = path
         .to_str()
@@ -603,6 +611,7 @@ fn seatbelt_string_native(path: &Path) -> Result<String, String> {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg(test)]
 fn workspace_scoped_local_shell_command(
     command: &str,
     root: &Path,
@@ -632,6 +641,7 @@ fn workspace_scoped_local_shell_command(
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(test)]
 fn workspace_scoped_local_shell_command(
     _command: &str,
     _root: &Path,
@@ -1445,6 +1455,22 @@ mod tests {
         assert!(canonical_workspace_root_native(root)
             .unwrap_err()
             .contains("filesystem roots"));
+        let result = spawn_workspace_scoped_local_process_native(
+            "invalid-workspace-task".into(),
+            "invalid-workspace-request".into(),
+            "local".into(),
+            "exit 0",
+            root,
+            Duration::from_secs(1),
+        );
+        let error = result
+            .err()
+            .expect("invalid workspace must not start a process");
+        if cfg!(any(target_os = "macos", target_os = "linux")) {
+            assert!(error.contains("filesystem roots"), "{error}");
+        } else {
+            assert!(error.contains("sandbox is unavailable"), "{error}");
+        }
     }
 
     #[cfg(target_os = "macos")]

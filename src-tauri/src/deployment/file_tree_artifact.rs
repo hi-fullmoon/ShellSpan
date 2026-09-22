@@ -157,14 +157,14 @@ pub(crate) fn normalize_archive_path(path: &Path) -> Result<String, NodeFailure>
     Ok(normalized)
 }
 
-fn source_mode(metadata: &fs::Metadata, directory: bool) -> u32 {
+fn source_mode(_metadata: &fs::Metadata, directory: bool) -> u32 {
     if directory {
         return 0o755;
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if metadata.permissions().mode() & 0o111 != 0 {
+        if _metadata.permissions().mode() & 0o111 != 0 {
             return 0o755;
         }
     }
@@ -215,7 +215,7 @@ fn scan_member(
             .map_err(|error| failure("artifactIo", error.to_string()))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| failure("artifactIo", error.to_string()))?;
-        children.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+        children.sort_by_key(|child| child.file_name());
         for child in children {
             scan_member(
                 &child.path(),
@@ -296,7 +296,7 @@ fn collect_source_entries(
                 .map_err(|error| failure("artifactIo", error.to_string()))?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|error| failure("artifactIo", error.to_string()))?;
-            children.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+            children.sort_by_key(|child| child.file_name());
             for child in children {
                 scan_member(
                     &child.path(),
@@ -605,7 +605,7 @@ pub(crate) fn validate_zip_archive(path: &Path) -> Result<(), NodeFailure> {
     let file = File::open(path).map_err(|error| failure("artifactIo", error.to_string()))?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|error| failure("artifactArchive", error.to_string()))?;
-    if archive.len() == 0 || archive.len() > MAX_FILE_TREE_ENTRIES {
+    if archive.is_empty() || archive.len() > MAX_FILE_TREE_ENTRIES {
         return Err(failure(
             "artifactLimit",
             "zip entry count is outside the allowed range",

@@ -373,16 +373,10 @@ fn has_uncertain_tool_executions(events: &[AgentSessionEvent]) -> bool {
             AgentSessionEventPayload::ToolExecution { call_id, .. } => {
                 dispatched.insert((event.step_id.as_deref(), call_id.as_str()));
             }
-            AgentSessionEventPayload::ToolResult { call_id, .. } => {
-                if !matches!(
-                    &event.payload,
-                    AgentSessionEventPayload::ToolResult {
-                        status: super::AgentToolResultStatus::Uncertain,
-                        ..
-                    }
-                ) {
-                    dispatched.remove(&(event.step_id.as_deref(), call_id.as_str()));
-                }
+            AgentSessionEventPayload::ToolResult {
+                call_id, status, ..
+            } if *status != super::AgentToolResultStatus::Uncertain => {
+                dispatched.remove(&(event.step_id.as_deref(), call_id.as_str()));
             }
             _ => {}
         }
@@ -4197,7 +4191,7 @@ fn resolve_surface_replays(
             &resolution.request_id,
         )
         .map_err(crate::llm::replay::replay_error_string)?;
-        *stored = Box::new(super::AgentStoredReplay::inline(envelope));
+        **stored = super::AgentStoredReplay::inline(envelope);
     }
     if !resolutions.is_empty() {
         return Err("Agent replay artifacts were not present in the Model Surface".into());
