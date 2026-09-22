@@ -123,6 +123,18 @@
   color: var(--ai-text-muted);
 }
 
+.ai-model-search-input {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ai-model-search-input [data-slot='input-group-control'] {
+  font-size: 13px;
+  padding-left: 4px;
+}
+
 .ai-composer-add-menu [data-slot='dropdown-menu-label'],
 .ai-completion-popup [data-mention-completion] [role='group'] > p {
   color: color-mix(in srgb, var(--muted-foreground) 70%, transparent);

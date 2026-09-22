@@ -1301,6 +1301,8 @@ export default {
   'ai.workspace.model.trigger': '模型选择：{selection}',
   'ai.workspace.model.menu': '模型与推理等级选择',
   'ai.workspace.model.model': '模型',
+  'ai.workspace.model.search': '搜索模型或服务商',
+  'ai.workspace.model.noResults': '未找到匹配的模型',
   'ai.workspace.model.reasoning': '推理等级',
   'ai.workspace.tasks.title': '任务',
   'ai.workspace.tasks.completed': '{count} 已完成',

@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDownIcon, ChevronRightIcon, SearchIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
+import { Separator } from '@/components/ui/separator';
 import { invokeResolveAiSelection, isTauriRuntime } from '@/lib/ipc/tauri';
 import { useResolvedModel } from '@/lib/ai/provider-contract';
 import {
@@ -98,7 +100,25 @@ export function AiComposerModelSelector({
     }))) ?? []), [routeSnapshot,modelsByRoute]);
   const availableProviders = routeSnapshot ? routeProviders : nativeRouteMode ? [] : providers;
   const [pane, setPane] = useState<ModelMenuPane>('root');
+  const [search, setSearch] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const groups = useMemo(() => groupProviders(availableProviders), [availableProviders]);
+  const filteredGroups = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return groups.map(group => ({
+      ...group,
+      providers: group.providers.filter(provider =>
+        [group.label, provider.model, provider.modelDefinition?.displayName ?? '']
+          .some(value => value.toLowerCase().includes(query))),
+    })).filter(group => group.providers.length > 0);
+  }, [groups, search]);
+  useEffect(() => {
+    if (pane === 'model') searchRef.current?.focus();
+  }, [pane]);
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [search, pane]);
   const defaultSelection=routeSnapshot?.defaultSelection;
   const defaultProvider = availableProviders.find((provider) => defaultSelection ? provider.id===defaultSelection.routeId && provider.model===defaultSelection.modelId : provider.id === defaultProviderId)
     ?? availableProviders[0];
@@ -134,6 +154,7 @@ export function AiComposerModelSelector({
   const close = (): void => {
     setOpen(false);
     setPane('root');
+    setSearch('');
   };
 
   return (
@@ -141,7 +162,10 @@ export function AiComposerModelSelector({
       open={open}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
-        if (!nextOpen) setPane('root');
+        if (!nextOpen) {
+          setPane('root');
+          setSearch('');
+        }
       }}
     >
       <DropdownMenuTrigger
@@ -168,15 +192,56 @@ export function AiComposerModelSelector({
         side="top"
         sideOffset={8}
         align="end"
-        className="ai-model-menu w-max min-w-56 max-w-[min(420px,calc(100vw-16px))] p-[3px]"
+        className="ai-model-menu flex max-h-[min(380px,var(--available-height))] w-max min-w-56 max-w-[min(420px,calc(100vw-16px))] flex-col overflow-hidden p-0"
         aria-label={t('ai.workspace.model.menu')}
-        onKeyDown={(event) => {
+        onKeyDownCapture={(event) => {
+          if (event.nativeEvent.isComposing) return;
+          if (pane === 'model' && event.key === 'ArrowUp'
+            && event.target === listRef.current?.querySelector('[role="menuitemradio"]')) {
+            event.preventDefault();
+            event.stopPropagation();
+            searchRef.current?.focus();
+            return;
+          }
           if (event.key !== 'Escape' || pane === 'root') return;
           event.preventDefault();
           event.stopPropagation();
-          setPane('root');
+          if (pane === 'model' && search) {
+            setSearch('');
+            searchRef.current?.focus();
+          } else {
+            setPane('root');
+          }
         }}
       >
+        {pane === 'model' && (
+          <>
+            <div className="shrink-0 px-[3px] py-1" data-slot="ai-model-search">
+              <InputGroup className="ai-model-search-input h-[30px]">
+                <InputGroupInput
+                  className="h-7 min-w-0 pr-2 pl-1"
+                  ref={searchRef}
+                  value={search}
+                  placeholder={t('ai.workspace.model.search')}
+                  aria-label={t('ai.workspace.model.search')}
+                  onChange={event => setSearch(event.target.value)}
+                  onKeyDown={event => {
+                    event.stopPropagation();
+                    if (event.nativeEvent.isComposing) return;
+                    if (event.key === 'ArrowDown') {
+                      event.preventDefault();
+                      listRef.current?.querySelector<HTMLElement>('[role="menuitemradio"]')?.focus();
+                    }
+                  }}
+                />
+                <InputGroupAddon><SearchIcon /></InputGroupAddon>
+              </InputGroup>
+            </div>
+            <Separator />
+          </>
+        )}
+        <div ref={listRef} data-slot="ai-model-menu-scroll" className="min-h-0 overflow-x-hidden overflow-y-auto">
+        <div data-slot="ai-model-menu-body" className="p-[3px]">
         {(routeStatus==='error'||selectionError||(routeSnapshot && !resolved)) && <DropdownMenuGroup><DropdownMenuLabel role="status">{aiErrorMessage((routeStatus==='error' ? routeError : selectionError) ?? t('settings.ai.capabilitiesLoading'), t)}</DropdownMenuLabel></DropdownMenuGroup>}
         {pane === 'root' && (
           <DropdownMenuGroup>
@@ -203,7 +268,12 @@ export function AiComposerModelSelector({
           </DropdownMenuGroup>
         )}
 
-        {pane === 'model' && groups.map((group) => (
+        {pane === 'model' && filteredGroups.length === 0 && (
+          <p role="status" className="px-2 py-6 text-center text-sm text-muted-foreground">
+            {t('ai.workspace.model.noResults')}
+          </p>
+        )}
+        {pane === 'model' && filteredGroups.map((group) => (
           <DropdownMenuGroup key={group.id}>
             <DropdownMenuLabel>{group.label}</DropdownMenuLabel>
             <DropdownMenuRadioGroup
@@ -272,6 +342,8 @@ export function AiComposerModelSelector({
             </DropdownMenuRadioGroup>
           </DropdownMenuGroup>
         )}
+        </div>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );
