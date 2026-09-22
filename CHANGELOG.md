@@ -2,6 +2,18 @@
 
 All notable changes to ShellSpan are documented in this file.
 
+## [v2.1.0](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.1.0) - 2026-09-22
+
+### 新增功能
+
+- AI 模型选择菜单支持按模型名称或服务商搜索，方便在大量模型中快速找到目标。
+
+### 体验改进
+
+- 模型列表支持独立滚动，搜索框保持可见；无匹配结果时显示明确提示。
+- 改进模型搜索的焦点和键盘操作：支持方向键在搜索框与结果间切换，按 Escape 清空搜索或返回上一级菜单。
+- 调整模型菜单分隔线的横向留白。
+
 ## [v2.0.62](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.0.62) - 2026-09-22
 
 ### 新增功能
