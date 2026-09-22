@@ -237,7 +237,9 @@ export function AiComposerModelSelector({
                 <InputGroupAddon><SearchIcon /></InputGroupAddon>
               </InputGroup>
             </div>
-            <Separator />
+            <div className="shrink-0 px-2">
+              <Separator />
+            </div>
           </>
         )}
         <div ref={listRef} data-slot="ai-model-menu-scroll" className="min-h-0 overflow-x-hidden overflow-y-auto">

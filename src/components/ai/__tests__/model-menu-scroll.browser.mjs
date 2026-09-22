@@ -61,6 +61,9 @@ try {
       assert.deepEqual(searchStyle, { shadow: 'none', border: '0px', radius: '0px' });
       await page.waitForFunction(() => document.getAnimations().every(animation => animation.playState !== 'running'));
       const popupBounds = await menu.boundingBox();
+      const separatorBounds = await menu.locator('[data-slot="separator"]').boundingBox();
+      assert.equal(separatorBounds.x - popupBounds.x, 8);
+      assert.equal(popupBounds.x + popupBounds.width - separatorBounds.x - separatorBounds.width, 8);
       assert.ok(popupBounds.height <= 380 && popupBounds.y >= 0);
       await menu.screenshot({ path: `/tmp/shellspan-model-initial-${viewport.width}.png` });
       const dimensions = await scroller.evaluate(element => {
