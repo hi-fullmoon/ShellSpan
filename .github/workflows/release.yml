@@ -58,10 +58,11 @@ jobs:
 
   quality:
     name: Release Quality Gate
-    needs: preflight
+    needs: [preflight, build-frontend]
     uses: ./.github/workflows/quality-gate.yml
     with:
       ref: ${{ needs.preflight.outputs.sha }}
+      frontend-artifact: frontend-dist
 
   build-frontend:
     name: Test and Build Frontend
@@ -112,7 +113,7 @@ jobs:
     needs:
       - preflight
       - build-frontend
-      - quality
+    # Build concurrently with quality checks; publication still requires both.
     strategy:
       fail-fast: false
       matrix:

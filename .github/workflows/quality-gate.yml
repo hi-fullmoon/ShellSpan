@@ -7,6 +7,11 @@ on:
         description: Exact commit to validate
         required: true
         type: string
+      frontend-artifact:
+        description: Frontend dist already tested and built at ref in this workflow run
+        required: false
+        default: ''
+        type: string
   pull_request:
   push:
     branches:
@@ -25,6 +30,7 @@ concurrency:
 jobs:
   frontend:
     name: Frontend and Audit
+    if: ${{ !inputs.frontend-artifact }}
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -79,9 +85,17 @@ jobs:
           toolchain: 1.95.0
           components: rustfmt, clippy
       - name: Run frontend tests
+        if: ${{ !inputs.frontend-artifact }}
         run: pnpm test
       - name: Build frontend
+        if: ${{ !inputs.frontend-artifact }}
         run: pnpm build
+      - name: Download tested frontend dist
+        if: ${{ inputs.frontend-artifact != '' }}
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ inputs.frontend-artifact }}
+          path: dist
       - name: Cache Rust
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:

@@ -131,8 +131,13 @@ describe('release publication gates', () => {
     const quality = parse(await readFile(path.join(root, '.github/workflows/quality-gate.yml'), 'utf8'));
     expect(release.jobs.quality.uses).toBe('./.github/workflows/quality-gate.yml');
     expect(release.jobs.quality.with.ref).toBe('${{ needs.preflight.outputs.sha }}');
-    expect(release.jobs.build.needs).toContain('quality');
+    expect(release.jobs.build.needs).toEqual(['preflight', 'build-frontend']);
+    expect(release.jobs.quality.needs).toEqual(['preflight', 'build-frontend']);
+    expect(release.jobs.release.needs).toContain('build');
     expect(release.jobs.release.needs).toContain('quality');
+    expect(release.jobs.release.if).toBeUndefined();
+    expect(release.jobs.quality['continue-on-error']).toBeUndefined();
+    expect(release.jobs.build['continue-on-error']).toBeUndefined();
     expect(release.jobs.release.concurrency.group).toBe('publish-release');
     expect(release.concurrency.group).toContain('inputs.tag || github.ref_name');
     for (const job of Object.values(quality.jobs)) {
@@ -144,5 +149,23 @@ describe('release publication gates', () => {
     expect(release.on.workflow_dispatch.inputs).not.toHaveProperty('release_notes');
     const scripts = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).scripts;
     expect(scripts.changelog).toBe('node scripts/release-notes.mjs sync');
+  });
+
+  it('reuses only the tested frontend artifact from the current release run', async () => {
+    const release = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
+    const quality = parse(await readFile(path.join(root, '.github/workflows/quality-gate.yml'), 'utf8'));
+    const frontend = release.jobs['build-frontend'].steps;
+    const uploadIndex = frontend.findIndex(step => step.uses?.startsWith('actions/upload-artifact@'));
+    expect(frontend.slice(0, uploadIndex).map(step => step.run)).toEqual(expect.arrayContaining(['pnpm test', 'pnpm run build']));
+    expect(frontend[uploadIndex].with.name).toBe(release.jobs.quality.with['frontend-artifact']);
+    expect(quality.on.workflow_call.inputs['frontend-artifact'].default).toBe('');
+    expect(quality.jobs.frontend.if).toBe('${{ !inputs.frontend-artifact }}');
+    for (const name of ['Run frontend tests', 'Build frontend']) {
+      expect(quality.jobs.rust.steps.find(step => step.name === name).if).toBe('${{ !inputs.frontend-artifact }}');
+    }
+    const download = quality.jobs.rust.steps.find(step => step.name === 'Download tested frontend dist');
+    expect(download.if).toBe("${{ inputs.frontend-artifact != '' }}");
+    expect(download.with).toEqual({ name: '${{ inputs.frontend-artifact }}', path: 'dist' });
+    expect(download['continue-on-error']).toBeUndefined();
   });
 });
