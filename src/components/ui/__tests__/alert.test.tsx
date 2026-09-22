@@ -4,6 +4,12 @@ import { Alert, AlertDescription, AlertTitle } from '../alert';
 import { InfoIcon } from 'lucide-react';
 
 describe('Alert compact typography', () => {
+  it.each(['default', 'sm', 'xs'] as const)('colors the info icon without changing text at size %s', size => {
+    render(<Alert variant="info" size={size}><InfoIcon /><AlertDescription>操作提示</AlertDescription></Alert>);
+    expect(screen.getByRole('alert')).toHaveClass('*:[svg]:text-primary', 'text-foreground');
+    expect(screen.getByRole('alert')).not.toHaveClass('*:[svg]:text-current');
+  });
+
   it.each(['default', 'sm', 'xs'] as const)('uses a 4px icon gap at size %s', size => {
     render(<Alert size={size}><InfoIcon /><AlertDescription>操作提示</AlertDescription></Alert>);
     expect(screen.getByRole('alert')).toHaveClass('has-[>svg]:gap-x-1');
