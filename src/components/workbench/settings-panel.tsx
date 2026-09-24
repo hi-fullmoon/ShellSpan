@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CompactDialogHeader } from '@/components/ui/compact-dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -435,7 +435,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => onOpenChange(nextOpen)}>
       <DialogContent
-        className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=dialog-close]]:size-8 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 [&_[data-slot=select-trigger]]:min-w-36 sm:rounded-xl"
+        className="flex max-h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=dialog-close]]:size-8 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 [&_[data-slot=select-trigger]]:min-w-36 sm:rounded-xl"
       >
         <TooltipProvider>
           <CompactDialogHeader
@@ -459,7 +459,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               {SETTINGS_SECTIONS.map((section) => {
                 const Icon = section.icon;
                 return (
-                  <TabsTrigger key={section.id} value={section.id} className="h-8 flex-none justify-start px-2.5 text-[13px]">
+                  <TabsTrigger key={section.id} value={section.id} className="h-8 flex-none justify-start px-2.5">
                     <Icon data-icon="inline-start" />
                     {t(section.titleKey)}
                   </TabsTrigger>
@@ -929,7 +929,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </Select>
                 </SettingRow>
                 <SettingRow label={t('settings.sftp.downloadDirectory')} description={t('settings.sftp.downloadDirectoryDescription')}>
-                  <div className="flex gap-1">
+                  <div className="flex gap-2">
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -1080,6 +1080,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 {t('settings.shortcuts.conflict', { action: shortcutLabels[conflictAction] })}
               </p>
             )}
+            <DialogFooter>
+              <Button type="button" variant="outline" size="sm" onClick={closeRecorder}>
+                {t('common.cancel')}
+              </Button>
+            </DialogFooter>
           </DialogContent>
           </Dialog>
         </TooltipProvider>

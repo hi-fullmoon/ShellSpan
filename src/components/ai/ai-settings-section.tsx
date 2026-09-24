@@ -8,6 +8,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Field } from '@/components/ui/field';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/hooks/useI18n';
@@ -160,7 +161,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   };
 
   return (
-    <div className={cn('@container flex flex-col', embedded ? 'gap-4' : 'gap-5 px-4 py-4')}>
+    <div className={cn('@container flex flex-col', embedded ? 'gap-3' : 'gap-5 px-4 py-4')}>
       {!embedded && (
         <div className="flex min-w-0 flex-col gap-1">
           <h2 className="text-base font-semibold text-foreground">{t('settings.ai.title')}</h2>
@@ -245,6 +246,13 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
             </Field>
           );
         })}
+        {providers.length === 0 && (
+          <EmptyState
+            title={t('settings.ai.providersEmpty')}
+            description={t('settings.ai.providersEmptyDescription')}
+            className="py-6"
+          />
+        )}
         <SettingRow
           label={t('settings.ai.contextLines')}
           description={t('settings.ai.contextHint')}

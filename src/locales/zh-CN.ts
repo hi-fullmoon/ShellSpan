@@ -1145,6 +1145,8 @@ export default {
   'settings.ai.addProvider': '添加厂商',
   'settings.ai.addProviderTitle': '添加 AI 厂商',
   'settings.ai.addProviderDescription': '选择厂商并填写凭据，其余配置将使用推荐默认值。',
+  'settings.ai.providersEmpty': '暂无厂商',
+  'settings.ai.providersEmptyDescription': '添加一个厂商后，即可在终端和工作台中使用 AI 助手。',
   'settings.ai.editProvider': '编辑',
   'settings.ai.editProviderTitle': '编辑 AI 服务',
   'settings.ai.editProviderDescription': '更新 {name} 的凭据或模型。',
