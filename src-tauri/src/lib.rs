@@ -402,6 +402,7 @@ pub fn run() {
             commands::open_path,
             commands::reveal_path,
             commands::pick_private_key_file,
+            commands::pick_profile_avatar,
             commands::open_remote_file,
             commands::preview_local_file,
             ai_attachment::read_ai_attachment,
@@ -531,4 +532,6 @@ mod tests {
         assert_eq!(output, "a\u{FFFD}b");
         assert!(pending_bytes.is_empty());
     }
+
+    include!("tests/tauri_config.rs");
 }
