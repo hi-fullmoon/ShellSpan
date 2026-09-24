@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeploymentWorkflowRecord } from '@/lib/deployment/types';
 import { buildDeploymentTemplate } from '@/lib/deployment/editor';
@@ -39,12 +39,12 @@ function record(id: string, name: string): DeploymentWorkflowRecord {
 const current = record('workflow-1', 'Website');
 const other = record('workflow-2', 'Other site');
 
-function renderToolbar(dirty = false): void {
+function renderToolbar(dirty = false, layout: 'wide' | 'compact' = 'wide'): void {
   render(
     <WorkflowEditorToolbar
       workflowId={current.id}
       workflowName={current.name}
-      layout="wide"
+      layout={layout}
       enabled={current.enabled}
       editable
       issueCount={0}
@@ -107,5 +107,34 @@ describe('WorkflowEditorToolbar delete entry', () => {
     useDeploymentWorkflowRunStore.setState({ preparing: true });
     renderToolbar();
     expect(screen.getByTestId('deployment-delete-workflow')).toBeDisabled();
+  });
+});
+
+describe('WorkflowEditorToolbar header actions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useDeploymentWorkflowStore.getState().reset();
+    useDeploymentWorkflowRunStore.getState().reset();
+    useDeploymentWorkflowStore.setState({ catalog: null, initialized: true });
+  });
+
+  it('renders borderless icon buttons in both layouts', () => {
+    for (const layout of ['wide', 'compact'] as const) {
+      renderToolbar(false, layout);
+      const labels = [
+        'deployment.editor.nodeLibrary',
+        'deployment.editor.settings',
+        'deployment.editor.configuration',
+        'deployment.editor.delete.title',
+      ];
+      for (const label of labels) {
+        const button = screen.queryByRole('button', { name: label });
+        // The inspector button only exists outside the wide layout.
+        if (!button && label === 'deployment.editor.configuration' && layout === 'wide') continue;
+        expect(button, `${layout}:${label}`).not.toBeNull();
+        expect(button, `${layout}:${label} must stay borderless (ghost)`).not.toHaveClass('border');
+      }
+      cleanup();
+    }
   });
 });

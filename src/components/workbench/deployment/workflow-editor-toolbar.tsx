@@ -124,7 +124,7 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
           <Button
             ref={libraryTriggerRef}
             size="icon-sm"
-            variant="outline"
+            variant="ghost"
             onClick={onOpenLibrary}
             disabled={!editable}
             aria-label={t('deployment.editor.nodeLibrary')}
@@ -135,7 +135,7 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
           <Button
             ref={settingsTriggerRef}
             size="icon-sm"
-            variant="outline"
+            variant="ghost"
             onClick={onOpenSettings}
             disabled={!editable}
             aria-label={t('deployment.editor.settings')}
@@ -147,7 +147,7 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
             <Button
               ref={inspectorTriggerRef}
               size="icon-sm"
-              variant="outline"
+              variant="ghost"
               onClick={onOpenInspector}
               aria-label={t('deployment.editor.configuration')}
               title={t('deployment.editor.configuration')}
