@@ -17,7 +17,6 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
-import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
 import { PinIcon, XIcon } from 'lucide-react';
@@ -66,7 +65,6 @@ interface SessionTabProps {
   dragging?: boolean;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
-  showSeparatorAfter?: boolean;
   onActivate: (sessionId: string) => void;
   onContextMenu: (session: TerminalSession, x: number, y: number) => void;
   onClose: (sessionId: string) => void;
@@ -79,7 +77,6 @@ const SessionTab: React.FC<SessionTabProps> = ({
   dragging = false,
   showDropIndicatorLeft = false,
   showDropIndicatorRight = false,
-  showSeparatorAfter = false,
   onActivate,
   onContextMenu,
   onClose,
@@ -113,40 +110,29 @@ const SessionTab: React.FC<SessionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-7.5 w-42 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-left text-xs outline-none transition-[background-color,border-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
-        active ? 'bg-app-tab-active text-app-tab-accent' : 'bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
+        'group relative flex h-8 w-42 shrink-0 items-center gap-1.5 rounded-md border px-2 text-left text-xs outline-none transition-[background-color,border-color,color,opacity,box-shadow] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
+        active
+          ? 'border-app-border bg-app-surface text-app-text shadow-xs'
+          : 'border-transparent bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
-      style={session.color ? { backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, transparent)` } : undefined}
+      style={session.color ? {
+        backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, transparent)`,
+        ...(active ? { borderColor: session.color } : {}),
+      } : undefined}
     >
-      {active && (
-        <div
-          aria-hidden="true"
-          data-active-tab-indicator
-          className="pointer-events-none absolute inset-0 rounded-md border border-app-tab-accent"
-          style={session.color ? { borderColor: session.color } : undefined}
-        />
-      )}
-      {showSeparatorAfter && (
-        <Separator
-          orientation="vertical"
-          aria-hidden="true"
-          data-tab-separator
-          className="pointer-events-none absolute right-[-4px] top-1/2 h-4 -translate-y-1/2 bg-app-border"
-        />
-      )}
       {showDropIndicatorLeft && (
         <div
           data-drop-indicator="left"
           // Absolute offsets start at the tab's inner border edge. Account
-          // for that 1px border when centering in the 5px outer gap.
-          className="pointer-events-none absolute left-[-3.5px] top-1/2 z-10 h-[20px] w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary"
+          // for that 1px border when centering in the 4px gap between tabs.
+          className="pointer-events-none absolute left-[-3px] top-1/2 z-10 h-6 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary"
         />
       )}
       {showDropIndicatorRight && (
         <div
           data-drop-indicator="right"
-          className="pointer-events-none absolute right-[-3.5px] top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary"
+          className="pointer-events-none absolute right-[-3px] top-1/2 z-10 h-6 w-0.5 translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary"
         />
       )}
       <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -167,7 +153,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
               e.stopPropagation();
               onTogglePin?.(session.sessionId);
             }}
-            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
           >
             <PinIcon className="size-3" strokeWidth={1.5} />
           </button>
@@ -181,7 +167,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
               onClose(session.sessionId);
             }}
             className={cn(
-              'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
+              'flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
               !dragging && active ? 'flex' : 'hidden group-hover:flex',
             )}
           >
@@ -201,7 +187,6 @@ interface SortableTabProps {
   onTogglePin: (sessionId: string) => void;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
-  showSeparatorAfter?: boolean;
 }
 
 const SortableTab: React.FC<SortableTabProps> = ({
@@ -213,7 +198,6 @@ const SortableTab: React.FC<SortableTabProps> = ({
   onTogglePin,
   showDropIndicatorLeft,
   showDropIndicatorRight,
-  showSeparatorAfter,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: session.sessionId,
@@ -223,7 +207,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
   return (
     <div
       ref={setNodeRef}
-      className="h-8.5 shrink-0 py-0.5"
+      className="h-10 shrink-0 py-1"
       {...attributes}
       {...listeners}
       style={{
@@ -238,7 +222,6 @@ const SortableTab: React.FC<SortableTabProps> = ({
         dragging={isDragging}
         showDropIndicatorLeft={showDropIndicatorLeft}
         showDropIndicatorRight={showDropIndicatorRight}
-        showSeparatorAfter={showSeparatorAfter}
         onActivate={onActivate}
         onContextMenu={onContextMenu}
         onClose={onClose}
@@ -584,7 +567,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const closingSession = closingSessionId ? (sessions.find((s) => s.sessionId === closingSessionId) ?? null) : null;
 
   const visibleTabCount = sessions.length - (draggingSessionId ? 1 : 0);
-  const visibleSessions = draggingSessionId ? sessions.filter((session) => session.sessionId !== draggingSessionId) : sessions;
   const displayedInsertIndex = externalInsertIndex !== null ? externalInsertIndex : draggingSessionId ? insertIndex : null;
   // Dropping back into the dragged tab's own slot is a no-op, so suppress the
   // indicator that would otherwise sit between the dragged tab and its right
@@ -605,7 +587,10 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         if ((e.target as HTMLElement).closest('[data-session-tab]')) return;
         onNewTabClick();
       }}
-      className={cn('group/tabbar relative my-0 flex h-8.5 items-start bg-app-surface px-[2px] py-0', shouldHide && 'h-0 overflow-hidden px-0')}
+      className={cn(
+        'group/tabbar relative my-0 flex h-10 items-start bg-app-bg px-0.5 py-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-app-border/40',
+        shouldHide && 'h-0 overflow-hidden px-0',
+      )}
     >
       <DndContext
         sensors={sensors}
@@ -617,16 +602,17 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={sessions.map((s) => s.sessionId)} strategy={() => null}>
-          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" onWheel={handleWheel} className="h-8.5 min-w-0 flex-1">
-            <div role="tablist" className="flex min-w-0 items-center gap-[4px] py-0">
+          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" onWheel={handleWheel} className="h-10 min-w-0 flex-1">
+            {/* The leading/trailing padding lives inside the scroll viewport so
+                the drop indicators flanking the first/last tab stay inside the
+                overflow clip instead of being cut off at the scroll origin. */}
+            <div role="tablist" className="flex min-w-0 items-center gap-1 px-1 py-0">
               {sessions.map((session, index) => {
                 const isDragging = draggingSessionId === session.sessionId;
                 const draggedIndex = draggingSessionId ? sessions.findIndex((s) => s.sessionId === draggingSessionId) : -1;
                 const visibleIndex = isDragging ? -1 : index - (draggedIndex >= 0 && draggedIndex < index ? 1 : 0);
                 const isLastVisible = visibleIndex === visibleTabCount - 1;
                 const isActive = activeSessionId === session.sessionId;
-                const nextVisibleSession = visibleIndex >= 0 ? visibleSessions[visibleIndex + 1] : undefined;
-                const showSeparatorAfter = !!nextVisibleSession && effectiveInsertIndex !== visibleIndex + 1;
 
                 return (
                   <SortableTab
@@ -639,7 +625,6 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
                     onTogglePin={togglePin}
                     showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
                     showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
-                    showSeparatorAfter={showSeparatorAfter}
                   />
                 );
               })}

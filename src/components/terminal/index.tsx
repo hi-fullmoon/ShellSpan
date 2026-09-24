@@ -586,7 +586,14 @@ const Terminal: React.FC = () => {
       }
       const direction = getTerminalSplitDirection(target.element.getBoundingClientRect(), x, y);
       if (direction) {
-        setDropPreview(canCreateSplitAt(direction, target.slot)
+        // Splitting its own pane only works while the source group keeps at
+        // least one tab behind; a pane's only tab has nowhere to go, and the
+        // drop would be a guaranteed no-op, so don't preview it.
+        const targetGroup = findTerminalGroup(split, target.slot);
+        const splittable = targetGroup !== null
+          && canCreateSplitAt(direction, target.slot)
+          && (target.slot !== source || targetGroup.sessionIds.some((id) => id !== sessionId));
+        setDropPreview(splittable
           ? { kind: 'split', direction, slot: target.slot }
           : null);
       } else {
