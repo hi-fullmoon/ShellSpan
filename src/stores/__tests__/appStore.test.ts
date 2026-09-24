@@ -12,7 +12,13 @@ vi.mock('@/lib/ipc/tauri', () => ({
   invokeSavePreferences: mocks.savePreferences,
 }));
 
-import { DEFAULT_SHORTCUTS, mergeShortcutBindings, useAppStore } from '../appStore';
+import {
+  DEFAULT_SHORTCUTS,
+  mergeShortcutBindings,
+  sanitizeProfileAvatar,
+  sanitizeProfileName,
+  useAppStore,
+} from '../appStore';
 
 const initialState = useAppStore.getState();
 
@@ -309,5 +315,55 @@ describe('appStore', () => {
       terminalRightClickBehavior: 'copyPaste',
       terminalBellStyle: 'sound',
     });
+  });
+
+  it('updates and persists profile preferences', async () => {
+    await useAppStore.getState().hydrateFromDb();
+    const avatar = 'data:image/png;base64,aGVsbG8=';
+    vi.useFakeTimers();
+    useAppStore.getState().setProfileName('  小明  ');
+    useAppStore.getState().setProfileAvatar(avatar);
+
+    expect(useAppStore.getState()).toMatchObject({
+      profileName: '小明',
+      profileAvatar: avatar,
+    });
+
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(mocks.savePreferences).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        ['profileName', '"小明"'],
+        ['profileAvatar', `"${avatar}"`],
+      ]),
+    );
+  });
+
+  it('drops invalid persisted profile values during hydration', async () => {
+    mocks.loadPreferences.mockResolvedValue([
+      ['profileName', 42],
+      ['profileAvatar', 'javascript:alert(1)'],
+    ]);
+
+    await useAppStore.getState().hydrateFromDb();
+
+    expect(useAppStore.getState()).toMatchObject({
+      profileName: '',
+      profileAvatar: '',
+    });
+  });
+
+  it('sanitizes profile names and rejects unsafe avatar payloads', () => {
+    expect(sanitizeProfileName('  Alice  ')).toBe('Alice');
+    expect(sanitizeProfileName('x'.repeat(40))).toHaveLength(32);
+    expect(sanitizeProfileName(undefined)).toBe('');
+
+    expect(sanitizeProfileAvatar('data:image/png;base64,aGVsbG8=')).toBe(
+      'data:image/png;base64,aGVsbG8=',
+    );
+    expect(sanitizeProfileAvatar('data:image/svg+xml;base64,PHN2Zz4=')).toBe('');
+    expect(sanitizeProfileAvatar('not a data url')).toBe('');
+    expect(sanitizeProfileAvatar(`data:image/png;base64,${'A'.repeat(3_000_000)}`)).toBe('');
+    expect(sanitizeProfileAvatar(null)).toBe('');
   });
 });

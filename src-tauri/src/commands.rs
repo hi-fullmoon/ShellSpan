@@ -1995,6 +1995,57 @@ pub(crate) async fn pick_private_key_file() -> Result<Option<String>, String> {
     .map_err(|error| format!("failed to run key file dialog: {error}"))?
 }
 
+const PROFILE_AVATAR_MAX_INPUT_BYTES: u64 = 20 * 1024 * 1024;
+const PROFILE_AVATAR_SIZE: u32 = 256;
+
+/// Normalizes an untrusted avatar image into a centered square PNG data URL so
+/// the stored preference is bounded and safe to render directly.
+pub(crate) fn process_profile_avatar(bytes: &[u8]) -> Result<String, String> {
+    let raster = image::load_from_memory(bytes)
+        .map_err(|error| format!("failed to decode avatar image: {error}"))?;
+    let (width, height) = (raster.width(), raster.height());
+    let side = width.min(height);
+    let left = (width - side) / 2;
+    let top = (height - side) / 2;
+    let square = raster
+        .crop_imm(left, top, side, side)
+        .resize_exact(
+            PROFILE_AVATAR_SIZE,
+            PROFILE_AVATAR_SIZE,
+            image::imageops::FilterType::Triangle,
+        )
+        .to_rgba8();
+    let mut output = std::io::Cursor::new(Vec::new());
+    square
+        .write_to(&mut output, image::ImageFormat::Png)
+        .map_err(|error| format!("failed to encode avatar image: {error}"))?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(output.into_inner());
+    Ok(format!("data:image/png;base64,{encoded}"))
+}
+
+#[tauri::command]
+pub(crate) async fn pick_profile_avatar() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let path = rfd::FileDialog::new()
+            .set_title("选择头像图片")
+            .add_filter("图片", &["png", "jpg", "jpeg", "webp", "gif"])
+            .pick_file();
+        let Some(path) = path else {
+            return Ok(None);
+        };
+        let metadata = std::fs::metadata(&path)
+            .map_err(|error| format!("failed to read avatar file metadata: {error}"))?;
+        if metadata.len() > PROFILE_AVATAR_MAX_INPUT_BYTES {
+            return Err("avatar image exceeds the 20 MB size limit".to_string());
+        }
+        let bytes =
+            std::fs::read(&path).map_err(|error| format!("failed to read avatar file: {error}"))?;
+        process_profile_avatar(&bytes).map(Some)
+    })
+    .await
+    .map_err(|error| format!("failed to run avatar file dialog: {error}"))?
+}
+
 #[tauri::command]
 pub(crate) async fn open_remote_file(
     app: AppHandle,

@@ -39,6 +39,8 @@ export const DEFAULT_SHORTCUTS: ShortcutBindings = {
 interface AppPreferences {
   theme: ThemeMode;
   locale: Locale;
+  profileName: string;
+  profileAvatar: string;
   startupUpdateCheck: boolean;
   petdexEnabled: boolean;
   startupSection: AppSection;
@@ -90,6 +92,8 @@ interface AppState extends AppPreferences {
   consumeWorkbenchAction: (action: 'newConnection') => void;
   setTheme: (theme: ThemeMode) => void;
   setLocale: (locale: Locale) => void;
+  setProfileName: (name: string) => void;
+  setProfileAvatar: (avatar: string) => void;
   setStartupUpdateCheck: (enabled: boolean) => void;
   setPetdexEnabled: (enabled: boolean) => Promise<PetdexConnectionStatus>;
   setStartupSection: (section: AppSection) => void;
@@ -124,7 +128,7 @@ interface AppState extends AppPreferences {
 }
 
 const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
-  'theme', 'locale', 'startupUpdateCheck', 'petdexEnabled', 'startupSection',
+  'theme', 'locale', 'profileName', 'profileAvatar', 'startupUpdateCheck', 'petdexEnabled', 'startupSection',
   'terminalFontSize', 'terminalFontFamily', 'terminalCursorBlink',
   'terminalCursorStyle', 'terminalCopyOnSelect', 'terminalScrollback',
   'terminalColorScheme', 'terminalMultiLinePasteWarning',
@@ -141,6 +145,8 @@ function getDefaultPreferences(): AppPreferences {
   return {
     theme: 'system',
     locale: 'zh-CN',
+    profileName: '',
+    profileAvatar: '',
     startupUpdateCheck: true,
     petdexEnabled: false,
     startupSection: 'workbench',
@@ -190,6 +196,26 @@ export function mergeShortcutBindings(value: unknown): ShortcutBindings {
   ) as ShortcutBindings;
 }
 
+export const PROFILE_NAME_MAX_LENGTH = 32;
+const PROFILE_AVATAR_MAX_LENGTH = 2_000_000;
+const PROFILE_AVATAR_PATTERN = /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+export function sanitizeProfileName(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.trim().slice(0, PROFILE_NAME_MAX_LENGTH);
+}
+
+export function sanitizeProfileAvatar(value: unknown): string {
+  if (
+    typeof value !== 'string'
+    || value.length > PROFILE_AVATAR_MAX_LENGTH
+    || !PROFILE_AVATAR_PATTERN.test(value)
+  ) {
+    return '';
+  }
+  return value;
+}
+
 function entriesToPreferences(entries: [string, string][]): Partial<AppPreferences> {
   const prefs: Record<string, unknown> = {};
   for (const [key, value] of entries) {
@@ -199,6 +225,8 @@ function entriesToPreferences(entries: [string, string][]): Partial<AppPreferenc
   return {
     theme: (prefs.theme as ThemeMode) ?? defaults.theme,
     locale: (prefs.locale as Locale) ?? defaults.locale,
+    profileName: sanitizeProfileName(prefs.profileName),
+    profileAvatar: sanitizeProfileAvatar(prefs.profileAvatar),
     startupUpdateCheck: (prefs.startupUpdateCheck as boolean) ?? defaults.startupUpdateCheck,
     petdexEnabled: (prefs.petdexEnabled as boolean) ?? defaults.petdexEnabled,
     startupSection: (prefs.startupSection as AppSection) ?? defaults.startupSection,
@@ -342,6 +370,8 @@ export const useAppStore = create<AppState>()(
       void changeLocale(locale);
       set({ locale });
     },
+    setProfileName: (name) => set({ profileName: sanitizeProfileName(name) }),
+    setProfileAvatar: (avatar) => set({ profileAvatar: sanitizeProfileAvatar(avatar) }),
     setStartupUpdateCheck: (startupUpdateCheck) => set({ startupUpdateCheck }),
     setPetdexEnabled: async (requestedEnabled) => {
       const revision = ++petdexConfigurationRevision;
@@ -419,6 +449,8 @@ useAppStore.subscribe(
   (state): AppPreferences => ({
     theme: state.theme,
     locale: state.locale,
+    profileName: state.profileName,
+    profileAvatar: state.profileAvatar,
     startupUpdateCheck: state.startupUpdateCheck,
     petdexEnabled: state.petdexEnabled,
     startupSection: state.startupSection,
