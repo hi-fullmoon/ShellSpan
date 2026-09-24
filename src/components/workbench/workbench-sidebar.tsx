@@ -12,28 +12,31 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { SettingsSection, WorkbenchTab } from '@/types';
 import { useUpdateStore } from '@/stores/updateStore';
 import { useAppStore } from '@/stores/appStore';
+import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import {
   ActivityIcon,
   ChevronUpIcon,
+  CloudUploadIcon,
   FileTextIcon,
   InfoIcon,
   KeyboardIcon,
   KeyRoundIcon,
   LogOutIcon,
   PaletteIcon,
+  PencilIcon,
   RefreshCwIcon,
   ServerIcon,
   SettingsIcon,
   ShieldCheckIcon,
-  UserRoundIcon,
 } from 'lucide-react';
+import { UserAvatar } from '@/components/workbench/user-avatar';
+import { UserProfileDialog } from '@/components/workbench/user-profile-dialog';
 
 interface WorkbenchSidebarProps {
   activeTab: WorkbenchTab;
@@ -100,6 +103,10 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
 }) => {
   const { t } = useI18n();
   const settingsShortcut = useAppStore((state) => state.shortcuts.openSettings);
+  const profileName = useAppStore((state) => state.profileName);
+  const profileAvatar = useAppStore((state) => state.profileAvatar);
+  const [profileDialogOpen, setProfileDialogOpen] = React.useState(false);
+  const displayName = profileName || t('workbench.userMenu.name');
   const platform = getPlatform();
   const settingsShortcutLabel = getShortcutKeys(settingsShortcut, platform)
     .join(platform === 'macos' ? '' : '+');
@@ -107,6 +114,9 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
   const checkingForUpdates = updatePhase === 'checking';
   const downloadingUpdate = updatePhase === 'update_available' || updatePhase === 'downloading';
   const updateBusy = checkingForUpdates || downloadingUpdate;
+  const deploymentAttentionCount = useDeploymentWorkflowRunStore(
+    (state) => state.runs.filter((run) => run.status === 'state_unknown').length,
+  );
   const items: MenuItem[] = [
     {
       key: 'connections',
@@ -117,6 +127,12 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
       key: 'keychain',
       label: t('workbench.keychain.title'),
       icon: KeyRoundIcon,
+    },
+    {
+      key: 'deployments',
+      label: t('deployment.title'),
+      icon: CloudUploadIcon,
+      badge: deploymentAttentionCount,
     },
     {
       key: 'knownHosts',
@@ -160,12 +176,10 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
             />
           }
         >
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <UserRoundIcon aria-hidden />
-          </span>
+          <UserAvatar avatar={profileAvatar} name={displayName} className="size-7 shrink-0" />
           <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5 leading-none">
-            <span className="text-sm font-medium text-foreground">{t('workbench.userMenu.name')}</span>
-            <span className="text-[11px] text-muted-foreground">{t('workbench.userMenu.localProfile')}</span>
+            <span className="max-w-full truncate text-sm font-medium text-foreground">{displayName}</span>
+            <span className="max-w-full truncate text-[11px] text-muted-foreground">{t('workbench.userMenu.localProfile')}</span>
           </span>
           <ChevronUpIcon data-icon="inline-end" className="text-muted-foreground" aria-hidden />
         </DropdownMenuTrigger>
@@ -174,18 +188,21 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
           side="top"
           align="start"
           sideOffset={6}
-          className="workbench-user-menu w-(--anchor-width) max-w-[calc(100vw-1rem)] rounded-2xl border border-border p-1 shadow-[var(--shadow-dialog)] ring-0 backdrop-blur-xl"
+          className="workbench-user-menu max-h-[calc(100vh-6rem)] w-(--anchor-width) max-w-[calc(100vw-1rem)] overflow-y-auto rounded-2xl border border-border p-1 shadow-[var(--shadow-dialog)] ring-0 backdrop-blur-xl"
         >
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="flex items-center gap-2 px-1.5 pt-1.5 pb-2">
-              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary [&_svg]:size-3.5">
-                <UserRoundIcon aria-hidden />
-              </span>
-              <span className="flex min-w-0 flex-col gap-0.5 leading-[18px]">
-                <span className="truncate text-sm font-medium text-foreground">{t('workbench.userMenu.name')}</span>
+            <DropdownMenuItem
+              className="flex items-center gap-2 px-1.5 pt-1.5 pb-2"
+              onClick={() => setProfileDialogOpen(true)}
+            >
+              <UserAvatar avatar={profileAvatar} name={displayName} className="size-10 shrink-0" iconClassName="size-5" />
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-[18px]">
+                <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
                 <span className="truncate text-xs font-normal text-muted-foreground">{t('workbench.userMenu.localProfile')}</span>
               </span>
-            </DropdownMenuLabel>
+              <PencilIcon className="size-3 shrink-0 text-muted-foreground/60" aria-hidden />
+              <span className="sr-only">{t('workbench.userMenu.editProfile')}</span>
+            </DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuGroup>
             <DropdownMenuItem onClick={() => onOpenSettings('general')}>
@@ -228,6 +245,8 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <UserProfileDialog open={profileDialogOpen} onOpenChange={setProfileDialogOpen} />
     </Sidebar>
   );
 };
