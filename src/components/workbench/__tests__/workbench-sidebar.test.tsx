@@ -1,19 +1,52 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { WorkbenchSidebar } from '../workbench-sidebar';
+import { useAppStore } from '@/stores/appStore';
 import { useUpdateStore } from '@/stores/updateStore';
+import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
+import type { DeploymentRunSummary } from '@/lib/deployment/types';
+
+function runSummary(
+  runId: string,
+  status: DeploymentRunSummary['status'],
+): DeploymentRunSummary {
+  return {
+    runId,
+    workflowId: 'workflow-1',
+    workflowRevision: 1,
+    operationKind: 'deploy',
+    triggerKind: 'manual',
+    status,
+    planDigest: 'sha256:plan',
+    targetRelease: {
+      releaseId: 'release-1',
+      artifactContentDigest: 'sha256:artifact',
+      layoutDigest: 'sha256:layout',
+    },
+    artifactReferences: [],
+    expiresAt: Date.now() + 60_000,
+    expired: false,
+    planDrifted: false,
+    createdAt: 10,
+    updatedAt: 11,
+    startedAt: null,
+    finishedAt: null,
+  };
+}
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
     t: (key: string) => ({
       'workbench.connections.title': 'Connections',
       'workbench.keychain.title': 'Keychain',
+      'deployment.title': 'Deployments',
       'workbench.knownHosts.title': 'Known Hosts',
       'workbench.monitor.title': 'Monitor',
       'workbench.logs.title': 'Log explorer',
       'workbench.settings.title': 'Settings',
       'workbench.userMenu.open': 'Open user menu',
       'workbench.userMenu.name': 'Me',
+      'workbench.userMenu.editProfile': 'Edit profile',
       'workbench.userMenu.localProfile': 'Local profile',
       'workbench.userMenu.about': 'About',
       'workbench.userMenu.checkingUpdate': 'Checking for updates…',
@@ -22,6 +55,8 @@ vi.mock('@/hooks/useI18n', () => ({
       'settings.appearance.title': 'Appearance',
       'settings.shortcuts.title': 'Keyboard shortcuts',
       'settings.general.checkUpdate': 'Check for updates',
+      'common.save': 'Save',
+      'common.cancel': 'Cancel',
     })[key] ?? key,
   }),
 }));
@@ -29,12 +64,34 @@ vi.mock('@/hooks/useI18n', () => ({
 describe('WorkbenchSidebar', () => {
   beforeEach(() => {
     useUpdateStore.setState({ phase: 'idle' });
+    useAppStore.setState({ profileName: '', profileAvatar: '' });
+    useDeploymentWorkflowRunStore.setState({ runs: [] });
   });
 
-  it('hides the deployment center menu entry', () => {
-    render(<WorkbenchSidebar activeTab="connections" onTabChange={vi.fn()} onOpenSettings={vi.fn()} onCheckForUpdates={vi.fn()} onOpenAbout={vi.fn()} onRequestExit={vi.fn()} />);
+  it('activates the deployment center menu entry', () => {
+    const onTabChange = vi.fn();
+    render(<WorkbenchSidebar activeTab="connections" onTabChange={onTabChange} onOpenSettings={vi.fn()} onCheckForUpdates={vi.fn()} onOpenAbout={vi.fn()} onRequestExit={vi.fn()} />);
 
-    expect(screen.queryByRole('button', { name: /deployment.title/ })).not.toBeInTheDocument();
+    const deployments = screen.getByRole('button', { name: 'Deployments' });
+    expect(deployments).toBeInTheDocument();
+
+    fireEvent.click(deployments, { detail: 0 });
+
+    expect(onTabChange).toHaveBeenCalledOnce();
+    expect(onTabChange).toHaveBeenCalledWith('deployments');
+  });
+
+  it('badges the deployment entry with runs awaiting reconciliation', () => {
+    useDeploymentWorkflowRunStore.setState({
+      runs: [
+        runSummary('run-1', 'state_unknown'),
+        runSummary('run-2', 'state_unknown'),
+        runSummary('run-3', 'succeeded'),
+      ],
+    });
+    render(<WorkbenchSidebar activeTab="deployments" onTabChange={vi.fn()} onOpenSettings={vi.fn()} onCheckForUpdates={vi.fn()} onOpenAbout={vi.fn()} onRequestExit={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: /Deployments/ })).toHaveTextContent('2');
   });
 
   it('activates a menu item when WKWebView drops its trackpad pointerdown', () => {
@@ -101,6 +158,88 @@ describe('WorkbenchSidebar', () => {
 
     expect(onOpenSettings).toHaveBeenCalledWith('general');
     expect(onTabChange).not.toHaveBeenCalled();
+  });
+
+  it('shows the custom profile name and avatar on the trigger', () => {
+    const avatar = 'data:image/png;base64,aGVsbG8=';
+    useAppStore.setState({ profileName: '小明', profileAvatar: avatar });
+    render(
+      <WorkbenchSidebar
+        activeTab="connections"
+        onTabChange={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onCheckForUpdates={vi.fn()}
+        onOpenAbout={vi.fn()}
+        onRequestExit={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: /Open user menu/ });
+    expect(trigger).toHaveTextContent('小明');
+    expect(trigger).not.toHaveTextContent('Me');
+    const avatarImage = screen.getByRole('img', { name: '小明' });
+    expect(avatarImage).toHaveAttribute('src', avatar);
+  });
+
+  it('keeps an overlong profile name on a single truncated line in the trigger', () => {
+    const longName = '天'.repeat(32);
+    useAppStore.setState({ profileName: longName });
+    render(
+      <WorkbenchSidebar
+        activeTab="connections"
+        onTabChange={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onCheckForUpdates={vi.fn()}
+        onOpenAbout={vi.fn()}
+        onRequestExit={vi.fn()}
+      />,
+    );
+
+    const nameLine = screen.getByText(longName);
+    expect(nameLine).toHaveClass('truncate', 'max-w-full');
+  });
+
+  it('enlarges the avatar in the user menu header', () => {
+    const avatar = 'data:image/png;base64,aGVsbG8=';
+    useAppStore.setState({ profileName: '小明', profileAvatar: avatar });
+    render(
+      <WorkbenchSidebar
+        activeTab="connections"
+        onTabChange={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onCheckForUpdates={vi.fn()}
+        onOpenAbout={vi.fn()}
+        onRequestExit={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open user menu' }));
+
+    const menu = screen.getByRole('menu');
+    const headerAvatar = within(menu).getByAltText('小明');
+    expect(headerAvatar.parentElement).toHaveClass('size-10', 'shrink-0');
+  });
+
+  it('opens the profile dialog from the identity row in the user menu', async () => {
+    render(
+      <WorkbenchSidebar
+        activeTab="connections"
+        onTabChange={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onCheckForUpdates={vi.fn()}
+        onOpenAbout={vi.fn()}
+        onRequestExit={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open user menu' }));
+    // The identity row itself is the profile entry (GitHub-style), announced
+    // via the screen-reader-only "Edit profile" hint.
+    fireEvent.click(screen.getByRole('menuitem', { name: /Edit profile/ }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Edit profile');
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeInTheDocument();
   });
 
   it('opens the appearance section from the user menu', () => {

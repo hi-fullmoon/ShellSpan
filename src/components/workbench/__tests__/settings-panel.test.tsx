@@ -339,11 +339,11 @@ describe('SettingsPanel', () => {
       '[&_[data-slot=select-trigger]]:min-w-36',
     );
     expect(settingsDialog).toHaveClass(
-      'max-h-[min(48rem,calc(100vh-2rem))]',
+      'h-[min(48rem,calc(100vh-2rem))]',
       'w-[min(64rem,calc(100vw-2rem))]',
       'max-w-none',
     );
-    expect(settingsDialog.className).not.toMatch(/(?:^|\s)h-\[min\(48rem/);
+    expect(settingsDialog.className).not.toMatch(/(?:^|\s)max-h-\[min\(48rem/);
   });
 
   it('uses the small button scale throughout every settings section', async () => {
@@ -420,11 +420,13 @@ describe('SettingsPanel', () => {
     const settingsCard = startupRow?.closest('[data-slot="card"]');
     const settingsGroups = settingsCard?.closest('[data-slot="settings-groups"]');
 
-    expect(startupRow).toHaveClass('min-h-16', '@min-[32rem]:flex-row');
+    expect(startupRow).toHaveClass('min-h-14', 'px-3.5', 'py-2', '@min-[32rem]:flex-row');
     expect(settingsCard).toHaveAttribute('data-variant', 'outline');
+    expect(settingsCard).toHaveAttribute('data-radius', 'compact');
     expect(updateRow?.closest('[data-slot="card"]')).toBe(settingsCard);
     expect(settingsCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(4);
     expect(settingsGroups).toHaveClass('flex-col', 'gap-3');
+    expect(settingsGroups?.firstElementChild).toHaveClass('gap-1.5');
 
     openSection('settings.terminal.title');
     const terminalGroups = screen
@@ -438,6 +440,24 @@ describe('SettingsPanel', () => {
       'settings.terminal.groupSafety',
       'settings.terminal.groupSessions',
     ]);
+  });
+
+  it('keeps section chrome and shortcut rows compact', async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+
+    const sectionHeader = screen
+      .getByRole('heading', { name: 'settings.general.title', level: 2 })
+      .parentElement?.parentElement;
+    expect(sectionHeader).toHaveClass('py-2');
+
+    const contentScroller = screen.getByRole('tabpanel').closest('[data-slot="scroll-area"]');
+    const viewport = contentScroller?.querySelector('[data-slot="scroll-area-viewport"]');
+    expect(viewport?.firstElementChild).toHaveClass('p-3.5', 'max-w-3xl');
+
+    openSection('settings.shortcuts.title');
+    const shortcutRow = screen.getByText('settings.shortcuts.newTerminalTab').parentElement;
+    expect(shortcutRow).toHaveClass('min-h-11', 'px-3.5', 'py-1.5');
   });
 
   it('reports close requests without changing the active app section', async () => {
