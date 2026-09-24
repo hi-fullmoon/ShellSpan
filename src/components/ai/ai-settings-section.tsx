@@ -111,6 +111,9 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
     () => providers.find((provider) => provider.id === selectedProviderId) ?? providers[0],
     [providers, selectedProviderId],
   );
+  // In native mode providers stay empty until the route snapshot hydrates;
+  // the empty state must not flash while that load is still in flight.
+  const providersLoaded = !nativeRouteMode || routeSnapshot !== undefined;
 
   useEffect(() => {
     if (selectedProvider && selectedProvider.id !== selectedProviderId) {
@@ -246,7 +249,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
             </Field>
           );
         })}
-        {providers.length === 0 && (
+        {providersLoaded && providers.length === 0 && (
           <EmptyState
             title={t('settings.ai.providersEmpty')}
             description={t('settings.ai.providersEmptyDescription')}

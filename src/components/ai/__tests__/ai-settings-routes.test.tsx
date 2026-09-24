@@ -125,4 +125,26 @@ describe('route-backed AI settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'settings.ai.editProvider' }));
     expect(mocks.save).not.toHaveBeenCalled();
   });
+
+  it('does not show the provider empty state while the route snapshot is still loading', () => {
+    useLlmRoutesStore.setState({ snapshot: undefined, status: 'loading', modelsByRoute: {} });
+
+    render(<AiSettingsSection />);
+
+    expect(screen.queryByText('settings.ai.providersEmpty')).not.toBeInTheDocument();
+    expect(screen.queryByText('settings.ai.providersEmptyDescription')).not.toBeInTheDocument();
+  });
+
+  it('shows the provider empty state once a loaded snapshot has no routes', () => {
+    useLlmRoutesStore.setState({
+      snapshot: { schemaVersion: 1, revision: 9, defaultSelection: undefined, routes: [] },
+      status: 'ready',
+      modelsByRoute: {},
+    });
+
+    render(<AiSettingsSection />);
+
+    expect(screen.getByText('settings.ai.providersEmpty')).toBeVisible();
+    expect(screen.getByText('settings.ai.providersEmptyDescription')).toBeVisible();
+  });
 });

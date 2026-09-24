@@ -468,20 +468,29 @@ describe('SettingsPanel', () => {
   });
 
   it('explains how to add the first provider when none is configured', async () => {
+    const previousProviders = useAiSettingsStore.getState().providers;
+    const previousDefault = useAiSettingsStore.getState().defaultProviderId;
     useAiSettingsStore.setState({ providers: [], defaultProviderId: '' });
-    render(<SettingsPanel />);
-    await waitFor(() => {});
-    openSection('settings.ai.title');
+    try {
+      render(<SettingsPanel />);
+      await waitFor(() => {});
+      openSection('settings.ai.title');
 
-    const emptyState = screen.getByText('settings.ai.providersEmpty').closest('[data-slot="empty-state"]');
-    const providerCard = emptyState?.closest('[data-slot="card"]');
+      const emptyState = screen.getByText('settings.ai.providersEmpty').closest('[data-slot="empty-state"]');
+      const providerCard = emptyState?.closest('[data-slot="card"]');
 
-    expect(emptyState).toHaveTextContent('settings.ai.providersEmptyDescription');
-    expect(providerCard).toBeInTheDocument();
-    expect(providerCard?.querySelectorAll('[data-slot="ai-provider-row"]')).toHaveLength(0);
-    expect(
-      screen.getByRole('button', { name: 'settings.ai.addProvider' }),
-    ).toBeInTheDocument();
+      expect(emptyState).toHaveTextContent('settings.ai.providersEmptyDescription');
+      expect(providerCard).toBeInTheDocument();
+      expect(providerCard?.querySelectorAll('[data-slot="ai-provider-row"]')).toHaveLength(0);
+      expect(
+        screen.getByRole('button', { name: 'settings.ai.addProvider' }),
+      ).toBeInTheDocument();
+    } finally {
+      useAiSettingsStore.setState({
+        providers: previousProviders,
+        defaultProviderId: previousDefault,
+      });
+    }
   });
 
   it('places global shortcut reset in the shortcuts title bar', async () => {
