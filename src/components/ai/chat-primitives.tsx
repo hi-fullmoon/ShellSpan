@@ -56,8 +56,13 @@ interface ConversationScrollerProps extends MessageScrollerProps {
 
 const SCROLL_EDGE_THRESHOLD = 8;
 
+/** Remaining distance to the bottom edge; negative while rubber-band overscroll stretches past it. */
+function distanceToBottom(viewport: HTMLElement): number {
+  return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+}
+
 function isNearBottom(viewport: HTMLElement): boolean {
-  return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= SCROLL_EDGE_THRESHOLD;
+  return distanceToBottom(viewport) <= SCROLL_EDGE_THRESHOLD;
 }
 
 function wantsScrollAnchor(child: React.ReactNode): boolean {
@@ -213,7 +218,9 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       followIntentRef.current = true;
       // A prior upward drag enters the primitive's settling-jump mode. Native
       // scrollbar movement emits no wheel/key event to release that mode.
-      scrollToEnd();
+      // Skip only while rubber-band overscroll sits past the bottom edge, where
+      // re-clamping would cancel the native bounce-back.
+      if (distanceToBottom(viewport) >= 0) scrollToEnd();
     } else if (viewport.scrollTop < start && !isNearBottom(viewport)) {
       followIntentRef.current = false;
       // A scrollbar drag may overlap the primitive's programmatic-scroll grace
@@ -247,7 +254,12 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       if (viewport && (isNearBottom(viewport) || !viewport.dataset.scrollable?.split(' ').includes('end'))) {
         followIntentRef.current = true;
         interruptRestore();
-        scrollToEnd();
+        // macOS rubber-band scrolling reports scrollTop past the bottom edge;
+        // writing scrollTop on those wheel events cancels the native bounce.
+        // Only jump while real distance remains (e.g. streamed output grew).
+        if (distanceToBottom(viewport) > 0.5) {
+          scrollToEnd();
+        }
         event.stopPropagation();
       }
     }

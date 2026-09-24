@@ -51,13 +51,13 @@ for (const engine of [chromium]) {
             className: 'ai-composer-toolbar flex min-w-0 items-center justify-between gap-3 px-2',
             'data-slot': 'ai-composer-seat',
           },
-          h('div', { className: 'ai-composer-tools flex min-w-0 flex-[0_1_auto] items-center gap-1' },
+          h('div', { className: 'ai-composer-tools flex min-w-0 flex-[0_2_auto] items-center gap-1' },
             h('button', { className: 'size-7 shrink-0' }, '+'),
             permissionControl(),
             executionSurfaceControl(),
           ),
-          h('div', { className: 'ai-composer-trailing flex min-w-0 flex-1 basis-0 items-center justify-end gap-1.5' },
-            h('button', { className: 'ai-model-trigger inline-flex h-7 min-w-0 max-w-full flex-[0_1_auto] items-center gap-1 overflow-hidden px-2 @min-[481px]/ai-workspace:shrink-0' },
+          h('div', { className: 'ai-composer-trailing flex min-w-0 flex-[1_1_auto] items-center justify-end gap-1.5' },
+            h('button', { className: 'ai-model-trigger inline-flex h-7 min-w-0 max-w-full flex-[0_1_auto] items-center gap-1 overflow-hidden px-2' },
               h('span', { className: 'ai-model-trigger-name min-w-0 max-w-60 flex-[0_1_auto] truncate' }, 'MiniMax-M3 · Default'),
             ),
             h('span', { className: 'size-7 shrink-0' }),
@@ -123,6 +123,31 @@ for (const engine of [chromium]) {
       });
       assert.equal(await modelLabel.evaluate(element => element.scrollWidth <= element.clientWidth), true,
         'A longer execution surface label should yield width before the model is truncated');
+
+      // Toolbar groups degrade by flex weights instead of letting the rigid
+      // model trigger paint over the execution surface control.
+      for (const width of [560, 540, 520]) {
+        await page.setViewportSize({ width, height: 260 });
+        const spacing = await composer.evaluate(() => {
+          const toolbar = document.querySelector('.ai-composer-toolbar');
+          const groups = [...toolbar.children].map(group => group.getBoundingClientRect());
+          const items = [...toolbar.children].flatMap(group => [...group.children]
+            .map(child => child.getBoundingClientRect())
+            .filter(rect => rect.width > 0));
+          const gapsFor = rects => rects
+            .map((rect, index) => (index === 0 ? Number.POSITIVE_INFINITY : rect.x - rects[index - 1].right))
+            .filter(gap => Number.isFinite(gap));
+          return { groups: gapsFor(groups), items: gapsFor(items) };
+        });
+        assert.ok(spacing.groups.every(gap => gap >= 0),
+          `Toolbar groups must not overlap at width ${width}: ${spacing.groups}`);
+        assert.ok(spacing.items.every(gap => gap >= 0),
+          `Toolbar controls must not overlap at width ${width}: ${spacing.items}`);
+      }
+      await page.setViewportSize({ width: 520, height: 260 });
+      assert.equal(await composer.locator('.ai-execution-surface-label').evaluate(
+        element => element.scrollWidth > element.clientWidth), true,
+        'Execution surface label should yield width when the toolbar runs out of room');
     } finally {
       await browser.close();
     }

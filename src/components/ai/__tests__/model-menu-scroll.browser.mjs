@@ -99,10 +99,14 @@ try {
       assert.ok(await results.count() > 0);
       for (const label of await results.allTextContents()) assert.match(label, /minimax/i);
       await search.fill('MiniMax');
+      assert.equal((await menu.boundingBox()).height, popupBounds.height, 'Filtered results must preserve the popup height');
+      assert.equal((await search.boundingBox()).y, searchBounds.y, 'Filtering must not move the search input');
       await menu.screenshot({ path: `/tmp/shellspan-model-search-${viewport.width}.png` });
       await search.fill('no matching model');
       assert.equal(await results.count(), 0);
       await menu.getByRole('status').filter({ hasText: '未找到匹配的模型' }).waitFor();
+      assert.equal((await menu.boundingBox()).height, popupBounds.height, 'Empty results must preserve the popup height');
+      assert.equal((await search.boundingBox()).y, searchBounds.y, 'Empty results must not move the search input');
       await menu.screenshot({ path: `/tmp/shellspan-model-empty-${viewport.width}.png` });
       await search.press('Escape');
       assert.equal(await search.inputValue(), '');
@@ -130,6 +134,50 @@ try {
       assert.deepEqual(errors, []);
       await page.close();
     }
+
+    // A short model list keeps a content-sized popup; the pinned height must
+    // follow the tallest content of the current open, not the fixed cap.
+    const shortPage = await browser.newPage({ viewport: { width: 1000, height: 900 } });
+    const shortErrors = [];
+    shortPage.on('pageerror', error => shortErrors.push(error.message));
+    await shortPage.goto(`http://127.0.0.1:${server.httpServer.address().port}/__model_menu`);
+    await shortPage.evaluate(async () => {
+      const { default: React } = await import('/@id/react');
+      const { default: ReactDOM } = await import('/@id/react-dom/client');
+      const { AiComposerModelSelector } = await import('/src/components/ai/workspace/ai-composer-model-selector.tsx');
+      const { AI_PROVIDER_PRESETS, useAiSettingsStore } = await import('/src/stores/aiSettingsStore.ts');
+      const { default: catalog } = await import('/protocol/llm/catalog.json');
+      const { initI18n } = await import('/src/locales/index.ts');
+      await import('/src/styles/base.css');
+      await import('/src/components/ai/styles/styles.css');
+      await initI18n('zh-CN');
+      const preset = AI_PROVIDER_PRESETS[0];
+      const providers = Object.keys(catalog.presets[preset.preset]?.models ?? {}).slice(0, 2)
+        .map(model => ({ ...preset, id: preset.preset, model }));
+      useAiSettingsStore.setState({ providers, defaultProviderId: providers[0].id });
+      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement('main', {
+        style: { position: 'fixed', bottom: 16, right: 16 },
+      }, React.createElement(AiComposerModelSelector)));
+    });
+    await shortPage.locator('.ai-model-trigger').click();
+    await shortPage.locator('.ai-model-menu-cell').first().click();
+    const shortMenu = shortPage.locator('.ai-model-menu');
+    const shortBounds = await shortMenu.boundingBox();
+    assert.ok(shortBounds.height < 380, 'A short model list should keep a content-sized popup');
+    const bodyBottom = await shortMenu.locator('[data-slot="ai-model-menu-body"]')
+      .evaluate(element => element.getBoundingClientRect().bottom);
+    assert.ok(shortBounds.y + shortBounds.height - bodyBottom <= 1,
+      'A short model list should not leave dead space below the last option');
+    const shortSearch = shortMenu.getByRole('textbox');
+    const shortSearchY = (await shortSearch.boundingBox()).y;
+    await shortSearch.fill('no matching model');
+    await shortMenu.getByRole('status').filter({ hasText: '未找到匹配的模型' }).waitFor();
+    assert.equal((await shortMenu.boundingBox()).height, shortBounds.height,
+      'Filtering a short list must keep the popup height stable');
+    assert.equal((await shortSearch.boundingBox()).y, shortSearchY,
+      'Filtering a short list must not move the search input');
+    assert.deepEqual(shortErrors, []);
+    await shortPage.close();
   } finally {
     await browser.close();
   }

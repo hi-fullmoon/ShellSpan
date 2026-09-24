@@ -303,6 +303,65 @@ describe('MessageScroller', () => {
     expect(geometry.scrollTo).toHaveBeenCalled();
   });
 
+  it('preserves the native bottom rubber-band overscroll while following at the live edge', async () => {
+    let itemCount = 3;
+    const thread = () => (
+      <MessageScroller followKey={String(itemCount)}>
+        {Array.from({ length: itemCount }, (_, index) => (
+          <div key={index} data-ai-node-key={`node-${index}`}>Message {index}</div>
+        ))}
+      </MessageScroller>
+    );
+    const { container, rerender } = render(thread());
+    const geometry = measureScroller(container, () => itemCount);
+    await waitFor(() => expect(container.querySelector('[data-slot="message-scroller"]')).not.toHaveClass('invisible'));
+    geometry.scrollTop = geometry.end();
+    fireEvent.scroll(geometry.viewport);
+    geometry.scrollTo.mockClear();
+
+    // Downward wheel input at the exact bottom must stay native; a programmatic
+    // clamp here would cancel the platform bounce (e.g. macOS rubber band).
+    fireEvent.wheel(geometry.viewport, { deltaY: 100 });
+    expect(geometry.scrollTo).not.toHaveBeenCalled();
+
+    // The rubber band stretches scrollTop past the bottom edge while wheel
+    // events keep firing; each of them must leave the stretched offset alone.
+    geometry.scrollTop = geometry.end() + 24;
+    fireEvent.scroll(geometry.viewport);
+    fireEvent.wheel(geometry.viewport, { deltaY: 100 });
+    expect(geometry.scrollTo).not.toHaveBeenCalled();
+    expect(geometry.scrollTop).toBe(geometry.end() + 24);
+
+    // Riding the bounce must not drop follow intent: streamed growth still lands on the live edge.
+    itemCount = 4;
+    rerender(thread());
+    geometry.installItemRects();
+    await waitFor(() => expect(geometry.scrollTop).toBe(geometry.end()));
+    expect(geometry.scrollTo).toHaveBeenCalled();
+  });
+
+  it('preserves the bottom rubber-band overscroll while the pointer is pressed in the transcript', async () => {
+    const { container } = render(
+      <MessageScroller followKey="pressed">
+        {Array.from({ length: 3 }, (_, index) => (
+          <div key={index} data-ai-node-key={`node-${index}`}>Message {index}</div>
+        ))}
+      </MessageScroller>,
+    );
+    const geometry = measureScroller(container, () => 3);
+    await waitFor(() => expect(container.querySelector('[data-slot="message-scroller"]')).not.toHaveClass('invisible'));
+    geometry.scrollTop = geometry.end();
+    fireEvent.scroll(geometry.viewport);
+    geometry.scrollTo.mockClear();
+
+    fireEvent.pointerDown(container.querySelector('[data-slot="message-scroller-content"]')!);
+    geometry.scrollTop = geometry.end() + 24;
+    fireEvent.scroll(geometry.viewport);
+
+    expect(geometry.scrollTo).not.toHaveBeenCalled();
+    expect(geometry.scrollTop).toBe(geometry.end() + 24);
+  });
+
   it.each(['no input', 'content pointer', 'downward wheel'])('keeps following a growing streaming row after $input during resize lag', async (input) => {
     const resizeCallbacks: ResizeObserverCallback[] = [];
     class ResizeObserverMock implements ResizeObserver {

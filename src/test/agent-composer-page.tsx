@@ -3,12 +3,15 @@ import { createRoot } from 'react-dom/client';
 import '@/components/ai/styles/styles.css';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { AiComposerModelSelector } from '@/components/ai/workspace/ai-composer-model-selector';
+import { AgentExecutionSurfaceSelector } from '@/components/ai/agent-execution-surface-selector';
+import { AgentPermissionSelector } from '@/components/ai/agent-permission-selector';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
 import { createAiComposerState, type AiComposerPhase } from '@/lib/ai/composer-machine';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import { applyTheme } from '@/lib/theme';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import { useTerminalStore } from '@/stores/terminalStore';
 import { agentSessionBaselineView } from './agent-session-baseline-page';
 import { agentSessionBaselineScenario } from './fixtures/agent-session-baseline';
 import type { AiPendingApproval } from '@/lib/ai/session-adapter';
@@ -50,6 +53,7 @@ function ComposerPage({ mode }: { readonly mode: 'ask' | 'agent' }) {
     draft: '', owner: 'A', status: 'idle', hero: false, terminal: false, errorMessage,
   });
   const [stops, setStops] = useState(0);
+  const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
   Object.assign(window, {
     composerTest: { update: (patch: Partial<ComposerScene>) => setScene(current => ({ ...current, ...patch })) },
   });
@@ -91,6 +95,12 @@ function ComposerPage({ mode }: { readonly mode: 'ask' | 'agent' }) {
       onListSkills={listSkills} onListFileReferences={listFiles}
       modelLabel="deepseek-v4"
       modelControl={<AiComposerModelSelector />}
+      permissionControl={mode === 'agent' && activeTerminalId
+        ? <AgentPermissionSelector sessionId={activeTerminalId} variant="composer" />
+        : undefined}
+      executionSurfaceControl={mode === 'agent' && activeTerminalId
+        ? <AgentExecutionSurfaceSelector surface="direct" realTerminalState="ready" />
+        : undefined}
       onOpenModel={() => undefined}
     />
   </main>;
