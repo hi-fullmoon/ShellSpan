@@ -53,13 +53,13 @@ export const UpdateSection: React.FC = () => {
   const displayProgress = Math.max(0, Math.min(100, downloadProgress ?? 0));
 
   return (
-    <Field className="min-h-16 gap-2.5 px-4 py-3 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5">
-      <div data-slot="update-summary" className="flex min-w-0 flex-1 flex-col gap-1">
+    <Field className="min-h-14 gap-2 px-3.5 py-2 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5">
+      <div data-slot="update-summary" className="flex min-w-0 flex-1 flex-col gap-0.5">
         <FieldLabel className="text-sm font-medium text-foreground">
           {t('settings.general.update')}
         </FieldLabel>
         <div className="flex flex-wrap items-center gap-2">
-          <FieldDescription className="leading-5">
+          <FieldDescription>
             {t('settings.general.currentVersion', { version: currentVersion || '--' })}
           </FieldDescription>
           {phase === 'no_update' && (

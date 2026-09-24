@@ -23,15 +23,15 @@ export const SettingRow: React.FC<SettingRowProps> = ({
 }) => (
   <Field
     className={cn(
-      'min-h-16 gap-2.5 px-4 py-3 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5',
+      'min-h-14 gap-2 px-3.5 py-2 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5',
       className,
     )}
   >
-    <div className="flex min-w-0 flex-1 flex-col gap-1">
+    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <FieldLabel id={labelId} className="text-sm font-medium text-foreground">
         {label}
       </FieldLabel>
-      <FieldDescription id={descriptionId} className="leading-5">
+      <FieldDescription id={descriptionId}>
         {description}
       </FieldDescription>
     </div>
@@ -67,10 +67,10 @@ export const SettingsGroup: React.FC<SettingsGroupProps> = ({
     <section
       aria-labelledby={titleId}
       data-slot="settings-group"
-      className="flex min-w-0 flex-col gap-2"
+      className="flex min-w-0 flex-col gap-1.5"
     >
       {(title || action) && (
-        <div className="flex min-h-6 items-center justify-between gap-3 px-1">
+        <div className="flex min-h-5 items-center justify-between gap-3 px-1">
           {title && (
             <h3 id={titleId} className="text-xs font-medium text-muted-foreground">
               {title}
@@ -79,7 +79,7 @@ export const SettingsGroup: React.FC<SettingsGroupProps> = ({
           {action && <div className="ml-auto shrink-0">{action}</div>}
         </div>
       )}
-      <Card size="sm" variant="outline" className="gap-0 py-0">
+      <Card size="sm" radius="compact" variant="outline" className="gap-0 py-0">
         <CardContent className="px-0">
           <FieldGroup className="gap-0">
             {rows.map((row, index) => (
