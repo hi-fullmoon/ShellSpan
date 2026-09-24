@@ -1239,6 +1239,10 @@ export async function invokeSavePreferences(
   return invokeLogged('save_preferences', { entries });
 }
 
+export async function invokePickProfileAvatar(): Promise<string | null> {
+  return invokeLogged<string | null>('pick_profile_avatar');
+}
+
 export async function invokeListRecentProfiles(): Promise<string[]> {
   return invokeLogged<string[]>('list_recent_profiles');
 }

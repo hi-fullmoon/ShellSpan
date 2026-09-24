@@ -2,10 +2,11 @@
     use super::rollback_local_broker_attachment_failure;
     use super::{
         collect_local_output_batch, configure_local_terminal_environment, detect_key_type,
-        expand_home_path, remove_failed_session_registration, should_prepare_remote_integration,
-        should_release_local_startup_output, visible_command_integration_presentation,
-        wait_for_local_worker_activity, LocalWorkerActivity, LOCAL_OUTPUT_DRAIN_BUDGET,
-        LOCAL_OUTPUT_QUEUE_CAPACITY, LOCAL_OUTPUT_READY_TIMEOUT,
+        expand_home_path, process_profile_avatar, remove_failed_session_registration,
+        should_prepare_remote_integration, should_release_local_startup_output,
+        visible_command_integration_presentation, wait_for_local_worker_activity,
+        LocalWorkerActivity, LOCAL_OUTPUT_DRAIN_BUDGET, LOCAL_OUTPUT_QUEUE_CAPACITY,
+        LOCAL_OUTPUT_READY_TIMEOUT,
     };
     use crate::models::{
         ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, SessionManager,
@@ -627,4 +628,38 @@
             expand_home_path("/tmp/id_ed25519", home),
             std::path::PathBuf::from("/tmp/id_ed25519")
         );
+    }
+
+    #[test]
+    fn profile_avatar_normalizes_to_a_centered_square_data_url() {
+        let pixels = [
+            image::Rgba([255, 0, 0, 255]),
+            image::Rgba([0, 255, 0, 255]),
+            image::Rgba([0, 0, 255, 255]),
+        ];
+        let source = image::RgbaImage::from_fn(3, 1, |x, _y| pixels[x as usize]);
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(source)
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .unwrap();
+
+        let data_url = process_profile_avatar(encoded.get_ref()).unwrap();
+
+        assert!(data_url.starts_with("data:image/png;base64,"));
+        let payload = data_url.strip_prefix("data:image/png;base64,").unwrap();
+        let decoded =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, payload).unwrap();
+        let avatar = image::load_from_memory(&decoded).unwrap();
+        use image::GenericImageView as _;
+        assert_eq!((avatar.width(), avatar.height()), (256, 256));
+        // The 3×1 source is center-cropped before resizing, so only the green
+        // middle pixel survives.
+        assert_eq!(avatar.get_pixel(0, 0), image::Rgba([0, 255, 0, 255]));
+        assert_eq!(avatar.get_pixel(255, 255), image::Rgba([0, 255, 0, 255]));
+    }
+
+    #[test]
+    fn profile_avatar_rejects_non_image_input() {
+        let error = process_profile_avatar(b"not an image").unwrap_err();
+        assert!(error.contains("failed to decode avatar image"));
     }
