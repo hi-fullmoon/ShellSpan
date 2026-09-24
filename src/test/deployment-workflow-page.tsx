@@ -27,7 +27,7 @@ const profile = {
 };
 
 const VISUAL_SCENARIOS = ['wide', 'medium', 'narrow', 'ai'] as const;
-const VISUAL_VIEWS = ['design', 'prepare', 'runs', 'versions'] as const;
+const VISUAL_VIEWS = ['pipeline', 'runs', 'versions'] as const;
 const VISUAL_OVERLAYS = ['approval', 'artifact', 'evidence', 'rollback'] as const;
 
 type VisualScenario = typeof VISUAL_SCENARIOS[number];
@@ -145,7 +145,7 @@ export async function mountDeploymentWorkflowPage(root: HTMLElement): Promise<vo
   const params = new URLSearchParams(window.location.search);
   const locale = params.get('locale') === 'en-US' ? 'en-US' : 'zh-CN';
   const scenario = supportedValue(params.get('scenario'), VISUAL_SCENARIOS, 'wide');
-  const initialTab = supportedValue(params.get('view'), VISUAL_VIEWS, 'design');
+  const initialTab = supportedValue(params.get('view'), VISUAL_VIEWS, 'pipeline');
   const overlay = optionalSupportedValue(params.get('overlay'), VISUAL_OVERLAYS);
   useAppStore.setState({ locale });
   await initI18n(locale);
@@ -188,13 +188,13 @@ export async function mountDeploymentWorkflowPage(root: HTMLElement): Promise<vo
   const artifactReference = `deployment-artifact:${manifestDigest}` as const;
   const runSummary: DeploymentRunSummary = {
     runId: 'run-visual-7', workflowId: workflow.id, workflowRevision: workflow.revision,
-    operationKind: 'deploy', triggerKind: 'manual', status: initialTab === 'prepare' ? 'awaiting_approval' : 'succeeded',
+    operationKind: 'deploy', triggerKind: 'manual', status: overlay === 'approval' ? 'awaiting_approval' : 'succeeded',
     planDigest,
     targetRelease: { releaseId: 'release-c0ffee42', artifactContentDigest: contentDigest, layoutDigest: `sha256:${'e'.repeat(64)}` as const },
     artifactReferences: [artifactReference], expiresAt: Date.now() + 900_000,
     expired: false, planDrifted: false, createdAt: Date.now() - 82_000,
     updatedAt: Date.now() - 2_000, startedAt: Date.now() - 80_000,
-    finishedAt: initialTab === 'prepare' ? null : Date.now() - 2_000,
+    finishedAt: overlay === 'approval' ? null : Date.now() - 2_000,
   };
   const runNodes: DeploymentRunNodeRecord[] = definition.nodes.map((node, index): DeploymentRunNodeRecord => ({
     runId: runSummary.runId, nodeId: node.id, nodeType: node.type,
@@ -245,7 +245,7 @@ export async function mountDeploymentWorkflowPage(root: HTMLElement): Promise<vo
     selectedRunId: runSummary.runId,
     detail: {
       summary: runSummary,
-      approvalSummary: initialTab === 'prepare' ? approvalSummary : null,
+      approvalSummary: overlay === 'approval' ? approvalSummary : null,
       outputs: [{
         nodeId: definition.nodes[1].id,
         outputName: 'bundle',

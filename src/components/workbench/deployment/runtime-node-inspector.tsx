@@ -21,6 +21,7 @@ import type {
   DeploymentWorkflowRecord,
 } from '@/lib/deployment/types';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
+import { DeploymentPaneHeader } from './deployment-pane-header';
 import {
   deploymentEventLabel,
   deploymentNodeProgress,
@@ -102,24 +103,22 @@ export const RuntimeNodeInspector: React.FC<RuntimeNodeInspectorProps> = ({
       data-testid="deployment-runtime-inspector"
       aria-label={t('deployment.runtime.node.details')}
     >
-      <header className="flex shrink-0 items-start justify-between gap-2 border-b px-3 py-2.5">
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-medium">{t('deployment.runtime.node.details')}</h2>
-          <p className="truncate text-xs text-muted-foreground">
-            {definitionNode?.displayName ?? t('deployment.runtime.node.none')}
-          </p>
-        </div>
-        <Button
-          size="icon-sm"
-          variant="outline"
-          onClick={(event) => onOpenEvidence(event.currentTarget)}
-          disabled={!selectedNode}
-          aria-label={t('deployment.runtime.evidence.action')}
-          data-testid="deployment-open-evidence"
-        >
-          <EyeIcon data-icon="inline-start" />
-        </Button>
-      </header>
+      <DeploymentPaneHeader
+        title={t('deployment.runtime.node.details')}
+        description={definitionNode?.displayName ?? t('deployment.runtime.node.none')}
+        actions={(
+          <Button
+            size="icon-sm"
+            variant="outline"
+            onClick={(event) => onOpenEvidence(event.currentTarget)}
+            disabled={!selectedNode}
+            aria-label={t('deployment.runtime.evidence.action')}
+            data-testid="deployment-open-evidence"
+          >
+            <EyeIcon data-icon="inline-start" />
+          </Button>
+        )}
+      />
       {!selectedNode ? (
         <EmptyState
           className="min-h-0 flex-1"

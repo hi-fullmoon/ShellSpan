@@ -2,48 +2,8 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/geist';
-@import '@xyflow/react/dist/base.css' layer(components);
 
 @custom-variant dark (&:is([data-theme="dark"] *));
-
-.deployment-workflow-flow {
-  --xy-edge-stroke-default: var(--border);
-  --xy-edge-stroke-selected-default: var(--primary);
-  --xy-connectionline-stroke-default: var(--primary);
-  --xy-handle-background-color-default: var(--muted-foreground);
-  --xy-minimap-background-color-default: var(--background);
-  --xy-minimap-mask-background-color-default: color-mix(in srgb, var(--background) 72%, transparent);
-  --xy-minimap-node-background-color-default: var(--muted);
-  --xy-minimap-node-stroke-color-default: var(--border);
-  --xy-background-pattern-dots-color-default: var(--border);
-  --xy-selection-background-color-default: color-mix(in srgb, var(--primary) 10%, transparent);
-  --xy-selection-border-default: 1px dotted var(--primary);
-}
-
-.deployment-workflow-flow .react-flow__controls-button {
-  border-bottom: 1px solid var(--border);
-  background: var(--background);
-  color: var(--foreground);
-}
-
-.deployment-workflow-flow .react-flow__controls-button:last-child {
-  border-bottom: 0;
-}
-
-.deployment-workflow-flow .react-flow__controls-button:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-
-.deployment-workflow-flow .react-flow__handle.connectingto.valid {
-  border-color: var(--primary);
-  background: var(--primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 20%, transparent);
-}
-
-.deployment-workflow-flow .react-flow__handle.connectingto:not(.valid) {
-  opacity: 0.35;
-}
 
 /* File completion uses the popover surface directly, without a nested card. */
 .ai-completion-popup:has(> [data-file-completion]) {
@@ -58,11 +18,7 @@
 }
 
 .agent-visible-terminal-aura {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--app-primary) 8%, transparent),
-    transparent 56px
-  ) top / 100% 56px no-repeat;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--app-primary) 8%, transparent), transparent 56px) top / 100% 56px no-repeat;
 }
 
 .agent-terminal-lease-identity {
@@ -173,8 +129,12 @@
   --animate-spinner: spinner 1s linear infinite;
 
   @keyframes spinner {
-    from { stroke-dashoffset: 0; }
-    to { stroke-dashoffset: -100; }
+    from {
+      stroke-dashoffset: 0;
+    }
+    to {
+      stroke-dashoffset: -100;
+    }
   }
 
   --color-app-bg: var(--app-bg);
@@ -211,7 +171,7 @@
   --app-border: rgba(100, 116, 139, 0.28);
   --app-primary: #1e293b;
   /* Resize rails keep the shell palette inside AI's locally themed surface. */
-  --app-resize-divider: rgba(100, 116, 139, 0.28);
+  --app-resize-divider: color-mix(in srgb, var(--app-border) 50%, transparent);
   --app-resize-divider-active: #1e293b;
   --app-primary-text: #ffffff;
   --app-button: #1e293b;
@@ -271,7 +231,7 @@
   --app-text-soft: #a1a1aa;
   --app-border: rgba(255, 255, 255, 0.09);
   --app-primary: #b3b3b8;
-  --app-resize-divider: rgba(255, 255, 255, 0.09);
+  --app-resize-divider: color-mix(in srgb, var(--app-border) 50%, transparent);
   --app-resize-divider-active: #b3b3b8;
   --app-primary-text: #191a1b;
   --app-button: #353638;

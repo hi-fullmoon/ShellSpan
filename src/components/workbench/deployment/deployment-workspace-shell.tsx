@@ -4,32 +4,25 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from '@/components/ui/resizable';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 
-export type DeploymentWorkspaceLayout = 'narrow' | 'medium' | 'wide';
+export type DeploymentWorkspaceLayout = 'compact' | 'wide';
 
 interface DeploymentWorkspaceShellProps {
   workflowPane: React.ReactNode;
-  canvas: React.ReactNode;
+  steps: React.ReactNode;
   inspector: React.ReactNode;
-  topology: React.ReactNode;
-  statusBar: React.ReactNode;
   renderToolbar: (layout: DeploymentWorkspaceLayout) => React.ReactNode;
 }
 
 function layoutForWidth(width: number): DeploymentWorkspaceLayout {
-  if (width >= 1_152) return 'wide';
-  if (width >= 768) return 'medium';
-  return 'narrow';
+  return width >= 1_152 ? 'wide' : 'compact';
 }
 
 export const DeploymentWorkspaceShell: React.FC<DeploymentWorkspaceShellProps> = ({
   workflowPane,
-  canvas,
+  steps,
   inspector,
-  topology,
-  statusBar,
   renderToolbar,
 }) => {
   const { t } = useI18n();
@@ -60,18 +53,19 @@ export const DeploymentWorkspaceShell: React.FC<DeploymentWorkspaceShellProps> =
     };
   }, []);
 
-  const editor = layout && layout !== 'narrow' ? (
+  const editor = (
     <section className="flex size-full min-h-0 min-w-0 flex-col bg-background">
-      {renderToolbar(layout)}
-      <div className="min-h-0 min-w-0 flex-1">{canvas}</div>
-      {statusBar}
+      {renderToolbar(layout ?? 'wide')}
+      <div className="min-h-0 min-w-0 flex-1">{steps}</div>
     </section>
-  ) : null;
+  );
 
   return (
     <div
       ref={rootRef}
-      className="@container flex min-h-0 min-w-0 flex-1 overflow-hidden"
+      // No border-r: the AI panel's resize handle owns the divider at this edge,
+      // and a workspace border would stack into a 2px seam beside it.
+      className="@container flex min-h-0 min-w-0 flex-1 overflow-hidden border-b"
       data-testid="deployment-design-workspace"
       data-layout={layout ?? 'measuring'}
     >
@@ -80,14 +74,14 @@ export const DeploymentWorkspaceShell: React.FC<DeploymentWorkspaceShellProps> =
           <ResizablePanelGroup
             id="deployment-workspace-panels"
             orientation="horizontal"
-            defaultLayout={{ workflows: 18, canvas: 58, inspector: 24 }}
+            defaultLayout={{ workflows: 18, steps: 58, inspector: 24 }}
             className="min-h-0 min-w-0"
           >
             <ResizablePanel id="workflows" defaultSize="18%" minSize="14%" maxSize="24%">
               {workflowPane}
             </ResizablePanel>
             <ResizableHandle aria-label={t('deployment.editor.resize.workflows')} />
-            <ResizablePanel id="canvas" defaultSize="58%" minSize="42%">
+            <ResizablePanel id="steps" defaultSize="58%" minSize="42%">
               {editor}
             </ResizablePanel>
             <ResizableHandle aria-label={t('deployment.editor.resize.inspector')} />
@@ -97,16 +91,12 @@ export const DeploymentWorkspaceShell: React.FC<DeploymentWorkspaceShellProps> =
           </ResizablePanelGroup>
         </div>
       )}
-      {layout === 'medium' && (
-        <div className="flex min-h-0 min-w-0 flex-1 @min-[72rem]:hidden" data-testid="deployment-workspace-medium">
+      {layout === 'compact' && (
+        <section
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+          data-testid="deployment-workspace-compact"
+        >
           {editor}
-        </div>
-      )}
-      {layout === 'narrow' && (
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col @min-[48rem]:hidden" data-testid="deployment-workspace-narrow">
-          {renderToolbar(layout)}
-          <ScrollArea className="min-h-0 flex-1">{topology}</ScrollArea>
-          {statusBar}
         </section>
       )}
     </div>

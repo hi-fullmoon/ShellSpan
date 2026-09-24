@@ -38,9 +38,10 @@ export const ArtifactDrawer: React.FC = () => {
     >
       <DrawerContent
         className="flex min-h-0 flex-col gap-0 overflow-hidden p-0"
+        closeButtonClassName="top-2 right-4 size-8 [&_svg]:size-3.5"
         data-testid="deployment-artifact-drawer"
       >
-        <DrawerHeader className="shrink-0 border-b p-4">
+        <DrawerHeader className="shrink-0 border-b p-4 pr-12">
           <DrawerTitle>{t('deployment.runtime.artifact.title')}</DrawerTitle>
         </DrawerHeader>
         <ScrollArea className="min-h-0 flex-1">

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArchiveIcon, AlertTriangleIcon, RotateCcwIcon, ShieldCheckIcon } from 'lucide-react';
+import { ArchiveIcon, AlertTriangleIcon, RotateCcwIcon } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -38,6 +38,7 @@ import {
   formatDeploymentDate,
   shortDeploymentDigest,
 } from './runtime-utils';
+import { DeploymentPaneHeader } from './deployment-pane-header';
 
 export interface ReleaseListProps {
   workflow: DeploymentWorkflowRecord;
@@ -68,16 +69,18 @@ export const ReleaseList: React.FC<ReleaseListProps> = ({
 
   return (
     <section
-      className="flex min-h-0 min-w-0 flex-1 flex-col border"
+      // No border-r: the AI panel's resize handle owns the divider at this edge,
+      // and a workspace border would stack into a 2px seam beside it.
+      className="flex min-h-0 min-w-0 flex-1 flex-col border-b"
       data-testid="deployment-versions-view"
     >
-      <header className="shrink-0 border-b px-3 py-2.5">
-        <h2 className="text-sm font-medium">{t('deployment.editor.tab.versions')}</h2>
-        <p className="text-xs text-muted-foreground">{t('deployment.runtime.version.description')}</p>
-      </header>
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="p-3">
-          {state.releases.length > 0 ? (
+      <DeploymentPaneHeader
+        title={t('deployment.editor.tab.versions')}
+        description={t('deployment.runtime.version.description')}
+      />
+      {state.releases.length > 0 ? (
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="p-3">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -138,23 +141,16 @@ export const ReleaseList: React.FC<ReleaseListProps> = ({
                 ))}
               </TableBody>
             </Table>
-          ) : (
-            <EmptyState
-              icon={<RotateCcwIcon />}
-              title={t('deployment.runtime.version.empty')}
-              description={t('deployment.runtime.version.emptyDescription')}
-            />
-          )}
-        </div>
-      </ScrollArea>
-      <div className="shrink-0 border-t p-3">
-        <Alert>
-          <ShieldCheckIcon />
-          <AlertTitle>{t('deployment.runtime.rollback.safetyTitle')}</AlertTitle>
-          <AlertDescription>{t('deployment.runtime.rollback.safetyDescription')}</AlertDescription>
-        </Alert>
-      </div>
-
+          </div>
+        </ScrollArea>
+      ) : (
+        <EmptyState
+          className="min-h-0 flex-1"
+          icon={<RotateCcwIcon />}
+          title={t('deployment.runtime.version.empty')}
+          description={t('deployment.runtime.version.emptyDescription')}
+        />
+      )}
       <Dialog
         open={rollbackOpen}
         onOpenChange={setRollbackOpen}

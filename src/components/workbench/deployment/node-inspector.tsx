@@ -7,14 +7,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/hooks/useI18n';
 import { compatibleOutputBindings } from '@/lib/deployment/editor';
@@ -27,10 +20,7 @@ import type {
   DeploymentWorkflowNode,
 } from '@/lib/deployment/types';
 import { useProfileStore } from '@/stores/profileStore';
-import {
-  useDeploymentWorkflowStore,
-  type DeploymentWorkflowDraft,
-} from '@/stores/deploymentWorkflowStore';
+import { useDeploymentWorkflowStore, type DeploymentWorkflowDraft } from '@/stores/deploymentWorkflowStore';
 import {
   DEPLOYMENT_NONE_VALUE,
   deploymentLocaleKey,
@@ -39,6 +29,7 @@ import {
   findDeploymentNodeSpec,
   readableDeploymentProfile,
 } from './deployment-editor-ui';
+import { DeploymentPaneHeader } from './deployment-pane-header';
 
 export interface NodeInputFieldsProps {
   node: DeploymentWorkflowNode;
@@ -48,13 +39,7 @@ export interface NodeInputFieldsProps {
   editable?: boolean;
 }
 
-export const NodeInputFields: React.FC<NodeInputFieldsProps> = ({
-  node,
-  spec,
-  definition,
-  catalog,
-  editable = true,
-}) => {
+export const NodeInputFields: React.FC<NodeInputFieldsProps> = ({ node, spec, definition, catalog, editable = true }) => {
   const { t } = useI18n();
   const connectInput = useDeploymentWorkflowStore((state) => state.connectInput);
   if (spec.inputs.length === 0) return null;
@@ -71,15 +56,11 @@ export const NodeInputFields: React.FC<NodeInputFieldsProps> = ({
           })),
         ];
         const binding = node.inputs[input.name];
-        const value = binding
-          ? `${binding.fromNodeId}|${binding.fromPort}`
-          : DEPLOYMENT_NONE_VALUE;
+        const value = binding ? `${binding.fromNodeId}|${binding.fromPort}` : DEPLOYMENT_NONE_VALUE;
 
         return (
           <Field key={input.name} data-invalid={input.required && !binding}>
-            <FieldLabel htmlFor={`input-${node.id}-${input.name}`}>
-              {deploymentPortLabel(input.name, t)}
-            </FieldLabel>
+            <FieldLabel htmlFor={`input-${node.id}-${input.name}`}>{deploymentPortLabel(input.name, t)}</FieldLabel>
             <Select
               items={options}
               value={value}
@@ -95,11 +76,7 @@ export const NodeInputFields: React.FC<NodeInputFieldsProps> = ({
                 }
               }}
             >
-              <SelectTrigger
-                id={`input-${node.id}-${input.name}`}
-                size="sm"
-                aria-invalid={input.required && !binding}
-              >
+              <SelectTrigger id={`input-${node.id}-${input.name}`} size="sm" aria-invalid={input.required && !binding}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -135,12 +112,7 @@ interface ConfigFieldControlProps {
   editable: boolean;
 }
 
-const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
-  node,
-  field,
-  definition,
-  editable,
-}) => {
+const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({ node, field, definition, editable }) => {
   const { t } = useI18n();
   const profiles = useProfileStore((state) => state.profiles);
   const update = useDeploymentWorkflowStore((state) => state.updateNodeConfig);
@@ -152,25 +124,22 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
       const profile = profiles.find((item) => item.id === target.connectionProfileId);
       return {
         value: target.id,
-        label: profile
-          ? `${readableDeploymentProfile(profile)} · ${target.remoteRoot}`
-          : target.remoteRoot,
+        label: profile ? `${readableDeploymentProfile(profile)} · ${target.remoteRoot}` : target.remoteRoot,
       };
     });
     return (
       <Field>
         <FieldLabel htmlFor={id}>{t(deploymentLocaleKey(field.labelKey))}</FieldLabel>
-        <Select
-          items={options}
-          value={String(value ?? '')}
-          disabled={!editable}
-          onValueChange={(next) => update(node.id, field.name, next ?? '')}
-        >
-          <SelectTrigger id={id} size="sm"><SelectValue /></SelectTrigger>
+        <Select items={options} value={String(value ?? '')} disabled={!editable} onValueChange={(next) => update(node.id, field.name, next ?? '')}>
+          <SelectTrigger id={id} size="sm">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectGroup>
               {options.map((option) => (
-                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
               ))}
             </SelectGroup>
           </SelectContent>
@@ -188,17 +157,16 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
     return (
       <Field>
         <FieldLabel htmlFor={id}>{t(deploymentLocaleKey(field.labelKey))}</FieldLabel>
-        <Select
-          items={options}
-          value={String(value ?? '')}
-          disabled={!editable}
-          onValueChange={(next) => update(node.id, field.name, next ?? '')}
-        >
-          <SelectTrigger id={id} size="sm"><SelectValue /></SelectTrigger>
+        <Select items={options} value={String(value ?? '')} disabled={!editable} onValueChange={(next) => update(node.id, field.name, next ?? '')}>
+          <SelectTrigger id={id} size="sm">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectGroup>
               {options.map((option) => (
-                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
               ))}
             </SelectGroup>
           </SelectContent>
@@ -211,12 +179,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
   if (field.kind === 'boolean') {
     return (
       <Field className="flex-row items-start gap-2">
-        <Checkbox
-          id={id}
-          checked={value === true}
-          onCheckedChange={(checked) => update(node.id, field.name, checked)}
-          disabled={!editable}
-        />
+        <Checkbox id={id} checked={value === true} onCheckedChange={(checked) => update(node.id, field.name, checked)} disabled={!editable} />
         <div className="flex flex-col gap-1">
           <FieldLabel htmlFor={id}>{t(deploymentLocaleKey(field.labelKey))}</FieldLabel>
           <FieldDescription>{t(deploymentLocaleKey(field.descriptionKey))}</FieldDescription>
@@ -239,13 +202,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
               .split(/[\n,]/)
               .map((item) => item.trim())
               .filter(Boolean);
-            update(
-              node.id,
-              field.name,
-              field.kind === 'integerList'
-                ? entries.map(Number).filter(Number.isInteger)
-                : entries,
-            );
+            update(node.id, field.name, field.kind === 'integerList' ? entries.map(Number).filter(Number.isInteger) : entries);
           }}
         />
         <FieldDescription>{t(deploymentLocaleKey(field.descriptionKey))}</FieldDescription>
@@ -264,11 +221,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({
         max={field.maximum}
         value={typeof value === 'string' || typeof value === 'number' ? value : ''}
         disabled={!editable}
-        onChange={(event) => update(
-          node.id,
-          field.name,
-          field.kind === 'integer' ? Number(event.target.value) : event.target.value,
-        )}
+        onChange={(event) => update(node.id, field.name, field.kind === 'integer' ? Number(event.target.value) : event.target.value)}
       />
       <FieldDescription>{t(deploymentLocaleKey(field.descriptionKey))}</FieldDescription>
     </Field>
@@ -282,12 +235,7 @@ export interface NodeInspectorProps {
   editable?: boolean;
 }
 
-export const NodeInspector: React.FC<NodeInspectorProps> = ({
-  draft,
-  node,
-  catalog,
-  editable = true,
-}) => {
+export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catalog, editable = true }) => {
   const { t } = useI18n();
   const updateNode = useDeploymentWorkflowStore((state) => state.updateNode);
   const removeNode = useDeploymentWorkflowStore((state) => state.removeNode);
@@ -299,9 +247,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
         data-testid="deployment-node-config"
         aria-label={t('deployment.editor.configuration')}
       >
-        <header className="shrink-0 border-b px-3 py-2.5">
-          <h2 className="text-sm font-medium">{t('deployment.editor.configuration')}</h2>
-        </header>
+        <DeploymentPaneHeader title={t('deployment.editor.configuration')} />
         <EmptyState
           className="min-h-0 flex-1"
           icon={<Settings2Icon />}
@@ -321,29 +267,25 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
       data-testid="deployment-node-config"
       aria-label={t('deployment.editor.configuration')}
     >
-      <header className="flex shrink-0 items-start justify-between gap-2 border-b px-3 py-2.5">
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-medium">{node.displayName}</h2>
-          <p className="line-clamp-2 text-xs text-muted-foreground">
-            {t(deploymentLocaleKey(spec.descriptionKey))}
-          </p>
-        </div>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          onClick={() => removeNode(node.id)}
-          disabled={!editable}
-          aria-label={t('deployment.editor.removeNode')}
-        >
-          <Trash2Icon data-icon="inline-start" />
-        </Button>
-      </header>
+      <DeploymentPaneHeader
+        title={node.displayName}
+        description={t(deploymentLocaleKey(spec.descriptionKey))}
+        actions={
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => removeNode(node.id)}
+            disabled={!editable}
+            aria-label={t('deployment.editor.removeNode')}
+          >
+            <Trash2Icon data-icon="inline-start" />
+          </Button>
+        }
+      />
       <ScrollArea className="min-h-0 flex-1">
-        <FieldGroup className="gap-3 p-3">
+        <FieldGroup className="gap-3 p-2">
           <Field>
-            <FieldLabel htmlFor={`node-name-${node.id}`}>
-              {t('deployment.editor.nodeName')}
-            </FieldLabel>
+            <FieldLabel htmlFor={`node-name-${node.id}`}>{t('deployment.editor.nodeName')}</FieldLabel>
             <Input
               id={`node-name-${node.id}`}
               className="h-8"
@@ -355,21 +297,13 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
           <Field>
             <FieldLabel>{t('deployment.editor.nodeProperties')}</FieldLabel>
             <div className="flex flex-wrap gap-1">
-              <Badge variant="outline">
-                {t(deploymentLocaleKey(`deployment.editor.effect.${spec.effectClass}`))}
-              </Badge>
-              <Badge variant="outline">
-                {t(deploymentLocaleKey(`deployment.editor.risk.${spec.riskLevel}`))}
-              </Badge>
-              <Badge variant="outline">
-                {t(deploymentLocaleKey(`deployment.editor.domain.${spec.executionDomain}`))}
-              </Badge>
+              <Badge variant="outline">{t(deploymentLocaleKey(`deployment.editor.effect.${spec.effectClass}`))}</Badge>
+              <Badge variant="outline">{t(deploymentLocaleKey(`deployment.editor.risk.${spec.riskLevel}`))}</Badge>
+              <Badge variant="outline">{t(deploymentLocaleKey(`deployment.editor.domain.${spec.executionDomain}`))}</Badge>
             </div>
           </Field>
           <Field>
-            <FieldLabel htmlFor={`node-timeout-${node.id}`}>
-              {t('deployment.editor.timeout')}
-            </FieldLabel>
+            <FieldLabel htmlFor={`node-timeout-${node.id}`}>{t('deployment.editor.timeout')}</FieldLabel>
             <Input
               id={`node-timeout-${node.id}`}
               className="h-8"
@@ -378,26 +312,16 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
               max={86_400}
               value={node.timeoutSeconds}
               disabled={!editable}
-              onChange={(event) => updateNode(node.id, {
-                timeoutSeconds: Number(event.target.value),
-              })}
+              onChange={(event) =>
+                updateNode(node.id, {
+                  timeoutSeconds: Number(event.target.value),
+                })
+              }
             />
           </Field>
-          <NodeInputFields
-            node={node}
-            spec={spec}
-            definition={draft.definition}
-            catalog={catalog}
-            editable={editable}
-          />
+          <NodeInputFields node={node} spec={spec} definition={draft.definition} catalog={catalog} editable={editable} />
           {spec.configSchema.fields.map((field) => (
-            <ConfigFieldControl
-              key={field.name}
-              node={node}
-              field={field}
-              definition={draft.definition}
-              editable={editable}
-            />
+            <ConfigFieldControl key={field.name} node={node} field={field} definition={draft.definition} editable={editable} />
           ))}
           {spec.capabilities.length > 0 && (
             <Field>

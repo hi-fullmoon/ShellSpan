@@ -46,11 +46,7 @@ export interface DeploymentEditorNotice {
   kind: 'created' | 'saved' | 'layoutSaved';
 }
 
-export interface DeploymentNodePositionChange {
-  id: string;
-  x: number;
-  y: number;
-}
+export type DeploymentWorkflowTab = 'pipeline' | 'runs' | 'versions';
 
 interface DeploymentWorkflowStoreState {
   capabilities: DeploymentWorkflowCapabilities | null;
@@ -69,7 +65,8 @@ interface DeploymentWorkflowStoreState {
   error: string | null;
   notice: DeploymentEditorNotice | null;
   profileFilterId: string | null;
-  requestedTab: 'design' | 'prepare' | 'runs' | 'versions' | null;
+  requestedTab: DeploymentWorkflowTab | null;
+  deployRequested: boolean;
   pendingSelectionId: string | null;
   initialize: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -77,8 +74,10 @@ interface DeploymentWorkflowStoreState {
   confirmPendingSelection: () => void;
   clearPendingSelection: () => void;
   setProfileFilter: (profileId: string | null) => void;
-  requestTab: (tab: 'design' | 'prepare' | 'runs' | 'versions') => void;
+  requestTab: (tab: DeploymentWorkflowTab) => void;
   clearRequestedTab: () => void;
+  requestDeploy: () => void;
+  clearDeployRequest: () => void;
   startTemplate: (
     kind: DeploymentWorkflowTemplateKind,
     name: string,
@@ -104,8 +103,6 @@ interface DeploymentWorkflowStoreState {
     targetPort: string,
     binding: DeploymentPortBinding,
   ) => void;
-  moveNode: (id: string, x: number, y: number) => void;
-  moveNodes: (changes: readonly DeploymentNodePositionChange[]) => void;
   validateDraft: () => Promise<DeploymentEditorIssue[]>;
   saveDraft: () => Promise<DeploymentWorkflowRecord>;
   clearError: () => void;
@@ -177,6 +174,7 @@ const initialState = {
   notice: null,
   profileFilterId: null,
   requestedTab: null,
+  deployRequested: false,
   pendingSelectionId: null,
 };
 
@@ -281,6 +279,8 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
   setProfileFilter: (profileFilterId) => set({ profileFilterId }),
   requestTab: (requestedTab) => set({ requestedTab }),
   clearRequestedTab: () => set({ requestedTab: null }),
+  requestDeploy: () => set({ deployRequested: true }),
+  clearDeployRequest: () => set({ deployRequested: false }),
   startTemplate: (kind, name, connectionProfileId, remoteRoot) => {
     if (get().saving) return;
     const { catalog, profileFilterId } = get();
@@ -485,37 +485,6 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
       definition: { ...draft.definition, nodes },
     };
     set({ draft: next, semanticDirty: true, issues: localIssues(next, get().catalog) });
-  },
-  moveNode: (id, x, y) => get().moveNodes([{ id, x, y }]),
-  moveNodes: (changes) => {
-    const draft = get().draft;
-    if (!draft || get().saving) return;
-    const nodeIds = new Set(draft.definition.nodes.map((item) => item.id));
-    const validChanges = new Map(changes
-      .filter((change) => nodeIds.has(change.id)
-        && Number.isFinite(change.x)
-        && Number.isFinite(change.y))
-      .map((change) => [change.id, change]));
-    if (validChanges.size === 0) return;
-    const layoutNodes = { ...draft.layout.nodes };
-    let changed = false;
-    for (const change of validChanges.values()) {
-      const current = layoutNodes[change.id];
-      if (current?.x === change.x && current.y === change.y) continue;
-      layoutNodes[change.id] = { ...current, x: change.x, y: change.y };
-      changed = true;
-    }
-    if (!changed) return;
-    set({
-      draft: {
-        ...draft,
-        layout: {
-          ...draft.layout,
-          nodes: layoutNodes,
-        },
-      },
-      layoutDirty: true,
-    });
   },
   validateDraft: async () => {
     const { draft, catalog } = get();

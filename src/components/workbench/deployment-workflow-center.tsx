@@ -5,6 +5,7 @@ import {
   CloudUploadIcon,
   ListTreeIcon,
   PlusIcon,
+  SaveIcon,
 } from 'lucide-react';
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
@@ -28,7 +29,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
-import { EmptyState, PanelLoadingState } from '@/components/ui/empty-state';
+import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -49,7 +50,10 @@ import type {
 } from '@/lib/deployment/editor';
 import type { LocaleKey } from '@/locales';
 import { useProfileStore } from '@/stores/profileStore';
-import { useDeploymentWorkflowStore } from '@/stores/deploymentWorkflowStore';
+import {
+  useDeploymentWorkflowStore,
+  type DeploymentWorkflowTab,
+} from '@/stores/deploymentWorkflowStore';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import { useToastStore } from '@/stores/toastStore';
 import {
@@ -64,17 +68,12 @@ import {
   DeploymentWorkspaceShell,
   type DeploymentWorkspaceLayout,
 } from './deployment/deployment-workspace-shell';
-import {
-  DeploymentWorkflowTabs,
-  type DeploymentWorkflowTab,
-} from './deployment/deployment-workflow-tabs';
+import { DeploymentWorkflowTabs } from './deployment/deployment-workflow-tabs';
 import { NodeInspector } from './deployment/node-inspector';
 import { NodeLibraryDrawer } from './deployment/node-library-drawer';
-import { ValidationStatusBar } from './deployment/validation-status-bar';
-import { WorkflowCanvas } from './deployment/workflow-canvas';
+import { WorkflowStepList } from './deployment/workflow-step-list';
 import { WorkflowEditorToolbar } from './deployment/workflow-editor-toolbar';
 import { WorkflowListPane } from './deployment/workflow-list-pane';
-import { WorkflowTopologyList } from './deployment/workflow-topology-list';
 import { WorkflowSettingsDialog } from './deployment/workflow-settings-dialog';
 import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader } from './workbench-page';
 
@@ -132,13 +131,13 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[min(26rem,calc(100vh-2rem))] w-[calc(100%-2rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0">
+      <DialogContent className="flex max-h-[calc(100vh-2rem)] w-[calc(100%-2rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b px-4 py-3">
           <DialogTitle>{t('deployment.editor.template.title')}</DialogTitle>
           <DialogDescription>{t('deployment.editor.template.description')}</DialogDescription>
         </DialogHeader>
-        <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={submit}>
-          <ScrollArea className="min-h-0 flex-1">
+        <form className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] overflow-hidden" onSubmit={submit}>
+          <ScrollArea className="min-h-0 min-w-0">
             <FieldGroup className="gap-3 p-4">
               <Field>
                 <FieldLabel htmlFor="deployment-template">
@@ -215,7 +214,7 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
               </Field>
             </FieldGroup>
           </ScrollArea>
-          <DialogFooter className="shrink-0 border-t px-4 py-3">
+          <DialogFooter className="border-t px-4 py-3">
             <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               {t('common.cancel')}
             </Button>
@@ -274,28 +273,32 @@ const IssueList: React.FC<IssueListProps> = ({ issues, onSelectNode, nodeName })
   );
 };
 
-const PlaceholderView: React.FC<{ kind: Exclude<DeploymentWorkflowTab, 'design'> }> = ({ kind }) => {
+const UnsavedDraftNotice: React.FC = () => {
   const { t } = useI18n();
   return (
-    <section className="flex min-h-0 flex-1 flex-col border" aria-label={t(deploymentLocaleKey(`deployment.editor.tab.${kind}`))}>
-      <header className="flex items-start justify-between gap-2 border-b p-3">
-        <div>
-          <h2 className="text-sm font-medium">
-            {t(deploymentLocaleKey(`deployment.editor.tab.${kind}`))}
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            {t(deploymentLocaleKey(`deployment.editor.placeholder.${kind}`))}
-          </p>
-        </div>
-        <Badge variant="secondary">{t('deployment.editor.placeholder.empty')}</Badge>
-      </header>
+    <section
+      // No border-r: the AI panel's resize handle owns the divider at this edge,
+      // and a workspace border would stack into a 2px seam beside it.
+      className="flex min-h-0 flex-1 flex-col items-center justify-center border-b"
+      data-testid="deployment-unsaved-notice"
+      aria-label={t('deployment.editor.placeholder.unsavedTitle')}
+    >
+      <div className="w-full max-w-lg p-3">
+        <Alert>
+          <SaveIcon />
+          <AlertTitle>{t('deployment.editor.placeholder.unsavedTitle')}</AlertTitle>
+          <AlertDescription>
+            {t('deployment.editor.placeholder.unsavedDescription')}
+          </AlertDescription>
+        </Alert>
+      </div>
     </section>
   );
 };
 
 export const DeploymentWorkflowCenter: React.FC<{
   initialTab?: DeploymentWorkflowTab;
-}> = ({ initialTab = 'design' }) => {
+}> = ({ initialTab = 'runs' }) => {
   const { t } = useI18n();
   const profiles = useProfileStore((state) => state.profiles);
   const state = useDeploymentWorkflowStore();
@@ -310,6 +313,7 @@ export const DeploymentWorkflowCenter: React.FC<{
   const [pendingDiscardAction, setPendingDiscardAction] = React.useState<'create' | 'refresh' | null>(null);
   const [search, setSearch] = React.useState('');
   const [activeTab, setActiveTab] = React.useState<DeploymentWorkflowTab>(initialTab);
+  const [approvalRequest, setApprovalRequest] = React.useState(0);
   const handledNoticeRef = React.useRef<number | null>(null);
   const handledErrorRef = React.useRef<string | null>(null);
   const handledRunNoticeRef = React.useRef<number | null>(null);
@@ -318,6 +322,7 @@ export const DeploymentWorkflowCenter: React.FC<{
   const libraryTriggerRef = React.useRef<HTMLButtonElement>(null);
   const configTriggerRef = React.useRef<HTMLButtonElement>(null);
   const settingsTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const deployTriggerRef = React.useRef<HTMLButtonElement>(null);
   const configFinalFocusRef = React.useRef<HTMLButtonElement>(null);
 
   React.useEffect(() => {
@@ -358,7 +363,7 @@ export const DeploymentWorkflowCenter: React.FC<{
       handledRunErrorRef.current = null;
       return;
     }
-    if (runState.errorContext === 'prepare' && activeTab === 'prepare') return;
+    if (runState.errorContext === 'prepare' && activeTab === 'runs') return;
     if (handledRunErrorRef.current === runState.error) return;
     handledRunErrorRef.current = runState.error;
     addToast(t('deployment.runtime.error.generic'), 'error', 6_000);
@@ -398,7 +403,10 @@ export const DeploymentWorkflowCenter: React.FC<{
     : state.workflows;
 
   React.useEffect(() => {
-    if (draft?.id === null) setSearch('');
+    if (draft?.id === null) {
+      setActiveTab('pipeline');
+      setSearch('');
+    }
   }, [draft?.id]);
 
   React.useEffect(() => {
@@ -408,6 +416,42 @@ export const DeploymentWorkflowCenter: React.FC<{
     if (visibleWorkflows.some((workflow) => workflow.id === state.selectedWorkflowId)) return;
     state.selectWorkflow(visibleWorkflows[0]!.id);
   }, [dirty, state, visibleWorkflows]);
+
+  const canDeploy = Boolean(selectedRecord)
+    && admissionsEnabled
+    && !state.semanticDirty
+    && selectedRecord?.enabled === true;
+
+  const deployHint = !admissionsEnabled
+    ? t('deployment.editor.readOnly')
+    : !selectedRecord
+      ? t('deployment.runtime.deploy.unsavedWorkflow')
+      : state.semanticDirty
+        ? t('deployment.runtime.deploy.unsaved')
+        : selectedRecord.enabled
+          ? null
+          : t('deployment.runtime.deploy.workflowDisabled');
+
+  const startDeploy = React.useCallback((): void => {
+    const record = selectedRecord;
+    if (!record) return;
+    setActiveTab('runs');
+    void useDeploymentWorkflowRunStore.getState().prepare(record)
+      .then(() => {
+        const latest = useDeploymentWorkflowRunStore.getState();
+        if (latest.workflowId === record.id) {
+          setApprovalRequest((count) => count + 1);
+        }
+      })
+      .catch(() => undefined);
+  }, [selectedRecord]);
+
+  React.useEffect(() => {
+    if (!state.deployRequested) return;
+    state.clearDeployRequest();
+    if (!state.initialized || state.loading) return;
+    if (canDeploy) startDeploy();
+  }, [canDeploy, startDeploy, state]);
 
   const requestCreate = (): void => {
     if (dirty) {
@@ -495,13 +539,13 @@ export const DeploymentWorkflowCenter: React.FC<{
         {!state.initialized && state.loading ? (
           <PanelLoadingState label={t('deployment.editor.loading')} />
         ) : profiles.length === 0 ? (
-          <EmptyState
+          <PanelEmptyState
             icon={<CloudUploadIcon />}
             title={t('deployment.noProfiles')}
             description={t('deployment.noProfilesDescription')}
           />
         ) : !draft || !catalog ? (
-          <EmptyState
+          <PanelEmptyState
             icon={<ListTreeIcon />}
             title={t('deployment.editor.empty')}
             description={t('deployment.editor.emptyDescription')}
@@ -523,52 +567,48 @@ export const DeploymentWorkflowCenter: React.FC<{
               loading={state.loading}
               saving={state.saving}
               validating={state.validating}
+              preparing={runState.preparing}
               canCreate={editable && profiles.length > 0}
               canSave={admissionsEnabled && dirty}
+              canDeploy={canDeploy}
+              deployHint={deployHint}
               onOpenWorkflows={() => setWorkflowsOpen(true)}
               onRefresh={requestRefresh}
               onCreate={requestCreate}
               onSave={() => void state.saveDraft().catch(() => undefined)}
               onValidate={() => void validate()}
+              onDeploy={startDeploy}
+              deployTriggerRef={deployTriggerRef}
               workflowsTriggerRef={workflowsTriggerRef}
             />
-            <TabsContent value="design" className="flex min-h-0 min-w-0 overflow-hidden">
+            <TabsContent value="pipeline" className="flex min-h-0 min-w-0 overflow-hidden">
               <DeploymentWorkspaceShell
                 workflowPane={workflowPane}
-                canvas={(
-                  <WorkflowCanvas
+                steps={(
+                  <WorkflowStepList
                     draft={draft}
                     catalog={catalog}
-                    selectedNodeId={state.selectedNodeId}
                     issues={state.issues}
+                    selectedNodeId={state.selectedNodeId}
                     editable={editable}
+                    onSelectNode={state.selectNode}
+                    onConfigure={openConfiguration}
+                    onAddStep={(trigger) => {
+                      libraryTriggerRef.current = trigger;
+                      setLibraryOpen(true);
+                    }}
                   />
                 )}
                 inspector={inspector}
-                topology={(
-                  <WorkflowTopologyList
-                    draft={draft}
-                    catalog={catalog}
-                    issues={state.issues}
-                    editable={editable}
-                    onConfigure={openConfiguration}
-                  />
-                )}
-                statusBar={(
-                  <ValidationStatusBar
-                    issueCount={state.issues.length}
-                    semanticDirty={state.semanticDirty}
-                    layoutDirty={state.layoutDirty}
-                    selectedNodeName={selectedNode?.displayName ?? null}
-                    onOpenIssues={() => setIssuesOpen(true)}
-                  />
-                )}
                 renderToolbar={(layout: DeploymentWorkspaceLayout) => (
                   <WorkflowEditorToolbar
                     workflowName={draft.name}
                     layout={layout}
                     enabled={draft.enabled}
                     editable={editable}
+                    issueCount={state.issues.length}
+                    dirty={dirty}
+                    onOpenIssues={() => setIssuesOpen(true)}
                     onOpenLibrary={() => setLibraryOpen(true)}
                     onOpenSettings={() => setSettingsOpen(true)}
                     onOpenInspector={() => {
@@ -582,19 +622,6 @@ export const DeploymentWorkflowCenter: React.FC<{
                 )}
               />
             </TabsContent>
-            <TabsContent value="prepare" className="flex min-h-0 min-w-0 overflow-hidden">
-              {selectedRecord
-                ? (
-                  <DeploymentWorkflowRuntimeView
-                    kind="prepare"
-                    workflow={selectedRecord}
-                    catalog={catalog}
-                    semanticDirty={state.semanticDirty}
-                    admissionsEnabled={admissionsEnabled}
-                  />
-                )
-                : <PlaceholderView kind="prepare" />}
-            </TabsContent>
             <TabsContent value="runs" className="flex min-h-0 min-w-0 overflow-hidden">
               {selectedRecord
                 ? (
@@ -603,9 +630,14 @@ export const DeploymentWorkflowCenter: React.FC<{
                     workflow={selectedRecord}
                     catalog={catalog}
                     admissionsEnabled={admissionsEnabled}
+                    onDeploy={startDeploy}
+                    canDeploy={canDeploy}
+                    approvalRequest={approvalRequest}
+                    onApprovalHandled={() => setApprovalRequest(0)}
+                    deployTriggerRef={deployTriggerRef}
                   />
                 )
-                : <PlaceholderView kind="runs" />}
+                : <UnsavedDraftNotice />}
             </TabsContent>
             <TabsContent value="versions" className="flex min-h-0 min-w-0 overflow-hidden">
               {selectedRecord
@@ -617,7 +649,7 @@ export const DeploymentWorkflowCenter: React.FC<{
                     admissionsEnabled={admissionsEnabled}
                   />
                 )
-                : <PlaceholderView kind="versions" />}
+                : <UnsavedDraftNotice />}
             </TabsContent>
           </Tabs>
         )}
@@ -629,9 +661,10 @@ export const DeploymentWorkflowCenter: React.FC<{
           <Drawer open={workflowsOpen} onOpenChange={setWorkflowsOpen}>
             <DrawerContent
               className="min-h-0 gap-0 overflow-hidden p-0"
+              closeButtonClassName="top-2 right-3 size-8 [&_svg]:size-3.5"
               finalFocus={workflowsTriggerRef}
             >
-              <DrawerHeader className="shrink-0 border-b px-3 py-2.5">
+              <DrawerHeader className="min-h-12 shrink-0 justify-center border-b px-3 py-1.5 pr-12">
                 <DrawerTitle>{t('deployment.editor.workflows')}</DrawerTitle>
               </DrawerHeader>
               <div className="min-h-0 flex-1">
@@ -676,9 +709,10 @@ export const DeploymentWorkflowCenter: React.FC<{
           <Drawer open={configOpen} onOpenChange={setConfigOpen}>
             <DrawerContent
               className="min-h-0 gap-0 overflow-hidden p-0"
+              closeButtonClassName="top-2 right-3 size-8 [&_svg]:size-3.5"
               finalFocus={configFinalFocusRef}
             >
-              <DrawerHeader className="shrink-0 border-b px-3 py-2.5">
+              <DrawerHeader className="min-h-12 shrink-0 justify-center border-b px-3 py-1.5 pr-12">
                 <DrawerTitle>{t('deployment.editor.configuration')}</DrawerTitle>
               </DrawerHeader>
               <div className="min-h-0 flex-1">{inspector}</div>
