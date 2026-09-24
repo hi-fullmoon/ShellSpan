@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { EmptyState, PanelLoadingState } from '@/components/ui/empty-state';
+import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { Progress, ProgressLabel, ProgressValue } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
@@ -31,14 +31,14 @@ import type {
   DeploymentRunStatus,
   DeploymentWorkflowRecord,
 } from '@/lib/deployment/types';
-import type { LocaleKey } from '@/locales';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import { ApprovalDialog } from './deployment/approval-dialog';
 import { ArtifactDrawer } from './deployment/artifact-drawer';
+import { DeploymentPaneHeader } from './deployment/deployment-pane-header';
 import { EvidenceDialog } from './deployment/evidence-dialog';
 import { ReleaseList } from './deployment/release-list';
-import { RuntimeFlow } from './deployment/runtime-flow';
 import { RuntimeNodeInspector } from './deployment/runtime-node-inspector';
+import { RuntimeStepList } from './deployment/runtime-step-list';
 import { RuntimeWorkspace } from './deployment/runtime-workspace';
 import {
   deploymentStatusBadgeVariant,
@@ -48,7 +48,7 @@ import {
   shortDeploymentDigest,
 } from './deployment/runtime-utils';
 
-type RuntimeViewKind = 'prepare' | 'runs' | 'versions';
+type RuntimeViewKind = 'runs' | 'versions';
 
 const RunStatusAlert: React.FC<{
   status: DeploymentRunStatus;
@@ -106,7 +106,7 @@ const PreparationProgress: React.FC = () => {
   const total = useDeploymentWorkflowRunStore((state) => state.preparationTotal);
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
   return (
-    <Alert role="status">
+    <Alert role="status" data-testid="deployment-preparing-progress">
       <Spinner />
       <AlertTitle>{t('deployment.runtime.preparing.title')}</AlertTitle>
       <AlertDescription>
@@ -141,149 +141,6 @@ const PreparationProgress: React.FC = () => {
   );
 };
 
-const PrepareView: React.FC<{
-  workflow: DeploymentWorkflowRecord;
-  semanticDirty: boolean;
-  admissionsEnabled: boolean;
-  onOpenApproval: (trigger?: HTMLElement | null) => void;
-}> = ({ workflow, semanticDirty, admissionsEnabled, onOpenApproval }) => {
-  const { t } = useI18n();
-  const state = useDeploymentWorkflowRunStore();
-  const awaiting = state.detail?.summary.status === 'awaiting_approval' ? state.detail : null;
-  const blocking = awaiting?.summary.expired || awaiting?.summary.planDrifted;
-  const requiredCapabilities = workflow.definition.nodes
-    .filter((node) => node.type === 'target.preflight')
-    .flatMap((node) => Array.isArray(node.config.requiredCapabilities)
-      ? node.config.requiredCapabilities.map(String)
-      : []);
-
-  return (
-    <section
-      className="flex min-h-0 min-w-0 flex-1 flex-col border"
-      data-testid="deployment-prepare-view"
-    >
-      <header className="shrink-0 border-b px-3 py-2.5">
-        <h2 className="text-sm font-medium">{t('deployment.runtime.prepare.title')}</h2>
-        <p className="text-xs text-muted-foreground">{t('deployment.runtime.prepare.description')}</p>
-      </header>
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-3 p-3">
-          {semanticDirty && (
-            <Alert variant="warning">
-              <AlertTriangleIcon />
-              <AlertTitle>{t('deployment.runtime.drift.unsavedTitle')}</AlertTitle>
-              <AlertDescription>{t('deployment.runtime.drift.unsavedDescription')}</AlertDescription>
-            </Alert>
-          )}
-          {state.preparing && <PreparationProgress />}
-          {state.error && state.errorContext === 'prepare' && (
-            <Alert variant="destructive">
-              <AlertTriangleIcon />
-              <AlertTitle>{state.error.includes('CAPABILITY')
-                ? t('deployment.runtime.capability.title')
-                : t('deployment.runtime.prepareFailed.title')}</AlertTitle>
-              <AlertDescription>{state.error.includes('CAPABILITY')
-                ? t('deployment.runtime.capability.description')
-                : t('deployment.runtime.prepareFailed.description')}</AlertDescription>
-            </Alert>
-          )}
-          {awaiting && (
-            <Alert variant={blocking ? 'warning' : 'default'} role="status">
-              {blocking ? <AlertTriangleIcon /> : <ShieldCheckIcon />}
-              <AlertTitle>{blocking
-                ? t('deployment.runtime.approval.invalidTitle')
-                : t('deployment.runtime.planReady.title')}</AlertTitle>
-              <AlertDescription>{blocking
-                ? t('deployment.runtime.approval.invalidDescription')
-                : t('deployment.runtime.planReady.description', {
-                  expires: formatDeploymentDate(awaiting.summary.expiresAt),
-                })}</AlertDescription>
-              <AlertAction>
-                <Button
-                  size="sm"
-                  onClick={(event) => onOpenApproval(event.currentTarget)}
-                  disabled={!admissionsEnabled}
-                  data-testid="deployment-open-approval"
-                >
-                  <ShieldCheckIcon data-icon="inline-start" />
-                  {t('deployment.runtime.reviewApproval')}
-                </Button>
-              </AlertAction>
-            </Alert>
-          )}
-          <dl className="grid gap-3 @min-[40rem]:grid-cols-3">
-            <div className="border-b pb-2 @min-[40rem]:border-b-0 @min-[40rem]:border-r @min-[40rem]:pr-3">
-              <dt className="text-xs text-muted-foreground">{t('deployment.runtime.prepare.revision')}</dt>
-              <dd className="mt-1 text-sm font-medium">{workflow.revision}</dd>
-            </div>
-            <div className="border-b pb-2 @min-[40rem]:border-b-0 @min-[40rem]:border-r @min-[40rem]:pr-3">
-              <dt className="text-xs text-muted-foreground">{t('deployment.runtime.prepare.nodes')}</dt>
-              <dd className="mt-1 text-sm font-medium">{workflow.definition.nodes.length}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">{t('deployment.runtime.prepare.retention')}</dt>
-              <dd className="mt-1 text-sm font-medium">{workflow.definition.policy.releasesToKeep}</dd>
-            </div>
-          </dl>
-          <section className="flex flex-col gap-2 border-t pt-3">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-medium">{t('deployment.runtime.capability.required')}</h3>
-              <Badge variant="secondary">{requiredCapabilities.length}</Badge>
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {requiredCapabilities.map((capability) => (
-                <Badge key={capability} variant="outline">
-                  {t(`deployment.editor.capability.${capability}` as LocaleKey)}
-                </Badge>
-              ))}
-              {requiredCapabilities.length === 0 && (
-                <span className="text-sm text-muted-foreground">
-                  {t('deployment.runtime.capability.none')}
-                </span>
-              )}
-            </div>
-          </section>
-          {!workflow.enabled && (
-            <Alert variant="warning">
-              <AlertTriangleIcon />
-              <AlertTitle>{t('deployment.runtime.workflowDisabled.title')}</AlertTitle>
-              <AlertDescription>{t('deployment.runtime.workflowDisabled.description')}</AlertDescription>
-            </Alert>
-          )}
-        </div>
-      </ScrollArea>
-      <footer className="flex shrink-0 justify-end border-t p-3">
-        <Button
-          size="sm"
-          onClick={(event) => {
-            const trigger = event.currentTarget;
-            void state.prepare(workflow).then(() => {
-              const latest = useDeploymentWorkflowRunStore.getState();
-              if (latest.workflowId === workflow.id
-                && latest.detail?.summary.workflowId === workflow.id) {
-                onOpenApproval(trigger);
-              }
-            }).catch(() => undefined);
-          }}
-          disabled={semanticDirty
-            || !admissionsEnabled
-            || !workflow.enabled
-            || state.preparing
-            || state.loading
-            || state.action !== null}
-        >
-          {state.preparing
-            ? <Spinner data-icon="inline-start" />
-            : <PackageCheckIcon data-icon="inline-start" />}
-          {awaiting && blocking
-            ? t('deployment.runtime.reprepare')
-            : t('deployment.runtime.prepare.action')}
-        </Button>
-      </footer>
-    </section>
-  );
-};
-
 const RunListPane: React.FC<{ workflow: DeploymentWorkflowRecord }> = ({ workflow }) => {
   const { t } = useI18n();
   const state = useDeploymentWorkflowRunStore();
@@ -293,23 +150,21 @@ const RunListPane: React.FC<{ workflow: DeploymentWorkflowRecord }> = ({ workflo
       aria-label={t('deployment.runtime.runs.title')}
       data-testid="deployment-run-list"
     >
-      <header className="flex shrink-0 items-start justify-between gap-2 border-b px-3 py-2.5">
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-medium">{t('deployment.runtime.runs.title')}</h2>
-          <p className="truncate text-xs text-muted-foreground">
-            {t('deployment.runtime.runs.count', { count: state.runs.length })}
-          </p>
-        </div>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label={t('common.refresh')}
-          onClick={() => void state.refreshWorkflow(workflow.id, true).catch(() => undefined)}
-          disabled={state.loading || state.action !== null || state.preparing}
-        >
-          <RefreshCwIcon data-icon="inline-start" />
-        </Button>
-      </header>
+      <DeploymentPaneHeader
+        title={t('deployment.runtime.runs.title')}
+        description={t('deployment.runtime.runs.count', { count: state.runs.length })}
+        actions={(
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={t('common.refresh')}
+            onClick={() => void state.refreshWorkflow(workflow.id, true).catch(() => undefined)}
+            disabled={state.loading || state.action !== null || state.preparing}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+          </Button>
+        )}
+      />
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-1 px-2 pb-2 pt-2">
           {state.runs.map((run) => (
@@ -354,10 +209,27 @@ const RunsView: React.FC<{
   admissionsEnabled: boolean;
   onOpenApproval: (trigger?: HTMLElement | null) => void;
   onOpenEvidence: (trigger: HTMLElement) => void;
-}> = ({ workflow, catalog, admissionsEnabled, onOpenApproval, onOpenEvidence }) => {
+  onDeploy: () => void;
+  canDeploy: boolean;
+  approvalRequest: number;
+  onApprovalHandled: () => void;
+  deployTriggerRef: React.RefObject<HTMLButtonElement | null>;
+}> = ({
+  workflow,
+  catalog,
+  admissionsEnabled,
+  onOpenApproval,
+  onOpenEvidence,
+  onDeploy,
+  canDeploy,
+  approvalRequest,
+  onApprovalHandled,
+  deployTriggerRef,
+}) => {
   const { t } = useI18n();
   const state = useDeploymentWorkflowRunStore();
   const [cancelOpen, setCancelOpen] = React.useState(false);
+  const handledApprovalRequestRef = React.useRef(0);
   const detail = state.detail;
   const active = detail
     && ['approved', 'in_progress', 'verifying', 'reconciling', 'cancel_requested']
@@ -371,15 +243,30 @@ const RunsView: React.FC<{
     return () => window.clearInterval(timer);
   }, [active]);
 
-  if (state.loading) {
-    return <PanelLoadingState label={t('deployment.runtime.loading')} />;
+  React.useEffect(() => {
+    if (approvalRequest <= 0 || handledApprovalRequestRef.current === approvalRequest) return;
+    if (state.detail?.summary.status === 'awaiting_approval') {
+      handledApprovalRequestRef.current = approvalRequest;
+      onApprovalHandled();
+      onOpenApproval(deployTriggerRef.current);
+    }
+  }, [approvalRequest, state.detail, onApprovalHandled, onOpenApproval, deployTriggerRef]);
+
+  if (state.loading && !detail) {
+    return <PanelLoadingState className="flex-1" label={t('deployment.runtime.loading')} />;
   }
   if (state.runs.length === 0) {
     return (
-      <EmptyState
+      <PanelEmptyState
         icon={<HistoryIcon />}
         title={t('deployment.runtime.runs.empty')}
         description={t('deployment.runtime.runs.emptyDescription')}
+        action={(
+          <Button onClick={onDeploy} disabled={!canDeploy} data-testid="deployment-run-empty-cta">
+            <PackageCheckIcon data-icon="inline-start" />
+            {t('deployment.runtime.deploy.action')}
+          </Button>
+        )}
       />
     );
   }
@@ -433,7 +320,19 @@ const RunsView: React.FC<{
           runPane={<RunListPane workflow={workflow} />}
           flow={(
             <div className="flex size-full min-h-0 flex-col">
-              <div className="shrink-0 p-2">
+              <div className="flex shrink-0 flex-col gap-2 p-2">
+                {state.preparing && <PreparationProgress />}
+                {state.error && state.errorContext === 'prepare' && (
+                  <Alert variant="destructive" data-testid="deployment-prepare-error">
+                    <AlertTriangleIcon />
+                    <AlertTitle>{state.error.includes('CAPABILITY')
+                      ? t('deployment.runtime.capability.title')
+                      : t('deployment.runtime.prepareFailed.title')}</AlertTitle>
+                    <AlertDescription>{state.error.includes('CAPABILITY')
+                      ? t('deployment.runtime.capability.description')
+                      : t('deployment.runtime.prepareFailed.description')}</AlertDescription>
+                  </Alert>
+                )}
                 <RunStatusAlert
                   status={detail.summary.status}
                   evidenceGaps={state.nodes
@@ -445,9 +344,8 @@ const RunsView: React.FC<{
                 />
               </div>
               <div className="min-h-0 flex-1">
-                <RuntimeFlow
+                <RuntimeStepList
                   workflow={workflow}
-                  catalog={catalog}
                   runNodes={state.nodes}
                   selectedNodeId={state.selectedNodeId}
                   onSelectNode={(nodeId) => void state.selectNode(nodeId).catch(() => undefined)}
@@ -485,14 +383,22 @@ export function DeploymentWorkflowRuntimeView({
   kind,
   workflow,
   catalog = null,
-  semanticDirty = false,
   admissionsEnabled = true,
+  onDeploy,
+  canDeploy,
+  approvalRequest = 0,
+  onApprovalHandled,
+  deployTriggerRef,
 }: {
   kind: RuntimeViewKind;
   workflow: DeploymentWorkflowRecord;
   catalog?: DeploymentNodeTypeCatalog | null;
-  semanticDirty?: boolean;
   admissionsEnabled?: boolean;
+  onDeploy?: () => void;
+  canDeploy?: boolean;
+  approvalRequest?: number;
+  onApprovalHandled?: () => void;
+  deployTriggerRef?: React.RefObject<HTMLButtonElement | null>;
 }): React.ReactNode {
   const [approvalOpen, setApprovalOpen] = React.useState(false);
   const [evidenceOpen, setEvidenceOpen] = React.useState(false);
@@ -510,14 +416,6 @@ export function DeploymentWorkflowRuntimeView({
 
   return (
     <>
-      {kind === 'prepare' && (
-        <PrepareView
-          workflow={workflow}
-          semanticDirty={semanticDirty}
-          admissionsEnabled={admissionsEnabled}
-          onOpenApproval={openApproval}
-        />
-      )}
       {kind === 'runs' && (
         <RunsView
           workflow={workflow}
@@ -525,6 +423,11 @@ export function DeploymentWorkflowRuntimeView({
           admissionsEnabled={admissionsEnabled}
           onOpenApproval={openApproval}
           onOpenEvidence={openEvidence}
+          onDeploy={onDeploy ?? (() => undefined)}
+          canDeploy={canDeploy ?? false}
+          approvalRequest={approvalRequest}
+          onApprovalHandled={onApprovalHandled ?? (() => undefined)}
+          deployTriggerRef={deployTriggerRef ?? { current: null }}
         />
       )}
       {kind === 'versions' && (

@@ -1,15 +1,25 @@
 import React from 'react';
-import { LibraryIcon, PanelRightIcon, Settings2Icon } from 'lucide-react';
+import {
+  AlertTriangleIcon,
+  CheckCircle2Icon,
+  LibraryIcon,
+  PanelRightIcon,
+  Settings2Icon,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
 import type { DeploymentWorkspaceLayout } from './deployment-workspace-shell';
+import { DeploymentPaneHeader } from './deployment-pane-header';
 
 export interface WorkflowEditorToolbarProps {
   workflowName: string;
   layout: DeploymentWorkspaceLayout;
   enabled: boolean;
   editable: boolean;
+  issueCount: number;
+  dirty: boolean;
+  onOpenIssues: () => void;
   onOpenLibrary: () => void;
   onOpenInspector: () => void;
   onOpenSettings: () => void;
@@ -23,6 +33,9 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
   layout,
   enabled,
   editable,
+  issueCount,
+  dirty,
+  onOpenIssues,
   onOpenLibrary,
   onOpenInspector,
   onOpenSettings,
@@ -32,57 +45,79 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
 }) => {
   const { t } = useI18n();
   return (
-    <header
-      className="flex min-h-10 shrink-0 flex-nowrap items-center gap-2 overflow-hidden border-b px-3 py-1"
+    <DeploymentPaneHeader
       data-testid="deployment-editor-toolbar"
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <h2 className="truncate text-sm font-medium">{workflowName}</h2>
+      title={workflowName}
+      titleMeta={(
+        <>
           <Badge variant={enabled ? 'secondary' : 'outline'} size="sm">
             {t(enabled ? 'deployment.editor.enabled' : 'deployment.editor.disabled')}
           </Badge>
-        </div>
-        <p className="hidden truncate text-xs text-muted-foreground @min-[60rem]:block">
-          {t('deployment.editor.canvasDescription')}
-        </p>
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        <Button
-          ref={libraryTriggerRef}
-          size="icon-sm"
-          variant="outline"
-          onClick={onOpenLibrary}
-          disabled={!editable}
-          aria-label={t('deployment.editor.nodeLibrary')}
-          title={t('deployment.editor.nodeLibrary')}
-        >
-          <LibraryIcon data-icon="inline-start" />
-        </Button>
-        <Button
-          ref={settingsTriggerRef}
-          size="icon-sm"
-          variant="outline"
-          onClick={onOpenSettings}
-          disabled={!editable}
-          aria-label={t('deployment.editor.settings')}
-          title={t('deployment.editor.settings')}
-        >
-          <Settings2Icon data-icon="inline-start" />
-        </Button>
-        {layout !== 'wide' && (
+          <Badge
+            variant={issueCount > 0 ? 'destructive' : 'outline'}
+            size="sm"
+            render={(
+              <button
+                type="button"
+                onClick={onOpenIssues}
+                title={t('deployment.editor.validation.title')}
+                data-testid="deployment-validation-status"
+              />
+            )}
+          >
+            {issueCount > 0
+              ? <AlertTriangleIcon data-icon="inline-start" />
+              : <CheckCircle2Icon data-icon="inline-start" />}
+            {issueCount > 0
+              ? t('deployment.editor.issues', { count: issueCount })
+              : t('deployment.editor.status.validated')}
+          </Badge>
+          {dirty && (
+            <Badge variant="secondary" size="sm">
+              {t('deployment.editor.status.unsaved')}
+            </Badge>
+          )}
+        </>
+      )}
+      description={t('deployment.editor.stepList.description')}
+      actions={(
+        <>
           <Button
-            ref={inspectorTriggerRef}
+            ref={libraryTriggerRef}
             size="icon-sm"
             variant="outline"
-            onClick={onOpenInspector}
-            aria-label={t('deployment.editor.configuration')}
-            title={t('deployment.editor.configuration')}
+            onClick={onOpenLibrary}
+            disabled={!editable}
+            aria-label={t('deployment.editor.nodeLibrary')}
+            title={t('deployment.editor.nodeLibrary')}
           >
-            <PanelRightIcon data-icon="inline-start" />
+            <LibraryIcon data-icon="inline-start" />
           </Button>
-        )}
-      </div>
-    </header>
+          <Button
+            ref={settingsTriggerRef}
+            size="icon-sm"
+            variant="outline"
+            onClick={onOpenSettings}
+            disabled={!editable}
+            aria-label={t('deployment.editor.settings')}
+            title={t('deployment.editor.settings')}
+          >
+            <Settings2Icon data-icon="inline-start" />
+          </Button>
+          {layout !== 'wide' && (
+            <Button
+              ref={inspectorTriggerRef}
+              size="icon-sm"
+              variant="outline"
+              onClick={onOpenInspector}
+              aria-label={t('deployment.editor.configuration')}
+              title={t('deployment.editor.configuration')}
+            >
+              <PanelRightIcon data-icon="inline-start" />
+            </Button>
+          )}
+        </>
+      )}
+    />
   );
 };

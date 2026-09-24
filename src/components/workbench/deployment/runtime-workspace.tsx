@@ -8,6 +8,7 @@ import {
   ResizablePanelGroup,
 } from '@/components/ui/resizable';
 import { useI18n } from '@/hooks/useI18n';
+import { DeploymentPaneHeader } from './deployment-pane-header';
 
 type RuntimeWorkspaceLayout = 'narrow' | 'medium' | 'wide';
 
@@ -65,36 +66,38 @@ export const RuntimeWorkspace: React.FC<RuntimeWorkspaceProps> = ({
 
   const main = (
     <section className="flex size-full min-h-0 min-w-0 flex-col bg-background">
-      <header className="flex min-h-11 shrink-0 items-center gap-2 border-b px-3 py-1.5">
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-medium">{title}</h2>
-          <p className="truncate text-xs text-muted-foreground">{description}</p>
-        </div>
-        {actions}
-        {layout !== 'wide' && (
-          <div className="flex shrink-0 items-center gap-1">
-            <Button
-              ref={runsTriggerRef}
-              size="icon-sm"
-              variant="outline"
-              onClick={() => setRunsOpen(true)}
-              aria-label={t('deployment.runtime.runs.title')}
-            >
-              <HistoryIcon data-icon="inline-start" />
-            </Button>
-            <Button
-              ref={inspectorTriggerRef}
-              size="icon-sm"
-              variant="outline"
-              onClick={() => setInspectorOpen(true)}
-              aria-label={t('deployment.runtime.node.details')}
-              data-testid="deployment-open-runtime-inspector"
-            >
-              <PanelRightIcon data-icon="inline-start" />
-            </Button>
-          </div>
+      <DeploymentPaneHeader
+        title={title}
+        description={description}
+        actions={(
+          <>
+            {actions}
+            {layout !== 'wide' && (
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  ref={runsTriggerRef}
+                  size="icon-sm"
+                  variant="outline"
+                  onClick={() => setRunsOpen(true)}
+                  aria-label={t('deployment.runtime.runs.title')}
+                >
+                  <HistoryIcon data-icon="inline-start" />
+                </Button>
+                <Button
+                  ref={inspectorTriggerRef}
+                  size="icon-sm"
+                  variant="outline"
+                  onClick={() => setInspectorOpen(true)}
+                  aria-label={t('deployment.runtime.node.details')}
+                  data-testid="deployment-open-runtime-inspector"
+                >
+                  <PanelRightIcon data-icon="inline-start" />
+                </Button>
+              </div>
+            )}
+          </>
         )}
-      </header>
+      />
       <div className="min-h-0 min-w-0 flex-1">{flow}</div>
     </section>
   );
@@ -102,7 +105,9 @@ export const RuntimeWorkspace: React.FC<RuntimeWorkspaceProps> = ({
   return (
     <div
       ref={rootRef}
-      className="@container flex min-h-0 min-w-0 flex-1 overflow-hidden border"
+      // No border-r: the AI panel's resize handle owns the divider at this edge,
+      // and a workspace border would stack into a 2px seam beside it.
+      className="@container flex min-h-0 min-w-0 flex-1 overflow-hidden border-b"
       data-testid="deployment-runtime-workspace"
       data-layout={layout ?? 'measuring'}
     >

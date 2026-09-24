@@ -7,6 +7,7 @@ import type {
   DeploymentWorkflowDefinition,
   DeploymentWorkflowRecord,
 } from '@/lib/deployment/types';
+import type { DeploymentEditorIssue } from '@/lib/deployment/editor';
 import { useDeploymentWorkflowStore } from '@/stores/deploymentWorkflowStore';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import { useProfileStore } from '@/stores/profileStore';
@@ -201,60 +202,310 @@ describe('DeploymentWorkflowCenter', () => {
     vi.unstubAllGlobals();
   });
 
-  it('renders mutually exclusive canvas and narrow topology surfaces from the same binding data', () => {
+  it('opens on the deployments tab with a disabled deploy CTA until the workflow is enabled', () => {
     render(<DeploymentWorkflowCenter />);
-    const canvas = screen.getByTestId('deployment-workflow-canvas');
-    expect(canvas.querySelectorAll('[data-node-id]')).toHaveLength(2);
-    expect(canvas.querySelectorAll('[data-edge-id]')).toHaveLength(1);
-    expect(canvas.querySelector('[data-edge-id]')).toMatchObject({
-      dataset: {
-        sourceNodeId: 'source',
-        sourcePort: 'source',
-        targetNodeId: 'build',
-        targetPort: 'source',
-      },
-    });
-    expect(screen.queryByTestId('deployment-topology-list')).not.toBeInTheDocument();
-
-    resizeWorkspace(428);
-
-    expect(screen.queryByTestId('deployment-workflow-canvas')).not.toBeInTheDocument();
-    const topology = screen.getByTestId('deployment-topology-list');
-    expect(topology.querySelectorAll('[data-topology-node-id]')).toHaveLength(2);
-
-    const sourceBinding = within(topology).getByLabelText('deployment.editor.port.source');
-    expect(sourceBinding).toHaveTextContent('Freeze source');
-    expect(sourceBinding).not.toHaveTextContent('source|source');
+    expect(screen.getByRole('tab', { name: 'deployment.editor.tab.runs' })).toHaveAttribute('aria-selected', 'true');
+    const cta = screen.getByTestId('deployment-run-empty-cta');
+    expect(cta).toBeDisabled();
+    expect(cta).toHaveTextContent('deployment.runtime.deploy.action');
   });
 
-  it('builds a card-free three-pane workspace with accessible resize handles and a fixed status bar', () => {
-    render(<DeploymentWorkflowCenter />);
+  it('renders the pipeline as an ordered step list with binding-derived relations and selection', () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    const steps = screen.getByTestId('deployment-step-list');
+    const rows = steps.querySelectorAll('[data-step-node-id]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveAttribute('data-step-node-id', 'source');
+    expect(rows[1]).toHaveAttribute('data-step-node-id', 'build');
+    expect(steps).toHaveTextContent('deployment.editor.stepList.relations');
+
+    fireEvent.click(within(steps).getByRole('button', { name: 'deployment.editor.stepList.stepAria:Freeze source' }));
+    expect(useDeploymentWorkflowStore.getState().selectedNodeId).toBe('source');
+    expect(screen.getByTestId('deployment-node-config')).toHaveTextContent('Freeze source');
+  });
+
+  it('aligns the pipeline columns under one shared pane header height with full-width step separators', () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    const workspace = screen.getByTestId('deployment-workspace-wide');
+    const headers = workspace.querySelectorAll('[data-slot="deployment-pane-header"]');
+    expect(headers).toHaveLength(3);
+    for (const header of headers) {
+      expect(header).toHaveClass('min-h-12', 'items-center', 'border-b', 'shrink-0');
+    }
+    for (const description of workspace.querySelectorAll('[data-slot="deployment-pane-header"] p')) {
+      expect(description).toHaveClass('truncate');
+    }
+
+    const separators = screen.getByTestId('deployment-step-list').querySelectorAll('[data-slot="separator"]');
+    expect(separators).toHaveLength(1);
+    expect(separators[0]).not.toHaveClass('mx-3', 'w-auto');
+  });
+
+  it('keeps step rows compact with the first node flush under the pane header', () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    const steps = screen.getByTestId('deployment-step-list');
+    expect(steps.querySelector('[data-slot="scroll-area-viewport"] > div')).toHaveClass('pb-1');
+    const rows = steps.querySelectorAll('[data-step-node-id]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveClass('pb-1');
+    expect(rows[0]).not.toHaveClass('pt-1');
+    expect(rows[1]).toHaveClass('pt-1', 'pb-1');
+    for (const row of rows) {
+      expect(row.querySelector('button')).toHaveClass('h-auto', 'justify-start', 'py-1.5');
+    }
+  });
+
+  it('renders workflow list rows tall enough for a comfortable click target', async () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    const workflowList = screen.getByTestId('deployment-workflow-list');
+    expect(within(workflowList).getByRole('button', { name: /Website/ }))
+      .toHaveClass('h-auto', 'justify-start', 'py-2.5');
+
+    act(() => {
+      useDeploymentWorkflowStore.getState().startTemplate(
+        'blank',
+        'Second workflow',
+        profile.id,
+        '/srv/second',
+      );
+    });
+    await waitFor(() => expect(
+      within(workflowList).getByRole('button', { name: /Second workflow/ }),
+    ).toHaveClass('h-auto', 'justify-start', 'py-2.5'));
+  });
+
+  it('keeps the same step list available in the compact layout with configure drawers', () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    resizeWorkspace(428);
+
+    const steps = screen.getByTestId('deployment-step-list');
+    expect(steps.querySelectorAll('[data-step-node-id]')).toHaveLength(2);
+    expect(screen.queryByTestId('deployment-workspace-wide')).not.toBeInTheDocument();
+
+    const configure = screen.getAllByRole('button', { name: 'deployment.editor.configure' })[0]!;
+    fireEvent.click(configure);
+    expect(screen.getByRole('heading', { name: 'deployment.editor.configuration' })).toBeInTheDocument();
+    expect(screen.getByTestId('deployment-node-config').querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
+    // The drawer header keeps the shared 48px pane-header height and the close
+    // button aligns with that row instead of hanging below the divider when
+    // the title has no description line.
+    const configDrawer = document.querySelector('[data-slot="drawer-content"]');
+    expect(configDrawer?.querySelector('[data-slot="drawer-header"]'))
+      .toHaveClass('min-h-12', 'justify-center', 'px-3', 'py-1.5', 'pr-12');
+    expect(configDrawer?.querySelector('[data-slot="drawer-close"]'))
+      .toHaveClass('top-2', 'right-3', 'size-8');
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    return waitFor(() => expect(configure).toHaveFocus());
+  });
+
+  it('keeps the workflows drawer close button on the title row in the compact layout', () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    resizeWorkspace(428);
+
+    const trigger = screen.getByRole('button', { name: 'deployment.editor.workflows' });
+    fireEvent.click(trigger);
+    expect(screen.getByRole('heading', { name: 'deployment.editor.workflows' })).toBeInTheDocument();
+
+    // The drawer header keeps the shared 48px pane-header height with room
+    // reserved for the close button, which stays on the title row instead of
+    // hanging below the divider into the search row.
+    const workflowsDrawer = document.querySelector('[data-slot="drawer-content"]');
+    expect(workflowsDrawer?.querySelector('[data-slot="drawer-header"]'))
+      .toHaveClass('min-h-12', 'justify-center', 'px-3', 'py-1.5', 'pr-12');
+    expect(workflowsDrawer?.querySelector('[data-slot="drawer-close"]'))
+      .toHaveClass('top-2', 'right-3', 'size-8');
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    return waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('builds a card-free three-pane pipeline workspace with accessible resize handles and header status chips', () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
     const workspace = screen.getByTestId('deployment-design-workspace');
     expect(workspace.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
     expect(workspace).toHaveAttribute('data-layout', 'wide');
     expect(screen.getByTestId('deployment-workspace-wide')).toBeInTheDocument();
-    expect(workspace.querySelectorAll('[data-panel]')).toHaveLength(3);
-    expect(within(workspace).getAllByRole('separator')).toHaveLength(2);
-    expect(within(workspace).getByRole('separator', { name: 'deployment.editor.resize.workflows' })).toBeInTheDocument();
-    expect(within(workspace).getByRole('separator', { name: 'deployment.editor.resize.inspector' })).toBeInTheDocument();
-    expect(screen.getByTestId('deployment-validation-status')).toHaveClass('shrink-0', 'border-t');
-    expect(screen.getByTestId('deployment-validation-status')).toHaveClass('min-h-8');
+    const panelGroup = workspace.querySelector('[data-slot="resizable-panel-group"]')!;
+    expect(panelGroup.querySelectorAll('[data-panel]')).toHaveLength(3);
+    expect(panelGroup.querySelectorAll('[data-slot="resizable-handle"]')).toHaveLength(2);
+    expect(within(panelGroup as HTMLElement).getByRole('separator', { name: 'deployment.editor.resize.workflows' })).toBeInTheDocument();
+    expect(within(panelGroup as HTMLElement).getByRole('separator', { name: 'deployment.editor.resize.inspector' })).toBeInTheDocument();
+    const editorToolbar = screen.getByTestId('deployment-editor-toolbar');
+    const statusChip = within(editorToolbar).getByTestId('deployment-validation-status');
+    expect(statusChip).toHaveRole('button');
+    expect(statusChip).toHaveTextContent('deployment.editor.status.validated');
+    expect(screen.queryByLabelText('deployment.editor.status.label')).not.toBeInTheDocument();
 
     const toolbar = screen.getByTestId('deployment-workflow-toolbar');
-    expect(toolbar).toHaveClass('flex-nowrap', 'min-h-10');
-    expect(within(toolbar).getByRole('tab', { name: 'deployment.editor.tab.design' })).toHaveAttribute('aria-selected', 'true');
+    expect(toolbar).toHaveClass('flex-nowrap', 'min-h-10', 'gap-3');
+    // The tab strip starts flush with the toolbar's left edge; only the action
+    // rail keeps the right padding.
+    expect(toolbar).toHaveClass('pr-3');
+    expect(toolbar).not.toHaveClass('px-3');
+    const tabsList = toolbar.querySelector('[data-slot="tabs-list"]')!;
+    expect(tabsList).toHaveClass('h-full!', 'p-0');
+    const activeTab = within(toolbar).getByRole('tab', { name: 'deployment.editor.tab.pipeline' });
+    expect(activeTab).toHaveAttribute('aria-selected', 'true');
+    // The active underline rides flush on the toolbar divider.
+    expect(activeTab).toHaveClass('h-full!', 'px-2.5', 'after:-bottom-px!');
+    const workflowsButton = toolbar.querySelector('[data-testid="deployment-workflow-actions"] button')!;
+    expect(workflowsButton).toHaveClass('size-8');
+  });
+
+  it('reflects validation issues and unsaved changes in the editor header chips and opens the issues dialog', () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    const editorToolbar = screen.getByTestId('deployment-editor-toolbar');
+    const chip = within(editorToolbar).getByTestId('deployment-validation-status');
+    expect(chip).toHaveTextContent('deployment.editor.status.validated');
+    expect(within(editorToolbar).queryByText('deployment.editor.status.unsaved')).not.toBeInTheDocument();
+
+    const issue: DeploymentEditorIssue = {
+      id: 'issue-1',
+      code: 'LOCAL_MISSING_INPUT',
+      messageKey: 'deployment.editor.validation.localMissingInput',
+      nodeId: 'build',
+      source: 'local',
+    };
+    act(() => {
+      useDeploymentWorkflowStore.setState({ issues: [issue], semanticDirty: true });
+    });
+    expect(chip).toHaveTextContent('deployment.editor.issues:1');
+    expect(within(editorToolbar).getByText('deployment.editor.status.unsaved')).toBeInTheDocument();
+
+    fireEvent.click(chip);
+    expect(screen.getByRole('heading', { name: 'deployment.editor.validation.title' })).toBeInTheDocument();
+    expect(screen.getByTestId('deployment-validation-list')).toHaveTextContent(
+      'deployment.editor.validation.localMissingInput',
+    );
   });
 
   it('keeps every deployment center tab free of Card DOM', () => {
-    for (const initialTab of ['design', 'prepare', 'runs', 'versions'] as const) {
+    for (const initialTab of ['pipeline', 'runs', 'versions'] as const) {
       const view = render(<DeploymentWorkflowCenter initialTab={initialTab} />);
       expect(view.container.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
       view.unmount();
     }
   });
 
-  it('exposes searchable grouped drawers with a fixed title, scrolling body, and focus return', async () => {
+  it('outlines the pipeline workspace like the runtime tabs without doubling adjacent dividers', () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    const workspace = screen.getByTestId('deployment-design-workspace');
+    expect(workspace).toHaveClass('flex-1', 'border-b');
+    expect(workspace).not.toHaveClass('border-r');
+    expect(workspace).not.toHaveClass('border-t');
+    expect(workspace).not.toHaveClass('border-l');
+    expect(screen.getByTestId('deployment-workflow-toolbar')).toHaveClass('border-b');
+  });
+
+  it('centers the page-level empty state when no workflow exists yet', () => {
+    useDeploymentWorkflowStore.setState({
+      workflows: [],
+      selectedWorkflowId: null,
+      selectedNodeId: null,
+      draft: null,
+    });
     render(<DeploymentWorkflowCenter />);
+    const panel = document.querySelector('[data-slot="panel-empty-state"]');
+    expect(panel).toHaveClass('flex-1', 'items-center', 'justify-center');
+    expect(within(panel as HTMLElement).getByText('deployment.editor.empty')).toBeInTheDocument();
+    expect(within(panel as HTMLElement).getByRole('button', { name: 'deployment.editor.newWorkflow' }))
+      .toBeInTheDocument();
+  });
+
+  it('centers the unsaved-draft notice inside its outlined panel', async () => {
+    render(<DeploymentWorkflowCenter initialTab="runs" />);
+    act(() => {
+      useDeploymentWorkflowStore.getState().startTemplate(
+        'blank',
+        'Second workflow',
+        profile.id,
+        '/srv/second',
+      );
+    });
+    await waitFor(() => expect(
+      screen.getByRole('tab', { name: 'deployment.editor.tab.pipeline' }),
+    ).toHaveAttribute('aria-selected', 'true'));
+    fireEvent.click(screen.getByRole('tab', { name: 'deployment.editor.tab.runs' }));
+
+    const notice = screen.getByTestId('deployment-unsaved-notice');
+    expect(notice).toHaveClass('flex-1', 'items-center', 'justify-center', 'border-b');
+    expect(notice).not.toHaveClass('border-r');
+    expect(within(notice).getByText('deployment.editor.placeholder.unsavedTitle')).toBeInTheDocument();
+  });
+
+  it('switches to the deployments tab, prepares, and auto-opens approval when deploying', async () => {
+    const digest = (character: string) => `sha256:${character.repeat(64)}` as const;
+    const enabledWorkflow: DeploymentWorkflowRecord = { ...workflow, enabled: true };
+    const awaitingSummary = {
+      runId: 'run-1', workflowId: enabledWorkflow.id, workflowRevision: enabledWorkflow.revision,
+      operationKind: 'deploy' as const, triggerKind: 'manual' as const, status: 'awaiting_approval' as const,
+      planDigest: digest('b'),
+      targetRelease: { releaseId: 'release-next', artifactContentDigest: digest('c'), layoutDigest: digest('d') },
+      artifactReferences: [], expiresAt: Date.now() + 60_000, expired: false, planDrifted: false,
+      createdAt: 1, updatedAt: 1, startedAt: null, finishedAt: null,
+    };
+    const prepare = vi.fn().mockImplementation(async () => {
+      useDeploymentWorkflowRunStore.setState({
+        workflowId: enabledWorkflow.id,
+        runs: [awaitingSummary],
+        selectedRunId: 'run-1',
+        detail: {
+          summary: awaitingSummary,
+          approvalSummary: {
+            schemaVersion: 1, workflowId: enabledWorkflow.id, workflowRevision: enabledWorkflow.revision,
+            definitionDigest: enabledWorkflow.definitionDigest, runId: 'run-1',
+            operationKind: 'deploy', triggerKind: 'manual', parameters: {}, planDigest: digest('b'),
+            preparedAt: 1, expiresAt: awaitingSummary.expiresAt,
+            source: { sourceRef: 'workspace', revision: 'abc123', dirty: false, snapshotDigest: digest('1'), metadataDigest: digest('2') },
+            target: { targetId: 'production', connectionProfileId: profile.id, profileRevision: 1, hostIdentityDigest: digest('3'), remoteRoot: '/srv/site', capabilitiesDigest: digest('4') },
+            preflight: {},
+            artifacts: [],
+            targetRelease: awaitingSummary.targetRelease,
+            effects: [],
+            risks: { highestLevel: 'low', entries: [] },
+            compensations: [],
+            verificationNodes: [],
+            retention: 3,
+          },
+          outputs: [],
+          receipts: [],
+        },
+        nodes: [],
+      });
+    });
+    useDeploymentWorkflowStore.setState({
+      workflows: [enabledWorkflow],
+      draft: {
+        id: enabledWorkflow.id, name: enabledWorkflow.name, enabled: true,
+        revision: enabledWorkflow.revision, layoutRevision: enabledWorkflow.layoutRevision,
+        definition: structuredClone(enabledWorkflow.definition),
+        layout: structuredClone(enabledWorkflow.layout!),
+      },
+    });
+    useDeploymentWorkflowRunStore.setState({ prepare });
+
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    fireEvent.click(screen.getByTestId('deployment-deploy-action'));
+
+    await waitFor(() => expect(prepare).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('tab', { name: 'deployment.editor.tab.runs' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('heading', { name: 'deployment.runtime.approval.what' })).toBeInTheDocument();
+  });
+
+  it('disables deploy with an explanatory hint for unsaved changes and disabled workflows', () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    const deploy = screen.getByTestId('deployment-deploy-action');
+    expect(deploy).toBeDisabled();
+    expect(deploy).toHaveAttribute('title', 'deployment.runtime.deploy.workflowDisabled');
+
+    act(() => {
+      useDeploymentWorkflowStore.getState().updateWorkflowMeta({ enabled: true });
+    });
+    expect(deploy).toBeDisabled();
+    expect(deploy).toHaveAttribute('title', 'deployment.runtime.deploy.unsaved');
+  });
+
+  it('exposes searchable grouped drawers with a fixed title, scrolling body, and focus return', async () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
     resizeWorkspace(858);
 
     const trigger = screen.getByRole('button', { name: 'deployment.editor.nodeLibrary' });
@@ -265,6 +516,10 @@ describe('DeploymentWorkflowCenter', () => {
     expect(drawer).toHaveClass('min-h-0', 'overflow-hidden');
     expect(drawer?.querySelector('[data-slot="drawer-header"]')).toHaveClass('shrink-0');
     expect(drawer?.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
+    // The search row must keep breathing room below the header divider instead
+    // of sitting flush against the drawer's top edge.
+    const searchRow = drawer?.querySelector('[data-testid="deployment-node-library"] > div');
+    expect(searchRow).toHaveClass('shrink-0', 'px-3', 'pt-2', 'pb-2');
     expect(screen.getByRole('heading', { name: 'deployment.editor.category.source' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'deployment.editor.category.build' })).toBeInTheDocument();
 
@@ -274,6 +529,15 @@ describe('DeploymentWorkflowCenter', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('adds a pipeline step from the step list footer', () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    fireEvent.click(screen.getByRole('button', { name: 'deployment.editor.stepList.addStep' }));
+    expect(screen.getByRole('heading', { name: 'deployment.editor.nodeLibrary' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'deployment.editor.addNodeNamed:deployment.node.source_snapshot.name' }));
+    expect(useDeploymentWorkflowStore.getState().draft?.definition.nodes).toHaveLength(3);
+    expect(useDeploymentWorkflowStore.getState().semanticDirty).toBe(true);
   });
 
   it('deduplicates save toasts under repeated notice delivery', async () => {
@@ -332,27 +596,8 @@ describe('DeploymentWorkflowCenter', () => {
     });
   });
 
-  it('provides keyboard alternatives for canvas selection, layout movement, and configuration', () => {
-    const { container } = render(<DeploymentWorkflowCenter />);
-    const source = container.querySelector<HTMLElement>('[data-node-id="source"]');
-    expect(source).not.toBeNull();
-    source!.focus();
-    fireEvent.keyDown(source!, { key: 'ArrowRight', altKey: true });
-    expect(useDeploymentWorkflowStore.getState().draft?.layout.nodes.source.x).toBe(36);
-    fireEvent.keyDown(source!, { key: 'Enter' });
-    expect(useDeploymentWorkflowStore.getState().selectedNodeId).toBe('source');
-
-    resizeWorkspace(428);
-    const configure = screen.getAllByRole('button', { name: 'deployment.editor.configure' })[0]!;
-    fireEvent.click(configure);
-    expect(screen.getByRole('heading', { name: 'deployment.editor.configuration' })).toBeInTheDocument();
-    expect(screen.getByTestId('deployment-node-config').querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
-    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
-    return waitFor(() => expect(configure).toHaveFocus());
-  });
-
   it('keeps a new unsaved workflow selected when saved workflows already exist', async () => {
-    render(<DeploymentWorkflowCenter />);
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
     const search = screen.getByRole('textbox', { name: 'deployment.editor.search' });
     fireEvent.change(search, { target: { value: 'stale-filter' } });
     act(() => {
@@ -376,12 +621,34 @@ describe('DeploymentWorkflowCenter', () => {
     expect(within(workflowList).getByText('deployment.editor.workflowCount:2')).toBeInTheDocument();
   });
 
+  it('points an unsaved draft at the pipeline tab and shows a save hint on runtime tabs', async () => {
+    render(<DeploymentWorkflowCenter initialTab="versions" />);
+    act(() => {
+      useDeploymentWorkflowStore.getState().startTemplate(
+        'blank',
+        'Second workflow',
+        profile.id,
+        '/srv/second',
+      );
+    });
+    await waitFor(() => expect(
+      screen.getByRole('tab', { name: 'deployment.editor.tab.pipeline' }),
+    ).toHaveAttribute('aria-selected', 'true'));
+  });
+
   it('keeps the template dialog compact with icon-free footer actions', async () => {
-    render(<DeploymentWorkflowCenter />);
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
     fireEvent.click(screen.getByRole('button', { name: 'deployment.editor.newWorkflow' }));
 
     const dialog = await screen.findByRole('dialog');
-    expect(dialog).toHaveClass('h-[min(26rem,calc(100vh-2rem))]');
+    expect(dialog).toHaveClass('max-h-[calc(100vh-2rem)]');
+    expect(dialog.className).not.toMatch(/(^|\s)h-\[/);
+    const scrollArea = dialog.querySelector('[data-slot="scroll-area"]');
+    expect(scrollArea).toHaveClass('min-h-0');
+    // A max-height-capped dialog leaves percentage heights indefinite in WebKit,
+    // so the body must sit in a definite grid row instead of a plain flex child.
+    expect(scrollArea?.parentElement).toHaveClass('grid', 'min-h-0', 'flex-1', 'grid-rows-[minmax(0,1fr)_auto]');
+    expect(within(dialog).getByText('deployment.editor.template.title').closest('[data-slot="dialog-header"]')).toHaveClass('shrink-0');
     const cancel = within(dialog).getByRole('button', { name: 'common.cancel' });
     const submit = within(dialog).getByRole('button', { name: 'deployment.editor.template.use' });
     expect(cancel.querySelector('svg')).toBeNull();
@@ -393,7 +660,7 @@ describe('DeploymentWorkflowCenter', () => {
   it('defaults a template to the active profile filter and keeps that filter after creation', async () => {
     useProfileStore.setState({ profiles: [profile, filteredProfile] });
     useDeploymentWorkflowStore.setState({ profileFilterId: filteredProfile.id });
-    render(<DeploymentWorkflowCenter />);
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
     fireEvent.click(screen.getByRole('button', { name: 'deployment.editor.newWorkflow' }));
 
     const dialog = await screen.findByRole('dialog');
@@ -418,7 +685,7 @@ describe('DeploymentWorkflowCenter', () => {
   });
 
   it('allows an editable workflow to be enabled from workflow settings', async () => {
-    render(<DeploymentWorkflowCenter />);
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
     fireEvent.click(screen.getByRole('button', { name: 'deployment.editor.settings' }));
     const enabled = await screen.findByRole('switch', { name: 'deployment.editor.enabled' });
     expect(enabled).not.toBeChecked();
@@ -437,11 +704,12 @@ describe('DeploymentWorkflowCenter', () => {
         readOnlyAvailable: true, cancelRecoveryAuditAvailable: true, coordinatorAvailable: true,
       },
     });
-    render(<DeploymentWorkflowCenter />);
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
 
     expect(screen.getByRole('button', { name: 'deployment.editor.nodeLibrary' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'deployment.editor.settings' })).toBeDisabled();
     expect(screen.getByLabelText('deployment.editor.nodeName')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'deployment.editor.removeNode' })).toBeDisabled();
+    expect(screen.getByTestId('deployment-deploy-action')).toBeDisabled();
   });
 });

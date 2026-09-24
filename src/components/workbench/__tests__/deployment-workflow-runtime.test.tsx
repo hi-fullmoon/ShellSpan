@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DeploymentWorkflowRuntimeOverlays,
@@ -100,6 +100,10 @@ function approvalSummary(): DeploymentApprovalSummary {
   };
 }
 
+function runDetail(summary: DeploymentRunSummary): DeploymentRunDetail {
+  return { summary, approvalSummary: approvalSummary(), outputs: [], receipts: [] };
+}
+
 const node: DeploymentRunNodeRecord = {
   runId: 'run-1', nodeId: 'source', nodeType: 'source.snapshot', nodeTypeVersion: 1,
   status: 'succeeded', lastAttempt: 1, outputSummary: { files: 4 }, startedAt: 10, finishedAt: 20, updatedAt: 20,
@@ -120,7 +124,6 @@ class RuntimeResizeObserverMock implements ResizeObserver {
   }
 
   disconnect(): void {}
-
   observe(target: Element): void {
     if (target.getAttribute('data-testid') === 'deployment-runtime-workspace') {
       runtimeWorkspaceResize = (width) => this.callback([{
@@ -167,7 +170,7 @@ beforeEach(() => {
     workflowId: workflow.id,
     runs: [summary],
     selectedRunId: summary.runId,
-    detail: { summary, approvalSummary: approvalSummary(), outputs: [], receipts: [] },
+    detail: runDetail(summary),
     nodes: [node, approvalNode],
     selectedNodeId: node.nodeId,
     events: [{ runId: summary.runId, sequence: 2, nodeId: node.nodeId, attempt: 1, eventKind: 'node_succeeded', status: 'succeeded', summaryKey: 'deployment.node.succeeded', payload: null, recordedAt: 20 }],
@@ -180,26 +183,20 @@ afterEach(() => {
 });
 
 describe('DeploymentWorkflowRuntimeView', () => {
-  it('blocks prepare and approval admissions in read-only mode while keeping cancellation available', () => {
-    render(
-      <DeploymentWorkflowRuntimeView
-        kind="prepare"
-        workflow={workflow}
-        admissionsEnabled={false}
-      />,
-    );
-    expect(screen.getByRole('button', { name: 'deployment.runtime.prepare.action' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'deployment.runtime.reviewApproval' })).toBeDisabled();
+  it('aligns the runs panes under one shared pane header height', () => {
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+    const headers = document.querySelectorAll('[data-slot="deployment-pane-header"]');
+    expect(headers).toHaveLength(3);
+    for (const header of headers) {
+      expect(header).toHaveClass('min-h-12', 'items-center', 'border-b', 'shrink-0');
+    }
+  });
 
+  it('blocks approval admissions in read-only mode while keeping cancellation available', () => {
     const approved = runSummary({ status: 'approved' });
     useDeploymentWorkflowRunStore.setState({
       runs: [approved],
-      detail: {
-        summary: approved,
-        approvalSummary: approvalSummary(),
-        outputs: [],
-        receipts: [],
-      },
+      detail: runDetail(approved),
     });
     render(
       <DeploymentWorkflowRuntimeView
@@ -214,9 +211,8 @@ describe('DeploymentWorkflowRuntimeView', () => {
   });
 
   it('groups approval by user meaning and keeps long content inside a fixed dialog chain', async () => {
-    render(<DeploymentWorkflowRuntimeView kind="prepare" workflow={workflow} />);
-    expect(screen.getByTestId('deployment-prepare-view').querySelector('[data-slot="card"]')).not.toBeInTheDocument();
-    const trigger = screen.getByRole('button', { name: 'deployment.runtime.reviewApproval' });
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+    const trigger = screen.getAllByTestId('deployment-open-approval')[0]!;
     trigger.focus();
     fireEvent.click(trigger);
 
@@ -237,30 +233,130 @@ describe('DeploymentWorkflowRuntimeView', () => {
 
   it('disables approval after expiry and requires a new preparation', () => {
     const expired = runSummary({ expired: true, expiresAt: 1 });
-    useDeploymentWorkflowRunStore.setState({ detail: { summary: expired, approvalSummary: approvalSummary(), outputs: [], receipts: [] } });
-    render(<DeploymentWorkflowRuntimeView kind="prepare" workflow={workflow} />);
-    fireEvent.click(screen.getByRole('button', { name: 'deployment.runtime.reviewApproval' }));
-    expect(screen.getAllByText('deployment.runtime.approval.invalidTitle')).toHaveLength(2);
+    useDeploymentWorkflowRunStore.setState({ detail: runDetail(expired) });
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+    fireEvent.click(screen.getAllByTestId('deployment-open-approval')[0]!);
+    expect(screen.getAllByText('deployment.runtime.approval.invalidTitle')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'deployment.runtime.approveAndRun' })).toBeDisabled();
   });
 
-  it('keeps semantic drift as a preparation gate and approval wired to the run coordinator', async () => {
-    const prepare = vi.fn().mockResolvedValue(undefined);
-    const approveAndStart = vi.fn().mockResolvedValue(undefined);
-    useDeploymentWorkflowRunStore.setState({ prepare, approveAndStart });
-    const view = render(
-      <DeploymentWorkflowRuntimeView kind="prepare" workflow={workflow} semanticDirty />,
+  it('opens the approval dialog automatically once a deploy preparation lands on an awaiting run', async () => {
+    const onApprovalHandled = vi.fn();
+    const { rerender } = render(
+      <DeploymentWorkflowRuntimeView
+        kind="runs"
+        workflow={workflow}
+        approvalRequest={0}
+        onApprovalHandled={onApprovalHandled}
+      />,
     );
+    expect(screen.queryByRole('heading', { name: 'deployment.runtime.approval.what' })).not.toBeInTheDocument();
 
-    expect(screen.getByRole('button', { name: 'deployment.runtime.prepare.action' })).toBeDisabled();
-    expect(screen.getByText('deployment.runtime.drift.unsavedTitle')).toBeInTheDocument();
-    view.unmount();
+    rerender(
+      <DeploymentWorkflowRuntimeView
+        kind="runs"
+        workflow={workflow}
+        approvalRequest={1}
+        onApprovalHandled={onApprovalHandled}
+      />,
+    );
+    expect(await screen.findByRole('heading', { name: 'deployment.runtime.approval.what' })).toBeInTheDocument();
+    expect(onApprovalHandled).toHaveBeenCalledTimes(1);
+  });
 
-    render(<DeploymentWorkflowRuntimeView kind="prepare" workflow={workflow} />);
-    fireEvent.click(screen.getByRole('button', { name: 'deployment.runtime.reviewApproval' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'deployment.runtime.approveAndRun' }));
-    await waitFor(() => expect(approveAndStart).toHaveBeenCalledTimes(1));
-    expect(prepare).not.toHaveBeenCalled();
+  it('shows preparation progress and preparation failures inline above the run steps', () => {
+    useDeploymentWorkflowRunStore.setState({
+      preparing: true,
+      preparationNodes: [
+        { nodeId: 'source', displayName: 'Freeze source', status: 'succeeded' },
+        { nodeId: 'approval', displayName: 'Human approval', status: 'running' },
+      ],
+      preparationCompleted: 1,
+      preparationTotal: 2,
+    });
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+    expect(screen.getByTestId('deployment-preparing-progress')).toBeInTheDocument();
+    expect(screen.getByText('deployment.runtime.preparing.title')).toBeInTheDocument();
+    expect(within(screen.getByTestId('deployment-preparing-progress')).getAllByText('Human approval').length).toBeGreaterThan(0);
+
+    act(() => {
+      useDeploymentWorkflowRunStore.setState({
+        preparing: false,
+        preparationNodes: [],
+        preparationCompleted: 0,
+        preparationTotal: 0,
+        error: 'CAPABILITY_MISSING',
+        errorContext: 'prepare',
+      });
+    });
+    expect(screen.getByTestId('deployment-prepare-error')).toBeInTheDocument();
+    expect(screen.getByText('deployment.runtime.capability.title')).toBeInTheDocument();
+  });
+
+  it('offers the deploy action from the empty deployment list state', () => {
+    const onDeploy = vi.fn();
+    useDeploymentWorkflowRunStore.setState({
+      runs: [],
+      nextRunCursor: null,
+      selectedRunId: null,
+      detail: null,
+      nodes: [],
+      events: [],
+      attempts: [],
+    });
+    render(
+      <DeploymentWorkflowRuntimeView
+        kind="runs"
+        workflow={workflow}
+        onDeploy={onDeploy}
+        canDeploy={false}
+      />,
+    );
+    const cta = screen.getByTestId('deployment-run-empty-cta');
+    expect(cta).toBeDisabled();
+    expect(cta).toHaveTextContent('deployment.runtime.deploy.action');
+    expect(cta.closest('[data-slot="panel-empty-state"]')).toHaveClass(
+      'flex-1',
+      'items-center',
+      'justify-center',
+    );
+  });
+
+  it('centers the empty step list inside the steps panel', () => {
+    const finished = runSummary({ status: 'succeeded', startedAt: 10, finishedAt: 20 });
+    useDeploymentWorkflowRunStore.setState({
+      runs: [finished],
+      selectedRunId: finished.runId,
+      detail: runDetail(finished),
+      nodes: [],
+    });
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+
+    const steps = screen.getByTestId('deployment-runtime-step-list');
+    expect(steps).toHaveClass('flex', 'size-full', 'items-center', 'justify-center');
+    expect(within(steps).getByText('deployment.runtime.steps.empty')).toBeInTheDocument();
+    expect(steps.querySelector('[data-run-node-id]')).not.toBeInTheDocument();
+  });
+
+  it('centers the empty release list inside the outlined versions workspace', () => {
+    render(<DeploymentWorkflowRuntimeView kind="versions" workflow={workflow} />);
+
+    const view = screen.getByTestId('deployment-versions-view');
+    expect(view).toHaveClass('flex-1', 'border-b');
+    expect(view).not.toHaveClass('border-r');
+    expect(view).not.toHaveClass('border-t');
+    const empty = within(view)
+      .getByText('deployment.runtime.version.empty')
+      .closest('[data-slot="empty-state"]');
+    expect(empty).toHaveClass('flex-1', 'items-center', 'justify-center');
+  });
+
+  it('frames the runs workspace with the same outline as the versions workspace', () => {
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+    const workspace = screen.getByTestId('deployment-runtime-workspace');
+    expect(workspace).toHaveClass('flex-1', 'border-b');
+    expect(workspace).not.toHaveClass('border-r');
+    expect(workspace).not.toHaveClass('border-t');
   });
 
   it('shows node attempts, bounded logs, and opens audit evidence with fixed scrolling', async () => {
@@ -283,37 +379,16 @@ describe('DeploymentWorkflowRuntimeView', () => {
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
-  it('projects workflow bindings and native node state into a strictly read-only runtime DAG', () => {
+  it('projects the run into an ordered, selectable step list', () => {
     render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
 
-    const flow = screen.getByTestId('deployment-runtime-flow');
-    expect(flow).toHaveAttribute('data-read-only', 'true');
-    expect(flow.querySelectorAll('[data-node-id]')).toHaveLength(2);
-    expect(flow.querySelector('[data-node-id="source"]')).toMatchObject({
-      dataset: { nodeStatus: 'succeeded', nodeAttempt: '1' },
-    });
-    expect(flow.querySelector('[data-node-id="approval"]')).toMatchObject({
-      dataset: { nodeStatus: 'awaiting_approval', nodeAttempt: '0' },
-    });
-    expect(flow.querySelectorAll('[data-edge-id]')).toHaveLength(1);
-    expect(flow.querySelector('[data-edge-id]')).toMatchObject({
-      dataset: {
-        sourceNodeId: 'source',
-        sourcePort: 'source',
-        targetNodeId: 'approval',
-        targetPort: 'source',
-      },
-    });
-    const anchors = [...flow.querySelectorAll<HTMLElement>('[data-runtime-anchor]')];
-    expect(anchors).toHaveLength(4);
-    expect(anchors.every((anchor) => (
-      anchor.getAttribute('aria-hidden') === 'true'
-      && anchor.tabIndex === -1
-      && anchor.classList.contains('pointer-events-none')
-      && anchor.classList.contains('opacity-0')
-    ))).toBe(true);
-    expect(flow).toHaveTextContent('deployment.runtime.status.succeeded');
-    expect(flow).toHaveTextContent('deployment.runtime.status.awaiting_approval');
+    const steps = screen.getByTestId('deployment-runtime-step-list');
+    const rows = steps.querySelectorAll('[data-run-node-id]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveAttribute('data-run-node-id', 'source');
+    expect(rows[1]).toHaveAttribute('data-run-node-id', 'approval');
+    expect(rows[0]).toHaveTextContent('deployment.runtime.status.succeeded');
+    expect(rows[1]).toHaveTextContent('deployment.runtime.status.awaiting_approval');
   });
 
   it('moves run history and the inspector into fixed-title drawers with focus return', async () => {
@@ -351,7 +426,7 @@ describe('DeploymentWorkflowRuntimeView', () => {
 
     expect(screen.getByRole('button', { name: 'deployment.runtime.reconcile' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'common.cancel' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('deployment-runtime-flow')).toHaveAttribute('data-read-only', 'true');
+    expect(screen.getByTestId('deployment-runtime-step-list')).toBeInTheDocument();
   });
 
   it('keeps active-run cancellation behind its confirmation dialog', async () => {
@@ -434,6 +509,8 @@ describe('DeploymentWorkflowRuntimeView', () => {
     render(<DeploymentWorkflowRuntimeView kind="versions" workflow={workflow} />);
 
     expect(screen.getByTestId('deployment-versions-view').querySelector('[data-slot="card"]')).not.toBeInTheDocument();
+    expect(screen.getByTestId('deployment-versions-view').querySelector('[data-slot="alert"]')).not.toBeInTheDocument();
+    expect(screen.queryByText('deployment.runtime.rollback.confirmTitle')).not.toBeInTheDocument();
 
     const trigger = screen.getByTestId('deployment-open-rollback');
     trigger.focus();
@@ -444,6 +521,8 @@ describe('DeploymentWorkflowRuntimeView', () => {
     expect(screen.getByLabelText('deployment.runtime.rollback.release')).toHaveTextContent('release-previous');
     expect(dialog.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
     expect(dialog.querySelector('[data-slot="dialog-footer"]')).toHaveClass('shrink-0');
+    expect(within(dialog).getByText('deployment.runtime.rollback.confirmTitle')).toBeInTheDocument();
+    expect(within(dialog).getByText('deployment.runtime.rollback.confirmDescription')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
     await waitFor(() => expect(trigger).toHaveFocus());

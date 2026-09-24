@@ -141,25 +141,10 @@ describe('deploymentWorkflowStore', () => {
     expect(useDeploymentWorkflowStore.getState().draft!.definition.nodes[0].inputs).toEqual({});
   });
 
-  it('keeps layout and semantic dirty transitions separate for moves, connections, and disconnections', () => {
+  it('marks connections and disconnections as semantic-only draft changes', () => {
     const current = record();
     useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current] });
-    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
-    const originalDefinition = structuredClone(useDeploymentWorkflowStore.getState().draft!.definition);
 
-    useDeploymentWorkflowStore.getState().moveNode('source', 48, 72);
-    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
-      layoutDirty: true,
-      semanticDirty: false,
-    });
-    expect(useDeploymentWorkflowStore.getState().draft?.definition).toEqual(originalDefinition);
-
-    useDeploymentWorkflowStore.setState({
-      selectedWorkflowId: null,
-      draft: null,
-      semanticDirty: false,
-      layoutDirty: false,
-    });
     useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
     useDeploymentWorkflowStore.getState().connectInput('build', 'source', null);
     expect(useDeploymentWorkflowStore.getState()).toMatchObject({
@@ -186,34 +171,6 @@ describe('deploymentWorkflowStore', () => {
     expect(useDeploymentWorkflowStore.getState().draft?.definition.nodes.find((node) => node.id === 'build')?.inputs.source).toEqual({
       fromNodeId: 'source',
       fromPort: 'source',
-    });
-  });
-
-  it('commits a multi-node move as one layout-only store update', () => {
-    const current = record();
-    useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current] });
-    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
-    const originalDefinition = structuredClone(useDeploymentWorkflowStore.getState().draft!.definition);
-    let draftUpdates = 0;
-    const unsubscribe = useDeploymentWorkflowStore.subscribe((state, previous) => {
-      if (state.draft !== previous.draft) draftUpdates += 1;
-    });
-
-    useDeploymentWorkflowStore.getState().moveNodes([
-      { id: 'source', x: 48, y: 72 },
-      { id: 'build', x: 320, y: 96 },
-    ]);
-    unsubscribe();
-
-    expect(draftUpdates).toBe(1);
-    expect(useDeploymentWorkflowStore.getState().draft?.layout.nodes).toMatchObject({
-      source: { x: 48, y: 72 },
-      build: { x: 320, y: 96 },
-    });
-    expect(useDeploymentWorkflowStore.getState().draft?.definition).toEqual(originalDefinition);
-    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
-      layoutDirty: true,
-      semanticDirty: false,
     });
   });
 
@@ -288,7 +245,7 @@ describe('deploymentWorkflowStore', () => {
     useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current] });
     useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
     const firstNode = current.definition.nodes[0];
-    useDeploymentWorkflowStore.getState().moveNode(firstNode.id, 42, 64);
+    useDeploymentWorkflowStore.setState({ layoutDirty: true });
     mocks.updateLayout.mockResolvedValue({
       workflowId: current.id,
       layoutRevision: 2,
@@ -365,7 +322,7 @@ describe('deploymentWorkflowStore', () => {
     useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current] });
     useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
     useDeploymentWorkflowStore.getState().updateNode('source', { displayName: 'Committed source' });
-    useDeploymentWorkflowStore.getState().moveNode('source', 84, 96);
+    useDeploymentWorkflowStore.setState({ layoutDirty: true });
     const updated = {
       ...current,
       revision: 2,
@@ -405,7 +362,6 @@ describe('deploymentWorkflowStore', () => {
     useDeploymentWorkflowStore.setState({ saving: true });
 
     useDeploymentWorkflowStore.getState().updateNode('source', { displayName: 'Late edit' });
-    useDeploymentWorkflowStore.getState().moveNode('source', 999, 999);
 
     expect(useDeploymentWorkflowStore.getState().draft).toEqual(before);
     expect(useDeploymentWorkflowStore.getState()).toMatchObject({

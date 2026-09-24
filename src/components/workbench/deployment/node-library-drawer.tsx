@@ -46,7 +46,7 @@ const NodeLibraryPane: React.FC<NodeLibraryPaneProps> = ({ catalog, onAdd, edita
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="deployment-node-library">
-      <div className="shrink-0 px-3 pb-2">
+      <div className="shrink-0 px-3 pt-2 pb-2">
         <WorkbenchSearchInput
           containerClassName="min-w-0 w-full flex-1"
           value={search}
@@ -119,8 +119,12 @@ export const NodeLibraryDrawer: React.FC<NodeLibraryDrawerProps> = ({
   const { t } = useI18n();
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="min-h-0 gap-0 overflow-hidden p-0" finalFocus={finalFocusRef}>
-        <DrawerHeader className="shrink-0 border-b px-3 py-2.5">
+      <DrawerContent
+        className="min-h-0 gap-0 overflow-hidden p-0"
+        closeButtonClassName="top-3.5 right-3 size-8 [&_svg]:size-3.5"
+        finalFocus={finalFocusRef}
+      >
+        <DrawerHeader className="shrink-0 border-b px-3 py-2.5 pr-12">
           <DrawerTitle>{t('deployment.editor.nodeLibrary')}</DrawerTitle>
           <p className="text-xs text-muted-foreground">
             {t('deployment.editor.nodeLibraryDescription')}

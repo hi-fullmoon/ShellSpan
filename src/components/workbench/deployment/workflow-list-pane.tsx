@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import type { DeploymentWorkflowRecord } from '@/lib/deployment/types';
+import { DeploymentPaneHeader } from './deployment-pane-header';
 import { WorkbenchSearchInput } from '../workbench-page';
 
 export interface WorkflowListPaneProps {
@@ -49,23 +50,21 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
       aria-label={t('deployment.editor.workflows')}
     >
       {showHeader && (
-        <header className="flex shrink-0 items-start justify-between gap-2 border-b px-3 py-2.5">
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-medium">{t('deployment.editor.workflows')}</h2>
-            <p className="truncate text-xs text-muted-foreground">
-              {t('deployment.editor.workflowCount', { count: workflowCount })}
-            </p>
-          </div>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={onCreate}
-            disabled={!canCreate}
-            aria-label={t('deployment.editor.template.title')}
-          >
-            <PlusIcon data-icon="inline-start" />
-          </Button>
-        </header>
+        <DeploymentPaneHeader
+          title={t('deployment.editor.workflows')}
+          description={t('deployment.editor.workflowCount', { count: workflowCount })}
+          actions={(
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={onCreate}
+              disabled={!canCreate}
+              aria-label={t('deployment.editor.template.title')}
+            >
+              <PlusIcon data-icon="inline-start" />
+            </Button>
+          )}
+        />
       )}
       <div className="shrink-0 p-2">
         <WorkbenchSearchInput
@@ -83,7 +82,7 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
           {draftVisible && draftName && (
             <Button
               variant="secondary"
-              className="h-auto min-w-0 justify-start py-1.5 disabled:opacity-100"
+              className="h-auto min-w-0 justify-start py-2.5 disabled:opacity-100"
               disabled
               aria-current="page"
             >
@@ -97,7 +96,7 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
             <Button
               key={workflow.id}
               variant={workflow.id === selectedWorkflowId ? 'secondary' : 'ghost'}
-              className="h-auto min-w-0 justify-start py-1.5"
+              className="h-auto min-w-0 justify-start py-2.5"
               onClick={() => onSelect(workflow.id)}
               disabled={selectionDisabled}
             >
