@@ -246,15 +246,15 @@ describe('DeploymentWorkflowCenter', () => {
     expect(separators[0]).not.toHaveClass('mx-3', 'w-auto');
   });
 
-  it('keeps step rows compact with the first node flush under the pane header', () => {
+  it('keeps step rows compact with uniform item padding under the pane header', () => {
     render(<DeploymentWorkflowCenter initialTab="pipeline" />);
     const steps = screen.getByTestId('deployment-step-list');
     expect(steps.querySelector('[data-slot="scroll-area-viewport"] > div')).toHaveClass('pb-1');
     const rows = steps.querySelectorAll('[data-step-node-id]');
     expect(rows).toHaveLength(2);
-    expect(rows[0]).toHaveClass('pb-1');
-    expect(rows[0]).not.toHaveClass('pt-1');
-    expect(rows[1]).toHaveClass('pt-1', 'pb-1');
+    for (const row of rows) {
+      expect(row).toHaveClass('py-1');
+    }
     for (const row of rows) {
       expect(row.querySelector('button')).toHaveClass('h-auto', 'justify-start', 'py-1.5');
     }
