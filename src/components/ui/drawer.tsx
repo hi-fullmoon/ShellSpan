@@ -45,10 +45,12 @@ function DrawerContent({
   children,
   showCloseButton = true,
   keepMounted = false,
+  closeButtonClassName,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean;
   keepMounted?: boolean;
+  closeButtonClassName?: string;
 }) {
   const { t } = useI18n();
   return (
@@ -69,7 +71,7 @@ function DrawerContent({
             render={
               <Button
                 variant="ghost"
-                className="absolute top-4 right-4"
+                className={cn("absolute top-4 right-4", closeButtonClassName)}
                 size="icon"
               />
             }
