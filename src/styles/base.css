@@ -197,6 +197,8 @@
 }
 
 :root {
+  /* Light palette: minimal monochrome slate with a near-black primary,
+     mirroring the graphite primary of the dark theme. */
   --image-preview-backdrop: rgb(0 0 0 / 88%);
   --image-preview-controls: #f4f4f4;
   --image-preview-control-hover: #dedede;
@@ -207,15 +209,15 @@
   --app-text: #0f172a;
   --app-text-soft: #475569;
   --app-border: rgba(100, 116, 139, 0.28);
-  --app-primary: #0e7490;
+  --app-primary: #1e293b;
   /* Resize rails keep the shell palette inside AI's locally themed surface. */
   --app-resize-divider: rgba(100, 116, 139, 0.28);
-  --app-resize-divider-active: #0e7490;
+  --app-resize-divider-active: #1e293b;
   --app-primary-text: #ffffff;
-  --app-button: #0e7490;
+  --app-button: #1e293b;
   --app-button-text: #ffffff;
-  --app-terminal-selection: rgba(14, 116, 144, 0.28);
-  --app-terminal-selection-inactive: rgba(14, 116, 144, 0.16);
+  --app-terminal-selection: rgba(15, 23, 42, 0.22);
+  --app-terminal-selection-inactive: rgba(15, 23, 42, 0.12);
   --app-error: #dc2626;
   --app-warning: #d97706;
   --app-success: #16a34a;
