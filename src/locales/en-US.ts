@@ -1147,6 +1147,8 @@ export default {
   'settings.ai.addProvider': 'Add provider',
   'settings.ai.addProviderTitle': 'Add AI provider',
   'settings.ai.addProviderDescription': 'Choose a provider and enter its credentials. Recommended defaults handle the rest.',
+  'settings.ai.providersEmpty': 'No providers yet',
+  'settings.ai.providersEmptyDescription': 'Add a provider to use the AI assistant in the terminal and workbench.',
   'settings.ai.editProvider': 'Edit',
   'settings.ai.editProviderTitle': 'Edit AI provider',
   'settings.ai.editProviderDescription': 'Update credentials or the model used by {name}.',

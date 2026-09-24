@@ -110,9 +110,9 @@ export const UpdateSection: React.FC = () => {
           <div className="flex items-center justify-between gap-3">
             <Tooltip>
               <TooltipTrigger render={<p className="min-w-0 flex-1 truncate text-xs text-destructive" />}>
-                {error ?? t('update.failed', { error: '' })}
+                {error ?? t('update.failedFriendly')}
               </TooltipTrigger>
-              <TooltipContent className="break-all">{error ?? t('update.failed', { error: '' })}</TooltipContent>
+              <TooltipContent className="break-all">{error ?? t('update.failedFriendly')}</TooltipContent>
             </Tooltip>
             <Button variant="outline" size="sm" onClick={() => void runCheck('manual')}>
               <RotateCcwIcon data-icon="inline-start" />

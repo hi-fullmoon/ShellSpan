@@ -339,10 +339,11 @@ describe('SettingsPanel', () => {
       '[&_[data-slot=select-trigger]]:min-w-36',
     );
     expect(settingsDialog).toHaveClass(
-      'h-[min(48rem,calc(100vh-2rem))]',
+      'max-h-[min(48rem,calc(100vh-2rem))]',
       'w-[min(64rem,calc(100vw-2rem))]',
       'max-w-none',
     );
+    expect(settingsDialog.className).not.toMatch(/(?:^|\s)h-\[min\(48rem/);
   });
 
   it('uses the small button scale throughout every settings section', async () => {
@@ -391,6 +392,19 @@ describe('SettingsPanel', () => {
 
     expect(screen.getByRole('button', { name: 'settings.general.checkingUpdate' })).toBeDisabled();
     expect(screen.queryByText('update.checking')).not.toBeInTheDocument();
+  });
+
+  it('falls back to a friendly update failure message when no error detail exists', async () => {
+    useUpdateStore.setState({ phase: 'error', error: undefined });
+
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+
+    expect(screen.getByText('update.failedFriendly')).toBeInTheDocument();
+    expect(screen.queryByText('update.failed')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'settings.general.retry' }),
+    ).toBeInTheDocument();
   });
 
   it('groups related settings into a responsive row card', async () => {
@@ -451,6 +465,23 @@ describe('SettingsPanel', () => {
     expect(providerRows).toHaveLength(useAiSettingsStore.getState().providers.length);
     expect(contextField?.closest('[data-slot="card"]')).toBe(providerCard);
     expect(screen.getAllByRole('button', { name: 'settings.ai.editProvider' })).not.toHaveLength(0);
+  });
+
+  it('explains how to add the first provider when none is configured', async () => {
+    useAiSettingsStore.setState({ providers: [], defaultProviderId: '' });
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+    openSection('settings.ai.title');
+
+    const emptyState = screen.getByText('settings.ai.providersEmpty').closest('[data-slot="empty-state"]');
+    const providerCard = emptyState?.closest('[data-slot="card"]');
+
+    expect(emptyState).toHaveTextContent('settings.ai.providersEmptyDescription');
+    expect(providerCard).toBeInTheDocument();
+    expect(providerCard?.querySelectorAll('[data-slot="ai-provider-row"]')).toHaveLength(0);
+    expect(
+      screen.getByRole('button', { name: 'settings.ai.addProvider' }),
+    ).toBeInTheDocument();
   });
 
   it('places global shortcut reset in the shortcuts title bar', async () => {
@@ -558,6 +589,17 @@ describe('SettingsPanel', () => {
     fireEvent.keyDown(captureArea, { key: 'k', metaKey: true });
 
     expect(await screen.findByText('settings.shortcuts.conflict')).toBeInTheDocument();
+  });
+
+  it('closes the shortcut recorder from its cancel button', async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+
+    await openRecorder('settings.shortcuts.closeTerminalTab');
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+
+    expect(screen.queryByText('settings.shortcuts.recordPrompt')).not.toBeInTheDocument();
   });
 
   it('allows a chord that is only used in a different section scope', async () => {
