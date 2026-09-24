@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { clampAiPanelWidth, getAiPanelWidthBounds } from '../ai-panel';
@@ -25,5 +27,23 @@ describe('AI panel width contract', () => {
   it('uses the available viewport below the main-content floor', () => {
     expect(getAiPanelWidthBounds(300)).toEqual({ min: 300, max: 300 });
     expect(clampAiPanelWidth(400, 300)).toBe(300);
+  });
+});
+
+describe('AI panel shell divider contract', () => {
+  it('derives the resting divider from the shell border at half strength in both themes', () => {
+    const baseCss = readFileSync('src/styles/base.css', 'utf8');
+    const dividers = [...baseCss.matchAll(/--app-resize-divider:\s*([^;]+);/g)]
+      .map(([match, value]) => value.trim());
+
+    expect(dividers).toEqual([
+      'color-mix(in srgb, var(--app-border) 50%, transparent)',
+      'color-mix(in srgb, var(--app-border) 50%, transparent)',
+    ]);
+  });
+
+  it('keeps the resize handle stroke on the divider token', () => {
+    const foundationCss = readFileSync('src/components/ai/styles/foundation.css', 'utf8');
+    expect(foundationCss).toContain('box-shadow: inset 1px 0 var(--app-resize-divider)');
   });
 });

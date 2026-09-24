@@ -258,7 +258,7 @@ describe('TerminalTabBar', () => {
     const { container } = render(<TerminalTabBar />);
 
     const tabBar = container.querySelector('[data-terminal-tab-bar]');
-    expect(tabBar).toHaveClass('h-10', 'my-0', 'py-0', 'bg-app-bg', 'px-0.5');
+    expect(tabBar).toHaveClass('h-10', 'my-0', 'py-0', 'bg-app-bg');
     expect(tabBar).toHaveClass('after:border-b', 'after:border-app-border/40');
     expect(tabBar?.querySelector('[data-slot="scroll-area"]')).toHaveClass('h-10');
     // Edge padding lives inside the scroll viewport so drop indicators
@@ -266,7 +266,7 @@ describe('TerminalTabBar', () => {
     expect(screen.getByRole('tablist')).toHaveClass('py-0', 'gap-1', 'px-1');
     for (const tab of screen.getAllByRole('tab')) {
       expect(tab.parentElement).toHaveClass('h-10', 'py-1');
-      expect(tab).toHaveClass('h-8', 'w-42');
+      expect(tab).toHaveClass('h-8', 'w-42', 'px-1.5', 'gap-1');
     }
     expect(screen.getAllByRole('tab')[0]).toHaveClass('h-8', 'rounded-md', 'border-app-border', 'bg-app-surface', 'text-app-text', 'shadow-xs');
     expect(screen.getAllByRole('tab')[1]).toHaveClass('border-transparent', 'bg-transparent', 'hover:bg-app-surface-muted');

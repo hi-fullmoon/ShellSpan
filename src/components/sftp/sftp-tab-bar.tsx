@@ -88,7 +88,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-8 w-42 shrink-0 items-center gap-1.5 rounded-md border px-2 text-left text-xs outline-none transition-[background-color,border-color,color,opacity,box-shadow] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
+        'group relative flex h-8 w-42 shrink-0 items-center gap-1 rounded-md border px-1.5 text-left text-xs outline-none transition-[background-color,border-color,color,opacity,box-shadow] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
         active
           ? 'border-app-border bg-app-surface text-app-text shadow-xs'
           : 'border-transparent bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
@@ -475,7 +475,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         if ((e.target as HTMLElement).closest('[data-sftp-tab]')) return;
         onNewTabClick();
       }}
-      className="group/tabbar relative my-0 flex h-10 items-start bg-app-bg px-0.5 py-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-app-border/40"
+      className="group/tabbar relative my-0 flex h-10 items-start bg-app-bg py-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-app-border/40"
     >
       <DndContext
         sensors={sensors}

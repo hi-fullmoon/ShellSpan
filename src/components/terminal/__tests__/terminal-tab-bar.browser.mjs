@@ -67,6 +67,7 @@ try {
         const slot = tab.parentElement;
         const barStyle = getComputedStyle(bar);
         const slotStyle = getComputedStyle(slot);
+        const tabStyle = getComputedStyle(tab);
         return {
           bar: bar.getBoundingClientRect().height,
           viewport: bar.querySelector('[data-slot="scroll-area-viewport"]').getBoundingClientRect().height,
@@ -77,12 +78,15 @@ try {
           barPadding: [barStyle.paddingTop, barStyle.paddingBottom],
           slotPadding: [slotStyle.paddingTop, slotStyle.paddingBottom],
           inset: tab.getBoundingClientRect().top - bar.getBoundingClientRect().top,
+          leadingInset: tab.getBoundingClientRect().left - bar.getBoundingClientRect().left,
+          tabPaddingX: [tabStyle.paddingLeft, tabStyle.paddingRight],
         };
       }, selector);
       assert.deepEqual(sizes, {
         bar: 40, viewport: 40, slot: 40, tab: 32, tabWidth: 168,
         margins: ['0px', '0px'], barPadding: ['0px', '0px'],
         slotPadding: ['4px', '4px'], inset: 4,
+        leadingInset: 4, tabPaddingX: ['6px', '6px'],
       });
     }
   }
@@ -118,7 +122,7 @@ try {
       `leading indicator ${leading.left}..${leading.right} outside viewport ${leading.viewportLeft}..${leading.viewportRight}`,
     );
   }
-  console.log('terminal and sftp tab bars: 40px bar, tab 168×32px, inset 4px');
+  console.log('terminal and sftp tab bars: 40px bar, tab 168×32px, leading inset 4px, tab padding 6px');
 } finally {
   await browser?.close();
   await server.close();
