@@ -125,6 +125,24 @@ describe('LogPanel', () => {
     expect(screen.queryByText('workbench.logs.copyHint')).not.toBeInTheDocument();
   });
 
+  it('softens inspector shell separators to match the workbench chrome borders', () => {
+    const today = new Date();
+    const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    mockContent =
+      `[${todayString}][12:34:57][ERROR][shellspan::connect] inspector border fixture`;
+
+    render(<LogPanel />);
+
+    fireEvent.click(screen.getByText('inspector border fixture'));
+
+    const aside = screen.getByText('workbench.logs.inspector.title').closest('aside')!;
+    expect(aside).toHaveClass('border-l', 'border-app-border/50');
+    expect(aside).not.toHaveClass('border-border');
+    const header = aside.firstElementChild as HTMLElement;
+    expect(header).toHaveClass('border-b', 'border-app-border/50');
+    expect(header).not.toHaveClass('border-border');
+  });
+
   it('renders the header refresh action as a text button', () => {
     render(<LogPanel />);
 
