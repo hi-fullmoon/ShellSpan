@@ -191,6 +191,28 @@ describe('NewSessionDialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('renders the local terminal icon with the same tinted background as profile icons', () => {
+    useProfileStore.setState({ profiles: [makeProfile('p1', 'Alpha', 'host1.io', 'user1')] });
+
+    render(
+      <NewSessionDialog
+        open
+        onClose={vi.fn()}
+        onConnect={mockConnect}
+        onOpenLocal={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const localIcon = screen
+      .getByRole('button', { name: 'terminal.newSession.localTerminal' })
+      .querySelector('span');
+    const profileIcon = screen.getByRole('button', { name: 'Alpha' }).querySelector('span');
+
+    expect(localIcon).toHaveClass('bg-primary/10', 'text-primary');
+    expect(localIcon).not.toHaveClass('bg-primary', 'text-primary-foreground');
+    expect(localIcon?.className).toBe(profileIcon?.className);
+  });
+
   it('cycles selection with arrow keys', () => {
     const p1 = makeProfile('p1', 'Alpha', 'host1.io', 'user1');
     const p2 = makeProfile('p2', 'Beta', 'host2.io', 'user2');

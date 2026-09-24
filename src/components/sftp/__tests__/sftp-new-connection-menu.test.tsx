@@ -122,6 +122,28 @@ describe('SftpNewConnectionMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('renders the local folder icon with the same tinted background as profile icons', () => {
+    useProfileStore.setState({ profiles: [profile] });
+
+    render(
+      <SftpNewConnectionMenu
+        open
+        onClose={vi.fn()}
+        onConnect={vi.fn().mockResolvedValue(undefined)}
+        onOpenLocal={vi.fn()}
+      />,
+    );
+
+    const localIcon = screen
+      .getByRole('button', { name: /sftp\.newConnectionMenu\.openLocal/ })
+      .querySelector('span');
+    const profileIcon = screen.getByRole('button', { name: 'Alpha' }).querySelector('span');
+
+    expect(localIcon).toHaveClass('bg-primary/10', 'text-primary');
+    expect(localIcon).not.toHaveClass('bg-primary', 'text-primary-foreground');
+    expect(localIcon?.className).toBe(profileIcon?.className);
+  });
+
   it('closes on Escape without activating a connection', () => {
     useProfileStore.setState({ profiles: [profile] });
     const onConnect = vi.fn().mockResolvedValue(undefined);
