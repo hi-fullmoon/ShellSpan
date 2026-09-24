@@ -435,7 +435,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => onOpenChange(nextOpen)}>
       <DialogContent
-        className="flex max-h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=dialog-close]]:size-8 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 [&_[data-slot=select-trigger]]:min-w-36 sm:rounded-xl"
+        className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=dialog-close]]:size-8 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 [&_[data-slot=select-trigger]]:min-w-36 sm:rounded-xl"
       >
         <TooltipProvider>
           <CompactDialogHeader
@@ -469,8 +469,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </aside>
 
             <section className="flex min-w-0 flex-1 flex-col bg-background">
-              <div className="flex shrink-0 items-center gap-2.5 border-b border-app-border/40 px-4 py-2.5">
-                <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+              <div className="flex shrink-0 items-center gap-2.5 border-b border-app-border/40 px-4 py-2">
+                <div className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
                   <ActiveSectionIcon className="size-3.5" aria-hidden />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -493,7 +493,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
 
               <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
-                <div className="@container mx-auto w-full max-w-3xl p-4">
+                <div className="@container mx-auto w-full max-w-3xl p-3.5">
             <TabsContent value="appearance" className="w-full">
               <SettingsGrid>
                 <SettingRow label={t('settings.appearance.theme')} description={t('settings.appearance.themeDescription')}>
@@ -996,7 +996,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       const binding = shortcuts[action] ?? DEFAULT_SHORTCUTS[action];
                       const leaderBinding = shortcuts.terminalLeader ?? DEFAULT_SHORTCUTS.terminalLeader;
                       return (
-                        <div key={action} className="flex min-h-14 items-center justify-between gap-3 px-4 py-2.5">
+                        <div key={action} className="flex min-h-11 items-center justify-between gap-3 px-3.5 py-1.5">
                           <span className="text-sm font-medium">{shortcutLabels[action]}</span>
                           <div className="flex items-center gap-1">
                             <Button
