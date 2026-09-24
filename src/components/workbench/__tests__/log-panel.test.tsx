@@ -143,6 +143,31 @@ describe('LogPanel', () => {
     );
   });
 
+  it('renders the stats overview toolbar flush while filter rows stay compact', () => {
+    const { container } = render(<LogPanel />);
+
+    const toolbars = container.querySelectorAll('[data-slot="workbench-page-toolbar"]');
+    expect(toolbars.length).toBeGreaterThanOrEqual(2);
+    expect(toolbars[0]).toHaveClass('py-2.5');
+    expect(toolbars[1]).toHaveClass('py-1');
+
+    const statsRow = toolbars[0].firstElementChild as HTMLElement;
+    expect(statsRow).toHaveClass('flex', 'items-center', 'gap-5');
+    ['bg-background', 'rounded-lg', 'border', 'border-border', 'px-3', 'py-2'].forEach((removedClass) => {
+      expect(statsRow).not.toHaveClass(removedClass);
+    });
+  });
+
+  it('lays out search and filters on one row in wide containers while staying stacked when narrow', () => {
+    const { container } = render(<LogPanel />);
+
+    const filterToolbar = container.querySelectorAll('[data-slot="workbench-page-toolbar"]')[1];
+    expect(filterToolbar).toHaveClass('@min-[1020px]:flex-row', '@min-[1020px]:items-center');
+
+    const filterRow = filterToolbar.children[1] as HTMLElement;
+    expect(filterRow).toHaveClass('flex', 'min-w-0', 'flex-wrap', '@min-[1020px]:flex-1');
+  });
+
   it('shows an empty-filter message when no log entries match', () => {
     mockContent =
       '[2000-01-01][12:34:56][INFO][shellspan] persisted log entry\n';

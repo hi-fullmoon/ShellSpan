@@ -67,6 +67,13 @@ describe('KeychainPanel', () => {
     expect(deleteButtons).toHaveLength(2);
   });
 
+  it('spaces keychain cards with the compact grid gap', () => {
+    const { container } = render(<KeychainPanel />);
+
+    const grid = container.querySelector('.grid') as HTMLElement;
+    expect(grid).toHaveStyle({ gap: '0.5rem' });
+  });
+
   it('renders the header refresh action as a text button', () => {
     render(<KeychainPanel />);
 
