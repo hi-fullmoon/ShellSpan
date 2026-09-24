@@ -503,7 +503,7 @@ export const MonitorPanel: React.FC = () => {
                           tone="warning"
                         />
                       </div>
-                      <dl className="grid grid-cols-2 gap-4 rounded-lg bg-muted/35 px-3 py-2.5 @min-[38rem]:grid-cols-3">
+                      <dl className="grid grid-cols-2 gap-3 rounded-lg bg-muted/35 px-3 py-2.5 @min-[38rem]:grid-cols-3">
                         <RuntimeStat
                           label={t('workbench.monitor.vsz')}
                           value={formatBytes(snapshot.app.vszBytes)}

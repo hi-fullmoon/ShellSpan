@@ -424,7 +424,7 @@ const LogInspector: React.FC<{
         </Button>
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-4 p-3">
+        <div className="flex flex-col gap-3 p-3">
           <div className="flex items-center justify-between gap-2">
             <LevelBadge level={line.level} />
             <Button
@@ -715,8 +715,8 @@ export const LogPanel: React.FC = () => {
             </>
           )}
         />
-        <WorkbenchPageToolbar>
-          <div className="flex min-w-0 items-center gap-5 rounded-lg border border-border bg-background px-3 py-2 @max-[600px]:flex-col @max-[600px]:items-stretch">
+        <WorkbenchPageToolbar className="py-2.5">
+          <div className="flex min-w-0 items-center gap-5 @max-[600px]:flex-col @max-[600px]:items-stretch">
             <div className="grid shrink-0 grid-cols-2 gap-x-5 gap-y-2 @min-[960px]:grid-cols-4">
               <OverviewStat icon={<Layers3Icon />} label={t('workbench.logs.stats.results')} value={filteredLines.length} />
               <OverviewStat icon={<CircleAlertIcon />} label={t('workbench.logs.stats.errors')} value={levelCounts.ERROR ?? 0} tone="error" />
@@ -728,7 +728,7 @@ export const LogPanel: React.FC = () => {
           </div>
         </WorkbenchPageToolbar>
 
-        <WorkbenchPageToolbar>
+        <WorkbenchPageToolbar className="@min-[1020px]:flex-row @min-[1020px]:items-center">
           <WorkbenchSearchInput
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -737,7 +737,7 @@ export const LogPanel: React.FC = () => {
             placeholder={t('workbench.logs.searchPlaceholder')}
             aria-label={t('workbench.logs.searchPlaceholder')}
           />
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 @min-[1020px]:flex-1">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('workbench.logs.date')}</span>

@@ -49,6 +49,13 @@ describe('KnownHostsPanel', () => {
     );
   });
 
+  it('spaces known-host cards with the compact grid gap', () => {
+    const { container } = render(<KnownHostsPanel />);
+
+    const grid = container.querySelector('.grid') as HTMLElement;
+    expect(grid).toHaveStyle({ gap: '0.5rem' });
+  });
+
   it('uses the compact file-manager delete confirmation style', () => {
     render(<KnownHostsPanel />);
 
