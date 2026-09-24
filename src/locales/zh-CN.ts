@@ -581,7 +581,6 @@ export default {
   'terminal.search.close': '关闭搜索',
 
   'terminal.feedback.copied': '已复制',
-  'terminal.feedback.copyFailed': '复制失败',
   'terminal.feedback.pasteFailed': '粘贴失败',
 
   'terminal.message.shellReady': 'Shell 已就绪',

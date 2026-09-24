@@ -63,6 +63,7 @@ zstd = "0.14"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 url = "2"
 rwml = { version = "0.1.4", default-features = false }
+tauri-plugin-clipboard-manager = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1", features = ["keychain"] }

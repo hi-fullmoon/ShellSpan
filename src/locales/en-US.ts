@@ -581,7 +581,6 @@ export default {
   'terminal.search.close': 'Close search',
 
   'terminal.feedback.copied': 'Copied',
-  'terminal.feedback.copyFailed': 'Copy failed',
   'terminal.feedback.pasteFailed': 'Paste failed',
 
   'terminal.message.shellReady': 'Shell ready',
