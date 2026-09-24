@@ -12,6 +12,7 @@ import {
   resolveTerminalTheme,
   terminalRegistry,
 } from '../registry/terminal-registry';
+import baseCss from '../../../styles/base.css?raw';
 
 const webglMocks = vi.hoisted(() => {
   type Behavior = 'success' | 'constructor-throw' | 'activate-throw';
@@ -105,9 +106,9 @@ describe('terminalRegistry', () => {
     document.documentElement.dataset.theme = 'light';
     document.documentElement.style.setProperty('--app-surface', '#ffffff');
     document.documentElement.style.setProperty('--app-text', '#0f172a');
-    document.documentElement.style.setProperty('--app-primary', '#0e7490');
-    document.documentElement.style.setProperty('--app-terminal-selection', 'rgba(14, 116, 144, 0.28)');
-    document.documentElement.style.setProperty('--app-terminal-selection-inactive', 'rgba(14, 116, 144, 0.16)');
+    document.documentElement.style.setProperty('--app-primary', '#1e293b');
+    document.documentElement.style.setProperty('--app-terminal-selection', 'rgba(15, 23, 42, 0.22)');
+    document.documentElement.style.setProperty('--app-terminal-selection-inactive', 'rgba(15, 23, 42, 0.12)');
     terminalRegistry.disposeAll();
     terminalRegistry.updateOptions({
       fontSize: 14,
@@ -190,9 +191,9 @@ describe('terminalRegistry', () => {
     expect(controller.terminal.options.theme).toMatchObject({
       background: '#ffffff',
       foreground: '#0f172a',
-      cursor: '#0e7490',
-      selectionBackground: 'rgba(14, 116, 144, 0.28)',
-      selectionInactiveBackground: 'rgba(14, 116, 144, 0.16)',
+      cursor: '#1e293b',
+      selectionBackground: 'rgba(15, 23, 42, 0.22)',
+      selectionInactiveBackground: 'rgba(15, 23, 42, 0.12)',
     });
 
     document.documentElement.dataset.theme = 'dark';
@@ -211,6 +212,30 @@ describe('terminalRegistry', () => {
       selectionInactiveBackground: 'rgba(34, 211, 238, 0.18)',
     });
     expect(controller.terminal.element?.style.backgroundColor).toBe('rgb(15, 23, 42)');
+  });
+
+  it('keeps app-scheme light fallbacks in sync with the light palette in base.css', () => {
+    const lightBlock = baseCss.slice(baseCss.indexOf(':root'), baseCss.indexOf("[data-theme='dark']"));
+    const declaredToken = (token: string) => {
+      const match = new RegExp(`${token}\\s*:\\s*([^;]+);`).exec(lightBlock);
+      expect(match, `${token} should be declared in the light palette`).not.toBeNull();
+      return match![1].trim();
+    };
+
+    document.documentElement.dataset.theme = 'light';
+    for (const token of [
+      '--app-primary',
+      '--app-terminal-selection',
+      '--app-terminal-selection-inactive',
+    ]) {
+      document.documentElement.style.removeProperty(token);
+    }
+
+    expect(resolveTerminalTheme('app')).toMatchObject({
+      cursor: declaredToken('--app-primary'),
+      selectionBackground: declaredToken('--app-terminal-selection'),
+      selectionInactiveBackground: declaredToken('--app-terminal-selection-inactive'),
+    });
   });
 
   it('hides xterm 6 legacy viewport while leaving its real scrollable element available', () => {

@@ -11,6 +11,7 @@ import { installTerminalSelectionGuard } from '@/components/terminal/terminal-se
 import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 import { useToast } from '@/hooks/useToast';
 import { getPlatform } from '@/lib/platform';
+import { readClipboardText, writeClipboardText } from '@/lib/clipboard';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
@@ -74,7 +75,7 @@ const AgentTerminalLeaseBar: React.FC<{
 
   return (
     <div
-      className="agent-terminal-lease-bar grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-y border-app-border/50 bg-app-surface px-2 py-[5px]"
+      className="agent-terminal-lease-bar grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-b border-app-border/50 bg-app-surface px-2 py-[5px]"
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -343,9 +344,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           const copiedText = trimTrailingWhitespace
             ? selection.replace(/[ \t]+(?=\r?$)/gm, '')
             : selection;
-          void navigator.clipboard
-            .writeText(copiedText)
-            .catch(() => showError(t('terminal.feedback.copyFailed')));
+          void writeClipboardText(copiedText).catch(() => undefined);
           return false;
         }
       }
@@ -381,9 +380,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         const copiedText = trimTrailingWhitespace
           ? selection.replace(/[ \t]+(?=\r?$)/gm, '')
           : selection;
-        void navigator.clipboard
-          .writeText(copiedText)
-          .catch(() => showError(t('terminal.feedback.copyFailed')));
+        void writeClipboardText(copiedText).catch(() => undefined);
       }, COPY_ON_SELECT_DEBOUNCE_MS);
     });
 
@@ -409,15 +406,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           const copiedText = trimTrailingWhitespace
             ? selection.replace(/[ \t]+(?=\r?$)/gm, '')
             : selection;
-          void navigator.clipboard
-            .writeText(copiedText)
-            .catch(() => showError(t('terminal.feedback.copyFailed')));
+          void writeClipboardText(copiedText).catch(() => undefined);
           return;
         }
       }
 
-      void navigator.clipboard
-        .readText()
+      void readClipboardText()
         .then((text) => {
           if (currentSessionIdRef.current !== activeSessionId) return;
           if (text) pasteText(text);

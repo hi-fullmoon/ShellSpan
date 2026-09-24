@@ -359,15 +359,15 @@ export function resolveTerminalTheme(colorScheme: TerminalColorScheme): Terminal
   return {
     background: readAppColor('--app-surface', '#ffffff', '#202122'),
     foreground: readAppColor('--app-text', '#0f172a', '#d4d4d8'),
-    cursor: readAppColor('--app-primary', '#0e7490', '#b3b3b8'),
+    cursor: readAppColor('--app-primary', '#1e293b', '#b3b3b8'),
     selectionBackground: readAppColor(
       '--app-terminal-selection',
-      'rgba(14, 116, 144, 0.28)',
+      'rgba(15, 23, 42, 0.22)',
       'rgba(244, 244, 245, 0.22)',
     ),
     selectionInactiveBackground: readAppColor(
       '--app-terminal-selection-inactive',
-      'rgba(14, 116, 144, 0.16)',
+      'rgba(15, 23, 42, 0.12)',
       'rgba(244, 244, 245, 0.12)',
     ),
   };

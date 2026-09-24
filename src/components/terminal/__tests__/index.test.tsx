@@ -402,6 +402,135 @@ describe('Terminal', () => {
     expect(container.querySelector('[data-direction="horizontal"]')).toBeInTheDocument();
   });
 
+  // Lays the split panes out side by side so drag hit-testing resolves the
+  // group under the pointer: tab bar first, content below it.
+  const setPaneRect = (group: HTMLElement, left: number): void => {
+    const setRect = (element: Element | null, rectLeft: number, top: number, width: number, height: number): void => {
+      if (!element) return;
+      (element as HTMLElement).getBoundingClientRect = () => ({
+        left: rectLeft,
+        top,
+        right: rectLeft + width,
+        bottom: top + height,
+        x: rectLeft,
+        y: top,
+        width,
+        height,
+        toJSON: () => ({}),
+      } as DOMRect);
+    };
+    setRect(group.querySelector('[data-terminal-tab-bar]'), left, 0, 400, 40);
+    setRect(group.querySelector('[data-terminal-content]'), left, 40, 400, 460);
+  };
+
+  const dragTabTo = async (tab: HTMLElement, fromX: number, toX: number, toY: number): Promise<void> => {
+    await act(async () => {
+      fireEvent.pointerDown(tab, {
+        button: 0,
+        isPrimary: true,
+        pointerType: 'mouse',
+        clientX: fromX,
+        clientY: 20,
+      });
+      // The first move must clear the PointerSensor's 10px activation
+      // distance, or the drag never starts.
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: fromX + 15, clientY: 20 });
+      fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: toX, clientY: toY });
+    });
+  };
+
+  it('does not offer its own pane as a split target for the pane\'s only tab', async () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    const firstGroup = container.querySelector<HTMLElement>('[data-terminal-group="first"]')!;
+    const secondGroup = container.querySelector<HTMLElement>('[data-terminal-group="second"]')!;
+    setPaneRect(firstGroup, 0);
+    setPaneRect(secondGroup, 500);
+
+    // Drag the second pane's only tab onto its own pane's left edge zone.
+    await dragTabTo(within(secondGroup).getByRole('tab', { name: /s1/ }), 700, 560, 200);
+    expect(container.querySelector('[data-testid="terminal-split-drop-preview"]')).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.pointerUp(document, { clientX: 560, clientY: 200 });
+    });
+
+    expect(container.querySelectorAll('[data-terminal-group]')).toHaveLength(2);
+    expect(within(secondGroup).getByRole('tab', { name: /s1/ })).toBeInTheDocument();
+  });
+
+  it('still previews a split when the dragged tab leaves another tab behind in its pane', async () => {
+    ['s1', 's2', 's3'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    const firstGroup = container.querySelector<HTMLElement>('[data-terminal-group="first"]')!;
+    const secondGroup = container.querySelector<HTMLElement>('[data-terminal-group="second"]')!;
+    setPaneRect(firstGroup, 0);
+    setPaneRect(secondGroup, 500);
+
+    await dragTabTo(within(firstGroup).getByRole('tab', { name: /s2/ }), 200, 60, 200);
+    const preview = firstGroup.querySelector<HTMLElement>('[data-testid="terminal-split-drop-preview"]');
+    expect(preview).toBeInTheDocument();
+    expect(preview).toHaveAttribute('data-direction', 'left');
+
+    await act(async () => {
+      fireEvent.pointerUp(document, { clientX: 60, clientY: 200 });
+    });
+
+    expect(container.querySelectorAll('[data-terminal-group]')).toHaveLength(3);
+  });
+
+  it('still previews a split on another pane for a pane\'s only tab', async () => {
+    ['s1', 's2', 's3'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    const firstGroup = container.querySelector<HTMLElement>('[data-terminal-group="first"]')!;
+    const secondGroup = container.querySelector<HTMLElement>('[data-terminal-group="second"]')!;
+    setPaneRect(firstGroup, 0);
+    setPaneRect(secondGroup, 500);
+
+    // The second pane holds only s1; dragging it at the first pane's edge is
+    // still a valid cross-pane split.
+    await dragTabTo(within(secondGroup).getByRole('tab', { name: /s1/ }), 700, 60, 200);
+    const preview = firstGroup.querySelector<HTMLElement>('[data-testid="terminal-split-drop-preview"]');
+    expect(preview).toBeInTheDocument();
+    expect(preview).toHaveAttribute('data-direction', 'left');
+
+    await act(async () => {
+      fireEvent.pointerUp(document, { clientX: 60, clientY: 200 });
+    });
+
+    // The empty second pane is pruned and the first pane is split around the
+    // dropped tab: s1 gets its own pane beside the remaining s2/s3 group.
+    const groupsAfter = [...container.querySelectorAll<HTMLElement>('[data-terminal-group]')];
+    expect(groupsAfter).toHaveLength(2);
+    expect(within(groupsAfter[0]).getByRole('tab', { name: /s1/ })).toBeInTheDocument();
+    expect(within(groupsAfter[1]).getByRole('tab', { name: /s2/ })).toBeInTheDocument();
+    expect(within(groupsAfter[1]).getByRole('tab', { name: /s3/ })).toBeInTheDocument();
+  });
+
   it('switches the matching group tab when the active session changes externally', () => {
     ['s1', 's2', 's3'].forEach((sessionId) => {
       useTerminalStore.getState().addSession({

@@ -80,13 +80,45 @@ try {
         };
       }, selector);
       assert.deepEqual(sizes, {
-        bar: 34, viewport: 34, slot: 34, tab: 30, tabWidth: 168,
+        bar: 40, viewport: 40, slot: 40, tab: 32, tabWidth: 168,
         margins: ['0px', '0px'], barPadding: ['0px', '0px'],
-        slotPadding: ['2px', '2px'], inset: 2,
+        slotPadding: ['4px', '4px'], inset: 4,
       });
-      console.log(`${selector} ${width}px: tab bar 34px, visible tab 168×30px, vertical inset 2px`);
     }
   }
+  {
+    // Regression: the leading drop indicator (insert index 0) used to sit left
+    // of the scroll viewport's clip origin and was never painted. Render the
+    // bar in that drop state and require the indicator to stay inside the
+    // viewport's content box.
+    const leading = await page.evaluate(async () => {
+      const { React, createRoot, TerminalTabBar } = await import('/tab-runtime.js');
+      const host = document.createElement('div');
+      document.getElementById('root').append(host);
+      createRoot(host).render(React.createElement(TerminalTabBar, { externalInsertIndex: 0 }));
+      for (let i = 0; i < 50 && !host.querySelector('[data-drop-indicator="left"]'); i++) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+      const bar = host.querySelector('[data-terminal-tab-bar]');
+      const viewport = bar.querySelector('[data-slot="scroll-area-viewport"]');
+      const indicator = bar.querySelector('[data-drop-indicator="left"]');
+      const vRect = viewport.getBoundingClientRect();
+      const iRect = indicator.getBoundingClientRect();
+      const geometry = {
+        left: iRect.x,
+        right: iRect.x + iRect.width,
+        viewportLeft: vRect.x,
+        viewportRight: vRect.x + vRect.width,
+      };
+      host.remove();
+      return geometry;
+    });
+    assert.ok(
+      leading.left >= leading.viewportLeft && leading.right <= leading.viewportRight,
+      `leading indicator ${leading.left}..${leading.right} outside viewport ${leading.viewportLeft}..${leading.viewportRight}`,
+    );
+  }
+  console.log('terminal and sftp tab bars: 40px bar, tab 168×32px, inset 4px');
 } finally {
   await browser?.close();
   await server.close();
