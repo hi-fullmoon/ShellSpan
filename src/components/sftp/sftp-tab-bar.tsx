@@ -17,7 +17,6 @@ import { PinIcon, XIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
-import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
@@ -38,7 +37,6 @@ interface ConnectionTabProps {
   dragging?: boolean;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
-  showSeparatorAfter?: boolean;
   onActivate: (id: string) => void;
   onContextMenu: (connection: SftpConnection, x: number, y: number) => void;
   onClose: (id: string) => void;
@@ -51,7 +49,6 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
   dragging = false,
   showDropIndicatorLeft = false,
   showDropIndicatorRight = false,
-  showSeparatorAfter = false,
   onActivate,
   onContextMenu,
   onClose,
@@ -91,34 +88,25 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-7.5 w-42 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 text-left text-xs outline-none transition-[background-color,border-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
-        active ? 'bg-app-tab-active text-app-tab-accent' : 'bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
+        'group relative flex h-8 w-42 shrink-0 items-center gap-1.5 rounded-md border px-2 text-left text-xs outline-none transition-[background-color,border-color,color,opacity,box-shadow] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
+        active
+          ? 'border-app-border bg-app-surface text-app-text shadow-xs'
+          : 'border-transparent bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
     >
-      {active && (
-        <div aria-hidden="true" data-active-tab-indicator className="pointer-events-none absolute inset-0 rounded-md border border-app-tab-accent" />
-      )}
-      {showSeparatorAfter && (
-        <Separator
-          orientation="vertical"
-          aria-hidden="true"
-          data-tab-separator
-          className="pointer-events-none absolute right-[-4px] top-1/2 h-4 -translate-y-1/2 bg-app-border"
-        />
-      )}
       {showDropIndicatorLeft && (
         <div
           data-drop-indicator="left"
           // Absolute offsets start at the tab's inner border edge. Account
-          // for that 1px border when centering in the 5px outer gap.
-          className="pointer-events-none absolute left-[-3.5px] top-1/2 z-10 h-[20px] w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary"
+          // for that 1px border when centering in the 4px gap between tabs.
+          className="pointer-events-none absolute left-[-3px] top-1/2 z-10 h-6 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary"
         />
       )}
       {showDropIndicatorRight && (
         <div
           data-drop-indicator="right"
-          className="pointer-events-none absolute right-[-3.5px] top-1/2 z-10 h-[20px] w-0.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-app-primary"
+          className="pointer-events-none absolute right-[-3px] top-1/2 z-10 h-6 w-0.5 translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary"
         />
       )}
       <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -135,7 +123,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
               e.stopPropagation();
               onTogglePin?.(connection.id);
             }}
-            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
           >
             <PinIcon className="size-3" strokeWidth={1.5} />
           </button>
@@ -149,7 +137,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
               onClose(connection.id);
             }}
             className={cn(
-              'flex h-4 w-4 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
+              'flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
               !dragging && active ? 'flex' : 'hidden group-hover:flex',
             )}
           >
@@ -169,7 +157,6 @@ interface SortableTabProps {
   onTogglePin: (id: string) => void;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
-  showSeparatorAfter?: boolean;
 }
 
 const SortableTab: React.FC<SortableTabProps> = ({
@@ -181,7 +168,6 @@ const SortableTab: React.FC<SortableTabProps> = ({
   onTogglePin,
   showDropIndicatorLeft,
   showDropIndicatorRight,
-  showSeparatorAfter,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: connection.id,
@@ -191,7 +177,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
   return (
     <div
       ref={setNodeRef}
-      className="h-8.5 shrink-0 py-0.5"
+      className="h-10 shrink-0 py-1"
       {...attributes}
       {...listeners}
       style={{
@@ -206,7 +192,6 @@ const SortableTab: React.FC<SortableTabProps> = ({
         dragging={isDragging}
         showDropIndicatorLeft={showDropIndicatorLeft}
         showDropIndicatorRight={showDropIndicatorRight}
-        showSeparatorAfter={showSeparatorAfter}
         onActivate={onActivate}
         onContextMenu={onContextMenu}
         onClose={onClose}
@@ -465,7 +450,6 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
   const closingTransferCount = closingConnection ? countActiveTransfersForOwners([closingConnection.id], transferOperations) : 0;
 
   const visibleTabCount = connections.length - (draggingConnectionId ? 1 : 0);
-  const visibleConnections = draggingConnectionId ? connections.filter((connection) => connection.id !== draggingConnectionId) : connections;
 
   // Dropping back into the dragged tab's own slot is a no-op, so suppress the
   // indicator that would otherwise sit between the dragged tab and its right
@@ -491,7 +475,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         if ((e.target as HTMLElement).closest('[data-sftp-tab]')) return;
         onNewTabClick();
       }}
-      className="group/tabbar relative my-0 flex h-8.5 items-start bg-app-bg px-[2px] py-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-app-border/40"
+      className="group/tabbar relative my-0 flex h-10 items-start bg-app-bg px-0.5 py-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-app-border/40"
     >
       <DndContext
         sensors={sensors}
@@ -502,16 +486,17 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={connections.map((c) => c.id)} strategy={() => null}>
-          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" className="h-8.5 min-w-0 flex-1">
-            <div role="tablist" className="flex min-w-0 items-center gap-[5px] py-0">
+          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" className="h-10 min-w-0 flex-1">
+            {/* The leading/trailing padding lives inside the scroll viewport so
+                the drop indicators flanking the first/last tab stay inside the
+                overflow clip instead of being cut off at the scroll origin. */}
+            <div role="tablist" className="flex min-w-0 items-center gap-1 px-1 py-0">
               {connections.map((connection, index) => {
                 const isDragging = draggingConnectionId === connection.id;
                 const draggedIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;
                 const visibleIndex = isDragging ? -1 : index - (draggedIndex >= 0 && draggedIndex < index ? 1 : 0);
                 const isLastVisible = visibleIndex === visibleTabCount - 1;
                 const isActive = activeConnectionId === connection.id;
-                const nextVisibleConnection = visibleIndex >= 0 ? visibleConnections[visibleIndex + 1] : undefined;
-                const showSeparatorAfter = !!nextVisibleConnection && effectiveInsertIndex !== visibleIndex + 1;
 
                 return (
                   <SortableTab
@@ -524,7 +509,6 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
                     onTogglePin={togglePin}
                     showDropIndicatorLeft={effectiveInsertIndex !== null && visibleIndex >= 0 && effectiveInsertIndex === visibleIndex}
                     showDropIndicatorRight={effectiveInsertIndex !== null && isLastVisible && effectiveInsertIndex === visibleTabCount}
-                    showSeparatorAfter={showSeparatorAfter}
                   />
                 );
               })}
