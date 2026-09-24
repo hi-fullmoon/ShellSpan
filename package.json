@@ -49,6 +49,7 @@
     "@shadcn/react": "^0.3.1",
     "@tanstack/react-virtual": "^3.14.13",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.3",
     "@tauri-apps/plugin-log": "^2.9.1",
     "@tauri-apps/plugin-updater": "^2.11.0",
     "@xterm/addon-fit": "^0.11.0",
