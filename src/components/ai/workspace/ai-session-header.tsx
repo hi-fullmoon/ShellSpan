@@ -50,7 +50,7 @@ export function AiSessionHeader({
     <header
       data-slot="ai-workspace-header"
       data-session-status={status}
-      className="ai-session-header relative flex h-10 min-h-10 min-w-0 shrink-0 items-center gap-2 border-b border-border px-[var(--ai-shell-clearance)]"
+      className="ai-session-header relative flex h-10 min-h-10 min-w-0 shrink-0 items-center gap-2 border-b border-app-border/50 px-[var(--ai-shell-clearance)]"
       data-ai-mode={mode}
     >
       <div className="ai-session-title-cluster flex min-w-0 flex-1 items-center gap-2">

@@ -75,9 +75,7 @@ export const KeychainKeyPromptDialog: React.FC = () => {
                   <SelectContent>
                     {keys.map((key) => (
                       <SelectItem key={key.id} value={key.id}>
-                        <span className="flex items-center gap-2">
-                          <span>{key.label}</span>
-                        </span>
+                        {key.label}
                       </SelectItem>
                     ))}
                   </SelectContent>

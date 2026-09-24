@@ -547,12 +547,10 @@ export const CommandPalette: React.FC = () => {
         deployment.setProfileFilter(null);
         app.setActiveSection('workbench');
         app.setActiveWorkbenchTab('deployments');
+        deployment.selectWorkflow(workflowId);
+        deployment.requestTab('runs');
         if (mode === 'newRelease') {
-          deployment.selectWorkflow(workflowId);
-          deployment.requestTab('prepare');
-        } else {
-          deployment.selectWorkflow(workflowId);
-          deployment.requestTab('runs');
+          deployment.requestDeploy();
         }
       },
     }),

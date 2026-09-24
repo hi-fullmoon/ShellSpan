@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiSessionHeader } from '@/components/ai/workspace/ai-session-header';
+import { AiRouteHeader } from '@/components/ai/workspace/ai-route-header';
 import { AiSessionBrowser } from '@/components/ai/workspace/ai-session-browser';
 import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
 import { AiArtifactDetails } from '@/components/ai/workspace/ai-artifact-details';
@@ -47,6 +48,29 @@ describe('AiSessionHeader', () => {
     expect(onHistory).toHaveBeenCalledOnce();
     expect(onNewSession).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('softens shell separators to match the surrounding chrome borders', () => {
+    const { container } = render(
+      <AiSessionHeader
+        title="/docker-diagnosis"
+        context="Terminal"
+        status="failed"
+        onHistory={vi.fn()}
+        onNewSession={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const sessionHeader = container.querySelector<HTMLElement>('.ai-session-header')!;
+    expect(sessionHeader).toHaveClass('border-b', 'border-app-border/50');
+    expect(sessionHeader).not.toHaveClass('border-border');
+
+    const { container: routeContainer } = render(
+      <AiRouteHeader title="History" description="Session history" onBack={vi.fn()} />,
+    );
+    const routeHeader = routeContainer.querySelector<HTMLElement>('.ai-route-header')!;
+    expect(routeHeader).toHaveClass('border-b', 'border-app-border/50');
+    expect(routeHeader).not.toHaveClass('border-border');
   });
 
   it.each(['history', 'tool details', 'artifact details'] as const)(

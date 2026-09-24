@@ -19,7 +19,7 @@ export function AiRouteHeader({
 }): React.ReactNode {
   const { t } = useI18n();
   return (
-    <header className="ai-route-header relative flex h-10 min-h-10 min-w-0 shrink-0 items-center gap-2 border-b border-border px-[var(--ai-shell-clearance)]" data-slot="ai-route-header">
+    <header className="ai-route-header relative flex h-10 min-h-10 min-w-0 shrink-0 items-center gap-2 border-b border-app-border/50 px-[var(--ai-shell-clearance)]" data-slot="ai-route-header">
       <Tooltip>
         <TooltipTrigger
           render={(
