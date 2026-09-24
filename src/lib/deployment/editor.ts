@@ -23,7 +23,7 @@ export const DEPLOYMENT_FLOW_CONTENT_PADDING = 36;
 
 export interface DeploymentEditorIssue {
   id: string;
-  code: DeploymentWorkflowValidationCode | 'LOCAL_MISSING_INPUT' | 'LOCAL_UNKNOWN_NODE';
+  code: DeploymentWorkflowValidationCode | 'LOCAL_MISSING_INPUT' | 'LOCAL_UNKNOWN_NODE' | 'LOCAL_EMPTY_NODE_NAME';
   messageKey: LocaleKey;
   nodeId?: string;
   path?: string;
@@ -450,6 +450,15 @@ export function localDeploymentEditorIssues(
   }
   if (!catalog) return issues;
   for (const workflowNode of definition.nodes) {
+    if (!workflowNode.displayName.trim()) {
+      issues.push({
+        id: `empty-name:${workflowNode.id}`,
+        code: 'LOCAL_EMPTY_NODE_NAME',
+        messageKey: 'deployment.editor.validation.emptyNodeName',
+        nodeId: workflowNode.id,
+        source: 'local',
+      });
+    }
     const spec = catalog.nodes.find(
       (item) => item.typeName === workflowNode.type && item.typeVersion === workflowNode.typeVersion,
     );

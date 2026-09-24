@@ -44,6 +44,7 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { useI18n } from '@/hooks/useI18n';
+import { useDeploymentDraftCloseGuard } from '@/hooks/useDeploymentDraftCloseGuard';
 import type {
   DeploymentEditorIssue,
   DeploymentWorkflowTemplateKind,
@@ -100,6 +101,7 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
   const [name, setName] = React.useState('');
   const [profileId, setProfileId] = React.useState('');
   const [remoteRoot, setRemoteRoot] = React.useState('/srv/apps/example');
+  const wasOpenRef = React.useRef(false);
   const templateOptions = React.useMemo(() => [
     { value: 'staticSite', label: t('deployment.editor.template.staticSite') },
     { value: 'dockerCompose', label: t('deployment.editor.template.dockerCompose') },
@@ -115,12 +117,18 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
 
   React.useEffect(() => {
     if (!open) return;
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
     setKind('staticSite');
     setName('');
     const filteredProfile = profiles.find((profile) => profile.id === profileFilterId);
     setProfileId(filteredProfile?.id ?? profiles[0]?.id ?? '');
     setRemoteRoot('/srv/apps/example');
   }, [open, profileFilterId, profiles]);
+
+  React.useEffect(() => {
+    if (!open) wasOpenRef.current = false;
+  }, [open]);
 
   const submit = (event: React.FormEvent): void => {
     event.preventDefault();
@@ -200,7 +208,7 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
                   </SelectContent>
                 </Select>
               </Field>
-              <Field>
+              <Field data-invalid={!validRemoteRoot && normalizedRemoteRoot !== '' ? 'true' : undefined}>
                 <FieldLabel htmlFor="deployment-root">
                   {t('deployment.editor.remoteRoot')}
                 </FieldLabel>
@@ -210,7 +218,13 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
                   onChange={(event) => setRemoteRoot(event.target.value)}
                   className="h-8"
                   required
+                  aria-invalid={!validRemoteRoot && normalizedRemoteRoot !== '' ? true : undefined}
                 />
+                {!validRemoteRoot && normalizedRemoteRoot !== '' && (
+                  <FieldDescription className="text-destructive">
+                    {t('deployment.editor.template.remoteRootInvalid')}
+                  </FieldDescription>
+                )}
               </Field>
             </FieldGroup>
           </ScrollArea>
@@ -313,6 +327,7 @@ export const DeploymentWorkflowCenter: React.FC<{
   const [pendingDiscardAction, setPendingDiscardAction] = React.useState<'create' | 'refresh' | null>(null);
   const [search, setSearch] = React.useState('');
   const [activeTab, setActiveTab] = React.useState<DeploymentWorkflowTab>(initialTab);
+  const closeGuard = useDeploymentDraftCloseGuard();
   const [approvalRequest, setApprovalRequest] = React.useState(0);
   const handledNoticeRef = React.useRef<number | null>(null);
   const handledErrorRef = React.useRef<string | null>(null);
@@ -376,6 +391,9 @@ export const DeploymentWorkflowCenter: React.FC<{
       return;
     }
     if (state.error.includes('VALIDATION_FAILED')) {
+      // saveDraft already refreshed the issue list; surface it instead of
+      // swallowing the rejection silently.
+      if (state.draft && state.catalog) setIssuesOpen(true);
       state.clearError();
       return;
     }
@@ -450,8 +468,12 @@ export const DeploymentWorkflowCenter: React.FC<{
     if (!state.deployRequested) return;
     state.clearDeployRequest();
     if (!state.initialized || state.loading) return;
-    if (canDeploy) startDeploy();
-  }, [canDeploy, startDeploy, state]);
+    if (canDeploy) {
+      startDeploy();
+    } else if (state.semanticDirty || state.layoutDirty) {
+      addToast(t('deployment.center.deploy.unsavedChanges'), 'info');
+    }
+  }, [addToast, canDeploy, startDeploy, state, t]);
 
   const requestCreate = (): void => {
     if (dirty) {
@@ -493,8 +515,8 @@ export const DeploymentWorkflowCenter: React.FC<{
   };
 
   const validate = async (): Promise<void> => {
-    const issues = await state.validateDraft().catch(() => []);
-    setIssuesOpen(issues.length > 0);
+    await state.validateDraft().catch(() => undefined);
+    setIssuesOpen(true);
   };
 
   const workflowPane = (
@@ -602,6 +624,7 @@ export const DeploymentWorkflowCenter: React.FC<{
                 inspector={inspector}
                 renderToolbar={(layout: DeploymentWorkspaceLayout) => (
                   <WorkflowEditorToolbar
+                    workflowId={draft.id}
                     workflowName={draft.name}
                     layout={layout}
                     enabled={draft.enabled}
@@ -675,7 +698,11 @@ export const DeploymentWorkflowCenter: React.FC<{
                   search={search}
                   onSearchChange={setSearch}
                   onSelect={(id) => {
-                    if (state.selectWorkflow(id)) setWorkflowsOpen(false);
+                    if (state.selectWorkflow(id)) {
+                      setWorkflowsOpen(false);
+                      return;
+                    }
+                    if (state.saving) addToast(t('deployment.editor.switchWhileSaving'), 'info');
                   }}
                   onCreate={() => {
                     setWorkflowsOpen(false);
@@ -764,6 +791,23 @@ export const DeploymentWorkflowCenter: React.FC<{
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={confirmDiscard}>
               {t('deployment.editor.discard.action')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={closeGuard.confirmOpen}
+        onOpenChange={(open) => { if (!open) closeGuard.cancelClose(); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('deployment.editor.closeGuard.title')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('deployment.editor.closeGuard.description')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={closeGuard.confirmClose}>
+              {t('deployment.editor.closeGuard.action')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

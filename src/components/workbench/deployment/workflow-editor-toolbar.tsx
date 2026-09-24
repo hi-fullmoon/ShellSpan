@@ -5,14 +5,29 @@ import {
   LibraryIcon,
   PanelRightIcon,
   Settings2Icon,
+  Trash2Icon,
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
+import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
+import { useDeploymentWorkflowStore } from '@/stores/deploymentWorkflowStore';
 import type { DeploymentWorkspaceLayout } from './deployment-workspace-shell';
 import { DeploymentPaneHeader } from './deployment-pane-header';
 
 export interface WorkflowEditorToolbarProps {
+  workflowId: string | null;
   workflowName: string;
   layout: DeploymentWorkspaceLayout;
   enabled: boolean;
@@ -29,6 +44,7 @@ export interface WorkflowEditorToolbarProps {
 }
 
 export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
+  workflowId,
   workflowName,
   layout,
   enabled,
@@ -44,7 +60,30 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
   settingsTriggerRef,
 }) => {
   const { t } = useI18n();
-  return (
+  const saving = useDeploymentWorkflowStore((state) => state.saving);
+  const archiveWorkflow = useDeploymentWorkflowStore((state) => state.archiveWorkflow);
+  const preparing = useDeploymentWorkflowRunStore((state) => state.preparing);
+  const runAction = useDeploymentWorkflowRunStore((state) => state.action);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [archivePending, setArchivePending] = React.useState(false);
+  // Dirty drafts are handled by the confirm dialog, which discloses that the
+  // unsaved changes are discarded; only an in-flight operation blocks deletion.
+  const deleteDisabled = saving || preparing || runAction !== null;
+
+  const confirmDelete = async (): Promise<void> => {
+    if (!workflowId || archivePending) return;
+    setArchivePending(true);
+    if (dirty) {
+      // The dialog above already disclosed discarding the draft; clear the
+      // flags so the store guard sees an explicit UI decision, not data loss.
+      useDeploymentWorkflowStore.setState({ semanticDirty: false, layoutDirty: false });
+    }
+    await archiveWorkflow(workflowId);
+    setArchivePending(false);
+    setDeleteOpen(false);
+  };
+
+  const header = (
     <DeploymentPaneHeader
       data-testid="deployment-editor-toolbar"
       title={workflowName}
@@ -116,8 +155,53 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
               <PanelRightIcon data-icon="inline-start" />
             </Button>
           )}
+          {workflowId && (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => setDeleteOpen(true)}
+              disabled={deleteDisabled}
+              aria-label={t('deployment.editor.delete.title')}
+              title={t('deployment.editor.delete.title')}
+              data-testid="deployment-delete-workflow"
+            >
+              <Trash2Icon data-icon="inline-start" />
+            </Button>
+          )}
         </>
       )}
     />
+  );
+
+  return (
+    <>
+      {header}
+      <AlertDialog open={deleteOpen} onOpenChange={(open) => { if (!archivePending) setDeleteOpen(open); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('deployment.editor.delete.title')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(dirty
+                ? 'deployment.editor.delete.dirtyDescription'
+                : 'deployment.editor.delete.description', { name: workflowName })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={archivePending}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={(event) => {
+                event.preventDefault();
+                void confirmDelete();
+              }}
+              disabled={archivePending}
+            >
+              {archivePending && <Spinner data-icon="inline-start" />}
+              {t('deployment.editor.delete.action')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 };

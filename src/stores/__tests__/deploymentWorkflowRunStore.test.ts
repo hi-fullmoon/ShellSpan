@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   DeploymentNodeAttemptRecord,
+  DeploymentNodeProgressEvent,
   DeploymentReleaseRecord,
+  DeploymentRunEvent,
   DeploymentRunDetail,
   DeploymentRunEventPage,
   DeploymentRunNodeRecord,
@@ -246,5 +248,163 @@ describe('deployment workflow run store', () => {
       planDigest: approved.planDigest,
     });
     expect(useDeploymentWorkflowRunStore.getState().notice?.kind).toBe('started');
+  });
+
+  it('clears the preparing state when a concurrent refresh supersedes prepare', async () => {
+    const preparedRun = summary('run-prepared', 'awaiting_approval');
+    const preparePending = deferred<{
+      runId: string;
+      planDigest: DeploymentRunSummary['planDigest'];
+      expiresAt: number;
+    }>();
+    mocks.prepare.mockReturnValue(preparePending.promise);
+    mocks.runs.mockResolvedValue({ items: [preparedRun], nextCursor: null });
+    mocks.detail.mockResolvedValue(detail(preparedRun));
+
+    const preparing = useDeploymentWorkflowRunStore.getState().prepare(workflow);
+    expect(useDeploymentWorkflowRunStore.getState().preparing).toBe(true);
+    const refreshing = useDeploymentWorkflowRunStore.getState().refreshWorkflow(workflow.id);
+    preparePending.resolve({
+      runId: preparedRun.runId,
+      planDigest: preparedRun.planDigest,
+      expiresAt: preparedRun.expiresAt,
+    });
+    await preparing;
+    await refreshing;
+
+    const state = useDeploymentWorkflowRunStore.getState();
+    expect(state.preparing).toBe(false);
+    expect(state.preparationNodes).toEqual([]);
+    expect(state.preparationCompleted).toBe(0);
+    expect(state.loading).toBe(false);
+  });
+
+  it('ignores node progress events from other runs while preparing', async () => {
+    const preparedRun = summary('run-prepared', 'awaiting_approval');
+    let progressHandler: ((event: { payload: DeploymentNodeProgressEvent }) => void) | null = null;
+    mocks.listenProgress.mockImplementation(
+      async (callback: (event: { payload: DeploymentNodeProgressEvent }) => void) => {
+        progressHandler = callback;
+        return vi.fn();
+      },
+    );
+    mocks.prepare.mockResolvedValue({
+      runId: preparedRun.runId,
+      planDigest: preparedRun.planDigest,
+      expiresAt: preparedRun.expiresAt,
+    });
+    mocks.runs.mockResolvedValue({ items: [preparedRun], nextCursor: null });
+    const pendingDetail = deferred<DeploymentRunDetail>();
+    mocks.detail.mockReturnValueOnce(pendingDetail.promise);
+    mocks.detail.mockResolvedValue(detail(preparedRun));
+
+    const noApprovalWorkflow: DeploymentWorkflowRecord = {
+      ...workflow,
+      definition: { ...workflow.definition, nodes: [workflow.definition.nodes[0]] },
+    };
+    const preparing = useDeploymentWorkflowRunStore.getState().prepare(noApprovalWorkflow);
+    const progress = (payload: DeploymentNodeProgressEvent): void => {
+      progressHandler?.({ payload });
+    };
+    const event = (overrides: Partial<DeploymentNodeProgressEvent>): DeploymentNodeProgressEvent => ({
+      operationId: 'op-1',
+      runId: preparedRun.runId,
+      nodeId: 'source',
+      attempt: 1,
+      sequence: 1,
+      phase: 'running',
+      completed: 0,
+      total: 1,
+      unit: 'steps',
+      summaryKey: 'deployment.run.progress',
+      ...overrides,
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(progressHandler).not.toBeNull();
+
+    progress(event({ runId: 'run-other', sequence: 9, completed: 5 }));
+    expect(useDeploymentWorkflowRunStore.getState().preparationCompleted).toBe(0);
+
+    progress(event({ sequence: 1, phase: 'succeeded', completed: 1 }));
+    expect(useDeploymentWorkflowRunStore.getState().preparationCompleted).toBe(1);
+    expect(useDeploymentWorkflowRunStore.getState().preparationNodes[0]?.status).toBe('succeeded');
+
+    progress(event({ nodeId: 'unknown-node', sequence: 2, completed: 7 }));
+    expect(useDeploymentWorkflowRunStore.getState().preparationCompleted).toBe(1);
+
+    pendingDetail.resolve(detail(preparedRun));
+    await preparing;
+    expect(useDeploymentWorkflowRunStore.getState().notice?.kind).toBe('prepared');
+  });
+
+  it('polls the selected node and merges events without dropping loaded history', async () => {
+    const run1 = summary('run-1', 'in_progress');
+    const buildNode: DeploymentRunNodeRecord = {
+      ...node, nodeId: 'build', nodeType: 'build.local', lastAttempt: 1,
+    };
+    mocks.nodes.mockResolvedValue([node, buildNode]);
+    mocks.runs.mockResolvedValue({ items: [run1], nextCursor: null });
+    mocks.detail.mockResolvedValue(detail(run1));
+    const attemptFor = (nodeId: string): DeploymentNodeAttemptRecord => ({
+      schemaVersion: 1, runId: run1.runId, nodeId, attempt: 1,
+      nodeType: 'transfer.sftp', nodeTypeVersion: 2, executorVersion: 'native/v1',
+      idempotencyKey: `attempt-${nodeId}`, status: 'succeeded', createdAt: 1, updatedAt: 2,
+    });
+    mocks.attempts.mockImplementation(async (_runId: string, nodeId: string) => ({
+      items: [attemptFor(nodeId)], nextBeforeAttempt: null,
+    }));
+    const runEvent = (sequence: number): DeploymentRunEvent => ({
+      runId: run1.runId, sequence, nodeId: 'transfer', attempt: 1,
+      eventKind: 'node.running', status: null, summaryKey: 'deployment.run.progress',
+      payload: null, recordedAt: sequence,
+    });
+    mocks.events
+      .mockResolvedValueOnce({ items: [runEvent(8), runEvent(9)], nextBeforeSequence: 8 })
+      .mockResolvedValueOnce({ items: [runEvent(8), runEvent(9), runEvent(10)], nextBeforeSequence: 8 })
+      .mockResolvedValueOnce({ items: [runEvent(6), runEvent(7)], nextBeforeSequence: 6 });
+
+    await useDeploymentWorkflowRunStore.getState().loadWorkflow('workflow-1');
+    expect(useDeploymentWorkflowRunStore.getState().events.map((item) => item.sequence)).toEqual([8, 9]);
+    expect(useDeploymentWorkflowRunStore.getState().nextEventSequence).toBe(8);
+
+    await useDeploymentWorkflowRunStore.getState().selectNode('build');
+    expect(useDeploymentWorkflowRunStore.getState().attempts.map((item) => item.nodeId)).toEqual(['build']);
+
+    await useDeploymentWorkflowRunStore.getState().refreshSelectedRun();
+    let state = useDeploymentWorkflowRunStore.getState();
+    expect(mocks.attempts).toHaveBeenLastCalledWith('run-1', 'build', null, 20);
+    expect(state.attempts.map((item) => item.nodeId)).toEqual(['build']);
+    expect(state.events.map((item) => item.sequence)).toEqual([10, 8, 9]);
+    expect(state.nextEventSequence).toBe(8);
+
+    await useDeploymentWorkflowRunStore.getState().loadMoreEvents();
+    state = useDeploymentWorkflowRunStore.getState();
+    expect(state.events.map((item) => item.sequence)).toEqual([10, 8, 9, 6, 7]);
+    expect(state.nextEventSequence).toBe(6);
+
+    await useDeploymentWorkflowRunStore.getState().refreshSelectedRun();
+    state = useDeploymentWorkflowRunStore.getState();
+    expect(state.events.map((item) => item.sequence)).toEqual([10, 8, 9, 6, 7]);
+    expect(state.nextEventSequence).toBe(6);
+  });
+
+  it('records polling errors without rethrowing them', async () => {
+    const run1 = summary('run-1', 'in_progress');
+    useDeploymentWorkflowRunStore.setState({
+      workflowId: workflow.id,
+      runs: [run1],
+      selectedRunId: run1.runId,
+      detail: detail(run1),
+      nodes: [node],
+    });
+    mocks.detail.mockRejectedValue(new Error('run projection unavailable'));
+
+    await expect(useDeploymentWorkflowRunStore.getState().refreshSelectedRun()).resolves.toBeUndefined();
+    expect(useDeploymentWorkflowRunStore.getState().error).toBe('run projection unavailable');
+    expect(useDeploymentWorkflowRunStore.getState().errorContext).toBe('operation');
   });
 });

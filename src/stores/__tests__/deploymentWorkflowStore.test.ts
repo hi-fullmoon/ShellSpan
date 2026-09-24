@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   updateLayout: vi.fn(),
+  archive: vi.fn(),
 }));
 
 vi.mock('@/lib/ipc/tauri', async (importOriginal) => ({
@@ -23,6 +24,7 @@ vi.mock('@/lib/ipc/tauri', async (importOriginal) => ({
   invokeCreateDeploymentWorkflow: mocks.create,
   invokeUpdateDeploymentWorkflow: mocks.update,
   invokeUpdateDeploymentWorkflowLayout: mocks.updateLayout,
+  invokeArchiveDeploymentWorkflow: mocks.archive,
 }));
 
 import { buildDeploymentTemplate, projectDeploymentEdges } from '@/lib/deployment/editor';
@@ -368,5 +370,105 @@ describe('deploymentWorkflowStore', () => {
       semanticDirty: false,
       layoutDirty: false,
     });
+  });
+
+  it('yields to an in-flight save instead of reinitializing over the draft', async () => {
+    const current = record();
+    const draft = {
+      id: current.id, name: current.name, enabled: current.enabled,
+      revision: current.revision, layoutRevision: current.layoutRevision,
+      definition: structuredClone(current.definition),
+      layout: structuredClone(current.layout!),
+    };
+    useDeploymentWorkflowStore.setState({
+      catalog: null,
+      workflows: [current],
+      selectedWorkflowId: current.id,
+      draft,
+      issues: [],
+      semanticDirty: true,
+      saving: true,
+    });
+
+    await useDeploymentWorkflowStore.getState().initialize();
+
+    expect(mocks.capabilities).not.toHaveBeenCalled();
+    expect(mocks.list).not.toHaveBeenCalled();
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      initialized: false,
+      saving: true,
+      semanticDirty: true,
+      draft,
+    });
+  });
+
+  it('drops native validation results that raced with a draft switch', async () => {
+    const current = record();
+    const other = { ...record(), id: 'workflow-2', name: 'Other site' };
+    useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current, other] });
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+
+    let resolveValidate: ((result: { valid: boolean; errors: { code: 'CYCLE_DETECTED' }[]; compiled: object }) => void) | undefined;
+    mocks.validate.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveValidate = resolve;
+    }));
+
+    const pending = useDeploymentWorkflowStore.getState().validateDraft();
+    useDeploymentWorkflowStore.getState().selectWorkflow(other.id);
+    resolveValidate!({ valid: false, errors: [{ code: 'CYCLE_DETECTED' }], compiled: {} });
+
+    const issues = await pending;
+    expect(issues.every((issue) => issue.source === 'local')).toBe(true);
+    expect(useDeploymentWorkflowStore.getState().issues).toEqual([]);
+    expect(useDeploymentWorkflowStore.getState().validating).toBe(false);
+  });
+
+  it('archives a workflow, removing its record and clearing the current draft', async () => {
+    const current = record();
+    const other = { ...record(), id: 'workflow-2', name: 'Other site' };
+    useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current, other] });
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+
+    const archived = await useDeploymentWorkflowStore.getState().archiveWorkflow(current.id);
+
+    expect(archived).toBe(true);
+    expect(mocks.archive).toHaveBeenCalledWith(current.id, current.revision);
+    expect(useDeploymentWorkflowStore.getState().workflows.map((item) => item.id)).toEqual([other.id]);
+    expect(useDeploymentWorkflowStore.getState()).toMatchObject({
+      selectedWorkflowId: null,
+      selectedNodeId: null,
+      draft: null,
+      semanticDirty: false,
+      layoutDirty: false,
+      error: null,
+    });
+  });
+
+  it('refuses to archive while the workflow has a dirty draft', async () => {
+    const current = record();
+    useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current] });
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+    useDeploymentWorkflowStore.getState().updateNode('source', { displayName: 'Local edit' });
+
+    const archived = await useDeploymentWorkflowStore.getState().archiveWorkflow(current.id);
+
+    expect(archived).toBe(false);
+    expect(mocks.archive).not.toHaveBeenCalled();
+    expect(useDeploymentWorkflowStore.getState().workflows).toHaveLength(1);
+    expect(useDeploymentWorkflowStore.getState().semanticDirty).toBe(true);
+  });
+
+  it('surfaces archive revision conflicts through the shared error channel', async () => {
+    const current = record();
+    useDeploymentWorkflowStore.setState({ catalog: null, workflows: [current] });
+    useDeploymentWorkflowStore.getState().selectWorkflow(current.id);
+    mocks.archive.mockRejectedValue(new Error('DEPLOYMENT_WORKFLOW_REVISION_CONFLICT'));
+
+    const archived = await useDeploymentWorkflowStore.getState().archiveWorkflow(current.id);
+
+    expect(archived).toBe(false);
+    expect(useDeploymentWorkflowStore.getState().error).toContain('REVISION_CONFLICT');
+    expect(useDeploymentWorkflowStore.getState().workflows).toHaveLength(1);
+    expect(useDeploymentWorkflowStore.getState().draft?.id).toBe(current.id);
   });
 });

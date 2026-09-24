@@ -28,6 +28,11 @@ vi.mock('@/hooks/useI18n', () => ({
   }),
 }));
 
+vi.mock('@/lib/ipc/tauri', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ipc/tauri')>()),
+  invokeValidateDeploymentWorkflow: vi.fn().mockResolvedValue({ valid: true, errors: [], compiled: {} }),
+}));
+
 const profile: ConnectionProfile = {
   id: 'profile-1', name: 'Production', host: 'example.test', port: 22,
   username: 'deploy', authMethod: 'password', createdAt: 1, updatedAt: 1,
@@ -711,5 +716,72 @@ describe('DeploymentWorkflowCenter', () => {
     expect(screen.getByLabelText('deployment.editor.nodeName')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'deployment.editor.removeNode' })).toBeDisabled();
     expect(screen.getByTestId('deployment-deploy-action')).toBeDisabled();
+  });
+
+  it('opens the issues dialog when a save is rejected by validation', async () => {
+    render(<DeploymentWorkflowCenter initialTab="runs" />);
+    act(() => {
+      useDeploymentWorkflowStore.setState({
+        error: 'DEPLOYMENT_WORKFLOW_VALIDATION_FAILED',
+        issues: [{
+          id: 'issue-1',
+          code: 'MISSING_APPROVAL',
+          messageKey: 'deployment.editor.validation.missingApproval',
+          source: 'native',
+        }],
+      });
+    });
+    await waitFor(() => expect(
+      screen.getByRole('heading', { name: 'deployment.editor.validation.title' }),
+    ).toBeInTheDocument());
+    expect(screen.getByTestId('deployment-validation-list'))
+      .toHaveTextContent('deployment.editor.validation.missingApproval');
+  });
+
+  it('opens the issues dialog with the ready state when validation passes', async () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    // With no recorded issues the dialog must still open and render its ready state.
+    fireEvent.click(within(screen.getByTestId('deployment-editor-toolbar'))
+      .getByTestId('deployment-validation-status'));
+    await waitFor(() => expect(
+      screen.getByRole('heading', { name: 'deployment.editor.validation.title' }),
+    ).toBeInTheDocument());
+    expect(screen.getByText('deployment.editor.validation.ready')).toBeInTheDocument();
+  });
+
+  it('always opens the issues dialog after running validation from the toolbar', async () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    fireEvent.click(screen.getByRole('button', { name: 'deployment.editor.validate' }));
+    await waitFor(() => expect(
+      screen.getByRole('heading', { name: 'deployment.editor.validation.title' }),
+    ).toBeInTheDocument());
+    expect(screen.getByTestId('deployment-validation-list')).toBeInTheDocument();
+  });
+
+  it('nudges to save first when a deploy request arrives with unsaved changes', async () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    act(() => {
+      useDeploymentWorkflowStore.getState().updateWorkflowMeta({ name: 'Renamed' });
+      useDeploymentWorkflowStore.getState().requestDeploy();
+    });
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(useToastStore.getState().toasts[0]).toMatchObject({
+      message: 'deployment.center.deploy.unsavedChanges',
+      variant: 'info',
+    });
+    expect(useDeploymentWorkflowStore.getState().deployRequested).toBe(false);
+  });
+
+  it('flags an invalid remote root in the template dialog', async () => {
+    render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    fireEvent.click(screen.getByRole('button', { name: 'deployment.editor.newWorkflow' }));
+
+    const dialog = await screen.findByRole('dialog');
+    const rootInput = within(dialog).getByLabelText('deployment.editor.remoteRoot');
+    const submit = within(dialog).getByRole('button', { name: 'deployment.editor.template.use' });
+    fireEvent.change(rootInput, { target: { value: 'srv/apps' } });
+    expect(submit).toBeDisabled();
+    expect(within(dialog).getByText('deployment.editor.template.remoteRootInvalid')).toBeInTheDocument();
+    expect(rootInput).toHaveAttribute('aria-invalid', 'true');
   });
 });

@@ -15,6 +15,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
+import type { DeploymentWorkflowRecord } from '@/lib/deployment/types';
 import { invokeExportDeploymentRunAudit } from '@/lib/ipc/tauri';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -23,17 +24,22 @@ import { deploymentEventLabel, deploymentRuntimeKey } from './runtime-utils';
 export interface EvidenceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  workflow: DeploymentWorkflowRecord;
   returnFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
 export const EvidenceDialog: React.FC<EvidenceDialogProps> = ({
   open,
   onOpenChange,
+  workflow,
   returnFocusRef,
 }) => {
   const { t } = useI18n();
   const state = useDeploymentWorkflowRunStore();
   const node = state.nodes.find((item) => item.nodeId === state.selectedNodeId) ?? null;
+  const nodeLabel = node
+    ? workflow.definition.nodes.find((item) => item.id === node.nodeId)?.displayName ?? node.nodeId
+    : null;
   const outputs = state.detail?.outputs.filter((output) => output.nodeId === node?.nodeId) ?? [];
   const receipts = state.detail?.receipts.filter((receipt) => receipt.nodeId === node?.nodeId) ?? [];
   const events = state.events.filter((event) => event.nodeId === node?.nodeId);
@@ -70,8 +76,8 @@ export const EvidenceDialog: React.FC<EvidenceDialogProps> = ({
         <DialogHeader className="shrink-0 border-b p-4">
           <DialogTitle>{t('deployment.runtime.evidence.title')}</DialogTitle>
           <DialogDescription>
-            {node?.nodeId
-              ? t('deployment.runtime.evidence.description', { node: node.nodeId })
+            {nodeLabel
+              ? t('deployment.runtime.evidence.description', { node: nodeLabel })
               : t('deployment.runtime.evidence.empty')}
           </DialogDescription>
         </DialogHeader>

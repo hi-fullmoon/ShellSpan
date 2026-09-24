@@ -30,11 +30,11 @@ import {
   formatDeploymentDuration,
 } from './runtime-utils';
 
-export const RuntimeNodeProgress: React.FC<{ node: DeploymentRunNodeRecord }> = ({ node }) => {
+export const RuntimeNodeProgress: React.FC<{ node: DeploymentRunNodeRecord; nodeLabel?: string }> = ({ node, nodeLabel }) => {
   const { t } = useI18n();
   const progress = deploymentNodeProgress(node);
   return (
-    <Progress value={progress.percent} aria-label={t('deployment.runtime.node.progress', { node: node.nodeId })}>
+    <Progress value={progress.percent} aria-label={t('deployment.runtime.node.progress', { node: nodeLabel ?? node.nodeId })}>
       <ProgressLabel>{deploymentStatusLabel(node.status, t)}</ProgressLabel>
       <ProgressValue>{() => progress.valueLabel}</ProgressValue>
     </Progress>
@@ -166,7 +166,10 @@ export const RuntimeNodeInspector: React.FC<RuntimeNodeInspectorProps> = ({
                   )}
                 </dl>
               )}
-              <RuntimeNodeProgress node={selectedNode} />
+              <RuntimeNodeProgress
+                node={selectedNode}
+                nodeLabel={definitionNode?.displayName ?? selectedNode.nodeId}
+              />
               {selectedArtifact && (
                 <Button
                   variant="outline"

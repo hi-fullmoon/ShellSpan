@@ -16,6 +16,7 @@ import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import type { DeploymentWorkflowRecord } from '@/lib/deployment/types';
+import { getErrorMessage } from '@/lib/error';
 import { useProfileStore } from '@/stores/profileStore';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import {
@@ -60,7 +61,8 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
   const detail = useDeploymentWorkflowRunStore((state) => state.detail);
   const action = useDeploymentWorkflowRunStore((state) => state.action);
   const approveAndStart = useDeploymentWorkflowRunStore((state) => state.approveAndStart);
-  const approveRef = React.useRef<HTMLButtonElement>(null);
+  const cancelRef = React.useRef<HTMLButtonElement>(null);
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [now, setNow] = React.useState(() => Date.now());
   const summary = detail?.approvalSummary ?? null;
   const invalid = !summary
@@ -82,6 +84,10 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
     return () => window.clearInterval(timer);
   }, [open]);
 
+  React.useEffect(() => {
+    if (open) setSubmitError(null);
+  }, [open]);
+
   return (
     <Dialog
       open={open}
@@ -89,7 +95,7 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
       onOpenChangeComplete={(nextOpen) => { if (!nextOpen) returnFocusRef?.current?.focus(); }}
     >
       <DialogContent
-        initialFocus={approveRef}
+        initialFocus={cancelRef}
         className="flex h-[min(46rem,calc(100vh-2rem))] w-[calc(100%-2rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0"
         data-testid="deployment-approval-dialog"
       >
@@ -99,6 +105,13 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
         </DialogHeader>
         <ScrollArea className="min-h-0 flex-1">
           <div className="px-4 pb-4">
+            {submitError && (
+              <Alert variant="destructive" className="mt-4" data-testid="deployment-approval-error">
+                <AlertTriangleIcon />
+                <AlertTitle>{t('deployment.runtime.approval.errorTitle')}</AlertTitle>
+                <AlertDescription>{submitError}</AlertDescription>
+              </Alert>
+            )}
             {summary && (
               <>
                 {invalid && (
@@ -168,14 +181,18 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
           </div>
         </ScrollArea>
         <DialogFooter className="shrink-0 border-t p-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
+          <Button ref={cancelRef} variant="outline" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
           <Button
-            ref={approveRef}
-            autoFocus
             disabled={!admissionsEnabled || invalid || action === 'approve'}
-            onClick={() => void approveAndStart()
-              .then(() => onOpenChange(false))
-              .catch(() => undefined)}
+            onClick={() => {
+              setSubmitError(null);
+              void approveAndStart()
+                .then(() => onOpenChange(false))
+                .catch((error: unknown) => {
+                  useDeploymentWorkflowRunStore.getState().clearError();
+                  setSubmitError(getErrorMessage(error));
+                });
+            }}
           >
             {action === 'approve'
               ? <Spinner data-icon="inline-start" />

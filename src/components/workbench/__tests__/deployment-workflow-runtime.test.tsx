@@ -226,7 +226,8 @@ describe('DeploymentWorkflowRuntimeView', () => {
     expect(content?.querySelector('[data-slot="card"]')).not.toBeInTheDocument();
     expect(content?.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
     expect(content?.querySelector('[data-slot="dialog-footer"]')).toHaveClass('shrink-0');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'deployment.runtime.approveAndRun' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveFocus());
+    expect(screen.getByRole('button', { name: 'deployment.runtime.approveAndRun' })).not.toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
     await waitFor(() => expect(trigger).toHaveFocus());
   });
@@ -442,6 +443,115 @@ describe('DeploymentWorkflowRuntimeView', () => {
     expect(await screen.findByRole('heading', { name: 'deployment.runtime.cancel.title' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'deployment.runtime.cancel.action' }));
     await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+  });
+
+  it('disables the cancel confirmation while the cancellation request is pending', async () => {
+    const cancel = vi.fn(() => {
+      useDeploymentWorkflowRunStore.setState({ action: 'cancel' });
+      return new Promise<void>(() => {});
+    });
+    const active = runSummary({ status: 'in_progress' });
+    useDeploymentWorkflowRunStore.setState({
+      detail: { summary: active, approvalSummary: null, outputs: [], receipts: [] },
+      cancel,
+    });
+
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+    const confirm = await screen.findByRole('button', { name: 'deployment.runtime.cancel.action' });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: /deployment\.runtime\.cancel\.action/ }),
+    ).toBeDisabled());
+  });
+
+  it('shows a destructive result alert with failed nodes and an evidence entry', () => {
+    const failed = runSummary({ status: 'failed', startedAt: 10, finishedAt: 20 });
+    useDeploymentWorkflowRunStore.setState({
+      detail: { summary: failed, approvalSummary: null, outputs: [], receipts: [] },
+      nodes: [{ ...node, status: 'failed' }],
+      events: [{
+        runId: failed.runId, sequence: 3, nodeId: 'source', attempt: 1,
+        eventKind: 'node_failed', status: 'failed', summaryKey: 'deployment.node.failed',
+        payload: null, recordedAt: 21,
+      }],
+    });
+
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+
+    const alert = screen.getByTestId('deployment-run-failed-alert');
+    expect(within(alert).getByText('deployment.runtime.failed.title')).toBeInTheDocument();
+    expect(within(alert).getByText('deployment.runtime.failed.nodes')).toBeInTheDocument();
+    expect(within(alert).getByText('deployment.node.failed')).toBeInTheDocument();
+    expect(within(alert).getByRole('button', { name: 'deployment.runtime.evidence.action' })).toBeInTheDocument();
+  });
+
+  it('shows a result alert for canceled runs with access to the run evidence', () => {
+    const canceled = runSummary({ status: 'canceled', startedAt: 10, finishedAt: 20 });
+    useDeploymentWorkflowRunStore.setState({
+      detail: { summary: canceled, approvalSummary: null, outputs: [], receipts: [] },
+      nodes: [{ ...approvalNode, status: 'canceled' }],
+    });
+
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+
+    const alert = screen.getByTestId('deployment-run-canceled-alert');
+    expect(within(alert).getByText('deployment.runtime.canceled.title')).toBeInTheDocument();
+    expect(within(alert).getByRole('button', { name: 'deployment.runtime.evidence.action' })).toBeInTheDocument();
+  });
+
+  it('polls the selected run while it awaits approval', () => {
+    vi.useFakeTimers();
+    try {
+      const refreshSelectedRun = vi.fn().mockResolvedValue(undefined);
+      useDeploymentWorkflowRunStore.setState({ refreshSelectedRun });
+      render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+      expect(refreshSelectedRun).not.toHaveBeenCalled();
+      act(() => { vi.advanceTimersByTime(1_500); });
+      expect(refreshSelectedRun).toHaveBeenCalledTimes(1);
+      act(() => { vi.advanceTimersByTime(1_500); });
+      expect(refreshSelectedRun).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('disables the empty-state deploy action while a preparation is running', () => {
+    const onDeploy = vi.fn();
+    useDeploymentWorkflowRunStore.setState({
+      runs: [],
+      nextRunCursor: null,
+      selectedRunId: null,
+      detail: null,
+      nodes: [],
+      events: [],
+      attempts: [],
+      preparing: true,
+    });
+    render(
+      <DeploymentWorkflowRuntimeView
+        kind="runs"
+        workflow={workflow}
+        onDeploy={onDeploy}
+        canDeploy
+      />,
+    );
+    const cta = screen.getByTestId('deployment-run-empty-cta');
+    expect(cta).toBeDisabled();
+    expect(cta).toHaveTextContent('deployment.runtime.deploy.action');
+  });
+
+  it('surfaces approval failures inside the dialog with the specific error', async () => {
+    const approveAndStart = vi.fn().mockRejectedValue(new Error('PLAN_EXPIRED'));
+    useDeploymentWorkflowRunStore.setState({ approveAndStart });
+    render(<DeploymentWorkflowRuntimeView kind="runs" workflow={workflow} />);
+    fireEvent.click(screen.getAllByTestId('deployment-open-approval')[0]!);
+    const approve = await screen.findByRole('button', { name: 'deployment.runtime.approveAndRun' });
+    fireEvent.click(approve);
+    expect(await screen.findByTestId('deployment-approval-error')).toHaveTextContent('PLAN_EXPIRED');
+    expect(screen.getByRole('button', { name: 'deployment.runtime.approveAndRun' })).toBeInTheDocument();
   });
 
   it('renders artifact identity, references, lease, and retention in a scrollable drawer', () => {

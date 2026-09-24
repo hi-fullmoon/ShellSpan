@@ -130,7 +130,10 @@ function nextNotice(kind: DeploymentRunNoticeKind): DeploymentRunNotice {
   return { id: noticeSequence, kind };
 }
 
-async function runDetail(runId: string): Promise<{
+async function runDetail(
+  runId: string,
+  nodeId?: string | null,
+): Promise<{
   detail: DeploymentRunDetail;
   nodes: DeploymentRunNodeRecord[];
   events: DeploymentRunEvent[];
@@ -144,8 +147,9 @@ async function runDetail(runId: string): Promise<{
     invokeListDeploymentRunEvents(runId, null, 50),
   ]);
   if (!detail) throw new Error('DEPLOYMENT_WORKFLOW_RUN_NOT_FOUND');
-  const attemptPage = nodes[0]
-    ? await invokeListDeploymentNodeAttempts(runId, nodes[0].nodeId, null, 20)
+  const attemptNodeId = nodeId ?? nodes[0]?.nodeId ?? null;
+  const attemptPage = attemptNodeId
+    ? await invokeListDeploymentNodeAttempts(runId, attemptNodeId, null, 20)
     : { items: [], nextBeforeAttempt: null };
   return {
     detail,
@@ -330,9 +334,34 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
     const runId = get().selectedRunId;
     if (!runId) return;
     const sequence = ++runDetailLoadSequence;
-    const selected = await runDetail(runId);
-    if (sequence !== runDetailLoadSequence || get().selectedRunId !== runId) return;
-    set({ ...selected, error: null, errorContext: null });
+    try {
+      const selectedNodeId = get().selectedNodeId;
+      const selected = await runDetail(runId, selectedNodeId);
+      if (sequence !== runDetailLoadSequence || get().selectedRunId !== runId) return;
+      const previous = get().events;
+      const seen = new Set(previous.map((event) => event.sequence));
+      const events = [...selected.events.filter((event) => !seen.has(event.sequence)), ...previous];
+      const nodeIds = new Set(selected.nodes.map((node) => node.nodeId));
+      const nextSelectedNodeId = selectedNodeId && nodeIds.has(selectedNodeId)
+        ? selectedNodeId
+        : selected.nodes[0]?.nodeId ?? null;
+      set({
+        detail: selected.detail,
+        nodes: selected.nodes,
+        events,
+        nextEventSequence: get().nextEventSequence ?? selected.nextEventSequence,
+        attempts: selected.attempts,
+        nextAttempt: selected.nextAttempt,
+        selectedNodeId: nextSelectedNodeId,
+        error: null,
+        errorContext: null,
+      });
+    } catch (error) {
+      if (sequence !== runDetailLoadSequence || get().selectedRunId !== runId) return;
+      const message = getErrorMessage(error);
+      if (get().error === message) return;
+      set({ error: message, errorContext: 'operation' });
+    }
   },
   selectNode: async (nodeId) => {
     const runId = get().selectedRunId;
@@ -416,18 +445,23 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
     let unlisten: (() => void) | null = null;
     try {
       let lastSequence = 0;
+      let preparedRunId: string | null = null;
       unlisten = await listenToDeploymentNodeProgress((event) => {
         const progress = event.payload;
         if (sequence !== workflowLoadSequence || get().workflowId !== workflow.id) return;
+        if (preparedRunId && progress.runId !== preparedRunId) return;
         if (progress.sequence <= lastSequence) return;
         lastSequence = progress.sequence;
-        set((current) => ({
-          preparationNodes: current.preparationNodes.map((node) => node.nodeId === progress.nodeId
-            ? { ...node, status: progress.phase }
-            : node),
-          preparationCompleted: progress.completed,
-          preparationTotal: progress.total,
-        }));
+        set((current) => {
+          if (!current.preparationNodes.some((node) => node.nodeId === progress.nodeId)) return {};
+          return {
+            preparationNodes: current.preparationNodes.map((node) => node.nodeId === progress.nodeId
+              ? { ...node, status: progress.phase }
+              : node),
+            preparationCompleted: progress.completed,
+            preparationTotal: progress.total,
+          };
+        });
       });
       const prepared = await invokePrepareDeploymentRun({
         workflowId: workflow.id,
@@ -437,6 +471,7 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
         parameters: {},
         ...(rollbackReleaseId ? { rollbackReleaseId } : {}),
       });
+      preparedRunId = prepared.runId;
       const [page, releases, selected] = await Promise.all([
         invokeListDeploymentRuns(workflow.id, null, 20),
         invokeListDeploymentReleases(workflow.id),
@@ -447,6 +482,7 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
       attemptLoadSequence += 1;
       set({
         workflowId: workflow.id,
+        loading: false,
         runs: [...page.items],
         nextRunCursor: page.nextCursor,
         releases,
@@ -474,6 +510,9 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
       throw error;
     } finally {
       unlisten?.();
+      if (get().preparing) {
+        set({ preparing: false, preparationNodes: [], preparationCompleted: 0, preparationTotal: 0 });
+      }
     }
   },
   approveAndStart: async () => {
@@ -489,11 +528,11 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
         throw new Error('DEPLOYMENT_WORKFLOW_RUN_NOT_STARTABLE');
       }
       await invokeStartDeploymentRun(binding);
-      const selected = await runDetail(summary.runId);
+      const selected = await runDetail(summary.runId, get().selectedNodeId);
       if (sequence !== actionSequence || get().selectedRunId !== summary.runId) return;
       set({ ...selected, action: null, notice: nextNotice('started'), errorContext: null });
     } catch (error) {
-      const latest = await runDetail(summary.runId).catch(() => null);
+      const latest = await runDetail(summary.runId, get().selectedNodeId).catch(() => null);
       if (sequence !== actionSequence || get().selectedRunId !== summary.runId) throw error;
       set({
         ...(latest ?? {}),
@@ -511,7 +550,7 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
     set({ action: 'cancel', error: null });
     try {
       await invokeCancelDeploymentRun({ runId });
-      const selected = await runDetail(runId);
+      const selected = await runDetail(runId, get().selectedNodeId);
       if (sequence !== actionSequence || get().selectedRunId !== runId) return;
       set({ ...selected, action: null, notice: nextNotice('canceled'), errorContext: null });
     } catch (error) {
@@ -527,7 +566,7 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
     set({ action: 'reconcile', error: null });
     try {
       await invokeReconcileDeploymentRun({ runId });
-      const selected = await runDetail(runId);
+      const selected = await runDetail(runId, get().selectedNodeId);
       if (sequence !== actionSequence || get().selectedRunId !== runId) return;
       set({ ...selected, action: null, notice: nextNotice('reconciled'), errorContext: null });
     } catch (error) {
