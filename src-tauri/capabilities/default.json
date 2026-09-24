@@ -6,6 +6,9 @@
   "permissions": [
     "core:default",
     "core:window:allow-close",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:event:allow-listen",
     "core:window:allow-minimize",
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",

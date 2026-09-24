@@ -2,11 +2,14 @@ import React from 'react';
 import {
   AlertTriangleIcon,
   Clock3Icon,
+  EyeIcon,
   HistoryIcon,
+  MinusCircleIcon,
   PackageCheckIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
   SquareIcon,
+  XCircleIcon,
 } from 'lucide-react';
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
@@ -41,6 +44,7 @@ import { RuntimeNodeInspector } from './deployment/runtime-node-inspector';
 import { RuntimeStepList } from './deployment/runtime-step-list';
 import { RuntimeWorkspace } from './deployment/runtime-workspace';
 import {
+  deploymentEventLabel,
   deploymentStatusBadgeVariant,
   deploymentStatusLabel,
   formatDeploymentDate,
@@ -53,8 +57,12 @@ type RuntimeViewKind = 'runs' | 'versions';
 const RunStatusAlert: React.FC<{
   status: DeploymentRunStatus;
   onReconcile: () => void;
+  onOpenEvidence?: (trigger: HTMLElement) => void;
   evidenceGaps?: readonly string[];
-}> = ({ status, onReconcile, evidenceGaps = [] }) => {
+  failedNodes?: readonly string[];
+  failureSummaryKey?: string | null;
+  hasEvidence?: boolean;
+}> = ({ status, onReconcile, onOpenEvidence, evidenceGaps = [], failedNodes = [], failureSummaryKey = null, hasEvidence = false }) => {
   const { t } = useI18n();
   if (status === 'state_unknown') {
     return (
@@ -93,6 +101,35 @@ const RunStatusAlert: React.FC<{
         <Spinner />
         <AlertTitle>{deploymentStatusLabel(status, t)}</AlertTitle>
         <AlertDescription>{t('deployment.runtime.active.description')}</AlertDescription>
+      </Alert>
+    );
+  }
+  if (status === 'failed' || status === 'canceled') {
+    const failed = status === 'failed';
+    return (
+      <Alert
+        variant="destructive"
+        data-testid={failed ? 'deployment-run-failed-alert' : 'deployment-run-canceled-alert'}
+      >
+        {failed ? <XCircleIcon /> : <MinusCircleIcon />}
+        <AlertTitle>{t(failed ? 'deployment.runtime.failed.title' : 'deployment.runtime.canceled.title')}</AlertTitle>
+        <AlertDescription>
+          <div className="flex flex-col gap-1">
+            <span>{t(failed ? 'deployment.runtime.failed.description' : 'deployment.runtime.canceled.description')}</span>
+            {failedNodes.length > 0 && (
+              <span>{t('deployment.runtime.failed.nodes', { nodes: failedNodes.join(', ') })}</span>
+            )}
+            {failureSummaryKey && <span>{deploymentEventLabel(failureSummaryKey, t)}</span>}
+          </div>
+        </AlertDescription>
+        {hasEvidence && onOpenEvidence && (
+          <AlertAction>
+            <Button variant="outline" size="sm" onClick={(event) => onOpenEvidence(event.currentTarget)}>
+              <EyeIcon data-icon="inline-start" />
+              {t('deployment.runtime.evidence.action')}
+            </Button>
+          </AlertAction>
+        )}
       </Alert>
     );
   }
@@ -232,7 +269,7 @@ const RunsView: React.FC<{
   const handledApprovalRequestRef = React.useRef(0);
   const detail = state.detail;
   const active = detail
-    && ['approved', 'in_progress', 'verifying', 'reconciling', 'cancel_requested']
+    && ['awaiting_approval', 'approved', 'in_progress', 'verifying', 'reconciling', 'cancel_requested']
       .includes(detail.summary.status);
 
   React.useEffect(() => {
@@ -262,7 +299,7 @@ const RunsView: React.FC<{
         title={t('deployment.runtime.runs.empty')}
         description={t('deployment.runtime.runs.emptyDescription')}
         action={(
-          <Button onClick={onDeploy} disabled={!canDeploy} data-testid="deployment-run-empty-cta">
+          <Button onClick={onDeploy} disabled={!canDeploy || state.preparing} data-testid="deployment-run-empty-cta">
             <PackageCheckIcon data-icon="inline-start" />
             {t('deployment.runtime.deploy.action')}
           </Button>
@@ -340,6 +377,30 @@ const RunsView: React.FC<{
                     .map((node) => workflow.definition.nodes.find(
                       (item) => item.id === node.nodeId,
                     )?.displayName ?? node.nodeType)}
+                  failedNodes={state.nodes
+                    .filter((node) => node.status === 'failed')
+                    .map((node) => workflow.definition.nodes.find(
+                      (item) => item.id === node.nodeId,
+                    )?.displayName ?? node.nodeType)}
+                  failureSummaryKey={(() => {
+                    const failedNodeIds = new Set(state.nodes
+                      .filter((node) => node.status === 'failed')
+                      .map((node) => node.nodeId));
+                    return failedNodeIds.size > 0
+                      ? [...state.events].reverse().find(
+                        (event) => event.nodeId !== null && failedNodeIds.has(event.nodeId),
+                      )?.summaryKey ?? null
+                      : null;
+                  })()}
+                  hasEvidence={state.events.length > 0
+                    || state.nodes.some((node) => node.status === 'failed')}
+                  onOpenEvidence={(trigger) => {
+                    const failedNode = state.nodes.find((node) => node.status === 'failed');
+                    if (failedNode && failedNode.nodeId !== state.selectedNodeId) {
+                      void state.selectNode(failedNode.nodeId).catch(() => undefined);
+                    }
+                    onOpenEvidence(trigger);
+                  }}
                   onReconcile={() => void state.reconcile().catch(() => undefined)}
                 />
               </div>
@@ -366,10 +427,14 @@ const RunsView: React.FC<{
             <AlertDialogCancel>{t('common.close')}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
+              disabled={state.action === 'cancel'}
               onClick={() => void state.cancel()
                 .then(() => setCancelOpen(false))
                 .catch(() => undefined)}
             >
+              {state.action === 'cancel'
+                ? <Spinner data-icon="inline-start" />
+                : <SquareIcon data-icon="inline-start" />}
               {t('deployment.runtime.cancel.action')}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -447,6 +512,7 @@ export function DeploymentWorkflowRuntimeView({
       <EvidenceDialog
         open={evidenceOpen}
         onOpenChange={setEvidenceOpen}
+        workflow={workflow}
         returnFocusRef={evidenceReturnFocusRef}
       />
     </>

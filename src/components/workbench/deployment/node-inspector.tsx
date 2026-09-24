@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -105,6 +105,94 @@ function listValue(value: DeploymentJsonValue | undefined): string {
   return Array.isArray(value) ? value.map(String).join('\n') : '';
 }
 
+interface IntegerFieldProps {
+  id: string;
+  label: string;
+  description?: string;
+  value: number;
+  min?: number;
+  max?: number;
+  disabled?: boolean;
+  invalidMessage: string;
+  onCommit: (value: number) => void;
+}
+
+// Number inputs sanitize arbitrary text on assignment, which makes controlled
+// typing lossy ("-" alone becomes ""). Keep the raw text locally and only parse,
+// clamp, and commit on blur so intermediate input is never swallowed.
+const IntegerField: React.FC<IntegerFieldProps> = ({
+  id,
+  label,
+  description,
+  value,
+  min,
+  max,
+  disabled = false,
+  invalidMessage,
+  onCommit,
+}) => {
+  const serialized = String(value);
+  const [text, setText] = React.useState(serialized);
+  const [invalid, setInvalid] = React.useState(false);
+  const lastSerializedRef = React.useRef(serialized);
+
+  React.useEffect(() => {
+    if (serialized !== lastSerializedRef.current) {
+      lastSerializedRef.current = serialized;
+      setText(serialized);
+      setInvalid(false);
+    }
+  }, [serialized]);
+
+  const commit = (): void => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      // An empty field reverts to the committed value instead of writing.
+      setText(lastSerializedRef.current);
+      setInvalid(false);
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isInteger(parsed)) {
+      setInvalid(true);
+      return;
+    }
+    setInvalid(false);
+    const clamped = Math.min(max ?? parsed, Math.max(min ?? parsed, parsed));
+    const next = String(clamped);
+    lastSerializedRef.current = next;
+    setText(next);
+    if (clamped !== value) onCommit(clamped);
+  };
+
+  return (
+    <Field data-invalid={invalid ? 'true' : undefined}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <Input
+        id={id}
+        className="h-8"
+        type="text"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        value={text}
+        disabled={disabled}
+        aria-invalid={invalid || undefined}
+        onChange={(event) => {
+          setText(event.target.value);
+          setInvalid(false);
+        }}
+        onBlur={commit}
+      />
+      {invalid
+        ? <FieldError>{invalidMessage}</FieldError>
+        : description
+          ? <FieldDescription>{description}</FieldDescription>
+          : null}
+    </Field>
+  );
+};
+
 interface ConfigFieldControlProps {
   node: DeploymentWorkflowNode;
   field: DeploymentNodeConfigFieldSpec;
@@ -189,24 +277,22 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({ node, field, de
   }
 
   if (field.kind === 'stringList' || field.kind === 'integerList') {
+    return <ListConfigField node={node} field={field} editable={editable} />;
+  }
+
+  if (field.kind === 'integer') {
     return (
-      <Field>
-        <FieldLabel htmlFor={id}>{t(deploymentLocaleKey(field.labelKey))}</FieldLabel>
-        <Textarea
-          id={id}
-          value={listValue(value)}
-          rows={3}
-          disabled={!editable}
-          onChange={(event) => {
-            const entries = event.target.value
-              .split(/[\n,]/)
-              .map((item) => item.trim())
-              .filter(Boolean);
-            update(node.id, field.name, field.kind === 'integerList' ? entries.map(Number).filter(Number.isInteger) : entries);
-          }}
-        />
-        <FieldDescription>{t(deploymentLocaleKey(field.descriptionKey))}</FieldDescription>
-      </Field>
+      <IntegerField
+        id={id}
+        label={t(deploymentLocaleKey(field.labelKey))}
+        description={t(deploymentLocaleKey(field.descriptionKey))}
+        value={typeof value === 'number' ? value : 0}
+        min={field.minimum}
+        max={field.maximum}
+        disabled={!editable}
+        invalidMessage={t('deployment.editor.config.invalidNumber')}
+        onCommit={(next) => update(node.id, field.name, next)}
+      />
     );
   }
 
@@ -216,12 +302,63 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({ node, field, de
       <Input
         id={id}
         className="h-8"
-        type={field.kind === 'integer' ? 'number' : 'text'}
-        min={field.minimum}
-        max={field.maximum}
+        type="text"
         value={typeof value === 'string' || typeof value === 'number' ? value : ''}
         disabled={!editable}
-        onChange={(event) => update(node.id, field.name, field.kind === 'integer' ? Number(event.target.value) : event.target.value)}
+        onChange={(event) => update(node.id, field.name, event.target.value)}
+      />
+      <FieldDescription>{t(deploymentLocaleKey(field.descriptionKey))}</FieldDescription>
+    </Field>
+  );
+};
+
+interface ListConfigFieldProps {
+  node: DeploymentWorkflowNode;
+  field: DeploymentNodeConfigFieldSpec;
+  editable: boolean;
+}
+
+// Splitting and filtering on every keystroke used to normalize the controlled
+// value immediately, swallowing trailing commas and newlines before the user
+// could finish typing. Keep the raw text and parse only on blur.
+const ListConfigField: React.FC<ListConfigFieldProps> = ({ node, field, editable }) => {
+  const { t } = useI18n();
+  const update = useDeploymentWorkflowStore((state) => state.updateNodeConfig);
+  const value = node.config[field.name];
+  const id = `config-${node.id}-${field.name}`;
+  const serialized = listValue(value);
+  const [text, setText] = React.useState(serialized);
+  const lastSerializedRef = React.useRef(serialized);
+
+  React.useEffect(() => {
+    if (serialized !== lastSerializedRef.current) {
+      lastSerializedRef.current = serialized;
+      setText(serialized);
+    }
+  }, [serialized]);
+
+  const commit = (): void => {
+    const entries = text
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const next = field.kind === 'integerList'
+      ? entries.map(Number).filter(Number.isInteger)
+      : entries;
+    lastSerializedRef.current = next.map(String).join('\n');
+    update(node.id, field.name, next);
+  };
+
+  return (
+    <Field>
+      <FieldLabel htmlFor={id}>{t(deploymentLocaleKey(field.labelKey))}</FieldLabel>
+      <Textarea
+        id={id}
+        value={text}
+        rows={3}
+        disabled={!editable}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={commit}
       />
       <FieldDescription>{t(deploymentLocaleKey(field.descriptionKey))}</FieldDescription>
     </Field>
@@ -302,23 +439,16 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catal
               <Badge variant="outline">{t(deploymentLocaleKey(`deployment.editor.domain.${spec.executionDomain}`))}</Badge>
             </div>
           </Field>
-          <Field>
-            <FieldLabel htmlFor={`node-timeout-${node.id}`}>{t('deployment.editor.timeout')}</FieldLabel>
-            <Input
-              id={`node-timeout-${node.id}`}
-              className="h-8"
-              type="number"
-              min={1}
-              max={86_400}
-              value={node.timeoutSeconds}
-              disabled={!editable}
-              onChange={(event) =>
-                updateNode(node.id, {
-                  timeoutSeconds: Number(event.target.value),
-                })
-              }
-            />
-          </Field>
+          <IntegerField
+            id={`node-timeout-${node.id}`}
+            label={t('deployment.editor.timeout')}
+            value={node.timeoutSeconds}
+            min={1}
+            max={86_400}
+            disabled={!editable}
+            invalidMessage={t('deployment.editor.config.invalidNumber')}
+            onCommit={(next) => updateNode(node.id, { timeoutSeconds: next })}
+          />
           <NodeInputFields node={node} spec={spec} definition={draft.definition} catalog={catalog} editable={editable} />
           {spec.configSchema.fields.map((field) => (
             <ConfigFieldControl key={field.name} node={node} field={field} definition={draft.definition} editable={editable} />

@@ -83,7 +83,10 @@ export const WorkflowStepList: React.FC<WorkflowStepListProps> = ({
             return (
               <React.Fragment key={workflowNode.id}>
                 {index > 0 && <Separator />}
-                <div className={cn('flex items-center gap-2 px-2 py-1')} data-step-node-id={workflowNode.id}>
+                <div
+                  className={cn('flex items-center gap-2 px-2', index === 0 ? 'pb-1' : 'pt-1 pb-1')}
+                  data-step-node-id={workflowNode.id}
+                >
                   <Button
                     variant={selected ? 'secondary' : 'ghost'}
                     className="h-auto min-w-0 flex-1 justify-start py-1.5"

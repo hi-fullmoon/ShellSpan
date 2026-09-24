@@ -20,6 +20,7 @@ import type {
   DeploymentWorkflowRecord,
 } from '@/lib/deployment/types';
 import {
+  invokeArchiveDeploymentWorkflow,
   invokeCreateDeploymentWorkflow,
   invokeDeploymentWorkflowCapabilities,
   invokeListDeploymentNodeTypes,
@@ -105,6 +106,7 @@ interface DeploymentWorkflowStoreState {
   ) => void;
   validateDraft: () => Promise<DeploymentEditorIssue[]>;
   saveDraft: () => Promise<DeploymentWorkflowRecord>;
+  archiveWorkflow: (id: string) => Promise<boolean>;
   clearError: () => void;
   clearNotice: () => void;
   reset: () => void;
@@ -181,7 +183,7 @@ const initialState = {
 export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((set, get) => ({
   ...initialState,
   initialize: async () => {
-    if (get().loading) return;
+    if (get().loading || get().saving) return;
     set({ loading: true, error: null });
     try {
       const [capabilities, catalog, page] = await Promise.all([
@@ -493,6 +495,17 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
     const immediate = localDeploymentEditorIssues(draft.definition, catalog);
     try {
       const result = await invokeValidateDeploymentWorkflow(draft.definition);
+      const latest = get().draft;
+      if (!latest) {
+        set({ validating: false });
+        return [];
+      }
+      if (latest.id !== draft.id || latest.revision !== draft.revision) {
+        // The draft moved on (selection change or concurrent save) while the
+        // native validator ran; the returned issues describe a stale definition.
+        set({ validating: false });
+        return localDeploymentEditorIssues(latest.definition, get().catalog);
+      }
       const issues = [...immediate, ...mapNativeValidationErrors(result.errors)];
       set({ issues, validating: false, error: null });
       return issues;
@@ -594,4 +607,34 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
   clearError: () => set({ error: null }),
   clearNotice: () => set({ notice: null }),
   reset: () => set(initialState),
+  archiveWorkflow: async (id) => {
+    const state = get();
+    if (state.saving) return false;
+    const record = state.workflows.find((item) => item.id === id);
+    if (!record) return false;
+    // A dirty draft of this workflow must be explicitly discarded by the UI
+    // (its confirm dialog discloses that) before archiving; the store does not
+    // discard unsaved edits on its own.
+    if (state.draft?.id === id && (state.semanticDirty || state.layoutDirty)) return false;
+    try {
+      await invokeArchiveDeploymentWorkflow(id, record.revision);
+    } catch (error) {
+      set({ error: getErrorMessage(error) });
+      return false;
+    }
+    const clearingCurrent = state.draft?.id === id;
+    set({
+      workflows: state.workflows.filter((item) => item.id !== id),
+      ...(clearingCurrent ? {
+        selectedWorkflowId: null,
+        selectedNodeId: null,
+        draft: null,
+        semanticDirty: false,
+        layoutDirty: false,
+        issues: [],
+        pendingSelectionId: null,
+      } : {}),
+    });
+    return true;
+  },
 }));

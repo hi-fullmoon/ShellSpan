@@ -121,6 +121,24 @@ describe('deployment editor domain', () => {
     expect(topologyOrder(definition).map((node) => node.id)).toEqual(['source', 'build']);
   });
 
+  it('flags nodes with an empty display name as local issues', () => {
+    const definition = buildDeploymentTemplate(
+      'blank',
+      { connectionProfileId: 'profile-1', remoteRoot: '/srv/example' },
+      nameForNode,
+    ).definition;
+    definition.nodes = [
+      {
+        id: 'source', type: 'source.snapshot', typeVersion: 1, displayName: '  ', inputs: {},
+        config: { sourceRef: 'workspace' }, timeoutSeconds: 60,
+        retry: { maxAttempts: 1, initialBackoffSeconds: 0, maxBackoffSeconds: 0 }, runWhen: 'allSucceeded',
+      },
+    ];
+    expect(localDeploymentEditorIssues(definition, catalog)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'LOCAL_EMPTY_NODE_NAME', nodeId: 'source' }),
+    ]));
+  });
+
   it('maps stable native codes to localized editor issues', () => {
     expect(mapNativeValidationErrors([
       { code: 'CYCLE_DETECTED', message: 'diagnostic only', nodeId: 'build' },
