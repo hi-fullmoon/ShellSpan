@@ -10,10 +10,14 @@ try {
     const { default: React } = await import('/node_modules/.vite/deps/react.js');
     const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
     const { AiComposerAddMenu } = await import('/src/components/ai/workspace/ai-composer-add-menu.tsx');
-    await import('/src/components/ai/styles/context-menus.css');
+    await import('/src/components/ai/styles/styles.css');
+    const shell = document.createElement('div');
+    shell.className = 'ai-panel-shell';
+    shell.style.cssText = 'position:fixed;bottom:20px;left:20px;width:calc(100% - 40px);z-index:100';
     const host = document.createElement('div');
-    host.style.cssText = 'position:fixed;bottom:20px;left:20px;width:calc(100% - 40px);z-index:100';
-    document.body.append(host);
+    host.style.cssText = 'position:relative';
+    shell.append(host);
+    document.body.append(shell);
     ReactDOM.createRoot(host).render(React.createElement(AiComposerAddMenu, {
       disabled: false, agent: true, anchor: { current: host },
       onAddFile: () => { host.dataset.action = 'file'; },
@@ -38,7 +42,7 @@ try {
     assert.equal(plus.strokes.length, 2);
     for (const stroke of plus.strokes) {
       assert.equal(stroke.effect, 'non-scaling-stroke', 'Keep plus strokes solid when the icon shrinks');
-      assert.equal(stroke.width, '1.5px');
+      assert.equal(stroke.width, '1.2px');
     }
     await trigger.screenshot({ path: `/tmp/shellspan-composer-plus-${width}.png` });
     await page.locator('.ai-composer-add').click();
@@ -64,6 +68,39 @@ try {
     await page.locator('.ai-composer-add-menu').waitFor({ state: 'hidden' });
     console.log(`Verified ${geometry.length} menu icons at ${width}px`);
   }
+
+  // Keyboard focus on the shadcn trigger draws one ring: the shell's fallback
+  // outline must stay suppressed instead of stacking into a thick double halo.
+  await page.evaluate(() => {
+    const probe = document.createElement('button');
+    probe.className = 'focus-outline-probe';
+    probe.textContent = 'probe';
+    document.querySelector('.ai-panel-shell').append(probe);
+  });
+  const probe = page.locator('.focus-outline-probe');
+  await probe.focus();
+  await page.keyboard.press('Shift+Tab');
+  const triggerFocus = await page.locator('.ai-composer-add').evaluate(el => {
+    const styles = getComputedStyle(el);
+    return {
+      focusVisible: el.matches(':focus-visible'),
+      outlineStyle: styles.outlineStyle,
+      ring: styles.boxShadow,
+    };
+  });
+  assert.equal(triggerFocus.focusVisible, true, 'Trigger receives keyboard focus');
+  assert.equal(triggerFocus.outlineStyle, 'none', 'Shell outline must not double the button ring');
+  assert.match(triggerFocus.ring, /0px 0px 0px 2px/, 'Button keeps its own 2px focus ring');
+  await page.locator('.ai-composer-add').screenshot({ path: '/tmp/shellspan-composer-plus-focused.png' });
+
+  // Raw buttons without their own focus indicator still get the shell outline.
+  await page.keyboard.press('Tab');
+  const probeFocus = await probe.evaluate(el => {
+    const styles = getComputedStyle(el);
+    return { focusVisible: el.matches(':focus-visible'), outlineStyle: styles.outlineStyle };
+  });
+  assert.equal(probeFocus.focusVisible, true, 'Probe receives keyboard focus');
+  assert.equal(probeFocus.outlineStyle, 'solid', 'Raw buttons keep the shell fallback outline');
 } finally {
   await browser.close();
 }

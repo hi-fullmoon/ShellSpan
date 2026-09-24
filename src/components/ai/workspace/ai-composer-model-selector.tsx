@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon, SearchIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,9 @@ import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import type { AiProviderConfig, AiProviderProfile, AiProviderPreset, AiReasoningOption } from '@/types/ai';
 
 type ModelMenuPane = 'root' | 'model' | 'reasoning';
+
+/** Model pane height cap; keep in sync with the max-h utility on the menu. */
+const MODEL_MENU_HEIGHT_LIMIT = 380;
 
 const REASONING_LABEL_KEYS: Record<string, LocaleKey> = {
   off: 'ai.reasoningEffort.off',
@@ -103,6 +106,11 @@ export function AiComposerModelSelector({
   const [search, setSearch] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // The model pane pins its height to the tallest content seen in the current
+  // open: filtering keeps the popup (and the search field) in place, while a
+  // short model list keeps a content-sized popup without dead space.
+  const [modelPaneHeight, setModelPaneHeight] = useState<number>();
+  const tallestModelPaneRef = useRef(0);
   const groups = useMemo(() => groupProviders(availableProviders), [availableProviders]);
   const filteredGroups = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -119,6 +127,27 @@ export function AiComposerModelSelector({
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = 0;
   }, [search, pane]);
+  useLayoutEffect(() => {
+    if (!open || pane !== 'model') return;
+    const menu = listRef.current?.closest<HTMLElement>('.ai-model-menu');
+    const body = listRef.current?.querySelector<HTMLElement>('[data-slot="ai-model-menu-body"]');
+    if (!menu || !body) return;
+    const searchArea = menu.querySelector<HTMLElement>('[data-slot="ai-model-search"]');
+    const separatorArea = menu.querySelector<HTMLElement>('[data-slot="ai-model-search-separator"]');
+    const contentHeight = (searchArea?.offsetHeight ?? 0) + (separatorArea?.offsetHeight ?? 0) + body.offsetHeight;
+    // jsdom reports zero-sized layout; keep the popup content-sized there.
+    if (contentHeight <= 0) return;
+    const available = Number.parseFloat(getComputedStyle(menu).getPropertyValue('--available-height'));
+    const limit = Math.min(MODEL_MENU_HEIGHT_LIMIT, Number.isFinite(available) ? available : MODEL_MENU_HEIGHT_LIMIT);
+    tallestModelPaneRef.current = Math.max(tallestModelPaneRef.current, contentHeight);
+    const next = Math.min(limit, tallestModelPaneRef.current);
+    setModelPaneHeight(current => (current === next ? current : next));
+  }, [open, pane, filteredGroups]);
+  useEffect(() => {
+    if (open) return;
+    tallestModelPaneRef.current = 0;
+    setModelPaneHeight(undefined);
+  }, [open]);
   const defaultSelection=routeSnapshot?.defaultSelection;
   const defaultProvider = availableProviders.find((provider) => defaultSelection ? provider.id===defaultSelection.routeId && provider.model===defaultSelection.modelId : provider.id === defaultProviderId)
     ?? availableProviders[0];
@@ -173,7 +202,7 @@ export function AiComposerModelSelector({
           <Button
             variant="ghost"
             size="xs"
-            className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] overflow-hidden pr-1.5 pl-2 @min-[481px]/ai-workspace:shrink-0"
+            className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] overflow-hidden pr-1.5 pl-2"
             disabled={disabled || current === undefined || groups.length === 0}
             aria-label={t('ai.workspace.model.trigger', { selection: triggerLabel })}
           />
@@ -192,7 +221,9 @@ export function AiComposerModelSelector({
         side="top"
         sideOffset={8}
         align="end"
+        data-pane={pane}
         className="ai-model-menu flex max-h-[min(380px,var(--available-height))] w-max min-w-56 max-w-[min(420px,calc(100vw-16px))] flex-col overflow-hidden p-0"
+        style={pane === 'model' && modelPaneHeight !== undefined ? { height: modelPaneHeight } : undefined}
         aria-label={t('ai.workspace.model.menu')}
         onKeyDownCapture={(event) => {
           if (event.nativeEvent.isComposing) return;
@@ -237,114 +268,114 @@ export function AiComposerModelSelector({
                 <InputGroupAddon><SearchIcon /></InputGroupAddon>
               </InputGroup>
             </div>
-            <div className="shrink-0 px-2">
+            <div className="shrink-0 px-2" data-slot="ai-model-search-separator">
               <Separator />
             </div>
           </>
         )}
-        <div ref={listRef} data-slot="ai-model-menu-scroll" className="min-h-0 overflow-x-hidden overflow-y-auto">
-        <div data-slot="ai-model-menu-body" className="p-[3px]">
-        {(routeStatus==='error'||selectionError||(routeSnapshot && !resolved)) && <DropdownMenuGroup><DropdownMenuLabel role="status">{aiErrorMessage((routeStatus==='error' ? routeError : selectionError) ?? t('settings.ai.capabilitiesLoading'), t)}</DropdownMenuLabel></DropdownMenuGroup>}
-        {pane === 'root' && (
-          <DropdownMenuGroup>
-            <DropdownMenuItem
-              closeOnClick={false}
-              className="ai-model-menu-cell min-h-9 min-w-56 gap-1 pr-[5px] pl-2 [&>:first-child]:flex-1"
-              onClick={() => setPane('model')}
-            >
-              <span>{t('ai.workspace.model.model')}</span>
-              <span className="max-w-[250px] truncate" data-slot="ai-model-menu-value">{modelLabel}</span>
-              <ChevronRightIcon />
-            </DropdownMenuItem>
-            {hasReasoning && (
+        <div ref={listRef} data-slot="ai-model-menu-scroll" className="min-h-0 flex-auto overflow-x-hidden overflow-y-auto">
+          <div data-slot="ai-model-menu-body" className="p-[3px]">
+          {(routeStatus==='error'||selectionError||(routeSnapshot && !resolved)) && <DropdownMenuGroup><DropdownMenuLabel role="status">{aiErrorMessage((routeStatus==='error' ? routeError : selectionError) ?? t('settings.ai.capabilitiesLoading'), t)}</DropdownMenuLabel></DropdownMenuGroup>}
+          {pane === 'root' && (
+            <DropdownMenuGroup>
               <DropdownMenuItem
                 closeOnClick={false}
                 className="ai-model-menu-cell min-h-9 min-w-56 gap-1 pr-[5px] pl-2 [&>:first-child]:flex-1"
-                onClick={() => setPane('reasoning')}
+                onClick={() => setPane('model')}
               >
-                <span>{t('ai.workspace.model.reasoning')}</span>
-                <span className="max-w-[250px] truncate" data-slot="ai-model-menu-value">{reasoningLabel}</span>
+                <span>{t('ai.workspace.model.model')}</span>
+                <span className="max-w-[250px] truncate" data-slot="ai-model-menu-value">{modelLabel}</span>
                 <ChevronRightIcon />
               </DropdownMenuItem>
-            )}
-          </DropdownMenuGroup>
-        )}
-
-        {pane === 'model' && filteredGroups.length === 0 && (
-          <p role="status" className="px-2 py-6 text-center text-sm text-muted-foreground">
-            {t('ai.workspace.model.noResults')}
-          </p>
-        )}
-        {pane === 'model' && filteredGroups.map((group) => (
-          <DropdownMenuGroup key={group.id}>
-            <DropdownMenuLabel>{group.label}</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={current ? `${current.id}\u0000${current.model}` : undefined}
-              onValueChange={(value) => {
-                const [routeId, modelId]=value.split('\u0000'); const selected=availableProviders.find(p=>p.id===routeId&&p.model===modelId);
-                if (!selected) return;
-                const {name:_n,preset:_p,...config}=selected;
-                if (onSelect) void onSelect(config);
-                else if (routeSnapshot) void saveRoutes(routeSnapshot.routes,{routeId,modelId,reasoningEffort:selected.reasoningEffort}).then(close);
-                else if (!nativeRouteMode) setDefaultProvider(routeId);
-                if (onSelect || !routeSnapshot) close();
-              }}
-            >
-              {group.providers.map((provider) => (
-                <DropdownMenuRadioItem
-                  key={`${provider.id}:${provider.model}`}
-                  value={`${provider.id}\u0000${provider.model}`}
-                  closeOnClick
-                  className="ai-model-menu-option min-h-[34px] gap-1 py-[5px] pl-2"
+              {hasReasoning && (
+                <DropdownMenuItem
+                  closeOnClick={false}
+                  className="ai-model-menu-cell min-h-9 min-w-56 gap-1 pr-[5px] pl-2 [&>:first-child]:flex-1"
+                  onClick={() => setPane('reasoning')}
                 >
-                  <span className="truncate">
-                    {provider.modelDefinition?.displayName ?? provider.model}
-                  </span>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuGroup>
-        ))}
+                  <span>{t('ai.workspace.model.reasoning')}</span>
+                  <span className="max-w-[250px] truncate" data-slot="ai-model-menu-value">{reasoningLabel}</span>
+                  <ChevronRightIcon />
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuGroup>
+          )}
 
-        {pane === 'reasoning' && current && (
-          <DropdownMenuGroup>
-            <DropdownMenuRadioGroup
-              value={reasoning ?? 'provider-default'}
-              onValueChange={(value) => {
-                const patch = {
-                  reasoningEffort: value === 'provider-default'
-                    ? undefined
-                    : value as AiReasoningOption,
-                };
-                if (onSelect) {
-                  const { name: _name, preset: _preset, ...config } = current;
-                  void onSelect({ ...config, ...patch });
-                } else if (routeSnapshot) void saveRoutes(routeSnapshot.routes,{routeId:current.id,modelId:current.model,reasoningEffort:patch.reasoningEffort}).then(close);
-                else if (!nativeRouteMode) updateProvider(current.id, patch);
-                if (onSelect || !routeSnapshot) close();
-              }}
-            >
-              <DropdownMenuRadioItem
-                value="provider-default"
-                closeOnClick
-                className="ai-model-menu-option min-h-[34px] gap-1 py-[5px] pl-2"
+          {pane === 'model' && filteredGroups.length === 0 && (
+            <p role="status" className="px-2 py-6 text-center text-sm text-muted-foreground">
+              {t('ai.workspace.model.noResults')}
+            </p>
+          )}
+          {pane === 'model' && filteredGroups.map((group) => (
+            <DropdownMenuGroup key={group.id}>
+              <DropdownMenuLabel>{group.label}</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={current ? `${current.id}\u0000${current.model}` : undefined}
+                onValueChange={(value) => {
+                  const [routeId, modelId]=value.split('\u0000'); const selected=availableProviders.find(p=>p.id===routeId&&p.model===modelId);
+                  if (!selected) return;
+                  const {name:_n,preset:_p,...config}=selected;
+                  if (onSelect) void onSelect(config);
+                  else if (routeSnapshot) void saveRoutes(routeSnapshot.routes,{routeId,modelId,reasoningEffort:selected.reasoningEffort}).then(close);
+                  else if (!nativeRouteMode) setDefaultProvider(routeId);
+                  if (onSelect || !routeSnapshot) close();
+                }}
               >
-                <span>{t('ai.reasoningEffort.default')}</span>
-              </DropdownMenuRadioItem>
-              {reasoningOptions.map((option) => (
+                {group.providers.map((provider) => (
+                  <DropdownMenuRadioItem
+                    key={`${provider.id}:${provider.model}`}
+                    value={`${provider.id}\u0000${provider.model}`}
+                    closeOnClick
+                    className="ai-model-menu-option min-h-[34px] gap-1 py-[5px] pl-2"
+                  >
+                    <span className="truncate">
+                      {provider.modelDefinition?.displayName ?? provider.model}
+                    </span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
+          ))}
+
+          {pane === 'reasoning' && current && (
+            <DropdownMenuGroup>
+              <DropdownMenuRadioGroup
+                value={reasoning ?? 'provider-default'}
+                onValueChange={(value) => {
+                  const patch = {
+                    reasoningEffort: value === 'provider-default'
+                      ? undefined
+                      : value as AiReasoningOption,
+                  };
+                  if (onSelect) {
+                    const { name: _name, preset: _preset, ...config } = current;
+                    void onSelect({ ...config, ...patch });
+                  } else if (routeSnapshot) void saveRoutes(routeSnapshot.routes,{routeId:current.id,modelId:current.model,reasoningEffort:patch.reasoningEffort}).then(close);
+                  else if (!nativeRouteMode) updateProvider(current.id, patch);
+                  if (onSelect || !routeSnapshot) close();
+                }}
+              >
                 <DropdownMenuRadioItem
-                  key={option}
-                  value={option}
+                  value="provider-default"
                   closeOnClick
                   className="ai-model-menu-option min-h-[34px] gap-1 py-[5px] pl-2"
                 >
-                  <span>{resolved?.reasoning.find(o => o.id === option)?.displayName ?? option}</span>
+                  <span>{t('ai.reasoningEffort.default')}</span>
                 </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuGroup>
-        )}
-        </div>
+                {reasoningOptions.map((option) => (
+                  <DropdownMenuRadioItem
+                    key={option}
+                    value={option}
+                    closeOnClick
+                    className="ai-model-menu-option min-h-[34px] gap-1 py-[5px] pl-2"
+                  >
+                    <span>{resolved?.reasoning.find(o => o.id === option)?.displayName ?? option}</span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
+          )}
+          </div>
         </div>
       </DropdownMenuContent>
     </DropdownMenu>

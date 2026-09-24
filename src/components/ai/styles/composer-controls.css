@@ -258,10 +258,3 @@
 .ai-model-trigger [data-icon='inline-end'][data-open] {
   transform: rotate(180deg);
 }
-
-/* Composer controls already inherit the shadcn Button focus ring. Suppress the
- * AI shell's second outline so keyboard focus stays visible without a double halo. */
-.ai-panel-shell :is(.ai-permission-trigger, .ai-execution-surface-trigger, .ai-model-trigger, .ai-busy-preference-trigger, .ai-composer-primary):focus-visible {
-  outline: none;
-  outline-offset: 0;
-}
