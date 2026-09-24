@@ -150,7 +150,7 @@ describe('ConnectionList', () => {
     ).not.toBeInTheDocument();
 
     const grid = container.querySelector('.grid');
-    expect(grid).toHaveClass('grid-cols-1', 'gap-3', '@min-[640px]/connections:grid-cols-2', '@min-[900px]/connections:grid-cols-3');
+    expect(grid).toHaveClass('grid-cols-1', 'gap-2', '@min-[640px]/connections:grid-cols-2', '@min-[900px]/connections:grid-cols-3');
     expect(grid?.parentElement).toHaveClass('@container/connections');
     expect(grid).not.toHaveAttribute('style');
     expect(grid).not.toHaveClass('items-start');

@@ -48,7 +48,7 @@ const CARD_ACTION_DEBOUNCE_MS = 500;
 // Keep column changes in the same layout pass as AI-panel resizing.
 export const ConnectionCardGrid = ({ children }: { children: React.ReactNode }) => (
   <div className="@container/connections w-full">
-    <div className="grid grid-cols-1 gap-3 @min-[640px]/connections:grid-cols-2 @min-[900px]/connections:grid-cols-3">
+    <div className="grid grid-cols-1 gap-2 @min-[640px]/connections:grid-cols-2 @min-[900px]/connections:grid-cols-3">
       {children}
     </div>
   </div>

@@ -12,7 +12,7 @@ export const ManagementCard = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      'group flex min-w-0 flex-col gap-2.5 rounded-lg border bg-app-surface p-3 transition-all hover:border-app-primary/30 hover:shadow-[var(--shadow-card)]',
+      'group flex min-w-0 flex-col gap-1.5 rounded-lg border bg-app-surface p-2.5 transition-all hover:border-app-primary/30 hover:shadow-[var(--shadow-card)]',
       selected
         ? 'border-app-primary ring-1 ring-app-primary/20'
         : 'border-app-border',
@@ -30,7 +30,7 @@ export const ManagementCardIcon: React.FC<React.ComponentProps<'span'>> = ({
 }) => (
   <span
     className={cn(
-      'flex size-9 shrink-0 items-center justify-center rounded-lg bg-app-primary/10 text-app-primary [&_svg]:size-4',
+      'flex size-8 shrink-0 items-center justify-center rounded-lg bg-app-primary/10 text-app-primary [&_svg]:size-4',
       className,
     )}
     {...props}

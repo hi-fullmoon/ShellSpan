@@ -51,7 +51,7 @@ try {
     for (const { width, card, columns } of measurements) {
       const expected = width >= 900 ? 3 : width >= 640 ? 2 : 1;
       assert.equal(columns, expected, `Column count at ${width}px`);
-      assert.ok(Math.abs(card - (width - (expected - 1) * 12) / expected) < 1,
+      assert.ok(Math.abs(card - (width - (expected - 1) * 8) / expected) < 1,
         `Card width ${card}px at container width ${width}px`);
     }
     console.log(`Connection grid: ${measurements.length} synchronous and animated layouts passed at viewport ${viewport}px`);

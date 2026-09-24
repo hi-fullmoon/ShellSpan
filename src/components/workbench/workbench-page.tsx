@@ -87,22 +87,22 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
   <header
     data-slot="workbench-page-header"
     className={cn(
-      'flex shrink-0 flex-col gap-3 border-b border-app-border/50 bg-card/80 px-4 py-3',
+      'flex shrink-0 flex-col gap-2 border-b border-app-border/50 bg-card/80 px-2.5 py-1.5',
       className,
     )}
     {...props}
   >
-    <div className="flex flex-col gap-3 @min-[64rem]:flex-row @min-[64rem]:items-center @min-[64rem]:justify-between">
+    <div className="flex flex-col gap-2 @min-[64rem]:flex-row @min-[64rem]:items-center @min-[64rem]:justify-between">
       <div
         data-slot="workbench-page-header-copy"
-        className="flex min-w-0 items-center gap-3 @min-[64rem]:flex-1"
+        className="flex min-w-0 items-center gap-2 @min-[64rem]:flex-1"
       >
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Icon className="size-4" aria-hidden />
         </div>
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h1 className="truncate text-base font-semibold text-foreground">{title}</h1>
+            <h1 className="truncate text-sm font-semibold text-foreground">{title}</h1>
             {titleMeta}
           </div>
           {description && (
@@ -132,7 +132,7 @@ export const WorkbenchPageToolbar: React.FC<WorkbenchPageToolbarProps> = ({
   <section
     data-slot="workbench-page-toolbar"
     className={cn(
-      'flex shrink-0 flex-col gap-2 border-b border-app-border/50 bg-card/40 px-4 py-2.5',
+      'flex shrink-0 flex-col gap-2 border-b border-app-border/50 bg-card/40 px-2.5 py-1',
       className,
     )}
     {...props}
@@ -148,7 +148,7 @@ export const WorkbenchPageContent: React.FC<WorkbenchPageContentProps> = ({
   <main
     data-slot="workbench-page-content"
     className={cn(
-      'mx-auto flex min-h-full w-full flex-col gap-3 p-3 sm:p-4',
+      'mx-auto flex min-h-full w-full flex-col gap-3 p-2.5',
       className,
     )}
     {...props}
