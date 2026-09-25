@@ -527,6 +527,10 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
   };
 
   const requestRefresh = (): void => {
+    if (activeTab !== 'pipeline') {
+      if (draft?.id) void runState.refreshWorkflow(draft.id, true).catch(() => undefined);
+      return;
+    }
     if (dirty) {
       setPendingDiscardAction('refresh');
       return;
@@ -584,7 +588,9 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
       <WorkbenchPageHeader
         icon={CloudUploadIcon}
         title={t('deployment.editor.title')}
-        description={t('deployment.editor.description')}
+        description={draft
+          ? t('deployment.editor.currentWorkflow', { name: draft.name })
+          : t('deployment.editor.description')}
       />
       <WorkbenchPageContent className="min-h-0 flex-1 gap-0 overflow-hidden p-0!">
         {state.capabilities && !admissionsEnabled && (
@@ -626,7 +632,7 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
           >
             <DeploymentWorkflowTabs
               activeTab={activeTab}
-              loading={state.loading}
+              loading={activeTab === 'pipeline' ? state.loading : runState.loading}
               saving={state.saving}
               validating={state.validating}
               preparing={runState.preparing}
@@ -643,7 +649,7 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
               deployTriggerRef={deployTriggerRef}
               workflowsTriggerRef={workflowsTriggerRef}
             />
-            <TabsContent value="pipeline" className="flex min-h-0 min-w-0 overflow-hidden">
+            <TabsContent value="pipeline" keepMounted className="flex min-h-0 min-w-0 overflow-hidden data-[hidden]:hidden">
               <DeploymentWorkspaceShell
                 workflowPane={workflowPane}
                 steps={(
@@ -685,10 +691,11 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
                 )}
               />
             </TabsContent>
-            <TabsContent value="runs" className="flex min-h-0 min-w-0 overflow-hidden">
+            <TabsContent value="runs" keepMounted className="flex min-h-0 min-w-0 overflow-hidden data-[hidden]:hidden">
               {selectedRecord
                 ? (
                   <DeploymentWorkflowRuntimeView
+                    key={selectedRecord.id}
                     kind="runs"
                     workflow={selectedRecord}
                     catalog={catalog}
@@ -702,10 +709,11 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
                 )
                 : <UnsavedDraftNotice />}
             </TabsContent>
-            <TabsContent value="versions" className="flex min-h-0 min-w-0 overflow-hidden">
+            <TabsContent value="versions" keepMounted className="flex min-h-0 min-w-0 overflow-hidden data-[hidden]:hidden">
               {selectedRecord
                 ? (
                   <DeploymentWorkflowRuntimeView
+                    key={selectedRecord.id}
                     kind="versions"
                     workflow={selectedRecord}
                     catalog={catalog}

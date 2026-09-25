@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import { topologyOrder } from '@/lib/deployment/editor';
@@ -99,45 +100,49 @@ export const RuntimeStepList: React.FC<RuntimeStepListProps> = ({
 
   return (
     <ScrollArea className="size-full" data-testid="deployment-runtime-step-list">
-      <div className="flex flex-col gap-1 p-2">
+      <div className="flex flex-col pb-1">
         {rows.map((row, index) => {
           const selected = row.nodeId === selectedNodeId;
           const progress = deploymentNodeProgress(row.node);
           return (
-            <Button
-              key={row.nodeId}
-              variant={selected ? 'secondary' : 'ghost'}
-              className="h-auto min-w-0 items-start justify-start py-2"
-              aria-current={selected ? 'true' : undefined}
-              data-run-node-id={row.nodeId}
-              onClick={() => onSelectNode(row.nodeId)}
-            >
-              <span className="flex min-w-0 flex-1 flex-col gap-1 text-left">
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                    {index + 1}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {row.displayName}
-                  </span>
-                  <Badge variant={deploymentStatusBadgeVariant(row.node.status)} size="sm">
-                    {stepStatusIcon(row.node.status)}
-                    {deploymentStatusLabel(row.node.status, t)}
-                  </Badge>
-                </span>
-                <span className="flex min-w-0 items-center gap-2 pl-7 text-xs text-muted-foreground">
-                  <span>{formatDeploymentDuration(row.node.startedAt, row.node.finishedAt)}</span>
-                  {(row.node.status === 'running' || row.node.status === 'compensating') && (
-                    <span className="min-w-0 flex-1">
-                      <Progress
-                        value={progress.percent}
-                        aria-label={t('deployment.runtime.node.progress', { node: row.displayName })}
-                      />
+            <React.Fragment key={row.nodeId}>
+              {index > 0 && <Separator />}
+              <div className="flex items-center gap-2 px-2 py-1">
+                <Button
+                  variant={selected ? 'secondary' : 'ghost'}
+                  className="h-auto min-w-0 flex-1 items-start justify-start py-1.5"
+                  aria-current={selected ? 'true' : undefined}
+                  data-run-node-id={row.nodeId}
+                  onClick={() => onSelectNode(row.nodeId)}
+                >
+                  <span className="flex min-w-0 flex-1 flex-col gap-1 text-left">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                        {index + 1}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                        {row.displayName}
+                      </span>
+                      <Badge variant={deploymentStatusBadgeVariant(row.node.status)} size="sm">
+                        {stepStatusIcon(row.node.status)}
+                        {deploymentStatusLabel(row.node.status, t)}
+                      </Badge>
                     </span>
-                  )}
-                </span>
-              </span>
-            </Button>
+                    <span className="flex min-w-0 items-center gap-2 pl-7 text-xs text-muted-foreground">
+                      <span>{formatDeploymentDuration(row.node.startedAt, row.node.finishedAt)}</span>
+                      {(row.node.status === 'running' || row.node.status === 'compensating') && (
+                        <span className="min-w-0 flex-1">
+                          <Progress
+                            value={progress.percent}
+                            aria-label={t('deployment.runtime.node.progress', { node: row.displayName })}
+                          />
+                        </span>
+                      )}
+                    </span>
+                  </span>
+                </Button>
+              </div>
+            </React.Fragment>
           );
         })}
       </div>

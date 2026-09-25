@@ -298,6 +298,7 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
   },
   selectRun: async (runId) => {
     if (get().action) return;
+    if (get().selectedRunId === runId && (get().loading || get().detail?.summary.runId === runId)) return;
     const sequence = ++runDetailLoadSequence;
     attemptLoadSequence += 1;
     set({
@@ -596,7 +597,7 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
   inspectArtifact: async (artifactReference) => {
     if (get().action) return;
     const sequence = ++actionSequence;
-    set({ action: 'artifact', error: null });
+    set({ action: 'artifact', artifact: null, error: null });
     try {
       const artifact = await invokeInspectDeploymentArtifact(artifactReference);
       if (sequence !== actionSequence) return;
@@ -607,7 +608,15 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
       throw error;
     }
   },
-  clearArtifact: () => set({ artifact: null }),
+  clearArtifact: () => {
+    if (get().action === 'artifact') {
+      // Ignore the pending inspection if the user closes its loading drawer.
+      actionSequence += 1;
+      set({ artifact: null, action: null });
+    } else {
+      set({ artifact: null });
+    }
+  },
   clearError: () => set({ error: null, errorContext: null }),
   clearNotice: () => set({ notice: null }),
   reset: () => {

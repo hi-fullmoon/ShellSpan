@@ -887,32 +887,38 @@ pub(crate) fn list_deployment_node_attempts(
 }
 
 #[tauri::command]
-pub(crate) fn inspect_deployment_artifact(
+pub(crate) async fn inspect_deployment_artifact(
     runtime: State<'_, DeploymentWorkflowRuntime>,
     database: State<'_, Database>,
     artifact_reference: String,
 ) -> Result<DeploymentArtifactInspection, String> {
     runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
-    let handle = database
-        .get_deployment_artifact_handle(&artifact_reference)?
-        .ok_or_else(|| "DEPLOYMENT_ARTIFACT_NOT_FOUND".to_string())?;
-    let ArtifactBundleProjection {
-        handle,
-        manifest,
-        component_count,
-        total_size,
-    } = runtime.artifacts().inspect(&handle)?;
-    let retention =
-        database.deployment_artifact_retention(&artifact_reference, current_timestamp_ms())?;
-    let references = database.list_deployment_artifact_references(&artifact_reference)?;
-    Ok(DeploymentArtifactInspection {
-        handle,
-        manifest,
-        component_count,
-        total_size,
-        retention,
-        references,
+    let database = database.inner().clone();
+    let artifacts = runtime.artifacts().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let handle = database
+            .get_deployment_artifact_handle(&artifact_reference)?
+            .ok_or_else(|| "DEPLOYMENT_ARTIFACT_NOT_FOUND".to_string())?;
+        let ArtifactBundleProjection {
+            handle,
+            manifest,
+            component_count,
+            total_size,
+        } = artifacts.inspect(&handle)?;
+        let retention =
+            database.deployment_artifact_retention(&artifact_reference, current_timestamp_ms())?;
+        let references = database.list_deployment_artifact_references(&artifact_reference)?;
+        Ok(DeploymentArtifactInspection {
+            handle,
+            manifest,
+            component_count,
+            total_size,
+            retention,
+            references,
+        })
     })
+    .await
+    .map_err(|_| "DEPLOYMENT_ARTIFACT_WORKER_STOPPED".to_string())?
 }
 
 #[tauri::command]
