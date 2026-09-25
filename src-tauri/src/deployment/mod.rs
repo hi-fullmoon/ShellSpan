@@ -4,6 +4,7 @@
 mod applications;
 mod artifact_cas;
 mod audit;
+mod build_verification;
 mod canonicalization;
 pub(crate) mod commands;
 mod compiler;
@@ -12,6 +13,8 @@ mod deployment_files;
 mod docker_archive;
 mod docker_compose_executor;
 mod file_tree_artifact;
+mod host_compose;
+pub(crate) mod import;
 mod local_artifact_executor;
 mod node_executor;
 mod node_registry;
@@ -34,3 +37,6 @@ mod application_acceptance;
 
 #[cfg(test)]
 mod release_acceptance;
+
+#[cfg(test)]
+mod host_compose_tests;
