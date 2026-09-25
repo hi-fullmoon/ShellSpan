@@ -3,9 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Drawer,
-  DrawerContent,
   DrawerFooter,
-  DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -13,6 +11,7 @@ import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import { deploymentRuntimeKey, formatDeploymentBytes } from './runtime-utils';
+import { DeploymentDrawerContent, DeploymentDrawerHeader } from './deployment-drawer';
 
 export const ArtifactDrawer: React.FC = () => {
   const { t } = useI18n();
@@ -36,18 +35,16 @@ export const ArtifactDrawer: React.FC = () => {
       onOpenChange={(open) => { if (!open) clearArtifact(); }}
       onOpenChangeComplete={(open) => { if (!open) returnFocusRef.current?.focus(); }}
     >
-      <DrawerContent
-        className="flex min-h-0 flex-col gap-0 overflow-hidden p-0"
-        closeButtonClassName="top-2 right-4 size-8 [&_svg]:size-3.5"
+      <DeploymentDrawerContent
         data-testid="deployment-artifact-drawer"
       >
-        <DrawerHeader className="shrink-0 border-b p-4 pr-12">
+        <DeploymentDrawerHeader>
           <DrawerTitle>{t('deployment.runtime.artifact.title')}</DrawerTitle>
-        </DrawerHeader>
+        </DeploymentDrawerHeader>
         <ScrollArea className="min-h-0 flex-1">
           {artifact && (
-            <div className="flex flex-col gap-4 px-4 pb-4">
-              <section className="flex flex-col gap-2 pt-4">
+            <div className="flex flex-col gap-3 px-3 pb-3">
+              <section className="flex flex-col gap-2 pt-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-medium">{artifact.manifest.artifactType}</h3>
                   <Badge variant="secondary">
@@ -141,10 +138,10 @@ export const ArtifactDrawer: React.FC = () => {
             </div>
           )}
         </ScrollArea>
-        <DrawerFooter className="shrink-0 border-t p-4">
+        <DrawerFooter className="shrink-0 border-t p-3">
           <Button variant="outline" onClick={clearArtifact}>{t('common.close')}</Button>
         </DrawerFooter>
-      </DrawerContent>
+      </DeploymentDrawerContent>
     </Drawer>
   );
 };
