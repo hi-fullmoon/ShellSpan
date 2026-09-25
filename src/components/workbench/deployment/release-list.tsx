@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Table,
   TableBody,
@@ -38,7 +39,6 @@ import {
   formatDeploymentDate,
   shortDeploymentDigest,
 } from './runtime-utils';
-import { DeploymentPaneHeader } from './deployment-pane-header';
 
 export interface ReleaseListProps {
   workflow: DeploymentWorkflowRecord;
@@ -71,16 +71,13 @@ export const ReleaseList: React.FC<ReleaseListProps> = ({
     <section
       // No border-r: the AI panel's resize handle owns the divider at this edge,
       // and a workspace border would stack into a 2px seam beside it.
-      className="flex min-h-0 min-w-0 flex-1 flex-col border-b"
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-b bg-background"
       data-testid="deployment-versions-view"
+      aria-label={t('deployment.editor.tab.versions')}
     >
-      <DeploymentPaneHeader
-        title={t('deployment.editor.tab.versions')}
-        description={t('deployment.runtime.version.description')}
-      />
       {state.releases.length > 0 ? (
         <ScrollArea className="min-h-0 flex-1">
-          <div className="p-3">
+          <div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -96,7 +93,7 @@ export const ReleaseList: React.FC<ReleaseListProps> = ({
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <span className="font-medium">{release.releaseId}</span>
-                        <Badge variant={release.position === 'current' ? 'default' : 'secondary'}>
+                        <Badge size="sm" variant={release.position === 'current' ? 'default' : 'secondary'}>
                           {release.position === 'current'
                             ? t('deployment.runtime.version.current')
                             : t('deployment.runtime.version.previous')}
@@ -112,15 +109,22 @@ export const ReleaseList: React.FC<ReleaseListProps> = ({
                     <TableCell>{formatDeploymentDate(release.activatedAt)}</TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">
-                        <Button
-                          variant="outline"
-                          size="icon-sm"
-                          disabled={state.loading || state.preparing || state.action !== null}
-                          onClick={() => void state.inspectArtifact(release.artifactReference).catch(() => undefined)}
-                          aria-label={t('deployment.runtime.artifact.open')}
-                        >
-                          <ArchiveIcon data-icon="inline-start" />
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={(
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                disabled={state.loading || state.preparing || state.action !== null}
+                              />
+                            )}
+                            onClick={() => void state.inspectArtifact(release.artifactReference).catch(() => undefined)}
+                            aria-label={t('deployment.runtime.artifact.open')}
+                          >
+                            <ArchiveIcon data-icon="inline-start" />
+                          </TooltipTrigger>
+                          <TooltipContent>{t('deployment.runtime.artifact.open')}</TooltipContent>
+                        </Tooltip>
                         {release.rollbackable && (
                           <Button
                             size="icon-sm"

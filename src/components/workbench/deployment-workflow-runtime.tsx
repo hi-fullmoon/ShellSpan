@@ -236,7 +236,7 @@ const RunListPane: React.FC<{ workflow: DeploymentWorkflowRecord }> = ({ workflo
                   {formatDeploymentDate(run.createdAt)}
                 </span>
               </span>
-              <Badge variant={deploymentStatusBadgeVariant(run.status)}>
+              <Badge size="sm" variant={deploymentStatusBadgeVariant(run.status)}>
                 {deploymentStatusLabel(run.status, t)}
               </Badge>
             </Button>
@@ -307,7 +307,7 @@ const RunsView: React.FC<{
     }
   }, [approvalRequest, state.detail, onApprovalHandled, onOpenApproval, deployTriggerRef]);
 
-  if (state.loading && !detail) {
+  if (state.loading && state.runs.length === 0) {
     return <PanelLoadingState className="flex-1" label={t('deployment.runtime.loading')} />;
   }
   if (state.runs.length === 0) {
@@ -326,7 +326,7 @@ const RunsView: React.FC<{
     );
   }
 
-  const summary = detail?.summary;
+  const summary = detail?.summary ?? state.runs.find((run) => run.runId === state.selectedRunId);
   const title = summary
     ? `${summary.operationKind === 'rollback'
       ? t('deployment.runtime.operation.rollback')
@@ -338,13 +338,13 @@ const RunsView: React.FC<{
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="deployment-runs-view">
-      {detail && (
+      {(
         <RuntimeWorkspace
           title={title}
           description={description}
           actions={(
             <div className="flex shrink-0 items-center gap-1">
-              {['awaiting_approval', 'approved'].includes(detail.summary.status) && (
+              {detail && ['awaiting_approval', 'approved'].includes(detail.summary.status) && (
                 <Button
                   size="sm"
                   onClick={(event) => onOpenApproval(event.currentTarget)}
@@ -362,7 +362,7 @@ const RunsView: React.FC<{
                   </span>
                 </Button>
               )}
-              {['approved', 'in_progress', 'verifying', 'reconciling'].includes(detail.summary.status) && (
+              {detail && ['approved', 'in_progress', 'verifying', 'reconciling'].includes(detail.summary.status) && (
                 <Button
                   size="sm"
                   variant="destructiveOutline"
@@ -377,9 +377,13 @@ const RunsView: React.FC<{
             </div>
           )}
           runPane={<RunListPane workflow={workflow} />}
-          flow={(
+          flow={!detail ? (
+            state.loading
+              ? <PanelLoadingState label={t('deployment.runtime.loading')} />
+              : null
+          ) : (
             <div className="flex size-full min-h-0 flex-col">
-              <div className="flex shrink-0 flex-col gap-2 p-2">
+              <div className="flex shrink-0 flex-col gap-2 p-2 empty:hidden" data-testid="deployment-runtime-feedback">
                 {state.preparing && <PreparationProgress />}
                 {state.error && state.errorContext === 'prepare' && (
                   <Alert variant="destructive" data-testid="deployment-prepare-error">

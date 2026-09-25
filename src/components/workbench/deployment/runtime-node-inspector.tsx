@@ -14,6 +14,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type {
   DeploymentNodeAttemptRecord,
@@ -83,19 +85,22 @@ export const RuntimeNodeInspector: React.FC<RuntimeNodeInspectorProps> = ({
 }) => {
   const { t } = useI18n();
   const state = useDeploymentWorkflowRunStore();
-  const [selectedAttempt, setSelectedAttempt] = React.useState<number | null>(null);
+  const [attemptSelection, setAttemptSelection] = React.useState<{
+    runId: string | null;
+    nodeId: string | null;
+    attempt: number;
+  } | null>(null);
   const selectedNode = state.nodes.find((node) => node.nodeId === state.selectedNodeId) ?? null;
   const definitionNode = workflow.definition.nodes.find((node) => node.id === selectedNode?.nodeId);
   const selectedEvents = state.events.filter((event) => event.nodeId === state.selectedNodeId).slice(0, 6);
   const selectedOutputs = state.detail?.outputs.filter((output) => output.nodeId === state.selectedNodeId) ?? [];
   const selectedArtifact = selectedOutputs.find((output) => output.artifactReference)?.artifactReference;
-  const selectedAttemptRecord = state.attempts.find(
-    (attempt) => attempt.attempt === selectedAttempt,
-  ) ?? null;
-
-  React.useEffect(() => {
-    setSelectedAttempt(state.attempts[0]?.attempt ?? null);
-  }, [state.attempts]);
+  const selectedAttemptRecord = (attemptSelection?.runId === state.selectedRunId
+    && attemptSelection?.nodeId === state.selectedNodeId
+    ? state.attempts.find((attempt) => attempt.attempt === attemptSelection?.attempt)
+    : undefined) ?? state.attempts[0] ?? null;
+  const pendingAttempt = state.loadingAttempts && state.attempts.length === 0
+    && (selectedNode?.lastAttempt ?? 0) > 0;
 
   return (
     <section
@@ -107,16 +112,17 @@ export const RuntimeNodeInspector: React.FC<RuntimeNodeInspectorProps> = ({
         title={t('deployment.runtime.node.details')}
         description={definitionNode?.displayName ?? t('deployment.runtime.node.none')}
         actions={(
-          <Button
-            size="icon-sm"
-            variant="outline"
-            onClick={(event) => onOpenEvidence(event.currentTarget)}
-            disabled={!selectedNode}
-            aria-label={t('deployment.runtime.evidence.action')}
-            data-testid="deployment-open-evidence"
-          >
-            <EyeIcon data-icon="inline-start" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button size="icon-sm" variant="ghost" disabled={!selectedNode} />}
+              onClick={(event) => onOpenEvidence(event.currentTarget)}
+              aria-label={t('deployment.runtime.evidence.action')}
+              data-testid="deployment-open-evidence"
+            >
+              <EyeIcon data-icon="inline-start" />
+            </TooltipTrigger>
+            <TooltipContent>{t('deployment.runtime.evidence.action')}</TooltipContent>
+          </Tooltip>
         )}
       />
       {!selectedNode ? (
@@ -136,29 +142,34 @@ export const RuntimeNodeInspector: React.FC<RuntimeNodeInspectorProps> = ({
                 </h3>
                 <Badge variant="outline" size="sm">{selectedNode.lastAttempt}</Badge>
               </div>
-              <AttemptSelector
+              {pendingAttempt ? (
+                <Skeleton className="h-8 w-full" aria-label={t('deployment.runtime.loading')} />
+              ) : <AttemptSelector
                 attempts={state.attempts}
-                selectedAttempt={selectedAttempt}
-                onChange={setSelectedAttempt}
-              />
-              {selectedAttemptRecord && (
+                selectedAttempt={selectedAttemptRecord?.attempt ?? null}
+                onChange={(attempt) => setAttemptSelection({
+                  runId: state.selectedRunId, nodeId: state.selectedNodeId, attempt,
+                })}
+              />}
+              {(selectedAttemptRecord || pendingAttempt) && (
                 <dl
                   className="grid grid-cols-2 gap-2 text-xs"
                   data-testid="deployment-selected-attempt"
-                  data-attempt={selectedAttemptRecord.attempt}
+                  data-attempt={selectedAttemptRecord?.attempt}
+                  aria-busy={pendingAttempt}
                 >
                   <div>
                     <dt className="text-muted-foreground">{t('deployment.runtime.attempt.executor')}</dt>
-                    <dd className="truncate">{selectedAttemptRecord.executorVersion}</dd>
+                    <dd className="truncate">{selectedAttemptRecord?.executorVersion ?? <Skeleton className="h-4 w-full" />}</dd>
                   </div>
                   <div>
                     <dt className="text-muted-foreground">{t('deployment.runtime.run.duration')}</dt>
-                    <dd>{formatDeploymentDuration(
+                    <dd>{selectedAttemptRecord ? formatDeploymentDuration(
                       selectedAttemptRecord.startedAt,
                       selectedAttemptRecord.finishedAt,
-                    )}</dd>
+                    ) : <Skeleton className="h-4 w-full" />}</dd>
                   </div>
-                  {selectedAttemptRecord.failureCategory && (
+                  {selectedAttemptRecord?.failureCategory && (
                     <div className="col-span-2">
                       <dt className="text-muted-foreground">{t('deployment.runtime.attempt.failure')}</dt>
                       <dd className="break-words">{selectedAttemptRecord.failureCategory}</dd>

@@ -10,10 +10,11 @@ import native from '../../docs/design/deployment-center-product-phase-5-native-r
 import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
-import type { DeploymentRunDetail, DeploymentWorkflowRecord, DeploymentReleaseRecord } from '@/lib/deployment/types';
+import type { DeploymentRunDetail, DeploymentRunNodeRecord, DeploymentWorkflowRecord, DeploymentReleaseRecord } from '@/lib/deployment/types';
 import type { DeploymentReadinessReport } from '@/lib/deployment/applications';
 import { DeploymentWorkflowRuntimeView, RunStatusAlert, PreparationProgress } from '@/components/workbench/deployment-workflow-runtime';
 import { ApprovalDialog } from '@/components/workbench/deployment/approval-dialog';
+import { ArtifactDrawer } from '@/components/workbench/deployment/artifact-drawer';
 import { ApplicationOnboarding, ReadinessItems } from '@/components/workbench/deployment/application-center';
 import { WorkflowSettingsDialog } from '@/components/workbench/deployment/workflow-settings-dialog';
 import { WorkflowListPane } from '@/components/workbench/deployment/workflow-list-pane';
@@ -25,17 +26,19 @@ const locale = query.get('locale') === 'en-US' ? 'en-US' : 'zh-CN';
 const mode = query.get('mode') ?? 'runtime';
 const width = Number(query.get('width') ?? 1418);
 const workflow = (mode === 'versions' ? native.workflow : release.workflow) as unknown as DeploymentWorkflowRecord;
-const detail = (mode === 'rollback' ? lifecycle.rollback : release.detail) as unknown as DeploymentRunDetail;
+const runtime = mode === 'runtime' || mode === 'runtime-rollback' || mode === 'runtime-loading';
+const detail = (mode === 'rollback' || mode === 'runtime-rollback' ? lifecycle.rollback : release.detail) as unknown as DeploymentRunDetail;
 useAppStore.setState({ locale });
 await initI18n(locale);
 document.documentElement.lang = locale;
 document.documentElement.dataset.theme = 'light';
 useDeploymentWorkflowRunStore.setState({
   workflowId: workflow.id,
-  detail: ['runtime', 'approval', 'rollback'].includes(mode) ? detail : null,
-  runs: mode === 'runtime' ? [detail.summary] : [],
-  selectedRunId: mode === 'runtime' ? detail.summary.runId : null,
-  loading: mode === 'loading',
+  detail: mode !== 'runtime-loading' && (runtime || ['approval', 'rollback'].includes(mode)) ? detail : null,
+  runs: runtime ? [detail.summary] : [],
+  selectedRunId: runtime ? detail.summary.runId : null,
+  nodes: mode === 'runtime-rollback' ? lifecycle.rollbackNodes as DeploymentRunNodeRecord[] : [],
+  loading: mode === 'loading' || mode === 'runtime-loading',
   releases: mode === 'versions' ? native.releases as DeploymentReleaseRecord[] : [],
 });
 
@@ -46,7 +49,7 @@ function View(): React.JSX.Element {
   const [search, setSearch] = React.useState('');
   return <div style={{ width, maxWidth: '100vw', height: '100dvh' }} data-testid="acceptance-container">
     <WorkbenchPage>
-      {['runtime', 'empty', 'loading', 'versions', 'versions-empty'].includes(mode) && <DeploymentWorkflowRuntimeView
+      {['runtime', 'runtime-rollback', 'runtime-loading', 'empty', 'loading', 'versions', 'versions-empty'].includes(mode) && <DeploymentWorkflowRuntimeView
         workflow={workflow} kind={mode.startsWith('versions') ? 'versions' : 'runs'} admissionsEnabled={false} />}
       {mode === 'list' && <WorkflowListPane workflows={[workflow]} selectedWorkflowId={workflow.id}
         search={search} onSearchChange={setSearch} onSelect={() => undefined} onCreate={() => undefined} canCreate={false} />}
@@ -54,6 +57,12 @@ function View(): React.JSX.Element {
         detail={lifecycle.failed as unknown as DeploymentRunDetail} onReconcile={() => undefined}
         hasEvidence onOpenEvidence={() => undefined} />}
       {/* State-only presentation contracts; these do not invent a run or remote evidence. */}
+      {mode === 'artifact-loading' && <>
+        <Button onClick={() => useDeploymentWorkflowRunStore.setState({ action: 'artifact' })}>
+          {t('deployment.runtime.artifact.open')}
+        </Button>
+        <ArtifactDrawer />
+      </>}
       {mode === 'unknown' && <RunStatusAlert status="state_unknown" onReconcile={() => undefined} />}
       {mode === 'preparing' && <PreparationProgress />}
       {mode === 'readiness' && <div className="overflow-auto p-3"><ReadinessItems report={onboarding.report as DeploymentReadinessReport} /></div>}

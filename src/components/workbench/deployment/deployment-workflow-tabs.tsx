@@ -108,28 +108,32 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
           {loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
           <ActionLabel>{t('common.refresh')}</ActionLabel>
         </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onCreate}
-          disabled={!canCreate}
-          className={squareWhenIconOnly}
-          aria-label={t('deployment.editor.newWorkflow')}
-        >
-          <PlusIcon data-icon="inline-start" />
-          <ActionLabel>{t('deployment.editor.newWorkflow')}</ActionLabel>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onSave}
-          disabled={!canSave || saving}
-          className={squareWhenIconOnly}
-          aria-label={t('common.save')}
-        >
-          {saving ? <Spinner data-icon="inline-start" /> : <SaveIcon data-icon="inline-start" />}
-          <ActionLabel>{t('common.save')}</ActionLabel>
-        </Button>
+        {activeTab === 'pipeline' && (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onCreate}
+              disabled={!canCreate}
+              className={squareWhenIconOnly}
+              aria-label={t('deployment.editor.newWorkflow')}
+            >
+              <PlusIcon data-icon="inline-start" />
+              <ActionLabel>{t('deployment.editor.newWorkflow')}</ActionLabel>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onSave}
+              disabled={!canSave || saving}
+              className={squareWhenIconOnly}
+              aria-label={t('common.save')}
+            >
+              {saving ? <Spinner data-icon="inline-start" /> : <SaveIcon data-icon="inline-start" />}
+              <ActionLabel>{t('common.save')}</ActionLabel>
+            </Button>
+          </>
+        )}
         <Button
           ref={deployTriggerRef}
           size="sm"

@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/drawer';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import { deploymentRuntimeKey, formatDeploymentBytes } from './runtime-utils';
@@ -16,22 +17,24 @@ import { DeploymentDrawerContent, DeploymentDrawerHeader } from './deployment-dr
 export const ArtifactDrawer: React.FC = () => {
   const { t } = useI18n();
   const artifact = useDeploymentWorkflowRunStore((state) => state.artifact);
+  const loading = useDeploymentWorkflowRunStore((state) => state.action === 'artifact');
+  const open = loading || artifact !== null;
   const clearArtifact = useDeploymentWorkflowRunStore((state) => state.clearArtifact);
   const returnFocusRef = React.useRef<HTMLElement | null>(null);
   const wasOpenRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (artifact && !wasOpenRef.current) {
+    if (open && !wasOpenRef.current) {
       returnFocusRef.current = document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
     }
-    wasOpenRef.current = artifact !== null;
-  }, [artifact]);
+    wasOpenRef.current = open;
+  }, [open]);
 
   return (
     <Drawer
-      open={artifact !== null}
+      open={open}
       onOpenChange={(open) => { if (!open) clearArtifact(); }}
       onOpenChangeComplete={(open) => { if (!open) returnFocusRef.current?.focus(); }}
     >
@@ -42,6 +45,12 @@ export const ArtifactDrawer: React.FC = () => {
           <DrawerTitle>{t('deployment.runtime.artifact.title')}</DrawerTitle>
         </DeploymentDrawerHeader>
         <ScrollArea className="min-h-0 flex-1">
+          {loading && (
+            <div role="status" className="flex items-center gap-1 p-3 text-sm text-muted-foreground">
+              <Spinner aria-hidden="true" />
+              {t('common.loading')}
+            </div>
+          )}
           {artifact && (
             <div className="flex flex-col gap-3 px-3 pb-3">
               <section className="flex flex-col gap-2 pt-3">
@@ -138,7 +147,7 @@ export const ArtifactDrawer: React.FC = () => {
             </div>
           )}
         </ScrollArea>
-        <DrawerFooter className="shrink-0 border-t p-3">
+        <DrawerFooter className="shrink-0 p-3">
           <Button variant="outline" onClick={clearArtifact}>{t('common.close')}</Button>
         </DrawerFooter>
       </DeploymentDrawerContent>

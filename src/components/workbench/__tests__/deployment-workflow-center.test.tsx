@@ -463,7 +463,7 @@ describe('DeploymentWorkflowCenter', () => {
     ).toHaveAttribute('aria-selected', 'true'));
     fireEvent.click(screen.getByRole('tab', { name: 'deployment.editor.tab.runs' }));
 
-    const notice = screen.getByTestId('deployment-unsaved-notice');
+    const notice = within(screen.getByRole('tabpanel')).getByTestId('deployment-unsaved-notice');
     expect(notice).toHaveClass('flex-1', 'items-center', 'justify-center', 'border-b');
     expect(notice).not.toHaveClass('border-r');
     expect(within(notice).getByText('deployment.editor.placeholder.unsavedTitle')).toBeInTheDocument();
@@ -524,7 +524,8 @@ describe('DeploymentWorkflowCenter', () => {
     fireEvent.click(screen.getByTestId('deployment-deploy-action'));
 
     await waitFor(() => expect(prepare).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole('tab', { name: 'deployment.editor.tab.runs' })).toHaveAttribute('aria-selected', 'true');
+    // The approval dialog makes the underlying tabs inaccessible while open.
+    expect(screen.getByRole('tab', { name: 'deployment.editor.tab.runs', hidden: true })).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByRole('heading', { name: 'deployment.runtime.approval.what' })).toBeInTheDocument();
   });
 
