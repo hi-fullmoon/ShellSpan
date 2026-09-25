@@ -121,7 +121,7 @@ export const WorkflowStepList: React.FC<WorkflowStepListProps> = ({
                   <Button
                     size="icon-sm"
                     variant="outline"
-                    className="shrink-0"
+                    className="shrink-0 @min-[1152px]:hidden"
                     onClick={(event) => onConfigure(workflowNode.id, event.currentTarget)}
                     aria-label={t('deployment.editor.configure')}
                   >

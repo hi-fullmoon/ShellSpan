@@ -138,7 +138,7 @@ export const EvidenceDialog: React.FC<EvidenceDialogProps> = ({
             )}
           </div>
         </ScrollArea>
-        <DialogFooter className="shrink-0 border-t p-4">
+        <DialogFooter className="shrink-0 p-4">
           <Button
             variant="outline"
             onClick={() => void exportAudit()}

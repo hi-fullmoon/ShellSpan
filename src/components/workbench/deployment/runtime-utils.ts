@@ -5,6 +5,7 @@ import type {
   DeploymentRunStatus,
 } from '@/lib/deployment/types';
 import type { LocaleKey } from '@/locales';
+import { useAppStore } from '@/stores/appStore';
 
 export type DeploymentTranslate = (
   key: LocaleKey,
@@ -17,7 +18,7 @@ export function deploymentRuntimeKey(value: string): LocaleKey {
 
 export function formatDeploymentDate(value: number | null | undefined): string {
   return value
-    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(value)
+    ? new Intl.DateTimeFormat(useAppStore.getState().locale, { dateStyle: 'medium', timeStyle: 'short' }).format(value)
     : '—';
 }
 

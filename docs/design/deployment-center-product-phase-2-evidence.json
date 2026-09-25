@@ -1,0 +1,612 @@
+{
+  "customNodesPreserved": true,
+  "draftSaved": true,
+  "entry": {
+    "application": {
+      "archived": false,
+      "id": "83f9e3aa-f1de-488c-b435-22017bb025b0",
+      "name": "for-you",
+      "revision": 2,
+      "sourceBindingId": "b8b9c62d-5651-4c4b-8c08-b3b44a6a2eb7"
+    },
+    "environment": {
+      "applicationId": "83f9e3aa-f1de-488c-b435-22017bb025b0",
+      "config": {
+        "accessUrl": "",
+        "basePath": "/for-you/",
+        "bindAddress": "127.0.0.1",
+        "buildContext": ".",
+        "composeFile": "compose.yaml",
+        "connectionProfileId": "phase2-a112513b-4b35-420a-81ca-22d68a93fb60",
+        "containerPort": 3000,
+        "dataDirectories": [],
+        "dockerfile": "Dockerfile",
+        "existingService": false,
+        "hostPort": 3000,
+        "managementMethod": "",
+        "nonSensitiveFiles": [],
+        "platform": "linux/arm64",
+        "projectName": "for-you",
+        "recoveryInstructions": "",
+        "remoteRoot": "/srv/shellspan-deployment/missing-bdfde267-43c7-4346-82ad-acfc613f7d49",
+        "service": "web",
+        "templateKind": "dockerCompose"
+      },
+      "id": "c57990db-ae38-4eea-bdbb-d001967248d8",
+      "name": "Production",
+      "revision": 2,
+      "workflowId": "workflow-0725b4e5-b355-4523-9775-1b49fca802e8"
+    },
+    "source": {
+      "excludedPaths": [],
+      "id": "b8b9c62d-5651-4c4b-8c08-b3b44a6a2eb7",
+      "includedUntracked": [
+        "Dockerfile",
+        "compose.yaml",
+        ".dockerignore"
+      ],
+      "localPath": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpzDi24P",
+      "repositoryIdentity": "sha256:950120fd9e7cae9250dc4229e5395d8e5a45397e854b3bfbeedd307cc3d05269",
+      "revision": 2
+    }
+  },
+  "existingFilesPreserved": true,
+  "inspection": {
+    "composeServices": [],
+    "detectedFiles": [
+      "package.json",
+      "pnpm-lock.yaml",
+      "next.config.ts"
+    ],
+    "source": {
+      "binding": {
+        "excludedPaths": [],
+        "id": "4071c199-2211-4422-aa10-cc7183273998",
+        "includedUntracked": [],
+        "localPath": "/Users/zhengbiwen/Developer/my/for-you",
+        "repositoryIdentity": "sha256:629732a421bea2dc58044b869ed75b819db752315fe83447e7f9e05d2449bafa",
+        "revision": 1
+      },
+      "branch": "feat/dream",
+      "changedFiles": [
+        "README.md",
+        "src/app/layout.tsx",
+        "src/features/experience/CatExperience.tsx",
+        "src/features/scene/Title.tsx",
+        "src/styles/globals.css"
+      ],
+      "headRevision": "f9590431650591fa92b0b15c96ed0f32bff30d06",
+      "untrackedFiles": [
+        "public/og.png",
+        "src/styles/signal.css"
+      ]
+    },
+    "suggestedTemplate": "dockerCompose"
+  },
+  "missingRemoteDirectoryNotCreated": true,
+  "multipleEnvironmentsSynchronized": true,
+  "originalSourceDigest": "sha256:427db66ce4ce4b77302110cd5392878a7d85037a5d1e7f8d98222a22ee07ca44",
+  "previewDidNotWrite": true,
+  "productionServerTouched": false,
+  "profile": {
+    "authMethod": "password",
+    "createdAt": 1,
+    "host": "127.0.0.1",
+    "id": "phase2-a112513b-4b35-420a-81ca-22d68a93fb60",
+    "jumpHostConfig": null,
+    "keychainKeyId": null,
+    "name": "Isolated Linux",
+    "organizationJson": null,
+    "port": 22224,
+    "updatedAt": 1,
+    "username": "shellspan"
+  },
+  "project": "/Users/zhengbiwen/Developer/my/for-you",
+  "projectScriptsExecuted": false,
+  "report": {
+    "checkedAt": 1790306823313,
+    "configDigest": "sha256:0bf5617ac8a70fe3defcafebecdf72e84848e95489bfeb76cebeff71e959a55e",
+    "items": [
+      {
+        "checkedAt": 1790306823793,
+        "evidence": "",
+        "key": "docker",
+        "location": "Docker",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306823875,
+        "evidence": "",
+        "key": "buildx",
+        "location": "Docker",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306824115,
+        "evidence": "",
+        "key": "source",
+        "location": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpzDi24P",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306824116,
+        "evidence": "",
+        "key": "lockfile",
+        "location": "package.json",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306824116,
+        "evidence": "",
+        "key": "dockerfile",
+        "location": "Dockerfile",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306824260,
+        "evidence": "",
+        "key": "compose",
+        "location": "compose.yaml",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306824265,
+        "evidence": "",
+        "key": "configuration",
+        "location": "Production",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306824265,
+        "evidence": "",
+        "key": "takeover",
+        "location": "",
+        "status": "passed"
+      },
+      {
+        "checkedAt": null,
+        "evidence": "",
+        "key": "proxy",
+        "location": "/srv/shellspan-deployment/missing-bdfde267-43c7-4346-82ad-acfc613f7d49",
+        "status": "unchecked"
+      },
+      {
+        "checkedAt": 1790306824537,
+        "evidence": "",
+        "key": "ssh",
+        "location": "phase2-a112513b-4b35-420a-81ca-22d68a93fb60",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306824537,
+        "evidence": "",
+        "key": "sftp",
+        "location": "phase2-a112513b-4b35-420a-81ca-22d68a93fb60",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306824537,
+        "evidence": "",
+        "key": "mounts",
+        "location": "/srv/shellspan-deployment/missing-bdfde267-43c7-4346-82ad-acfc613f7d49",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306824630,
+        "evidence": "",
+        "key": "remoteDocker",
+        "location": "/srv/shellspan-deployment/missing-bdfde267-43c7-4346-82ad-acfc613f7d49",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306824745,
+        "evidence": "",
+        "key": "remoteCompose",
+        "location": "/srv/shellspan-deployment/missing-bdfde267-43c7-4346-82ad-acfc613f7d49",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306824834,
+        "evidence": "",
+        "key": "architecture",
+        "location": "/srv/shellspan-deployment/missing-bdfde267-43c7-4346-82ad-acfc613f7d49",
+        "status": "passed"
+      },
+      {
+        "checkedAt": 1790306824926,
+        "evidence": "DEPLOYMENT_READINESS_DIRECTORY",
+        "key": "directory",
+        "location": "/srv/shellspan-deployment/missing-bdfde267-43c7-4346-82ad-acfc613f7d49",
+        "status": "blocked"
+      },
+      {
+        "checkedAt": 1790306825019,
+        "evidence": "DEPLOYMENT_READINESS_DISK",
+        "key": "disk",
+        "location": "/srv/shellspan-deployment/missing-bdfde267-43c7-4346-82ad-acfc613f7d49",
+        "status": "blocked"
+      },
+      {
+        "checkedAt": 1790306825114,
+        "evidence": "DEPLOYMENT_READINESS_PORT",
+        "key": "port",
+        "location": "/srv/shellspan-deployment/missing-bdfde267-43c7-4346-82ad-acfc613f7d49",
+        "status": "blocked"
+      },
+      {
+        "checkedAt": 1790306825208,
+        "evidence": "DEPLOYMENT_READINESS_OWNERSHIP",
+        "key": "ownership",
+        "location": "/srv/shellspan-deployment/missing-bdfde267-43c7-4346-82ad-acfc613f7d49",
+        "status": "blocked"
+      }
+    ]
+  },
+  "revisionConflictRejected": true,
+  "savedConfigurationReopened": true,
+  "unmappableGraphTransactionRolledBack": true,
+  "workflow": {
+    "archived": false,
+    "createdAt": 1790306823307,
+    "definition": {
+      "applicationBinding": {
+        "applicationId": "83f9e3aa-f1de-488c-b435-22017bb025b0",
+        "applicationRevision": 2,
+        "environmentId": "c57990db-ae38-4eea-bdbb-d001967248d8",
+        "environmentRevision": 2,
+        "sourceBindingId": "b8b9c62d-5651-4c4b-8c08-b3b44a6a2eb7",
+        "sourceRevision": 2
+      },
+      "nodes": [
+        {
+          "config": {
+            "binding": {
+              "excludedPaths": [],
+              "id": "b8b9c62d-5651-4c4b-8c08-b3b44a6a2eb7",
+              "includedUntracked": [
+                "Dockerfile",
+                "compose.yaml",
+                ".dockerignore"
+              ],
+              "localPath": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpzDi24P",
+              "repositoryIdentity": "sha256:950120fd9e7cae9250dc4229e5395d8e5a45397e854b3bfbeedd307cc3d05269",
+              "revision": 2
+            },
+            "sourceRef": "workspace"
+          },
+          "displayName": "Freeze source",
+          "id": "source",
+          "inputs": {},
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded",
+          "timeoutSeconds": 60,
+          "type": "source.snapshot",
+          "typeVersion": 1
+        },
+        {
+          "config": {
+            "context": ".",
+            "dockerfile": "Dockerfile",
+            "imageRepository": "example/web",
+            "platform": "linux/arm64"
+          },
+          "displayName": "Build container image",
+          "id": "image",
+          "inputs": {
+            "source": {
+              "fromNodeId": "source",
+              "fromPort": "source"
+            }
+          },
+          "retry": {
+            "initialBackoffSeconds": 2,
+            "maxAttempts": 2,
+            "maxBackoffSeconds": 10
+          },
+          "runWhen": "allSucceeded",
+          "timeoutSeconds": 3600,
+          "type": "build.docker-buildx",
+          "typeVersion": 2
+        },
+        {
+          "config": {
+            "composeFiles": [
+              "compose.yaml"
+            ],
+            "nonSensitiveFiles": [],
+            "projectName": "for-you",
+            "registeredMounts": [],
+            "services": [
+              "web"
+            ]
+          },
+          "displayName": "Bind Compose configuration",
+          "id": "bundle",
+          "inputs": {
+            "imageBundle": {
+              "fromNodeId": "image",
+              "fromPort": "bundle"
+            },
+            "source": {
+              "fromNodeId": "source",
+              "fromPort": "source"
+            }
+          },
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded",
+          "timeoutSeconds": 60,
+          "type": "artifact.bundle-compose",
+          "typeVersion": 1
+        },
+        {
+          "config": {
+            "requiredCapabilities": [
+              "sftp",
+              "docker",
+              "compose",
+              "http"
+            ],
+            "targetId": "production"
+          },
+          "displayName": "Check production target",
+          "id": "preflight",
+          "inputs": {
+            "bundle": {
+              "fromNodeId": "bundle",
+              "fromPort": "bundle"
+            }
+          },
+          "retry": {
+            "initialBackoffSeconds": 2,
+            "maxAttempts": 2,
+            "maxBackoffSeconds": 10
+          },
+          "runWhen": "allSucceeded",
+          "timeoutSeconds": 120,
+          "type": "target.preflight",
+          "typeVersion": 2
+        },
+        {
+          "config": {
+            "strategy": "dockerCompose",
+            "targetId": "production"
+          },
+          "displayName": "Create release candidate",
+          "id": "candidate",
+          "inputs": {
+            "bundle": {
+              "fromNodeId": "bundle",
+              "fromPort": "bundle"
+            },
+            "target": {
+              "fromNodeId": "preflight",
+              "fromPort": "target"
+            }
+          },
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded",
+          "timeoutSeconds": 30,
+          "type": "release.create-candidate",
+          "typeVersion": 1
+        },
+        {
+          "config": {
+            "targetId": "production"
+          },
+          "displayName": "Approve production release",
+          "id": "approval",
+          "inputs": {
+            "candidate": {
+              "fromNodeId": "candidate",
+              "fromPort": "candidate"
+            },
+            "target": {
+              "fromNodeId": "preflight",
+              "fromPort": "target"
+            }
+          },
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded",
+          "timeoutSeconds": 3600,
+          "type": "control.approval",
+          "typeVersion": 1
+        },
+        {
+          "config": {
+            "targetId": "production"
+          },
+          "displayName": "Transfer release bundle",
+          "id": "transfer",
+          "inputs": {
+            "approval": {
+              "fromNodeId": "approval",
+              "fromPort": "approval"
+            },
+            "bundle": {
+              "fromNodeId": "bundle",
+              "fromPort": "bundle"
+            }
+          },
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded",
+          "timeoutSeconds": 1800,
+          "type": "transfer.sftp",
+          "typeVersion": 2
+        },
+        {
+          "config": {
+            "targetId": "production"
+          },
+          "displayName": "Prepare Compose release",
+          "id": "prepare",
+          "inputs": {
+            "transfer": {
+              "fromNodeId": "transfer",
+              "fromPort": "transfer"
+            }
+          },
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded",
+          "timeoutSeconds": 300,
+          "type": "release.prepare-compose",
+          "typeVersion": 1
+        },
+        {
+          "config": {
+            "targetId": "production"
+          },
+          "displayName": "Load container image",
+          "id": "load",
+          "inputs": {
+            "release": {
+              "fromNodeId": "prepare",
+              "fromPort": "release"
+            }
+          },
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded",
+          "timeoutSeconds": 900,
+          "type": "runtime.load-image",
+          "typeVersion": 1
+        },
+        {
+          "config": {
+            "projectName": "for-you",
+            "pullPolicy": "never",
+            "services": [
+              "web"
+            ],
+            "targetId": "production"
+          },
+          "displayName": "Deploy Compose project",
+          "id": "deploy",
+          "inputs": {
+            "image": {
+              "fromNodeId": "load",
+              "fromPort": "image"
+            }
+          },
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded",
+          "timeoutSeconds": 900,
+          "type": "deploy.compose",
+          "typeVersion": 2
+        },
+        {
+          "config": {
+            "expectedStatuses": [
+              200
+            ],
+            "path": "/for-you/",
+            "port": 3000,
+            "scheme": "http",
+            "targetId": "production"
+          },
+          "displayName": "Verify application",
+          "id": "verify",
+          "inputs": {
+            "activation": {
+              "fromNodeId": "deploy",
+              "fromPort": "activation"
+            }
+          },
+          "retry": {
+            "initialBackoffSeconds": 2,
+            "maxAttempts": 3,
+            "maxBackoffSeconds": 10
+          },
+          "runWhen": "allSucceeded",
+          "timeoutSeconds": 120,
+          "type": "verify.http",
+          "typeVersion": 2
+        },
+        {
+          "config": {
+            "targetId": "production"
+          },
+          "displayName": "Commit active release",
+          "id": "commit",
+          "inputs": {
+            "evidence": {
+              "fromNodeId": "verify",
+              "fromPort": "evidence"
+            }
+          },
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded",
+          "timeoutSeconds": 60,
+          "type": "release.commit",
+          "typeVersion": 1
+        }
+      ],
+      "outputs": {
+        "activeRelease": {
+          "fromNodeId": "commit",
+          "fromPort": "activeRelease"
+        },
+        "verification": {
+          "fromNodeId": "verify",
+          "fromPort": "evidence"
+        }
+      },
+      "parameters": [],
+      "policy": {
+        "automaticRestore": true,
+        "failFast": true,
+        "maxParallelLocalNodes": 4,
+        "releasesToKeep": 5
+      },
+      "schemaVersion": 3,
+      "targets": [
+        {
+          "connectionProfileId": "phase2-a112513b-4b35-420a-81ca-22d68a93fb60",
+          "id": "production",
+          "remoteRoot": "/srv/shellspan-deployment/missing-bdfde267-43c7-4346-82ad-acfc613f7d49"
+        }
+      ]
+    },
+    "definitionDigest": "sha256:c43d6dc078b2b93b36671287619a29351db03a60dd349df8a33ba452d7998ec9",
+    "enabled": true,
+    "id": "workflow-0725b4e5-b355-4523-9775-1b49fca802e8",
+    "layoutRevision": 0,
+    "name": "for-you",
+    "revision": 1,
+    "updatedAt": 1790306823307
+  }
+}

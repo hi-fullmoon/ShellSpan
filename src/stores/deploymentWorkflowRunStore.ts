@@ -65,6 +65,8 @@ interface DeploymentWorkflowRunState {
   loadingMoreEvents: boolean;
   loadingAttempts: boolean;
   preparing: boolean;
+  preparationRunId: string | null;
+  cancelPreparation: () => Promise<void>;
   preparationNodes: DeploymentPreparationNode[];
   preparationCompleted: number;
   preparationTotal: number;
@@ -116,6 +118,7 @@ const initialState = {
   loadingMoreEvents: false,
   loadingAttempts: false,
   preparing: false,
+  preparationRunId: null,
   preparationNodes: [] as DeploymentPreparationNode[],
   preparationCompleted: 0,
   preparationTotal: 0,
@@ -337,6 +340,9 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
     try {
       const selectedNodeId = get().selectedNodeId;
       const selected = await runDetail(runId, selectedNodeId);
+      const releases = selected.detail.summary.status !== get().detail?.summary.status
+        && ['succeeded', 'failed', 'canceled', 'state_unknown'].includes(selected.detail.summary.status)
+        ? await invokeListDeploymentReleases(selected.detail.summary.workflowId) : get().releases;
       if (sequence !== runDetailLoadSequence || get().selectedRunId !== runId) return;
       const previous = get().events;
       const seen = new Set(previous.map((event) => event.sequence));
@@ -347,6 +353,8 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
         : selected.nodes[0]?.nodeId ?? null;
       set({
         detail: selected.detail,
+        runs: get().runs.map((run) => run.runId === runId ? selected.detail.summary : run),
+        releases,
         nodes: selected.nodes,
         events,
         nextEventSequence: get().nextEventSequence ?? selected.nextEventSequence,
@@ -449,6 +457,11 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
       unlisten = await listenToDeploymentNodeProgress((event) => {
         const progress = event.payload;
         if (sequence !== workflowLoadSequence || get().workflowId !== workflow.id) return;
+        if (progress.workflowId && progress.workflowId !== workflow.id) return;
+        if (!preparedRunId && progress.workflowId === workflow.id) {
+          preparedRunId = progress.runId;
+          set({ preparationRunId: progress.runId });
+        }
         if (preparedRunId && progress.runId !== preparedRunId) return;
         if (progress.sequence <= lastSequence) return;
         lastSequence = progress.sequence;
@@ -510,10 +523,15 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
       throw error;
     } finally {
       unlisten?.();
+      set({ preparationRunId: null });
       if (get().preparing) {
         set({ preparing: false, preparationNodes: [], preparationCompleted: 0, preparationTotal: 0 });
       }
     }
+  },
+  cancelPreparation: async () => {
+    const runId = get().preparationRunId;
+    if (runId) await invokeCancelDeploymentRun({ runId });
   },
   approveAndStart: async () => {
     const summary = get().detail?.summary;

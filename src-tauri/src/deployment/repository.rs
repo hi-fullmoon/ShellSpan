@@ -18,7 +18,6 @@ use crate::db::{current_timestamp_ms, Database};
 use rusqlite::{params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-#[cfg(test)]
 use std::collections::BTreeSet;
 
 const MAX_WORKFLOW_NAME_BYTES: usize = 200;
@@ -137,7 +136,6 @@ pub(crate) struct DeploymentRunEventPage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg(test)]
 pub(crate) struct DeploymentRunEventWrite {
     pub node_id: Option<String>,
     pub attempt: Option<u32>,
@@ -2165,7 +2163,6 @@ impl Database {
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn append_deployment_run_event(
         &self,
         run_id: &str,
@@ -2328,6 +2325,7 @@ impl Database {
         artifact_reference: &str,
         now: i64,
     ) -> Result<DeploymentArtifactRetention, String> {
+        let retained_releases = self.retained_deployment_release_artifacts()?;
         self.with_connection(|connection| {
             let (reference_count, lease_count, current_release, previous_release, retained_until) =
                 connection
@@ -2370,7 +2368,8 @@ impl Database {
                 || current_release == 1
                 || previous_release == 1
                 || retained_until.is_some_and(|until| until >= now)
-                || unfinished_run_reference;
+                || unfinished_run_reference
+                || retained_releases.contains(artifact_reference);
             Ok(DeploymentArtifactRetention {
                 reference_count: reference_count
                     .try_into()
@@ -2574,7 +2573,8 @@ impl Database {
         &self,
         now: i64,
     ) -> Result<BTreeSet<String>, String> {
-        self.with_connection(|connection| {
+        let retained_releases = self.retained_deployment_release_artifacts()?;
+        let mut protected = self.with_connection(|connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT DISTINCT a.manifest_digest
@@ -2600,7 +2600,46 @@ impl Database {
                     format!("failed to collect deployment retention projection: {error}")
                 })?;
             Ok(rows)
-        })
+        })?;
+        for reference in retained_releases {
+            if let Some(handle) = self.get_deployment_artifact_handle(&reference)? {
+                protected.insert(handle.manifest_digest);
+            }
+        }
+        Ok(protected)
+    }
+
+    /// Keep the configured number of distinct successful release bundles.
+    /// Repeated activation of one release does not evict other recent versions.
+    fn retained_deployment_release_artifacts(&self) -> Result<BTreeSet<String>, String> {
+        let rows = self.with_connection(|connection| {
+            let mut statement = connection.prepare("SELECT workflow_id, plan_json FROM deployment_runs WHERE status='succeeded' ORDER BY finished_at DESC, id DESC")
+                .map_err(|error| error.to_string())?;
+            let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+            Ok(rows)
+        })?;
+        let mut groups = std::collections::BTreeMap::<String, (usize, BTreeSet<String>)>::new();
+        let mut retained = BTreeSet::new();
+        for (workflow_id, json) in rows {
+            let plan: ImmutableRunPlan =
+                serde_json::from_str(&json).map_err(|error| error.to_string())?;
+            let (limit, seen) = groups.entry(workflow_id).or_insert_with(|| {
+                (
+                    usize::from(plan.compiled.policy.releases_to_keep),
+                    BTreeSet::new(),
+                )
+            });
+            if seen.len() >= *limit || !seen.insert(plan.target_release.release_id.clone()) {
+                continue;
+            }
+            for handle in plan.artifacts.iter().filter(|handle| {
+                handle.content_digest == plan.target_release.artifact_content_digest
+            }) {
+                retained.insert(handle.artifact_reference.clone());
+            }
+        }
+        Ok(retained)
     }
 }
 

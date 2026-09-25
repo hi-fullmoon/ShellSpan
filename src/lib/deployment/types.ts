@@ -102,6 +102,14 @@ export interface DeploymentWorkflowPolicy {
 
 export interface DeploymentWorkflowDefinition {
   schemaVersion: 3;
+  applicationBinding?: {
+    applicationId: string;
+    applicationRevision: number;
+    environmentId: string;
+    environmentRevision: number;
+    sourceBindingId: string;
+    sourceRevision: number;
+  };
   targets: readonly DeploymentWorkflowTarget[];
   parameters: readonly DeploymentWorkflowParameter[];
   nodes: readonly DeploymentWorkflowNode[];
@@ -309,7 +317,39 @@ export interface DeploymentCompiledRunPlanDraft {
   policy: DeploymentWorkflowPolicy;
 }
 
+export interface DeploymentSourceBinding {
+  id: string;
+  revision: number;
+  localPath: string;
+  repositoryIdentity: Sha256Digest;
+  includedUntracked: readonly string[];
+  excludedPaths?: readonly string[];
+}
+
+export interface DeploymentSourceBindingInspection {
+  binding: DeploymentSourceBinding;
+  headRevision: string;
+  untrackedFiles: readonly string[];
+  branch?: string;
+  changedFiles?: readonly string[];
+}
+
+export interface DeploymentSourceSnapshotConfig {
+  sourceRef: 'workspace';
+  binding?: DeploymentSourceBinding;
+}
+
+export interface DeploymentBundleComposeConfig {
+  composeFiles: readonly string[];
+  projectName: string;
+  services: readonly string[];
+  registeredMounts?: readonly { source: string; target: string; readOnly: boolean }[];
+  nonSensitiveFiles?: readonly string[];
+}
+
 export interface DeploymentFrozenSourceSnapshot {
+  changedFiles?: readonly string[];
+  binding?: DeploymentSourceBinding;
   sourceRef: string;
   revision: string;
   dirty: boolean;
@@ -566,6 +606,7 @@ export interface DeploymentAuditExportResult {
 }
 
 export interface DeploymentNodeProgressEvent {
+  workflowId?: string;
   operationId: string;
   runId: string;
   nodeId: string;
@@ -701,6 +742,10 @@ export interface DeploymentApprovalEffectSummary {
 }
 
 export interface DeploymentApprovalSummary {
+  releaseReview?: {
+    automaticRestore: boolean;
+    configuration: readonly { nodeId: string; name: string; type: string; config: DeploymentJsonObject }[];
+  };
   schemaVersion: 1;
   workflowId: string;
   workflowRevision: number;
@@ -739,6 +784,7 @@ export interface DeploymentRunOutputProjection {
 }
 
 export interface DeploymentRunDetail {
+  serviceObservation?: { status: 'passed' | 'unknown'; checkedAt: number; reason?: string; checks: readonly DeploymentJsonObject[] } | null;
   summary: DeploymentRunSummary;
   approvalSummary: DeploymentApprovalSummary | null;
   outputs: readonly DeploymentRunOutputProjection[];

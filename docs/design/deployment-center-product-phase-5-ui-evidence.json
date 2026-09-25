@@ -1,0 +1,631 @@
+{
+  "scope": "WebKit rendering of existing components and recorded real phase 2–4 evidence; state-only empty/loading/unknown contracts are not backend execution evidence.",
+  "recordedAt": "2026-09-25T11:48:40.138Z",
+  "viewports": "Main panes: 1500px viewport with independent 1418/858/778/428px containers. Dialogs: matching viewport widths. Height: 900px, or 740px at 428px.",
+  "results": [
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "runtime",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "list",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "empty",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "loading",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "versions",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "versions-empty",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "recovery",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "unknown",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "preparing",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "readiness",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "approval",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "rollback",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 1418,
+      "mode": "settings",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "runtime",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "list",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "empty",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "loading",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "versions",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "versions-empty",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "recovery",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "unknown",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "preparing",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "readiness",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "approval",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "rollback",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 858,
+      "mode": "settings",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "runtime",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "list",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "empty",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "loading",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "versions",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "versions-empty",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "recovery",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "unknown",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "preparing",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "readiness",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "approval",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "rollback",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 778,
+      "mode": "settings",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "runtime",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "list",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "empty",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "loading",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "versions",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "versions-empty",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "recovery",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "unknown",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "preparing",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "readiness",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "approval",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "rollback",
+      "passed": true
+    },
+    {
+      "locale": "zh-CN",
+      "width": 428,
+      "mode": "settings",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "runtime",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "list",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "empty",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "loading",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "versions",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "versions-empty",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "recovery",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "unknown",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "preparing",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "readiness",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "approval",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "rollback",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 1418,
+      "mode": "settings",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "runtime",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "list",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "empty",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "loading",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "versions",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "versions-empty",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "recovery",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "unknown",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "preparing",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "readiness",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "approval",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "rollback",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 858,
+      "mode": "settings",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "runtime",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "list",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "empty",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "loading",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "versions",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "versions-empty",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "recovery",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "unknown",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "preparing",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "readiness",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "approval",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "rollback",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 778,
+      "mode": "settings",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "runtime",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "list",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "empty",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "loading",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "versions",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "versions-empty",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "recovery",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "unknown",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "preparing",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "readiness",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "approval",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "rollback",
+      "passed": true
+    },
+    {
+      "locale": "en-US",
+      "width": 428,
+      "mode": "settings",
+      "passed": true
+    }
+  ]
+}

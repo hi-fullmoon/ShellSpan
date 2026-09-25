@@ -28,9 +28,11 @@ import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state'
 import { Progress, ProgressLabel, ProgressValue } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type {
   DeploymentNodeTypeCatalog,
+  DeploymentRunDetail,
   DeploymentRunStatus,
   DeploymentWorkflowRecord,
 } from '@/lib/deployment/types';
@@ -54,7 +56,7 @@ import {
 
 type RuntimeViewKind = 'runs' | 'versions';
 
-const RunStatusAlert: React.FC<{
+export const RunStatusAlert: React.FC<{
   status: DeploymentRunStatus;
   onReconcile: () => void;
   onOpenEvidence?: (trigger: HTMLElement) => void;
@@ -62,11 +64,12 @@ const RunStatusAlert: React.FC<{
   failedNodes?: readonly string[];
   failureSummaryKey?: string | null;
   hasEvidence?: boolean;
-}> = ({ status, onReconcile, onOpenEvidence, evidenceGaps = [], failedNodes = [], failureSummaryKey = null, hasEvidence = false }) => {
+  detail?: DeploymentRunDetail;
+}> = ({ status, onReconcile, onOpenEvidence, evidenceGaps = [], failedNodes = [], failureSummaryKey = null, hasEvidence = false, detail }) => {
   const { t } = useI18n();
   if (status === 'state_unknown') {
     return (
-      <Alert variant="destructive" role="status">
+      <Alert variant="destructive" role="status" className="has-data-[slot=alert-action]:grid-cols-[auto_minmax(0,1fr)_auto] has-data-[slot=alert-action]:pr-2.5">
         <AlertTriangleIcon />
         <AlertTitle>{t('deployment.runtime.unknown.title')}</AlertTitle>
         <AlertDescription>
@@ -77,7 +80,7 @@ const RunStatusAlert: React.FC<{
             )}
           </div>
         </AlertDescription>
-        <AlertAction>
+        <AlertAction className="static col-start-3 row-span-2 row-start-1 self-start">
           <Button variant="outline" size="sm" onClick={onReconcile}>
             <ShieldCheckIcon data-icon="inline-start" />
             {t('deployment.runtime.reconcile')}
@@ -110,12 +113,18 @@ const RunStatusAlert: React.FC<{
       <Alert
         variant="destructive"
         data-testid={failed ? 'deployment-run-failed-alert' : 'deployment-run-canceled-alert'}
+        className="has-data-[slot=alert-action]:grid-cols-[auto_minmax(0,1fr)_auto] has-data-[slot=alert-action]:pr-2.5"
       >
         {failed ? <XCircleIcon /> : <MinusCircleIcon />}
         <AlertTitle>{t(failed ? 'deployment.runtime.failed.title' : 'deployment.runtime.canceled.title')}</AlertTitle>
         <AlertDescription>
           <div className="flex flex-col gap-1">
             <span>{t(failed ? 'deployment.runtime.failed.description' : 'deployment.runtime.canceled.description')}</span>
+            {failed && detail?.receipts.some((receipt) => receipt.receiptType === 'compose.restore'
+              && receipt.runId === detail.summary.runId
+              && receipt.planDigest === detail.summary.planDigest) && (
+              <span>{t('deployment.runtime.restore.receiptRecorded')}</span>
+            )}
             {failedNodes.length > 0 && (
               <span>{t('deployment.runtime.failed.nodes', { nodes: failedNodes.join(', ') })}</span>
             )}
@@ -123,7 +132,7 @@ const RunStatusAlert: React.FC<{
           </div>
         </AlertDescription>
         {hasEvidence && onOpenEvidence && (
-          <AlertAction>
+          <AlertAction className="static col-start-3 row-span-2 row-start-1 self-start">
             <Button variant="outline" size="sm" onClick={(event) => onOpenEvidence(event.currentTarget)}>
               <EyeIcon data-icon="inline-start" />
               {t('deployment.runtime.evidence.action')}
@@ -136,7 +145,7 @@ const RunStatusAlert: React.FC<{
   return null;
 };
 
-const PreparationProgress: React.FC = () => {
+export const PreparationProgress: React.FC = () => {
   const { t } = useI18n();
   const nodes = useDeploymentWorkflowRunStore((state) => state.preparationNodes);
   const completed = useDeploymentWorkflowRunStore((state) => state.preparationCompleted);
@@ -191,15 +200,22 @@ const RunListPane: React.FC<{ workflow: DeploymentWorkflowRecord }> = ({ workflo
         title={t('deployment.runtime.runs.title')}
         description={t('deployment.runtime.runs.count', { count: state.runs.length })}
         actions={(
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={t('common.refresh')}
-            onClick={() => void state.refreshWorkflow(workflow.id, true).catch(() => undefined)}
-            disabled={state.loading || state.action !== null || state.preparing}
-          >
-            <RefreshCwIcon data-icon="inline-start" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={(
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  disabled={state.loading || state.action !== null || state.preparing}
+                />
+              )}
+              aria-label={t('common.refresh')}
+              onClick={() => void state.refreshWorkflow(workflow.id, true).catch(() => undefined)}
+            >
+              <RefreshCwIcon data-icon="inline-start" />
+            </TooltipTrigger>
+            <TooltipContent>{t('common.refresh')}</TooltipContent>
+          </Tooltip>
         )}
       />
       <ScrollArea className="min-h-0 flex-1">
@@ -332,6 +348,9 @@ const RunsView: React.FC<{
                   onClick={(event) => onOpenApproval(event.currentTarget)}
                   disabled={!admissionsEnabled || state.action !== null}
                   data-testid="deployment-open-approval"
+                  aria-label={t(detail.summary.status === 'approved'
+                    ? 'deployment.runtime.startApproved'
+                    : 'deployment.runtime.reviewApproval')}
                 >
                   <ShieldCheckIcon data-icon="inline-start" />
                   <span className="hidden @min-[48rem]:inline">
@@ -347,6 +366,7 @@ const RunsView: React.FC<{
                   variant="destructiveOutline"
                   onClick={() => setCancelOpen(true)}
                   disabled={state.action !== null}
+                  aria-label={t('common.cancel')}
                 >
                   <SquareIcon data-icon="inline-start" />
                   <span className="hidden @min-[48rem]:inline">{t('common.cancel')}</span>
@@ -372,6 +392,7 @@ const RunsView: React.FC<{
                 )}
                 <RunStatusAlert
                   status={detail.summary.status}
+                  detail={detail}
                   evidenceGaps={state.nodes
                     .filter((node) => node.status === 'state_unknown')
                     .map((node) => workflow.definition.nodes.find(
@@ -393,6 +414,7 @@ const RunsView: React.FC<{
                       : null;
                   })()}
                   hasEvidence={state.events.length > 0
+                    || detail.receipts.length > 0
                     || state.nodes.some((node) => node.status === 'failed')}
                   onOpenEvidence={(trigger) => {
                     const failedNode = state.nodes.find((node) => node.status === 'failed');

@@ -193,7 +193,7 @@ export const ReleaseList: React.FC<ReleaseListProps> = ({
               </Alert>
             </FieldGroup>
           </ScrollArea>
-          <DialogFooter className="shrink-0 border-t p-4">
+          <DialogFooter className="shrink-0 p-4">
             <Button variant="outline" onClick={() => setRollbackOpen(false)}>{t('common.cancel')}</Button>
             <Button
               disabled={!selectedReleaseId

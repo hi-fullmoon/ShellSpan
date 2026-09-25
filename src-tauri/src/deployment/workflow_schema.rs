@@ -41,6 +41,19 @@ pub(crate) struct DeploymentWorkflowDefinition {
     pub nodes: Vec<WorkflowNodeDefinition>,
     pub outputs: BTreeMap<String, PortBinding>,
     pub policy: WorkflowPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_binding: Option<WorkflowApplicationBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct WorkflowApplicationBinding {
+    pub application_id: String,
+    pub application_revision: u64,
+    pub environment_id: String,
+    pub environment_revision: u64,
+    pub source_binding_id: String,
+    pub source_revision: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -388,6 +401,10 @@ pub(crate) enum WorkflowRunTriggerKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FrozenSourceSnapshot {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<super::source_binding::SourceBinding>,
     pub source_ref: String,
     pub revision: String,
     pub dirty: bool,

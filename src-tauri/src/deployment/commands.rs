@@ -180,11 +180,13 @@ pub(crate) struct DeploymentRunDetail {
     pub approval_summary: Option<serde_json::Value>,
     pub outputs: Vec<DeploymentRunOutputProjection>,
     pub receipts: Vec<EffectReceipt>,
+    pub service_observation: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeploymentNodeProgressEvent {
+    pub workflow_id: String,
     pub operation_id: String,
     pub run_id: String,
     pub node_id: String,
@@ -205,14 +207,12 @@ fn native_executors(
     runtime: &DeploymentWorkflowRuntime,
 ) -> Result<super::node_executor::DeploymentNodeExecutorRegistry, String> {
     let known_hosts_path = crate::known_hosts::known_hosts_path(app)?;
-    let source_root = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
     let backend = NativeDockerComposeBackend::new(
         app.clone(),
         database,
         credentials,
         cancellations,
         known_hosts_path,
-        source_root,
         runtime.artifacts().clone(),
     )?;
     docker_compose_executor_registry(Arc::new(backend))
@@ -291,6 +291,124 @@ pub(crate) fn start_deployment_workflow_recovery(app: &AppHandle) -> Result<(), 
         }
     });
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn preview_deployment_files(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    entry: super::applications::ApplicationEntry,
+) -> Result<super::deployment_files::DeploymentFilePreview, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    tauri::async_runtime::spawn_blocking(move || super::deployment_files::preview(&entry))
+        .await
+        .map_err(|_| "DEPLOYMENT_APPLICATION_WORKER_STOPPED".to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn apply_deployment_files(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    entry: super::applications::ApplicationEntry,
+    expected_digest: String,
+) -> Result<Vec<String>, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Mutating)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        super::deployment_files::apply(&entry, &expected_digest)
+    })
+    .await
+    .map_err(|_| "DEPLOYMENT_APPLICATION_WORKER_STOPPED".to_string())?
+}
+
+#[tauri::command]
+pub(crate) fn list_deployment_applications(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+) -> Result<Vec<super::applications::ApplicationEntry>, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    database.list_deployment_applications()
+}
+
+#[tauri::command]
+pub(crate) async fn save_deployment_application(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    input: super::applications::SaveApplicationInput,
+) -> Result<super::applications::ApplicationEntry, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::Mutating)?;
+    let database = database.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || database.save_deployment_application(&input))
+        .await
+        .map_err(|_| "DEPLOYMENT_APPLICATION_WORKER_STOPPED".to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn inspect_deployment_project(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    local_path: String,
+) -> Result<super::readiness::ProjectInspection, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        super::readiness::inspect_project(std::path::Path::new(&local_path))
+    })
+    .await
+    .map_err(|_| "DEPLOYMENT_APPLICATION_WORKER_STOPPED".to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn check_deployment_readiness(
+    app: AppHandle,
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    cancellations: State<'_, ExecutionCancellationRegistry>,
+    entry: super::applications::ApplicationEntry,
+    check_remote: bool,
+) -> Result<super::readiness::ReadinessReport, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    let database = database.inner().clone();
+    let credentials = credentials.inner().clone();
+    let cancellations = cancellations.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        super::applications::validate(&entry)?;
+        let mut report = super::readiness::check_local(&entry)?;
+        if check_remote {
+            super::readiness::check_remote(
+                &entry,
+                &mut report,
+                &database,
+                &credentials,
+                &known_hosts,
+                &cancellations,
+            )?;
+        }
+        database.store_deployment_readiness(&entry, &report)?;
+        Ok(report)
+    })
+    .await
+    .map_err(|_| "DEPLOYMENT_APPLICATION_WORKER_STOPPED".to_string())?
+}
+
+#[tauri::command]
+pub(crate) fn get_deployment_readiness(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    environment_id: String,
+) -> Result<Option<super::readiness::ReadinessReport>, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    database.get_deployment_readiness(&environment_id)
+}
+
+#[tauri::command]
+pub(crate) async fn inspect_deployment_source_binding(
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    local_path: String,
+) -> Result<super::source_binding::SourceBindingInspection, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        super::source_binding::inspect(std::path::Path::new(&local_path))
+    })
+    .await
+    .map_err(|_| "DEPLOYMENT_SOURCE_INSPECTION_STOPPED".to_string())?
 }
 
 #[tauri::command]
@@ -426,6 +544,10 @@ pub(crate) async fn prepare_deployment_run(
     input: PrepareDeploymentRunInput,
 ) -> Result<DeploymentPrepareResult, String> {
     runtime.ensure(DeploymentWorkflowAdmission::Mutating)?;
+    if input.operation_kind == WorkflowRunOperationKind::Deploy {
+        database
+            .ensure_deployment_application_ready(&input.workflow_id, input.workflow_revision)?;
+    }
     let executors = native_executors(
         &app,
         database.inner().clone(),
@@ -436,7 +558,7 @@ pub(crate) async fn prepare_deployment_run(
     let run_id = format!("run-{}", uuid::Uuid::new_v4());
     app.emit(
         "deployment-prepare-started",
-        serde_json::json!({ "runId": run_id }),
+        serde_json::json!({ "runId": run_id, "workflowId": input.workflow_id }),
     )
     .map_err(|error| format!("failed to emit deployment preparation identity: {error}"))?;
     let request = PrepareRunRequest {
@@ -453,12 +575,14 @@ pub(crate) async fn prepare_deployment_run(
         _ => return Err("DEPLOYMENT_WORKFLOW_INVALID_ROLLBACK_SELECTION".into()),
     };
     let progress_app = app.clone();
+    let progress_workflow_id = request.workflow_id.clone();
     let progress_sequence = Arc::new(AtomicU32::new(0));
     let observer = {
         let progress_sequence = progress_sequence.clone();
         Arc::new(move |progress: PreparationProgress| {
             let sequence = progress_sequence.fetch_add(1, Ordering::SeqCst) + 1;
             let event = DeploymentNodeProgressEvent {
+                workflow_id: progress_workflow_id.clone(),
                 operation_id: progress.run_id.clone(),
                 run_id: progress.run_id,
                 node_id: progress.node_id,
@@ -654,6 +778,13 @@ pub(crate) fn get_deployment_run_detail(
     run_id: String,
 ) -> Result<Option<DeploymentRunDetail>, String> {
     runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    run_detail(&database, &run_id)
+}
+
+pub(super) fn run_detail(
+    database: &Database,
+    run_id: &str,
+) -> Result<Option<DeploymentRunDetail>, String> {
     let Some(run) = database.get_deployment_run(&run_id)? else {
         return Ok(None);
     };
@@ -681,7 +812,33 @@ pub(crate) fn get_deployment_run_detail(
         approval_summary: run.approval_summary,
         outputs,
         receipts: database.list_deployment_effect_receipts(&run_id)?,
+        service_observation: database
+            .list_deployment_run_events(&run_id, None, 100)?
+            .items
+            .into_iter()
+            .find(|event| event.event_kind == "serviceObservation")
+            .and_then(|event| event.payload),
     }))
+}
+
+#[tauri::command]
+pub(crate) async fn observe_deployment_service(
+    app: AppHandle,
+    runtime: State<'_, DeploymentWorkflowRuntime>,
+    database: State<'_, Database>,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    cancellations: State<'_, ExecutionCancellationRegistry>,
+    run_id: String,
+) -> Result<serde_json::Value, String> {
+    runtime.ensure(DeploymentWorkflowAdmission::ReadOnly)?;
+    let executors = native_executors(
+        &app,
+        database.inner().clone(),
+        credentials.inner().clone(),
+        cancellations.inner().clone(),
+        &runtime,
+    )?;
+    super::run_coordinator::observe_service(&database, &runtime, &executors, &run_id).await
 }
 
 #[tauri::command]

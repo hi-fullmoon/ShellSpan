@@ -15,7 +15,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
-import type { DeploymentWorkflowRecord } from '@/lib/deployment/types';
+import type { DeploymentJsonObject, DeploymentWorkflowRecord } from '@/lib/deployment/types';
 import { getErrorMessage } from '@/lib/error';
 import { useProfileStore } from '@/stores/profileStore';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
@@ -56,7 +56,7 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
   admissionsEnabled = true,
   returnFocusRef,
 }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const profiles = useProfileStore((state) => state.profiles);
   const detail = useDeploymentWorkflowRunStore((state) => state.detail);
   const action = useDeploymentWorkflowRunStore((state) => state.action);
@@ -72,6 +72,11 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
     || detail.summary.planDrifted
     || now > detail.summary.expiresAt;
   const profile = profiles.find((item) => item.id === summary?.target.connectionProfileId);
+  const frozenDisplay = summary?.preflight.display;
+  const frozenAddress = frozenDisplay && typeof frozenDisplay === 'object' && !Array.isArray(frozenDisplay)
+    ? frozenDisplay as DeploymentJsonObject : null;
+  const frozenHost = frozenAddress
+    ? `${String(frozenAddress.username ?? '')}@${String(frozenAddress.host ?? '')}:${String(frozenAddress.port ?? '')}` : null;
   const verificationNames = summary?.verificationNodes.map((nodeId) => (
     workflow.definition.nodes.find((node) => node.id === nodeId)?.displayName
       ?? t('deployment.runtime.verification.fallback')
@@ -125,7 +130,8 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
                   <dl className="grid gap-2 @min-[36rem]:grid-cols-2">
                     <div>
                       <dt className="text-xs text-muted-foreground">{t('deployment.runtime.source')}</dt>
-                      <dd>{summary.source.revision}{summary.source.dirty ? ` · ${t('deployment.runtime.dirty')}` : ''}</dd>
+                      <dd className="break-all">{summary.source.revision}{summary.source.dirty ? ` · ${t('deployment.runtime.dirty')}` : ''}</dd>
+                      {summary.source.changedFiles && <ul>{summary.source.changedFiles.map((file) => <li className="break-all" key={file}>{file}</li>)}</ul>}
                     </div>
                     {summary.artifacts.map((artifact) => (
                       <div key={artifact.handle.artifactReference} className="min-w-0">
@@ -143,7 +149,7 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
                 </ApprovalSection>
                 <Separator />
                 <ApprovalSection title={t('deployment.runtime.approval.where')}>
-                  <div>{profileLabel(profile, t('deployment.runtime.target.unavailable'))}</div>
+                  <div>{frozenHost ?? profileLabel(profile, t('deployment.runtime.target.unavailable'))}</div>
                   <code className="break-all text-xs text-muted-foreground">{summary.target.remoteRoot}</code>
                   <div>{t('deployment.runtime.releasePath', {
                     current: summary.currentRelease?.releaseId ?? t('deployment.runtime.none'),
@@ -152,6 +158,12 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
                 </ApprovalSection>
                 <Separator />
                 <ApprovalSection title={t('deployment.runtime.approval.effects')}>
+                  <p>{t('deployment.release.interruption')}</p>
+                  {summary.releaseReview?.configuration.filter((node) => node.type === 'deploy.compose').map((node) => <div key={node.nodeId}>
+                    <p>{t('deployment.application.projectName')}: {String(node.config.projectName ?? '')}</p>
+                    <p>{t('deployment.application.service')}: {Array.isArray(node.config.services) ? node.config.services.join(', ') : ''}</p>
+                  </div>)}
+                  {[...new Set(summary.artifacts.flatMap((artifact) => artifact.components).map((component) => component.annotations.imageReference).filter(Boolean))].map((reference) => <p className="break-all" key={reference}>{reference}</p>)}
                   {summary.effects.map((effect) => (
                     <div key={effect.nodeId} className="flex items-center justify-between gap-2">
                       <span>{effect.displayName}</span>
@@ -163,12 +175,15 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
                 </ApprovalSection>
                 <Separator />
                 <ApprovalSection title={t('deployment.runtime.approval.verify')}>
-                  {verificationNames.map((name) => <div key={name}>{name}</div>)}
+                  {summary.releaseReview ? summary.releaseReview.configuration.filter((node) => node.type === 'verify.http').map((node) => <div key={node.nodeId}>
+                    <p>{node.name}</p><p className="break-all">{String(node.config.scheme)}://127.0.0.1:{String(node.config.port)}{String(node.config.path)}</p>
+                    <p>{t('deployment.release.expectedStatuses')}: {Array.isArray(node.config.expectedStatuses) ? node.config.expectedStatuses.join(', ') : ''}</p>
+                  </div>) : verificationNames.map((name) => <div key={name}>{name}</div>)}
                   {verificationNames.length === 0 && <div>{t('deployment.runtime.verification.none')}</div>}
                 </ApprovalSection>
                 <Separator />
                 <ApprovalSection title={t('deployment.runtime.approval.failure')}>
-                  <div>{workflow.definition.policy.automaticRestore
+                  <div>{summary.releaseReview?.automaticRestore
                     ? t('deployment.runtime.restore.enabled')
                     : t('deployment.runtime.restore.disabled')}</div>
                   <div>{summary.previousRelease
@@ -176,11 +191,20 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
                     : t('deployment.runtime.restore.noPrevious')}</div>
                   <div className="text-muted-foreground">{t('deployment.runtime.restore.unknown')}</div>
                 </ApprovalSection>
+                <ApprovalSection title={t('deployment.release.frozenConfiguration')}>
+                  <p>{t('deployment.release.frozenHelp')}</p>
+                  <p>{t('deployment.release.expires')}: {new Date(summary.expiresAt).toLocaleString(locale)}</p>
+                  <p className="break-all">{summary.source.binding?.includedUntracked.join(', ')}</p>
+                  {summary.releaseReview?.configuration.map((node) => <details key={node.nodeId}>
+                    <summary>{node.name}</summary>
+                    <pre className="whitespace-pre-wrap break-all text-xs">{JSON.stringify(node.config, null, 2)}</pre>
+                  </details>)}
+                </ApprovalSection>
               </>
             )}
           </div>
         </ScrollArea>
-        <DialogFooter className="shrink-0 border-t p-4">
+        <DialogFooter className="shrink-0 p-4">
           <Button ref={cancelRef} variant="outline" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
           <Button
             disabled={!admissionsEnabled || invalid || action === 'approve'}

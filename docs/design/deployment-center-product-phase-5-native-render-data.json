@@ -1,0 +1,386 @@
+{
+  "scope": "Read-only export of the existing phase 3 isolated workflow/current release for UI rendering, not a new execution.",
+  "workflow": {
+    "id": "workflow-8f807b4d-05a0-48a7-a70c-aff803cd8b0b",
+    "name": "for-you · Phase3 UI",
+    "enabled": true,
+    "archived": false,
+    "revision": 1,
+    "layoutRevision": 0,
+    "createdAt": 1790309219490,
+    "updatedAt": 1790309219490,
+    "definitionDigest": "sha256:60f972b20efe2df481172e80966c6d11f8b07cbbab1ac24aaf6824c885eee2c9",
+    "definition": {
+      "schemaVersion": 3,
+      "targets": [
+        {
+          "id": "production",
+          "connectionProfileId": "mugfgmv7-u6z8r9l",
+          "remoteRoot": "/srv/shellspan-deployment/phase3-ui-20260925"
+        }
+      ],
+      "parameters": [],
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source.snapshot",
+          "typeVersion": 1,
+          "displayName": "Freeze source",
+          "inputs": {},
+          "config": {
+            "binding": {
+              "excludedPaths": [],
+              "id": "31cd8e13-3581-4a0e-ae20-cc52e0c810e6",
+              "includedUntracked": [
+                ".dockerignore",
+                "Dockerfile",
+                "compose.yaml"
+              ],
+              "localPath": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpcoMLCs",
+              "repositoryIdentity": "sha256:35c67d71b7cbfc4e805b1187638ba37bc4c43739dc72df3fe8222ca7fffc859f",
+              "revision": 1
+            },
+            "sourceRef": "workspace"
+          },
+          "timeoutSeconds": 60,
+          "retry": {
+            "maxAttempts": 1,
+            "initialBackoffSeconds": 0,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded"
+        },
+        {
+          "id": "image",
+          "type": "build.docker-buildx",
+          "typeVersion": 2,
+          "displayName": "Build container image",
+          "inputs": {
+            "source": {
+              "fromNodeId": "source",
+              "fromPort": "source"
+            }
+          },
+          "config": {
+            "context": ".",
+            "dockerfile": "Dockerfile",
+            "imageRepository": "example/web",
+            "platform": "linux/arm64"
+          },
+          "timeoutSeconds": 3600,
+          "retry": {
+            "maxAttempts": 2,
+            "initialBackoffSeconds": 2,
+            "maxBackoffSeconds": 10
+          },
+          "runWhen": "allSucceeded"
+        },
+        {
+          "id": "bundle",
+          "type": "artifact.bundle-compose",
+          "typeVersion": 1,
+          "displayName": "Bind Compose configuration",
+          "inputs": {
+            "imageBundle": {
+              "fromNodeId": "image",
+              "fromPort": "bundle"
+            },
+            "source": {
+              "fromNodeId": "source",
+              "fromPort": "source"
+            }
+          },
+          "config": {
+            "composeFiles": [
+              "compose.yaml"
+            ],
+            "nonSensitiveFiles": [],
+            "projectName": "phase3-ui-20260925",
+            "registeredMounts": [],
+            "services": [
+              "web"
+            ]
+          },
+          "timeoutSeconds": 60,
+          "retry": {
+            "maxAttempts": 1,
+            "initialBackoffSeconds": 0,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded"
+        },
+        {
+          "id": "preflight",
+          "type": "target.preflight",
+          "typeVersion": 2,
+          "displayName": "Check production target",
+          "inputs": {
+            "bundle": {
+              "fromNodeId": "bundle",
+              "fromPort": "bundle"
+            }
+          },
+          "config": {
+            "requiredCapabilities": [
+              "sftp",
+              "docker",
+              "compose",
+              "http"
+            ],
+            "targetId": "production"
+          },
+          "timeoutSeconds": 120,
+          "retry": {
+            "maxAttempts": 2,
+            "initialBackoffSeconds": 2,
+            "maxBackoffSeconds": 10
+          },
+          "runWhen": "allSucceeded"
+        },
+        {
+          "id": "candidate",
+          "type": "release.create-candidate",
+          "typeVersion": 1,
+          "displayName": "Create release candidate",
+          "inputs": {
+            "bundle": {
+              "fromNodeId": "bundle",
+              "fromPort": "bundle"
+            },
+            "target": {
+              "fromNodeId": "preflight",
+              "fromPort": "target"
+            }
+          },
+          "config": {
+            "strategy": "dockerCompose",
+            "targetId": "production"
+          },
+          "timeoutSeconds": 30,
+          "retry": {
+            "maxAttempts": 1,
+            "initialBackoffSeconds": 0,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded"
+        },
+        {
+          "id": "approval",
+          "type": "control.approval",
+          "typeVersion": 1,
+          "displayName": "Approve production release",
+          "inputs": {
+            "candidate": {
+              "fromNodeId": "candidate",
+              "fromPort": "candidate"
+            },
+            "target": {
+              "fromNodeId": "preflight",
+              "fromPort": "target"
+            }
+          },
+          "config": {
+            "targetId": "production"
+          },
+          "timeoutSeconds": 3600,
+          "retry": {
+            "maxAttempts": 1,
+            "initialBackoffSeconds": 0,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded"
+        },
+        {
+          "id": "transfer",
+          "type": "transfer.sftp",
+          "typeVersion": 2,
+          "displayName": "Transfer release bundle",
+          "inputs": {
+            "approval": {
+              "fromNodeId": "approval",
+              "fromPort": "approval"
+            },
+            "bundle": {
+              "fromNodeId": "bundle",
+              "fromPort": "bundle"
+            }
+          },
+          "config": {
+            "targetId": "production"
+          },
+          "timeoutSeconds": 1800,
+          "retry": {
+            "maxAttempts": 1,
+            "initialBackoffSeconds": 0,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded"
+        },
+        {
+          "id": "prepare",
+          "type": "release.prepare-compose",
+          "typeVersion": 1,
+          "displayName": "Prepare Compose release",
+          "inputs": {
+            "transfer": {
+              "fromNodeId": "transfer",
+              "fromPort": "transfer"
+            }
+          },
+          "config": {
+            "targetId": "production"
+          },
+          "timeoutSeconds": 300,
+          "retry": {
+            "maxAttempts": 1,
+            "initialBackoffSeconds": 0,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded"
+        },
+        {
+          "id": "load",
+          "type": "runtime.load-image",
+          "typeVersion": 1,
+          "displayName": "Load container image",
+          "inputs": {
+            "release": {
+              "fromNodeId": "prepare",
+              "fromPort": "release"
+            }
+          },
+          "config": {
+            "targetId": "production"
+          },
+          "timeoutSeconds": 900,
+          "retry": {
+            "maxAttempts": 1,
+            "initialBackoffSeconds": 0,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded"
+        },
+        {
+          "id": "deploy",
+          "type": "deploy.compose",
+          "typeVersion": 2,
+          "displayName": "Deploy Compose project",
+          "inputs": {
+            "image": {
+              "fromNodeId": "load",
+              "fromPort": "image"
+            }
+          },
+          "config": {
+            "projectName": "phase3-ui-20260925",
+            "pullPolicy": "never",
+            "services": [
+              "web"
+            ],
+            "targetId": "production"
+          },
+          "timeoutSeconds": 900,
+          "retry": {
+            "maxAttempts": 1,
+            "initialBackoffSeconds": 0,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded"
+        },
+        {
+          "id": "verify",
+          "type": "verify.http",
+          "typeVersion": 2,
+          "displayName": "Verify application",
+          "inputs": {
+            "activation": {
+              "fromNodeId": "deploy",
+              "fromPort": "activation"
+            }
+          },
+          "config": {
+            "expectedStatuses": [
+              200
+            ],
+            "path": "/for-you/",
+            "port": 3000,
+            "scheme": "http",
+            "targetId": "production"
+          },
+          "timeoutSeconds": 120,
+          "retry": {
+            "maxAttempts": 3,
+            "initialBackoffSeconds": 2,
+            "maxBackoffSeconds": 10
+          },
+          "runWhen": "allSucceeded"
+        },
+        {
+          "id": "commit",
+          "type": "release.commit",
+          "typeVersion": 1,
+          "displayName": "Commit active release",
+          "inputs": {
+            "evidence": {
+              "fromNodeId": "verify",
+              "fromPort": "evidence"
+            }
+          },
+          "config": {
+            "targetId": "production"
+          },
+          "timeoutSeconds": 60,
+          "retry": {
+            "maxAttempts": 1,
+            "initialBackoffSeconds": 0,
+            "maxBackoffSeconds": 0
+          },
+          "runWhen": "allSucceeded"
+        }
+      ],
+      "outputs": {
+        "activeRelease": {
+          "fromNodeId": "commit",
+          "fromPort": "activeRelease"
+        },
+        "verification": {
+          "fromNodeId": "verify",
+          "fromPort": "evidence"
+        }
+      },
+      "policy": {
+        "failFast": true,
+        "maxParallelLocalNodes": 4,
+        "releasesToKeep": 5,
+        "automaticRestore": true
+      },
+      "applicationBinding": {
+        "applicationId": "82dff4d7-1ba1-4eef-b40f-ed2e619e597c",
+        "applicationRevision": 1,
+        "environmentId": "c6af0601-35fd-41d4-b933-903a497bde99",
+        "environmentRevision": 1,
+        "sourceBindingId": "31cd8e13-3581-4a0e-ae20-cc52e0c810e6",
+        "sourceRevision": 1
+      }
+    }
+  },
+  "releases": [
+    {
+      "workflowId": "workflow-8f807b4d-05a0-48a7-a70c-aff803cd8b0b",
+      "releaseId": "release-aca5ac128b042166",
+      "artifactReference": "deployment-artifact:sha256:8a72fe38d7ddb36671c454df608399c85f852f716559d7eac9d57dba9a5b8d0c",
+      "manifestDigest": "sha256:8a72fe38d7ddb36671c454df608399c85f852f716559d7eac9d57dba9a5b8d0c",
+      "contentDigest": "sha256:aca5ac128b0421663ff940217daa0cf582c43cc20542807bd9ad0953feeb6273",
+      "artifactType": "application/vnd.shellspan.compose-release",
+      "sourceRunId": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "position": "current",
+      "rollbackable": false,
+      "identity": {
+        "artifactContentDigest": "sha256:aca5ac128b0421663ff940217daa0cf582c43cc20542807bd9ad0953feeb6273",
+        "layoutDigest": "sha256:6faa6076fe7b32ae18680abe07c04b67f3b39023c64df181da5ba6c912f7889c",
+        "releaseId": "release-aca5ac128b042166"
+      },
+      "activatedAt": 1790332678367
+    }
+  ]
+}

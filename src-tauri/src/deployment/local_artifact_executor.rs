@@ -952,6 +952,8 @@ mod tests {
 
     fn source() -> FrozenSourceSnapshot {
         FrozenSourceSnapshot {
+            changed_files: Vec::new(),
+            binding: None,
             source_ref: "workspace".into(),
             revision: "0123456789abcdef0123456789abcdef01234567".into(),
             dirty: false,

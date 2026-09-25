@@ -4,6 +4,7 @@ RUN apk add --no-cache \
       bash \
       coreutils \
       curl \
+      iproute2 \
       docker \
       docker-cli-compose \
       nginx \

@@ -960,6 +960,15 @@ impl DeploymentNodeRegistry {
             ConfigKind::SourceSnapshot => parse_config::<SourceSnapshotConfig>(node_id, config)
                 .and_then(|value| {
                     validate_reference("sourceRef", &value.source_ref)?;
+                    if let Some(binding) = &value.binding {
+                        validate_identifier("binding.id", &binding.id)?;
+                        if binding.revision == 0 || !binding.local_path.is_absolute() {
+                            return Err("source binding requires an absolute local path and positive revision".into());
+                        }
+                        for path in binding.included_untracked.iter().chain(&binding.excluded_paths) {
+                            validate_relative_path("binding.fileSelection", path, false)?;
+                        }
+                    }
                     Ok(None)
                 }),
             ConfigKind::PackageScript => parse_config::<PackageScriptConfig>(node_id, config)
@@ -1361,6 +1370,8 @@ fn validate_http_path(value: &str) -> Result<(), String> {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SourceSnapshotConfig {
     source_ref: String,
+    #[serde(default)]
+    binding: Option<super::source_binding::SourceBinding>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1433,6 +1444,10 @@ struct BundleComposeConfig {
     project_name: String,
     #[serde(default)]
     services: Vec<String>,
+    #[serde(default, rename = "registeredMounts")]
+    _registered_mounts: Vec<super::compose_release::RegisteredBindMount>,
+    #[serde(default, rename = "nonSensitiveFiles")]
+    _non_sensitive_files: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

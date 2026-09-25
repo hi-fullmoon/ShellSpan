@@ -9,3 +9,5 @@ src-tauri/target
 /release-output/
 /release-artifact/
 /tauri-ci-override.json
+/.phase3-acceptance/
+/.phase4-acceptance/

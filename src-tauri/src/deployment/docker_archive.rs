@@ -46,10 +46,78 @@ fn docker_config_digest(path: &str) -> Result<&str, String> {
     Ok(digest)
 }
 
-pub(crate) fn docker_archive_image_id(
+pub(crate) struct DockerArchiveIdentity {
+    pub config_id: String,
+    pub manifest_id: Option<String>,
+}
+
+fn verify_oci_manifest(
+    descriptor: &serde_json::Value,
+    config_id: &str,
+    read_entry: &dyn Fn(&str, u64) -> Result<Option<Vec<u8>>, String>,
+    depth: u8,
+) -> Result<u32, String> {
+    if depth > 3 {
+        return Err("OCI index nesting exceeds limit".into());
+    }
+    let digest = descriptor
+        .get("digest")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| value.strip_prefix("sha256:"))
+        .filter(|value| valid_sha256(value))
+        .ok_or_else(|| "invalid OCI digest".to_string())?;
+    let bytes = read_entry(&format!("blobs/sha256/{digest}"), 64 * 1024)?
+        .ok_or_else(|| "OCI manifest missing".to_string())?;
+    if sha256_bytes(&bytes) != digest {
+        return Err("OCI manifest digest mismatch".into());
+    }
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|_| "invalid OCI manifest".to_string())?;
+    if manifest
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        != Some(2)
+    {
+        return Err("unsupported OCI schema".into());
+    }
+    if descriptor
+        .pointer("/annotations/vnd.docker.reference.type")
+        .and_then(serde_json::Value::as_str)
+        == Some("attestation-manifest")
+        && descriptor
+            .pointer("/platform/os")
+            .and_then(serde_json::Value::as_str)
+            == Some("unknown")
+    {
+        return Ok(0);
+    }
+    if let Some(children) = manifest
+        .get("manifests")
+        .and_then(serde_json::Value::as_array)
+    {
+        if children.is_empty() || children.len() > 16 {
+            return Err("OCI descriptor count exceeds limit".into());
+        }
+        let mut matches = 0;
+        for child in children {
+            matches += verify_oci_manifest(child, config_id, read_entry, depth + 1)?;
+        }
+        return Ok(matches);
+    }
+    if manifest
+        .pointer("/config/digest")
+        .and_then(serde_json::Value::as_str)
+        != Some(config_id)
+    {
+        return Err("OCI manifest does not reference the approved config".into());
+    }
+    Ok(1)
+}
+
+pub(crate) fn docker_archive_image_identity(
     archive_path: &Path,
     image_reference: &str,
-) -> Result<String, String> {
+) -> Result<DockerArchiveIdentity, String> {
     const MAX_DOCKER_MANIFEST_BYTES: u64 = 64 * 1024;
     const MAX_DOCKER_CONFIG_BYTES: u64 = 1024 * 1024;
     let read_entry = |wanted: &str, max_bytes: u64| -> Result<Option<Vec<u8>>, String> {
@@ -112,5 +180,43 @@ pub(crate) fn docker_archive_image_id(
     if sha256_bytes(&config_bytes) != digest {
         return Err("Docker image archive config digest does not match its content".into());
     }
-    Ok(format!("sha256:{digest}"))
+    let config_id = format!("sha256:{digest}");
+    // Docker's classic store identifies an image by its config; containerd's
+    // store identifies it by the OCI manifest. Accept only identities proven
+    // to reference the very same config in this verified archive.
+    let manifest_id = if let Some(index) = read_entry("index.json", MAX_DOCKER_MANIFEST_BYTES)? {
+        let index: serde_json::Value =
+            serde_json::from_slice(&index).map_err(|_| "invalid OCI archive index".to_string())?;
+        let descriptors = index
+            .get("manifests")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| "OCI archive descriptors missing".to_string())?;
+        if descriptors.len() != 1 {
+            return Err("multi-image OCI archives are unsupported".into());
+        }
+        let descriptor = &descriptors[0];
+        let reference = descriptor
+            .get("digest")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "OCI manifest digest missing".to_string())?;
+        let hex = reference
+            .strip_prefix("sha256:")
+            .filter(|hex| valid_sha256(hex))
+            .ok_or_else(|| "OCI manifest digest invalid".to_string())?;
+        let bytes = read_entry(&format!("blobs/sha256/{hex}"), MAX_DOCKER_MANIFEST_BYTES)?
+            .ok_or_else(|| "OCI manifest content missing".to_string())?;
+        if sha256_bytes(&bytes) != hex {
+            return Err("OCI manifest digest mismatch".into());
+        }
+        if verify_oci_manifest(descriptor, &config_id, &read_entry, 0)? != 1 {
+            return Err("OCI archive must contain exactly one runnable image".into());
+        }
+        Some(reference.to_owned())
+    } else {
+        None
+    };
+    Ok(DockerArchiveIdentity {
+        config_id,
+        manifest_id,
+    })
 }

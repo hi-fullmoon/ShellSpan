@@ -1,0 +1,1860 @@
+{
+  "recordedAt": "2026-09-25T10:41:08.964Z",
+  "scope": "Native UI acceptance against the isolated localhost Linux fixture only",
+  "workflowId": "workflow-8f807b4d-05a0-48a7-a70c-aff803cd8b0b",
+  "sourcePath": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpcoMLCs",
+  "summary": {
+    "id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+    "workflow_id": "workflow-8f807b4d-05a0-48a7-a70c-aff803cd8b0b",
+    "workflow_revision": 1,
+    "operation_kind": "deploy",
+    "trigger_kind": "manual",
+    "status": "succeeded",
+    "definition_digest": "sha256:60f972b20efe2df481172e80966c6d11f8b07cbbab1ac24aaf6824c885eee2c9",
+    "plan_digest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0",
+    "last_event_sequence": 83,
+    "created_at": 1790332561373,
+    "updated_at": 1790332839303,
+    "started_at": 1790332640392,
+    "finished_at": 1790332678367
+  },
+  "plan": {
+    "artifacts": [
+      {
+        "artifactReference": "deployment-artifact:sha256:8a72fe38d7ddb36671c454df608399c85f852f716559d7eac9d57dba9a5b8d0c",
+        "contentDigest": "sha256:aca5ac128b0421663ff940217daa0cf582c43cc20542807bd9ad0953feeb6273",
+        "manifestDigest": "sha256:8a72fe38d7ddb36671c454df608399c85f852f716559d7eac9d57dba9a5b8d0c"
+      },
+      {
+        "artifactReference": "deployment-artifact:sha256:02176ca6322da86eeb41acd3f6fa4966e4e06afc45334ae89b5261345d5d93be",
+        "contentDigest": "sha256:8aa0ba379db6246931cfced74eb12382f8da9b3051404c39472552ca49c492ad",
+        "manifestDigest": "sha256:02176ca6322da86eeb41acd3f6fa4966e4e06afc45334ae89b5261345d5d93be"
+      }
+    ],
+    "compiled": {
+      "compensations": [
+        {
+          "compensationKind": "discard_unactivated_staging",
+          "fixedActions": [
+            "mark_staging_for_cleanup"
+          ],
+          "nodeId": "transfer"
+        },
+        {
+          "compensationKind": "mark_unactivated_compose_release",
+          "fixedActions": [
+            "mark_staging_for_cleanup"
+          ],
+          "nodeId": "prepare"
+        },
+        {
+          "compensationKind": "content_addressed_image_noop",
+          "fixedActions": [],
+          "nodeId": "load"
+        },
+        {
+          "compensationKind": "restore_compose_release",
+          "fixedActions": [
+            "compose_up_frozen_previous_release",
+            "capture_service_state"
+          ],
+          "nodeId": "deploy"
+        },
+        {
+          "compensationKind": "restore_previous_release_identity",
+          "fixedActions": [
+            "commit_frozen_previous_release_identity"
+          ],
+          "nodeId": "commit"
+        }
+      ],
+      "definitionDigest": "sha256:60f972b20efe2df481172e80966c6d11f8b07cbbab1ac24aaf6824c885eee2c9",
+      "nodes": [
+        {
+          "configDigest": "sha256:7f75582ef771d8592e9a5865f336a311e6605d031a403cad8b595fc37a145b0a",
+          "displayName": "Freeze source",
+          "effectClass": "localRead",
+          "executionDomain": "local",
+          "fixedActions": [
+            "freeze_source_snapshot"
+          ],
+          "inputDigest": "sha256:f380015d86a38ac9848f7df04d7323073dc603a6e9804e9155f3e025bd12149a",
+          "nodeId": "source",
+          "nodeType": "source.snapshot",
+          "nodeTypeVersion": 1,
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "timeoutSeconds": 60
+        },
+        {
+          "configDigest": "sha256:c62e301c4ab5c2233ea80eb343ae96a6246e48ceb13135f19a28e336be999277",
+          "displayName": "Build container image",
+          "effectClass": "localBuild",
+          "executionDomain": "local",
+          "fixedActions": [
+            "docker_buildx_build",
+            "inspect_image",
+            "export_image_archive"
+          ],
+          "inputDigest": "sha256:9b7aa0305b47686476a1292279b82590fa4ac5b337f866bcbb41f980fe8212ba",
+          "nodeId": "image",
+          "nodeType": "build.docker-buildx",
+          "nodeTypeVersion": 2,
+          "retry": {
+            "initialBackoffSeconds": 2,
+            "maxAttempts": 2,
+            "maxBackoffSeconds": 10
+          },
+          "timeoutSeconds": 3600
+        },
+        {
+          "configDigest": "sha256:b6084fe11d7dddca41401055f7a6d5a6dccd315060980af8f9d1af8678f122ff",
+          "displayName": "Bind Compose configuration",
+          "effectClass": "pure",
+          "executionDomain": "local",
+          "fixedActions": [
+            "bind_compose_config_to_image_bundle"
+          ],
+          "inputDigest": "sha256:7809463667da76a9f393c0def3fce91e6b0ed8e96feabc3e4873f4d4f8c83917",
+          "nodeId": "bundle",
+          "nodeType": "artifact.bundle-compose",
+          "nodeTypeVersion": 1,
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "timeoutSeconds": 60
+        },
+        {
+          "configDigest": "sha256:571adf6272117101b8417f254720ad852b0ea75d82168bc4f97cb132450e9c78",
+          "displayName": "Check production target",
+          "effectClass": "remoteRead",
+          "executionDomain": "target",
+          "fixedActions": [
+            "inspect_target_capabilities",
+            "inspect_release_state"
+          ],
+          "inputDigest": "sha256:b8273bbb1e126b9274d16f1ed08d83cb4524202c089f93f0cb6c9c5bcad1f9f6",
+          "nodeId": "preflight",
+          "nodeType": "target.preflight",
+          "nodeTypeVersion": 2,
+          "retry": {
+            "initialBackoffSeconds": 2,
+            "maxAttempts": 2,
+            "maxBackoffSeconds": 10
+          },
+          "targetId": "production",
+          "timeoutSeconds": 120
+        },
+        {
+          "configDigest": "sha256:8d881ff52f39b5b3f21d4b47b3cb102507af205518671c33a5312c234eff3b8e",
+          "displayName": "Create release candidate",
+          "effectClass": "pure",
+          "executionDomain": "local",
+          "fixedActions": [
+            "bind_bundle_target_and_release_strategy"
+          ],
+          "inputDigest": "sha256:e558e91c0b64518c103a202bf93bb55b06c38a26cb7c543c404cecfb177427f5",
+          "nodeId": "candidate",
+          "nodeType": "release.create-candidate",
+          "nodeTypeVersion": 1,
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "targetId": "production",
+          "timeoutSeconds": 30
+        },
+        {
+          "configDigest": "sha256:7c5cb3aceeb5c008393aaf13d6f89fbd8c68f14d57af2dac9f828e4b659f0c6d",
+          "displayName": "Approve production release",
+          "effectClass": "control",
+          "executionDomain": "nativeUi",
+          "fixedActions": [
+            "present_native_approval"
+          ],
+          "inputDigest": "sha256:d5d9a9909a2d399065864a259a8363f2f3b90e9691ab6300f60eb698a69a2c65",
+          "nodeId": "approval",
+          "nodeType": "control.approval",
+          "nodeTypeVersion": 1,
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "targetId": "production",
+          "timeoutSeconds": 3600
+        },
+        {
+          "configDigest": "sha256:7c5cb3aceeb5c008393aaf13d6f89fbd8c68f14d57af2dac9f828e4b659f0c6d",
+          "displayName": "Transfer release bundle",
+          "effectClass": "remoteWrite",
+          "executionDomain": "target",
+          "fixedActions": [
+            "stage_artifact",
+            "verify_remote_digest"
+          ],
+          "inputDigest": "sha256:438e997040b53258cc9cc88143801ac8569c21ce5d1bb91428ff10fc9ce3aec5",
+          "nodeId": "transfer",
+          "nodeType": "transfer.sftp",
+          "nodeTypeVersion": 2,
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "targetId": "production",
+          "timeoutSeconds": 1800
+        },
+        {
+          "configDigest": "sha256:7c5cb3aceeb5c008393aaf13d6f89fbd8c68f14d57af2dac9f828e4b659f0c6d",
+          "displayName": "Prepare Compose release",
+          "effectClass": "remoteWrite",
+          "executionDomain": "target",
+          "fixedActions": [
+            "verify_compose_staging",
+            "mark_compose_release_prepared"
+          ],
+          "inputDigest": "sha256:0839c056c789ea007faaa6703e759e79bd4d6cd97a42bd2caf8d5d651eb084a3",
+          "nodeId": "prepare",
+          "nodeType": "release.prepare-compose",
+          "nodeTypeVersion": 1,
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "targetId": "production",
+          "timeoutSeconds": 300
+        },
+        {
+          "configDigest": "sha256:7c5cb3aceeb5c008393aaf13d6f89fbd8c68f14d57af2dac9f828e4b659f0c6d",
+          "displayName": "Load container image",
+          "effectClass": "remoteWrite",
+          "executionDomain": "target",
+          "fixedActions": [
+            "load_verified_image_archive",
+            "verify_loaded_image_identity"
+          ],
+          "inputDigest": "sha256:ce0eb92099c61d107107714179b0ee320c5b20ca19c525a7f53e588bb65ab1b1",
+          "nodeId": "load",
+          "nodeType": "runtime.load-image",
+          "nodeTypeVersion": 1,
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "targetId": "production",
+          "timeoutSeconds": 900
+        },
+        {
+          "configDigest": "sha256:04f6224d4c1e869626a77d2f8b6dd2cab5c8292a8c0fbbd582b9a8ed2c85ae74",
+          "displayName": "Deploy Compose project",
+          "effectClass": "serviceControl",
+          "executionDomain": "target",
+          "fixedActions": [
+            "compose_config",
+            "compose_up_no_build_fixed_pull_policy",
+            "capture_service_state"
+          ],
+          "inputDigest": "sha256:3abcbaf5098e7abd50766137c9d460353ff88d6e34707bc69589928777384bba",
+          "nodeId": "deploy",
+          "nodeType": "deploy.compose",
+          "nodeTypeVersion": 2,
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "targetId": "production",
+          "timeoutSeconds": 900
+        },
+        {
+          "configDigest": "sha256:378096007b1650ae13e559c8916288ea8f566a144035bd8c1dcc5df7eb5dd882",
+          "displayName": "Verify application",
+          "effectClass": "remoteRead",
+          "executionDomain": "target",
+          "fixedActions": [
+            "perform_bounded_http_probe"
+          ],
+          "inputDigest": "sha256:6e1a75199dbb13f7fea9c816c42b1bf15a689e44ffd94310be95cc0a85378cd1",
+          "nodeId": "verify",
+          "nodeType": "verify.http",
+          "nodeTypeVersion": 2,
+          "retry": {
+            "initialBackoffSeconds": 2,
+            "maxAttempts": 3,
+            "maxBackoffSeconds": 10
+          },
+          "targetId": "production",
+          "timeoutSeconds": 120
+        },
+        {
+          "configDigest": "sha256:7c5cb3aceeb5c008393aaf13d6f89fbd8c68f14d57af2dac9f828e4b659f0c6d",
+          "displayName": "Commit active release",
+          "effectClass": "trafficSwitch",
+          "executionDomain": "target",
+          "fixedActions": [
+            "commit_active_release_identity"
+          ],
+          "inputDigest": "sha256:c99e8d7d41e5463b5a1c74b0031a207f6b3a454a3fb6f77592fa008e887221f1",
+          "nodeId": "commit",
+          "nodeType": "release.commit",
+          "nodeTypeVersion": 1,
+          "retry": {
+            "initialBackoffSeconds": 0,
+            "maxAttempts": 1,
+            "maxBackoffSeconds": 0
+          },
+          "targetId": "production",
+          "timeoutSeconds": 60
+        }
+      ],
+      "planDigest": "sha256:3c0864e3b02e6756b2595fd01262294030103ebcca132236efb90849691682a4",
+      "policy": {
+        "automaticRestore": true,
+        "failFast": true,
+        "maxParallelLocalNodes": 4,
+        "releasesToKeep": 5
+      },
+      "risks": {
+        "entries": [
+          {
+            "effectClass": "localBuild",
+            "level": "medium",
+            "nodeId": "image",
+            "summaryKey": "deployment.risk.build_docker_buildx"
+          },
+          {
+            "effectClass": "control",
+            "level": "high",
+            "nodeId": "approval",
+            "summaryKey": "deployment.risk.control_approval"
+          },
+          {
+            "effectClass": "remoteWrite",
+            "level": "medium",
+            "nodeId": "transfer",
+            "summaryKey": "deployment.risk.transfer_sftp"
+          },
+          {
+            "effectClass": "remoteWrite",
+            "level": "medium",
+            "nodeId": "prepare",
+            "summaryKey": "deployment.risk.release_prepare_compose"
+          },
+          {
+            "effectClass": "remoteWrite",
+            "level": "medium",
+            "nodeId": "load",
+            "summaryKey": "deployment.risk.runtime_load_image"
+          },
+          {
+            "effectClass": "serviceControl",
+            "level": "high",
+            "nodeId": "deploy",
+            "summaryKey": "deployment.risk.deploy_compose"
+          },
+          {
+            "effectClass": "trafficSwitch",
+            "level": "high",
+            "nodeId": "commit",
+            "summaryKey": "deployment.risk.release_commit"
+          }
+        ],
+        "highestLevel": "high"
+      },
+      "schemaVersion": 1,
+      "targetEffectLanes": {
+        "production": [
+          "transfer",
+          "prepare",
+          "load",
+          "deploy",
+          "commit"
+        ]
+      },
+      "topologyLayers": [
+        [
+          "source"
+        ],
+        [
+          "image"
+        ],
+        [
+          "bundle"
+        ],
+        [
+          "preflight"
+        ],
+        [
+          "candidate"
+        ],
+        [
+          "approval"
+        ],
+        [
+          "transfer"
+        ],
+        [
+          "prepare"
+        ],
+        [
+          "load"
+        ],
+        [
+          "deploy"
+        ],
+        [
+          "verify"
+        ],
+        [
+          "commit"
+        ]
+      ]
+    },
+    "definitionDigest": "sha256:60f972b20efe2df481172e80966c6d11f8b07cbbab1ac24aaf6824c885eee2c9",
+    "executorVersions": {
+      "approval": "docker-compose/2",
+      "bundle": "docker-compose/2",
+      "candidate": "docker-compose/2",
+      "commit": "docker-compose/2",
+      "deploy": "docker-compose/2",
+      "image": "docker-compose/2",
+      "load": "docker-compose/2",
+      "preflight": "docker-compose/2",
+      "prepare": "docker-compose/2",
+      "source": "docker-compose/2",
+      "transfer": "docker-compose/2",
+      "verify": "docker-compose/2"
+    },
+    "expiresAt": 1790334361373,
+    "operationKind": "deploy",
+    "parameters": {},
+    "planDigest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0",
+    "preparedAt": 1790332561373,
+    "runId": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+    "schemaVersion": 1,
+    "source": {
+      "binding": {
+        "excludedPaths": [],
+        "id": "31cd8e13-3581-4a0e-ae20-cc52e0c810e6",
+        "includedUntracked": [
+          ".dockerignore",
+          "Dockerfile",
+          "compose.yaml"
+        ],
+        "localPath": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpcoMLCs",
+        "repositoryIdentity": "sha256:35c67d71b7cbfc4e805b1187638ba37bc4c43739dc72df3fe8222ca7fffc859f",
+        "revision": 1
+      },
+      "changedFiles": [
+        ".dockerignore",
+        "Dockerfile",
+        "compose.yaml"
+      ],
+      "dirty": true,
+      "metadataDigest": "sha256:459041c735450940658ca1ccca161e4d8219148f0c4339efadca830606df3d13",
+      "revision": "68295dfbaf8b1f283e1840ebd58d43fb99cab30a",
+      "snapshotDigest": "sha256:937bc422c5cdd741e89369873ce7376661b21c2440e0d2baaad4c65033716319",
+      "sourceRef": "workspace"
+    },
+    "target": {
+      "capabilitiesDigest": "sha256:38a837d79db949c1d805cb437e6c105d704e383d352b8765dae6393d901ee223",
+      "connectionProfileId": "mugfgmv7-u6z8r9l",
+      "hostIdentityDigest": "sha256:e063514fe97de5bb6abe88574eb426b26b5f14c5580da12e5dde2cfe9f946101",
+      "profileRevision": 1790308509379,
+      "remoteRoot": "/srv/shellspan-deployment/phase3-ui-20260925",
+      "targetId": "production"
+    },
+    "targetRelease": {
+      "artifactContentDigest": "sha256:aca5ac128b0421663ff940217daa0cf582c43cc20542807bd9ad0953feeb6273",
+      "layoutDigest": "sha256:6faa6076fe7b32ae18680abe07c04b67f3b39023c64df181da5ba6c912f7889c",
+      "releaseId": "release-aca5ac128b042166"
+    },
+    "triggerKind": "manual",
+    "workflowId": "workflow-8f807b4d-05a0-48a7-a70c-aff803cd8b0b",
+    "workflowRevision": 1
+  },
+  "approval": {
+    "artifacts": [
+      {
+        "artifactType": "application/vnd.shellspan.compose-release",
+        "componentCount": 2,
+        "components": [
+          {
+            "annotations": {},
+            "digest": "sha256:38aa3ceb9510676438fc9ed4edad1c7d1c8879c04e2cd6d9951d6785746489d0",
+            "mediaType": "application/vnd.shellspan.compose+yaml",
+            "name": "compose.yaml",
+            "role": "deployment-config",
+            "size": 455
+          },
+          {
+            "annotations": {
+              "imageId": "sha256:42de461a6a2c46b7ff9f6b64ebbbdc158e550de164897473500547a1a436e4ce",
+              "imageManifestId": "sha256:810cfe614f0eff5dd495d93f74deea8614b4a651cc30df6df24dcdfd080d2eae",
+              "imageReference": "example/web:release-53afdd8db567cb4d"
+            },
+            "digest": "sha256:32b5a623be8cc1910ecd72f4aaa5a29dad2fdb37bab6f981c130d95124331ec2",
+            "mediaType": "application/vnd.shellspan.oci-image.tar",
+            "name": "image.tar",
+            "role": "application",
+            "size": 244519424
+          }
+        ],
+        "handle": {
+          "artifactReference": "deployment-artifact:sha256:8a72fe38d7ddb36671c454df608399c85f852f716559d7eac9d57dba9a5b8d0c",
+          "contentDigest": "sha256:aca5ac128b0421663ff940217daa0cf582c43cc20542807bd9ad0953feeb6273",
+          "manifestDigest": "sha256:8a72fe38d7ddb36671c454df608399c85f852f716559d7eac9d57dba9a5b8d0c"
+        },
+        "totalSize": 244519879
+      },
+      {
+        "artifactType": "application/vnd.shellspan.oci-image",
+        "componentCount": 1,
+        "components": [
+          {
+            "annotations": {
+              "imageId": "sha256:42de461a6a2c46b7ff9f6b64ebbbdc158e550de164897473500547a1a436e4ce",
+              "imageManifestId": "sha256:810cfe614f0eff5dd495d93f74deea8614b4a651cc30df6df24dcdfd080d2eae",
+              "imageReference": "example/web:release-53afdd8db567cb4d"
+            },
+            "digest": "sha256:32b5a623be8cc1910ecd72f4aaa5a29dad2fdb37bab6f981c130d95124331ec2",
+            "mediaType": "application/vnd.shellspan.oci-image.tar",
+            "name": "image.tar",
+            "role": "application",
+            "size": 244519424
+          }
+        ],
+        "handle": {
+          "artifactReference": "deployment-artifact:sha256:02176ca6322da86eeb41acd3f6fa4966e4e06afc45334ae89b5261345d5d93be",
+          "contentDigest": "sha256:8aa0ba379db6246931cfced74eb12382f8da9b3051404c39472552ca49c492ad",
+          "manifestDigest": "sha256:02176ca6322da86eeb41acd3f6fa4966e4e06afc45334ae89b5261345d5d93be"
+        },
+        "totalSize": 244519424
+      }
+    ],
+    "compensations": [
+      {
+        "compensationKind": "discard_unactivated_staging",
+        "fixedActions": [
+          "mark_staging_for_cleanup"
+        ],
+        "nodeId": "transfer"
+      },
+      {
+        "compensationKind": "mark_unactivated_compose_release",
+        "fixedActions": [
+          "mark_staging_for_cleanup"
+        ],
+        "nodeId": "prepare"
+      },
+      {
+        "compensationKind": "content_addressed_image_noop",
+        "fixedActions": [],
+        "nodeId": "load"
+      },
+      {
+        "compensationKind": "restore_compose_release",
+        "fixedActions": [
+          "compose_up_frozen_previous_release",
+          "capture_service_state"
+        ],
+        "nodeId": "deploy"
+      },
+      {
+        "compensationKind": "restore_previous_release_identity",
+        "fixedActions": [
+          "commit_frozen_previous_release_identity"
+        ],
+        "nodeId": "commit"
+      }
+    ],
+    "currentRelease": null,
+    "definitionDigest": "sha256:60f972b20efe2df481172e80966c6d11f8b07cbbab1ac24aaf6824c885eee2c9",
+    "effects": [
+      {
+        "displayName": "Transfer release bundle",
+        "effectClass": "remoteWrite",
+        "fixedActions": [
+          "stage_artifact",
+          "verify_remote_digest"
+        ],
+        "nodeId": "transfer"
+      },
+      {
+        "displayName": "Prepare Compose release",
+        "effectClass": "remoteWrite",
+        "fixedActions": [
+          "verify_compose_staging",
+          "mark_compose_release_prepared"
+        ],
+        "nodeId": "prepare"
+      },
+      {
+        "displayName": "Load container image",
+        "effectClass": "remoteWrite",
+        "fixedActions": [
+          "load_verified_image_archive",
+          "verify_loaded_image_identity"
+        ],
+        "nodeId": "load"
+      },
+      {
+        "displayName": "Deploy Compose project",
+        "effectClass": "serviceControl",
+        "fixedActions": [
+          "compose_config",
+          "compose_up_no_build_fixed_pull_policy",
+          "capture_service_state"
+        ],
+        "nodeId": "deploy"
+      },
+      {
+        "displayName": "Commit active release",
+        "effectClass": "trafficSwitch",
+        "fixedActions": [
+          "commit_active_release_identity"
+        ],
+        "nodeId": "commit"
+      }
+    ],
+    "expiresAt": 1790334361373,
+    "operationKind": "deploy",
+    "parameters": {},
+    "planDigest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0",
+    "preflight": {
+      "capabilities": {
+        "atomicSymlink": "1",
+        "compose": "1",
+        "docker": "1",
+        "http": "1",
+        "nginx": "1",
+        "sftp": "1",
+        "ssh": "1"
+      },
+      "currentRelease": null,
+      "display": {
+        "host": "127.0.0.1",
+        "port": 22224,
+        "username": "shellspan"
+      },
+      "identity": {
+        "capabilitiesDigest": "sha256:38a837d79db949c1d805cb437e6c105d704e383d352b8765dae6393d901ee223",
+        "connectionProfileId": "mugfgmv7-u6z8r9l",
+        "hostIdentityDigest": "sha256:e063514fe97de5bb6abe88574eb426b26b5f14c5580da12e5dde2cfe9f946101",
+        "profileRevision": 1790308509379,
+        "remoteRoot": "/srv/shellspan-deployment/phase3-ui-20260925",
+        "targetId": "production"
+      }
+    },
+    "preparedAt": 1790332561373,
+    "previousRelease": null,
+    "releaseReview": {
+      "automaticRestore": true,
+      "configuration": [
+        {
+          "config": {
+            "composeFiles": [
+              "compose.yaml"
+            ],
+            "nonSensitiveFiles": [],
+            "projectName": "phase3-ui-20260925",
+            "registeredMounts": [],
+            "services": [
+              "web"
+            ]
+          },
+          "name": "Bind Compose configuration",
+          "nodeId": "bundle",
+          "type": "artifact.bundle-compose"
+        },
+        {
+          "config": {
+            "projectName": "phase3-ui-20260925",
+            "pullPolicy": "never",
+            "services": [
+              "web"
+            ],
+            "targetId": "production"
+          },
+          "name": "Deploy Compose project",
+          "nodeId": "deploy",
+          "type": "deploy.compose"
+        },
+        {
+          "config": {
+            "expectedStatuses": [
+              200
+            ],
+            "path": "/for-you/",
+            "port": 3000,
+            "scheme": "http",
+            "targetId": "production"
+          },
+          "name": "Verify application",
+          "nodeId": "verify",
+          "type": "verify.http"
+        }
+      ]
+    },
+    "retention": 5,
+    "risks": {
+      "entries": [
+        {
+          "effectClass": "localBuild",
+          "level": "medium",
+          "nodeId": "image",
+          "summaryKey": "deployment.risk.build_docker_buildx"
+        },
+        {
+          "effectClass": "control",
+          "level": "high",
+          "nodeId": "approval",
+          "summaryKey": "deployment.risk.control_approval"
+        },
+        {
+          "effectClass": "remoteWrite",
+          "level": "medium",
+          "nodeId": "transfer",
+          "summaryKey": "deployment.risk.transfer_sftp"
+        },
+        {
+          "effectClass": "remoteWrite",
+          "level": "medium",
+          "nodeId": "prepare",
+          "summaryKey": "deployment.risk.release_prepare_compose"
+        },
+        {
+          "effectClass": "remoteWrite",
+          "level": "medium",
+          "nodeId": "load",
+          "summaryKey": "deployment.risk.runtime_load_image"
+        },
+        {
+          "effectClass": "serviceControl",
+          "level": "high",
+          "nodeId": "deploy",
+          "summaryKey": "deployment.risk.deploy_compose"
+        },
+        {
+          "effectClass": "trafficSwitch",
+          "level": "high",
+          "nodeId": "commit",
+          "summaryKey": "deployment.risk.release_commit"
+        }
+      ],
+      "highestLevel": "high"
+    },
+    "runId": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+    "schemaVersion": 1,
+    "source": {
+      "binding": {
+        "excludedPaths": [],
+        "id": "31cd8e13-3581-4a0e-ae20-cc52e0c810e6",
+        "includedUntracked": [
+          ".dockerignore",
+          "Dockerfile",
+          "compose.yaml"
+        ],
+        "localPath": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpcoMLCs",
+        "repositoryIdentity": "sha256:35c67d71b7cbfc4e805b1187638ba37bc4c43739dc72df3fe8222ca7fffc859f",
+        "revision": 1
+      },
+      "changedFiles": [
+        ".dockerignore",
+        "Dockerfile",
+        "compose.yaml"
+      ],
+      "dirty": true,
+      "metadataDigest": "sha256:459041c735450940658ca1ccca161e4d8219148f0c4339efadca830606df3d13",
+      "revision": "68295dfbaf8b1f283e1840ebd58d43fb99cab30a",
+      "snapshotDigest": "sha256:937bc422c5cdd741e89369873ce7376661b21c2440e0d2baaad4c65033716319",
+      "sourceRef": "workspace"
+    },
+    "target": {
+      "capabilitiesDigest": "sha256:38a837d79db949c1d805cb437e6c105d704e383d352b8765dae6393d901ee223",
+      "connectionProfileId": "mugfgmv7-u6z8r9l",
+      "hostIdentityDigest": "sha256:e063514fe97de5bb6abe88574eb426b26b5f14c5580da12e5dde2cfe9f946101",
+      "profileRevision": 1790308509379,
+      "remoteRoot": "/srv/shellspan-deployment/phase3-ui-20260925",
+      "targetId": "production"
+    },
+    "targetRelease": {
+      "artifactContentDigest": "sha256:aca5ac128b0421663ff940217daa0cf582c43cc20542807bd9ad0953feeb6273",
+      "layoutDigest": "sha256:6faa6076fe7b32ae18680abe07c04b67f3b39023c64df181da5ba6c912f7889c",
+      "releaseId": "release-aca5ac128b042166"
+    },
+    "triggerKind": "manual",
+    "verificationNodes": [
+      "verify"
+    ],
+    "workflowId": "workflow-8f807b4d-05a0-48a7-a70c-aff803cd8b0b",
+    "workflowRevision": 1
+  },
+  "receipts": [
+    {
+      "attempt": 1,
+      "nodeId": "transfer",
+      "operationId": "effect-3bf4fd9091ecb0880734797f77c1242193ae667429c7aecc3ca867fe31f92",
+      "payloadDigest": "sha256:bc9db64c64b6c4c673ea6f09e4280df7730fbc1b9f80bdec19ecca8fcc11390f",
+      "planDigest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0",
+      "receiptType": "transfer.sftp",
+      "runId": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "schemaVersion": 1,
+      "targetId": "production"
+    },
+    {
+      "attempt": 1,
+      "nodeId": "prepare",
+      "operationId": "effect-9e5394ac133186d0e8be8d836e649eb567ef2683869c700259c8574034d23",
+      "payloadDigest": "sha256:bc9db64c64b6c4c673ea6f09e4280df7730fbc1b9f80bdec19ecca8fcc11390f",
+      "planDigest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0",
+      "receiptType": "release.prepare-compose",
+      "runId": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "schemaVersion": 1,
+      "targetId": "production"
+    },
+    {
+      "attempt": 1,
+      "nodeId": "load",
+      "operationId": "effect-e2ad1927277ae25a87dbc4b95cbb1ba83c6ad49af8a2006618cc92dec6946",
+      "payloadDigest": "sha256:bc9db64c64b6c4c673ea6f09e4280df7730fbc1b9f80bdec19ecca8fcc11390f",
+      "planDigest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0",
+      "receiptType": "runtime.load-image",
+      "runId": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "schemaVersion": 1,
+      "targetId": "production"
+    },
+    {
+      "attempt": 1,
+      "nodeId": "deploy",
+      "operationId": "effect-7be1d28bf4b04cfd227fc91d9618a6d973e7e7aa9466f0e05503d6ab934f8",
+      "payloadDigest": "sha256:99f692da10ece57f9e7f95a2383e3f02b5e44086ea1bdaff02fa69d18834ae6c",
+      "planDigest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0",
+      "receiptType": "deploy.compose",
+      "runId": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "schemaVersion": 1,
+      "targetId": "production"
+    },
+    {
+      "attempt": 1,
+      "nodeId": "commit",
+      "operationId": "effect-5182e824f45c083b843c377a84d06551029d728961fa298a56f7ff5d1a7f5",
+      "payloadDigest": "sha256:e6c0c3e99b07ac682c0093e6eb8309e0d70296e0bb11a63ab2d7867b34db3b11",
+      "planDigest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0",
+      "receiptType": "release.commit",
+      "runId": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "schemaVersion": 1,
+      "targetId": "production"
+    }
+  ],
+  "events": [
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 1,
+      "node_id": null,
+      "attempt": null,
+      "event_kind": "run_created",
+      "status": "planned",
+      "summary_key": "deployment.run.created",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 2,
+      "node_id": "source",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "ready",
+      "summary_key": "deployment.node.ready",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 3,
+      "node_id": "source",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "running",
+      "summary_key": "deployment.node.running",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 4,
+      "node_id": "source",
+      "attempt": 1,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 5,
+      "node_id": "source",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 6,
+      "node_id": "source",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 7,
+      "node_id": "source",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.node.succeeded",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 8,
+      "node_id": "image",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "ready",
+      "summary_key": "deployment.node.ready",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 9,
+      "node_id": "image",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "running",
+      "summary_key": "deployment.node.running",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 10,
+      "node_id": "image",
+      "attempt": 1,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 11,
+      "node_id": "image",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 12,
+      "node_id": "image",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 13,
+      "node_id": "image",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.node.succeeded",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 14,
+      "node_id": "bundle",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "ready",
+      "summary_key": "deployment.node.ready",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 15,
+      "node_id": "bundle",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "running",
+      "summary_key": "deployment.node.running",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 16,
+      "node_id": "bundle",
+      "attempt": 1,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 17,
+      "node_id": "bundle",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 18,
+      "node_id": "bundle",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 19,
+      "node_id": "bundle",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.node.succeeded",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 20,
+      "node_id": "preflight",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "ready",
+      "summary_key": "deployment.node.ready",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 21,
+      "node_id": "preflight",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "running",
+      "summary_key": "deployment.node.running",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 22,
+      "node_id": "preflight",
+      "attempt": 1,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 23,
+      "node_id": "preflight",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 24,
+      "node_id": "preflight",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 25,
+      "node_id": "preflight",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.node.succeeded",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 26,
+      "node_id": "candidate",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "ready",
+      "summary_key": "deployment.node.ready",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 27,
+      "node_id": "candidate",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "running",
+      "summary_key": "deployment.node.running",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 28,
+      "node_id": "candidate",
+      "attempt": 1,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 29,
+      "node_id": "candidate",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 30,
+      "node_id": "candidate",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 31,
+      "node_id": "candidate",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.node.succeeded",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 32,
+      "node_id": "approval",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "awaiting_approval",
+      "summary_key": "deployment.node.awaitingApproval",
+      "recorded_at": 1790332561373,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 33,
+      "node_id": null,
+      "attempt": null,
+      "event_kind": "status_changed",
+      "status": "awaiting_approval",
+      "summary_key": "deployment.run.awaitingApproval",
+      "recorded_at": 1790332561373,
+      "payload": {
+        "expiresAt": 1790334361373,
+        "planDigest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0"
+      }
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 34,
+      "node_id": "approval",
+      "attempt": 1,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332624765,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 35,
+      "node_id": "approval",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332624765,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 36,
+      "node_id": "approval",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332624765,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 37,
+      "node_id": "approval",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.node.approved",
+      "recorded_at": 1790332624765,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 38,
+      "node_id": null,
+      "attempt": null,
+      "event_kind": "status_changed",
+      "status": "approved",
+      "summary_key": "deployment.run.approved",
+      "recorded_at": 1790332624765,
+      "payload": {
+        "approvedAt": 1790332624765,
+        "planDigest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0"
+      }
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 39,
+      "node_id": null,
+      "attempt": null,
+      "event_kind": "status_changed",
+      "status": "in_progress",
+      "summary_key": "deployment.run.started",
+      "recorded_at": 1790332640392,
+      "payload": {
+        "planDigest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0"
+      }
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 40,
+      "node_id": "transfer",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "ready",
+      "summary_key": "deployment.node.ready",
+      "recorded_at": 1790332651930,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 41,
+      "node_id": "transfer",
+      "attempt": 1,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332651931,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 42,
+      "node_id": "transfer",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332651931,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 43,
+      "node_id": "transfer",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "running",
+      "summary_key": "deployment.node.running",
+      "recorded_at": 1790332651931,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 44,
+      "node_id": "transfer",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332668596,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 45,
+      "node_id": "transfer",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.node.succeeded",
+      "recorded_at": 1790332668596,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 46,
+      "node_id": "prepare",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "ready",
+      "summary_key": "deployment.node.ready",
+      "recorded_at": 1790332668597,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 47,
+      "node_id": "prepare",
+      "attempt": 1,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332668597,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 48,
+      "node_id": "prepare",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332668597,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 49,
+      "node_id": "prepare",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "running",
+      "summary_key": "deployment.node.running",
+      "recorded_at": 1790332668597,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 50,
+      "node_id": "prepare",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332670662,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 51,
+      "node_id": "prepare",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.node.succeeded",
+      "recorded_at": 1790332670662,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 52,
+      "node_id": "load",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "ready",
+      "summary_key": "deployment.node.ready",
+      "recorded_at": 1790332670663,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 53,
+      "node_id": "load",
+      "attempt": 1,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332670664,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 54,
+      "node_id": "load",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332670664,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 55,
+      "node_id": "load",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "running",
+      "summary_key": "deployment.node.running",
+      "recorded_at": 1790332670664,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 56,
+      "node_id": "load",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332673695,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 57,
+      "node_id": "load",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.node.succeeded",
+      "recorded_at": 1790332673695,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 58,
+      "node_id": "deploy",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "ready",
+      "summary_key": "deployment.node.ready",
+      "recorded_at": 1790332673703,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 59,
+      "node_id": "deploy",
+      "attempt": 1,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332673704,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 60,
+      "node_id": "deploy",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332673704,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 61,
+      "node_id": "deploy",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "running",
+      "summary_key": "deployment.node.running",
+      "recorded_at": 1790332673704,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 62,
+      "node_id": "deploy",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332675975,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 63,
+      "node_id": "deploy",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.node.succeeded",
+      "recorded_at": 1790332675975,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 64,
+      "node_id": null,
+      "attempt": null,
+      "event_kind": "status_changed",
+      "status": "verifying",
+      "summary_key": "deployment.run.verifying",
+      "recorded_at": 1790332675978,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 65,
+      "node_id": "verify",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "ready",
+      "summary_key": "deployment.node.ready",
+      "recorded_at": 1790332675979,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 66,
+      "node_id": "verify",
+      "attempt": 1,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332675980,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 67,
+      "node_id": "verify",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332675980,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 68,
+      "node_id": "verify",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "running",
+      "summary_key": "deployment.node.running",
+      "recorded_at": 1790332675980,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 69,
+      "node_id": "verify",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "failed",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332676077,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 70,
+      "node_id": "verify",
+      "attempt": 2,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332678080,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 71,
+      "node_id": "verify",
+      "attempt": 2,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332678080,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 72,
+      "node_id": "verify",
+      "attempt": 2,
+      "event_kind": "attempt_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332678185,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 73,
+      "node_id": "verify",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.node.succeeded",
+      "recorded_at": 1790332678185,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 74,
+      "node_id": "commit",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "ready",
+      "summary_key": "deployment.node.ready",
+      "recorded_at": 1790332678188,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 75,
+      "node_id": "commit",
+      "attempt": 1,
+      "event_kind": "attempt_created",
+      "status": "pending",
+      "summary_key": "deployment.attempt.created",
+      "recorded_at": 1790332678189,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 76,
+      "node_id": "commit",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "running",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332678189,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 77,
+      "node_id": "commit",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "running",
+      "summary_key": "deployment.node.running",
+      "recorded_at": 1790332678189,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 78,
+      "node_id": "commit",
+      "attempt": 1,
+      "event_kind": "attempt_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.attempt.statusChanged",
+      "recorded_at": 1790332678363,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 79,
+      "node_id": "commit",
+      "attempt": null,
+      "event_kind": "node_status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.node.succeeded",
+      "recorded_at": 1790332678363,
+      "payload": null
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 80,
+      "node_id": null,
+      "attempt": null,
+      "event_kind": "status_changed",
+      "status": "succeeded",
+      "summary_key": "deployment.run.succeeded",
+      "recorded_at": 1790332678367,
+      "payload": {
+        "finalizerFailures": 0
+      }
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 81,
+      "node_id": null,
+      "attempt": null,
+      "event_kind": "serviceObservation",
+      "status": null,
+      "summary_key": "deployment.service.observed",
+      "recorded_at": 1790332678368,
+      "payload": {
+        "checkedAt": 1790332678184,
+        "checks": [
+          {
+            "evidence": {
+              "evidence": {
+                "evidenceType": "verify.http",
+                "nodeId": "verify",
+                "observedAt": 1790332678184,
+                "outcome": "passed",
+                "payloadDigest": "sha256:3328c8afed20c8f2a5f1044e35b78b37de2fc39cabc764d9cc769b32bbaf1e52",
+                "planDigest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0",
+                "runId": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+                "schemaVersion": 1,
+                "targetId": "production"
+              },
+              "payload": {
+                "activationDigest": "sha256:6e85665bb39ea7a1cbb4ab787383c80dfa2058c7271264c33ec163ff582b9f4a",
+                "expectedStatuses": [
+                  200
+                ],
+                "status": 200,
+                "url": "http://127.0.0.1:3000/for-you/"
+              }
+            },
+            "location": "server",
+            "nodeId": "verify"
+          }
+        ],
+        "status": "passed"
+      }
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 82,
+      "node_id": null,
+      "attempt": null,
+      "event_kind": "serviceObservation",
+      "status": null,
+      "summary_key": "deployment.service.observed",
+      "recorded_at": 1790332741793,
+      "payload": {
+        "checkedAt": 1790332741793,
+        "checks": [
+          {
+            "evidence": {
+              "evidence": {
+                "evidenceType": "verify.http",
+                "nodeId": "verify",
+                "observedAt": 1790332741792,
+                "outcome": "passed",
+                "payloadDigest": "sha256:3328c8afed20c8f2a5f1044e35b78b37de2fc39cabc764d9cc769b32bbaf1e52",
+                "planDigest": "sha256:a802e627ef666a652050511b6e01c538ae8630af5efa4993972a40d5502a10e0",
+                "runId": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+                "schemaVersion": 1,
+                "targetId": "production"
+              },
+              "payload": {
+                "activationDigest": "sha256:6e85665bb39ea7a1cbb4ab787383c80dfa2058c7271264c33ec163ff582b9f4a",
+                "expectedStatuses": [
+                  200
+                ],
+                "status": 200,
+                "url": "http://127.0.0.1:3000/for-you/"
+              }
+            },
+            "location": "server",
+            "name": "Verify application",
+            "nodeId": "verify"
+          }
+        ],
+        "status": "passed"
+      }
+    },
+    {
+      "run_id": "run-10f860d9-7e97-4b2e-ad2a-5581ad006c2b",
+      "sequence": 83,
+      "node_id": null,
+      "attempt": null,
+      "event_kind": "serviceObservation",
+      "status": null,
+      "summary_key": "deployment.service.observed",
+      "recorded_at": 1790332839303,
+      "payload": {
+        "checkedAt": 1790332839303,
+        "checks": [],
+        "reason": "DEPLOYMENT_SERVICE_CHECK_FAILED:readCheckFailed",
+        "status": "unknown"
+      }
+    }
+  ],
+  "observedUi": {
+    "canvasOpened": false,
+    "applicationOverviewPreparedCandidate": true,
+    "frozenHostAndSourceChangesReviewed": true,
+    "nativeApprovalStartedRun": true,
+    "allExecutionStepsSucceeded": true,
+    "currentReleaseAndDatedObservationDisplayedSeparately": true,
+    "stoppedFixtureObservationUnknownWithoutChangingSuccessfulRun": true,
+    "keyboardEscapeReturnedToTrigger": true
+  }
+}

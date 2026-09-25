@@ -63,6 +63,7 @@ import type {
   DeploymentNodeProgressEvent,
   DeploymentNodeTypeCatalog,
   DeploymentPrepareResult,
+  DeploymentSourceBindingInspection,
   DeploymentReconciliationResult,
   DeploymentRunIdInput,
   DeploymentRunDetail,
@@ -1026,6 +1027,38 @@ export function invokeAnswerAgentRuntimeQuestion(input: import('@/types/agent-qu
 
 // --- Deployment Workflow high-level commands ---
 
+export function invokePreviewDeploymentFiles(entry: import('@/lib/deployment/applications').DeploymentApplicationEntry): Promise<import('@/lib/deployment/applications').DeploymentFilePreview> {
+  return invokeLogged('preview_deployment_files', { entry });
+}
+
+export function invokeApplyDeploymentFiles(entry: import('@/lib/deployment/applications').DeploymentApplicationEntry, expectedDigest: string): Promise<string[]> {
+  return invokeLogged('apply_deployment_files', { entry, expectedDigest });
+}
+
+export function invokeListDeploymentApplications(): Promise<import('@/lib/deployment/applications').DeploymentApplicationEntry[]> {
+  return invokeLogged('list_deployment_applications');
+}
+
+export function invokeGetDeploymentReadiness(environmentId: string): Promise<import('@/lib/deployment/applications').DeploymentReadinessReport | null> {
+  return invokeLogged('get_deployment_readiness', { environmentId });
+}
+
+export function invokeSaveDeploymentApplication(input: import('@/lib/deployment/applications').SaveDeploymentApplicationInput): Promise<import('@/lib/deployment/applications').DeploymentApplicationEntry> {
+  return invokeLogged('save_deployment_application', { input });
+}
+
+export function invokeInspectDeploymentProject(localPath: string): Promise<import('@/lib/deployment/applications').DeploymentProjectInspection> {
+  return invokeLogged('inspect_deployment_project', { localPath });
+}
+
+export function invokeCheckDeploymentReadiness(entry: import('@/lib/deployment/applications').DeploymentApplicationEntry, checkRemote: boolean): Promise<import('@/lib/deployment/applications').DeploymentReadinessReport> {
+  return invokeLogged('check_deployment_readiness', { entry, checkRemote });
+}
+
+export async function invokeInspectDeploymentSourceBinding(localPath: string): Promise<DeploymentSourceBindingInspection> {
+  return invokeLogged<DeploymentSourceBindingInspection>('inspect_deployment_source_binding', { localPath });
+}
+
 export async function invokeDeploymentWorkflowCapabilities(): Promise<DeploymentWorkflowCapabilities> {
   return invokeLogged<DeploymentWorkflowCapabilities>('deployment_workflow_capabilities');
 }
@@ -1115,6 +1148,10 @@ export async function listenToDeploymentNodeProgress(
   callback: EventCallback<DeploymentNodeProgressEvent>,
 ): Promise<UnlistenFn> {
   return listen<DeploymentNodeProgressEvent>('deployment-node-progress', callback);
+}
+
+export async function invokeObserveDeploymentService(runId: string): Promise<DeploymentRunDetail['serviceObservation']> {
+  return invokeLogged('observe_deployment_service', { runId });
 }
 
 export async function invokeApproveDeploymentRun(
