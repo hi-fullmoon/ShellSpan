@@ -265,6 +265,7 @@ const RunsView: React.FC<{
   onOpenApproval: (trigger?: HTMLElement | null) => void;
   onOpenEvidence: (trigger: HTMLElement) => void;
   onDeploy: () => void;
+  onOpenDeploymentChecks?: (trigger: HTMLButtonElement) => void;
   canDeploy: boolean;
   approvalRequest: number;
   onApprovalHandled: () => void;
@@ -276,6 +277,7 @@ const RunsView: React.FC<{
   onOpenApproval,
   onOpenEvidence,
   onDeploy,
+  onOpenDeploymentChecks,
   canDeploy,
   approvalRequest,
   onApprovalHandled,
@@ -286,6 +288,10 @@ const RunsView: React.FC<{
   const [cancelOpen, setCancelOpen] = React.useState(false);
   const handledApprovalRequestRef = React.useRef(0);
   const detail = state.detail;
+  const readinessRequired = state.error?.includes('DEPLOYMENT_APPLICATION_READINESS_REQUIRED') === true;
+  const managedFieldsChanged = state.error?.includes('DEPLOYMENT_APPLICATION_MANAGED_FIELDS_CHANGED') === true;
+  const revisionConflict = ['DEPLOYMENT_APPLICATION_REVISION_CONFLICT', 'DEPLOYMENT_WORKFLOW_REVISION_CONFLICT']
+    .some((code) => state.error?.includes(code));
   const active = detail
     && ['awaiting_approval', 'approved', 'in_progress', 'verifying', 'reconciling', 'cancel_requested']
       .includes(detail.summary.status);
@@ -306,6 +312,45 @@ const RunsView: React.FC<{
       onOpenApproval(deployTriggerRef.current);
     }
   }, [approvalRequest, state.detail, onApprovalHandled, onOpenApproval, deployTriggerRef]);
+
+  if (state.preparing || (state.error && state.errorContext === 'prepare')) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="deployment-preparation-view">
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="flex min-w-0 flex-col gap-3 p-3">
+            {state.preparing ? <PreparationProgress /> : (
+              <Alert variant="destructive" data-testid="deployment-prepare-error">
+                <AlertTriangleIcon />
+                <AlertTitle>{t(revisionConflict
+                  ? 'deployment.runtime.revisionConflict.title'
+                  : managedFieldsChanged
+                  ? 'deployment.runtime.managedFieldsChanged.title'
+                  : readinessRequired
+                  ? 'deployment.runtime.readinessRequired.title'
+                  : state.error?.includes('CAPABILITY')
+                  ? 'deployment.runtime.capability.title'
+                  : 'deployment.runtime.prepareFailed.title')}</AlertTitle>
+                <AlertDescription className="whitespace-pre-wrap break-all">
+                  <div className="flex flex-col items-start gap-2">
+                  <p>{revisionConflict ? t('deployment.runtime.revisionConflict.description') : managedFieldsChanged ? t('deployment.runtime.managedFieldsChanged.description') : readinessRequired ? t('deployment.runtime.readinessRequired.description') : state.error}</p>
+                  {(readinessRequired || managedFieldsChanged) && onOpenDeploymentChecks && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(event) => onOpenDeploymentChecks(event.currentTarget)}
+                    >
+                      {t(managedFieldsChanged ? 'deployment.application.configure' : 'deployment.runtime.readinessRequired.action')}
+                    </Button>
+                  )}
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+        </ScrollArea>
+      </div>
+    );
+  }
 
   if (state.loading && state.runs.length === 0) {
     return <PanelLoadingState className="flex-1" label={t('deployment.runtime.loading')} />;
@@ -384,18 +429,6 @@ const RunsView: React.FC<{
           ) : (
             <div className="flex size-full min-h-0 flex-col">
               <div className="flex shrink-0 flex-col gap-2 p-2 empty:hidden" data-testid="deployment-runtime-feedback">
-                {state.preparing && <PreparationProgress />}
-                {state.error && state.errorContext === 'prepare' && (
-                  <Alert variant="destructive" data-testid="deployment-prepare-error">
-                    <AlertTriangleIcon />
-                    <AlertTitle>{state.error.includes('CAPABILITY')
-                      ? t('deployment.runtime.capability.title')
-                      : t('deployment.runtime.prepareFailed.title')}</AlertTitle>
-                    <AlertDescription>{state.error.includes('CAPABILITY')
-                      ? t('deployment.runtime.capability.description')
-                      : t('deployment.runtime.prepareFailed.description')}</AlertDescription>
-                  </Alert>
-                )}
                 <RunStatusAlert
                   status={detail.summary.status}
                   detail={detail}
@@ -478,6 +511,7 @@ export function DeploymentWorkflowRuntimeView({
   catalog = null,
   admissionsEnabled = true,
   onDeploy,
+  onOpenDeploymentChecks,
   canDeploy,
   approvalRequest = 0,
   onApprovalHandled,
@@ -488,6 +522,7 @@ export function DeploymentWorkflowRuntimeView({
   catalog?: DeploymentNodeTypeCatalog | null;
   admissionsEnabled?: boolean;
   onDeploy?: () => void;
+  onOpenDeploymentChecks?: (trigger: HTMLButtonElement) => void;
   canDeploy?: boolean;
   approvalRequest?: number;
   onApprovalHandled?: () => void;
@@ -517,6 +552,7 @@ export function DeploymentWorkflowRuntimeView({
           onOpenApproval={openApproval}
           onOpenEvidence={openEvidence}
           onDeploy={onDeploy ?? (() => undefined)}
+          onOpenDeploymentChecks={onOpenDeploymentChecks}
           canDeploy={canDeploy ?? false}
           approvalRequest={approvalRequest}
           onApprovalHandled={onApprovalHandled ?? (() => undefined)}
