@@ -1,3 +1,4 @@
+import equal from 'fast-deep-equal';
 import type { DeploymentSourceBinding, DeploymentSourceBindingInspection } from './types';
 import type { DeploymentWorkflowRecord } from './types';
 
@@ -10,6 +11,10 @@ export interface DeploymentDataDirectory {
 }
 
 export interface DeploymentEnvironmentConfig {
+  gitRef?: string;
+  imageRepository?: string;
+  verification?: { packageManager: 'npm' | 'pnpm'; script: string };
+  hostCompose?: HostComposeConfig;
   templateKind: 'dockerCompose' | 'staticSite';
   connectionProfileId: string;
   remoteRoot: string;
@@ -31,6 +36,31 @@ export interface DeploymentEnvironmentConfig {
   recoveryInstructions: string;
 }
 
+export interface HostComposeConfig {
+  environmentFile: string;
+  overrideFiles: string[];
+  recreateServices: string[];
+  backup: { script: string; arguments: string[] };
+  checks: { url: string; status: number; jsonFields?: Record<string, string>; location?: string }[];
+}
+
+export function normalizeDeploymentConfig(config: DeploymentEnvironmentConfig): DeploymentEnvironmentConfig {
+  const host = config.hostCompose;
+  return {
+    ...config,
+    gitRef: config.gitRef?.trim() || undefined,
+    nonSensitiveFiles: config.nonSensitiveFiles.map((value) => value.trim()).filter(Boolean),
+    ...(host ? { hostCompose: {
+      ...host,
+      environmentFile: host.environmentFile.trim(),
+      overrideFiles: host.overrideFiles.map((value) => value.trim()).filter(Boolean),
+      recreateServices: host.recreateServices.map((value) => value.trim()).filter(Boolean),
+      backup: { script: host.backup.script.trim(), arguments: host.backup.arguments.filter((value) => value.length > 0) },
+      checks: host.checks.filter((check) => check.url.trim()).map((check) => ({ ...check, url: check.url.trim() })),
+    } } : {}),
+  };
+}
+
 export interface DeploymentApplicationEntry {
   application: { id: string; name: string; sourceBindingId: string; revision: number; archived: boolean };
   source: DeploymentSourceBinding;
@@ -50,6 +80,7 @@ export interface SaveDeploymentApplicationInput {
   expectedEnvironmentRevision: number;
   expectedSourceRevision: number;
   expectedWorkflowRevision: number;
+  reconcileManagedFields?: boolean;
   workflowId: string | null;
 }
 
@@ -109,28 +140,37 @@ export function workflowMappingIssues(workflow: DeploymentWorkflowRecord, entry?
   if (entry?.environment.workflowId === workflow.id) {
     const projected = associateWorkflowDefaults(entry, workflow).environment.config;
     const saved = entry.environment.config;
-    for (const field of ['connectionProfileId', 'remoteRoot', 'templateKind', 'platform', 'dockerfile', 'buildContext', 'projectName', 'service', 'composeFile', 'nonSensitiveFiles'] as const) {
-      if (JSON.stringify(projected[field]) !== JSON.stringify(saved[field])) issues.push(`managedFields/${field}`);
+    for (const field of ['connectionProfileId', 'remoteRoot', 'templateKind', 'platform', 'dockerfile', 'buildContext', 'projectName', 'service', 'composeFile', 'nonSensitiveFiles', 'hostCompose', 'gitRef', 'verification', 'imageRepository'] as const) {
+      if (!equal(projected[field], saved[field])) issues.push(`managedFields/${field}`);
     }
     const mounts = (directories: DeploymentDataDirectory[]): unknown => directories.map(({ hostPath, containerPath, readOnly }) => ({ hostPath, containerPath, readOnly }));
-    if (JSON.stringify(mounts(projected.dataDirectories)) !== JSON.stringify(mounts(saved.dataDirectories))) issues.push('managedFields/dataDirectories');
+    if (!equal(mounts(projected.dataDirectories), mounts(saved.dataDirectories))) issues.push('managedFields/dataDirectories');
   }
   return issues;
 }
 
 export function associateWorkflowDefaults(entry: DeploymentApplicationEntry, workflow: DeploymentWorkflowRecord): DeploymentApplicationEntry {
   const config = { ...entry.environment.config };
+  const source = workflow.definition.nodes.find((node) => node.type === 'source.snapshot');
+  if (typeof source?.config.sourceRef === 'string' && source.config.sourceRef !== 'workspace') config.gitRef = source.config.sourceRef;
+  else delete config.gitRef;
   const target = workflow.definition.targets[0];
   if (target) { config.connectionProfileId = target.connectionProfileId; config.remoteRoot = target.remoteRoot; }
   config.templateKind = workflow.definition.nodes.some((node) => node.type === 'deploy.compose') ? 'dockerCompose' : 'staticSite';
   const image = workflow.definition.nodes.find((node) => node.type === 'build.docker-buildx');
   const bundle = workflow.definition.nodes.find((node) => node.type === 'artifact.bundle-compose');
   if (image) {
+    if (config.imageRepository !== undefined && typeof image.config.imageRepository === 'string') config.imageRepository = image.config.imageRepository;
+    if (image.config.verification && typeof image.config.verification === 'object') config.verification = image.config.verification as unknown as NonNullable<DeploymentEnvironmentConfig['verification']>;
+    else delete config.verification;
     if (typeof image.config.platform === 'string') config.platform = image.config.platform;
     if (typeof image.config.dockerfile === 'string') config.dockerfile = image.config.dockerfile;
     if (typeof image.config.context === 'string') config.buildContext = image.config.context;
   }
   if (bundle) {
+    if (bundle.config.hostCompose && typeof bundle.config.hostCompose === 'object') {
+      config.hostCompose = bundle.config.hostCompose as unknown as HostComposeConfig;
+    } else delete config.hostCompose;
     if (typeof bundle.config.projectName === 'string') config.projectName = bundle.config.projectName;
     if (Array.isArray(bundle.config.services) && typeof bundle.config.services[0] === 'string') config.service = bundle.config.services[0];
     if (Array.isArray(bundle.config.composeFiles) && typeof bundle.config.composeFiles[0] === 'string') config.composeFile = bundle.config.composeFiles[0];
@@ -140,7 +180,8 @@ export function associateWorkflowDefaults(entry: DeploymentApplicationEntry, wor
         if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
         const mount = value as Record<string, unknown>;
         if (typeof mount.source !== 'string' || typeof mount.target !== 'string' || typeof mount.readOnly !== 'boolean') return [];
-        return [{ hostPath: mount.source, containerPath: mount.target, readOnly: mount.readOnly, containerUser: '', backupPolicy: '' }];
+        const existing = entry.environment.config.dataDirectories.find((directory) => directory.hostPath === mount.source && directory.containerPath === mount.target);
+        return [{ hostPath: mount.source, containerPath: mount.target, readOnly: mount.readOnly, containerUser: existing?.containerUser ?? '', backupPolicy: existing?.backupPolicy ?? '' }];
       });
     }
   }
