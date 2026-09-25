@@ -306,7 +306,13 @@ export function DeploymentValidationDialog({
         </DialogHeader>
         <ScrollArea className="min-h-0 min-w-0">
           <div className="p-4">
-            <IssueList {...issueListProps} />
+            {validating ? (
+              <Alert role="status" aria-live="polite">
+                <Spinner aria-hidden="true" />
+                <AlertTitle>{t('deployment.editor.validation.running')}</AlertTitle>
+                <AlertDescription>{t('deployment.editor.validation.description')}</AlertDescription>
+              </Alert>
+            ) : <IssueList {...issueListProps} />}
           </div>
         </ScrollArea>
         <DialogFooter className="shrink-0 px-4 py-3">
@@ -314,8 +320,8 @@ export function DeploymentValidationDialog({
             {t('common.close')}
           </Button>
           <Button size="sm" onClick={onValidate} disabled={validating}>
-            {validating && <Spinner data-icon="inline-start" />}
-            {t('deployment.editor.validate')}
+            {validating && <Spinner aria-hidden="true" data-icon="inline-start" />}
+            {t(validating ? 'deployment.editor.validation.running' : 'deployment.editor.validate')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -380,6 +386,7 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
   const libraryTriggerRef = React.useRef<HTMLButtonElement>(null);
   const configTriggerRef = React.useRef<HTMLButtonElement>(null);
   const settingsTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const deploymentChecksTriggerRef = React.useRef<HTMLButtonElement>(null);
   const deployTriggerRef = React.useRef<HTMLButtonElement>(null);
   const configFinalFocusRef = React.useRef<HTMLButtonElement>(null);
 
@@ -480,6 +487,7 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
 
   const canDeploy = Boolean(selectedRecord)
     && admissionsEnabled
+    && !state.loading
     && !state.semanticDirty
     && selectedRecord?.enabled === true;
 
@@ -495,7 +503,7 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
 
   const startDeploy = React.useCallback((): void => {
     const record = selectedRecord;
-    if (!record) return;
+    if (!record || !canDeploy) return;
     setActiveTab('runs');
     void useDeploymentWorkflowRunStore.getState().prepare(record)
       .then(() => {
@@ -505,7 +513,7 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
         }
       })
       .catch(() => undefined);
-  }, [selectedRecord]);
+  }, [canDeploy, selectedRecord]);
 
   React.useEffect(() => {
     if (!state.deployRequested) return;
@@ -526,16 +534,20 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
     setTemplateOpen(true);
   };
 
-  const requestRefresh = (): void => {
-    if (activeTab !== 'pipeline') {
-      if (draft?.id) void runState.refreshWorkflow(draft.id, true).catch(() => undefined);
-      return;
+  const refreshCurrentView = async (): Promise<void> => {
+    await state.refresh();
+    const workflowId = useDeploymentWorkflowStore.getState().selectedWorkflowId;
+    if (activeTab !== 'pipeline' && workflowId) {
+      await useDeploymentWorkflowRunStore.getState().refreshWorkflow(workflowId, true);
     }
+  };
+
+  const requestRefresh = (): void => {
     if (dirty) {
       setPendingDiscardAction('refresh');
       return;
     }
-    void state.refresh().catch(() => undefined);
+    void refreshCurrentView().catch(() => undefined);
   };
 
   const closeDiscardDialog = (): void => {
@@ -548,7 +560,7 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
       state.confirmPendingSelection();
       setWorkflowsOpen(false);
     } else if (pendingDiscardAction === 'refresh') {
-      void state.refresh().catch(() => undefined);
+      void refreshCurrentView().catch(() => undefined);
     } else if (pendingDiscardAction === 'create') {
       setTemplateOpen(true);
     }
@@ -562,8 +574,18 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
   };
 
   const validate = async (): Promise<void> => {
-    await state.validateDraft().catch(() => undefined);
+    if (useDeploymentWorkflowStore.getState().validating) return;
     setIssuesOpen(true);
+    try {
+      const issues = await state.validateDraft();
+      addToast(issues.length === 0
+        ? t('deployment.editor.validation.ready')
+        : t('deployment.editor.validation.completedWithIssues', { count: issues.length }),
+      issues.length === 0 ? 'success' : 'info');
+    } catch {
+      // The existing editor error handler reports the failed request via Toast.
+      setIssuesOpen(false);
+    }
   };
 
   const workflowPane = (
@@ -632,7 +654,7 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
           >
             <DeploymentWorkflowTabs
               activeTab={activeTab}
-              loading={activeTab === 'pipeline' ? state.loading : runState.loading}
+              loading={state.loading || (activeTab !== 'pipeline' && runState.loading)}
               saving={state.saving}
               validating={state.validating}
               preparing={runState.preparing}
@@ -678,13 +700,11 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
                     issueCount={state.issues.length}
                     dirty={dirty}
                     onOpenIssues={() => setIssuesOpen(true)}
-                    onOpenLibrary={() => setLibraryOpen(true)}
                     onOpenSettings={() => setSettingsOpen(true)}
                     onOpenInspector={() => {
                       configFinalFocusRef.current = configTriggerRef.current;
                       setConfigOpen(true);
                     }}
-                    libraryTriggerRef={libraryTriggerRef}
                     inspectorTriggerRef={configTriggerRef}
                     settingsTriggerRef={settingsTriggerRef}
                   />
@@ -701,6 +721,10 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
                     catalog={catalog}
                     admissionsEnabled={admissionsEnabled}
                     onDeploy={startDeploy}
+                    onOpenDeploymentChecks={(trigger) => {
+                      deploymentChecksTriggerRef.current = trigger;
+                      setDeploymentSettingsOpen(true);
+                    }}
                     canDeploy={canDeploy}
                     approvalRequest={approvalRequest}
                     onApprovalHandled={() => setApprovalRequest(0)}
@@ -779,13 +803,14 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
             editable={editable}
             returnFocusRef={settingsTriggerRef}
             onConfigureDeployment={draft.id && !dirty ? () => {
+              deploymentChecksTriggerRef.current = settingsTriggerRef.current;
               setSettingsOpen(false);
               setDeploymentSettingsOpen(true);
             } : undefined}
           />
           {deploymentSettingsOpen && draft.id && <WorkflowDeploymentConfiguration
             workflowId={draft.id}
-            triggerRef={settingsTriggerRef}
+            triggerRef={deploymentChecksTriggerRef}
             onClose={() => setDeploymentSettingsOpen(false)}
             onSaved={() => { setDeploymentSettingsOpen(false); void state.refresh(); }}
           />}

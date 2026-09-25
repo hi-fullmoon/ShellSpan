@@ -548,7 +548,7 @@ describe('DeploymentWorkflowCenter', () => {
     render(<DeploymentWorkflowCenter initialTab="pipeline" />);
     resizeWorkspace(858);
 
-    const trigger = screen.getByRole('button', { name: 'deployment.editor.nodeLibrary' });
+    const trigger = screen.getByRole('button', { name: 'deployment.editor.stepList.addStep' });
     trigger.focus();
     fireEvent.click(trigger);
     expect(await screen.findByRole('heading', { name: 'deployment.editor.nodeLibrary' })).toBeInTheDocument();
@@ -747,7 +747,8 @@ describe('DeploymentWorkflowCenter', () => {
     });
     render(<DeploymentWorkflowCenter initialTab="pipeline" />);
 
-    expect(screen.getByRole('button', { name: 'deployment.editor.nodeLibrary' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'deployment.editor.nodeLibrary' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'deployment.editor.stepList.addStep' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'deployment.editor.settings' })).toBeDisabled();
     expect(screen.getByLabelText('deployment.editor.nodeName')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'deployment.editor.removeNode' })).toBeDisabled();
