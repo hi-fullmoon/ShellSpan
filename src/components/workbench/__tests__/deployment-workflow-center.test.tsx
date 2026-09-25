@@ -207,8 +207,32 @@ describe('DeploymentWorkflowCenter', () => {
     vi.unstubAllGlobals();
   });
 
-  it('opens on the deployments tab with a disabled deploy CTA until the workflow is enabled', () => {
+  it.each(['pipeline', 'runs', 'versions'] as const)('remembers the %s tab after leaving and reopening the center', (tab) => {
+    const view = render(<DeploymentWorkflowCenter initialTab="pipeline" />);
+    fireEvent.click(screen.getByRole('tab', { name: `deployment.editor.tab.${tab}` }));
+    view.unmount();
     render(<DeploymentWorkflowCenter />);
+    expect(screen.getByRole('tab', { name: `deployment.editor.tab.${tab}` })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('honors an explicit requested tab over the remembered selection and remembers the destination', () => {
+    useDeploymentWorkflowStore.getState().setActiveTab('versions');
+    useDeploymentWorkflowStore.getState().requestTab('pipeline');
+    const view = render(<DeploymentWorkflowCenter />);
+    expect(screen.getByRole('tab', { name: 'deployment.editor.tab.pipeline' })).toHaveAttribute('aria-selected', 'true');
+    expect(useDeploymentWorkflowStore.getState().requestedTab).toBeNull();
+    view.unmount();
+    render(<DeploymentWorkflowCenter />);
+    expect(screen.getByRole('tab', { name: 'deployment.editor.tab.pipeline' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens on the pipeline tab by default', () => {
+    render(<DeploymentWorkflowCenter />);
+    expect(screen.getByRole('tab', { name: 'deployment.editor.tab.pipeline' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens on the deployments tab with a disabled deploy CTA when explicitly requested', () => {
+    render(<DeploymentWorkflowCenter initialTab="runs" />);
     expect(screen.getByRole('tab', { name: 'deployment.editor.tab.runs' })).toHaveAttribute('aria-selected', 'true');
     const cta = screen.getByTestId('deployment-run-empty-cta');
     expect(cta).toBeDisabled();
@@ -223,6 +247,9 @@ describe('DeploymentWorkflowCenter', () => {
     expect(rows[0]).toHaveAttribute('data-step-node-id', 'source');
     expect(rows[1]).toHaveAttribute('data-step-node-id', 'build');
     expect(steps).toHaveTextContent('deployment.editor.stepList.relations');
+    for (const button of within(steps).getAllByRole('button', { name: 'deployment.editor.configure' })) {
+      expect(button).toHaveClass('@min-[1152px]:hidden');
+    }
 
     fireEvent.click(within(steps).getByRole('button', { name: 'deployment.editor.stepList.stepAria:Freeze source' }));
     expect(useDeploymentWorkflowStore.getState().selectedNodeId).toBe('source');
@@ -296,7 +323,9 @@ describe('DeploymentWorkflowCenter', () => {
     // the title has no description line.
     const configDrawer = document.querySelector('[data-slot="drawer-content"]');
     expect(configDrawer?.querySelector('[data-slot="drawer-header"]'))
-      .toHaveClass('min-h-12', 'justify-center', 'px-3', 'py-1.5', 'pr-12');
+      .toHaveClass('min-h-12', 'justify-center', 'px-3', 'py-3', 'pr-12');
+    expect(configDrawer?.querySelectorAll('[data-slot="drawer-title"]')).toHaveLength(1);
+    expect(configDrawer?.querySelector('[data-slot="field-group"]')).toHaveClass('p-3');
     expect(configDrawer?.querySelector('[data-slot="drawer-close"]'))
       .toHaveClass('top-2', 'right-3', 'size-8');
     fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
@@ -316,7 +345,7 @@ describe('DeploymentWorkflowCenter', () => {
     // hanging below the divider into the search row.
     const workflowsDrawer = document.querySelector('[data-slot="drawer-content"]');
     expect(workflowsDrawer?.querySelector('[data-slot="drawer-header"]'))
-      .toHaveClass('min-h-12', 'justify-center', 'px-3', 'py-1.5', 'pr-12');
+      .toHaveClass('min-h-12', 'justify-center', 'px-3', 'py-3', 'pr-12');
     expect(workflowsDrawer?.querySelector('[data-slot="drawer-close"]'))
       .toHaveClass('top-2', 'right-3', 'size-8');
     fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
@@ -500,13 +529,15 @@ describe('DeploymentWorkflowCenter', () => {
     render(<DeploymentWorkflowCenter initialTab="pipeline" />);
     const deploy = screen.getByTestId('deployment-deploy-action');
     expect(deploy).toBeDisabled();
-    expect(deploy).toHaveAttribute('title', 'deployment.runtime.deploy.workflowDisabled');
+    expect(deploy).not.toHaveAttribute('title');
+    expect(deploy).toHaveAttribute('aria-description', 'deployment.runtime.deploy.workflowDisabled');
 
     act(() => {
       useDeploymentWorkflowStore.getState().updateWorkflowMeta({ enabled: true });
     });
     expect(deploy).toBeDisabled();
-    expect(deploy).toHaveAttribute('title', 'deployment.runtime.deploy.unsaved');
+    expect(deploy).not.toHaveAttribute('title');
+    expect(deploy).toHaveAttribute('aria-description', 'deployment.runtime.deploy.unsaved');
   });
 
   it('exposes searchable grouped drawers with a fixed title, scrolling body, and focus return', async () => {
