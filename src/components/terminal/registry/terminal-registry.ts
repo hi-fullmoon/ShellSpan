@@ -336,6 +336,8 @@ const TERMINAL_COLOR_THEMES: Record<Exclude<TerminalColorScheme, 'app'>, Termina
     background: '#ffffff',
     foreground: '#1f2328',
     cursor: '#0969da',
+    selectionBackground: 'rgba(15, 23, 42, 0.22)',
+    selectionInactiveBackground: 'rgba(15, 23, 42, 0.12)',
     black: '#24292f',
     red: '#cf222e',
     green: '#116329',
