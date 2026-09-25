@@ -11,7 +11,8 @@ import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import type { DeploymentRunDetail, DeploymentRunNodeRecord, DeploymentWorkflowRecord, DeploymentReleaseRecord } from '@/lib/deployment/types';
-import type { DeploymentReadinessReport } from '@/lib/deployment/applications';
+import type { DeploymentReadinessReport, DeploymentEnvironmentConfig, DeploymentApplicationEntry } from '@/lib/deployment/applications';
+import { HostComposeFields } from '@/components/workbench/deployment/host-compose-fields';
 import { DeploymentWorkflowRuntimeView, RunStatusAlert, PreparationProgress } from '@/components/workbench/deployment-workflow-runtime';
 import { ApprovalDialog } from '@/components/workbench/deployment/approval-dialog';
 import { ArtifactDrawer } from '@/components/workbench/deployment/artifact-drawer';
@@ -19,6 +20,8 @@ import { ApplicationOnboarding, ReadinessItems } from '@/components/workbench/de
 import { WorkflowSettingsDialog } from '@/components/workbench/deployment/workflow-settings-dialog';
 import { WorkflowListPane } from '@/components/workbench/deployment/workflow-list-pane';
 import { WorkbenchPage } from '@/components/workbench/workbench-page';
+import { DeploymentValidationDialog } from '@/components/workbench/deployment-workflow-center';
+import { useDeploymentWorkflowStore } from '@/stores/deploymentWorkflowStore';
 import { Button } from '@/components/ui/button';
 
 const query = new URLSearchParams(location.search);
@@ -43,14 +46,21 @@ useDeploymentWorkflowRunStore.setState({
 });
 
 function View(): React.JSX.Element {
+  const validating = useDeploymentWorkflowStore((state) => state.validating);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const [open, setOpen] = React.useState(false);
   const [config, setConfig] = React.useState(false);
   const [search, setSearch] = React.useState('');
+  const [hostConfig, setHostConfig] = React.useState<DeploymentEnvironmentConfig>(onboarding.entry.environment.config as DeploymentEnvironmentConfig);
   return <div style={{ width, maxWidth: '100vw', height: '100dvh' }} data-testid="acceptance-container">
     <WorkbenchPage>
+      {mode === 'validation' && <DeploymentValidationDialog open onOpenChange={() => undefined}
+        validating={validating} onValidate={() => useDeploymentWorkflowStore.setState({ validating: true })}
+        issues={[]} nodeName={(id) => id} onSelectNode={() => undefined} />}
+      {mode === 'host-compose' && <div className="min-h-0 flex-1 overflow-auto p-4"><HostComposeFields config={hostConfig} onChange={(patch) => setHostConfig({ ...hostConfig, ...patch })} /></div>}
       {['runtime', 'runtime-rollback', 'runtime-loading', 'empty', 'loading', 'versions', 'versions-empty'].includes(mode) && <DeploymentWorkflowRuntimeView
-        workflow={workflow} kind={mode.startsWith('versions') ? 'versions' : 'runs'} admissionsEnabled={false} />}
+        workflow={workflow} kind={mode.startsWith('versions') ? 'versions' : 'runs'} admissionsEnabled={false}
+        onOpenDeploymentChecks={(trigger) => { triggerRef.current = trigger; setConfig(true); }} />}
       {mode === 'list' && <WorkflowListPane workflows={[workflow]} selectedWorkflowId={workflow.id}
         search={search} onSearchChange={setSearch} onSelect={() => undefined} onCreate={() => undefined} canCreate={false} />}
       {mode === 'recovery' && <RunStatusAlert status={lifecycle.failed.summary.status as 'failed'}
@@ -74,7 +84,7 @@ function View(): React.JSX.Element {
       {mode === 'settings' && <WorkflowSettingsDialog open={open} onOpenChange={setOpen}
         draft={{ ...workflow, layout: workflow.layout ?? { schemaVersion: 1, nodes: {}, groups: [] } }} editable
         returnFocusRef={triggerRef} onConfigureDeployment={() => setConfig(true)} />}
-      {config && <ApplicationOnboarding initial={null} workflowId={null} triggerRef={triggerRef}
+      {config && <ApplicationOnboarding initial={query.has('configured') ? onboarding.entry as DeploymentApplicationEntry : null} workflowId={null} triggerRef={triggerRef}
         onSaved={() => undefined} onClose={() => setConfig(false)} />}
     </WorkbenchPage>
   </div>;
