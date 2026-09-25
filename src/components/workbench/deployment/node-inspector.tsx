@@ -28,7 +28,7 @@ import {
   deploymentPortLabel,
   deploymentPortTypeLabel,
   findDeploymentNodeSpec,
-  readableDeploymentProfile,
+  readableDeploymentTarget,
 } from './deployment-editor-ui';
 import { DeploymentPaneHeader } from './deployment-pane-header';
 import { DeploymentDrawerContext } from './deployment-drawer';
@@ -214,7 +214,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({ node, field, de
       const profile = profiles.find((item) => item.id === target.connectionProfileId);
       return {
         value: target.id,
-        label: profile ? `${readableDeploymentProfile(profile)} · ${target.remoteRoot}` : target.remoteRoot,
+        label: readableDeploymentTarget(target.remoteRoot, profile),
       };
     });
     return (

@@ -64,9 +64,91 @@ try {
       assert.equal(result.lastCells, result.time);
       assert.ok(result.gap >= 0 && result.gap < 20 + result.cellWidth, JSON.stringify(result));
       if (width === 1982) assert.ok(result.dimensions.cols > 120);
-      process.stdout.write(`${width}px / ${fontSize}px font: ${result.dimensions.cols} columns, right gap ${result.gap}px\n`);
+      const resizeResult = await page.evaluate(async ({ fontSize }) => {
+        const { createTerminalResizeHandler, TERMINAL_CONTAINER_CLASS } = await import('/src/components/terminal/registry/terminal-geometry.ts');
+        const { Terminal } = await import('/node_modules/@xterm/xterm/lib/xterm.mjs');
+        const { FitAddon } = await import('/node_modules/@xterm/addon-fit/lib/addon-fit.mjs');
+        const pane = document.getElementById('pane');
+        const container = document.createElement('div');
+        container.className = TERMINAL_CONTAINER_CLASS;
+        pane.appendChild(container);
+        const terminal = new Terminal({ fontSize, lineHeight: 1.2 });
+        const fit = new FitAddon();
+        terminal.loadAddon(fit);
+        terminal.open(container);
+        fit.fit();
+        const initialRows = terminal.rows;
+        const sent = [];
+        const handler = createTerminalResizeHandler(terminal, fit, container, (cols, rows) => sent.push({ cols, rows }));
+        const settle = () => new Promise((resolve) => setTimeout(resolve, 160));
+        const write = (data) => new Promise((resolve) => terminal.write(data, resolve));
+        const scrollbarVisible = () => {
+          const bar = container.querySelector('.scrollbar.vertical');
+          return getComputedStyle(bar).opacity !== '0' && bar.getBoundingClientRect().height > 0;
+        };
+        try {
+          await write('Terminal resize regression\r\n');
+          pane.style.height = '200px';
+          handler.schedule();
+          pane.style.height = '600px';
+          handler.schedule();
+          await settle();
+          const restored = terminal.rows === initialRows && sent.length === 0 && !scrollbarVisible();
+
+          pane.style.height = '200px';
+          handler.schedule();
+          // The timer must measure current layout even before another observer delivery.
+          pane.style.height = '420px';
+          await settle();
+          const remeasured = terminal.rows === fit.proposeDimensions().rows && sent.length === 1;
+
+          pane.style.height = '200px';
+          handler.schedule();
+          pane.style.display = 'none';
+          await settle();
+          const hiddenSkipped = sent.length === 1;
+          pane.style.display = '';
+          pane.style.height = '600px';
+          handler.schedule();
+          await settle();
+          const shown = terminal.rows === initialRows;
+
+          pane.style.height = '200px';
+          handler.schedule();
+          handler.cancel();
+          await settle();
+          const cancelled = terminal.rows === initialRows;
+          pane.style.height = '600px';
+          await write('\r\n'.repeat(initialRows + 10));
+          await settle();
+          const historyLength = terminal.buffer.active.length;
+          const historyVisible = terminal.buffer.active.baseY > 0 && scrollbarVisible();
+          pane.style.height = '420px';
+          handler.schedule();
+          await settle();
+          pane.style.height = '600px';
+          handler.schedule();
+          await settle();
+          terminal.scrollToTop();
+          await settle();
+          const historyPreserved = terminal.buffer.active.length === historyLength
+            && terminal.buffer.active.viewportY === 0
+            && terminal.buffer.active.getLine(0).translateToString(true) === 'Terminal resize regression';
+          return { restored, remeasured, hiddenSkipped, shown, cancelled, historyVisible, historyPreserved };
+        } finally {
+          handler.cancel();
+          terminal.dispose();
+          container.remove();
+          pane.style.display = '';
+          pane.style.height = '600px';
+        }
+      }, { fontSize });
+      for (const [scenario, passed] of Object.entries(resizeResult)) {
+        assert.ok(passed, `${width}px / ${fontSize}px font: ${scenario}: ${JSON.stringify(resizeResult)}`);
+      }
     }
   }
+  process.stdout.write('Terminal geometry and resize regressions passed at wide and narrow widths.\n');
 } finally {
   await browser?.close();
   await server.close();

@@ -701,7 +701,8 @@ describe('DeploymentWorkflowCenter', () => {
 
     const dialog = await screen.findByRole('dialog');
     const target = within(dialog).getByLabelText('deployment.editor.targetProfile');
-    expect(target).toHaveTextContent('Staging · release@staging.example.test');
+    expect(target).toHaveTextContent('release@staging.example.test');
+    expect(target).not.toHaveTextContent('Staging ·');
     fireEvent.change(within(dialog).getByLabelText('deployment.editor.workflowName'), {
       target: { value: 'Staging workflow' },
     });
