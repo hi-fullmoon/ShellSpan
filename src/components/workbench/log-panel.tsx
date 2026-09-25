@@ -406,17 +406,16 @@ const LogInspector: React.FC<{
 
   return (
     <aside className="flex min-h-0 w-72 shrink-0 flex-col border-l border-app-border/50 bg-card @max-[760px]:absolute @max-[760px]:inset-y-0 @max-[760px]:right-0 @max-[760px]:z-20 @max-[760px]:w-[min(22rem,92%)] @max-[760px]:shadow-xl">
-      <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-app-border/50 px-3">
+      <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-app-border/50 bg-muted/35 px-3">
         <div className="flex min-w-0 items-center gap-1">
-          <ChevronRightIcon className="size-3.5 text-muted-foreground" />
-          <span className="truncate text-xs font-medium text-foreground">
+          <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate text-xs leading-none font-medium text-foreground">
             {t('workbench.logs.inspector.title')}
           </span>
         </div>
         <Button
           variant="ghost"
-          size="icon"
-          className="size-7"
+          size="icon-xs"
           onClick={onClose}
           aria-label={t('common.close')}
         >
