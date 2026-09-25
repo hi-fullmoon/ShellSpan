@@ -229,6 +229,9 @@ describe('DeploymentWorkflowCenter', () => {
   it('opens on the pipeline tab by default', () => {
     render(<DeploymentWorkflowCenter />);
     expect(screen.getByRole('tab', { name: 'deployment.editor.tab.pipeline' })).toHaveAttribute('aria-selected', 'true');
+    const heading = screen.getByRole('heading', { name: 'deployment.editor.title' });
+    expect(heading).toBeInTheDocument();
+    expect(heading.closest('header')).not.toHaveTextContent('deployment.editor.revision');
   });
 
   it('opens on the deployments tab with a disabled deploy CTA when explicitly requested', () => {
