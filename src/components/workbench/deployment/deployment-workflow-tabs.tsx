@@ -1,10 +1,14 @@
 import React from 'react';
-import { CheckCircle2Icon, ListTreeIcon, PlusIcon, RefreshCwIcon, RocketIcon, SaveIcon } from 'lucide-react';
+import { CheckCircle2Icon, ListTreeIcon, PlusIcon, RefreshCwIcon, RocketIcon, SaveIcon, SquareIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useI18n } from '@/hooks/useI18n';
 import type { DeploymentWorkflowTab } from '@/stores/deploymentWorkflowStore';
+import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
+import { useToastStore } from '@/stores/toastStore';
+import { getErrorMessage } from '@/lib/error';
+import { deploymentStatusLabel } from './runtime-utils';
 
 export interface DeploymentWorkflowTabsProps {
   activeTab: DeploymentWorkflowTab;
@@ -57,6 +61,14 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
   workflowsTriggerRef,
 }) => {
   const { t } = useI18n();
+  const preparationRunId = useDeploymentWorkflowRunStore((state) => state.preparationRunId);
+  const [cancelPending, setCancelPending] = React.useState(false);
+  const [cancelRequested, setCancelRequested] = React.useState(false);
+  React.useEffect(() => {
+    setCancelPending(false);
+    setCancelRequested(false);
+  }, [preparing]);
+  const cancelLabel = cancelRequested ? deploymentStatusLabel('cancel_requested', t) : t('deployment.runtime.cancel.action');
   return (
     <div className="flex min-h-10 shrink-0 flex-nowrap items-center gap-3 overflow-hidden border-b pr-3" data-testid="deployment-workflow-toolbar">
       <div className="min-w-0 flex-1 self-stretch overflow-x-auto overflow-y-hidden">
@@ -134,6 +146,23 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
             </Button>
           </>
         )}
+        {preparing && <Button
+          variant="outline"
+          size="sm"
+          className={squareWhenIconOnly}
+          aria-label={cancelLabel}
+          disabled={!preparationRunId || cancelPending || cancelRequested}
+          onClick={() => {
+            setCancelPending(true);
+            void useDeploymentWorkflowRunStore.getState().cancelPreparation()
+              .then(() => setCancelRequested(true))
+              .catch((error: unknown) => useToastStore.getState().addToast(getErrorMessage(error), 'error'))
+              .finally(() => setCancelPending(false));
+          }}
+        >
+          {cancelPending ? <Spinner data-icon="inline-start" /> : <SquareIcon data-icon="inline-start" />}
+          <ActionLabel>{cancelLabel}</ActionLabel>
+        </Button>}
         <Button
           ref={deployTriggerRef}
           size="sm"

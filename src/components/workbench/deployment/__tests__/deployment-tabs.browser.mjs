@@ -46,6 +46,23 @@ try {
         assert(geometry.heights.every(height => height === 32));
         assert(await page.locator('body').evaluate(el => el.scrollWidth <= innerWidth));
         await page.screenshot({ path: `${output}/${locale}-${width}-${index}.png`, animations: 'disabled' });
+        await page.evaluate(async () => {
+          const { useDeploymentWorkflowRunStore: store } = await import('/src/stores/deploymentWorkflowRunStore.ts');
+          store.setState({ preparing: true });
+        });
+        const cancel = actions.getByRole('button', { name: locale === 'zh-CN' ? '请求取消' : 'Request cancellation', exact: true });
+        await cancel.waitFor();
+        assert(await cancel.isDisabled());
+        assert(await cancel.evaluate(el => el.nextElementSibling?.getAttribute('data-testid') === 'deployment-deploy-action'));
+        const cancelBounds = await cancel.boundingBox();
+        const deployBounds = await page.getByTestId('deployment-deploy-action').boundingBox();
+        assert(cancelBounds && deployBounds && cancelBounds.y === deployBounds.y && cancelBounds.height === deployBounds.height);
+        assert(deployBounds.x + deployBounds.width <= width);
+        await page.screenshot({ path: `${output}/preparing-${locale}-${width}-${index}.png`, animations: 'disabled' });
+        await page.evaluate(async () => {
+          const { useDeploymentWorkflowRunStore: store } = await import('/src/stores/deploymentWorkflowRunStore.ts');
+          store.setState({ preparing: false });
+        });
       }
       await tabs.first().focus();
       await page.keyboard.press('ArrowRight');
