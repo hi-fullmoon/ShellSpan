@@ -1,16 +1,42 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Tabs } from '@/components/ui/tabs';
 import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { DeploymentWorkflowTab } from '@/stores/deploymentWorkflowStore';
 import { DeploymentWorkflowTabs } from '../deployment-workflow-tabs';
+import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
+import release from '../../../../../docs/design/deployment-center-product-phase-3-evidence.json';
 
 describe('Deployment tab action context', () => {
   beforeEach(async () => {
     useAppStore.setState({ locale: 'zh-CN' });
     await initI18n('zh-CN');
+    useDeploymentWorkflowRunStore.getState().reset();
+  });
+
+  it('places preparation cancellation immediately beside deploy and waits for the run ID', () => {
+    function View(): React.JSX.Element {
+      const preparing = useDeploymentWorkflowRunStore((state) => state.preparing);
+      return <Tabs value="runs"><DeploymentWorkflowTabs activeTab="runs" loading={false} saving={false} validating={false}
+        preparing={preparing} canCreate canSave canDeploy deployHint={null}
+        onOpenWorkflows={() => undefined} onRefresh={() => undefined} onCreate={() => undefined}
+        onSave={() => undefined} onValidate={() => undefined} onDeploy={() => undefined} /></Tabs>;
+    }
+    render(<View />);
+    expect(screen.queryByRole('button', { name: t('deployment.runtime.cancel.action') })).toBeNull();
+    act(() => useDeploymentWorkflowRunStore.setState({ preparing: true }));
+    const cancel = screen.getByRole('button', { name: t('deployment.runtime.cancel.action') });
+    const deploy = screen.getByTestId('deployment-deploy-action');
+    expect(cancel.nextElementSibling).toBe(deploy);
+    expect(cancel.parentElement).toBe(screen.getByTestId('deployment-workflow-actions'));
+    expect(cancel).toBeDisabled();
+    expect(deploy).toBeDisabled();
+    act(() => useDeploymentWorkflowRunStore.setState({ preparationRunId: release.detail.summary.runId }));
+    expect(cancel).toBeEnabled();
+    act(() => useDeploymentWorkflowRunStore.setState({ preparing: false }));
+    expect(screen.queryByRole('button', { name: t('deployment.runtime.cancel.action') })).toBeNull();
   });
 
   it('keeps editing actions in the pipeline and preserves deployment access across tabs', async () => {
