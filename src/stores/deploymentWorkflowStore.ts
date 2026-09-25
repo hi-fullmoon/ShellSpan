@@ -66,6 +66,7 @@ interface DeploymentWorkflowStoreState {
   error: string | null;
   notice: DeploymentEditorNotice | null;
   profileFilterId: string | null;
+  activeTab: DeploymentWorkflowTab;
   requestedTab: DeploymentWorkflowTab | null;
   deployRequested: boolean;
   pendingSelectionId: string | null;
@@ -75,6 +76,7 @@ interface DeploymentWorkflowStoreState {
   confirmPendingSelection: () => void;
   clearPendingSelection: () => void;
   setProfileFilter: (profileId: string | null) => void;
+  setActiveTab: (tab: DeploymentWorkflowTab) => void;
   requestTab: (tab: DeploymentWorkflowTab) => void;
   clearRequestedTab: () => void;
   requestDeploy: () => void;
@@ -175,6 +177,7 @@ const initialState = {
   error: null,
   notice: null,
   profileFilterId: null,
+  activeTab: 'pipeline' as DeploymentWorkflowTab,
   requestedTab: null,
   deployRequested: false,
   pendingSelectionId: null,
@@ -279,6 +282,7 @@ export const useDeploymentWorkflowStore = create<DeploymentWorkflowStoreState>((
   },
   clearPendingSelection: () => set({ pendingSelectionId: null }),
   setProfileFilter: (profileFilterId) => set({ profileFilterId }),
+  setActiveTab: (activeTab) => set({ activeTab }),
   requestTab: (requestedTab) => set({ requestedTab }),
   clearRequestedTab: () => set({ requestedTab: null }),
   requestDeploy: () => set({ deployRequested: true }),

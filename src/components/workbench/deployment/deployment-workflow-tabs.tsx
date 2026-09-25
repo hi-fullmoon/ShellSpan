@@ -61,11 +61,11 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
     <div className="flex min-h-10 shrink-0 flex-nowrap items-center gap-3 overflow-hidden border-b pr-3" data-testid="deployment-workflow-toolbar">
       <div className="min-w-0 flex-1 self-stretch overflow-x-auto overflow-y-hidden">
         <TabsList variant="line" className="h-full! min-w-max justify-start p-0">
-          <TabsTrigger value="runs" className={tabTriggerClass}>
-            {t('deployment.editor.tab.runs')}
-          </TabsTrigger>
           <TabsTrigger value="pipeline" className={tabTriggerClass}>
             {t('deployment.editor.tab.pipeline')}
+          </TabsTrigger>
+          <TabsTrigger value="runs" className={tabTriggerClass}>
+            {t('deployment.editor.tab.runs')}
           </TabsTrigger>
           <TabsTrigger value="versions" className={tabTriggerClass}>
             {t('deployment.editor.tab.versions')}
@@ -80,7 +80,6 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
           className={activeTab === 'pipeline' ? 'size-8 @min-[72rem]:hidden' : 'size-8'}
           onClick={onOpenWorkflows}
           aria-label={t('deployment.editor.workflows')}
-          title={t('deployment.editor.workflows')}
         >
           <ListTreeIcon data-icon="inline-start" />
           <span className="sr-only">{t('deployment.editor.workflows')}</span>
@@ -93,7 +92,6 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
             disabled={validating || saving}
             className={squareWhenIconOnly}
             aria-label={t('deployment.editor.validate')}
-            title={t('deployment.editor.validate')}
           >
             {validating ? <Spinner data-icon="inline-start" /> : <CheckCircle2Icon data-icon="inline-start" />}
             <ActionLabel>{t('deployment.editor.validate')}</ActionLabel>
@@ -106,7 +104,6 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
           disabled={loading || saving}
           className={squareWhenIconOnly}
           aria-label={t('common.refresh')}
-          title={t('common.refresh')}
         >
           {loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
           <ActionLabel>{t('common.refresh')}</ActionLabel>
@@ -118,7 +115,6 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
           disabled={!canCreate}
           className={squareWhenIconOnly}
           aria-label={t('deployment.editor.newWorkflow')}
-          title={t('deployment.editor.newWorkflow')}
         >
           <PlusIcon data-icon="inline-start" />
           <ActionLabel>{t('deployment.editor.newWorkflow')}</ActionLabel>
@@ -130,7 +126,6 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
           disabled={!canSave || saving}
           className={squareWhenIconOnly}
           aria-label={t('common.save')}
-          title={t('common.save')}
         >
           {saving ? <Spinner data-icon="inline-start" /> : <SaveIcon data-icon="inline-start" />}
           <ActionLabel>{t('common.save')}</ActionLabel>
@@ -142,7 +137,7 @@ export const DeploymentWorkflowTabs: React.FC<DeploymentWorkflowTabsProps> = ({
           onClick={onDeploy}
           disabled={!canDeploy || preparing}
           aria-label={t('deployment.runtime.deploy.action')}
-          title={deployHint ?? t('deployment.runtime.deploy.action')}
+          aria-description={deployHint ?? undefined}
           data-testid="deployment-deploy-action"
         >
           {preparing ? <Spinner data-icon="inline-start" /> : <RocketIcon data-icon="inline-start" />}
