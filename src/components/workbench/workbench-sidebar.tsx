@@ -124,15 +124,15 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
       icon: ServerIcon,
     },
     {
-      key: 'keychain',
-      label: t('workbench.keychain.title'),
-      icon: KeyRoundIcon,
-    },
-    {
       key: 'deployments',
       label: t('deployment.title'),
       icon: CloudUploadIcon,
       badge: deploymentAttentionCount,
+    },
+    {
+      key: 'keychain',
+      label: t('workbench.keychain.title'),
+      icon: KeyRoundIcon,
     },
     {
       key: 'knownHosts',
