@@ -435,6 +435,13 @@ impl CredentialManager {
         Self::with_backend(Arc::new(InMemoryCredentialBackend::default()))
     }
 
+    /// Real native entries with unique fixture IDs, without opening the user's
+    /// shared credential vault from an independently rebuilt test executable.
+    #[cfg(test)]
+    pub(crate) fn isolated_native_for_tests() -> Self {
+        Self::with_backend(Arc::new(NativeKeychainBackend))
+    }
+
     // --- Generic credentials ---
 
     pub(crate) fn set_credential(

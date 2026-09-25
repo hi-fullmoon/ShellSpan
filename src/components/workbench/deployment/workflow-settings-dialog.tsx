@@ -23,6 +23,7 @@ export interface WorkflowSettingsDialogProps {
   draft: DeploymentWorkflowDraft;
   editable: boolean;
   returnFocusRef?: React.RefObject<HTMLButtonElement | null>;
+  onConfigureDeployment?: () => void;
 }
 
 export const WorkflowSettingsDialog: React.FC<WorkflowSettingsDialogProps> = ({
@@ -31,11 +32,13 @@ export const WorkflowSettingsDialog: React.FC<WorkflowSettingsDialogProps> = ({
   draft,
   editable,
   returnFocusRef,
+  onConfigureDeployment,
 }) => {
   const { t } = useI18n();
   const updateWorkflowMeta = useDeploymentWorkflowStore((state) => state.updateWorkflowMeta);
   const [name, setName] = React.useState(draft.name);
   const [enabled, setEnabled] = React.useState(draft.enabled);
+  const configureAfterClose = React.useRef(false);
 
   React.useEffect(() => {
     if (!open) return;
@@ -55,7 +58,15 @@ export const WorkflowSettingsDialog: React.FC<WorkflowSettingsDialogProps> = ({
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      onOpenChangeComplete={(nextOpen) => { if (!nextOpen) returnFocusRef?.current?.focus(); }}
+      onOpenChangeComplete={(nextOpen) => {
+        if (nextOpen) return;
+        if (configureAfterClose.current) {
+          configureAfterClose.current = false;
+          onConfigureDeployment?.();
+        } else {
+          returnFocusRef?.current?.focus();
+        }
+      }}
     >
       <DialogContent className="w-[calc(100%-2rem)] max-w-lg">
         <form className="flex flex-col gap-3" onSubmit={submit}>
@@ -94,6 +105,12 @@ export const WorkflowSettingsDialog: React.FC<WorkflowSettingsDialogProps> = ({
               />
             </Field>
           </FieldGroup>
+          {onConfigureDeployment && <Button type="button" variant="outline" size="sm" disabled={!editable} onClick={() => {
+            configureAfterClose.current = true;
+            onOpenChange(false);
+          }}>
+            {t('deployment.application.configure')}
+          </Button>}
           <DialogFooter>
             <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               {t('common.cancel')}

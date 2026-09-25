@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 10;
+const CURRENT_SCHEMA_VERSION: i32 = 11;
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
@@ -973,6 +973,11 @@ const MIGRATIONS: &[SchemaMigration] = &[
         version: 10,
         name: "deployment_workflow_canonical_names",
         sql: SCHEMA_DEPLOYMENT_WORKFLOW_CANONICAL_NAMES,
+    },
+    SchemaMigration {
+        version: 11,
+        name: "deployment_applications",
+        sql: include_str!("deployment/application_schema.sql"),
     },
 ];
 

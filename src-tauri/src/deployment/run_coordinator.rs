@@ -86,6 +86,7 @@ struct CompletedNode {
 struct PreparationState {
     outputs: BTreeMap<(String, String), NodeOutputValue>,
     completed: Vec<CompletedNode>,
+    reused_nodes: Vec<String>,
 }
 
 fn output_kind(kind: NodeOutputKind) -> DeploymentRunOutputKind {
@@ -133,6 +134,13 @@ fn plan_digest(plan: &ImmutableRunPlan) -> Result<String, String> {
         .ok_or_else(|| "DEPLOYMENT_WORKFLOW_INVALID_IMMUTABLE_PLAN".to_string())?
         .remove("planDigest");
     canonical_sha256(&value).map_err(|error| error.to_string())
+}
+
+fn ensure_plan_unexpired(expires_at: i64) -> Result<(), String> {
+    if current_timestamp_ms() >= expires_at {
+        return Err("DEPLOYMENT_WORKFLOW_PLAN_EXPIRED".into());
+    }
+    Ok(())
 }
 
 fn parse_artifact_handle(value: &Value) -> Result<ArtifactHandle, String> {
@@ -343,6 +351,7 @@ async fn execute_pre_approval(
     )));
     let mut outputs = BTreeMap::new();
     let mut completed = Vec::new();
+    let mut reused_nodes = Vec::new();
     let total = compiled
         .topology_layers
         .iter()
@@ -373,6 +382,37 @@ async fn execute_pre_approval(
                 .ok_or_else(|| "DEPLOYMENT_WORKFLOW_EXECUTOR_DESCRIPTOR_MISSING".to_string())?;
             if descriptor.is_finalizer || descriptor.effect_class.requires_approval() {
                 continue;
+            }
+            if let Some(handle) = rollback_artifact {
+                if matches!(
+                    node.type_name.as_str(),
+                    "source.snapshot"
+                        | "build.docker-buildx"
+                        | "build.package-script"
+                        | "artifact.collect"
+                        | "artifact.bundle-compose"
+                ) {
+                    reused_nodes.push(node.id.clone());
+                    continue;
+                }
+                for binding in node.inputs.values().filter(|binding| {
+                    nodes.get(&binding.from_node_id).is_some_and(|producer| {
+                        matches!(
+                            producer.type_name.as_str(),
+                            "artifact.collect" | "artifact.bundle-compose"
+                        )
+                    })
+                }) {
+                    outputs.insert(
+                        (binding.from_node_id.clone(), binding.from_port.clone()),
+                        NodeOutputValue {
+                            kind: NodeOutputKind::Artifact,
+                            value: serde_json::to_value(handle)
+                                .map_err(|error| error.to_string())?,
+                            artifact_reference: Some(handle.artifact_reference.clone()),
+                        },
+                    );
+                }
             }
             let mut inputs = node_inputs(node, &outputs)?;
             if let Some(handle) = rollback_artifact.filter(|_| {
@@ -498,7 +538,11 @@ async fn execute_pre_approval(
             }
         }
     }
-    Ok(PreparationState { outputs, completed })
+    Ok(PreparationState {
+        outputs,
+        completed,
+        reused_nodes,
+    })
 }
 
 fn find_output<'a>(
@@ -564,6 +608,13 @@ fn approval_summary(
         "compensations": plan.compiled.compensations,
         "verificationNodes": definition.nodes.iter().filter(|node| node.type_name.starts_with("verify.")).map(|node| &node.id).collect::<Vec<_>>(),
         "retention": plan.compiled.policy.releases_to_keep,
+        "releaseReview": {
+            "automaticRestore": definition.policy.automatic_restore,
+            "configuration": definition.nodes.iter().filter(|node| matches!(node.type_name.as_str(),
+                "artifact.bundle-compose" | "deploy.compose" | "verify.http"))
+                .map(|node| serde_json::json!({"nodeId":node.id,"name":node.display_name,"type":node.type_name,"config":node.config}))
+                .collect::<Vec<_>>(),
+        },
     })
 }
 
@@ -738,12 +789,25 @@ async fn prepare_run_internal(
     .await;
     runtime.finish_run(&run_id);
     let preparation = preparation_result?;
-    let mut source = parse_source(find_output(
-        &preparation,
-        "source.snapshot",
-        &workflow.definition,
-        "source",
-    )?)?;
+    let mut source = if let Some(projection) = &rollback_projection {
+        FrozenSourceSnapshot {
+            changed_files: Vec::new(),
+            binding: None,
+            source_ref: format!("release:{}", rollback_release.as_ref().unwrap().release_id),
+            revision: projection.manifest.source.revision.clone(),
+            dirty: projection.manifest.source.dirty,
+            snapshot_digest: projection.manifest.source.snapshot_digest.clone(),
+            metadata_digest: canonical_sha256(&projection.manifest.source)
+                .map_err(|error| error.to_string())?,
+        }
+    } else {
+        parse_source(find_output(
+            &preparation,
+            "source.snapshot",
+            &workflow.definition,
+            "source",
+        )?)?
+    };
     let target_output = find_output(
         &preparation,
         "target.preflight",
@@ -794,6 +858,8 @@ async fn prepare_run_internal(
             .as_ref()
             .ok_or_else(|| "DEPLOYMENT_ARTIFACT_NOT_FOUND".to_string())?;
         source = FrozenSourceSnapshot {
+            changed_files: Vec::new(),
+            binding: None,
             source_ref: format!("release:{}", release.release_id),
             revision: projection.manifest.source.revision.clone(),
             dirty: projection.manifest.source.dirty,
@@ -921,6 +987,25 @@ async fn prepare_run_internal(
     )?;
     for handle in &produced_artifacts {
         record_artifact(database, runtime.artifacts(), handle, prepared_at)?;
+    }
+    for node_id in &preparation.reused_nodes {
+        database.transition_deployment_run_node(
+            &run_id,
+            node_id,
+            DeploymentRunNodeStatus::Pending,
+            DeploymentRunNodeStatus::Skipped,
+            Some(&serde_json::json!({"reason":"historicalBundleReused"})),
+            "deployment.node.skipped",
+            None,
+            None,
+            Some(prepared_at),
+            prepared_at,
+        )?;
+        for ((producer, name), output) in &preparation.outputs {
+            if producer == node_id {
+                persist_output(database, &run_id, node_id, name, output, prepared_at)?;
+            }
+        }
     }
     for completed in &preparation.completed {
         database.transition_deployment_run_node(
@@ -1145,6 +1230,20 @@ fn ensure_frozen_plan_integrity(
     run: &DeploymentRunRecord,
     plan: &ImmutableRunPlan,
 ) -> Result<(), String> {
+    ensure_frozen_plan_integrity_for_mode(database, runtime, run, plan, false)
+}
+
+fn supports_reconciliation_version(version: &str) -> bool {
+    matches!(version, "docker-compose/1" | "docker-compose/2")
+}
+
+fn ensure_frozen_plan_integrity_for_mode(
+    database: &Database,
+    runtime: &DeploymentWorkflowRuntime,
+    run: &DeploymentRunRecord,
+    plan: &ImmutableRunPlan,
+    reconciliation: bool,
+) -> Result<(), String> {
     if plan.plan_digest != run.plan_digest || plan_digest(plan)? != run.plan_digest {
         return Err("DEPLOYMENT_WORKFLOW_PLAN_INTEGRITY_FAILURE".into());
     }
@@ -1200,8 +1299,10 @@ fn ensure_frozen_plan_integrity(
     }
     if plan.executor_versions.len() != workflow.definition.nodes.len()
         || workflow.definition.nodes.iter().any(|node| {
-            plan.executor_versions.get(&node.id).map(String::as_str)
-                != Some(DOCKER_COMPOSE_EXECUTOR_VERSION)
+            plan.executor_versions.get(&node.id).is_none_or(|version| {
+                version != DOCKER_COMPOSE_EXECUTOR_VERSION
+                    && !(reconciliation && supports_reconciliation_version(version))
+            })
         })
         || plan.compiled.nodes.iter().any(|compiled| {
             workflow
@@ -1275,9 +1376,7 @@ pub(crate) fn approve_run(
         return Err("DEPLOYMENT_WORKFLOW_RUN_NOT_AWAITING_APPROVAL".into());
     }
     let now = current_timestamp_ms();
-    if now > plan.expires_at {
-        return Err("DEPLOYMENT_WORKFLOW_PLAN_EXPIRED".into());
-    }
+    ensure_plan_unexpired(plan.expires_at)?;
     ensure_frozen_plan_integrity(database, runtime, &run, &plan)?;
     ensure_workflow_head_matches_plan(database, &run, &plan)?;
     let workflow = database
@@ -1926,14 +2025,63 @@ pub(crate) async fn execute_approved_run(
     if run.status != DeploymentRunStatus::InProgress {
         return Err("DEPLOYMENT_WORKFLOW_RUN_NOT_IN_PROGRESS".into());
     }
-    if current_timestamp_ms() > plan.expires_at {
-        return Err("DEPLOYMENT_WORKFLOW_PLAN_EXPIRED".into());
-    }
+    ensure_plan_unexpired(plan.expires_at)?;
     ensure_frozen_plan_integrity(&database, &runtime, &run, &plan)?;
     let workflow = database
         .get_deployment_workflow_revision(&run.workflow_id, run.workflow_revision)?
         .ok_or_else(|| "DEPLOYMENT_WORKFLOW_REVISION_NOT_FOUND".to_string())?;
-    let _target_guard = runtime.acquire_target_lock(&plan.target.target_id).await?;
+    // Serialize effects by the actual endpoint, including aliases with distinct
+    // profile/environment IDs. Revalidate after waiting, before any remote write.
+    let profile = database
+        .get_profile(&plan.target.connection_profile_id)?
+        .ok_or("DEPLOYMENT_WORKFLOW_PROFILE_NOT_FOUND")?;
+    let endpoint = canonical_sha256(&serde_json::json!({
+        "host": profile.host, "port": profile.port, "jumpHost": profile.jump_host_config,
+    }))
+    .map_err(|error| error.to_string())?;
+    let _target_guard = runtime.acquire_target_lock(&endpoint).await?;
+    let revalidation = async {
+        ensure_plan_unexpired(plan.expires_at)?;
+        ensure_workflow_head_matches_plan(&database, &run, &plan)?;
+        for unfinished in database.list_unfinished_deployment_runs()? {
+            if unfinished.id == run_id || unfinished.status != DeploymentRunStatus::StateUnknown {
+                continue;
+            }
+            let other: ImmutableRunPlan = serde_json::from_value(unfinished.plan)
+                .map_err(|_| "DEPLOYMENT_WORKFLOW_STORED_PLAN_INVALID")?;
+            let other_profile = database
+                .get_profile(&other.target.connection_profile_id)?
+                .ok_or("DEPLOYMENT_WORKFLOW_PROFILE_NOT_FOUND")?;
+            if other_profile.host == profile.host && other_profile.port == profile.port {
+                return Err("DEPLOYMENT_WORKFLOW_TARGET_STATE_UNKNOWN".into());
+            }
+        }
+        verify_pre_start_frozen_inputs(
+            &database,
+            &runtime,
+            &executors,
+            &run_id,
+            &expected_plan_digest,
+        )
+        .await
+    }
+    .await;
+    if let Err(error) = revalidation {
+        database.transition_deployment_run(
+            &run_id,
+            DeploymentRunStatus::InProgress,
+            DeploymentRunStatus::Failed,
+            None,
+            "deployment.run.preStartRejected",
+            Some(&serde_json::json!({"reason":error,"remoteEffectsStarted":false})),
+            None,
+            Some(current_timestamp_ms()),
+            current_timestamp_ms(),
+        )?;
+        release_artifact_leases(&database, &runtime, &plan);
+        runtime.finish_run(&run_id);
+        return Err(error);
+    }
     let descriptors = DeploymentNodeRegistry::mvp();
     let mut outputs = load_outputs(&database, &run_id)?;
     let existing_nodes = database
@@ -2169,6 +2317,26 @@ pub(crate) async fn execute_approved_run(
             Some(now),
             now,
         )?;
+        let checks = outputs.iter().filter(|(_, output)| output.kind == NodeOutputKind::Evidence)
+            .filter(|(_, output)| output.value.pointer("/evidence/outcome").and_then(Value::as_str) == Some("passed"))
+            .map(|((node_id, _), output)| serde_json::json!({"nodeId":node_id,"location":"server","evidence":output.value}))
+            .collect::<Vec<_>>();
+        if let Some(checked_at) = checks
+            .iter()
+            .filter_map(|check| {
+                check
+                    .pointer("/evidence/evidence/observedAt")
+                    .and_then(Value::as_i64)
+            })
+            .min()
+        {
+            database.append_deployment_run_event(&run_id, &super::repository::DeploymentRunEventWrite {
+                node_id: None, attempt: None, event_kind: "serviceObservation".into(), status: None,
+                summary_key: "deployment.service.observed".into(),
+                payload: Some(serde_json::json!({"status":"passed","checkedAt":checked_at,"checks":checks})),
+                recorded_at: current_timestamp_ms(),
+            })?;
+        }
         release_artifact_leases(&database, &runtime, &plan);
     }
     runtime.finish_run(&run_id);
@@ -2185,9 +2353,7 @@ pub(crate) fn begin_start_run(
     if run.status != DeploymentRunStatus::Approved {
         return Err("DEPLOYMENT_WORKFLOW_RUN_NOT_APPROVED".into());
     }
-    if current_timestamp_ms() > plan.expires_at {
-        return Err("DEPLOYMENT_WORKFLOW_PLAN_EXPIRED".into());
-    }
+    ensure_plan_unexpired(plan.expires_at)?;
     ensure_frozen_plan_integrity(database, runtime, &run, &plan)?;
     ensure_workflow_head_matches_plan(database, &run, &plan)?;
     let approval = database
@@ -2232,6 +2398,8 @@ pub(crate) async fn verify_pre_start_frozen_inputs(
     expected_plan_digest: &str,
 ) -> Result<(), String> {
     let (run, plan) = load_and_verify_plan(database, run_id, expected_plan_digest)?;
+    ensure_plan_unexpired(plan.expires_at)?;
+    ensure_workflow_head_matches_plan(database, &run, &plan)?;
     ensure_frozen_plan_integrity(database, runtime, &run, &plan)?;
     let workflow = database
         .get_deployment_workflow_revision(&run.workflow_id, run.workflow_revision)?
@@ -2293,6 +2461,81 @@ pub(crate) async fn verify_pre_start_frozen_inputs(
         return Err("DEPLOYMENT_WORKFLOW_TARGET_DRIFT".into());
     }
     Ok(())
+}
+
+/// Re-observe the committed release through read-only nodes. This never admits
+/// transfer, activation, commit, or compensation and never changes run outcome.
+pub(crate) async fn observe_service(
+    database: &Database,
+    runtime: &DeploymentWorkflowRuntime,
+    executors: &DeploymentNodeExecutorRegistry,
+    run_id: &str,
+) -> Result<Value, String> {
+    let run = database
+        .get_deployment_run(run_id)?
+        .ok_or("DEPLOYMENT_WORKFLOW_RUN_NOT_FOUND")?;
+    let (_, plan) = load_and_verify_plan(database, run_id, &run.plan_digest)?;
+    let workflow = database
+        .get_deployment_workflow_revision(&run.workflow_id, run.workflow_revision)?
+        .ok_or("DEPLOYMENT_WORKFLOW_REVISION_NOT_FOUND")?;
+    let check = async {
+        ensure_frozen_plan_integrity(database, runtime, &run, &plan)?;
+        if !database.list_deployment_releases(&run.workflow_id)?.iter().any(|release|
+            release.position == "current" && release.release_id == plan.target_release.release_id) {
+            return Err("DEPLOYMENT_SERVICE_NOT_CURRENT_RELEASE".to_string());
+        }
+        if database.list_unfinished_deployment_runs()?.iter().any(|other|
+            other.id != run_id && !matches!(other.status, DeploymentRunStatus::AwaitingApproval | DeploymentRunStatus::Approved | DeploymentRunStatus::Planned)) {
+            return Err("DEPLOYMENT_SERVICE_ACTIVE_OR_UNKNOWN_RUN".to_string());
+        }
+        let outputs = load_outputs(database, run_id)?;
+        let mut checks = Vec::new();
+        let nodes = workflow.definition.nodes.iter().filter(|node| node.type_name == "target.preflight")
+            .chain(workflow.definition.nodes.iter().filter(|node| node.type_name == "verify.http"));
+        for node in nodes {
+            let frozen = FrozenNodeInput { run_id: run_id.into(), node: node.clone(),
+                targets: workflow.definition.targets.clone(), inputs: node_inputs(node, &outputs)? };
+            let executor = executors.get(&node.type_name, node.type_version)?;
+            let planned = executor.plan(frozen.clone())?;
+            let result = executor.execute(VerifiedNodeInput { frozen, planned,
+                immutable_plan: Some(plan.clone()), attempt: 1,
+                idempotency_key: idempotency_key(run_id, &node.id, 1, &plan.plan_digest) },
+                NodeExecutionContext { cancellation: CancellationToken::new() }).await
+                .map_err(|error| format!("DEPLOYMENT_SERVICE_CHECK_FAILED:{}", error.category))?;
+            if node.type_name == "target.preflight" {
+                let observed = &result.outputs.get("target").ok_or("DEPLOYMENT_SERVICE_IDENTITY_MISSING")?.value;
+                if observed.get("currentRelease") != Some(&serde_json::to_value(&plan.target_release).map_err(|e|e.to_string())?) {
+                    return Err("DEPLOYMENT_SERVICE_RELEASE_DRIFT".into());
+                }
+            } else {
+                checks.push(serde_json::json!({"nodeId": node.id, "location":"server", "name":node.display_name,
+                    "evidence":result.outputs.get("evidence").map(|output| &output.value)}));
+            }
+        }
+        if checks.is_empty() { return Err("DEPLOYMENT_SERVICE_NO_CHECKS".into()); }
+        Ok(checks)
+    }.await;
+    let observation = match check {
+        Ok(checks) => {
+            serde_json::json!({"status":"passed","checkedAt":current_timestamp_ms(),"checks":checks})
+        }
+        Err(error) => {
+            serde_json::json!({"status":"unknown","checkedAt":current_timestamp_ms(),"reason":error,"checks":[]})
+        }
+    };
+    database.append_deployment_run_event(
+        run_id,
+        &super::repository::DeploymentRunEventWrite {
+            node_id: None,
+            attempt: None,
+            event_kind: "serviceObservation".into(),
+            status: None,
+            summary_key: "deployment.service.observed".into(),
+            payload: Some(observation.clone()),
+            recorded_at: current_timestamp_ms(),
+        },
+    )?;
+    Ok(observation)
 }
 
 pub(crate) fn cancel_run(
@@ -2400,10 +2643,18 @@ pub(crate) async fn reconcile_run(
             )
         }
     };
-    if let Err(error) = ensure_frozen_plan_integrity(database, runtime, &run, &plan) {
+    if let Err(error) = ensure_frozen_plan_integrity_for_mode(database, runtime, &run, &plan, true)
+    {
         return mark_integrity_unknown(database, &run, &error);
     }
-    let _target_guard = runtime.acquire_target_lock(&plan.target.target_id).await?;
+    let profile = database
+        .get_profile(&plan.target.connection_profile_id)?
+        .ok_or("DEPLOYMENT_WORKFLOW_PROFILE_NOT_FOUND")?;
+    let endpoint = canonical_sha256(&serde_json::json!({
+        "host": profile.host, "port": profile.port, "jumpHost": profile.jump_host_config,
+    }))
+    .map_err(|error| error.to_string())?;
+    let _target_guard = runtime.acquire_target_lock(&endpoint).await?;
     let workflow = database
         .get_deployment_workflow_revision(&run.workflow_id, run.workflow_revision)?
         .ok_or_else(|| "DEPLOYMENT_WORKFLOW_REVISION_NOT_FOUND".to_string())?;
@@ -2483,6 +2734,10 @@ pub(crate) async fn reconcile_run(
         let executor = executors.get(&node.type_name, node.type_version)?;
         if plan.executor_versions.get(&node.id).map(String::as_str)
             != Some(executor.executor_version())
+            && !plan.executor_versions.get(&node.id).is_some_and(|version| {
+                supports_reconciliation_version(version)
+                    && executor.executor_version() == DOCKER_COMPOSE_EXECUTOR_VERSION
+            })
         {
             evidence_complete = false;
             all_succeeded = false;
@@ -2767,6 +3022,17 @@ pub(crate) async fn reconcile_run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approval_and_execution_deadline_expires_on_the_real_clock() {
+        let deadline = current_timestamp_ms() + 100;
+        ensure_plan_unexpired(deadline).unwrap();
+        std::thread::sleep(Duration::from_millis(110));
+        assert_eq!(
+            ensure_plan_unexpired(deadline).unwrap_err(),
+            "DEPLOYMENT_WORKFLOW_PLAN_EXPIRED"
+        );
+    }
     use crate::db::tests::test_db;
     use crate::deployment::artifact_cas::{ArtifactBlobSource, DeploymentArtifactCas};
     use crate::deployment::docker_compose_executor::{
@@ -2926,6 +3192,8 @@ mod tests {
             definition_digest: format!("sha256:{}", "b".repeat(64)),
             parameters: BTreeMap::new(),
             source: FrozenSourceSnapshot {
+                changed_files: Vec::new(),
+                binding: None,
                 source_ref: "workspace".into(),
                 revision: "0123456789abcdef0123456789abcdef01234567".into(),
                 dirty: false,
@@ -3177,6 +3445,8 @@ mod tests {
                         NodeOutputValue {
                             kind: NodeOutputKind::Scalar,
                             value: serde_json::to_value(FrozenSourceSnapshot {
+                                changed_files: Vec::new(),
+                                binding: None,
                                 source_ref: "workspace".into(),
                                 revision: "0123456789abcdef0123456789abcdef01234567".into(),
                                 dirty: false,

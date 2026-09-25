@@ -57,6 +57,7 @@ fn initializes_empty_database_to_current_schema() {
             (8, "deployment_workflow_integrity_guards".to_string()),
             (9, "deployment_workflow_profile_guard".to_string()),
             (10, "deployment_workflow_canonical_names".to_string()),
+            (11, "deployment_applications".to_string()),
         ]
     );
 
@@ -287,14 +288,20 @@ fn repeated_open_is_idempotent() {
             |row| row.get::<_, i32>(0),
         )
         .unwrap(),
-        16
+        20
     );
 }
 
 #[test]
 fn rejects_higher_database_schema_without_modifying_it() {
     let conn = Connection::open_in_memory().unwrap();
-    conn.execute_batch("CREATE TABLE schema_version (version INTEGER PRIMARY KEY); INSERT INTO schema_version (version) VALUES (11);").unwrap();
+    conn.execute_batch("CREATE TABLE schema_version (version INTEGER PRIMARY KEY);")
+        .unwrap();
+    conn.execute(
+        "INSERT INTO schema_version (version) VALUES (?1)",
+        [CURRENT_SCHEMA_VERSION + 1],
+    )
+    .unwrap();
     let db = Database {
         conn: Arc::new(Mutex::new(conn)),
     };
@@ -304,7 +311,7 @@ fn rejects_higher_database_schema_without_modifying_it() {
     assert_eq!(
             error,
             format!(
-                "unsupported database schema version 11; latest supported version is {CURRENT_SCHEMA_VERSION}"
+                "unsupported database schema version {}; latest supported version is {CURRENT_SCHEMA_VERSION}", CURRENT_SCHEMA_VERSION + 1
             )
         );
     let conn = db.conn.lock().unwrap();

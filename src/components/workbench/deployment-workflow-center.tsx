@@ -1,4 +1,5 @@
 import React from 'react';
+import { WorkflowDeploymentConfiguration } from './deployment/application-center';
 import {
   AlertTriangleIcon,
   CheckCircle2Icon,
@@ -228,7 +229,7 @@ const TemplateDialog: React.FC<TemplateDialogProps> = ({ open, onOpenChange }) =
               </Field>
             </FieldGroup>
           </ScrollArea>
-          <DialogFooter className="border-t px-4 py-3">
+          <DialogFooter className="shrink-0 px-4 py-3">
             <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               {t('common.cancel')}
             </Button>
@@ -310,9 +311,9 @@ const UnsavedDraftNotice: React.FC = () => {
   );
 };
 
-export const DeploymentWorkflowCenter: React.FC<{
+export const AdvancedDeploymentWorkflowCenter: React.FC<{
   initialTab?: DeploymentWorkflowTab;
-}> = ({ initialTab = 'runs' }) => {
+}> = ({ initialTab }) => {
   const { t } = useI18n();
   const profiles = useProfileStore((state) => state.profiles);
   const state = useDeploymentWorkflowStore();
@@ -324,9 +325,16 @@ export const DeploymentWorkflowCenter: React.FC<{
   const [configOpen, setConfigOpen] = React.useState(false);
   const [issuesOpen, setIssuesOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [deploymentSettingsOpen, setDeploymentSettingsOpen] = React.useState(false);
   const [pendingDiscardAction, setPendingDiscardAction] = React.useState<'create' | 'refresh' | null>(null);
   const [search, setSearch] = React.useState('');
-  const [activeTab, setActiveTab] = React.useState<DeploymentWorkflowTab>(initialTab);
+  const [activeTab, setActiveTab] = React.useState<DeploymentWorkflowTab>(
+    () => initialTab ?? useDeploymentWorkflowStore.getState().activeTab,
+  );
+  const rememberActiveTab = state.setActiveTab;
+  React.useEffect(() => {
+    rememberActiveTab(activeTab);
+  }, [activeTab, rememberActiveTab]);
   const closeGuard = useDeploymentDraftCloseGuard();
   const [approvalRequest, setApprovalRequest] = React.useState(0);
   const handledNoticeRef = React.useRef<number | null>(null);
@@ -732,7 +740,17 @@ export const DeploymentWorkflowCenter: React.FC<{
             draft={draft}
             editable={editable}
             returnFocusRef={settingsTriggerRef}
+            onConfigureDeployment={draft.id && !dirty ? () => {
+              setSettingsOpen(false);
+              setDeploymentSettingsOpen(true);
+            } : undefined}
           />
+          {deploymentSettingsOpen && draft.id && <WorkflowDeploymentConfiguration
+            workflowId={draft.id}
+            triggerRef={settingsTriggerRef}
+            onClose={() => setDeploymentSettingsOpen(false)}
+            onSaved={() => { setDeploymentSettingsOpen(false); void state.refresh(); }}
+          />}
           <Drawer open={configOpen} onOpenChange={setConfigOpen}>
             <DrawerContent
               className="min-h-0 gap-0 overflow-hidden p-0"
@@ -765,7 +783,7 @@ export const DeploymentWorkflowCenter: React.FC<{
                   />
                 </div>
               </ScrollArea>
-              <DialogFooter className="shrink-0 border-t px-4 py-3">
+              <DialogFooter className="shrink-0 px-4 py-3">
                 <Button variant="outline" size="sm" onClick={() => setIssuesOpen(false)}>
                   {t('common.close')}
                 </Button>
@@ -816,3 +834,5 @@ export const DeploymentWorkflowCenter: React.FC<{
     </WorkbenchPage>
   );
 };
+
+export const DeploymentWorkflowCenter = AdvancedDeploymentWorkflowCenter;

@@ -1,5 +1,6 @@
 use super::artifact_cas::{ArtifactBlobSource, DeploymentArtifactCas};
 use super::canonicalization::canonical_sha256;
+use super::compose_release::{BundleComposeConfig, RegisteredBindMount};
 use super::file_tree_artifact::{
     extract_verified_file_tree, FileTreeEntry, FileTreeEntryKind, FILE_TREE_COMPONENT_NAME,
     FILE_TREE_MEDIA_TYPE,
@@ -38,11 +39,11 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-pub(crate) const DOCKER_COMPOSE_EXECUTOR_VERSION: &str = "docker-compose/1";
+pub(crate) const DOCKER_COMPOSE_EXECUTOR_VERSION: &str = "docker-compose/2";
 
 pub(crate) const DOCKER_COMPOSE_NODE_TYPES: &[(&str, u32)] = &[
     ("source.snapshot", 1),
@@ -176,12 +177,12 @@ pub(crate) fn docker_compose_executor_registry(
 
 #[derive(Clone)]
 pub(crate) struct NativeDockerComposeBackend {
-    app: AppHandle,
+    app: Option<AppHandle>,
     database: Database,
     credentials: CredentialManager,
     cancellations: ExecutionCancellationRegistry,
     known_hosts_path: PathBuf,
-    source_root: PathBuf,
+    sources: Arc<Mutex<BTreeMap<(String, String), (FrozenSourceSnapshot, Arc<tempfile::TempDir>)>>>,
     artifacts: DeploymentArtifactCas,
 }
 
@@ -189,6 +190,8 @@ pub(crate) struct NativeDockerComposeBackend {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SourceSnapshotConfig {
     source_ref: String,
+    #[serde(default)]
+    binding: Option<super::source_binding::SourceBinding>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -198,15 +201,6 @@ struct DockerBuildxConfig {
     dockerfile: String,
     platform: String,
     image_repository: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct BundleComposeConfig {
-    compose_files: Vec<String>,
-    project_name: String,
-    #[serde(default)]
-    services: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -259,6 +253,11 @@ struct StaticSwitchConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DockerComposeRemoteAction {
+    CheckManagedCompose(super::readiness::ManagedComposeCheck),
+    CheckUnoccupiedCompose {
+        project_name: String,
+        ports: Vec<u16>,
+    },
     Preflight {
         remote_root: String,
         require_atomic_symlink: bool,
@@ -267,6 +266,7 @@ enum DockerComposeRemoteAction {
         archive: String,
         image_reference: String,
         image_id: String,
+        image_manifest_id: Option<String>,
     },
     PrepareCompose {
         remote_directory: String,
@@ -279,6 +279,8 @@ enum DockerComposeRemoteAction {
         services: Vec<String>,
         pull_policy: String,
         image_reference: String,
+        container_user: String,
+        mounts: Vec<RegisteredBindMount>,
     },
     StaticSwitch {
         remote_root: String,
@@ -301,6 +303,8 @@ enum DockerComposeRemoteAction {
     },
     RestoreCompose {
         release: String,
+        project_name: String,
+        components: Vec<(String, String)>,
     },
     RestoreReleaseIdentity {
         remote_root: String,
@@ -329,6 +333,14 @@ enum DockerComposeRemoteAction {
 impl DockerComposeRemoteAction {
     fn fixed_request(&self) -> (String, &'static str) {
         let script = match self {
+            Self::CheckManagedCompose(check) => check.command().to_string(),
+            Self::CheckUnoccupiedCompose { project_name, ports } => {
+                let port_checks = ports.iter().map(|port| format!(
+                    "listeners=$(ss -H -ltn 'sport = :{port}'); test -z \"$listeners\"; published=$(docker ps -q --filter publish={port}); test -z \"$published\";"
+                )).collect::<Vec<_>>().join(" ");
+                format!("set -eu; containers=$(docker ps -aq --filter {}); test -z \"$containers\"; {port_checks}",
+                    posix_quote(&format!("label=com.docker.compose.project={project_name}")))
+            }
             Self::Preflight {
                 remote_root,
                 require_atomic_symlink,
@@ -347,11 +359,13 @@ impl DockerComposeRemoteAction {
                 archive,
                 image_reference,
                 image_id,
+                image_manifest_id,
             } => format!(
-                "set -eu; archive={}; image={}; expected={}; test -f \"$archive\"; docker load --input \"$archive\" >/dev/null; actual=$(docker image inspect --format '{{{{.Id}}}}' \"$image\"); test \"$actual\" = \"$expected\"",
+                "set -eu; archive={}; image={}; expected={}; manifest={}; test -f \"$archive\"; docker load --input \"$archive\" >/dev/null; actual=$(docker image inspect --format '{{{{.Id}}}}' \"$image\"); test \"$actual\" = \"$expected\" || {{ test -n \"$manifest\" && test \"$actual\" = \"$manifest\"; }}",
                 posix_quote(archive),
                 posix_quote(image_reference),
                 posix_quote(image_id),
+                posix_quote(image_manifest_id.as_deref().unwrap_or("")),
             ),
             Self::PrepareCompose {
                 remote_directory,
@@ -380,7 +394,18 @@ impl DockerComposeRemoteAction {
                 services,
                 pull_policy,
                 image_reference,
+                container_user,
+                mounts,
             } => {
+                let probes = mounts.iter().map(|mount| {
+                    let specification = format!("type=bind,source={},target={}{}", mount.source, mount.target,
+                        if mount.read_only { ",readonly" } else { "" });
+                    let probe = "set -eu; test -d \"$1\"; test -r \"$1\"; test -x \"$1\"; if test \"$2\" = rw; then scratch=$(mktemp -d \"$1/.shellspan-access.XXXXXXXX\"); trap 'rm -f \"$scratch/probe\"; rmdir \"$scratch\"' EXIT; printf shellspan-access > \"$scratch/probe\"; test \"$(cat \"$scratch/probe\")\" = shellspan-access; fi";
+                    format!("test \"$(readlink -f {source})\" = {source}; docker run --rm --pull never --network none --read-only --user {user} --mount {mount} --entrypoint /bin/sh {image} -ec {probe} shellspan-access {target} {mode};",
+                        source=posix_quote(&mount.source), user=posix_quote(container_user), mount=posix_quote(&specification),
+                        image=posix_quote(image_reference), probe=posix_quote(probe), target=posix_quote(&mount.target),
+                        mode=if mount.read_only { "ro" } else { "rw" })
+                }).collect::<Vec<_>>().join(" ");
                 let file_args = compose_files
                     .iter()
                     .map(|path| format!("-f {}", posix_quote(path)))
@@ -392,7 +417,7 @@ impl DockerComposeRemoteAction {
                     .collect::<Vec<_>>()
                     .join(" ");
                 format!(
-                    "set -eu; images=$(docker compose {file_args} --project-name {} config --images); printf '%s\\n' \"$images\" | grep -F -x -- {} >/dev/null; docker compose {file_args} --project-name {} config >/dev/null; docker compose {file_args} --project-name {} up -d --no-build --pull {} {services}",
+                    "set -eu; images=$(docker compose {file_args} --project-name {} config --images); printf '%s\\n' \"$images\" | grep -F -x -- {} >/dev/null; docker compose {file_args} --project-name {} config >/dev/null; {probes} docker compose {file_args} --project-name {} up -d --no-build --pull {} {services}",
                     posix_quote(project_name),
                     posix_quote(image_reference),
                     posix_quote(project_name),
@@ -450,10 +475,17 @@ impl DockerComposeRemoteAction {
                 posix_quote(layout_digest),
                 posix_quote(metadata),
             ),
-            Self::RestoreCompose { release } => format!(
-                "set -eu; release={}; test -d \"$release\"; docker load --input \"$release/image.tar\" >/dev/null; files=''; for file in \"$release\"/*.yml \"$release\"/*.yaml; do test -f \"$file\" && files=\"$files -f $file\"; done; test -n \"$files\"; docker compose $files up -d --no-build --pull never",
-                posix_quote(release)
-            ),
+            Self::RestoreCompose { release, project_name, components } => {
+                let checks = components.iter().map(|(name, digest)| format!(
+                    "test ! -L {path}; test -f {path}; actual=$(sha256sum {path}); test \"${{actual%% *}}\" = {digest};",
+                    path = posix_quote(&format!("{release}/{name}")),
+                    digest = posix_quote(digest.strip_prefix("sha256:").unwrap_or(digest)),
+                )).collect::<Vec<_>>().join(" ");
+                format!(
+                    "set -eu; release={}; test -d \"$release\"; test ! -L \"$release\"; {checks} docker load --input \"$release/image.tar\" >/dev/null; docker compose -f \"$release/compose.yaml\" --project-name {} up -d --no-build --pull never",
+                    posix_quote(release), posix_quote(project_name),
+                )
+            },
             Self::RestoreReleaseIdentity {
                 remote_root,
                 release,
@@ -509,6 +541,10 @@ impl DockerComposeRemoteAction {
             ),
         };
         let preview = match self {
+            Self::CheckManagedCompose(_) => "ShellSpan read-only managed Compose evidence check",
+            Self::CheckUnoccupiedCompose { .. } => {
+                "ShellSpan read-only Compose resource conflict check"
+            }
             Self::Preflight { .. } => "ShellSpan fixed deployment preflight",
             Self::LoadImage { .. } => "ShellSpan fixed Docker image load",
             Self::PrepareCompose { .. } => "ShellSpan fixed Compose release preparation",
@@ -529,17 +565,6 @@ impl DockerComposeRemoteAction {
         };
         (format!("sh -c {}", posix_quote(&script)), preview)
     }
-}
-
-fn sha256_bytes(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    format!(
-        "sha256:{}",
-        digest
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-    )
 }
 
 fn sha256_file(path: &Path) -> Result<(String, u64), NodeFailure> {
@@ -574,14 +599,16 @@ fn sha256_file(path: &Path) -> Result<(String, u64), NodeFailure> {
 }
 
 fn canonical_member(root: &Path, relative: &str) -> Result<PathBuf, NodeFailure> {
+    let root = fs::canonicalize(root)
+        .map_err(|error| NodeFailure::definite("pathBoundary", error.to_string()))?;
     let candidate = if relative == "." {
-        root.to_path_buf()
+        root.clone()
     } else {
         root.join(relative)
     };
     let canonical = fs::canonicalize(&candidate)
         .map_err(|error| NodeFailure::definite("pathBoundary", error.to_string()))?;
-    if !canonical.starts_with(root) {
+    if !canonical.starts_with(&root) {
         return Err(NodeFailure::definite(
             "pathBoundary",
             "source member escapes the frozen workspace",
@@ -590,11 +617,11 @@ fn canonical_member(root: &Path, relative: &str) -> Result<PathBuf, NodeFailure>
     Ok(canonical)
 }
 
-fn posix_quote(value: &str) -> String {
+pub(super) fn posix_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn safe_local_command(program: &str) -> Command {
+pub(super) fn safe_local_command(program: &str) -> Command {
     let mut command = Command::new(program);
     command.env_clear();
     for name in [
@@ -622,7 +649,7 @@ fn safe_local_command(program: &str) -> Command {
     command
 }
 
-fn fixed_command(
+pub(super) fn fixed_command(
     program: &str,
     args: &[String],
     directory: &Path,
@@ -636,6 +663,10 @@ fn fixed_command(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    #[cfg(test)]
+    if std::env::var("SHELLSPAN_DEPLOYMENT_TEST_VERBOSE").as_deref() == Ok("1") {
+        command.stderr(Stdio::inherit());
+    }
     let mut child = command
         .spawn()
         .map_err(|error| NodeFailure::definite("processStart", error.to_string()))?;
@@ -671,6 +702,109 @@ fn fixed_command(
     }
 }
 
+fn build_image_bundle(
+    frozen_root: &Path,
+    source: FrozenSourceSnapshot,
+    config: DockerBuildxConfig,
+    config_digest: String,
+    artifacts: &DeploymentArtifactCas,
+    cancellation: &tokio_util::sync::CancellationToken,
+    timeout: Duration,
+) -> Result<super::artifact_cas::ArtifactBundleProjection, NodeFailure> {
+    let materialized = super::source_binding::materialize(frozen_root)
+        .map_err(|error| NodeFailure::definite("sourceMaterialize", error))?;
+    let source_root = materialized.path();
+    let context_path = canonical_member(&source_root, &config.context)?;
+    let dockerfile = canonical_member(&source_root, &config.dockerfile)?;
+    if !context_path.is_dir() || !dockerfile.is_file() {
+        return Err(NodeFailure::definite(
+            "pathBoundary",
+            "Docker build inputs are unavailable",
+        ));
+    }
+    let identity = canonical_sha256(&serde_json::json!({
+        "source": source,
+        "configDigest": config_digest,
+    }))
+    .map_err(|error| NodeFailure::definite("artifact", error.to_string()))?;
+    let release_id = format!("release-{}", &identity[7..23]);
+    let image_reference = format!("{}:{release_id}", config.image_repository);
+    fixed_command(
+        "docker",
+        &["buildx".into(), "version".into()],
+        &source_root,
+        &cancellation,
+        Duration::from_secs(30),
+    )?;
+    let temporary = tempfile::tempdir()
+        .map_err(|error| NodeFailure::definite("artifactIo", error.to_string()))?;
+    let archive = temporary.path().join("image.tar");
+    fixed_command(
+        "docker",
+        &[
+            "buildx".into(),
+            "build".into(),
+            "--progress".into(),
+            "plain".into(),
+            "--platform".into(),
+            config.platform.clone(),
+            "--file".into(),
+            dockerfile.to_string_lossy().into_owned(),
+            "--tag".into(),
+            image_reference.clone(),
+            "--output".into(),
+            format!("type=docker,dest={}", archive.display()),
+            context_path.to_string_lossy().into_owned(),
+        ],
+        &source_root,
+        &cancellation,
+        timeout,
+    )?;
+    let identity = super::docker_archive::docker_archive_image_identity(&archive, &image_reference)
+        .map_err(|error| NodeFailure::definite("imageIdentity", error))?;
+    let mut annotations = BTreeMap::from([
+        ("imageReference".into(), image_reference),
+        ("imageId".into(), identity.config_id),
+    ]);
+    if let Some(manifest_id) = identity.manifest_id {
+        annotations.insert("imageManifestId".into(), manifest_id);
+    }
+    let (digest, size) = sha256_file(&archive)?;
+    let manifest = ArtifactBundleManifest {
+        schema_version: 2,
+        artifact_type: super::node_registry::ARTIFACT_TYPE_DOCKER_IMAGE.into(),
+        source: ArtifactSource {
+            revision: source.revision,
+            dirty: source.dirty,
+            snapshot_digest: source.snapshot_digest,
+        },
+        components: vec![ArtifactDescriptor {
+            name: "image.tar".into(),
+            role: ArtifactRole::Application,
+            media_type: "application/vnd.shellspan.oci-image.tar".into(),
+            digest: digest.clone(),
+            size,
+            platform: None,
+            annotations,
+        }],
+        producer: ArtifactProducer {
+            node_type: "build.docker-buildx".into(),
+            node_type_version: 2,
+            config_digest: config_digest,
+        },
+        annotations: BTreeMap::from([("releaseId".into(), release_id)]),
+    };
+    artifacts
+        .publish_bundle(
+            &manifest,
+            &[ArtifactBlobSource {
+                digest,
+                path: archive,
+            }],
+        )
+        .map_err(|error| NodeFailure::definite("artifactPublish", error))
+}
+
 impl NativeDockerComposeBackend {
     pub(crate) fn new(
         app: AppHandle,
@@ -678,167 +812,56 @@ impl NativeDockerComposeBackend {
         credentials: CredentialManager,
         cancellations: ExecutionCancellationRegistry,
         known_hosts_path: PathBuf,
-        source_root: PathBuf,
         artifacts: DeploymentArtifactCas,
     ) -> Result<Self, String> {
-        if !source_root.is_absolute() {
-            return Err("deployment source workspace must be absolute".into());
-        }
         Ok(Self {
-            app,
+            app: Some(app),
             database,
             credentials,
             cancellations,
             known_hosts_path,
-            source_root,
+            sources: Arc::new(Mutex::new(BTreeMap::new())),
             artifacts,
         })
     }
 
-    fn canonical_source_root(&self) -> Result<PathBuf, NodeFailure> {
-        let root = fs::canonicalize(&self.source_root)
-            .map_err(|error| NodeFailure::definite("sourceUnavailable", error.to_string()))?;
-        if !root.is_dir() {
-            return Err(NodeFailure::definite(
-                "sourceUnavailable",
-                "deployment source workspace is not a directory",
-            ));
+    #[cfg(test)]
+    pub(crate) fn isolated_native(
+        database: Database,
+        credentials: CredentialManager,
+        known_hosts_path: PathBuf,
+        artifacts: DeploymentArtifactCas,
+    ) -> Self {
+        Self {
+            app: None,
+            database,
+            credentials,
+            known_hosts_path,
+            artifacts,
+            cancellations: ExecutionCancellationRegistry::default(),
+            sources: Arc::new(Mutex::new(BTreeMap::new())),
         }
-        Ok(root)
     }
 
-    fn source_snapshot(&self, source_ref: &str) -> Result<FrozenSourceSnapshot, NodeFailure> {
-        if source_ref != "workspace" {
-            return Err(NodeFailure::definite(
-                "sourceReference",
-                "phase 2 supports only the native workspace source reference",
-            ));
-        }
-        let source_root = self.canonical_source_root()?;
-        let top_level = safe_local_command("git")
-            .args(["rev-parse", "--show-toplevel"])
-            .current_dir(&source_root)
-            .output()
-            .map_err(|error| NodeFailure::definite("sourceUnavailable", error.to_string()))?;
-        if !top_level.status.success() {
-            return Err(NodeFailure::definite(
-                "sourceUnavailable",
-                "workspace is not a readable Git checkout",
-            ));
-        }
-        let top_level = String::from_utf8(top_level.stdout)
-            .map_err(|_| {
-                NodeFailure::definite("sourceUnavailable", "Git project root is not UTF-8")
-            })?
-            .trim()
-            .to_string();
-        if !top_level.starts_with('/')
-            || fs::canonicalize(&top_level)
-                .ok()
-                .as_ref()
-                .is_none_or(|top| top != &source_root)
-        {
-            return Err(NodeFailure::definite(
-                "sourceUnavailable",
-                "native workspace must be the exact Git project root",
-            ));
-        }
-        let revision = safe_local_command("git")
-            .args(["rev-parse", "HEAD"])
-            .current_dir(&source_root)
-            .output()
-            .map_err(|error| NodeFailure::definite("sourceUnavailable", error.to_string()))?;
-        if !revision.status.success() {
-            return Err(NodeFailure::definite(
-                "sourceUnavailable",
-                "workspace is not a readable Git checkout",
-            ));
-        }
-        let revision = String::from_utf8(revision.stdout)
-            .map_err(|_| NodeFailure::definite("sourceUnavailable", "Git revision is not UTF-8"))?
-            .trim()
-            .to_string();
-        let status = safe_local_command("git")
-            .args([
-                "status",
-                "--porcelain",
-                "-z",
-                "--untracked-files=all",
-                "--no-renames",
-            ])
-            .current_dir(&source_root)
-            .output()
-            .map_err(|error| NodeFailure::definite("sourceUnavailable", error.to_string()))?;
-        if !status.status.success() || status.stdout.len() > 4 * 1024 * 1024 {
-            return Err(NodeFailure::definite(
-                "sourceUnavailable",
-                "workspace status is unavailable or exceeds the safety limit",
-            ));
-        }
-        let diff = safe_local_command("git")
-            .args(["diff", "--binary", "HEAD", "--"])
-            .current_dir(&source_root)
-            .output()
-            .map_err(|error| NodeFailure::definite("sourceUnavailable", error.to_string()))?;
-        if !diff.status.success() || diff.stdout.len() > 64 * 1024 * 1024 {
-            return Err(NodeFailure::definite(
-                "sourceUnavailable",
-                "workspace diff is unavailable or exceeds the safety limit",
-            ));
-        }
-        let mut snapshot_bytes = [
-            revision.as_bytes(),
-            &[0],
-            status.stdout.as_slice(),
-            &[0],
-            diff.stdout.as_slice(),
-        ]
-        .concat();
-        let mut untracked_bytes = 0_u64;
-        for entry in status
-            .stdout
-            .split(|byte| *byte == 0)
-            .filter(|entry| entry.starts_with(b"?? "))
-        {
-            let relative = std::str::from_utf8(&entry[3..]).map_err(|_| {
-                NodeFailure::definite("sourceUnavailable", "untracked path is not UTF-8")
-            })?;
-            let path = canonical_member(&source_root, relative)?;
-            if !path.is_file() {
-                return Err(NodeFailure::definite(
+    fn frozen_source_root(
+        &self,
+        source: &FrozenSourceSnapshot,
+    ) -> Result<Arc<tempfile::TempDir>, NodeFailure> {
+        self.sources
+            .lock()
+            .map_err(|_| NodeFailure::definite("sourceUnavailable", "source lock poisoned"))?
+            .get(&(
+                source.metadata_digest.clone(),
+                source.snapshot_digest.clone(),
+            ))
+            .filter(|captured| captured.0 == *source)
+            .map(|captured| captured.1.clone())
+            .ok_or_else(|| {
+                NodeFailure::definite(
                     "sourceUnavailable",
-                    "untracked source member is not a regular file",
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| NodeFailure::definite("sourceUnavailable", error.to_string()))?;
-            untracked_bytes = untracked_bytes.saturating_add(bytes.len() as u64);
-            if untracked_bytes > 64 * 1024 * 1024 {
-                return Err(NodeFailure::definite(
-                    "sourceUnavailable",
-                    "untracked source content exceeds the snapshot safety limit",
-                ));
-            }
-            snapshot_bytes.extend_from_slice(relative.as_bytes());
-            snapshot_bytes.push(0);
-            snapshot_bytes.extend_from_slice(&bytes);
-            snapshot_bytes.push(0);
-        }
-        let snapshot_digest = sha256_bytes(&snapshot_bytes);
-        let metadata_digest = canonical_sha256(&serde_json::json!({
-            "sourceRef": source_ref,
-            "revision": revision,
-            "dirty": !status.stdout.is_empty(),
-            "statusDigest": sha256_bytes(&status.stdout),
-        }))
-        .map_err(|error| NodeFailure::definite("sourceUnavailable", error.to_string()))?;
-        Ok(FrozenSourceSnapshot {
-            source_ref: source_ref.to_string(),
-            revision,
-            dirty: !status.stdout.is_empty(),
-            snapshot_digest,
-            metadata_digest,
-        })
+                    "frozen source is unavailable; prepare again",
+                )
+            })
     }
 
     fn target_definition<'a>(
@@ -913,6 +936,14 @@ impl NativeDockerComposeBackend {
             .cancellations
             .register(operation_id.clone())
             .map_err(|error| NodeFailure::definite("cancellation", error.to_string()))?;
+        let read_only = matches!(
+            &action,
+            DockerComposeRemoteAction::Preflight { .. }
+                | DockerComposeRemoteAction::CheckUnoccupiedCompose { .. }
+                | DockerComposeRemoteAction::CheckManagedCompose(_)
+                | DockerComposeRemoteAction::VerifyHttp { .. }
+                | DockerComposeRemoteAction::ReverifyHttp { .. }
+        );
         let (command, preview) = action.fixed_request();
         let request = ReviewedSshExecutionRequest {
             operation_id: operation_id.clone(),
@@ -949,6 +980,10 @@ impl NativeDockerComposeBackend {
         match result.status {
             ExecutionStatus::Completed if result.exit_code == Some(0) => Ok(result.stdout),
             ExecutionStatus::Cancelled => Err(NodeFailure::canceled()),
+            _ if read_only => Err(NodeFailure::definite(
+                "readCheckFailed",
+                "read-only remote check did not complete successfully",
+            )),
             ExecutionStatus::TimedOut => Err(NodeFailure::ambiguous(
                 "timedOut",
                 "fixed remote action timed out",
@@ -1755,6 +1790,7 @@ impl NativeDockerComposeBackend {
                 archive: format!("{remote_directory}/image.tar"),
                 image_reference: image_reference.clone(),
                 image_id: image_id.clone(),
+                image_manifest_id: image.annotations.get("imageManifestId").cloned(),
             },
             context.cancellation,
         )
@@ -1821,6 +1857,15 @@ impl NativeDockerComposeBackend {
             .find(|component| component.name == "image.tar")
             .and_then(|component| component.annotations.get("imageReference"))
             .ok_or_else(|| NodeFailure::definite("imageIdentity", "image reference is missing"))?;
+        if config.pull_policy != "never"
+            || bundle.manifest.annotations.get("projectName") != Some(&config.project_name)
+            || bundle.manifest.annotations.get("services") != Some(&config.services.join(","))
+        {
+            return Err(NodeFailure::definite(
+                "composeBinding",
+                "activation differs from the frozen Compose bundle",
+            ));
+        }
         let compose_files = bundle
             .manifest
             .components
@@ -1834,6 +1879,33 @@ impl NativeDockerComposeBackend {
                 "Compose bundle has no configuration",
             ));
         }
+        let document: Value = serde_yaml::from_slice(
+            &fs::read(
+                self.artifacts
+                    .verified_component_path(&handle, "compose.yaml")
+                    .map_err(|error| NodeFailure::definite("artifactIntegrity", error))?,
+            )
+            .map_err(|error| NodeFailure::definite("artifactIo", error.to_string()))?,
+        )
+        .map_err(|error| NodeFailure::definite("composeConfig", error.to_string()))?;
+        let service = &document["services"][&config.services[0]];
+        let container_user = service["user"].as_str().unwrap_or("").to_string();
+        let mounts = service["volumes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|mount| RegisteredBindMount {
+                source: mount["source"].as_str().unwrap_or("").into(),
+                target: mount["target"].as_str().unwrap_or("").into(),
+                read_only: mount["read_only"].as_bool().unwrap_or(false),
+            })
+            .collect::<Vec<_>>();
+        if !mounts.is_empty() && !super::compose_release::numeric_container_user(&container_user) {
+            return Err(NodeFailure::definite(
+                "containerIdentity",
+                "mount access requires a numeric UID:GID",
+            ));
+        }
         self.run_remote(
             &input,
             &config.target_id,
@@ -1843,6 +1915,8 @@ impl NativeDockerComposeBackend {
                 services: config.services.clone(),
                 pull_policy: config.pull_policy.clone(),
                 image_reference: image_reference.clone(),
+                container_user: container_user.clone(),
+                mounts: mounts.clone(),
             },
             context.cancellation,
         )
@@ -1853,6 +1927,8 @@ impl NativeDockerComposeBackend {
             "projectName": config.project_name,
             "services": config.services,
             "artifact": handle,
+            "containerUser": container_user,
+            "verifiedMounts": mounts,
         });
         let receipt =
             Self::effect_receipt(&input, "deploy.compose", &config.target_id, &effect_payload)?;
@@ -2562,7 +2638,42 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                         .map_err(|error| NodeFailure::definite("config", error.to_string()))?;
                 let backend = self.clone();
                 let snapshot = tokio::task::spawn_blocking(move || {
-                    backend.source_snapshot(&config.source_ref)
+                    if config.source_ref != "workspace" {
+                        return Err(NodeFailure::definite(
+                            "sourceReference",
+                            "unsupported source reference",
+                        ));
+                    }
+                    let binding = config.binding.ok_or_else(|| {
+                        NodeFailure::definite(
+                            "sourceBindingRequired",
+                            "bind a local Git repository before preparing a deployment",
+                        )
+                    })?;
+                    let captured =
+                        super::source_binding::capture_cancellable(&binding, &context.cancellation)
+                            .map_err(|error| {
+                                if context.cancellation.is_cancelled() {
+                                    NodeFailure::canceled()
+                                } else {
+                                    NodeFailure::definite("sourceCapture", error)
+                                }
+                            })?;
+                    let snapshot = captured.snapshot;
+                    backend
+                        .sources
+                        .lock()
+                        .map_err(|_| {
+                            NodeFailure::definite("sourceUnavailable", "source lock poisoned")
+                        })?
+                        .insert(
+                            (
+                                snapshot.metadata_digest.clone(),
+                                snapshot.snapshot_digest.clone(),
+                            ),
+                            (snapshot.clone(), Arc::new(captured.directory)),
+                        );
+                    Ok::<_, NodeFailure>(snapshot)
                 })
                 .await
                 .map_err(|_| {
@@ -2590,14 +2701,10 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                 let planned = input.planned.clone();
                 let timeout = Duration::from_secs(u64::from(input.frozen.node.timeout_seconds));
                 let handle = tokio::task::spawn_blocking(move || {
-                    let observed = backend.source_snapshot(&source.source_ref)?;
-                    if observed != source {
-                        return Err(NodeFailure::definite(
-                            "sourceChanged",
-                            "source snapshot changed before package build",
-                        ));
-                    }
-                    let source_root = backend.canonical_source_root()?;
+                    let frozen = backend.frozen_source_root(&source)?;
+                    let materialized = super::source_binding::materialize(frozen.path())
+                        .map_err(|error| NodeFailure::definite("sourceMaterialize", error))?;
+                    let source_root = materialized.path();
                     let handle = execute_package_script_build(
                         &source_root,
                         &source,
@@ -2606,15 +2713,7 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                         &backend.artifacts,
                         &cancellation,
                         timeout,
-                        || {
-                            if backend.source_snapshot(&source.source_ref)? != source {
-                                return Err(NodeFailure::definite(
-                                    "sourceChanged",
-                                    "source snapshot changed during package build",
-                                ));
-                            }
-                            Ok(())
-                        },
+                        || Ok(()),
                     )?;
                     Ok::<_, NodeFailure>(handle)
                 })
@@ -2644,107 +2743,16 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                 let cancellation = context.cancellation.clone();
                 let planned = input.planned.clone();
                 let projection = tokio::task::spawn_blocking(move || {
-                    let observed = backend.source_snapshot(&source.source_ref)?;
-                    if observed != source {
-                        return Err(NodeFailure::definite(
-                            "sourceChanged",
-                            "source snapshot changed before build",
-                        ));
-                    }
-                    let source_root = backend.canonical_source_root()?;
-                    let context_path = canonical_member(&source_root, &config.context)?;
-                    let dockerfile = canonical_member(&source_root, &config.dockerfile)?;
-                    if !context_path.is_dir() || !dockerfile.is_file() {
-                        return Err(NodeFailure::definite(
-                            "pathBoundary",
-                            "Docker build inputs are unavailable",
-                        ));
-                    }
-                    let identity = canonical_sha256(&serde_json::json!({
-                        "source": source,
-                        "configDigest": planned.config_digest,
-                    }))
-                    .map_err(|error| NodeFailure::definite("artifact", error.to_string()))?;
-                    let release_id = format!("release-{}", &identity[7..23]);
-                    let image_reference = format!("{}:{release_id}", config.image_repository);
-                    fixed_command(
-                        "docker",
-                        &["buildx".into(), "version".into()],
-                        &source_root,
-                        &cancellation,
-                        Duration::from_secs(30),
-                    )?;
-                    let temporary = tempfile::tempdir()
-                        .map_err(|error| NodeFailure::definite("artifactIo", error.to_string()))?;
-                    let archive = temporary.path().join("image.tar");
-                    fixed_command(
-                        "docker",
-                        &[
-                            "buildx".into(),
-                            "build".into(),
-                            "--progress".into(),
-                            "plain".into(),
-                            "--platform".into(),
-                            config.platform.clone(),
-                            "--file".into(),
-                            dockerfile.to_string_lossy().into_owned(),
-                            "--tag".into(),
-                            image_reference.clone(),
-                            "--output".into(),
-                            format!("type=docker,dest={}", archive.display()),
-                            context_path.to_string_lossy().into_owned(),
-                        ],
-                        &source_root,
+                    let frozen = backend.frozen_source_root(&source)?;
+                    build_image_bundle(
+                        frozen.path(),
+                        source,
+                        config,
+                        planned.config_digest,
+                        &backend.artifacts,
                         &cancellation,
                         Duration::from_secs(u64::from(input.frozen.node.timeout_seconds)),
-                    )?;
-                    if backend.source_snapshot(&source.source_ref)? != source {
-                        return Err(NodeFailure::definite(
-                            "sourceChanged",
-                            "source snapshot changed during build",
-                        ));
-                    }
-                    let image_id =
-                        super::docker_archive::docker_archive_image_id(&archive, &image_reference)
-                            .map_err(|error| NodeFailure::definite("imageIdentity", error))?;
-                    let (digest, size) = sha256_file(&archive)?;
-                    let manifest = ArtifactBundleManifest {
-                        schema_version: 2,
-                        artifact_type: super::node_registry::ARTIFACT_TYPE_DOCKER_IMAGE.into(),
-                        source: ArtifactSource {
-                            revision: source.revision,
-                            dirty: source.dirty,
-                            snapshot_digest: source.snapshot_digest,
-                        },
-                        components: vec![ArtifactDescriptor {
-                            name: "image.tar".into(),
-                            role: ArtifactRole::Application,
-                            media_type: "application/vnd.shellspan.oci-image.tar".into(),
-                            digest: digest.clone(),
-                            size,
-                            platform: None,
-                            annotations: BTreeMap::from([
-                                ("imageReference".into(), image_reference),
-                                ("imageId".into(), image_id),
-                            ]),
-                        }],
-                        producer: ArtifactProducer {
-                            node_type: "build.docker-buildx".into(),
-                            node_type_version: 2,
-                            config_digest: planned.config_digest,
-                        },
-                        annotations: BTreeMap::from([("releaseId".into(), release_id)]),
-                    };
-                    backend
-                        .artifacts
-                        .publish_bundle(
-                            &manifest,
-                            &[ArtifactBlobSource {
-                                digest,
-                                path: archive,
-                            }],
-                        )
-                        .map_err(|error| NodeFailure::definite("artifactPublish", error))
+                    )
                 })
                 .await
                 .map_err(|_| {
@@ -2772,14 +2780,10 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                 let cancellation = context.cancellation.clone();
                 let planned = input.planned.clone();
                 let handle = tokio::task::spawn_blocking(move || {
-                    let observed = backend.source_snapshot(&source.source_ref)?;
-                    if observed != source {
-                        return Err(NodeFailure::definite(
-                            "sourceChanged",
-                            "source snapshot changed before artifact collection",
-                        ));
-                    }
-                    let source_root = backend.canonical_source_root()?;
+                    let frozen = backend.frozen_source_root(&source)?;
+                    let materialized = super::source_binding::materialize(frozen.path())
+                        .map_err(|error| NodeFailure::definite("sourceMaterialize", error))?;
+                    let source_root = materialized.path();
                     let handle = execute_artifact_collect(
                         &source_root,
                         &source,
@@ -2787,15 +2791,7 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                         &planned,
                         &backend.artifacts,
                         &cancellation,
-                        || {
-                            if backend.source_snapshot(&source.source_ref)? != source {
-                                return Err(NodeFailure::definite(
-                                    "sourceChanged",
-                                    "source snapshot changed during artifact collection",
-                                ));
-                            }
-                            Ok(())
-                        },
+                        || Ok(()),
                     )?;
                     Ok::<_, NodeFailure>(handle)
                 })
@@ -2825,11 +2821,18 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                 let backend = self.clone();
                 let planned = input.planned.clone();
                 let projection = tokio::task::spawn_blocking(move || {
-                    let source_root = backend.canonical_source_root()?;
+                    let frozen = backend.frozen_source_root(&source)?;
+                    let source_root = frozen.path();
                     let image = backend
                         .artifacts
                         .inspect(&image_handle)
                         .map_err(|error| NodeFailure::definite("artifactIntegrity", error))?;
+                    if image.manifest.source.snapshot_digest != source.snapshot_digest {
+                        return Err(NodeFailure::definite(
+                            "artifactIntegrity",
+                            "image and Compose source snapshots differ",
+                        ));
+                    }
                     let image_component = image
                         .manifest
                         .components
@@ -2849,19 +2852,43 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                             .verified_component_path(&image_handle, "image.tar")
                             .map_err(|error| NodeFailure::definite("artifactIntegrity", error))?,
                     }];
-                    for compose_file in &config.compose_files {
-                        let path = canonical_member(&source_root, compose_file)?;
-                        if !path.is_file() {
-                            return Err(NodeFailure::definite(
-                                "composeConfig",
-                                "Compose file is unavailable",
-                            ));
+                    let image_reference = image_component
+                        .annotations
+                        .get("imageReference")
+                        .ok_or_else(|| {
+                            NodeFailure::definite("imageIdentity", "image reference is missing")
+                        })?;
+                    let release = super::compose_release::compile(
+                        source_root,
+                        &config,
+                        image_reference,
+                        &context.cancellation,
+                    )?;
+                    for entry in fs::read_dir(release.path())
+                        .map_err(|error| NodeFailure::definite("artifactIo", error.to_string()))?
+                    {
+                        let entry = entry.map_err(|error| {
+                            NodeFailure::definite("artifactIo", error.to_string())
+                        })?;
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        if name != "compose.yaml" && !name.starts_with("config-") {
+                            continue;
                         }
+                        let path = entry.path();
                         let (digest, size) = sha256_file(&path)?;
                         components.push(ArtifactDescriptor {
-                            name: compose_file.clone(),
-                            role: ArtifactRole::DeploymentConfig,
-                            media_type: "application/vnd.shellspan.compose+yaml".into(),
+                            name: name.clone(),
+                            role: if name == "compose.yaml" {
+                                ArtifactRole::DeploymentConfig
+                            } else {
+                                ArtifactRole::Auxiliary
+                            },
+                            media_type: if name == "compose.yaml" {
+                                "application/vnd.shellspan.compose+yaml"
+                            } else {
+                                "application/octet-stream"
+                            }
+                            .into(),
                             digest: digest.clone(),
                             size,
                             platform: None,
@@ -2869,6 +2896,7 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                         });
                         sources.push(ArtifactBlobSource { digest, path });
                     }
+                    components.sort_by(|left, right| left.name.cmp(&right.name));
                     let manifest = ArtifactBundleManifest {
                         schema_version: 2,
                         artifact_type: super::node_registry::ARTIFACT_TYPE_COMPOSE_RELEASE.into(),
@@ -2928,11 +2956,108 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                                 .iter()
                                 .any(|capability| capability == "atomicSymlink"),
                         },
-                        context.cancellation,
+                        context.cancellation.clone(),
                     )
                     .await?;
                 self.probe_sftp(&target.connection_profile_id).await?;
                 let mut capabilities = parse_preflight_output(&output)?;
+                if capabilities.contains_key("releaseId")
+                    && config
+                        .required_capabilities
+                        .iter()
+                        .any(|capability| capability == "compose")
+                {
+                    let entry = self
+                        .database
+                        .list_deployment_applications()
+                        .map_err(|error| NodeFailure::definite("managedEvidence", error))?
+                        .into_iter()
+                        .find(|entry| {
+                            entry.environment.config.remote_root == target.remote_root
+                                && entry.environment.config.connection_profile_id
+                                    == target.connection_profile_id
+                        })
+                        .ok_or_else(|| {
+                            NodeFailure::definite(
+                                "managedEvidence",
+                                "current Compose release is not associated with this target",
+                            )
+                        })?;
+                    let check = super::readiness::managed_compose_check(&entry, &self.database)
+                        .map_err(|error| NodeFailure::definite("managedEvidence", error))?
+                        .ok_or_else(|| {
+                            NodeFailure::definite(
+                                "managedEvidence",
+                                "current Compose release has no successful local evidence",
+                            )
+                        })?;
+                    self.run_remote(
+                        &input,
+                        &config.target_id,
+                        DockerComposeRemoteAction::CheckManagedCompose(check),
+                        context.cancellation.clone(),
+                    )
+                    .await?;
+                }
+                if !capabilities.contains_key("releaseId") {
+                    let handle: ArtifactHandle =
+                        serde_json::from_value(output_value(&input, "bundle")?.clone()).map_err(
+                            |error| NodeFailure::definite("artifactIntegrity", error.to_string()),
+                        )?;
+                    let bundle = self
+                        .artifacts
+                        .inspect(&handle)
+                        .map_err(|error| NodeFailure::definite("artifactIntegrity", error))?;
+                    if let Some(project_name) = bundle.manifest.annotations.get("projectName") {
+                        let path = self
+                            .artifacts
+                            .verified_component_path(&handle, "compose.yaml")
+                            .map_err(|error| NodeFailure::definite("artifactIntegrity", error))?;
+                        let document: Value =
+                            serde_yaml::from_slice(&fs::read(path).map_err(|error| {
+                                NodeFailure::definite("artifactIo", error.to_string())
+                            })?)
+                            .map_err(|error| {
+                                NodeFailure::definite("composeConfig", error.to_string())
+                            })?;
+                        let mut ports = Vec::new();
+                        for service in document["services"]
+                            .as_object()
+                            .into_iter()
+                            .flat_map(|services| services.values())
+                        {
+                            for port in service["ports"].as_array().into_iter().flatten() {
+                                let published = port["published"]
+                                    .as_str()
+                                    .and_then(|value| value.parse::<u16>().ok())
+                                    .filter(|value| *value > 0)
+                                    .ok_or_else(|| {
+                                        NodeFailure::definite(
+                                            "composeConfig",
+                                            "invalid published port",
+                                        )
+                                    })?;
+                                ports.push(published);
+                            }
+                        }
+                        self.run_remote(
+                            &input,
+                            &config.target_id,
+                            DockerComposeRemoteAction::CheckUnoccupiedCompose {
+                                project_name: project_name.clone(),
+                                ports,
+                            },
+                            context.cancellation.clone(),
+                        )
+                        .await
+                        .map_err(|_| {
+                            NodeFailure::definite(
+                                "resourceConflict",
+                                "Compose project or host port is occupied",
+                            )
+                        })?;
+                    }
+                }
                 capabilities.insert("sftp".into(), "1".into());
                 require_target_capabilities(&config.required_capabilities, &capabilities)?;
                 let profile = self
@@ -2997,6 +3122,7 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                         kind: NodeOutputKind::Scalar,
                         value: serde_json::json!({
                             "identity": identity,
+                            "display": {"host":profile.host,"port":profile.port,"username":profile.username},
                             "capabilities": capabilities,
                             "currentRelease": current_release,
                         }),
@@ -3079,6 +3205,13 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                     .and_then(Value::as_str)
                     .unwrap_or("failed");
                 self.app
+                    .as_ref()
+                    .ok_or_else(|| {
+                        NodeFailure::definite(
+                            "notification",
+                            "desktop notification host unavailable",
+                        )
+                    })?
                     .emit(
                         "deployment-finalizer",
                         serde_json::json!({
@@ -3171,7 +3304,11 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                 .ok_or_else(|| NodeFailure::definite("config", "targetId is missing"))?;
             return match self.read_ledger(&input, target_id).await {
                 Ok(Some(result)) => Ok(NodeReconcileResult::Succeeded(Box::new(result))),
-                Ok(None) => Ok(NodeReconcileResult::NotStarted),
+                // A command can take effect before its SFTP receipt is written.
+                // Missing evidence is not evidence that the command never ran.
+                Ok(None) => Ok(NodeReconcileResult::StateUnknown(
+                    "remote effect receipt is missing; execution cannot safely be repeated".into(),
+                )),
                 Err(error)
                     if error.disposition
                         == super::node_executor::NodeFailureDisposition::Ambiguous =>
@@ -3338,10 +3475,130 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
         };
         let root = &plan.target.remote_root;
         let previous_dir = format!("{root}/releases/{}", previous.release_id);
+        let mut restore_checks = Vec::new();
         let action = match node_type {
-            "deploy.compose" => DockerComposeRemoteAction::RestoreCompose {
-                release: previous_dir.clone(),
-            },
+            "deploy.compose" => {
+                let release = self
+                    .database
+                    .get_deployment_release(&plan.workflow_id, &previous.release_id)
+                    .map_err(|error| NodeFailure::definite("restoreEvidence", error))?
+                    .filter(|release| release.identity.as_ref() == Some(previous))
+                    .ok_or_else(|| {
+                        NodeFailure::definite(
+                            "restoreEvidence",
+                            "previous release identity is unavailable",
+                        )
+                    })?;
+                let handle = self
+                    .database
+                    .get_deployment_artifact_handle(&release.artifact_reference)
+                    .map_err(|error| NodeFailure::definite("restoreEvidence", error))?
+                    .ok_or_else(|| {
+                        NodeFailure::definite("restoreEvidence", "previous bundle is unavailable")
+                    })?;
+                let bundle = self
+                    .artifacts
+                    .inspect(&handle)
+                    .map_err(|error| NodeFailure::definite("restoreEvidence", error))?;
+                let target_handle = plan
+                    .artifacts
+                    .iter()
+                    .find(|artifact| {
+                        artifact.content_digest == plan.target_release.artifact_content_digest
+                    })
+                    .ok_or_else(|| {
+                        NodeFailure::definite("restoreEvidence", "target bundle is unavailable")
+                    })?;
+                let data_contract = |artifact: &ArtifactHandle| -> Result<Value, NodeFailure> {
+                    let path = self
+                        .artifacts
+                        .verified_component_path(artifact, "compose.yaml")
+                        .map_err(|error| NodeFailure::definite("restoreEvidence", error))?;
+                    let document: Value =
+                        serde_yaml::from_slice(&fs::read(path).map_err(|error| {
+                            NodeFailure::definite("restoreEvidence", error.to_string())
+                        })?)
+                        .map_err(|error| {
+                            NodeFailure::definite("restoreEvidence", error.to_string())
+                        })?;
+                    let services = document["services"].as_object().ok_or_else(|| {
+                        NodeFailure::definite("restoreEvidence", "frozen services are missing")
+                    })?;
+                    Ok(Value::Object(services.iter().map(|(name, service)| (name.clone(),
+                        serde_json::json!({"user":service["user"],"volumes":service["volumes"]}))).collect()))
+                };
+                if data_contract(&handle)? != data_contract(target_handle)? {
+                    return Ok(CompensationResult::StateUnknown(
+                        "automatic restore requires unchanged data mounts and container identity; manual verification is required".into()));
+                }
+                let source_run = self
+                    .database
+                    .get_deployment_run(release.source_run_id.as_deref().unwrap_or(""))
+                    .map_err(|error| NodeFailure::definite("restoreEvidence", error))?
+                    .ok_or_else(|| {
+                        NodeFailure::definite(
+                            "restoreEvidence",
+                            "previous successful run is unavailable",
+                        )
+                    })?;
+                let workflow = self
+                    .database
+                    .get_deployment_workflow_revision(
+                        &source_run.workflow_id,
+                        source_run.workflow_revision,
+                    )
+                    .map_err(|error| NodeFailure::definite("restoreEvidence", error))?
+                    .ok_or_else(|| {
+                        NodeFailure::definite(
+                            "restoreEvidence",
+                            "previous verification configuration is unavailable",
+                        )
+                    })?;
+                for node in workflow
+                    .definition
+                    .nodes
+                    .iter()
+                    .filter(|node| node.type_name == "verify.http")
+                {
+                    let check: VerifyHttpConfig = serde_json::from_value(node.config.clone())
+                        .map_err(|error| {
+                            NodeFailure::definite("restoreEvidence", error.to_string())
+                        })?;
+                    if check.target_id != plan.target.target_id {
+                        return Err(NodeFailure::definite(
+                            "restoreEvidence",
+                            "previous verification target differs",
+                        ));
+                    }
+                    restore_checks.push(check);
+                }
+                if restore_checks.is_empty() {
+                    return Err(NodeFailure::definite(
+                        "restoreEvidence",
+                        "previous HTTP verification is missing",
+                    ));
+                }
+                DockerComposeRemoteAction::RestoreCompose {
+                    release: previous_dir.clone(),
+                    project_name: bundle
+                        .manifest
+                        .annotations
+                        .get("projectName")
+                        .cloned()
+                        .ok_or_else(|| {
+                            NodeFailure::definite(
+                                "restoreEvidence",
+                                "previous Compose project is missing",
+                            )
+                        })?,
+                    components: bundle
+                        .manifest
+                        .components
+                        .iter()
+                        .map(|component| (component.name.clone(), component.digest.clone()))
+                        .collect(),
+                }
+            }
             "release.commit" => {
                 let metadata = format!(
                     "releaseId={}\nartifactContentDigest={}\nlayoutDigest={}\nplanDigest={}\n",
@@ -3379,12 +3636,48 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
             &input.verified,
             &plan.target.target_id,
             action,
-            context.cancellation,
+            context.cancellation.clone(),
         )
         .await?;
+        for check in &restore_checks {
+            let mut verified = false;
+            for _ in 0..10 {
+                let result = self
+                    .run_remote(
+                        &input.verified,
+                        &plan.target.target_id,
+                        DockerComposeRemoteAction::VerifyHttp {
+                            url: format!(
+                                "{}://127.0.0.1:{}{}",
+                                check.scheme, check.port, check.path
+                            ),
+                        },
+                        context.cancellation.clone(),
+                    )
+                    .await;
+                if result
+                    .ok()
+                    .and_then(|value| value.trim().parse::<u16>().ok())
+                    .is_some_and(|status| check.expected_statuses.contains(&status))
+                {
+                    verified = true;
+                    break;
+                }
+                tokio::select! {
+                    _ = context.cancellation.cancelled() => return Err(NodeFailure::canceled()),
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => {},
+                }
+            }
+            if !verified {
+                return Ok(CompensationResult::StateUnknown(
+                    "previous service failed restoration verification".into(),
+                ));
+            }
+        }
         let payload = serde_json::json!({
             "restoredRelease": previous,
             "compensatedNodeType": node_type,
+            "httpReverified": !restore_checks.is_empty(),
         });
         let mut receipt = Self::effect_receipt(
             &input.verified,
@@ -3405,6 +3698,177 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "builds a real local project using Docker; requires SHELLSPAN_PHASE1_PROJECT and SHELLSPAN_PHASE1_PROJECT_KIND"]
+    fn real_project_frozen_image_acceptance() {
+        let path = std::env::var("SHELLSPAN_PHASE1_PROJECT").expect("real project path required");
+        let kind = std::env::var("SHELLSPAN_PHASE1_PROJECT_KIND").expect("project kind required");
+        assert!(matches!(kind.as_str(), "for-you" | "shellspan"));
+        let mut binding = super::super::source_binding::inspect(Path::new(&path))
+            .unwrap()
+            .binding;
+        if let Ok(selection) = std::env::var("SHELLSPAN_PHASE1_INCLUDED_UNTRACKED") {
+            binding.included_untracked = serde_json::from_str(&selection).unwrap();
+        }
+        binding.excluded_paths = vec![
+            ".claude".into(),
+            ".agents".into(),
+            ".codex".into(),
+            "data".into(),
+            ".env.example".into(),
+        ];
+        let original = super::super::source_binding::capture(&binding).unwrap();
+        let project = super::super::source_binding::materialize(original.directory.path()).unwrap();
+        let command = if kind == "for-you" {
+            "[\"pnpm\",\"start\"]"
+        } else {
+            "[\"pnpm\",\"exec\",\"vite\",\"preview\",\"--host\",\"0.0.0.0\",\"--port\",\"3000\"]"
+        };
+        fs::write(project.path().join("Dockerfile"), format!("FROM node:24-bookworm-slim\nWORKDIR /app\nRUN npm install -g pnpm@11.1.1\nCOPY . .\nRUN pnpm install --frozen-lockfile\nRUN pnpm build\nCMD {command}\n")).unwrap();
+        fs::write(
+            project.path().join(".dockerignore"),
+            ".git\nnode_modules\ndist\n.next\ndata\nsrc-tauri/target\n",
+        )
+        .unwrap();
+        fs::write(
+            project.path().join("compose.yaml"),
+            "services:\n  web:\n    build: .\n    image: obsolete:must-not-run\n",
+        )
+        .unwrap();
+        for args in [
+            vec!["init", "--quiet"],
+            vec!["add", "."],
+            vec![
+                "-c",
+                "user.name=Acceptance",
+                "-c",
+                "user.email=acceptance@localhost",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--quiet",
+                "-m",
+                "Isolated real project acceptance input",
+            ],
+        ] {
+            let status = safe_local_command("git")
+                .args(args)
+                .current_dir(project.path())
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+        let binding = super::super::source_binding::inspect(project.path())
+            .unwrap()
+            .binding;
+        let frozen = super::super::source_binding::capture(&binding).unwrap();
+        let original_package = fs::read(frozen.directory.path().join("package.json")).unwrap();
+        // A broken live Dockerfile must have no influence on the frozen build.
+        fs::write(
+            project.path().join("Dockerfile"),
+            "FROM invalid-live-edit:must-not-build\n",
+        )
+        .unwrap();
+        fs::write(project.path().join("compose.yaml"), "invalid: live edit\n").unwrap();
+        let cas_root = tempfile::tempdir().unwrap();
+        let artifacts = DeploymentArtifactCas::new(cas_root.path().join("cas")).unwrap();
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let projection = build_image_bundle(
+            frozen.directory.path(),
+            frozen.snapshot.clone(),
+            DockerBuildxConfig {
+                context: ".".into(),
+                dockerfile: "Dockerfile".into(),
+                platform: "linux/arm64".into(),
+                image_repository: format!("shellspan/phase1-{kind}"),
+            },
+            canonical_sha256(&kind).unwrap(),
+            &artifacts,
+            &cancellation,
+            Duration::from_secs(1800),
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(frozen.directory.path().join("package.json")).unwrap(),
+            original_package
+        );
+        let image = &projection.manifest.components[0];
+        let reference = &image.annotations["imageReference"];
+        let project_name = format!(
+            "shellspan-p1-{}",
+            &uuid::Uuid::new_v4().simple().to_string()[..12]
+        );
+        let config = BundleComposeConfig {
+            compose_files: vec!["compose.yaml".into()],
+            project_name: project_name.clone(),
+            services: vec!["web".into()],
+            registered_mounts: vec![],
+            non_sensitive_files: vec![],
+        };
+        let release = super::super::compose_release::compile(
+            frozen.directory.path(),
+            &config,
+            reference,
+            &cancellation,
+        )
+        .unwrap();
+        let archive = artifacts
+            .verified_component_path(&projection.handle, "image.tar")
+            .unwrap();
+        fixed_command(
+            "docker",
+            &[
+                "load".into(),
+                "--input".into(),
+                archive.to_string_lossy().into_owned(),
+            ],
+            release.path(),
+            &cancellation,
+            Duration::from_secs(120),
+        )
+        .unwrap();
+        let observed = safe_local_command("docker")
+            .args(["image", "inspect", "--format", "{{.Id}}", reference])
+            .output()
+            .unwrap();
+        assert!(observed.status.success());
+        let observed_id = String::from_utf8(observed.stdout)
+            .unwrap()
+            .trim()
+            .to_owned();
+        assert!(
+            observed_id == image.annotations["imageId"]
+                || image.annotations.get("imageManifestId") == Some(&observed_id)
+        );
+        let compose: Value =
+            serde_yaml::from_slice(&fs::read(release.path().join("compose.yaml")).unwrap())
+                .unwrap();
+        assert_eq!(compose["services"]["web"]["image"], *reference);
+        assert!(compose["services"]["web"].get("build").is_none());
+        if let Ok(report) = std::env::var("SHELLSPAN_PHASE1_REPORT") {
+            fs::write(
+                report,
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "project": path,
+                    "projectKind": kind,
+                    "sourceRevision": original.snapshot.revision,
+                    "sourceDigest": frozen.snapshot.snapshot_digest,
+                    "imageReference": reference,
+                    "imageConfigId": image.annotations["imageId"],
+                    "imageManifestId": image.annotations.get("imageManifestId"),
+                    "loadedImageId": observed_id,
+                    "archiveDigest": image.digest,
+                    "artifactReference": projection.handle.artifact_reference,
+                    "workspaceMutationIgnored": true,
+                    "loadedImageMatchesCompose": true,
+                    "platform": "linux/arm64"
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
+    }
 
     fn run_fixture_command(session: &ssh2::Session, command: &str) -> (i32, String) {
         let mut channel = session.channel_session().unwrap();
@@ -3473,6 +3937,8 @@ mod tests {
             services: vec!["web".into()],
             pull_policy: "never".into(),
             image_reference: "example/web:release-1".into(),
+            container_user: String::new(),
+            mounts: vec![],
         }
         .fixed_request();
         assert!(request.starts_with("sh -c '"));
@@ -3528,6 +3994,110 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires isolated SSH fixture and a real application image already loaded"]
+    fn isolated_container_user_permission_denial() {
+        let connection = crate::execution::fixture::isolated_ssh_connection();
+        let (_hosts, known_hosts) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let session =
+            crate::execution::open_ssh_execution_session(&connection, &known_hosts).unwrap();
+        let image = std::env::var("SHELLSPAN_PERMISSION_IMAGE")
+            .expect("real loaded application image required");
+        let root = format!(
+            "/srv/shellspan-deployment/permissions-{}",
+            uuid::Uuid::new_v4()
+        );
+        let data = format!("{root}/data");
+        assert_eq!(
+            run_fixture_command(
+                &session.target,
+                &format!(
+                    "mkdir -p {}; chmod 555 {}",
+                    posix_quote(&data),
+                    posix_quote(&data)
+                )
+            )
+            .0,
+            0
+        );
+        let compose = format!("{root}/compose.yaml");
+        let document = serde_yaml::to_string(&serde_json::json!({"services":{"web":{
+            "image":image,"user":"1000:1000","volumes":[{"type":"bind","source":data,"target":"/app/data","bind":{"create_host_path":false}}]
+        }}})).unwrap();
+        session
+            .target
+            .sftp()
+            .unwrap()
+            .create(Path::new(&compose))
+            .unwrap()
+            .write_all(document.as_bytes())
+            .unwrap();
+        let project = format!("permissions-{}", uuid::Uuid::new_v4());
+        let action = DockerComposeRemoteAction::ComposeDeploy {
+            compose_files: vec![compose.clone()],
+            project_name: project.clone(),
+            services: vec!["web".into()],
+            pull_policy: "never".into(),
+            image_reference: image,
+            container_user: "1000:1000".into(),
+            mounts: vec![RegisteredBindMount {
+                source: data.clone(),
+                target: "/app/data".into(),
+                read_only: false,
+            }],
+        };
+        let result = run_fixture_command(&session.target, &action.fixed_request().0);
+        assert_ne!(
+            result.0, 0,
+            "read-only host directory must reject writable container access"
+        );
+        let query = format!(
+            "docker ps -aq --filter {}",
+            posix_quote(&format!("label=com.docker.compose.project={project}"))
+        );
+        assert!(
+            run_fixture_command(&session.target, &query)
+                .1
+                .trim()
+                .is_empty(),
+            "failed probe must not start the service"
+        );
+        assert_eq!(
+            run_fixture_command(
+                &session.target,
+                &format!("chmod 770 {}", posix_quote(&data))
+            )
+            .0,
+            0
+        );
+        let result = run_fixture_command(&session.target, &action.fixed_request().0);
+        assert_eq!(
+            result.0, 0,
+            "matching UID:GID must be able to start the real application: {}",
+            result.1
+        );
+        assert!(run_fixture_command(
+            &session.target,
+            &format!("find {} -name '.shellspan-access.*'", posix_quote(&data))
+        )
+        .1
+        .trim()
+        .is_empty());
+        assert_eq!(
+            run_fixture_command(
+                &session.target,
+                &format!(
+                    "docker compose -f {} -p {} down",
+                    posix_quote(&compose),
+                    posix_quote(&project)
+                )
+            )
+            .0,
+            0
+        );
+    }
+
+    #[test]
     #[ignore = "requires the isolated tests/deployment-e2e DinD SSH fixture"]
     fn isolated_deployment_docker_compose_acceptance() {
         let connection = crate::execution::fixture::isolated_ssh_connection();
@@ -3543,8 +4113,8 @@ mod tests {
                 .expect("SHELLSPAN_DEPLOYMENT_E2E_IMAGE_ARCHIVE is required"),
         );
         let image_reference = "shellspan/deployment-e2e:fixture-healthy";
-        let image_id =
-            super::super::docker_archive::docker_archive_image_id(&archive, image_reference)
+        let identity =
+            super::super::docker_archive::docker_archive_image_identity(&archive, image_reference)
                 .unwrap();
         let release = format!("{fixture_root}/compose/release-e2e");
         ensure_remote_directories(&sftp, &release).unwrap();
@@ -3575,7 +4145,8 @@ mod tests {
         let load = DockerComposeRemoteAction::LoadImage {
             archive: remote_archive.clone(),
             image_reference: image_reference.into(),
-            image_id,
+            image_id: identity.config_id,
+            image_manifest_id: identity.manifest_id,
         }
         .fixed_request()
         .0;
@@ -3594,6 +4165,8 @@ mod tests {
             services: vec!["web".into()],
             pull_policy: "never".into(),
             image_reference: image_reference.into(),
+            container_user: String::new(),
+            mounts: vec![],
         }
         .fixed_request()
         .0;

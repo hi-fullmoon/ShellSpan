@@ -6,5 +6,7 @@ services:
       DOCKER_TLS_CERTDIR: ""
     ports:
       - "127.0.0.1:22224:22"
-    tmpfs:
-      - /var/lib/docker
+    volumes:
+      - deployment-engine:/var/lib/docker
+volumes:
+  deployment-engine:

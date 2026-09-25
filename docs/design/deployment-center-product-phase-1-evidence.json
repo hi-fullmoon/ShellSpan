@@ -1,0 +1,54 @@
+{
+  "date": "2026-09-25",
+  "worktree": "/Users/zhengbiwen/.codex/worktrees/7f64/ShellSpan",
+  "baseCommit": "bc3de48f76e57bd65c5420937b4b40b599a2e13b",
+  "tools": {
+    "docker": "29.8.0",
+    "compose": "5.5.1",
+    "buildx": "0.37.0",
+    "rustc": "1.95.0",
+    "pnpm": "11.1.1",
+    "platform": "linux/arm64"
+  },
+  "projects": [
+    {
+      "archiveDigest": "sha256:1796cbe967d7972fe3da7299bdcae6ea8424fa9626f8d829d3393900e53e587f",
+      "artifactReference": "deployment-artifact:sha256:5e860f80af348a8b821e9138bb65e243b8111dfd7e4b1f2595b6d178a86fa6b2",
+      "imageConfigId": "sha256:965726b1efe25e378ad1974bca59871d3fd6ea3ff72161fd6b53de3144d31119",
+      "imageManifestId": "sha256:4f69f90633df1c5add38acaf0e5e3d6a16a89391489cbf00f2b04e63931d2eb4",
+      "imageReference": "shellspan/phase1-for-you:release-fe699e9daf881d48",
+      "loadedImageId": "sha256:4f69f90633df1c5add38acaf0e5e3d6a16a89391489cbf00f2b04e63931d2eb4",
+      "loadedImageMatchesCompose": true,
+      "platform": "linux/arm64",
+      "project": "/Users/zhengbiwen/Developer/my/for-you",
+      "projectKind": "for-you",
+      "sourceDigest": "sha256:fd192446142b502dc423ad103333fb1f2dc67b289495176a2fa5bfbe1efb53e2",
+      "sourceRevision": "f9590431650591fa92b0b15c96ed0f32bff30d06",
+      "workspaceMutationIgnored": true
+    },
+    {
+      "archiveDigest": "sha256:de9771bb71500d3d0af2ff3d2a2231e77b5a08bc39e8b60468e647e9db0f409e",
+      "artifactReference": "deployment-artifact:sha256:5909e8b71345515ec2a09352c6e15caa6246c926ddd87cb44ee498c9d266c85f",
+      "imageConfigId": "sha256:c9a9ebcc99496ec804c0d8d93ae9e2273b49112688c678a81be24d886aeb0d72",
+      "imageManifestId": "sha256:5dc528ea2d2309d6d7d8c5f591e68f640e3990148a898651c6e32d069270fce5",
+      "imageReference": "shellspan/phase1-shellspan:release-21ed635607c9ee2d",
+      "loadedImageId": "sha256:5dc528ea2d2309d6d7d8c5f591e68f640e3990148a898651c6e32d069270fce5",
+      "loadedImageMatchesCompose": true,
+      "platform": "linux/arm64",
+      "project": "/Users/zhengbiwen/.codex/worktrees/7f64/ShellSpan",
+      "projectKind": "shellspan",
+      "sourceDigest": "sha256:2e96bf9e82042c3d68db9f4770ae20f674ee640493f791c9e4fd7cf97dc71375",
+      "sourceRevision": "bc3de48f76e57bd65c5420937b4b40b599a2e13b",
+      "workspaceMutationIgnored": true
+    }
+  ],
+  "validation": {
+    "deploymentRustTests": 82,
+    "deploymentRustFailed": 0,
+    "frontendTests": 9,
+    "frontendBuild": "passed",
+    "isolatedSshSftpComposeAndStaticTests": 2,
+    "isolatedTestScript": "pnpm test:deployment:e2e",
+    "productionServerTouched": false
+  }
+}

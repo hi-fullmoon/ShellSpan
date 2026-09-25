@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { compatibleOutputBindings } from '@/lib/deployment/editor';
 import type {
@@ -408,15 +409,16 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catal
         title={node.displayName}
         description={t(deploymentLocaleKey(spec.descriptionKey))}
         actions={
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => removeNode(node.id)}
-            disabled={!editable}
-            aria-label={t('deployment.editor.removeNode')}
-          >
-            <Trash2Icon data-icon="inline-start" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button size="icon-sm" variant="ghost" disabled={!editable} />}
+              onClick={() => removeNode(node.id)}
+              aria-label={t('deployment.editor.removeNode')}
+            >
+              <Trash2Icon data-icon="inline-start" />
+            </TooltipTrigger>
+            <TooltipContent>{t('deployment.editor.removeNode')}</TooltipContent>
+          </Tooltip>
         }
       />
       <ScrollArea className="min-h-0 flex-1">

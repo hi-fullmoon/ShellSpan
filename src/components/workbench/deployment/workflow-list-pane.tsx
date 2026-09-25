@@ -3,6 +3,7 @@ import { PlusIcon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { DeploymentWorkflowRecord } from '@/lib/deployment/types';
 import { DeploymentPaneHeader } from './deployment-pane-header';
@@ -54,15 +55,16 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
           title={t('deployment.editor.workflows')}
           description={t('deployment.editor.workflowCount', { count: workflowCount })}
           actions={(
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              onClick={onCreate}
-              disabled={!canCreate}
-              aria-label={t('deployment.editor.template.title')}
-            >
-              <PlusIcon data-icon="inline-start" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button size="icon-sm" variant="ghost" disabled={!canCreate} />}
+                onClick={onCreate}
+                aria-label={t('deployment.editor.template.title')}
+              >
+                <PlusIcon data-icon="inline-start" />
+              </TooltipTrigger>
+              <TooltipContent>{t('deployment.editor.template.title')}</TooltipContent>
+            </Tooltip>
           )}
         />
       )}
