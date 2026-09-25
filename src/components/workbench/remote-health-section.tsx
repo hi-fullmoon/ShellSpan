@@ -6,7 +6,6 @@ import {
   MemoryStickIcon,
   ServerCogIcon,
   ShieldCheckIcon,
-  SquareIcon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -235,33 +234,28 @@ export function RemoteHealthSection(): React.JSX.Element {
                 >
                   <Button
                     size="sm"
-                    onClick={() => setAuthorizationProfileId(selectedProfile.id)}
-                    disabled={busy}
+                    onClick={() => {
+                      if (entry?.phase === 'collecting') {
+                        void cancel(selectedProfile.id);
+                      } else {
+                        setAuthorizationProfileId(selectedProfile.id);
+                      }
+                    }}
+                    disabled={entry?.phase === 'preparing' || entry?.phase === 'cancelling'}
                   >
                     {busy
                       ? <Spinner data-icon="inline-start" aria-hidden="true" />
                       : <ShieldCheckIcon data-icon="inline-start" />}
                     {entry?.phase === 'preparing'
                       ? t('remoteHealth.preparing')
-                      : entry?.phase === 'collecting' || entry?.phase === 'cancelling'
-                        ? t('remoteHealth.collecting')
+                      : entry?.phase === 'cancelling'
+                        ? t('remoteHealth.cancelling')
+                        : entry?.phase === 'collecting'
+                          ? t('common.cancel')
                         : remoteSnapshot
                           ? t('remoteHealth.collectAgain')
                           : t('remoteHealth.collect')}
                   </Button>
-                  {(entry?.phase === 'collecting' || entry?.phase === 'cancelling') && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void cancel(selectedProfile.id)}
-                      disabled={entry.phase === 'cancelling'}
-                    >
-                      <SquareIcon data-icon="inline-start" />
-                      {entry.phase === 'cancelling'
-                        ? t('remoteHealth.cancelling')
-                        : t('common.cancel')}
-                    </Button>
-                  )}
                 </div>
               </div>
             </CardAction>
