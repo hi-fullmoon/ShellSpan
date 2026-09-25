@@ -17,7 +17,7 @@ import { useProfileStore } from '@/stores/profileStore';
 import { useToastStore } from '@/stores/toastStore';
 import { useDeploymentWorkflowStore } from '@/stores/deploymentWorkflowStore';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
-import { createApplicationEntry, associateWorkflowDefaults, workflowMappingIssues, type DeploymentApplicationEntry, type DeploymentEnvironmentConfig,
+import { createApplicationEntry, associateWorkflowDefaults, workflowMappingIssues, normalizeDeploymentConfig, type DeploymentApplicationEntry, type DeploymentEnvironmentConfig,
   type DeploymentProjectInspection, type DeploymentReadinessReport, type DeploymentFilePreview } from '@/lib/deployment/applications';
 import { invokeListDeploymentApplications, invokeInspectDeploymentProject, invokePickLocalFolder,
   invokeSaveDeploymentApplication, invokeCheckDeploymentReadiness, invokeGetDeploymentReadiness,
@@ -25,6 +25,7 @@ import { invokeListDeploymentApplications, invokeInspectDeploymentProject, invok
 import type { LocaleKey } from '@/locales';
 import { readableDeploymentProfile } from './deployment-editor-ui';
 import { ApplicationRelease } from './application-release';
+import { HostComposeFields } from './host-compose-fields';
 import { WorkbenchPage, WorkbenchPageHeader, WorkbenchPageContent } from '../workbench-page';
 
 const key = (name: string): LocaleKey => `deployment.application.${name}` as LocaleKey;
@@ -62,15 +63,27 @@ export function ApplicationOnboarding({ initial, workflowId, onSaved, onClose, t
   const [entry, setEntry] = React.useState(initial);
   const [name, setName] = React.useState(initial?.application.name ?? workflows.find((workflow) => workflow.id === workflowId)?.name ?? '');
   const [path, setPath] = React.useState(initial?.source.localPath ?? '');
+  const pathId = React.useId();
   const [inspection, setInspection] = React.useState<DeploymentProjectInspection | null>(null);
   const [report, setReport] = React.useState<DeploymentReadinessReport | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState('');
   const [remote, setRemote] = React.useState(false);
   const [filePreview, setFilePreview] = React.useState<DeploymentFilePreview | null>(null);
+  const [reconcileManagedFields, setReconcileManagedFields] = React.useState(false);
   const [expectedWorkflowRevision] = React.useState(() => workflows.find((workflow) => workflow.id === (initial?.environment.workflowId ?? workflowId))?.revision ?? 0);
   const associatedWorkflow = workflows.find((workflow) => workflow.id === (initial?.environment.workflowId ?? workflowId));
   const mappingIssues = associatedWorkflow ? workflowMappingIssues(associatedWorkflow, initial) : [];
+  const canReconcile = initial !== null && mappingIssues.length > 0 && mappingIssues.every((issue) => issue.startsWith('managedFields/'));
+  const mappingBlocked = mappingIssues.length > 0 && !reconcileManagedFields;
+  const projectedConfig = initial && associatedWorkflow ? associateWorkflowDefaults(initial, associatedWorkflow).environment.config : null;
+  const describeConflict = (location: string): string => {
+    const field = location.slice('managedFields/'.length) as keyof DeploymentEnvironmentConfig;
+    const label = field === 'gitRef' || field === 'verification' || field === 'imageRepository'
+      ? key(`host.${field}`) : field === 'hostCompose' ? key('host.enabled') : field === 'dataDirectories' ? key('check.mounts') : key(field);
+    const display = (value: unknown): string => typeof value === 'string' ? value : JSON.stringify(value) ?? '—';
+    return t(key('conflictField'), { field: t(label), application: display(initial?.environment.config[field]), workflow: display(projectedConfig?.[field]) });
+  };
   React.useEffect(() => {
     if (!initial) return;
     let active = true;
@@ -109,16 +122,22 @@ export function ApplicationOnboarding({ initial, workflowId, onSaved, onClose, t
     if (!entry) return;
     const boundWorkflowId = initial?.environment.workflowId ?? workflowId;
     const saved = await invokeSaveDeploymentApplication({
-      entry: { ...entry, application: { ...entry.application, name: name.trim() } },
+      entry: { ...entry, application: { ...entry.application, name: name.trim() }, environment: { ...entry.environment, config: normalizeDeploymentConfig(entry.environment.config) } },
       expectedApplicationRevision: initial?.application.revision ?? 0,
       expectedEnvironmentRevision: initial?.environment.revision ?? 0,
       expectedSourceRevision: initial?.source.revision ?? 0,
       expectedWorkflowRevision,
+      reconcileManagedFields,
       workflowId: boundWorkflowId,
     });
-    if (report) {
+    if (report && !reconcileManagedFields) {
       try { await invokeCheckDeploymentReadiness(saved, remote); }
       catch { addToast(t(key('checkAgain')), 'info'); }
+    }
+    const runtime = useDeploymentWorkflowRunStore.getState();
+    if (reconcileManagedFields && runtime.workflowId === saved.environment.workflowId
+      && runtime.errorContext === 'prepare' && runtime.error?.includes('DEPLOYMENT_APPLICATION_MANAGED_FIELDS_CHANGED')) {
+      runtime.clearError();
     }
     addToast(t(key('saved')), 'success'); onSaved(saved);
   };
@@ -126,20 +145,38 @@ export function ApplicationOnboarding({ initial, workflowId, onSaved, onClose, t
     <TextField key={field} name={field} value={String(config?.[field] ?? '')} type={type}
       onChange={(value) => patch({ [field]: type === 'number' ? Number(value) : value })} />;
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
-    <DialogContent finalFocus={triggerRef} className="flex h-[min(44rem,calc(100dvh-2rem))] w-[calc(100%-2rem)] max-w-2xl flex-col overflow-hidden p-0">
+    <DialogContent finalFocus={triggerRef} className="flex h-[min(50rem,calc(100dvh-2rem))] w-[calc(100%-2rem)] max-w-4xl flex-col overflow-hidden p-0">
       <DialogHeader className="shrink-0 px-4 pt-4 pr-12">
         <DialogTitle>{t(key('configure'))}</DialogTitle>
         <DialogDescription>{t(key('intro'))}</DialogDescription>
       </DialogHeader>
-      <ScrollArea className="min-h-0 flex-1"><div className="flex flex-col gap-4 p-4">
-        {mappingIssues.length > 0 && <Alert variant="warning"><AlertTitle>{t(key('mappingReadOnly'))}</AlertTitle><AlertDescription><p>{t(key('mappingHelp'))}</p><ul>{mappingIssues.map((location) => <li className="break-all" key={location}>{location}</li>)}</ul></AlertDescription></Alert>}
+      <ScrollArea className="min-h-0 flex-1"><div className="flex flex-col gap-4 px-4 pb-4">
+        {mappingIssues.length > 0 && !canReconcile && <Alert variant="warning"><AlertTitle>{t(key('mappingReadOnly'))}</AlertTitle><AlertDescription><p>{t(key('mappingHelp'))}</p><ul>{mappingIssues.map((location) => <li className="break-all" key={location}>{location}</li>)}</ul></AlertDescription></Alert>}
+        {canReconcile && <Alert><AlertTitle>{t(key('reconcileTitle'))}</AlertTitle><AlertDescription>
+          <p>{t(key(reconcileManagedFields ? 'reconcileReview' : 'reconcileHelp'))}</p>
+          <ul>{mappingIssues.map((location) => <li className="break-all" key={location}>{describeConflict(location)}</li>)}</ul>
+          {!reconcileManagedFields && <Button variant="outline" size="sm" disabled={busy} onClick={() => {
+            if (!initial || !associatedWorkflow) return;
+            setEntry(associateWorkflowDefaults(initial, associatedWorkflow));
+            setReconcileManagedFields(true);
+            setReport(null);
+            setFilePreview(null);
+          }}>{t(key('reconcileAction'))}</Button>}
+        </AlertDescription></Alert>}
         {error && <Alert variant="warning"><AlertTitle>{t(key('error'))}</AlertTitle><AlertDescription><p>{t(key('errorFix'))}</p><details><summary>{t(key('details'))}</summary><p className="break-all">{error}</p></details></AlertDescription></Alert>}
-        <fieldset disabled={busy || mappingIssues.length > 0} className="contents">
+        <fieldset disabled={busy || mappingBlocked || reconcileManagedFields} className="contents">
         <FieldGroup>
           <TextField name="name" value={name} onChange={(value) => { setName(value); setReport(null); }} />
-          <TextField name="path" value={path} onChange={setPath} />
-          <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy} onClick={() => void run(async () => { const [selected] = await invokePickLocalFolder(t(key('path'))); if (selected) await inspect(selected); })}><FolderOpenIcon data-icon="inline-start" />{t(key('choose'))}</Button>
-            <Button variant="outline" disabled={busy || !path} onClick={() => void run(() => inspect(path))}>{t(key('inspect'))}</Button></div>
+          <Field className="@container/source-path">
+            <FieldLabel htmlFor={pathId}>{t(key('path'))}</FieldLabel>
+            <div className="flex min-w-0 flex-col gap-2 @min-[32rem]/source-path:flex-row">
+              <Input id={pathId} className="min-w-0 @min-[32rem]/source-path:flex-1" autoCapitalize="none" autoCorrect="off" value={path} onChange={(event) => setPath(event.target.value)} />
+              <div className="flex shrink-0 gap-2">
+                <Button variant="outline" disabled={busy} onClick={() => void run(async () => { const [selected] = await invokePickLocalFolder(t(key('path'))); if (selected) await inspect(selected); })}><FolderOpenIcon data-icon="inline-start" />{t(key('choose'))}</Button>
+                <Button variant="outline" disabled={busy || !path} onClick={() => void run(() => inspect(path))}>{t(key('inspect'))}</Button>
+              </div>
+            </div>
+          </Field>
           {inspection && <><FieldDescription>{t(key('detected'))}: {inspection.detectedFiles.join(', ') || t(key('noneDetected'))}</FieldDescription>
             <FieldDescription>{t(key('suggested'))}: {t(inspection.suggestedTemplate === 'staticSite' ? 'deployment.editor.template.staticSite' : 'deployment.editor.template.dockerCompose')}</FieldDescription>
             <FieldDescription>{t(key('revision'))}: {inspection.source.headRevision}</FieldDescription>
@@ -153,18 +190,25 @@ export function ApplicationOnboarding({ initial, workflowId, onSaved, onClose, t
           {entry && <Field><FieldLabel htmlFor="source-exclusions">{t(key('excludedPaths'))}</FieldLabel><Textarea id="source-exclusions" value={(entry.source.excludedPaths ?? []).join('\n')} onChange={(event) => { const excludedPaths = event.target.value.split('\n').filter(Boolean); setEntry({ ...entry, source: { ...entry.source, excludedPaths } }); setReport(null); }} /><FieldDescription>{t(key('excludedHelp'))}</FieldDescription></Field>}
           <Alert><AlertTitle>{t(key('limits'))}</AlertTitle><AlertDescription>{t(key('limitsDescription'))}</AlertDescription></Alert>
         </FieldGroup>
-        {config && entry && <FieldGroup>
+        {config && entry && <FieldGroup className="@container/deployment-fields">
+          <FieldGroup className="grid grid-cols-1 gap-x-3 @min-[36rem]/deployment-fields:grid-cols-2">
           <Field><FieldLabel htmlFor="application-template">{t(key('templateKind'))}</FieldLabel><Select disabled={Boolean(associatedWorkflow)} items={templateOptions} value={config.templateKind} onValueChange={(value) => patch({ templateKind: value === 'staticSite' ? 'staticSite' : 'dockerCompose' })}><SelectTrigger id="application-template"><SelectValue /></SelectTrigger><SelectContent><SelectGroup>{templateOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>
           <TextField name="environment" value={entry.environment.name} onChange={(value) => { setEntry({ ...entry, environment: { ...entry.environment, name: value } }); setReport(null); }} />
+          </FieldGroup>
           <Field><FieldLabel htmlFor="application-profile">{t(key('connectionProfileId'))}</FieldLabel><Select items={profileOptions} value={config.connectionProfileId} onValueChange={(value) => patch({ connectionProfileId: value ?? '' })}><SelectTrigger id="application-profile"><SelectValue placeholder={t(key('chooseProfile'))} /></SelectTrigger><SelectContent><SelectGroup>{profileOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>
           {input('remoteRoot')}
           <Field><FieldLabel htmlFor="application-platform">{t(key('platform'))}</FieldLabel><Select items={platformOptions} value={config.platform} onValueChange={(value) => patch({ platform: value ?? '' })}><SelectTrigger id="application-platform"><SelectValue /></SelectTrigger><SelectContent><SelectGroup>{platformOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>
-          {config.templateKind === 'dockerCompose' && <>{(['projectName', 'service', 'composeFile', 'dockerfile', 'buildContext', 'bindAddress'] as const).map((field) => input(field))}{input('containerPort', 'number')}{input('hostPort', 'number')}</>}
+          {config.templateKind === 'dockerCompose' && <>
+            <FieldGroup className="grid grid-cols-1 gap-x-3 @min-[36rem]/deployment-fields:grid-cols-2">{input('projectName')}{input('service')}</FieldGroup>
+            {(['composeFile', 'dockerfile', 'buildContext', 'bindAddress'] as const).map((field) => input(field))}
+            <FieldGroup className="grid grid-cols-1 gap-x-3 @min-[36rem]/deployment-fields:grid-cols-2">{input('containerPort', 'number')}{input('hostPort', 'number')}</FieldGroup>
+          </>}
           {input('accessUrl')}{input('basePath')}
           {config.templateKind === 'staticSite' && <FieldDescription>{t(key('staticAdvanced'))}</FieldDescription>}
           <FieldDescription>{t(key('pathIndependence'))}</FieldDescription>
           <FieldDescription>{t(key('credentialsHelp'))}</FieldDescription>
-          {config.templateKind === 'dockerCompose' && <Button variant="outline" disabled={busy} onClick={() => void run(async () => setFilePreview(await invokePreviewDeploymentFiles({ ...entry, application: { ...entry.application, name: name.trim() } }))) }>{t(key('generatePreview'))}</Button>}
+          {config.templateKind === 'dockerCompose' && <HostComposeFields config={config} onChange={patch} />}
+          {config.templateKind === 'dockerCompose' && !config.hostCompose && <Button variant="outline" disabled={busy} onClick={() => void run(async () => setFilePreview(await invokePreviewDeploymentFiles({ ...entry, application: { ...entry.application, name: name.trim() } }))) }>{t(key('generatePreview'))}</Button>}
           {filePreview && <>
             <Alert><AlertTitle>{t(key('previewTitle'))}</AlertTitle><AlertDescription>{t(key('previewHelp'))}</AlertDescription></Alert>
             {filePreview.files.map((file) => <Field key={file.path}><FieldLabel>{file.path} · {t(key(file.exists ? 'fileExists' : 'fileAdded'))}</FieldLabel><pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-all text-xs">{file.content}</pre></Field>)}
@@ -176,7 +220,7 @@ export function ApplicationOnboarding({ initial, workflowId, onSaved, onClose, t
         </FieldGroup>}
         {config && <FieldGroup>
           <Field className="flex-row items-center"><Checkbox id="existing-service" checked={config.existingService} onCheckedChange={(checked) => patch({ existingService: checked === true })} /><FieldLabel htmlFor="existing-service">{t(key('existingService'))}</FieldLabel></Field>
-          {config.existingService && <>{input('managementMethod')}{input('recoveryInstructions')}<Alert variant="warning"><AlertTitle>{t(key('takeoverRequired'))}</AlertTitle><AlertDescription>{t(key('takeoverHelp'))}</AlertDescription></Alert></>}
+          {config.existingService && <>{input('managementMethod')}{input('recoveryInstructions')}{!config.hostCompose && <Alert variant="warning"><AlertTitle>{t(key('takeoverRequired'))}</AlertTitle><AlertDescription>{t(key('takeoverHelp'))}</AlertDescription></Alert>}</>}
           {config.dataDirectories.map((directory, index) => <FieldGroup key={index}>
             {(['hostPath', 'containerPath', 'containerUser', 'backupPolicy'] as const).map((field) => <TextField key={field} name={field} value={directory[field]} onChange={(value) => patch({ dataDirectories: config.dataDirectories.map((item, i) => i === index ? { ...item, [field]: value } : item) })} />)}
             <Field className="flex-row items-center"><Checkbox id={`read-only-${index}`} checked={directory.readOnly} onCheckedChange={(checked) => patch({ dataDirectories: config.dataDirectories.map((item, i) => i === index ? { ...item, readOnly: checked === true } : item) })} /><FieldLabel htmlFor={`read-only-${index}`}>{t(key('readOnly'))}</FieldLabel></Field>
@@ -189,14 +233,14 @@ export function ApplicationOnboarding({ initial, workflowId, onSaved, onClose, t
         {entry && <>
           <Alert><AlertTitle>{t(key('incomplete'))}</AlertTitle><AlertDescription>{t(key('saveHelp'))}</AlertDescription></Alert>
           <Field className="flex-row items-center"><Checkbox id="check-remote" checked={remote} onCheckedChange={(checked) => setRemote(checked === true)} /><FieldLabel htmlFor="check-remote">{t(key('remoteReadOnly'))}</FieldLabel></Field>
-          <Button variant="outline" disabled={busy} onClick={() => void run(async () => setReport(await invokeCheckDeploymentReadiness({ ...entry, application: { ...entry.application, name: name.trim() } }, remote)))}>{t(key('check'))}</Button>
+          <Button variant="outline" disabled={busy} onClick={() => void run(async () => setReport(await invokeCheckDeploymentReadiness({ ...entry, application: { ...entry.application, name: name.trim() }, environment: { ...entry.environment, config: normalizeDeploymentConfig(entry.environment.config) } }, remote)))}>{t(key('check'))}</Button>
           {report && <ReadinessItems report={report} />}
         </>}
         </fieldset>
       </div></ScrollArea>
       <DialogFooter className="shrink-0 px-4 pb-4">
         <Button variant="outline" disabled={busy} onClick={onClose}>{t('common.cancel')}</Button>
-        <Button disabled={busy || !entry || !name.trim() || path !== entry.source.localPath || mappingIssues.length > 0} onClick={() => void run(save, true)}>{t(key('save'))}</Button>
+        <Button disabled={busy || !entry || !name.trim() || path !== entry.source.localPath || mappingBlocked} onClick={() => void run(save, true)}>{t(key('save'))}</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>;
