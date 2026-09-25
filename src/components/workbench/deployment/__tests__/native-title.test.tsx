@@ -23,7 +23,7 @@ describe('Deployment native tooltips', () => {
         <WorkflowEditorToolbar
           workflowId={null} workflowName="" layout="compact" enabled editable
           issueCount={0} dirty={false}
-          onOpenIssues={() => undefined} onOpenLibrary={() => undefined}
+          onOpenIssues={() => undefined}
           onOpenInspector={() => undefined} onOpenSettings={() => undefined}
         />
       </>,
@@ -38,7 +38,7 @@ describe('Deployment native tooltips', () => {
       ]);
       expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
       const actions = container.querySelectorAll('button[aria-label]');
-      expect(actions.length).toBeGreaterThanOrEqual(9);
+      expect(actions.length).toBeGreaterThanOrEqual(8);
       for (const action of actions) expect(action).toHaveAccessibleName();
     });
   });
