@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { compatibleOutputBindings } from '@/lib/deployment/editor';
 import type {
@@ -30,6 +31,7 @@ import {
   readableDeploymentProfile,
 } from './deployment-editor-ui';
 import { DeploymentPaneHeader } from './deployment-pane-header';
+import { DeploymentDrawerContext } from './deployment-drawer';
 
 export interface NodeInputFieldsProps {
   node: DeploymentWorkflowNode;
@@ -374,6 +376,7 @@ export interface NodeInspectorProps {
 
 export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catalog, editable = true }) => {
   const { t } = useI18n();
+  const inDrawer = React.useContext(DeploymentDrawerContext);
   const updateNode = useDeploymentWorkflowStore((state) => state.updateNode);
   const removeNode = useDeploymentWorkflowStore((state) => state.removeNode);
 
@@ -405,22 +408,23 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catal
       aria-label={t('deployment.editor.configuration')}
     >
       <DeploymentPaneHeader
-        title={node.displayName}
-        description={t(deploymentLocaleKey(spec.descriptionKey))}
+        title={inDrawer ? t('deployment.editor.configuration') : node.displayName}
+        description={inDrawer ? `${node.displayName} · ${t(deploymentLocaleKey(spec.descriptionKey))}` : t(deploymentLocaleKey(spec.descriptionKey))}
         actions={
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => removeNode(node.id)}
-            disabled={!editable}
-            aria-label={t('deployment.editor.removeNode')}
-          >
-            <Trash2Icon data-icon="inline-start" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button size="icon-sm" variant="ghost" disabled={!editable} />}
+              onClick={() => removeNode(node.id)}
+              aria-label={t('deployment.editor.removeNode')}
+            >
+              <Trash2Icon data-icon="inline-start" />
+            </TooltipTrigger>
+            <TooltipContent>{t('deployment.editor.removeNode')}</TooltipContent>
+          </Tooltip>
         }
       />
       <ScrollArea className="min-h-0 flex-1">
-        <FieldGroup className="gap-3 p-2">
+        <FieldGroup className={inDrawer ? 'gap-3 p-3' : 'gap-3 p-2'}>
           <Field>
             <FieldLabel htmlFor={`node-name-${node.id}`}>{t('deployment.editor.nodeName')}</FieldLabel>
             <Input

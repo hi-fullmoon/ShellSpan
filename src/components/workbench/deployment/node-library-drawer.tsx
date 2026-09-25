@@ -4,8 +4,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Drawer,
-  DrawerContent,
-  DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -18,6 +16,7 @@ import type {
 } from '@/lib/deployment/types';
 import { WorkbenchSearchInput } from '../workbench-page';
 import { deploymentLocaleKey } from './deployment-editor-ui';
+import { DeploymentDrawerContent, DeploymentDrawerHeader } from './deployment-drawer';
 
 interface NodeLibraryPaneProps {
   catalog: DeploymentNodeTypeCatalog;
@@ -119,19 +118,17 @@ export const NodeLibraryDrawer: React.FC<NodeLibraryDrawerProps> = ({
   const { t } = useI18n();
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent
-        className="min-h-0 gap-0 overflow-hidden p-0"
-        closeButtonClassName="top-3.5 right-3 size-8 [&_svg]:size-3.5"
+      <DeploymentDrawerContent
         finalFocus={finalFocusRef}
       >
-        <DrawerHeader className="shrink-0 border-b px-3 py-2.5 pr-12">
+        <DeploymentDrawerHeader>
           <DrawerTitle>{t('deployment.editor.nodeLibrary')}</DrawerTitle>
           <p className="text-xs text-muted-foreground">
             {t('deployment.editor.nodeLibraryDescription')}
           </p>
-        </DrawerHeader>
+        </DeploymentDrawerHeader>
         <NodeLibraryPane catalog={catalog} onAdd={onAdd} editable={editable} />
-      </DrawerContent>
+      </DeploymentDrawerContent>
     </Drawer>
   );
 };

@@ -1,7 +1,8 @@
 import React from 'react';
 import { HistoryIcon, PanelRightIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
+import { Drawer } from '@/components/ui/drawer';
+import { DeploymentDrawerContent } from './deployment-drawer';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -133,26 +134,18 @@ export const RuntimeWorkspace: React.FC<RuntimeWorkspaceProps> = ({
       ) : layout ? main : null}
 
       <Drawer open={runsOpen} onOpenChange={setRunsOpen}>
-        <DrawerContent
-          className="min-h-0 gap-0 overflow-hidden p-0"
+        <DeploymentDrawerContent
           finalFocus={runsTriggerRef}
         >
-          <DrawerHeader className="sr-only">
-            <DrawerTitle>{t('deployment.runtime.runs.title')}</DrawerTitle>
-          </DrawerHeader>
           <div className="min-h-0 flex-1">{runPane}</div>
-        </DrawerContent>
+        </DeploymentDrawerContent>
       </Drawer>
       <Drawer open={inspectorOpen} onOpenChange={setInspectorOpen}>
-        <DrawerContent
-          className="min-h-0 gap-0 overflow-hidden p-0"
+        <DeploymentDrawerContent
           finalFocus={inspectorTriggerRef}
         >
-          <DrawerHeader className="sr-only">
-            <DrawerTitle>{t('deployment.runtime.node.details')}</DrawerTitle>
-          </DrawerHeader>
           <div className="min-h-0 flex-1">{inspector}</div>
-        </DrawerContent>
+        </DeploymentDrawerContent>
       </Drawer>
     </div>
   );

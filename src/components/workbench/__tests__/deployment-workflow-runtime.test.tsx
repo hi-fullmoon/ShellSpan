@@ -402,6 +402,9 @@ describe('DeploymentWorkflowRuntimeView', () => {
     expect((await screen.findAllByRole('heading', { name: 'deployment.runtime.runs.title' })).length).toBeGreaterThan(0);
     const runsDrawer = document.querySelector('[data-slot="drawer-content"]');
     expect(runsDrawer).toHaveClass('min-h-0', 'overflow-hidden');
+    expect(runsDrawer?.querySelectorAll('[data-slot="drawer-title"]')).toHaveLength(1);
+    expect(runsDrawer?.querySelector('[data-slot="drawer-header"]')).toHaveClass('px-3', 'pr-12', 'shrink-0');
+    expect(runsDrawer?.querySelector('[data-slot="drawer-close"]')).toHaveClass('top-2', 'right-3', 'size-8');
     expect(runsDrawer?.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
     fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
     await waitFor(() => expect(runsTrigger).toHaveFocus());
@@ -411,6 +414,9 @@ describe('DeploymentWorkflowRuntimeView', () => {
     fireEvent.click(inspectorTrigger);
     expect(await screen.findByTestId('deployment-runtime-inspector')).toBeInTheDocument();
     const inspectorDrawer = document.querySelector('[data-slot="drawer-content"]');
+    expect(inspectorDrawer?.querySelectorAll('[data-slot="drawer-title"]')).toHaveLength(1);
+    expect(inspectorDrawer?.querySelector('[data-slot="drawer-header"]')).toHaveClass('px-3', 'pr-12', 'shrink-0');
+    expect(inspectorDrawer?.querySelector('[data-slot="drawer-close"]')).toHaveClass('top-2', 'right-3', 'size-8');
     expect(inspectorDrawer?.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
     fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
     await waitFor(() => expect(inspectorTrigger).toHaveFocus());
