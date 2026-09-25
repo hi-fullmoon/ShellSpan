@@ -9,3 +9,4 @@ src-tauri/target
 /release-output/
 /release-artifact/
 /tauri-ci-override.json
+/.drawer-review/
