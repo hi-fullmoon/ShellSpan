@@ -774,6 +774,43 @@ async fn prepare_run_internal(
         .as_ref()
         .map(|handle| runtime.artifacts().inspect(handle))
         .transpose()?;
+    if let Some(handle) = &rollback_handle {
+        let projection = rollback_projection
+            .as_ref()
+            .ok_or("DEPLOYMENT_ARTIFACT_NOT_FOUND")?;
+        let has_host_manifest = projection
+            .manifest
+            .components
+            .iter()
+            .any(|item| item.name == "config-host.json");
+        let bundle_node = workflow
+            .definition
+            .nodes
+            .iter()
+            .find(|node| node.type_name == "artifact.bundle-compose");
+        let configured_host = bundle_node
+            .and_then(|node| node.config.get("hostCompose"))
+            .is_some_and(|value| !value.is_null());
+        if has_host_manifest || configured_host {
+            let config: super::compose_release::BundleComposeConfig = serde_json::from_value(
+                bundle_node
+                    .ok_or("DEPLOYMENT_WORKFLOW_ROLLBACK_CONFIG_MISMATCH")?
+                    .config
+                    .clone(),
+            )
+            .map_err(|_| "DEPLOYMENT_WORKFLOW_ROLLBACK_CONFIG_MISMATCH")?;
+            let path = runtime
+                .artifacts()
+                .verified_component_path(handle, "config-host.json")?;
+            let host: super::host_compose::HostBundle = serde_json::from_slice(
+                &std::fs::read(path).map_err(|_| "DEPLOYMENT_ARTIFACT_NOT_FOUND")?,
+            )
+            .map_err(|_| "DEPLOYMENT_WORKFLOW_ROLLBACK_CONFIG_MISMATCH")?;
+            if !host.matches_config(&config) {
+                return Err("DEPLOYMENT_WORKFLOW_ROLLBACK_CONFIG_MISMATCH".into());
+            }
+        }
+    }
     let run_id = request.run_id;
     super::node_registry::validate_identifier("runId", &run_id)?;
     let cancellation = runtime.register_run_cancellation(&run_id)?;

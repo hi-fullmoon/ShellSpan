@@ -68,6 +68,22 @@ pub(crate) use session::{
 
 pub(crate) const SSH_DATA_EVENT_PREFIX: &str = "ssh-data:";
 pub(crate) const SSH_STATUS_EVENT: &str = "ssh-status";
+
+/// Import a reviewed local configuration without opening a window or executing
+/// deployment nodes. Explicit database and package paths prevent cross-profile imports.
+pub fn import_deployment_configuration(
+    database: &std::path::Path,
+    package: &std::path::Path,
+) -> Result<String, String> {
+    deployment::import::import(database, package)
+}
+
+pub fn check_deployment_configuration(
+    database: &std::path::Path,
+    application_id: &str,
+) -> Result<String, String> {
+    deployment::import::check(database, application_id)
+}
 pub(crate) const SSH_CLOSED_EVENT: &str = "ssh-closed";
 pub(crate) const SSH_SESSION_ERROR_EVENT: &str = "ssh-session-error";
 pub(crate) const UPLOAD_PROGRESS_EVENT: &str = "upload-progress";

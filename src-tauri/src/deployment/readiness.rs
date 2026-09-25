@@ -156,7 +156,11 @@ pub(crate) fn check_local(entry: &ApplicationEntry) -> Result<ReadinessReport, S
             );
         }
     }
-    let captured = super::source_binding::capture_cancellable(&entry.source, &cancellation);
+    let captured = super::source_binding::capture_ref(
+        &entry.source,
+        config.git_ref.as_deref().unwrap_or("workspace"),
+        &cancellation,
+    );
     report.record(
         "source",
         entry.source.local_path.display().to_string(),
@@ -193,6 +197,7 @@ pub(crate) fn check_local(entry: &ApplicationEntry) -> Result<ReadinessReport, S
                 },
             );
             let bundle = BundleComposeConfig {
+                host_compose: config.host_compose.clone(),
                 compose_files: vec![config.compose_file.clone()],
                 project_name: config.project_name.clone(),
                 services: vec![config.service.clone()],
@@ -220,6 +225,9 @@ pub(crate) fn check_local(entry: &ApplicationEntry) -> Result<ReadinessReport, S
                 )
                 .map_err(|e| e.message)
                 .and_then(|compiled| {
+                    if config.host_compose.is_some() {
+                        return Ok(());
+                    }
                     let document: serde_json::Value = serde_yaml::from_slice(
                         &std::fs::read(compiled.path().join("compose.yaml"))
                             .map_err(|e| e.to_string())?,
@@ -284,7 +292,7 @@ pub(crate) fn check_local(entry: &ApplicationEntry) -> Result<ReadinessReport, S
     report.record(
         "takeover",
         &config.management_method,
-        if config.existing_service {
+        if config.existing_service && config.host_compose.is_none() {
             Err("DEPLOYMENT_EXISTING_SERVICE_REQUIRES_TAKEOVER_PLAN".into())
         } else {
             Ok(())
@@ -392,7 +400,23 @@ pub(crate) fn check_remote(
         ("port", format!("listeners=$(ss -H -ltn 'sport = :{}') && test -z \"$listeners\"", config.host_port)),
         ("ownership", format!("test -d {root} && contents=$(find {root} -mindepth 1 -maxdepth 1 -print -quit) && test -z \"$contents\"")),
     ];
-    if let Some(managed) = managed_compose_check(entry, database)? {
+    if let Some(host) = &config.host_compose {
+        let bundle = super::host_compose::HostBundle {
+            config: host.clone(),
+            project_name: config.project_name.clone(),
+            service: config.service.clone(),
+            compose_files: vec![config.compose_file.clone()],
+            files: Vec::new(),
+        };
+        for (key, command) in &mut checks {
+            if matches!(*key, "port" | "ownership") {
+                *command = format!(
+                    "bash -c {}",
+                    posix_quote(&bundle.preflight(&config.remote_root))
+                );
+            }
+        }
+    } else if let Some(managed) = managed_compose_check(entry, database)? {
         for (key, command) in &mut checks {
             if matches!(*key, "port" | "ownership") {
                 *command = managed.command().to_string();

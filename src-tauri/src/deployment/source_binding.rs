@@ -332,6 +332,75 @@ pub(crate) fn capture_cancellable(
     })
 }
 
+/// Capture a committed revision without changing the user's checkout. Git owns
+/// the worktree format and checkout semantics; the existing capture boundary
+/// still rejects links, credentials and oversized files.
+pub(crate) fn capture_ref(
+    binding: &SourceBinding,
+    reference: &str,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> Result<CapturedSource, String> {
+    if reference == "workspace" {
+        return capture_cancellable(binding, cancellation);
+    }
+    if reference.is_empty()
+        || reference.starts_with('-')
+        || reference.len() > 256
+        || reference.chars().any(char::is_control)
+        || !binding.included_untracked.is_empty()
+    {
+        return Err("DEPLOYMENT_SOURCE_REF_INVALID".into());
+    }
+    let (root, identity) = inspect_repository(&binding.local_path)?;
+    if identity != binding.repository_identity || root != binding.local_path {
+        return Err("DEPLOYMENT_SOURCE_REPOSITORY_CHANGED".into());
+    }
+    let revision = git_text(
+        &root,
+        &[
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            &format!("{reference}^{{commit}}"),
+        ],
+    )?;
+    if cancellation.is_cancelled() {
+        return Err("DEPLOYMENT_SOURCE_CANCELED".into());
+    }
+    let temporary = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let checkout = temporary.path().join("checkout");
+    let checkout_text = checkout.to_str().ok_or("DEPLOYMENT_SOURCE_NON_UTF8")?;
+    git(
+        &root,
+        &[
+            "-c",
+            "core.hooksPath=/dev/null",
+            "worktree",
+            "add",
+            "--detach",
+            checkout_text,
+            &revision,
+        ],
+    )?;
+    let result = (|| {
+        let mut isolated = binding.clone();
+        isolated.local_path = fs::canonicalize(&checkout).map_err(|e| e.to_string())?;
+        let mut captured = capture_cancellable(&isolated, cancellation)?;
+        captured.snapshot.binding = Some(binding.clone());
+        captured.snapshot.source_ref = reference.into();
+        captured.snapshot.metadata_digest = canonical_sha256(&serde_json::json!({
+            "binding": binding, "reference": reference, "revision": revision
+        }))
+        .map_err(|e| e.to_string())?;
+        Ok(captured)
+    })();
+    let cleanup = git(&root, &["worktree", "remove", "--force", checkout_text]);
+    match (result, cleanup) {
+        (Ok(captured), Ok(_)) => Ok(captured),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,6 +432,37 @@ mod tests {
         )
         .unwrap();
         root
+    }
+
+    #[test]
+    fn committed_capture_preserves_dirty_checkout_and_cleans_worktree() {
+        let root = repository();
+        let binding = inspect(root.path()).unwrap().binding;
+        let committed = fs::read(root.path().join("package.json")).unwrap();
+        fs::write(root.path().join("package.json"), "uncommitted edit").unwrap();
+        fs::write(root.path().join("local.txt"), "local file").unwrap();
+        let before = git(root.path(), &["worktree", "list", "--porcelain"]).unwrap();
+        let captured = capture_ref(
+            &binding,
+            "HEAD",
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(captured.directory.path().join("package.json")).unwrap(),
+            committed
+        );
+        assert!(!captured.directory.path().join("local.txt").exists());
+        assert!(!captured.snapshot.dirty);
+        assert_eq!(captured.snapshot.binding, Some(binding));
+        assert_eq!(
+            fs::read_to_string(root.path().join("package.json")).unwrap(),
+            "uncommitted edit"
+        );
+        assert_eq!(
+            git(root.path(), &["worktree", "list", "--porcelain"]).unwrap(),
+            before
+        );
     }
 
     #[test]
