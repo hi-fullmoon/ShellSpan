@@ -50,7 +50,6 @@ function renderToolbar(dirty = false, layout: 'wide' | 'compact' = 'wide'): void
       issueCount={0}
       dirty={dirty}
       onOpenIssues={() => undefined}
-      onOpenLibrary={() => undefined}
       onOpenInspector={() => undefined}
       onOpenSettings={() => undefined}
     />,
@@ -121,8 +120,8 @@ describe('WorkflowEditorToolbar header actions', () => {
   it('renders borderless icon buttons in both layouts', () => {
     for (const layout of ['wide', 'compact'] as const) {
       renderToolbar(false, layout);
+      expect(screen.queryByRole('button', { name: 'deployment.editor.nodeLibrary' })).not.toBeInTheDocument();
       const labels = [
-        'deployment.editor.nodeLibrary',
         'deployment.editor.settings',
         'deployment.editor.configuration',
         'deployment.editor.delete.title',

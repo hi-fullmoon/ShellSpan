@@ -24,7 +24,6 @@ describe('workflow toolbar tooltips', () => {
           issueCount={0}
           dirty={false}
           onOpenIssues={() => undefined}
-          onOpenLibrary={() => undefined}
           onOpenInspector={() => undefined}
           onOpenSettings={() => undefined}
         />
@@ -32,7 +31,6 @@ describe('workflow toolbar tooltips', () => {
     );
 
     for (const key of [
-      'deployment.editor.nodeLibrary',
       'deployment.editor.settings',
       'deployment.editor.configuration',
       'deployment.editor.delete.title',
@@ -48,7 +46,6 @@ describe('workflow toolbar tooltips', () => {
 
     await user.tab(); // Validation status.
     for (const key of [
-      'deployment.editor.nodeLibrary',
       'deployment.editor.settings',
       'deployment.editor.configuration',
       'deployment.editor.delete.title',
