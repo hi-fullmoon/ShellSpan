@@ -110,12 +110,12 @@ describe('RemoteHealthSection authorization', () => {
       },
     }));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'remoteHealth.collecting' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'common.cancel' })).toBeEnabled();
 
     await act(async () => resolveCollection(result));
   });
 
-  it('keeps cancel next to the active collection control', () => {
+  it('uses the single collection control to cancel while collecting', () => {
     const cancel = vi.fn().mockResolvedValue(undefined);
     useRemoteHealthStore.setState({
       cancel,
@@ -130,12 +130,11 @@ describe('RemoteHealthSection authorization', () => {
 
     render(<RemoteHealthSection />);
 
-    const collectingButton = screen.getByRole('button', { name: 'remoteHealth.collecting' });
     const cancelButton = screen.getByRole('button', { name: 'common.cancel' });
-    const sectionActions = collectingButton.closest<HTMLElement>(
+    const sectionActions = cancelButton.closest<HTMLElement>(
       '[data-slot="remote-health-section-actions"]',
     );
-    const collectionActions = collectingButton.closest<HTMLElement>(
+    const collectionActions = cancelButton.closest<HTMLElement>(
       '[data-slot="remote-health-collection-actions"]',
     );
 
@@ -143,11 +142,28 @@ describe('RemoteHealthSection authorization', () => {
     expect(collectionActions).toBeInTheDocument();
     expect(collectionActions).toHaveClass('flex', 'shrink-0', 'flex-nowrap');
     expect(collectionActions).toContainElement(cancelButton);
+    expect(collectionActions?.querySelectorAll('button')).toHaveLength(1);
+    expect(cancelButton).toBeEnabled();
+    expect(cancelButton).toHaveClass('h-8');
+    expect(cancelButton.querySelector('[data-slot="spinner"]')).toBeInTheDocument();
     expect(sectionActions).toContainElement(collectionActions);
     expect(cancelButton.closest('[data-slot="remote-health-actions"]')).toBeNull();
 
     fireEvent.click(cancelButton);
     expect(cancel).toHaveBeenCalledWith(profile.id);
+
+    act(() => useRemoteHealthStore.setState({
+      entries: {
+        [profile.id]: {
+          profileId: profile.id,
+          phase: 'cancelling',
+          operationId: 'remote-health:test',
+        },
+      },
+    }));
+    expect(screen.getByRole('button', { name: 'remoteHealth.cancelling' })).toBe(cancelButton);
+    expect(cancelButton).toBeDisabled();
+    expect(collectionActions?.querySelectorAll('button')).toHaveLength(1);
   });
 
 });
