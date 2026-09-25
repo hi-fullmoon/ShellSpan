@@ -20,6 +20,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import { useDeploymentWorkflowStore } from '@/stores/deploymentWorkflowStore';
@@ -99,7 +100,6 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
               <button
                 type="button"
                 onClick={onOpenIssues}
-                title={t('deployment.editor.validation.title')}
                 data-testid="deployment-validation-status"
               />
             )}
@@ -121,52 +121,53 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
       description={t('deployment.editor.stepList.description')}
       actions={(
         <>
-          <Button
-            ref={libraryTriggerRef}
-            size="icon-sm"
-            variant="ghost"
-            onClick={onOpenLibrary}
-            disabled={!editable}
-            aria-label={t('deployment.editor.nodeLibrary')}
-            title={t('deployment.editor.nodeLibrary')}
-          >
-            <LibraryIcon data-icon="inline-start" />
-          </Button>
-          <Button
-            ref={settingsTriggerRef}
-            size="icon-sm"
-            variant="ghost"
-            onClick={onOpenSettings}
-            disabled={!editable}
-            aria-label={t('deployment.editor.settings')}
-            title={t('deployment.editor.settings')}
-          >
-            <Settings2Icon data-icon="inline-start" />
-          </Button>
-          {layout !== 'wide' && (
-            <Button
-              ref={inspectorTriggerRef}
-              size="icon-sm"
-              variant="ghost"
-              onClick={onOpenInspector}
-              aria-label={t('deployment.editor.configuration')}
-              title={t('deployment.editor.configuration')}
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button size="icon-sm" variant="ghost" disabled={!editable} />}
+              ref={libraryTriggerRef}
+              onClick={onOpenLibrary}
+              aria-label={t('deployment.editor.nodeLibrary')}
             >
-              <PanelRightIcon data-icon="inline-start" />
-            </Button>
+              <LibraryIcon data-icon="inline-start" />
+            </TooltipTrigger>
+            <TooltipContent>{t('deployment.editor.nodeLibrary')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button size="icon-sm" variant="ghost" disabled={!editable} />}
+              ref={settingsTriggerRef}
+              onClick={onOpenSettings}
+              aria-label={t('deployment.editor.settings')}
+            >
+              <Settings2Icon data-icon="inline-start" />
+            </TooltipTrigger>
+            <TooltipContent>{t('deployment.editor.settings')}</TooltipContent>
+          </Tooltip>
+          {layout !== 'wide' && (
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button size="icon-sm" variant="ghost" />}
+                ref={inspectorTriggerRef}
+                onClick={onOpenInspector}
+                aria-label={t('deployment.editor.configuration')}
+              >
+                <PanelRightIcon data-icon="inline-start" />
+              </TooltipTrigger>
+              <TooltipContent>{t('deployment.editor.configuration')}</TooltipContent>
+            </Tooltip>
           )}
           {workflowId && (
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              onClick={() => setDeleteOpen(true)}
-              disabled={deleteDisabled}
-              aria-label={t('deployment.editor.delete.title')}
-              title={t('deployment.editor.delete.title')}
-              data-testid="deployment-delete-workflow"
-            >
-              <Trash2Icon data-icon="inline-start" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button size="icon-sm" variant="ghost" disabled={deleteDisabled} />}
+                onClick={() => setDeleteOpen(true)}
+                aria-label={t('deployment.editor.delete.title')}
+                data-testid="deployment-delete-workflow"
+              >
+                <Trash2Icon data-icon="inline-start" />
+              </TooltipTrigger>
+              <TooltipContent>{t('deployment.editor.delete.title')}</TooltipContent>
+            </Tooltip>
           )}
         </>
       )}
