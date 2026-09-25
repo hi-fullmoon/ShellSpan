@@ -229,6 +229,9 @@ describe('DeploymentWorkflowCenter', () => {
   it('opens on the pipeline tab by default', () => {
     render(<DeploymentWorkflowCenter />);
     expect(screen.getByRole('tab', { name: 'deployment.editor.tab.pipeline' })).toHaveAttribute('aria-selected', 'true');
+    const heading = screen.getByRole('heading', { name: 'deployment.editor.title' });
+    expect(heading).toBeInTheDocument();
+    expect(heading.closest('header')).not.toHaveTextContent('deployment.editor.revision');
   });
 
   it('opens on the deployments tab with a disabled deploy CTA when explicitly requested', () => {
@@ -323,7 +326,9 @@ describe('DeploymentWorkflowCenter', () => {
     // the title has no description line.
     const configDrawer = document.querySelector('[data-slot="drawer-content"]');
     expect(configDrawer?.querySelector('[data-slot="drawer-header"]'))
-      .toHaveClass('min-h-12', 'justify-center', 'px-3', 'py-1.5', 'pr-12');
+      .toHaveClass('min-h-12', 'justify-center', 'px-3', 'py-3', 'pr-12');
+    expect(configDrawer?.querySelectorAll('[data-slot="drawer-title"]')).toHaveLength(1);
+    expect(configDrawer?.querySelector('[data-slot="field-group"]')).toHaveClass('p-3');
     expect(configDrawer?.querySelector('[data-slot="drawer-close"]'))
       .toHaveClass('top-2', 'right-3', 'size-8');
     fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
@@ -343,7 +348,7 @@ describe('DeploymentWorkflowCenter', () => {
     // hanging below the divider into the search row.
     const workflowsDrawer = document.querySelector('[data-slot="drawer-content"]');
     expect(workflowsDrawer?.querySelector('[data-slot="drawer-header"]'))
-      .toHaveClass('min-h-12', 'justify-center', 'px-3', 'py-1.5', 'pr-12');
+      .toHaveClass('min-h-12', 'justify-center', 'px-3', 'py-3', 'pr-12');
     expect(workflowsDrawer?.querySelector('[data-slot="drawer-close"]'))
       .toHaveClass('top-2', 'right-3', 'size-8');
     fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
@@ -699,7 +704,8 @@ describe('DeploymentWorkflowCenter', () => {
 
     const dialog = await screen.findByRole('dialog');
     const target = within(dialog).getByLabelText('deployment.editor.targetProfile');
-    expect(target).toHaveTextContent('Staging · release@staging.example.test');
+    expect(target).toHaveTextContent('release@staging.example.test');
+    expect(target).not.toHaveTextContent('Staging ·');
     fireEvent.change(within(dialog).getByLabelText('deployment.editor.workflowName'), {
       target: { value: 'Staging workflow' },
     });

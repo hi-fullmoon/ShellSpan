@@ -36,6 +36,21 @@ beforeEach(() => {
 });
 
 describe('RemoteHealthSection authorization', () => {
+  it('keeps heading spacing independent of the collection action height', () => {
+    render(<RemoteHealthSection />);
+
+    const title = screen.getByText('remoteHealth.title');
+    expect(title.parentElement).toHaveClass('flex', 'flex-col', 'gap-1', 'min-w-0');
+    expect(title.parentElement).toContainElement(screen.getByText('remoteHealth.description'));
+    expect(title.closest('[data-slot="card-header"]')).toHaveClass(
+      'flex', 'flex-col', 'gap-3', '@min-[640px]/remote-health:flex-row',
+    );
+    const button = screen.getByRole('button', { name: 'remoteHealth.collect' });
+    expect(button).toHaveClass('h-8', 'border', 'border-input', 'gap-1');
+    expect(button.closest('[data-slot="card-action"]')).toHaveClass('shrink-0');
+    expect(button.closest('[data-slot="card-action"]')).not.toHaveClass('max-w-[60%]');
+  });
+
   it('shows the profile label instead of its internal ID in the target select', () => {
     render(<RemoteHealthSection />);
 

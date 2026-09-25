@@ -74,6 +74,11 @@ describe('WorkbenchSidebar', () => {
 
     const deployments = screen.getByRole('button', { name: 'Deployments' });
     expect(deployments).toBeInTheDocument();
+    expect(screen.getAllByRole('button', {
+      name: /^(Connections|Deployments|Keychain|Known Hosts|Monitor|Log explorer)$/,
+    }).map((button) => button.textContent)).toEqual([
+      'Connections', 'Deployments', 'Keychain', 'Known Hosts', 'Monitor', 'Log explorer',
+    ]);
 
     fireEvent.click(deployments, { detail: 0 });
 

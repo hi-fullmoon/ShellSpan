@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebglAddon } from '@xterm/addon-webgl';
-import { measureTerminalGeometry, TERMINAL_CONTAINER_CLASS } from './terminal-geometry';
+import { createTerminalResizeHandler, measureTerminalGeometry, TERMINAL_CONTAINER_CLASS } from './terminal-geometry';
 import {
   invokeGetSessionStatus,
   invokeMarkSessionReady,
@@ -95,7 +95,6 @@ const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
 
 const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 
-const RESIZE_DEBOUNCE_MS = 100;
 const RESIZE_RETRY_BASE_MS = 250;
 const RESIZE_RETRY_MAX_MS = 2000;
 const OUTPUT_PAUSE_HIGH_WATERMARK = 512 * 1024;
@@ -436,8 +435,7 @@ class TerminalControllerImpl implements TerminalController {
   private listenerGeneration = 0;
   private preferences: TerminalDisplayPreferences;
   private linkProviderDisposable?: IDisposable;
-  private resizeDebounceTimer: number | null = null;
-  private pendingDimensions: { cols: number; rows: number } | null = null;
+  private resizeHandler?: ReturnType<typeof createTerminalResizeHandler>;
   // Last size acknowledged by the pty resize command. The backend relays every resize as an
   // SSH window-change even when the size is unchanged, and the resulting
   // SIGWINCH makes the remote shell redraw its prompt — sometimes leaving
@@ -908,40 +906,11 @@ class TerminalControllerImpl implements TerminalController {
     }
 
     if (!this.resizeObserver) {
-      this.resizeObserver = new ResizeObserver(() => {
-        if (this.container.offsetParent === null) return;
-        const dimensions = this.fitAddon.proposeDimensions();
-        if (!dimensions) return;
-        if (dimensions.cols === this.terminal.cols && dimensions.rows === this.terminal.rows) {
-          // Grid size unchanged (most drag frames): nothing to do — the pty
-          // size is unchanged too, so no IPC either.
-          return;
-        }
-        // Debounce the reflow itself, not just the IPC: with the webgl
-        // renderer each terminal.resize() updates the canvas CSS size
-        // immediately while the glyph texture is redrawn one frame later, so
-        // resizing on every drag frame shows the old texture squeezed into
-        // the new size — a constant compression flicker. Coalescing to a
-        // single reflow once the size settles avoids it; overflow is simply
-        // clipped while dragging.
-        this.pendingDimensions = dimensions;
-        if (this.resizeDebounceTimer !== null) {
-          window.clearTimeout(this.resizeDebounceTimer);
-        }
-        this.resizeDebounceTimer = window.setTimeout(() => {
-          this.resizeDebounceTimer = null;
-          if (this.disposed) return;
-          const pending = this.pendingDimensions;
-          this.pendingDimensions = null;
-          if (!pending) return;
-          try {
-            this.terminal.resize(pending.cols, pending.rows);
-          } catch {
-            // resize() can fail mid-teardown; harmless.
-          }
-          this.sendResize(pending.cols, pending.rows);
-        }, RESIZE_DEBOUNCE_MS);
-      });
+      this.resizeHandler = createTerminalResizeHandler(
+        this.terminal, this.fitAddon, this.container,
+        (cols, rows) => this.sendResize(cols, rows),
+      );
+      this.resizeObserver = new ResizeObserver(this.resizeHandler.schedule);
       this.resizeObserver.observe(this.container);
     }
 
@@ -964,11 +933,7 @@ class TerminalControllerImpl implements TerminalController {
   // Drop any scheduled debounced resize so a disposed or rebound
   // controller never reflows or sends a resize IPC for a stale session.
   private cancelPendingResize(): void {
-    if (this.resizeDebounceTimer !== null) {
-      window.clearTimeout(this.resizeDebounceTimer);
-      this.resizeDebounceTimer = null;
-    }
-    this.pendingDimensions = null;
+    this.resizeHandler?.cancel();
   }
 
   private cancelResizeRetry(): void {

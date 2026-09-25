@@ -17,11 +17,17 @@ export function deploymentLocaleKey(value: string): LocaleKey {
 }
 
 export function readableDeploymentProfile(profile: {
-  name: string;
   username: string;
   host: string;
 }): string {
-  return `${profile.name} · ${profile.username}@${profile.host}`;
+  return `${profile.username}@${profile.host}`;
+}
+
+export function readableDeploymentTarget(
+  remoteRoot: string,
+  profile?: { username: string; host: string },
+): string {
+  return profile ? `${profile.username}@${profile.host} · ${remoteRoot}` : remoteRoot;
 }
 
 export function findDeploymentNodeSpec(
