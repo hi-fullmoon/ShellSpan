@@ -524,8 +524,7 @@ describe('DeploymentWorkflowRuntimeView', () => {
     }
   });
 
-  it('disables the empty-state deploy action while a preparation is running', () => {
-    const onDeploy = vi.fn();
+  it('replaces the empty-state deploy action with preparation progress', () => {
     useDeploymentWorkflowRunStore.setState({
       runs: [],
       nextRunCursor: null,
@@ -540,13 +539,11 @@ describe('DeploymentWorkflowRuntimeView', () => {
       <DeploymentWorkflowRuntimeView
         kind="runs"
         workflow={workflow}
-        onDeploy={onDeploy}
         canDeploy
       />,
     );
-    const cta = screen.getByTestId('deployment-run-empty-cta');
-    expect(cta).toBeDisabled();
-    expect(cta).toHaveTextContent('deployment.runtime.deploy.action');
+    expect(screen.queryByTestId('deployment-run-empty-cta')).toBeNull();
+    expect(screen.getByTestId('deployment-preparing-progress')).toBeVisible();
   });
 
   it('surfaces approval failures inside the dialog with the specific error', async () => {

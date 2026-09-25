@@ -39,6 +39,24 @@ describe('deployment validation dialog layout', () => {
         issues={[]} nodeName={(id) => id} onSelectNode={() => {}}
         validating onValidate={() => {}} />);
     });
-    expect(screen.getByRole('button', { name: new RegExp(t('deployment.editor.validate')) })).toBeDisabled();
+    expect(screen.getByRole('button', { name: t('deployment.editor.validation.running') })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent(t('deployment.editor.validation.running'));
+    expect(screen.queryByText(t('deployment.editor.validation.ready'))).toBeNull();
+  });
+
+  it('dispatches validation on each click and restores the result after completion', async () => {
+    await initI18n('zh-CN');
+    let requests = 0;
+    const props = { open: true, onOpenChange: () => {}, issues: [], nodeName: (id: string) => id,
+      onSelectNode: () => {}, onValidate: () => { requests += 1; } };
+    const view = render(<DeploymentValidationDialog {...props} validating={false} />);
+    fireEvent.click(screen.getByRole('button', { name: t('deployment.editor.validate') }));
+    expect(requests).toBe(1);
+    view.rerender(<DeploymentValidationDialog {...props} validating />);
+    expect(screen.queryByText(t('deployment.editor.validation.ready'))).toBeNull();
+    view.rerender(<DeploymentValidationDialog {...props} validating={false} />);
+    expect(screen.getByText(t('deployment.editor.validation.readyDescription'))).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: t('deployment.editor.validate') }));
+    expect(requests).toBe(2);
   });
 });
