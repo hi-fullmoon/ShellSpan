@@ -10,6 +10,7 @@ RUN apk add --no-cache \
       nginx \
       openssh \
       openssh-client \
+      python3 \
       shadow \
       sudo \
       util-linux \
