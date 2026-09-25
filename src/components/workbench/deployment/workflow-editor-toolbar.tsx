@@ -2,7 +2,6 @@ import React from 'react';
 import {
   AlertTriangleIcon,
   CheckCircle2Icon,
-  LibraryIcon,
   PanelRightIcon,
   Settings2Icon,
   Trash2Icon,
@@ -36,10 +35,8 @@ export interface WorkflowEditorToolbarProps {
   issueCount: number;
   dirty: boolean;
   onOpenIssues: () => void;
-  onOpenLibrary: () => void;
   onOpenInspector: () => void;
   onOpenSettings: () => void;
-  libraryTriggerRef?: React.Ref<HTMLButtonElement>;
   inspectorTriggerRef?: React.Ref<HTMLButtonElement>;
   settingsTriggerRef?: React.Ref<HTMLButtonElement>;
 }
@@ -53,10 +50,8 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
   issueCount,
   dirty,
   onOpenIssues,
-  onOpenLibrary,
   onOpenInspector,
   onOpenSettings,
-  libraryTriggerRef,
   inspectorTriggerRef,
   settingsTriggerRef,
 }) => {
@@ -121,17 +116,6 @@ export const WorkflowEditorToolbar: React.FC<WorkflowEditorToolbarProps> = ({
       description={t('deployment.editor.stepList.description')}
       actions={(
         <>
-          <Tooltip>
-            <TooltipTrigger
-              render={<Button size="icon-sm" variant="ghost" disabled={!editable} />}
-              ref={libraryTriggerRef}
-              onClick={onOpenLibrary}
-              aria-label={t('deployment.editor.nodeLibrary')}
-            >
-              <LibraryIcon data-icon="inline-start" />
-            </TooltipTrigger>
-            <TooltipContent>{t('deployment.editor.nodeLibrary')}</TooltipContent>
-          </Tooltip>
           <Tooltip>
             <TooltipTrigger
               render={<Button size="icon-sm" variant="ghost" disabled={!editable} />}
