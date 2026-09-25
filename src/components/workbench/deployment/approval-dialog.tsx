@@ -180,7 +180,7 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
             )}
           </div>
         </ScrollArea>
-        <DialogFooter className="shrink-0 border-t p-4">
+        <DialogFooter className="shrink-0 p-4">
           <Button ref={cancelRef} variant="outline" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
           <Button
             disabled={!admissionsEnabled || invalid || action === 'approve'}
