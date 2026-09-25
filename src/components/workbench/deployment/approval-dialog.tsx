@@ -65,6 +65,7 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [now, setNow] = React.useState(() => Date.now());
   const summary = detail?.approvalSummary ?? null;
+  const hostCompose = workflow.definition.nodes.find((node) => node.type === 'artifact.bundle-compose')?.config.hostCompose;
   const invalid = !summary
     || !detail
     || !['awaiting_approval', 'approved'].includes(detail.summary.status)
@@ -157,6 +158,10 @@ export const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
                   })}</div>
                 </ApprovalSection>
                 <Separator />
+                {hostCompose && <ApprovalSection title={t('deployment.application.host.enabled')}>
+                  <p>{t('deployment.application.host.recovery')}</p>
+                  <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(hostCompose, null, 2)}</pre>
+                </ApprovalSection>}
                 <ApprovalSection title={t('deployment.runtime.approval.effects')}>
                   <p>{t('deployment.release.interruption')}</p>
                   {summary.releaseReview?.configuration.filter((node) => node.type === 'deploy.compose').map((node) => <div key={node.nodeId}>
