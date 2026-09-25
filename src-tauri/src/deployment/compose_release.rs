@@ -19,6 +19,8 @@ pub(crate) struct RegisteredBindMount {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BundleComposeConfig {
+    #[serde(default)]
+    pub host_compose: Option<super::host_compose::HostCompose>,
     pub compose_files: Vec<String>,
     pub project_name: String,
     #[serde(default)]
@@ -109,6 +111,9 @@ pub(crate) fn compile(
     image_reference: &str,
     cancellation: &CancellationToken,
 ) -> Result<tempfile::TempDir, NodeFailure> {
+    if config.host_compose.is_some() {
+        return super::host_compose::compile(root, config, image_reference);
+    }
     let canonical_root =
         fs::canonicalize(root).map_err(|_| failure("frozen source is unavailable"))?;
     let root = canonical_root.as_path();
@@ -352,6 +357,7 @@ mod tests {
 
     fn config() -> BundleComposeConfig {
         BundleComposeConfig {
+            host_compose: None,
             compose_files: vec!["compose.yaml".into()],
             project_name: "shellspan-phase1-test".into(),
             services: vec!["web".into()],

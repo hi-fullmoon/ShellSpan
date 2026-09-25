@@ -43,7 +43,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-pub(crate) const DOCKER_COMPOSE_EXECUTOR_VERSION: &str = "docker-compose/2";
+pub(crate) const DOCKER_COMPOSE_EXECUTOR_VERSION: &str = "docker-compose/3";
 
 pub(crate) const DOCKER_COMPOSE_NODE_TYPES: &[(&str, u32)] = &[
     ("source.snapshot", 1),
@@ -197,6 +197,8 @@ struct SourceSnapshotConfig {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DockerBuildxConfig {
+    #[serde(default)]
+    verification: Option<super::build_verification::BuildVerification>,
     context: String,
     dockerfile: String,
     platform: String,
@@ -253,6 +255,12 @@ struct StaticSwitchConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DockerComposeRemoteAction {
+    HostComposeCheck {
+        command: String,
+    },
+    HostComposeDeploy {
+        command: String,
+    },
     CheckManagedCompose(super::readiness::ManagedComposeCheck),
     CheckUnoccupiedCompose {
         project_name: String,
@@ -333,6 +341,7 @@ enum DockerComposeRemoteAction {
 impl DockerComposeRemoteAction {
     fn fixed_request(&self) -> (String, &'static str) {
         let script = match self {
+            Self::HostComposeCheck { command } | Self::HostComposeDeploy { command } => format!("bash -c {}", posix_quote(command)),
             Self::CheckManagedCompose(check) => check.command().to_string(),
             Self::CheckUnoccupiedCompose { project_name, ports } => {
                 let port_checks = ports.iter().map(|port| format!(
@@ -549,6 +558,10 @@ impl DockerComposeRemoteAction {
             Self::LoadImage { .. } => "ShellSpan fixed Docker image load",
             Self::PrepareCompose { .. } => "ShellSpan fixed Compose release preparation",
             Self::ComposeDeploy { .. } => "ShellSpan fixed Docker Compose deploy",
+            Self::HostComposeCheck { .. } => "ShellSpan read-only existing Compose check",
+            Self::HostComposeDeploy { .. } => {
+                "ShellSpan approved existing Compose backup and deploy"
+            }
             Self::StaticSwitch { .. } => "ShellSpan fixed static release symlink switch",
             Self::VerifyHttp { .. } => "ShellSpan fixed HTTP verification",
             Self::NginxReload => "ShellSpan fixed Nginx validate and reload",
@@ -711,6 +724,9 @@ fn build_image_bundle(
     cancellation: &tokio_util::sync::CancellationToken,
     timeout: Duration,
 ) -> Result<super::artifact_cas::ArtifactBundleProjection, NodeFailure> {
+    if let Some(verification) = &config.verification {
+        verification.execute(frozen_root, cancellation, timeout)?;
+    }
     let materialized = super::source_binding::materialize(frozen_root)
         .map_err(|error| NodeFailure::definite("sourceMaterialize", error))?;
     let source_root = materialized.path();
@@ -864,6 +880,37 @@ impl NativeDockerComposeBackend {
             })
     }
 
+    fn host_bundle(
+        &self,
+        handle: &ArtifactHandle,
+    ) -> Result<Option<super::host_compose::HostBundle>, NodeFailure> {
+        let bundle = self
+            .artifacts
+            .inspect(handle)
+            .map_err(|error| NodeFailure::definite("artifactIntegrity", error))?;
+        if !bundle
+            .manifest
+            .components
+            .iter()
+            .any(|component| component.name == "config-host.json")
+        {
+            return Ok(None);
+        }
+        let path = self
+            .artifacts
+            .verified_component_path(handle, "config-host.json")
+            .map_err(|error| NodeFailure::definite("artifactIntegrity", error))?;
+        let host: super::host_compose::HostBundle = serde_json::from_slice(
+            &fs::read(path)
+                .map_err(|_| NodeFailure::definite("artifactIo", "host manifest unavailable"))?,
+        )
+        .map_err(|_| NodeFailure::definite("artifactIntegrity", "invalid host manifest"))?;
+        host.config
+            .validate()
+            .map_err(|error| NodeFailure::definite("hostCompose", error))?;
+        Ok(Some(host))
+    }
+
     fn target_definition<'a>(
         input: &'a VerifiedNodeInput,
         target_id: &str,
@@ -941,6 +988,7 @@ impl NativeDockerComposeBackend {
             DockerComposeRemoteAction::Preflight { .. }
                 | DockerComposeRemoteAction::CheckUnoccupiedCompose { .. }
                 | DockerComposeRemoteAction::CheckManagedCompose(_)
+                | DockerComposeRemoteAction::HostComposeCheck { .. }
                 | DockerComposeRemoteAction::VerifyHttp { .. }
                 | DockerComposeRemoteAction::ReverifyHttp { .. }
         );
@@ -1906,9 +1954,31 @@ impl NativeDockerComposeBackend {
                 "mount access requires a numeric UID:GID",
             ));
         }
-        self.run_remote(
-            &input,
-            &config.target_id,
+        let host = self.host_bundle(&handle)?;
+        let action = if let Some(host) = &host {
+            let root = &Self::target_definition(&input, &config.target_id)?.remote_root;
+            let checksums = bundle
+                .manifest
+                .components
+                .iter()
+                .filter(|component| component.name != "image.tar")
+                .map(|component| {
+                    format!(
+                        "{}  {}\n",
+                        component.digest.trim_start_matches("sha256:"),
+                        component.name
+                    )
+                })
+                .collect::<String>();
+            DockerComposeRemoteAction::HostComposeDeploy {
+                command: format!(
+                    "set -eu; cd {}; printf '%s' {} | sha256sum --check --status; {}",
+                    posix_quote(remote_directory),
+                    posix_quote(&checksums),
+                    host.deploy(root, remote_directory, image_reference)
+                ),
+            }
+        } else {
             DockerComposeRemoteAction::ComposeDeploy {
                 compose_files,
                 project_name: config.project_name.clone(),
@@ -1917,10 +1987,10 @@ impl NativeDockerComposeBackend {
                 image_reference: image_reference.clone(),
                 container_user: container_user.clone(),
                 mounts: mounts.clone(),
-            },
-            context.cancellation,
-        )
-        .await?;
+            }
+        };
+        self.run_remote(&input, &config.target_id, action, context.cancellation)
+            .await?;
         let effect_payload = serde_json::json!({
             "remoteDirectory": remote_directory,
             "releaseId": payload.get("releaseId"),
@@ -1929,6 +1999,8 @@ impl NativeDockerComposeBackend {
             "artifact": handle,
             "containerUser": container_user,
             "verifiedMounts": mounts,
+            "hostCompose": host.is_some(),
+            "backupDirectory": host.as_ref().map(|_| format!("{remote_directory}/host-backup")),
         });
         let receipt =
             Self::effect_receipt(&input, "deploy.compose", &config.target_id, &effect_payload)?;
@@ -2638,27 +2710,24 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                         .map_err(|error| NodeFailure::definite("config", error.to_string()))?;
                 let backend = self.clone();
                 let snapshot = tokio::task::spawn_blocking(move || {
-                    if config.source_ref != "workspace" {
-                        return Err(NodeFailure::definite(
-                            "sourceReference",
-                            "unsupported source reference",
-                        ));
-                    }
                     let binding = config.binding.ok_or_else(|| {
                         NodeFailure::definite(
                             "sourceBindingRequired",
                             "bind a local Git repository before preparing a deployment",
                         )
                     })?;
-                    let captured =
-                        super::source_binding::capture_cancellable(&binding, &context.cancellation)
-                            .map_err(|error| {
-                                if context.cancellation.is_cancelled() {
-                                    NodeFailure::canceled()
-                                } else {
-                                    NodeFailure::definite("sourceCapture", error)
-                                }
-                            })?;
+                    let captured = super::source_binding::capture_ref(
+                        &binding,
+                        &config.source_ref,
+                        &context.cancellation,
+                    )
+                    .map_err(|error| {
+                        if context.cancellation.is_cancelled() {
+                            NodeFailure::canceled()
+                        } else {
+                            NodeFailure::definite("sourceCapture", error)
+                        }
+                    })?;
                     let snapshot = captured.snapshot;
                     backend
                         .sources
@@ -2961,7 +3030,32 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                     .await?;
                 self.probe_sftp(&target.connection_profile_id).await?;
                 let mut capabilities = parse_preflight_output(&output)?;
-                if capabilities.contains_key("releaseId")
+                let preflight_bundle = input_handle(&input, "bundle")?;
+                let host = self.host_bundle(&preflight_bundle)?;
+                if let Some(host) = &host {
+                    let fingerprint = self
+                        .run_remote(
+                            &input,
+                            &config.target_id,
+                            DockerComposeRemoteAction::HostComposeCheck {
+                                command: host.preflight(&target.remote_root),
+                            },
+                            context.cancellation.clone(),
+                        )
+                        .await?;
+                    let fingerprint = fingerprint.trim();
+                    if fingerprint.len() != 64
+                        || !fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    {
+                        return Err(NodeFailure::definite(
+                            "hostCompose",
+                            "invalid host configuration fingerprint",
+                        ));
+                    }
+                    capabilities.insert("hostComposeDigest".into(), fingerprint.into());
+                }
+                if host.is_none()
+                    && capabilities.contains_key("releaseId")
                     && config
                         .required_capabilities
                         .iter()
@@ -2999,7 +3093,7 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                     )
                     .await?;
                 }
-                if !capabilities.contains_key("releaseId") {
+                if host.is_none() && !capabilities.contains_key("releaseId") {
                     let handle: ArtifactHandle =
                         serde_json::from_value(output_value(&input, "bundle")?.clone()).map_err(
                             |error| NodeFailure::definite("artifactIntegrity", error.to_string()),
@@ -3464,6 +3558,14 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
         ) {
             return Ok(CompensationResult::NotRequired);
         }
+        if input
+            .successful_result
+            .outputs
+            .values()
+            .any(|output| output.value.pointer("/payload/hostCompose") == Some(&Value::Bool(true)))
+        {
+            return Ok(CompensationResult::StateUnknown("existing Compose deployment requires reviewed restoration of its configuration archive; database restoration is never automatic".into()));
+        }
         let plan =
             input.verified.immutable_plan.as_ref().ok_or_else(|| {
                 NodeFailure::definite("compensation", "immutable plan is missing")
@@ -3778,6 +3880,7 @@ mod tests {
             frozen.directory.path(),
             frozen.snapshot.clone(),
             DockerBuildxConfig {
+                verification: None,
                 context: ".".into(),
                 dockerfile: "Dockerfile".into(),
                 platform: "linux/arm64".into(),
@@ -3800,6 +3903,7 @@ mod tests {
             &uuid::Uuid::new_v4().simple().to_string()[..12]
         );
         let config = BundleComposeConfig {
+            host_compose: None,
             compose_files: vec!["compose.yaml".into()],
             project_name: project_name.clone(),
             services: vec!["web".into()],
