@@ -375,9 +375,8 @@ export const useDeploymentWorkflowRunStore = create<DeploymentWorkflowRunState>(
   selectNode: async (nodeId) => {
     const runId = get().selectedRunId;
     const sequence = ++attemptLoadSequence;
-    set({ selectedNodeId: nodeId, attempts: [], nextAttempt: null });
+    set({ selectedNodeId: nodeId, attempts: [], nextAttempt: null, loadingAttempts: !!runId });
     if (!runId) return;
-    set({ loadingAttempts: true });
     try {
       const page = await invokeListDeploymentNodeAttempts(runId, nodeId, null, 20);
       if (sequence !== attemptLoadSequence
