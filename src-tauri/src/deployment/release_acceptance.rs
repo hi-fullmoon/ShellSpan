@@ -132,6 +132,10 @@ async fn real_release_acceptance(recovery: bool) {
             revision: 0,
             workflow_id: None,
             config: EnvironmentConfig {
+                host_compose: None,
+                image_repository: None,
+                verification: None,
+                git_ref: None,
                 template_kind: "dockerCompose".into(),
                 connection_profile_id: profile_id.clone(),
                 remote_root: root.clone(),
@@ -170,6 +174,7 @@ async fn real_release_acceptance(recovery: bool) {
     entry.source.included_untracked = deployment_files::apply(&entry, &preview.digest).unwrap();
     entry = database
         .save_deployment_application(&SaveApplicationInput {
+            reconcile_managed_fields: false,
             entry,
             expected_application_revision: 0,
             expected_environment_revision: 0,

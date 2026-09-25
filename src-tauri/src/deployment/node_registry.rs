@@ -754,7 +754,11 @@ impl DeploymentNodeRegistry {
                 risk_level: High,
                 fixed_actions: &[
                     "compose_config",
+                    "backup_selected_host_project_before_replacement_when_configured",
+                    "replace_declared_files_preserving_host_owned_configuration_when_configured",
                     "compose_up_no_build_fixed_pull_policy",
+                    "recreate_selected_companion_services_when_configured",
+                    "verify_configured_http_assertions",
                     "capture_service_state",
                 ],
                 compensation: Some((
@@ -959,7 +963,10 @@ impl DeploymentNodeRegistry {
         let result = match spec.config_kind {
             ConfigKind::SourceSnapshot => parse_config::<SourceSnapshotConfig>(node_id, config)
                 .and_then(|value| {
-                    validate_reference("sourceRef", &value.source_ref)?;
+                    if value.source_ref.is_empty() || value.source_ref.starts_with('-')
+                        || value.source_ref.len() > 256 || value.source_ref.chars().any(char::is_control) {
+                        return Err("sourceRef must identify a Git commit or workspace".into());
+                    }
                     if let Some(binding) = &value.binding {
                         validate_identifier("binding.id", &binding.id)?;
                         if binding.revision == 0 || !binding.local_path.is_absolute() {
@@ -982,6 +989,7 @@ impl DeploymentNodeRegistry {
                 }),
             ConfigKind::DockerBuildx => parse_config::<DockerBuildxConfig>(node_id, config)
                 .and_then(|value| {
+                    if let Some(verification) = &value.verification { verification.validate()?; }
                     validate_relative_path("context", &value.context, true)?;
                     validate_relative_path("dockerfile", &value.dockerfile, false)?;
                     validate_image_repository(&value.image_repository)?;
@@ -1006,6 +1014,7 @@ impl DeploymentNodeRegistry {
                 }),
             ConfigKind::BundleCompose => parse_config::<BundleComposeConfig>(node_id, config)
                 .and_then(|value| {
+                    if let Some(host) = &value.host_compose { host.validate()?; }
                     if value.compose_files.is_empty() || value.compose_files.len() > 8 {
                         return Err("composeFiles must contain between 1 and 8 entries".into());
                     }
@@ -1407,6 +1416,8 @@ enum InstallMode {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DockerBuildxConfig {
+    #[serde(default)]
+    verification: Option<super::build_verification::BuildVerification>,
     context: String,
     dockerfile: String,
     #[serde(rename = "platform")]
@@ -1440,6 +1451,8 @@ enum ArtifactCollectKind {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct BundleComposeConfig {
+    #[serde(default)]
+    host_compose: Option<super::host_compose::HostCompose>,
     compose_files: Vec<String>,
     project_name: String,
     #[serde(default)]

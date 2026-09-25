@@ -32,6 +32,14 @@ pub(crate) struct DataDirectory {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct EnvironmentConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_repository: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<super::build_verification::BuildVerification>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_compose: Option<super::host_compose::HostCompose>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_ref: Option<String>,
     pub template_kind: String,
     pub connection_profile_id: String,
     pub remote_root: String,
@@ -80,6 +88,9 @@ pub(crate) struct SaveApplicationInput {
     pub expected_environment_revision: u64,
     pub expected_source_revision: u64,
     pub expected_workflow_revision: u64,
+    /// Explicitly reviewed reconciliation; revision and mapping checks still apply.
+    #[serde(default)]
+    pub reconcile_managed_fields: bool,
     /// An explicit existing workflow selection. Omitted for a new template.
     pub workflow_id: Option<String>,
 }
@@ -123,6 +134,21 @@ pub(crate) fn validate(entry: &ApplicationEntry) -> Result<(), String> {
         return Err("DEPLOYMENT_APPLICATION_INVALID".into());
     }
     let config = &entry.environment.config;
+    if let Some(verification) = &config.verification {
+        verification.validate()?;
+    }
+    if let Some(host) = &config.host_compose {
+        host.validate()?;
+        if config.template_kind != "dockerCompose"
+            || !config.existing_service
+            || config
+                .git_ref
+                .as_deref()
+                .is_none_or(|value| value.is_empty() || value == "workspace")
+        {
+            return Err("DEPLOYMENT_HOST_COMPOSE_COMMITTED_SOURCE_REQUIRED".into());
+        }
+    }
     for value in [
         &config.dockerfile,
         &config.compose_file,
@@ -215,6 +241,11 @@ fn synchronize(
     definition.targets[0].remote_root = config.remote_root.clone();
     definition.nodes[sources[0]].config["binding"] =
         serde_json::to_value(&entry.source).map_err(|e| e.to_string())?;
+    definition.nodes[sources[0]].config["sourceRef"] =
+        json!(config.git_ref.as_deref().unwrap_or("workspace"));
+    if config.host_compose.is_some() {
+        definition.policy.automatic_restore = false;
+    }
     for role in [
         "build.docker-buildx",
         "artifact.bundle-compose",
@@ -237,6 +268,14 @@ fn synchronize(
                     fields["platform"] = json!(config.platform);
                     fields["dockerfile"] = json!(config.dockerfile);
                     fields["context"] = json!(config.build_context);
+                    if let Some(repository) = &config.image_repository {
+                        fields["imageRepository"] = json!(repository);
+                    }
+                    if let Some(verification) = &config.verification {
+                        fields["verification"] = json!(verification);
+                    } else if let Some(fields) = fields.as_object_mut() {
+                        fields.remove("verification");
+                    }
                 }
                 "artifact.bundle-compose" => {
                     if fields
@@ -254,6 +293,11 @@ fn synchronize(
                     fields["projectName"] = json!(config.project_name);
                     fields["services"] = json!([config.service]);
                     fields["nonSensitiveFiles"] = json!(config.non_sensitive_files);
+                    if let Some(host) = &config.host_compose {
+                        fields["hostCompose"] = json!(host);
+                    } else if let Some(fields) = fields.as_object_mut() {
+                        fields.remove("hostCompose");
+                    }
                     fields["registeredMounts"] = json!(config.data_directories.iter().map(|directory| json!({
                         "source": directory.host_path, "target": directory.container_path, "readOnly": directory.read_only
                     })).collect::<Vec<_>>());
@@ -363,7 +407,16 @@ impl Database {
                     previous.source = serde_json::from_str(previous_source.as_deref().ok_or("DEPLOYMENT_APPLICATION_ASSOCIATION_CHANGED")?).map_err(|e|e.to_string())?;
                     let mut projected = definition.clone();
                     synchronize(&mut projected, &previous)?;
-                    if projected != definition { return Err("DEPLOYMENT_APPLICATION_READ_ONLY:managedFieldsChangedInAdvancedEditor".into()); }
+                    if projected != definition && !input.reconcile_managed_fields { return Err("DEPLOYMENT_APPLICATION_READ_ONLY:managedFieldsChangedInAdvancedEditor".into()); }
+                    if input.reconcile_managed_fields {
+                        // Adoption must reproduce the reviewed workflow, not use the
+                        // acknowledgement as a bypass for unrelated managed edits.
+                        let mut accepted = previous;
+                        accepted.environment.config = input.entry.environment.config.clone();
+                        let mut projected = definition.clone();
+                        synchronize(&mut projected, &accepted)?;
+                        if projected != definition { return Err("DEPLOYMENT_APPLICATION_READ_ONLY:managedFieldsChangedInAdvancedEditor".into()); }
+                    }
                 }
                 definition
             } else if entry.environment.config.template_kind == "staticSite" {
