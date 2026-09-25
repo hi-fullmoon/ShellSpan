@@ -85,6 +85,41 @@ pub(crate) fn compile_workflow_definition(
     }
 
     let mut errors = Vec::new();
+    if definition.nodes.iter().any(|node| {
+        node.type_name == "artifact.bundle-compose"
+            && node
+                .config
+                .get("hostCompose")
+                .is_some_and(|value| !value.is_null())
+    }) && definition.nodes.iter().any(|node| {
+        node.type_name == "source.snapshot"
+            && node
+                .config
+                .get("sourceRef")
+                .and_then(serde_json::Value::as_str)
+                == Some("workspace")
+    }) {
+        errors.push(
+            WorkflowValidationError::new(
+                WorkflowValidationCode::InvalidNodeConfig,
+                "existing Compose deployments require a committed Git sourceRef",
+            )
+            .at_path("nodes.source.config.sourceRef"),
+        );
+    }
+    if definition.policy.automatic_restore
+        && definition.nodes.iter().any(|node| {
+            node.type_name == "artifact.bundle-compose"
+                && node
+                    .config
+                    .get("hostCompose")
+                    .is_some_and(|value| !value.is_null())
+        })
+    {
+        errors.push(WorkflowValidationError::new(WorkflowValidationCode::InvalidNodeConfig,
+            "existing Compose deployments require reviewed recovery; automaticRestore must be false")
+            .at_path("policy.automaticRestore"));
+    }
     validate_top_level(definition, &mut errors);
 
     let mut targets = BTreeSet::new();
