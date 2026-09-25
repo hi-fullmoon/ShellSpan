@@ -19,7 +19,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -29,7 +28,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
+import { Drawer, DrawerTitle } from '@/components/ui/drawer';
+import { DeploymentDrawerContent, DeploymentDrawerHeader } from './deployment/deployment-drawer';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -287,6 +287,41 @@ const IssueList: React.FC<IssueListProps> = ({ issues, onSelectNode, nodeName })
     </div>
   );
 };
+
+export function DeploymentValidationDialog({
+  open, onOpenChange, validating, onValidate, ...issueListProps
+}: IssueListProps & {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  validating: boolean;
+  onValidate: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="grid max-h-[min(30rem,calc(100dvh-2rem))] w-[calc(100%-2rem)] max-w-2xl grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b px-4 py-3 pr-12">
+          <DialogTitle>{t('deployment.editor.validation.title')}</DialogTitle>
+          <DialogDescription>{t('deployment.editor.validation.description')}</DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="min-h-0 min-w-0">
+          <div className="p-4">
+            <IssueList {...issueListProps} />
+          </div>
+        </ScrollArea>
+        <DialogFooter className="shrink-0 px-4 py-3">
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            {t('common.close')}
+          </Button>
+          <Button size="sm" onClick={onValidate} disabled={validating}>
+            {validating && <Spinner data-icon="inline-start" />}
+            {t('deployment.editor.validate')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 const UnsavedDraftNotice: React.FC = () => {
   const { t } = useI18n();
@@ -550,9 +585,6 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
         icon={CloudUploadIcon}
         title={t('deployment.editor.title')}
         description={t('deployment.editor.description')}
-        titleMeta={draft?.id
-          ? <Badge variant="outline">{t('deployment.editor.revision', { revision: draft.revision })}</Badge>
-          : undefined}
       />
       <WorkbenchPageContent className="min-h-0 flex-1 gap-0 overflow-hidden p-0!">
         {state.capabilities && !admissionsEnabled && (
@@ -690,14 +722,12 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
       {draft && catalog && (
         <>
           <Drawer open={workflowsOpen} onOpenChange={setWorkflowsOpen}>
-            <DrawerContent
-              className="min-h-0 gap-0 overflow-hidden p-0"
-              closeButtonClassName="top-2 right-3 size-8 [&_svg]:size-3.5"
+            <DeploymentDrawerContent
               finalFocus={workflowsTriggerRef}
             >
-              <DrawerHeader className="min-h-12 shrink-0 justify-center border-b px-3 py-1.5 pr-12">
+              <DeploymentDrawerHeader>
                 <DrawerTitle>{t('deployment.editor.workflows')}</DrawerTitle>
-              </DrawerHeader>
+              </DeploymentDrawerHeader>
               <div className="min-h-0 flex-1">
                 <WorkflowListPane
                   workflows={visibleWorkflows}
@@ -721,7 +751,7 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
                   showHeader={false}
                 />
               </div>
-            </DrawerContent>
+            </DeploymentDrawerContent>
           </Drawer>
           <NodeLibraryDrawer
             open={libraryOpen}
@@ -752,48 +782,26 @@ export const AdvancedDeploymentWorkflowCenter: React.FC<{
             onSaved={() => { setDeploymentSettingsOpen(false); void state.refresh(); }}
           />}
           <Drawer open={configOpen} onOpenChange={setConfigOpen}>
-            <DrawerContent
-              className="min-h-0 gap-0 overflow-hidden p-0"
-              closeButtonClassName="top-2 right-3 size-8 [&_svg]:size-3.5"
+            <DeploymentDrawerContent
               finalFocus={configFinalFocusRef}
             >
-              <DrawerHeader className="min-h-12 shrink-0 justify-center border-b px-3 py-1.5 pr-12">
-                <DrawerTitle>{t('deployment.editor.configuration')}</DrawerTitle>
-              </DrawerHeader>
               <div className="min-h-0 flex-1">{inspector}</div>
-            </DrawerContent>
+            </DeploymentDrawerContent>
           </Drawer>
-          <Dialog open={issuesOpen} onOpenChange={setIssuesOpen}>
-            <DialogContent className="flex h-[min(30rem,calc(100vh-2rem))] w-[calc(100%-2rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0">
-              <DialogHeader className="shrink-0 border-b px-4 py-3">
-                <DialogTitle>{t('deployment.editor.validation.title')}</DialogTitle>
-                <DialogDescription>{t('deployment.editor.validation.description')}</DialogDescription>
-              </DialogHeader>
-              <ScrollArea className="min-h-0 flex-1">
-                <div className="px-4 pb-4">
-                  <IssueList
-                    issues={state.issues}
-                    nodeName={(id) => draft.definition.nodes.find(
-                      (item) => item.id === id,
-                    )?.displayName ?? t('deployment.editor.validation.workflowContext')}
-                    onSelectNode={(id) => {
-                      state.selectNode(id);
-                      setIssuesOpen(false);
-                    }}
-                  />
-                </div>
-              </ScrollArea>
-              <DialogFooter className="shrink-0 px-4 py-3">
-                <Button variant="outline" size="sm" onClick={() => setIssuesOpen(false)}>
-                  {t('common.close')}
-                </Button>
-                <Button size="sm" onClick={() => void validate()} disabled={state.validating}>
-                  {state.validating && <Spinner data-icon="inline-start" />}
-                  {t('deployment.editor.validate')}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          <DeploymentValidationDialog
+            open={issuesOpen}
+            onOpenChange={setIssuesOpen}
+            validating={state.validating}
+            onValidate={() => void validate()}
+            issues={state.issues}
+            nodeName={(id) => draft.definition.nodes.find(
+              (item) => item.id === id,
+            )?.displayName ?? t('deployment.editor.validation.workflowContext')}
+            onSelectNode={(id) => {
+              state.selectNode(id);
+              setIssuesOpen(false);
+            }}
+          />
         </>
       )}
       <AlertDialog

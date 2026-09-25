@@ -40,6 +40,7 @@ import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunSto
 import { ApprovalDialog } from './deployment/approval-dialog';
 import { ArtifactDrawer } from './deployment/artifact-drawer';
 import { DeploymentPaneHeader } from './deployment/deployment-pane-header';
+import { DeploymentDrawerContext } from './deployment/deployment-drawer';
 import { EvidenceDialog } from './deployment/evidence-dialog';
 import { ReleaseList } from './deployment/release-list';
 import { RuntimeNodeInspector } from './deployment/runtime-node-inspector';
@@ -189,6 +190,7 @@ export const PreparationProgress: React.FC = () => {
 
 const RunListPane: React.FC<{ workflow: DeploymentWorkflowRecord }> = ({ workflow }) => {
   const { t } = useI18n();
+  const inDrawer = React.useContext(DeploymentDrawerContext);
   const state = useDeploymentWorkflowRunStore();
   return (
     <section
@@ -219,7 +221,7 @@ const RunListPane: React.FC<{ workflow: DeploymentWorkflowRecord }> = ({ workflo
         )}
       />
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-1 px-2 pb-2 pt-2">
+        <div className={inDrawer ? 'flex flex-col gap-1 p-3' : 'flex flex-col gap-1 px-2 pb-2 pt-2'}>
           {state.runs.map((run) => (
             <Button
               key={run.runId}

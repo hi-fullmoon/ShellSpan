@@ -28,9 +28,10 @@ import {
   deploymentPortLabel,
   deploymentPortTypeLabel,
   findDeploymentNodeSpec,
-  readableDeploymentProfile,
+  readableDeploymentTarget,
 } from './deployment-editor-ui';
 import { DeploymentPaneHeader } from './deployment-pane-header';
+import { DeploymentDrawerContext } from './deployment-drawer';
 
 export interface NodeInputFieldsProps {
   node: DeploymentWorkflowNode;
@@ -213,7 +214,7 @@ const ConfigFieldControl: React.FC<ConfigFieldControlProps> = ({ node, field, de
       const profile = profiles.find((item) => item.id === target.connectionProfileId);
       return {
         value: target.id,
-        label: profile ? `${readableDeploymentProfile(profile)} · ${target.remoteRoot}` : target.remoteRoot,
+        label: readableDeploymentTarget(target.remoteRoot, profile),
       };
     });
     return (
@@ -375,6 +376,7 @@ export interface NodeInspectorProps {
 
 export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catalog, editable = true }) => {
   const { t } = useI18n();
+  const inDrawer = React.useContext(DeploymentDrawerContext);
   const updateNode = useDeploymentWorkflowStore((state) => state.updateNode);
   const removeNode = useDeploymentWorkflowStore((state) => state.removeNode);
 
@@ -406,8 +408,8 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catal
       aria-label={t('deployment.editor.configuration')}
     >
       <DeploymentPaneHeader
-        title={node.displayName}
-        description={t(deploymentLocaleKey(spec.descriptionKey))}
+        title={inDrawer ? t('deployment.editor.configuration') : node.displayName}
+        description={inDrawer ? `${node.displayName} · ${t(deploymentLocaleKey(spec.descriptionKey))}` : t(deploymentLocaleKey(spec.descriptionKey))}
         actions={
           <Tooltip>
             <TooltipTrigger
@@ -422,7 +424,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ draft, node, catal
         }
       />
       <ScrollArea className="min-h-0 flex-1">
-        <FieldGroup className="gap-3 p-2">
+        <FieldGroup className={inDrawer ? 'gap-3 p-3' : 'gap-3 p-2'}>
           <Field>
             <FieldLabel htmlFor={`node-name-${node.id}`}>{t('deployment.editor.nodeName')}</FieldLabel>
             <Input

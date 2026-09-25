@@ -8,6 +8,7 @@ import { useI18n } from '@/hooks/useI18n';
 import type { DeploymentWorkflowRecord } from '@/lib/deployment/types';
 import { DeploymentPaneHeader } from './deployment-pane-header';
 import { WorkbenchSearchInput } from '../workbench-page';
+import { DeploymentDrawerContext } from './deployment-drawer';
 
 export interface WorkflowListPaneProps {
   workflows: readonly DeploymentWorkflowRecord[];
@@ -35,6 +36,7 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
   showHeader = true,
 }) => {
   const { t } = useI18n();
+  const inDrawer = React.useContext(DeploymentDrawerContext);
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const visible = workflows.filter((workflow) => (
     workflow.name.toLocaleLowerCase().includes(normalizedSearch)
@@ -68,7 +70,7 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
           )}
         />
       )}
-      <div className="shrink-0 p-2">
+      <div className={inDrawer ? 'shrink-0 px-3 py-2' : 'shrink-0 p-2'}>
         <WorkbenchSearchInput
           containerClassName="min-w-0 w-full flex-1"
           value={search}
@@ -80,7 +82,7 @@ export const WorkflowListPane: React.FC<WorkflowListPaneProps> = ({
         />
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-1 px-2 pb-2">
+        <div className={inDrawer ? 'flex flex-col gap-1 px-3 pb-3' : 'flex flex-col gap-1 px-2 pb-2'}>
           {draftVisible && draftName && (
             <Button
               variant="secondary"

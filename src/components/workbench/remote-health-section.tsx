@@ -207,20 +207,22 @@ export function RemoteHealthSection(): React.JSX.Element {
   };
 
   return (
-    <section aria-labelledby="remote-health-heading">
+    <section aria-labelledby="remote-health-heading" className="@container/remote-health">
       <Card size="sm" radius="compact">
-        <CardHeader>
-          <CardTitle id="remote-health-heading">
-            {t('remoteHealth.title')}
-          </CardTitle>
-          <CardDescription>{t('remoteHealth.description')}</CardDescription>
+        <CardHeader className="flex flex-col gap-3 @min-[640px]/remote-health:flex-row @min-[640px]/remote-health:items-start @min-[640px]/remote-health:justify-between">
+          <div className="flex min-w-0 flex-col gap-1">
+            <CardTitle id="remote-health-heading">
+              {t('remoteHealth.title')}
+            </CardTitle>
+            <CardDescription>{t('remoteHealth.description')}</CardDescription>
+          </div>
           {selectedProfile && (
             <CardAction
-              className="max-w-[60%]"
+              className="shrink-0 self-start"
             >
               <div
                 data-slot="remote-health-section-actions"
-                className="flex flex-wrap items-center justify-end gap-1.5"
+                className="flex flex-wrap items-center gap-2"
               >
                 {statuses && (
                   <>
@@ -234,6 +236,7 @@ export function RemoteHealthSection(): React.JSX.Element {
                 >
                   <Button
                     size="sm"
+                    variant="outline"
                     onClick={() => {
                       if (entry?.phase === 'collecting') {
                         void cancel(selectedProfile.id);
