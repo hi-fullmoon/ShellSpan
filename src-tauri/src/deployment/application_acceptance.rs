@@ -21,6 +21,7 @@ fn git(root: &Path, arguments: &[&str]) {
 
 fn input(entry: ApplicationEntry, workflow_revision: u64) -> SaveApplicationInput {
     SaveApplicationInput {
+        reconcile_managed_fields: false,
         expected_application_revision: entry.application.revision,
         expected_environment_revision: entry.environment.revision,
         expected_source_revision: if entry.application.revision == 0 {
@@ -32,6 +33,185 @@ fn input(entry: ApplicationEntry, workflow_revision: u64) -> SaveApplicationInpu
         workflow_id: entry.environment.workflow_id.clone(),
         entry,
     }
+}
+
+#[test]
+fn managed_field_reconciliation_preserves_history_and_requires_fresh_checks() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path().join("project");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "--quiet"]);
+    git(
+        &root,
+        &[
+            "-c",
+            "user.name=Deployment",
+            "-c",
+            "user.email=deployment@localhost",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "--quiet",
+            "-m",
+            "Initialize",
+        ],
+    );
+    let evidence: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../docs/design/deployment-center-product-phase-2-evidence.json"
+    ))
+    .unwrap();
+    let mut entry: ApplicationEntry = serde_json::from_value(evidence["entry"].clone()).unwrap();
+    entry.source = source_binding::inspect(&root).unwrap().binding;
+    entry.application.source_binding_id = entry.source.id.clone();
+    entry.application.revision = 0;
+    entry.environment.revision = 0;
+    entry.environment.workflow_id = None;
+    entry.environment.config.platform = "linux/amd64".into();
+    entry.environment.config.connection_profile_id = "reconciliation-profile".into();
+    let database = Database::open(&temporary.path().join("application.db")).unwrap();
+    database.with_connection(|connection| {
+        connection.execute("INSERT INTO profiles (id,name,host,port,username,auth_method,created_at,updated_at)
+            VALUES ('reconciliation-profile','Local check','127.0.0.1',22,'deploy','password',1,1)", [])
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }).unwrap();
+    let entry = database
+        .save_deployment_application(&input(entry, 0))
+        .unwrap();
+    let workflow_id = entry.environment.workflow_id.as_ref().unwrap();
+    let original = database
+        .get_deployment_workflow(workflow_id)
+        .unwrap()
+        .unwrap();
+    let mut definition = original.definition.clone();
+    definition
+        .nodes
+        .iter_mut()
+        .find(|node| node.type_name == "build.docker-buildx")
+        .unwrap()
+        .config["platform"] = serde_json::json!("linux/arm64");
+    definition
+        .nodes
+        .iter_mut()
+        .find(|node| node.type_name == "verify.http")
+        .unwrap()
+        .config["path"] = serde_json::json!("/health/reviewed");
+    let edited = database
+        .update_deployment_workflow(
+            workflow_id,
+            original.revision,
+            &super::repository::UpdateDeploymentWorkflowInput {
+                name: original.name,
+                definition: definition.clone(),
+                enabled: true,
+            },
+        )
+        .unwrap();
+    database
+        .store_deployment_readiness(&entry, &readiness::check_local(&entry).unwrap())
+        .unwrap();
+    assert!(database
+        .get_deployment_readiness(&entry.environment.id)
+        .unwrap()
+        .is_some());
+    assert_eq!(
+        database
+            .ensure_deployment_application_ready(workflow_id, edited.revision)
+            .unwrap_err(),
+        "DEPLOYMENT_APPLICATION_MANAGED_FIELDS_CHANGED"
+    );
+    let mut request = input(entry.clone(), edited.revision);
+    request.entry.environment.config.platform = "linux/arm64".into();
+    assert!(database
+        .save_deployment_application(&request)
+        .unwrap_err()
+        .contains("managedFieldsChangedInAdvancedEditor"));
+    request.reconcile_managed_fields = true;
+    request.entry.environment.config.platform = "linux/amd64".into();
+    assert!(database
+        .save_deployment_application(&request)
+        .unwrap_err()
+        .contains("READ_ONLY"));
+    request.entry.environment.config.platform = "linux/arm64".into();
+    request.expected_workflow_revision = original.revision;
+    assert!(database
+        .save_deployment_application(&request)
+        .unwrap_err()
+        .contains("REVISION_CONFLICT"));
+    request.expected_workflow_revision = edited.revision;
+    let saved = database.save_deployment_application(&request).unwrap();
+    assert_eq!(saved.environment.config.platform, "linux/arm64");
+    let current = database
+        .get_deployment_workflow(workflow_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.revision, edited.revision + 1);
+    assert_eq!(
+        current
+            .definition
+            .nodes
+            .iter()
+            .find(|node| node.type_name == "verify.http")
+            .unwrap()
+            .config["path"],
+        "/health/reviewed"
+    );
+    assert_eq!(
+        database
+            .get_deployment_workflow_revision(workflow_id, edited.revision)
+            .unwrap()
+            .unwrap()
+            .definition,
+        definition
+    );
+    assert!(database
+        .get_deployment_readiness(&saved.environment.id)
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        database
+            .ensure_deployment_application_ready(workflow_id, current.revision)
+            .unwrap_err(),
+        "DEPLOYMENT_APPLICATION_READINESS_REQUIRED"
+    );
+    assert!(database
+        .save_deployment_application(&request)
+        .unwrap_err()
+        .contains("REVISION_CONFLICT"));
+    let mut unsupported = current.definition.clone();
+    unsupported
+        .nodes
+        .iter_mut()
+        .find(|node| node.type_name == "artifact.bundle-compose")
+        .unwrap()
+        .config["composeFiles"] = serde_json::json!(["compose.yaml", "extra.yaml"]);
+    let unsupported = database
+        .update_deployment_workflow(
+            workflow_id,
+            current.revision,
+            &super::repository::UpdateDeploymentWorkflowInput {
+                name: current.name,
+                definition: unsupported,
+                enabled: true,
+            },
+        )
+        .unwrap();
+    let mut request = input(saved, unsupported.revision);
+    request.reconcile_managed_fields = true;
+    assert!(database
+        .save_deployment_application(&request)
+        .unwrap_err()
+        .contains("READ_ONLY"));
+    database
+        .with_connection(|connection| {
+            let runs: i64 = connection
+                .query_row("SELECT COUNT(*) FROM deployment_runs", [], |row| row.get(0))
+                .map_err(|error| error.to_string())?;
+            assert_eq!(runs, 0);
+            Ok(())
+        })
+        .unwrap();
 }
 
 #[test]
@@ -99,6 +279,10 @@ fn real_application_onboarding_acceptance() {
             revision: 0,
             workflow_id: None,
             config: EnvironmentConfig {
+                host_compose: None,
+                image_repository: None,
+                verification: None,
+                git_ref: None,
                 template_kind: "dockerCompose".into(),
                 connection_profile_id: String::new(),
                 remote_root: String::new(),
