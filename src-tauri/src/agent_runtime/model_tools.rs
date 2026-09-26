@@ -168,7 +168,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "search_text".into(),
-            description: "Search file names or file contents on the frozen target with bounded results.".into(),
+            description: "Search a regular file or recursively search a directory on the frozen target with bounded results. path accepts a file or directory; symlinks are rejected. query is a literal substring, NOT a regular expression: | does not mean OR. Search different terms in separate calls. Optional globs filter full file paths (for example */metrics.jsonl).".into(),
             input_schema: object_schema(
                 &["path", "query", "mode"],
                 json!({
