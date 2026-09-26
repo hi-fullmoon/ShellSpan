@@ -8,6 +8,7 @@ in the matching directory instead of the library root.
 - `deployment/`: deployment workflow, frozen approval-plan, run, and event wire types.
 - `host/`: host actions, host health, monitoring, and overview projections.
 - `ipc/`: typed Tauri command and event adapters.
+- `logs/`: incremental log parsing and log viewer domain logic.
 - `petdex/`: Petdex integration and feedback helpers.
 - `sftp/`: remote file browsing, previews, workspace persistence, and transfers.
 - `terminal/`: terminal state, output buffering, workspace persistence, and
