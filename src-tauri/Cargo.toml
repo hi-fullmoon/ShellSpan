@@ -1,6 +1,6 @@
 [package]
 name = "ShellSpan"
-version = "2.1.0"
+version = "2.1.1"
 description = "ShellSpan desktop SSH client"
 authors = ["Codex"]
 license = "MIT"
