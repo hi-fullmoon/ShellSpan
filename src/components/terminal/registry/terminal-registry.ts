@@ -4,6 +4,9 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { createTerminalResizeHandler, measureTerminalGeometry, TERMINAL_CONTAINER_CLASS } from './terminal-geometry';
+import { installTerminalEdgeBackground } from './terminal-edge-background';
+import { terminalInputReadiness } from '../terminal-input-readiness';
+import { getTerminalScrollState } from '@/components/terminal/terminal-scroll-state';
 import {
   invokeGetSessionStatus,
   invokeMarkSessionReady,
@@ -101,12 +104,6 @@ const OUTPUT_PAUSE_HIGH_WATERMARK = 512 * 1024;
 const OUTPUT_RESUME_LOW_WATERMARK = 128 * 1024;
 const OUTPUT_RESUME_RETRY_BASE_MS = 250;
 const OUTPUT_RESUME_RETRY_MAX_MS = 2000;
-
-// After a reconnect the channel reports connected while the remote shell is
-// still starting up (sourcing rc files, printing its first prompt). Input
-// sent in that window is echoed into the middle of the prompt output,
-// leaving garbled duplicate prompt lines, so it is dropped briefly.
-const RECONNECT_INPUT_GRACE_MS = 800;
 
 // xterm 6 renders its scrollbar in `.xterm-scrollable-element`. The legacy
 // `.xterm-viewport` still has `overflow-y: scroll` in xterm.css, but no longer
@@ -433,7 +430,6 @@ class TerminalControllerImpl implements TerminalController {
   private unverifiedUserSubmission = false;
   private recentOutputTail = '';
   private reconnectRequestedRef = false;
-  private inputGraceDeadlineRef = 0;
   private listenerGeneration = 0;
   private preferences: TerminalDisplayPreferences;
   private linkProviderDisposable?: IDisposable;
@@ -448,6 +444,7 @@ class TerminalControllerImpl implements TerminalController {
   private resizeRetryTimer: number | null = null;
   private resizeRetryAttempts = 0;
   private rendererInitialized = false;
+  private edgeBackground?: IDisposable;
   private webglAddon?: WebglAddon;
   private webglContextLossDisposable?: IDisposable;
   private pendingOutputCharacters = 0;
@@ -479,6 +476,8 @@ class TerminalControllerImpl implements TerminalController {
     this.preferences = preferences;
 
     this.terminal = new Terminal({
+      // Search result counts and match highlights use xterm's decoration API.
+      allowProposedApi: true,
       fontFamily: TERMINAL_FONT_FAMILIES[preferences.fontFamily],
       fontSize: preferences.fontSize,
       theme: resolveTerminalTheme(preferences.colorScheme),
@@ -492,6 +491,7 @@ class TerminalControllerImpl implements TerminalController {
     this.searchAddon = new SearchAddon();
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.loadAddon(this.searchAddon);
+    getTerminalScrollState(this.terminal);
 
     this.container = document.createElement('div');
     this.container.className = TERMINAL_CONTAINER_CLASS;
@@ -897,6 +897,7 @@ class TerminalControllerImpl implements TerminalController {
 
     if (this.opened) {
       this.setupRenderer();
+      this.edgeBackground ??= installTerminalEdgeBackground(this.terminal);
     }
 
     this.updateElementStyles();
@@ -1189,8 +1190,7 @@ class TerminalControllerImpl implements TerminalController {
       }
       return false;
     }
-    if (Date.now() < this.inputGraceDeadlineRef) {
-      logger.debug(`Dropped input during post-reconnect grace period session=${this.sessionId}`);
+    if (terminalInputReadiness.isPreparing(this.sessionId)) {
       return false;
     }
     return true;
@@ -1273,6 +1273,7 @@ class TerminalControllerImpl implements TerminalController {
   rebindSession(sessionId: string): void {
     if (this.disposed || sessionId === this.sessionId) return;
     const previousSessionId = this.sessionId;
+    terminalInputReadiness.finish(previousSessionId);
     this.emitLifecycle({
       type: 'rebound',
       sessionId: previousSessionId,
@@ -1299,7 +1300,7 @@ class TerminalControllerImpl implements TerminalController {
     this.sessionId = sessionId;
     rebindTerminalOutput(previousSessionId, sessionId);
     this.resetNoticeState();
-    this.inputGraceDeadlineRef = Date.now() + RECONNECT_INPUT_GRACE_MS;
+    terminalInputReadiness.begin(sessionId);
     this.listenerSetup = this.startListenerSetup();
   }
 
@@ -1366,6 +1367,7 @@ class TerminalControllerImpl implements TerminalController {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    terminalInputReadiness.finish(this.sessionId);
     logger.debug(`Terminal disposed for session ${this.sessionId}`);
     this.emitLifecycle({ type: 'disposed', sessionId: this.sessionId });
     this.cancelOutputResumeRetry();
@@ -1378,6 +1380,7 @@ class TerminalControllerImpl implements TerminalController {
     this.clearListeners();
     this.linkProviderDisposable?.dispose();
     this.disposeWebglRenderer();
+    this.edgeBackground?.dispose();
     this.terminal.dispose();
     clearTerminalOutput(this.sessionId);
     this.outputListeners.clear();
