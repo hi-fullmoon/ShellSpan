@@ -285,7 +285,7 @@ const Workbench: React.FC<WorkbenchProps> = ({
           {activeTab === 'knownHosts' && (
             <KnownHostsPanel onCreateConnection={handleCreateFromKnownHost} />
           )}
-          {activeTab === 'keychain' && <KeychainPanel />}
+          {activeTab === 'keychain' && <KeychainPanel onEditConnection={handleEdit} />}
           {activeTab === 'monitor' && <MonitorPanel />}
           {activeTab === 'deployments' && <DeploymentWorkflowCenter />}
           {activeTab === 'logs' && <LogPanel />}

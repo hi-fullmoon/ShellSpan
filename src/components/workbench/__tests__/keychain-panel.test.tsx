@@ -57,6 +57,23 @@ describe('KeychainPanel', () => {
     ).toBeInTheDocument();
   });
 
+  it('uses readable credential labels and opens metadata without retrieving a private key', () => {
+    render(<KeychainPanel />);
+
+    expect(screen.getByText('workbench.keychain.password')).toBeInTheDocument();
+    expect(screen.getByText('workbench.keychain.sshKey · RSA')).toBeInTheDocument();
+    expect(screen.queryByText('PROFILE')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'common.edit' }));
+    expect(screen.getByLabelText('common.label')).toHaveValue('Server key');
+    expect(screen.queryByLabelText('common.privateKey')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'workbench.keychain.viewPrivateKey' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.keychain.replacePrivateKey' }));
+    expect(screen.getByLabelText('common.privateKey')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    expect(screen.getByText('keychain.form.privateKeyRequired')).toBeInTheDocument();
+  });
+
   it('renders delete buttons for all keychains', () => {
     render(<KeychainPanel />);
 
@@ -64,14 +81,15 @@ describe('KeychainPanel', () => {
       name: 'common.delete',
       hidden: true,
     });
-    expect(deleteButtons).toHaveLength(2);
+    expect(deleteButtons).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'workbench.keychain.forgetPassword' })).toBeInTheDocument();
   });
 
-  it('spaces keychain cards with the compact grid gap', () => {
+  it('spaces credential cards with the workbench grid gap', () => {
     const { container } = render(<KeychainPanel />);
 
     const grid = container.querySelector('.grid') as HTMLElement;
-    expect(grid).toHaveStyle({ gap: '0.5rem' });
+    expect(grid).toHaveStyle({ gap: '0.75rem' });
   });
 
   it('renders the header refresh action as a text button', () => {
@@ -85,9 +103,8 @@ describe('KeychainPanel', () => {
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
     expect(search.parentElement).toHaveClass(
       'min-w-0',
-      'w-64',
       'max-w-full',
-      'flex-none',
+      'flex-1',
     );
   });
 
@@ -167,7 +184,7 @@ describe('KeychainPanel', () => {
       name: 'common.delete',
       hidden: true,
     });
-    fireEvent.click(deleteButtons[1]);
+    fireEvent.click(deleteButtons[0]);
 
     const confirmButton = await screen.findByRole('button', { name: 'common.delete' });
     fireEvent.click(confirmButton);
@@ -198,12 +215,8 @@ describe('KeychainPanel', () => {
     });
 
     render(<KeychainPanel />);
-    const deleteButtons = screen.getAllByRole('button', {
-      name: 'common.delete',
-      hidden: true,
-    });
-    fireEvent.click(deleteButtons[0]);
-    fireEvent.click(await screen.findByRole('button', { name: 'common.delete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.keychain.forgetPassword' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'workbench.keychain.forgetPassword' }));
 
     await waitFor(() => {
       expect(useProfileStore.getState().getProfile('profile-1')?.password).toBeUndefined();
