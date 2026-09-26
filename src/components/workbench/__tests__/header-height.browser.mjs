@@ -33,15 +33,40 @@ try {
       await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       heights.push(await header.evaluate((element) => element.getBoundingClientRect().height));
       const actions = header.locator('[data-slot="workbench-page-header-actions"]');
+      const search = actions.locator('input').first();
+      if (await search.count()) await search.focus();
       const metrics = await actions.evaluate((element) => ({
         scrollbar: getComputedStyle(element).scrollbarWidth,
-        height: element.clientHeight,
+        height: element.clientHeight - parseFloat(getComputedStyle(element).paddingTop) - parseFloat(getComputedStyle(element).paddingBottom),
         controls: [...element.children].map((child) => child.getBoundingClientRect().height),
+        clippedSearch: [...element.querySelectorAll('[data-slot="input-group"]')].some((group) => {
+          const bounds = group.getBoundingClientRect();
+          for (let parent = group.parentElement; parent; parent = parent.parentElement) {
+            const style = getComputedStyle(parent);
+            const clip = parent.getBoundingClientRect();
+            if (style.overflowY !== 'visible' && (bounds.top - 1 < clip.top || bounds.bottom + 1 > clip.bottom)) return true;
+            if (style.overflowX !== 'visible' && bounds.left - 1 < clip.left) return true;
+          }
+          return false;
+        }),
       }));
       assert.equal(metrics.scrollbar, 'none', `${tab}: header actions must not show a scrollbar`);
       assert.equal(metrics.height, 32, `${tab}: scrollbar must not consume control height`);
       assert.ok(metrics.controls.every((height) => height <= metrics.height), `${tab}: controls must fit vertically`);
+      assert.equal(metrics.clippedSearch, false, `${tab}: search focus ring must have top, bottom and left clearance at ${width}px`);
       await page.screenshot({ path: `.drawer-review/header-${tab}-${width}.png` });
+      const scrollEdges = await actions.evaluate((element) => {
+        element.scrollLeft = element.scrollWidth;
+        const last = element.lastElementChild.getBoundingClientRect();
+        const bounds = element.getBoundingClientRect();
+        const rightClearance = getComputedStyle(element).overflowX === 'visible' || last.right + 1 <= bounds.right;
+        element.scrollLeft = 0;
+        const first = element.firstElementChild.getBoundingClientRect();
+        const leftClearance = getComputedStyle(element).overflowX === 'visible' || first.left - 1 >= bounds.left;
+        return { rightClearance, leftClearance };
+      });
+      assert.ok(scrollEdges.leftClearance && scrollEdges.rightClearance,
+        `${tab}: controls must retain shadow clearance at both scroll ends at ${width}px`);
     }
     assert.equal(new Set(heights).size, 1, `Headers must match at ${width}px: ${heights}`);
   }
