@@ -251,7 +251,7 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
           actions={
             <>
               <WorkbenchSearchInput
-                containerClassName="min-w-0 flex-1 @min-[64rem]:w-64 @min-[64rem]:flex-none"
+                containerClassName="min-w-0 max-w-64 flex-1 @min-[64rem]:flex-none"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t('workbench.keychain.searchPlaceholder')}
