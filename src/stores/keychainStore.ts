@@ -136,6 +136,8 @@ export interface KeychainKeySummary {
   keyType: string;
   kind: KeychainKeyKind;
   service: string;
+  publicKey?: string | null;
+  fingerprint?: string | null;
 }
 
 interface KeychainState {
@@ -203,31 +205,21 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
       publicKey: newKey.publicKey,
       keyType,
     });
-    set((state) => ({
-      keys: [...state.keys, {
-        id: newKey.id,
-        label: newKey.label,
-        keyType,
-        kind: newKey.kind,
-        service: 'com.shellspan.key',
-      }],
-    }));
+    await get().hydrate();
     return newKey;
   },
 
   updateKey: async (id, updates) => {
     const current = get().keys.find((k) => k.id === id);
-    if (!current) return;
-
-    const existing = await invokeRetrieveKeyCredential(id);
-    if (!existing) {
+    if (!current) {
       throw new Error(`key credential ${id} not found`);
     }
 
-    const updated: KeychainKey = {
-      ...existing,
+    const updated = {
+      ...current,
       ...updates,
       id,
+      publicKey: updates.publicKey ?? current.publicKey ?? undefined,
       updatedAt: Date.now(),
     };
     if (updated.kind !== 'keyFile') {
@@ -245,19 +237,7 @@ export const useKeychainStore = create<KeychainState>()((set, get) => ({
       keyType,
     });
 
-    set((state) => ({
-      keys: state.keys.map((k) =>
-        k.id === id
-          ? {
-              id: updated.id,
-              label: updated.label,
-              keyType,
-              kind: updated.kind,
-              service: current.service,
-            }
-          : k,
-      ),
-    }));
+    await get().hydrate();
   },
 
   removeKey: async (id) => {
