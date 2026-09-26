@@ -68,25 +68,24 @@ describe('WorkbenchSidebar', () => {
     useDeploymentWorkflowRunStore.setState({ runs: [] });
   });
 
-  it('activates the deployment center menu entry', () => {
+  it('hides the deployment center and preserves the other navigation entries', () => {
     const onTabChange = vi.fn();
     render(<WorkbenchSidebar activeTab="connections" onTabChange={onTabChange} onOpenSettings={vi.fn()} onCheckForUpdates={vi.fn()} onOpenAbout={vi.fn()} onRequestExit={vi.fn()} />);
 
-    const deployments = screen.getByRole('button', { name: 'Deployments' });
-    expect(deployments).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deployments' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', {
       name: /^(Connections|Deployments|Keychain|Known Hosts|Monitor|Log explorer)$/,
     }).map((button) => button.textContent)).toEqual([
-      'Connections', 'Deployments', 'Keychain', 'Known Hosts', 'Monitor', 'Log explorer',
+      'Connections', 'Keychain', 'Known Hosts', 'Monitor', 'Log explorer',
     ]);
 
-    fireEvent.click(deployments, { detail: 0 });
+    fireEvent.click(screen.getByRole('button', { name: 'Connections' }), { detail: 0 });
 
     expect(onTabChange).toHaveBeenCalledOnce();
-    expect(onTabChange).toHaveBeenCalledWith('deployments');
+    expect(onTabChange).toHaveBeenCalledWith('connections');
   });
 
-  it('badges the deployment entry with runs awaiting reconciliation', () => {
+  it('keeps the deployment entry hidden with runs awaiting reconciliation', () => {
     useDeploymentWorkflowRunStore.setState({
       runs: [
         runSummary('run-1', 'state_unknown'),
@@ -96,7 +95,7 @@ describe('WorkbenchSidebar', () => {
     });
     render(<WorkbenchSidebar activeTab="deployments" onTabChange={vi.fn()} onOpenSettings={vi.fn()} onCheckForUpdates={vi.fn()} onOpenAbout={vi.fn()} onRequestExit={vi.fn()} />);
 
-    expect(screen.getByRole('button', { name: /Deployments/ })).toHaveTextContent('2');
+    expect(screen.queryByRole('button', { name: /Deployments/ })).not.toBeInTheDocument();
   });
 
   it('activates a menu item when WKWebView drops its trackpad pointerdown', () => {

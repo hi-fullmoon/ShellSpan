@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { DEPLOYMENT_ENTRY_POINTS_VISIBLE } from '@/lib/deployment/availability';
 import { useI18n } from '@/hooks/useI18n';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Button } from '@/components/ui/button';
@@ -423,10 +424,12 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
                     <HeartPulseIcon />
                     {t('remoteHealth.open')}
                   </DropdownMenuItem>
-                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleOpenDeployments}>
-                    <CloudUploadIcon />
-                    {t('deployment.openForHost')}
-                  </DropdownMenuItem>
+                  {DEPLOYMENT_ENTRY_POINTS_VISIBLE && (
+                    <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleOpenDeployments}>
+                      <CloudUploadIcon />
+                      {t('deployment.openForHost')}
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handlePortForward}>
                     <CableIcon />
                     {t('portForward.open')}

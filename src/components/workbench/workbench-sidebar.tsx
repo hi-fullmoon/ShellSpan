@@ -1,4 +1,5 @@
 import React from 'react';
+import { DEPLOYMENT_ENTRY_POINTS_VISIBLE } from '@/lib/deployment/availability';
 import { cn } from '@/lib/utils';
 import { getPlatform } from '@/lib/platform';
 import { getShortcutKeys } from '@/lib/shortcuts';
@@ -154,7 +155,7 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
   return (
     <Sidebar className="border-r border-app-border/50 p-2">
       <nav className="flex flex-1 flex-col gap-1">
-        {items.map((item) => {
+        {items.filter((item) => DEPLOYMENT_ENTRY_POINTS_VISIBLE || item.key !== 'deployments').map((item) => {
           return (
             <WorkbenchSidebarItem
               key={item.key}

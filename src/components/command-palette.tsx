@@ -1,4 +1,5 @@
 import React from 'react';
+import { DEPLOYMENT_ENTRY_POINTS_VISIBLE } from '@/lib/deployment/availability';
 import {
   BotIcon,
   CableIcon,
@@ -172,7 +173,7 @@ export function buildCommandPaletteItems({
     ['logs', 'workbench', 'logs', LogsIcon],
     ['monitor', 'workbench', 'monitor', MonitorIcon],
     ['deployments', 'workbench', 'deployments', CloudUploadIcon],
-  ].map(([id, section, tab, icon]) => ({
+  ].filter(([, , tab]) => DEPLOYMENT_ENTRY_POINTS_VISIBLE || tab !== 'deployments').map(([id, section, tab, icon]) => ({
     id: `navigation-${String(id)}`,
     group: 'navigation' as const,
     label: label(`commandPalette.action.${String(id)}` as LocaleKey),
@@ -234,15 +235,15 @@ export function buildCommandPaletteItems({
       icon: ServerIcon,
       run: () => connect(profile.id, 'sftp'),
     },
-    {
+    ...(DEPLOYMENT_ENTRY_POINTS_VISIBLE ? [{
       id: `profile-deployments-${profile.id}`,
-      group: 'connection',
+      group: 'connection' as const,
       label: `${label('commandPalette.action.deployments')}: ${profile.name}`,
       detail: `${profile.username}@${profile.host}:${profile.port}`,
       keywords: `${profile.name} ${profile.host} deployment release preflight`,
       icon: CloudUploadIcon,
       run: () => openHostTool(profile.id, 'deployments'),
-    },
+    }] : []),
     {
       id: `profile-overview-${profile.id}`,
       group: 'connection',
@@ -272,7 +273,7 @@ export function buildCommandPaletteItems({
     },
   ]);
 
-  const deployments = workflows.flatMap((workflow): CommandPaletteItem[] => {
+  const deployments = (DEPLOYMENT_ENTRY_POINTS_VISIBLE ? workflows : []).flatMap((workflow): CommandPaletteItem[] => {
     const target = workflow.definition.targets[0];
     if (!target) return [];
     const profile = profiles.find((candidate) => candidate.id === target.connectionProfileId);
@@ -465,7 +466,7 @@ export const CommandPalette: React.FC = () => {
   }, [open, profiles]);
 
   React.useEffect(() => {
-    if (!open || deploymentInitialized) return;
+    if (!DEPLOYMENT_ENTRY_POINTS_VISIBLE || !open || deploymentInitialized) return;
     void useDeploymentWorkflowStore.getState().initialize().catch(() => undefined);
   }, [deploymentInitialized, open]);
 
