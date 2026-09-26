@@ -41,13 +41,32 @@ try {
   }, { publicKey, fingerprint, host: hostname(), username: userInfo().username });
 
   await mkdir('.drawer-review', { recursive: true });
-  for (const width of [1440, 420]) {
+  for (const width of [1440, 960, 420]) {
     await page.setViewportSize({ width, height: 720 });
     await page.getByRole('heading', { name: '凭据管理', exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: '新建', exact: true }).count(), 1);
+    const search = page.getByRole('textbox', { name: '搜索名称、类型或关联连接' });
+    const searchLayout = await search.evaluate((input) => {
+      const group = input.closest('[data-slot="input-group"]');
+      const actions = group.parentElement;
+      const bounds = [...actions.children].map((element) => element.getBoundingClientRect());
+      return {
+        width: group.getBoundingClientRect().width,
+        tops: bounds.map((rect) => rect.top),
+        right: Math.max(...bounds.map((rect) => rect.right)),
+        containerRight: actions.getBoundingClientRect().right,
+      };
+    });
+    assert.ok(searchLayout.width <= 256, 'Search must not grow beyond the connection manager search width');
+    if (width >= 960) assert.equal(searchLayout.width, 256);
+    assert.equal(new Set(searchLayout.tops).size, 1, 'Search and actions must remain on one row');
+    assert.ok(searchLayout.right <= searchLayout.containerRight, 'Search must shrink to keep actions visible');
+    if (process.argv.includes('--search-only')) {
+      await page.screenshot({ path: `.drawer-review/credential-search-${width}.png` });
+      continue;
+    }
     assert.equal(await page.getByText('SSH 密钥 · Ed25519', { exact: true }).count(), 1,
       await page.locator('#credential-review').innerText());
-    const search = page.getByRole('textbox', { name: '搜索名称、类型或关联连接' });
     const help = page.getByRole('button', { name: '凭据管理说明', exact: true });
     const description = '安全保存连接密码和 SSH 密钥，凭据由系统钥匙串保护。';
     assert.equal(await page.getByText(description, { exact: true }).count(), 0);
@@ -138,7 +157,9 @@ try {
     await confirmation.getByRole('button', { name: '取消', exact: true }).click();
     await confirmation.waitFor({ state: 'hidden' });
   }
-  console.log(process.argv.includes('--help-only')
+  console.log(process.argv.includes('--search-only')
+    ? 'Credential search: fixed width and narrow container shrinking passed.'
+    : process.argv.includes('--help-only')
     ? 'Credential help: wide/narrow rendering, keyboard, outside dismissal and stable layout passed.'
     : 'Credential panel: metadata privacy, search, delete context and wide/narrow rendering passed.');
 } finally {
