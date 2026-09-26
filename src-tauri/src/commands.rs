@@ -2268,7 +2268,7 @@ fn detect_key_type(private_key: &str) -> &'static str {
 pub(crate) fn store_key_credential(
     credentials: State<'_, crate::keychain::CredentialManager>,
     database: State<'_, Database>,
-    request: KeyCredentialRequest,
+    mut request: KeyCredentialRequest,
 ) -> Result<(), String> {
     if request.kind != crate::models::KeyCredentialKind::KeyFile {
         return Err("generic key credentials must contain a private key file".to_string());
@@ -2279,11 +2279,15 @@ pub(crate) fn store_key_credential(
     if request.label.trim().is_empty() {
         return Err("key credential label cannot be empty".to_string());
     }
-    let private_key = request
-        .private_key
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| "key credential private key cannot be empty".to_string())?;
+    if database
+        .key_credential_service(&request.id)?
+        .is_some_and(|service| service != crate::keychain::KEY_SERVICE)
+    {
+        return Err("profile passwords cannot be edited as SSH keys".to_string());
+    }
+    let previous_payload = credentials.retrieve_key_credential(&request.id)?;
+    prepare_key_credential(&mut request, previous_payload.as_deref())?;
+    let private_key = request.private_key.as_deref().unwrap_or_default();
     let updated_at = crate::db::current_timestamp_ms();
     let key_type = request
         .key_type
@@ -2297,7 +2301,6 @@ pub(crate) fn store_key_credential(
         "keyType": key_type,
         "updatedAt": updated_at,
     });
-    let previous_payload = credentials.retrieve_key_credential(&request.id)?;
     credentials.store_key_credential(&request.id, &payload.to_string())?;
     if let Err(error) = database.upsert_key_credential(
         &request.id,
@@ -2324,6 +2327,61 @@ pub(crate) fn store_key_credential(
             );
         }
         return Err(error);
+    }
+    Ok(())
+}
+
+// Merge unchanged secrets inside the backend so ordinary edits never send a
+// stored private key to the webview. Public metadata uses the SSH format parser.
+fn prepare_key_credential(
+    request: &mut KeyCredentialRequest,
+    previous: Option<&str>,
+) -> Result<(), String> {
+    let replacing = request.private_key.is_some();
+    if !replacing {
+        let previous: serde_json::Value =
+            serde_json::from_str(previous.ok_or_else(|| "key credential not found".to_string())?)
+                .map_err(|_| "invalid stored key credential".to_string())?;
+        request.private_key = previous
+            .get("privateKey")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        if request.public_key.is_none() {
+            request.public_key = previous
+                .get("publicKey")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+        }
+    }
+    let private_key = request
+        .private_key
+        .as_deref()
+        .filter(|key| !key.trim().is_empty())
+        .ok_or_else(|| "key credential private key cannot be empty".to_string())?;
+    let derived = ssh_key::PrivateKey::from_openssh(private_key)
+        .ok()
+        .map(|key| key.public_key().clone());
+    let supplied = request
+        .public_key
+        .as_deref()
+        .filter(|key| !key.trim().is_empty())
+        .map(ssh_key::PublicKey::from_openssh)
+        .transpose()
+        .map_err(|_| "invalid SSH public key".to_string())?;
+    if let (Some(derived), Some(supplied)) = (&derived, &supplied) {
+        if derived.key_data() != supplied.key_data() {
+            return Err("public key does not match the private key".to_string());
+        }
+    }
+    if let Some(public_key) = derived.or(supplied) {
+        request.key_type = Some(public_key.algorithm().to_string());
+        request.public_key = Some(
+            public_key
+                .to_openssh()
+                .map_err(|_| "invalid SSH public key".to_string())?,
+        );
+    } else {
+        request.public_key = None;
     }
     Ok(())
 }
@@ -2394,8 +2452,10 @@ pub(crate) fn delete_key_credential(
     };
     if service == crate::keychain::KEY_SERVICE {
         credentials.delete_key_credential(&id)?;
+    } else if service == crate::keychain::PROFILE_PASSWORD_SERVICE {
+        credentials.delete_profile_password(&id)?;
     } else {
-        credentials.delete_credential(&service, &id)?;
+        return Err("unsupported credential service".to_string());
     }
     database.delete_key_credential(&id)?;
     if service == crate::keychain::KEY_SERVICE {
@@ -3448,3 +3508,7 @@ pub(crate) fn clear_sftp_workspace(db: State<'_, Database>) -> Result<(), String
 mod tests {
     include!("tests/commands.rs");
 }
+
+#[cfg(all(test, unix))]
+#[path = "tests/credential_metadata.rs"]
+mod credential_metadata_tests;

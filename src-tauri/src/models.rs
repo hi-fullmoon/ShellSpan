@@ -829,6 +829,8 @@ pub(crate) struct KeyCredentialSummary {
     pub(crate) key_type: String,
     pub(crate) kind: KeyCredentialKind,
     pub(crate) service: String,
+    pub(crate) public_key: Option<String>,
+    pub(crate) fingerprint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

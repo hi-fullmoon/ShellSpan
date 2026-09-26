@@ -1419,12 +1419,17 @@ impl Database {
             .map_err(|e| format!("database lock poisoned: {e}"))?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, label, COALESCE(key_type, 'unknown'), kind, service FROM key_credentials ORDER BY label",
+                "SELECT id, label, COALESCE(key_type, 'unknown'), kind, service, public_key FROM key_credentials ORDER BY label",
             )
             .map_err(|e| format!("failed to prepare list_key_credentials: {e}"))?;
         let rows = stmt
             .query_map([], |row| {
                 let kind: String = row.get(3)?;
+                let public_key: Option<String> = row.get(5)?;
+                let fingerprint = public_key
+                    .as_deref()
+                    .and_then(|key| ssh_key::PublicKey::from_openssh(key).ok())
+                    .map(|key| key.fingerprint(ssh_key::HashAlg::Sha256).to_string());
                 Ok(crate::models::KeyCredentialSummary {
                     id: row.get(0)?,
                     label: row.get(1)?,
@@ -1434,6 +1439,8 @@ impl Database {
                         _ => crate::models::KeyCredentialKind::KeyFile,
                     },
                     service: row.get(4)?,
+                    public_key,
+                    fingerprint,
                 })
             })
             .map_err(|e| format!("failed to query key_credentials: {e}"))?;
