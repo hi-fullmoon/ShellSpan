@@ -95,13 +95,13 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
     <div className="flex flex-col gap-2 @min-[64rem]:flex-row @min-[64rem]:items-center @min-[64rem]:justify-between">
       <div
         data-slot="workbench-page-header-copy"
-        className="flex min-w-0 items-center gap-2 @min-[64rem]:flex-1"
+        className="flex h-9 min-w-0 shrink-0 items-center gap-2 @min-[64rem]:flex-1"
       >
         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Icon className="size-4" aria-hidden />
         </div>
         <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="flex h-5 min-w-0 items-center gap-2 [&>[data-slot=popover-trigger]]:size-5">
             <h1 className="truncate text-sm font-semibold text-foreground">{title}</h1>
             {titleMeta}
           </div>
@@ -113,7 +113,7 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
       {actions && (
         <div
           data-slot="workbench-page-header-actions"
-          className="flex min-w-0 flex-wrap items-center gap-2 @min-[64rem]:shrink-0 @min-[64rem]:flex-nowrap @min-[64rem]:justify-end"
+          className="flex h-8 min-w-0 flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden @min-[64rem]:shrink-0 @min-[64rem]:overflow-visible @min-[64rem]:justify-end [&>button]:shrink-0"
         >
           {actions}
         </div>
