@@ -304,34 +304,34 @@ function TerminalSurface({ node, compact, showCopyActions }: { node: ToolNode; c
           {displayCommand}
         </button>
         {exitCode !== null && exitCode !== 0 && <span className="ai-terminal-exit shrink-0">exit {exitCode}</span>}
-        {showCopyActions && <AiToolCopyButton text={displayCommand} label={t('ai.workspace.tool.copyCommand')} />}
+        {showCopyActions && node.state !== 'running' && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} />}
       </div>
       {node.state !== 'running' && (
         <div className="ai-terminal-output relative m-0 max-w-full">
-          <div className="max-h-65 max-w-full overflow-auto py-3 pr-9 pl-3.5 whitespace-pre">
+          <div className="max-h-65 max-w-full overflow-auto px-3.5 py-3 whitespace-pre">
             {output ? <CappedText text={output} maxLines={compact ? 8 : Number.POSITIVE_INFINITY} /> : t('ai.workspace.tool.noOutput')}
           </div>
-          {showCopyActions && output && (
-            <div className="absolute top-2 right-1">
-              <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} />
-            </div>
-          )}
         </div>
       )}
     </div>
   );
 }
 
-function ReadSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
+function ReadSurface({ node, compact, showCopyActions }: { node: ToolNode; compact: boolean; showCopyActions: boolean }) {
+  const { t } = useI18n();
   const input = asRecord(node.input);
   const label = firstString(input, ['path', 'file_path', 'filePath']) ?? node.summary ?? node.name;
-  const lines = bounded(outputText(node)).split('\n');
+  const output = outputText(node);
+  const lines = bounded(output).split('\n');
   const shown = compact && lines.length > 8
     ? [...lines.slice(0, 4), `… ${lines.length - 8} lines …`, ...lines.slice(-4)]
     : lines;
   return (
     <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="read">
-      <div className="ai-block-banner flex min-w-0 items-center gap-2 truncate px-3.5 py-[9px]">{label}</div>
+      <div className="ai-block-banner flex min-w-0 items-start gap-2 py-[9px] pr-1 pl-3.5">
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {showCopyActions && node.state !== 'running' && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} />}
+      </div>
       <pre className="ai-read-lines m-0 max-h-65 max-w-full overflow-auto px-3.5 py-3 whitespace-pre">
         {shown.map((line, index) => (
           <span key={index} className="ai-read-line grid min-h-[18px] grid-cols-[34px_minmax(max-content,1fr)]">
@@ -698,7 +698,7 @@ export function AiToolExpandedContent({
   const variant = classifyAiTool(node.name, node.nativeName);
   switch (variant) {
     case 'terminal': return <TerminalSurface node={node} compact={compact} showCopyActions={showCopyActions} />;
-    case 'read': return <ReadSurface node={node} compact={compact} />;
+    case 'read': return <ReadSurface node={node} compact={compact} showCopyActions={showCopyActions} />;
     case 'search': return <SearchSurface node={node} compact={compact} />;
     case 'web': return <WebSurface node={node} />;
     case 'write':

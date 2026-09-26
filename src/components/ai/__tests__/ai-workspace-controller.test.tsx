@@ -2065,6 +2065,8 @@ it('freezes the current interactive shell directory for the first path query', a
     resolveTerminalDirectory,
   }));
 
+  expect(result.current.skillsNeedsRoot).toBe(false);
+
   await act(async () => {
     await result.current.listFileReferences('', new AbortController().signal);
   });

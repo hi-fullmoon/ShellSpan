@@ -78,7 +78,7 @@ function DocumentPreviewTrigger({ title, label, overflowTooltip }: {
 
   return <Tooltip disabled={!isTitleTruncated}>
     <TooltipTrigger render={trigger} onFocus={updateTruncation} onMouseEnter={updateTruncation} />
-    <TooltipContent className="max-w-sm break-all">{title}</TooltipContent>
+    <TooltipContent side="top" align="start" className="max-w-sm break-all">{title}</TooltipContent>
   </Tooltip>;
 }
 

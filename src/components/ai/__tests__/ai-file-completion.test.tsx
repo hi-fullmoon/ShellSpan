@@ -23,7 +23,10 @@ describe('composer path completion', () => {
     };
     render(<AiComposerSeat phase="hero" status="idle" onListFileReferences={query} />);
     const editor = screen.getByRole('textbox');
-    await user.type(editor, '@src');
+    await user.type(editor, '@');
+    await user.click(await screen.findByRole('option', { name: 'Add folder' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await user.type(editor, 'src');
     await screen.findByRole('option', { name: 'src/' });
     await user.keyboard('{Tab}');
     expect(editor.textContent).toBe('@src/');

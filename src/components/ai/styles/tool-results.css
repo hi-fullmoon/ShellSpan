@@ -17,15 +17,31 @@
 }
 
 .ai-terminal-cwd {
-  color: var(--ai-text-muted);
+  color: inherit;
 }
 
-.ai-terminal-block .ai-tool-copy-button {
+:is(.ai-terminal-block, .ai-read-block) .ai-tool-copy-button {
   color: var(--ai-text-secondary);
 }
 
+@media (hover: hover) {
+  :is(.ai-terminal-block, .ai-read-block) .ai-tool-copy-button {
+    opacity: 0;
+    max-width: 0;
+    margin-inline-start: calc(-2 * var(--spacing));
+    pointer-events: none;
+  }
+
+  :is(.ai-terminal-block, .ai-read-block):is(:hover, :focus-within) .ai-tool-copy-button {
+    opacity: 1;
+    max-width: none;
+    margin-inline-start: 0;
+    pointer-events: auto;
+  }
+}
+
 .ai-terminal-command {
-  color: var(--ai-text);
+  color: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
