@@ -1,14 +1,19 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { Terminal } from '@xterm/xterm';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { COPY_ON_SELECT_DEBOUNCE_MS, TerminalPane } from '../terminal-pane';
 import { resetTerminalLeader } from '../terminal-leader';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
-import type { TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
+import { useTerminalStore, type TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 
 const toastMocks = vi.hoisted(() => ({ error: vi.fn() }));
+const backingTerminals: Terminal[] = [];
+afterEach(() => {
+  for (const terminal of backingTerminals.splice(0)) terminal.dispose();
+});
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -53,6 +58,7 @@ function makeSession(
 beforeEach(() => {
   vi.clearAllMocks();
   resetTerminalLeader();
+  useTerminalStore.setState({ sessions: [makeSession()] });
   useAppStore.setState({
     terminalCopyOnSelect: true,
     terminalMultiLinePasteWarning: true,
@@ -94,7 +100,11 @@ function setAgentLease(overrides: Partial<Parameters<typeof agentTerminalLeaseSt
 function makeMockTerminal(selection = '') {
   const handlers: Array<(event: KeyboardEvent) => boolean> = [];
   const selectionHandlers: Array<() => void> = [];
-  const terminal = {
+  // Keep real xterm buffers and events for the scroll controls while retaining
+  // the existing interaction spies used by these legacy selection tests.
+  const backingTerminal = new Terminal();
+  backingTerminals.push(backingTerminal);
+  const terminal = Object.create(backingTerminal, Object.getOwnPropertyDescriptors({
     cols: 80,
     getSelection: vi.fn().mockReturnValue(selection),
     getSelectionPosition: vi.fn().mockReturnValue(
@@ -119,7 +129,7 @@ function makeMockTerminal(selection = '') {
     }),
     getCustomKeyEventHandlers: () => handlers,
     getSelectionChangeHandlers: () => selectionHandlers,
-  } as unknown as import('@xterm/xterm').Terminal & {
+  })) as import('@xterm/xterm').Terminal & {
     getCustomKeyEventHandlers: () => Array<(event: KeyboardEvent) => boolean>;
     getSelectionChangeHandlers: () => Array<() => void>;
   };
@@ -336,7 +346,7 @@ describe('TerminalPane', () => {
     act(() => document.dispatchEvent(new Event('shellspan:find-terminal')));
     const searchInput = screen.getByPlaceholderText('terminal.search.placeholder');
     expect(searchInput).toBeInTheDocument();
-    expect(searchInput.parentElement).toHaveClass('border-t-0');
+    expect(searchInput.parentElement).toHaveClass('top-2', 'right-2', 'border', 'rounded-md');
     await userEvent.click(screen.getByRole('button', { name: 'terminal.search.close' }));
     expect(screen.queryByPlaceholderText('terminal.search.placeholder')).toBeNull();
   });
@@ -345,7 +355,7 @@ describe('TerminalPane', () => {
     render(<TerminalPane activeSession={makeSession({ status: 'connecting' })} />);
     const overlay = document.querySelector('div.absolute.inset-0.z-10');
     expect(overlay).not.toBeNull();
-    expect(overlay).toHaveClass('bg-app-surface');
+    expect(overlay).toHaveStyle({ backgroundColor: 'var(--app-surface)', color: 'var(--app-text)' });
     expect(overlay?.querySelector('span')?.textContent ?? '').toMatch(/\.\.\.$/);
     expect(overlay?.querySelector('svg.animate-spin')).not.toBeNull();
   });
