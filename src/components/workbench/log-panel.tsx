@@ -23,6 +23,7 @@ import {
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { useLogStore } from '@/stores/logStore';
+import { createLogParser, type ParsedLogLine } from '@/lib/logs/parser';
 import type { LogSource } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -52,15 +53,6 @@ import {
   WorkbenchPageToolbar,
 } from './workbench-page';
 
-interface ParsedLogLine {
-  raw: string;
-  date?: string;
-  time?: string;
-  level?: string;
-  target?: string;
-  message?: string;
-}
-
 interface IndexedLogLine {
   line: ParsedLogLine;
   originalIndex: number;
@@ -83,44 +75,6 @@ type DateFilterOption = (typeof DATE_FILTER_OPTIONS)[number]['key'];
 
 const LOG_LEVELS = ['INFO', 'WARN', 'ERROR', 'DEBUG'] as const;
 type LogLevel = (typeof LOG_LEVELS)[number];
-
-const LOG_LINE_REGEX =
-  /^\[(\d{4}-\d{2}-\d{2})\]\[(\d{2}:\d{2}:\d{2}(?:\.\d+)?)\]\[(DEBUG|INFO|WARN|ERROR)\](?:\[(.*?)\])?\s*(.*)$/;
-
-function parseLogLine(line: string): ParsedLogLine {
-  const match = LOG_LINE_REGEX.exec(line);
-  if (!match) return { raw: line };
-  return {
-    raw: line,
-    date: match[1],
-    time: match[2],
-    level: match[3],
-    target: match[4],
-    message: match[5],
-  };
-}
-
-function parseLogContent(content: string): ParsedLogLine[] {
-  if (!content) return [];
-  const lines = content.split(/\r?\n/);
-  if (lines[lines.length - 1] === '') lines.pop();
-
-  const entries: ParsedLogLine[] = [];
-  let current: ParsedLogLine | undefined;
-  for (const line of lines) {
-    const parsed = parseLogLine(line);
-    if (parsed.level) {
-      current = parsed;
-      entries.push(current);
-    } else if (current) {
-      current.message = `${current.message}\n${line}`;
-      current.raw = `${current.raw}\n${line}`;
-    } else {
-      entries.push(parsed);
-    }
-  }
-  return entries;
-}
 
 function getDaysDifference(dateString: string, today: Date): number {
   const [year, month, day] = dateString.split('-').map(Number);
@@ -493,7 +447,8 @@ export const LogPanel: React.FC = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeSection = useAppStore((state) => state.activeSection);
 
-  const parsedLines = useMemo(() => parseLogContent(content), [content]);
+  const parseLogContent = useMemo(() => createLogParser(), []);
+  const parsedLines = useMemo(() => parseLogContent(content), [content, parseLogContent]);
   const normalizedQuery = query.trim().toLowerCase();
   const searchFilteredLines = useMemo(() => {
     const today = new Date();
