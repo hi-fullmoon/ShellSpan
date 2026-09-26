@@ -61,12 +61,12 @@ describe('aiSettingsStore', () => {
     expect(preferences.defaultProviderId).toBe(initialState.defaultProviderId);
   });
 
-  it('rejects persisted full access and invalid execution defaults', () => {
+  it('restores persisted full access and rejects invalid execution defaults', () => {
     const preferences = parseAiPreferences([
       preference('agentPermissionMode', 'fullAccess'),
       preference('agentExecutionSurface', 'unknown'),
     ]);
-    expect(preferences.agentPermissionMode).toBe('autoApproveReadOnly');
+    expect(preferences.agentPermissionMode).toBe('fullAccess');
     expect(preferences.agentExecutionSurface).toBe('direct');
   });
 

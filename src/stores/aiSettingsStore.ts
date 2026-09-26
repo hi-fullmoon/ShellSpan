@@ -113,7 +113,7 @@ interface AiPreferences {
   providers: AiProviderProfile[];
   defaultProviderId: string;
   contextLines: number;
-  agentPermissionMode: Exclude<AgentPermissionMode, 'fullAccess'>;
+  agentPermissionMode: AgentPermissionMode;
   agentExecutionSurface: AgentExecutionSurface;
 }
 
@@ -129,7 +129,7 @@ interface AiSettingsState extends AiPreferences {
   removeProvider: (id: string) => void;
   setDefaultProvider: (id: string) => void;
   setContextLines: (lines: number) => void;
-  setAgentPermissionMode: (mode: Exclude<AgentPermissionMode, 'fullAccess'>) => void;
+  setAgentPermissionMode: (mode: AgentPermissionMode) => void;
   setAgentExecutionSurface: (surface: AgentExecutionSurface) => void;
   getProviderConfig: (id?: string) => AiProviderConfig;
 }
@@ -187,7 +187,8 @@ export function parseAiPreferences(entries: [string, string][]): AiPreferences {
   return {
     ...defaults,
     contextLines,
-    agentPermissionMode: permissionValue === 'requestApproval' ? permissionValue : defaults.agentPermissionMode,
+    agentPermissionMode: permissionValue === 'requestApproval' || permissionValue === 'fullAccess'
+      ? permissionValue : defaults.agentPermissionMode,
     agentExecutionSurface: surfaceValue === 'boundTerminal' ? surfaceValue : defaults.agentExecutionSurface,
   };
 }
