@@ -785,12 +785,12 @@ pub(super) fn run_detail(
     database: &Database,
     run_id: &str,
 ) -> Result<Option<DeploymentRunDetail>, String> {
-    let Some(run) = database.get_deployment_run(&run_id)? else {
+    let Some(run) = database.get_deployment_run(run_id)? else {
         return Ok(None);
     };
-    let summary = run_summary(&database, &run)?;
+    let summary = run_summary(database, &run)?;
     let outputs = database
-        .list_deployment_run_outputs(&run_id)?
+        .list_deployment_run_outputs(run_id)?
         .into_iter()
         .map(|output| DeploymentRunOutputProjection {
             node_id: output.node_id,
@@ -811,9 +811,9 @@ pub(super) fn run_detail(
         summary,
         approval_summary: run.approval_summary,
         outputs,
-        receipts: database.list_deployment_effect_receipts(&run_id)?,
+        receipts: database.list_deployment_effect_receipts(run_id)?,
         service_observation: database
-            .list_deployment_run_events(&run_id, None, 100)?
+            .list_deployment_run_events(run_id, None, 100)?
             .items
             .into_iter()
             .find(|event| event.event_kind == "serviceObservation")
