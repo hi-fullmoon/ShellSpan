@@ -26,7 +26,10 @@ try {
         const page = await browser.newPage({ viewport: { width, height: 720 } });
         await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__attachment-position`);
         const name = 'terminal-protocol-rfc.md';
-        await page.locator('input[type="file"]').setInputFiles(`${root}protocol/agent/runtime/${name}`);
+        await page.locator('input[type="file"]').setInputFiles([
+          ...(width === 960 ? [`${root}package.json`] : []),
+          `${root}protocol/agent/runtime/${name}`,
+        ]);
         const preview = page.getByRole('button', { name: `Preview ${name}`, exact: true });
         await preview.hover();
         const tooltip = page.locator('[data-slot="tooltip-content"]');
@@ -34,11 +37,15 @@ try {
         await tooltip.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
         const card = page.locator(`[data-document-name="${name}"]`);
         const bounds = await card.boundingBox();
+        const title = await card.locator('[data-slot="attachment-title"]').boundingBox();
         const tip = await tooltip.boundingBox();
         assert.equal(await tooltip.textContent(), name);
         assert.equal(await tooltip.getAttribute('data-side'), 'top');
-        assert.ok(Math.abs(tip.x - bounds.x) <= 1, 'Filename tooltip aligns with the card left edge');
-        assert.ok(Math.abs(bounds.y - tip.y - tip.height - 4) <= 1, 'Filename tooltip sits directly above the card');
+        assert.equal(await tooltip.getAttribute('data-align'), 'center');
+        const centeredLeft = title.x + title.width / 2 - tip.width / 2;
+        assert.ok(centeredLeft < 0 ? tip.x >= 0 && tip.x <= title.x : Math.abs(tip.x - centeredLeft) <= 1,
+          'Filename tooltip centers over the filename, shifting only to stay inside the viewport');
+        assert.ok(Math.abs(title.y - tip.y - tip.height - 4) <= 1, 'Filename tooltip sits directly above the filename');
         const remove = page.getByRole('button', { name: `Remove ${name}`, exact: true });
         const button = await remove.boundingBox();
         assert.ok(Math.abs(button.y - bounds.y - 2) <= 1, 'Close button is 1px inside the top border');
