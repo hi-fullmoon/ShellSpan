@@ -89,7 +89,7 @@ describe('KeychainPanel', () => {
     const { container } = render(<KeychainPanel />);
 
     const grid = container.querySelector('.grid') as HTMLElement;
-    expect(grid).toHaveStyle({ gap: '0.75rem' });
+    expect(grid).toHaveStyle({ gap: '0.5rem' });
   });
 
   it('renders the header refresh action as a text button', () => {

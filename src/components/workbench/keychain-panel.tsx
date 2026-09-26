@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CopyIcon, EyeIcon, EyeOffIcon, FileKey, KeyRound, Lock, PencilIcon, PlusIcon, RefreshCwIcon, SearchXIcon, Trash2Icon, UploadCloud } from 'lucide-react';
+import { CopyIcon, EyeIcon, EyeOffIcon, FileKey, InfoIcon, KeyRound, Lock, PencilIcon, PlusIcon, RefreshCwIcon, SearchXIcon, Trash2Icon, UploadCloud } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
@@ -7,6 +7,7 @@ import { useKeychainStore, type KeychainKeySummary } from '@/stores/keychainStor
 import { useProfileStore } from '@/stores/profileStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
@@ -232,6 +233,17 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
         <WorkbenchPageHeader
           icon={KeyRound}
           title={t('workbench.keychain.title')}
+          titleMeta={(
+            <Popover>
+              <PopoverTrigger render={<Button variant="ghost" size="icon-xs" className="text-muted-foreground" aria-label={t('workbench.keychain.help')} />}>
+                <InfoIcon />
+              </PopoverTrigger>
+              <PopoverContent align="start" className="max-w-[calc(100vw-2rem)]">
+                <PopoverTitle>{t('workbench.keychain.help')}</PopoverTitle>
+                <p className="text-xs text-muted-foreground">{t('workbench.keychain.description')}</p>
+              </PopoverContent>
+            </Popover>
+          )}
           description={t('workbench.keychain.count', {
             count: filteredKeys.length,
             total: keys.length,
@@ -259,7 +271,6 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
 
         <ScrollArea className="min-h-0 flex-1">
           <WorkbenchPageContent>
-            <p className="text-xs text-muted-foreground">{t('workbench.keychain.description')}</p>
             {!initialized && keys.length === 0 && <PanelLoadingState />}
             {initialized && keys.length === 0 && (
               <PanelEmptyState
@@ -276,7 +287,7 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
               />
             )}
             {filteredKeys.length > 0 && (
-              <ResponsiveCardGrid columns={1} minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH} gap="0.75rem">
+              <ResponsiveCardGrid columns={1} minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH} gap="0.5rem">
                 {filteredKeys.map((key) => {
                   const isProfilePassword = key.service === 'com.shellspan.profile-password';
                   return (

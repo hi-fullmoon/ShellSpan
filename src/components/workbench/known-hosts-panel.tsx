@@ -4,6 +4,10 @@ import { useToast } from '@/hooks/useToast';
 import { useKnownHostsStore } from '@/stores/knownHostsStore';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
+import { writeClipboardText } from '@/lib/clipboard';
+import type { KnownHostEntry } from '@/types';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -11,6 +15,8 @@ import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   CircleAlertIcon,
+  CopyIcon,
+  InfoIcon,
   FingerprintIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -21,7 +27,7 @@ import {
 import { cn } from '@/lib/utils';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
-import { MANAGEMENT_CARD_MIN_WIDTH, keyTypeBadgeClass } from './shared';
+import { MANAGEMENT_CARD_MIN_WIDTH } from './shared';
 import {
   WorkbenchPage,
   WorkbenchPageContent,
@@ -37,7 +43,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
   onCreateConnection,
 }) => {
   const { t } = useI18n();
-  const { error: showError } = useToast();
+  const { error: showError, success: showSuccess } = useToast();
   const { hosts, loading, error, loadHosts, removeHost } = useKnownHostsStore();
   const [removing, setRemoving] = React.useState<{
     host: string;
@@ -64,6 +70,14 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
   };
 
   const normalizedQuery = query.trim().toLowerCase();
+  const handleCopy = async (fingerprint: string): Promise<void> => {
+    try {
+      await writeClipboardText(fingerprint);
+      showSuccess(t('workbench.knownHosts.copied'));
+    } catch {
+      showError(t('workbench.knownHosts.copyFailed'));
+    }
+  };
   const filteredHosts = hosts.filter((host) => {
     if (!normalizedQuery) return true;
     return [host.host, host.keyType, host.fingerprint, String(host.port)]
@@ -71,6 +85,13 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
       .toLowerCase()
       .includes(normalizedQuery);
   });
+  const groupedHosts = new Map<string, { host: string; port: number; keys: KnownHostEntry[] }>();
+  for (const host of filteredHosts) {
+    const id = JSON.stringify([host.host, host.port]);
+    const group = groupedHosts.get(id);
+    if (group) group.keys.push(host);
+    else groupedHosts.set(id, { host: host.host, port: host.port, keys: [host] });
+  }
 
   return (
     <TooltipProvider>
@@ -78,8 +99,30 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
         <WorkbenchPageHeader
           icon={ShieldCheckIcon}
           title={t('workbench.knownHosts.title')}
-          description={t('workbench.knownHosts.count', {
-            count: filteredHosts.length,
+          titleMeta={(
+            <Popover>
+              <PopoverTrigger render={<Button variant="ghost" size="icon-xs" className="size-5 text-muted-foreground" aria-label={t('workbench.knownHosts.help')} />}>
+                <InfoIcon />
+              </PopoverTrigger>
+              <PopoverContent align="start" className="max-w-[calc(100vw-2rem)]">
+                <PopoverTitle>{t('workbench.knownHosts.help')}</PopoverTitle>
+                <div className="flex flex-col gap-3 text-xs text-muted-foreground">
+                  <p>{t('workbench.knownHosts.description')}</p>
+                  <section className="flex flex-col gap-1">
+                    <h3 className="font-medium text-foreground">{t('workbench.knownHosts.verifyTitle')}</h3>
+                    <p>{t('workbench.knownHosts.verifyDescription')}</p>
+                  </section>
+                  <section className="flex flex-col gap-1">
+                    <h3 className="font-medium text-foreground">{t('workbench.knownHosts.changedTitle')}</h3>
+                    <p>{t('workbench.knownHosts.changedDescription')}</p>
+                  </section>
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+          description={t(normalizedQuery ? 'workbench.knownHosts.filteredCount' : 'workbench.knownHosts.count', {
+            hosts: groupedHosts.size,
+            keys: filteredHosts.length,
             total: hosts.length,
           })}
           actions={(
@@ -91,7 +134,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
                 placeholder={t('workbench.knownHosts.searchPlaceholder')}
                 aria-label={t('workbench.knownHosts.searchPlaceholder')}
               />
-              <Button variant="outline" size="sm" onClick={loadHosts}>
+              <Button variant="outline" size="sm" onClick={loadHosts} disabled={loading}>
                 <RefreshCwIcon data-icon="inline-start" className={cn(loading && 'animate-spin')} />
                 {t('common.refresh')}
               </Button>
@@ -136,7 +179,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
             minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH}
             gap="0.5rem"
           >
-            {filteredHosts.map((host) => (
+            {Array.from(groupedHosts.values()).map((host) => (
               <ManagementCard key={`${host.host}:${host.port}`}>
                 <div className="flex items-center gap-2.5">
                   <ManagementCardIcon>
@@ -145,14 +188,6 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
                   <div className="flex min-w-0 flex-1 flex-col gap-1">
                     <span className="truncate text-[13px] font-medium leading-tight text-app-text">
                       {host.host}:{host.port}
-                    </span>
-                    <span
-                      className={cn(
-                        'w-fit rounded-md px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide',
-                        keyTypeBadgeClass(host.keyType),
-                      )}
-                    >
-                      {host.keyType}
                     </span>
                   </div>
                   {onCreateConnection && (
@@ -180,17 +215,35 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
                     />
                   </IconActionButton>
                 </div>
-                <div className="flex items-start gap-1 rounded-md border border-app-border/60 bg-muted/60 px-2.5 py-2">
-                  <FingerprintIcon className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <div className="text-[10px] font-medium uppercase leading-tight tracking-[0.08em] text-muted-foreground">
-                      {t('workbench.knownHosts.fingerprint')}
+                {host.keys.map((key) => {
+                  const prefix = `${key.keyType} `;
+                  const fingerprint = key.fingerprint.startsWith(prefix)
+                    ? key.fingerprint.slice(prefix.length)
+                    : key.fingerprint;
+                  return (
+                    <div key={`${key.keyType}:${key.fingerprint}`} className="group/fingerprint relative flex items-start gap-1 rounded-md border border-app-border/60 bg-muted/60 px-2.5 py-2">
+                      <FingerprintIcon className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1">
+                          <Badge variant="secondary" size="sm">{key.keyType}</Badge>
+                          <span className="text-[10px] text-muted-foreground">{t('workbench.knownHosts.fingerprint')}</span>
+                        </div>
+                        <div className="mt-0.5 break-all font-mono text-[11px] leading-relaxed text-app-text">
+                          {fingerprint}
+                        </div>
+                      </div>
+                      <IconActionButton
+                        size="icon-xs"
+                        className="absolute right-1 top-1 size-6! text-muted-foreground opacity-0 group-hover/fingerprint:opacity-100 focus-visible:opacity-100"
+                        onClick={() => void handleCopy(fingerprint)}
+                        aria-label={t('workbench.knownHosts.copyFingerprint', { keyType: key.keyType })}
+                        tooltip={t('workbench.knownHosts.copyFingerprint', { keyType: key.keyType })}
+                      >
+                        <CopyIcon />
+                      </IconActionButton>
                     </div>
-                    <div className="mt-0.5 break-all font-mono text-[11px] leading-relaxed text-app-text">
-                      {host.fingerprint}
-                    </div>
-                  </div>
-                </div>
+                  );
+                })}
               </ManagementCard>
             ))}
           </ResponsiveCardGrid>

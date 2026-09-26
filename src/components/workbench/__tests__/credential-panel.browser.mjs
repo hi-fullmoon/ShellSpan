@@ -24,6 +24,7 @@ try {
     const { useAppStore } = await import('/src/stores/appStore.ts');
     const { initI18n } = await import('/src/locales/index.ts');
     await initI18n('zh-CN');
+    await useProfileStore.getState().hydrateFromDb();
     useAppStore.setState({ locale: 'zh-CN' });
     const profile = { id: 'local-ssh', name: host, host, port: 22, username, authMethod: 'key', keychainKeyId: 'generated-key', createdAt: Date.now(), updatedAt: Date.now() };
     useProfileStore.setState({ initialized: true, profiles: [profile] });
@@ -47,6 +48,27 @@ try {
     assert.equal(await page.getByText('SSH 密钥 · Ed25519', { exact: true }).count(), 1,
       await page.locator('#credential-review').innerText());
     const search = page.getByRole('textbox', { name: '搜索名称、类型或关联连接' });
+    const help = page.getByRole('button', { name: '凭据管理说明', exact: true });
+    const description = '安全保存连接密码和 SSH 密钥，凭据由系统钥匙串保护。';
+    assert.equal(await page.getByText(description, { exact: true }).count(), 0);
+    const cardTop = await page.locator('#credential-review .grid').evaluate((grid) => grid.getBoundingClientRect().top);
+    await help.click();
+    const helpPanel = page.getByRole('dialog', { name: '凭据管理说明' });
+    await helpPanel.waitFor();
+    await helpPanel.evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
+    assert.ok((await helpPanel.innerText()).includes(description));
+    assert.equal(await page.locator('#credential-review .grid').evaluate((grid) => grid.getBoundingClientRect().top), cardTop);
+    await page.screenshot({ path: `.drawer-review/credential-help-${width}.png` });
+    await page.keyboard.press('Escape');
+    await helpPanel.waitFor({ state: 'hidden' });
+    await help.focus();
+    await page.keyboard.press('Enter');
+    await helpPanel.waitFor();
+    await page.mouse.click(width - 10, 700);
+    await helpPanel.waitFor({ state: 'hidden' });
+    if (process.argv.includes('--help-only')) continue;
     await search.fill(hostname());
     assert.equal(await page.getByText('OpenSSH · Ed25519', { exact: true }).count(), 1);
     await search.fill('登录密码');
@@ -60,7 +82,7 @@ try {
     });
     assert.equal(new Set(layout.tops).size, 1, 'Header actions must remain on one row');
     assert.ok(layout.right <= layout.width, 'Header actions must fit the container');
-    assert.equal(layout.gap, '12px');
+    assert.equal(layout.gap, '8px');
     const card = page.locator('#credential-review .grid > *').first();
     const actions = card.getByRole('button');
     await page.mouse.move(0, 0);
@@ -116,7 +138,9 @@ try {
     await confirmation.getByRole('button', { name: '取消', exact: true }).click();
     await confirmation.waitFor({ state: 'hidden' });
   }
-  console.log('Credential panel: metadata privacy, search, delete context and wide/narrow rendering passed.');
+  console.log(process.argv.includes('--help-only')
+    ? 'Credential help: wide/narrow rendering, keyboard, outside dismissal and stable layout passed.'
+    : 'Credential panel: metadata privacy, search, delete context and wide/narrow rendering passed.');
 } finally {
   await browser.close();
   await rm(directory, { recursive: true, force: true });
