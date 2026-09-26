@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import type { AgentExecutionSurface } from '@/types/agent-session';
 import {
   AGENT_PERMISSION_MODES,
   type AgentPermissionMode,
@@ -13,6 +14,9 @@ export interface AgentPermissionBinding {
 }
 
 interface AgentPermissionState {
+  readonly preferences: Readonly<Record<string, { mode: AgentPermissionMode; surface: AgentExecutionSurface }>>;
+  getExecutionSurface: (sessionId: string) => AgentExecutionSurface;
+  setExecutionSurface: (sessionId: string, surface: AgentExecutionSurface) => void;
   readonly bindings: Readonly<Record<string, AgentPermissionBinding>>;
   getMode: (sessionId: string) => AgentPermissionMode;
   getBinding: (sessionId: string) => AgentPermissionBinding | undefined;
@@ -53,12 +57,22 @@ function findLiveSession(sessionId: string): TerminalSession | undefined {
 }
 
 export const useAgentPermissionStore = create<AgentPermissionState>()((set, get) => ({
+  preferences: {},
+  getExecutionSurface: (sessionId) => get().preferences[sessionId]?.surface
+    ?? useAiSettingsStore.getState().agentExecutionSurface,
+  setExecutionSurface: (sessionId, surface) => {
+    const preference = get().preferences[sessionId];
+    if (!preference) return;
+    set((state) => ({ preferences: { ...state.preferences, [sessionId]: { ...preference, surface } } }));
+    useAiSettingsStore.getState().setAgentExecutionSurface(surface);
+  },
   bindings: {},
   getMode: (sessionId) => {
+    if (findLiveSession(sessionId)?.status !== 'connected') return 'autoApproveReadOnly';
     const binding = get().bindings[sessionId];
     return binding?.mode === 'fullAccess' && sameTarget(binding.target, findLiveSession(sessionId))
       ? 'fullAccess'
-      : useAiSettingsStore.getState().agentPermissionMode;
+      : get().preferences[sessionId]?.mode ?? useAiSettingsStore.getState().agentPermissionMode;
   },
   getBinding: (sessionId) => {
     const binding = get().bindings[sessionId];
@@ -80,18 +94,18 @@ export const useAgentPermissionStore = create<AgentPermissionState>()((set, get)
       });
       return false;
     }
-    if (mode !== 'fullAccess') {
-      get().resetSession(sessionId);
-      useAiSettingsStore.getState().setAgentPermissionMode(mode as Exclude<AgentPermissionMode, 'fullAccess'>);
-      return true;
-    }
     const target = targetFromSession(session);
     set((state) => ({
+      preferences: {
+        ...state.preferences,
+        [sessionId]: { mode: mode as AgentPermissionMode, surface: get().getExecutionSurface(sessionId) },
+      },
       bindings: {
         ...state.bindings,
-        [sessionId]: Object.freeze({ mode: 'fullAccess', target }),
+        [sessionId]: Object.freeze({ mode: mode as AgentPermissionMode, target }),
       },
     }));
+    useAiSettingsStore.getState().setAgentPermissionMode(mode as AgentPermissionMode);
     return true;
   },
   resetSession: (sessionId) => set((state) => {
@@ -102,11 +116,19 @@ export const useAgentPermissionStore = create<AgentPermissionState>()((set, get)
   resetAll: () => set({ bindings: {} }),
 }));
 
-// Permission grants are memory-only connection-instance capabilities. Any
-// disconnect, close, removal, reconnect replacement, or in-place identity
-// drift drops the grant; a later connected instance starts at the default.
+// Target bindings remain connection-scoped. New connected instances use the
+// remembered preference rather than reusing a previous target binding.
 useTerminalStore.subscribe((terminalState) => {
   const permissionState = useAgentPermissionStore.getState();
+  const defaults = useAiSettingsStore.getState();
+  const preferences = Object.fromEntries(terminalState.sessions.map((session) => [
+    session.sessionId,
+    permissionState.preferences[session.sessionId] ?? {
+      mode: defaults.agentPermissionMode,
+      surface: defaults.agentExecutionSurface,
+    },
+  ]));
+  useAgentPermissionStore.setState({ preferences });
   for (const [sessionId, binding] of Object.entries(permissionState.bindings)) {
     const session = terminalState.sessions.find((item) => item.sessionId === sessionId);
     if (!sameTarget(binding.target, session)) permissionState.resetSession(sessionId);

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useAgentPermissionStore } from '../agentPermissionStore';
-import { useAiSettingsStore } from '../aiSettingsStore';
+import { parseAiPreferences, useAiSettingsStore } from '../aiSettingsStore';
 import { useTerminalStore } from '../terminalStore';
 
 const initialTerminalState = useTerminalStore.getState();
@@ -26,31 +26,63 @@ function connectSession(
 
 describe('connection-instance Agent permissions', () => {
   beforeEach(() => {
-    useAiSettingsStore.setState({ agentPermissionMode: 'autoApproveReadOnly' });
+    useAiSettingsStore.setState({ agentPermissionMode: 'autoApproveReadOnly', agentExecutionSurface: 'direct' });
     useTerminalStore.setState(initialTerminalState, true);
     useAgentPermissionStore.setState(initialPermissionState, true);
   });
 
-  it('uses a remembered safe preference for a new connection while full access remains connection-scoped', () => {
+  it('restores both remembered choices for a new terminal after preferences reload', () => {
+    connectSession('session-before');
+    useAgentPermissionStore.getState().setMode('session-before', 'fullAccess');
+    useAiSettingsStore.getState().setAgentExecutionSurface('boundTerminal');
+    const settings = useAiSettingsStore.getState();
+    const saved: [string, string][] = [
+      ['ai.agentPermissionMode', JSON.stringify(settings.agentPermissionMode)],
+      ['ai.agentExecutionSurface', JSON.stringify(settings.agentExecutionSurface)],
+    ];
+    useTerminalStore.setState(initialTerminalState, true);
+    useAgentPermissionStore.setState(initialPermissionState, true);
+    useAiSettingsStore.setState(parseAiPreferences(saved));
+    connectSession('session-after');
+    expect(useAgentPermissionStore.getState().getMode('session-after')).toBe('fullAccess');
+    expect(useAgentPermissionStore.getState().getBinding('session-after')).toBeUndefined();
+    expect(useAiSettingsStore.getState().agentExecutionSurface).toBe('boundTerminal');
+  });
+
+  it('remembers full access only for newly connected terminals', () => {
     connectSession('session-a');
     expect(useAgentPermissionStore.getState().setMode('session-a', 'requestApproval')).toBe(true);
     connectSession('session-b');
     expect(useAgentPermissionStore.getState().getMode('session-b')).toBe('requestApproval');
     expect(useAgentPermissionStore.getState().setMode('session-a', 'fullAccess')).toBe(true);
-    expect(useAiSettingsStore.getState().agentPermissionMode).toBe('requestApproval');
+    expect(useAiSettingsStore.getState().agentPermissionMode).toBe('fullAccess');
     expect(useAgentPermissionStore.getState().getMode('session-b')).toBe('requestApproval');
+    connectSession('session-c', 'another.example.com');
+    expect(useAgentPermissionStore.getState().getMode('session-c')).toBe('fullAccess');
+    useAgentPermissionStore.getState().setMode('session-c', 'requestApproval');
+    connectSession('session-d');
+    expect(useAgentPermissionStore.getState().getMode('session-d')).toBe('requestApproval');
   });
 
-  it('applies the latest safe Agent preference to future sessions on already connected targets', () => {
+  it('keeps existing terminal preferences when another terminal changes either setting', () => {
     connectSession('session-a');
     connectSession('session-b');
     useAgentPermissionStore.getState().setMode('session-a', 'requestApproval');
-    expect(useAgentPermissionStore.getState().getMode('session-b')).toBe('requestApproval');
+    useAgentPermissionStore.getState().setExecutionSurface('session-a', 'boundTerminal');
+    expect(useAgentPermissionStore.getState().getMode('session-b')).toBe('autoApproveReadOnly');
+    expect(useAgentPermissionStore.getState().getExecutionSurface('session-b')).toBe('direct');
+    connectSession('session-c');
+    expect(useAgentPermissionStore.getState().getMode('session-c')).toBe('requestApproval');
+    expect(useAgentPermissionStore.getState().getExecutionSurface('session-c')).toBe('boundTerminal');
     useAgentPermissionStore.getState().setMode('session-b', 'autoApproveReadOnly');
-    expect(useAgentPermissionStore.getState().getMode('session-a')).toBe('autoApproveReadOnly');
+    useAgentPermissionStore.getState().setExecutionSurface('session-b', 'direct');
+    useTerminalStore.getState().setActiveSession('session-a');
+    expect(useAgentPermissionStore.getState().getMode('session-a')).toBe('requestApproval');
+    expect(useAgentPermissionStore.getState().getExecutionSurface('session-a')).toBe('boundTerminal');
+    expect(useAgentPermissionStore.getState().getExecutionSurface('session-c')).toBe('boundTerminal');
   });
 
-  it('defaults every new connection to autoApproveReadOnly and isolates identical hosts', () => {
+  it('defaults to autoApproveReadOnly until a permission preference is selected', () => {
     connectSession('session-a');
     connectSession('session-b');
     const permissions = useAgentPermissionStore.getState();
@@ -96,7 +128,7 @@ describe('connection-instance Agent permissions', () => {
     expect(useAgentPermissionStore.getState().bindings).not.toHaveProperty('session-b');
   });
 
-  it('treats reconnect as a new connection instance with the safe default', () => {
+  it('uses the remembered preference after reconnect without reusing the old binding', () => {
     connectSession('session-old');
     useAgentPermissionStore.getState().setMode('session-old', 'fullAccess');
 
@@ -113,7 +145,7 @@ describe('connection-instance Agent permissions', () => {
     });
 
     expect(useAgentPermissionStore.getState().bindings).not.toHaveProperty('session-old');
-    expect(useAgentPermissionStore.getState().getMode('session-new')).toBe('autoApproveReadOnly');
+    expect(useAgentPermissionStore.getState().getMode('session-new')).toBe('fullAccess');
   });
 
   it('drops a binding if identity changes in place and rejects elevation while disconnected', () => {
@@ -125,7 +157,7 @@ describe('connection-instance Agent permissions', () => {
         : session),
     }));
 
-    expect(useAgentPermissionStore.getState().getMode('session-a')).toBe('autoApproveReadOnly');
+    expect(useAgentPermissionStore.getState().bindings).not.toHaveProperty('session-a');
     useTerminalStore.getState().setStatus('session-a', {
       sessionId: 'session-a',
       status: 'disconnected',
