@@ -50,12 +50,14 @@ function DocumentPreviewTrigger({ title, label, overflowTooltip }: {
   overflowTooltip: boolean;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const titleRef = useRef<HTMLElement | null>(null);
   const [isTitleTruncated, setIsTitleTruncated] = useState(false);
 
   const updateTruncation = useCallback(() => {
     const titleElement = triggerRef.current
       ?.closest('[data-slot="attachment"]')
       ?.querySelector<HTMLElement>('[data-slot="attachment-title"]');
+    titleRef.current = titleElement ?? null;
     if (!titleElement) return;
     const nextIsTruncated = titleElement.scrollWidth > titleElement.clientWidth;
     setIsTitleTruncated(current => current === nextIsTruncated ? current : nextIsTruncated);
@@ -76,9 +78,9 @@ function DocumentPreviewTrigger({ title, label, overflowTooltip }: {
   const trigger = <DialogTrigger render={<AttachmentTrigger ref={triggerRef} aria-label={label} />} />;
   if (!overflowTooltip) return trigger;
 
-  return <Tooltip disabled={!isTitleTruncated}>
+  return <Tooltip disabled={!isTitleTruncated} disableHoverablePopup>
     <TooltipTrigger render={trigger} onFocus={updateTruncation} onMouseEnter={updateTruncation} />
-    <TooltipContent side="top" align="start" className="max-w-sm break-all">{title}</TooltipContent>
+    <TooltipContent anchor={titleRef} side="top" align="center" className="max-w-sm break-all">{title}</TooltipContent>
   </Tooltip>;
 }
 
