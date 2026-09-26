@@ -449,9 +449,15 @@ one whose directory probe is unavailable MUST remain unrooted and may execute
 shell commands without approval in `operator` mode. Local full-access Sessions
 also MUST NOT require a successful directory probe to start. Full access preserves
 the selected execution surface; commands requiring trusted lifecycle evidence
-still use Direct execution. Enabling full access requires explicit confirmation
-for the current connection instance and does not grant authority over another
-connection or bypass operating-system permissions.
+still use Direct execution. Selecting full access requires explicit confirmation.
+The confirmed permission preference and execution surface are saved locally and
+reused for new terminal sessions, including after application restart. Each terminal
+captures both preferences when it is created. Changing either control updates that
+terminal and the saved defaults; other existing terminals retain both settings,
+including terminals that have not started an Agent Session yet. Existing Agent
+Sessions retain their own permission settings. Target bindings remain
+connection-scoped, and the remembered preference does not bypass operating-system
+permissions or permit execution on disconnected targets.
 Loopback HTTP verification uses the structured `probe_http` tool, which fixes
 the destination to the frozen local or SSH target's `127.0.0.1`, follows no
 redirects, exposes no arbitrary request headers, and enforces method, request
