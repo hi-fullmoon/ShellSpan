@@ -1258,9 +1258,13 @@ fn search_target(
             cwd: Some(root), ..
         } => {
             let root = canonical_local_root(Path::new(root))?;
-            let search_root = resolve_local_existing(&root, &arguments.path, true)?;
+            let search_root = resolve_local_search_path(&root, &arguments.path)?;
             let mut files = Vec::new();
-            collect_local_files(&search_root, &mut files, operation)?;
+            if search_root.is_file() {
+                files.push(search_root.clone());
+            } else {
+                collect_local_files(&search_root, &mut files, operation)?;
+            }
             let mut matches = Vec::new();
             let mut bytes_read = 0_u64;
             let mut bounds_hit = files.len() >= MAX_SEARCH_FILES;
@@ -1323,7 +1327,18 @@ fn search_target(
             let root = resolve_remote_root(&connected.sftp, root)?;
             let search_root = resolve_remote_path(&connected.sftp, &root, &arguments.path, false)?;
             let mut files = Vec::new();
-            collect_remote_files(&connected.sftp, &search_root, &mut files, operation)?;
+            let stat = connected
+                .sftp
+                .lstat(Path::new(&search_root))
+                .map_err(|error| format!("failed to inspect remote search path: {error}"))?;
+            match remote_kind(stat.perm) {
+                "file" => files.push((search_root.clone(), stat.size.unwrap_or(0))),
+                "directory" => {
+                    collect_remote_files(&connected.sftp, &search_root, &mut files, operation)?
+                }
+                "symlink" => return Err("remote symlink traversal is denied".into()),
+                _ => return Err("search_text path must be a regular file or directory".into()),
+            }
             let mut matches = Vec::new();
             let mut bytes_read = 0_u64;
             let mut bounds_hit = files.len() >= MAX_SEARCH_FILES;
@@ -1471,6 +1486,19 @@ fn resolve_local_existing(
     requested: &str,
     directory: bool,
 ) -> Result<PathBuf, String> {
+    let canonical = resolve_local_search_path(root, requested)?;
+    let metadata = fs::symlink_metadata(&canonical)
+        .map_err(|error| format!("failed to inspect scoped path: {error}"))?;
+    if directory && !metadata.is_dir() {
+        return Err("local path must be a directory; received a regular file".into());
+    }
+    if !directory && !metadata.is_file() {
+        return Err("local path must be a regular file; received a directory".into());
+    }
+    Ok(canonical)
+}
+
+fn resolve_local_search_path(root: &Path, requested: &str) -> Result<PathBuf, String> {
     let candidate = local_candidate(root, requested)?;
     if Path::new(requested).is_absolute() {
         ensure_absolute_no_symlink(&candidate)?;
@@ -1484,11 +1512,11 @@ fn resolve_local_existing(
     }
     let metadata = fs::symlink_metadata(&canonical)
         .map_err(|error| format!("failed to inspect scoped path: {error}"))?;
-    if metadata.file_type().is_symlink()
-        || (directory && !metadata.is_dir())
-        || (!directory && !metadata.is_file())
-    {
-        return Err("local path has the wrong kind or is a symlink".into());
+    if metadata.file_type().is_symlink() {
+        return Err("local symlink traversal is denied".into());
+    }
+    if !metadata.is_dir() && !metadata.is_file() {
+        return Err("local path must be a regular file or directory".into());
     }
     Ok(canonical)
 }
@@ -2121,6 +2149,99 @@ fn truncate_utf8(value: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_text_accepts_files_and_directories_with_literal_queries_and_pagination() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(workspace.path()).unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let database = Database::open(&runtime.path().join("search.db")).unwrap();
+        let credentials = CredentialManager::in_memory_for_tests();
+        let checkpoints = CheckpointStoreNative::default();
+        let operations = FileOperationRegistryNative::default();
+        let known_hosts = runtime.path().join("known_hosts");
+        // Search actual Rust source through the production file-tool entry point.
+        let source = include_str!("filesystem.rs");
+        fs::write(root.join("filesystem.rs"), source).unwrap();
+        let run = |arguments: Value| {
+            let call = AgentToolCallNative {
+                request_id: "search-request".into(),
+                call_id: Uuid::new_v4().to_string(),
+                tool_name: "search_text".into(),
+                arguments,
+                target: AgentToolTargetNative::Local {
+                    target_id: "local".into(),
+                    session_id: "terminal".into(),
+                    cwd: Some(root.to_string_lossy().into()),
+                },
+                capability_id: "search".into(),
+            };
+            execute_file_tool_native(FileExecutionContextNative {
+                task_id: "search-task",
+                call: &call,
+                database: &database,
+                credentials: &credentials,
+                known_hosts_path: &known_hosts,
+                checkpoint_root: runtime.path(),
+                checkpoints: &checkpoints,
+                operations: &operations,
+            })
+        };
+        let mut arguments = json!({
+            "path": root.join("filesystem.rs"), "mode": "content",
+            "query": "fn ", "maxResults": 1
+        });
+        let first = run(arguments.clone()).unwrap();
+        assert_eq!(first.data["matches"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            first.data["matches"][0]["path"],
+            json!(root.join("filesystem.rs"))
+        );
+        assert_eq!(first.data["truncated"], true);
+        arguments["cursor"] = first.data["nextCursor"].clone();
+        let second = run(arguments.clone()).unwrap();
+        assert_ne!(
+            first.data["matches"][0]["line"],
+            second.data["matches"][0]["line"]
+        );
+        arguments.as_object_mut().unwrap().remove("cursor");
+        arguments["path"] = json!(".");
+        assert_eq!(
+            run(arguments.clone()).unwrap().data["matches"],
+            first.data["matches"]
+        );
+        arguments["path"] = json!("filesystem.rs");
+        arguments["globs"] = json!(["*.jsonl"]);
+        assert_eq!(run(arguments.clone()).unwrap().data["matches"], json!([]));
+        arguments["globs"] = json!(["*/filesystem.rs"]);
+        arguments["mode"] = json!("fileName");
+        arguments["query"] = json!("filesystem");
+        assert_eq!(
+            run(arguments.clone()).unwrap().data["matches"][0]["line"],
+            Value::Null
+        );
+        arguments["query"] = json!(["filesystem", "missing"].join("|"));
+        assert_eq!(run(arguments.clone()).unwrap().data["matches"], json!([]));
+        arguments["path"] = json!("../outside");
+        assert!(run(arguments.clone()).err().unwrap().contains("traversal"));
+        arguments["path"] = json!(fs::canonicalize(runtime.path()).unwrap());
+        assert!(run(arguments.clone())
+            .err()
+            .unwrap()
+            .contains("frozen root"));
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("filesystem.rs"), root.join("link.rs")).unwrap();
+            arguments["path"] = json!("link.rs");
+            assert!(run(arguments).err().unwrap().contains("symlink"));
+        }
+        assert!(resolve_local_existing(&root, "filesystem.rs", true)
+            .unwrap_err()
+            .contains("must be a directory"));
+        assert!(resolve_local_existing(&root, ".", false)
+            .unwrap_err()
+            .contains("must be a regular file"));
+    }
 
     #[test]
     fn local_scope_rejects_parent_and_symlink_escape() {

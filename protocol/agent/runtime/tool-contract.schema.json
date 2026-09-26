@@ -310,6 +310,7 @@
       }
     },
     "searchTextArguments": {
+      "description": "Search a regular file or recursively search a directory within the frozen target. Symlinks are rejected. query uses literal substring matching, not regex or OR expressions; search separate terms in separate calls. globs filter full file paths, including when path names a single file.",
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "query", "mode"],
