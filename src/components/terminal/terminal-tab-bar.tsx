@@ -24,6 +24,7 @@ import { invokeCloseSession } from '@/lib/ipc/tauri';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { TerminalCloseDetails } from './terminal-close-details';
 import type { SessionStatus } from '@/types';
 
 const DRAG_OVERLAY_CURSOR_GAP = 2;
@@ -660,7 +661,9 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         confirmLabel={t('common.close')}
         confirmVariant="destructive"
         onConfirm={confirmCloseSession}
-      />
+      >
+        {closingSession && <TerminalCloseDetails sessions={[closingSession]} />}
+      </ConfirmationDialog>
     </div>
   );
 };

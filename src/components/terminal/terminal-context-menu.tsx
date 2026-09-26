@@ -11,6 +11,8 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import type { TerminalSession } from '@/stores/terminalStore';
 import type { TerminalSplitDirection } from './terminal-split';
+import { TerminalCloseDetails } from './terminal-close-details';
+import { copyTerminalText } from './terminal-clipboard';
 
 const MENU_WIDTH = 256;
 const MENU_HEIGHT = 420;
@@ -164,11 +166,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   };
 
   const handleCopyInfo = (): void => {
-    if (navigator.clipboard) {
-      void navigator.clipboard.writeText(
-        `${target.username}@${target.host}:${target.port}`,
-      );
-    }
+    void copyTerminalText(`${target.username}@${target.host}:${target.port}`);
     onClose();
   };
 
@@ -402,7 +400,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         confirmLabel={t('common.close')}
         confirmVariant="destructive"
         onConfirm={confirmCloseOthers}
-      />
+      >
+        <TerminalCloseDetails sessions={closeOthersIds.flatMap((id) => sessions.filter((item) => item.sessionId === id))} />
+      </ConfirmationDialog>
       <ConfirmationDialog
         open={closeToRightConfirm}
         onOpenChange={(nextOpen) => { if (!nextOpen) dismissCloseToRightConfirm(); }}
@@ -411,7 +411,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         confirmLabel={t('common.close')}
         confirmVariant="destructive"
         onConfirm={confirmCloseToRight}
-      />
+      >
+        <TerminalCloseDetails sessions={closeToRightIds.flatMap((id) => sessions.filter((item) => item.sessionId === id))} />
+      </ConfirmationDialog>
     </>,
     document.body,
   );
