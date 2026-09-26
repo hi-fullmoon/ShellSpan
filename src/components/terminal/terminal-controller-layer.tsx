@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { terminalRegistry } from './registry/terminal-registry';
+import { terminalInputReadiness } from './terminal-input-readiness';
 import { useAppStore } from '@/stores/appStore';
 import {
   invokeGetAgentRuntimeSession,
@@ -584,6 +585,9 @@ export const TerminalControllerLayer: React.FC = () => {
     );
     for (const session of sessions) {
       if (session.pendingConnection) continue;
+      if (session.promptReady || session.status === 'error' || session.status === 'disconnected') {
+        terminalInputReadiness.finish(session.sessionId);
+      }
       if (!knownRef.current.has(session.sessionId) && !terminalRegistry.get(session.sessionId)) {
         const controller = terminalRegistry.create(
           session.sessionId,
