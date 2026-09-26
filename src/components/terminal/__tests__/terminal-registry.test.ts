@@ -457,10 +457,10 @@ describe('terminalRegistry', () => {
 
   it('debounces resize for 100ms and drops an unchanged grid size', async () => {
     const originalResizeObserver = globalThis.ResizeObserver;
-    const callbacks: ResizeObserverCallback[] = [];
+    const callbacks = new Map<ResizeObserver, ResizeObserverCallback>();
     class RecordingResizeObserver implements ResizeObserver {
       constructor(callback: ResizeObserverCallback) {
-        callbacks.push(callback);
+        callbacks.set(this, callback);
       }
       observe() {}
       unobserve() {}
@@ -489,8 +489,9 @@ describe('terminalRegistry', () => {
         .mockReturnValueOnce({ cols: 100, rows: 30 })
         .mockReturnValue({ cols: 101, rows: 31 });
 
-      callbacks[0]([], controller.resizeObserver!);
-      callbacks[0]([], controller.resizeObserver!);
+      const resizeCallback = callbacks.get(controller.resizeObserver!)!;
+      resizeCallback([], controller.resizeObserver!);
+      resizeCallback([], controller.resizeObserver!);
       vi.advanceTimersByTime(99);
       expect(invokeResizeSession).not.toHaveBeenCalled();
 
@@ -504,7 +505,7 @@ describe('terminalRegistry', () => {
       expect(invokeResizeSession).toHaveBeenCalledOnce();
       expect(invokeResizeSession).toHaveBeenCalledWith('s1', 101, 31);
 
-      callbacks[0]([], controller.resizeObserver!);
+      resizeCallback([], controller.resizeObserver!);
       vi.advanceTimersByTime(100);
       expect(invokeResizeSession).toHaveBeenCalledOnce();
     } finally {
