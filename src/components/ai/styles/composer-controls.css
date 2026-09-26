@@ -128,8 +128,8 @@
 
 .ai-composer-file-card > [data-slot='attachment-actions'] {
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: 1px;
+  right: 1px;
 }
 
 .ai-image-thumbnail-loading {
