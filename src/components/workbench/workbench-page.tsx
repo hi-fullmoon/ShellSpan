@@ -113,7 +113,7 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
       {actions && (
         <div
           data-slot="workbench-page-header-actions"
-          className="flex h-8 min-w-0 flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden @min-[64rem]:shrink-0 @min-[64rem]:overflow-visible @min-[64rem]:justify-end [&>button]:shrink-0"
+          className="-m-1 flex h-10 min-w-0 flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden @min-[64rem]:m-0 @min-[64rem]:h-8 @min-[64rem]:shrink-0 @min-[64rem]:overflow-visible @min-[64rem]:p-0 @min-[64rem]:justify-end [&>button]:shrink-0"
         >
           {actions}
         </div>
