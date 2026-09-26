@@ -189,22 +189,19 @@ describe('CommandPalette', () => {
       'settings',
     ]));
     expect(items.some((item) => item.id === 'navigation-runbooks')).toBe(false);
-    expect(items.some((item) => item.id === 'navigation-deployments')).toBe(true);
+    expect(items.some((item) => item.id === 'navigation-deployments')).toBe(false);
   });
 
-  it('opens deployments globally and with an explicit host filter', () => {
+  it('hides global and host-specific deployment entries', () => {
     const navigate = vi.fn();
     const openHostTool = vi.fn();
     const items = buildCommandPaletteItems(buildOptions({ navigate, openHostTool }));
 
-    items.find((item) => item.id === 'navigation-deployments')?.run();
-    items.find((item) => item.id === 'profile-deployments-profile-1')?.run();
-
-    expect(navigate).toHaveBeenCalledWith('workbench', 'deployments');
-    expect(openHostTool).toHaveBeenCalledWith('profile-1', 'deployments');
+    expect(items.find((item) => item.id === 'navigation-deployments')).toBeUndefined();
+    expect(items.find((item) => item.id === 'profile-deployments-profile-1')).toBeUndefined();
   });
 
-  it('searches deployment workflows by workflow and host and only navigates', () => {
+  it('hides workflow and new-release entries even when workflows are loaded', () => {
     const openDeployment = vi.fn();
     const items = buildCommandPaletteItems(buildOptions({
       workflows: [workflow],
@@ -213,16 +210,9 @@ describe('CommandPalette', () => {
     const details = items.find((item) => item.id === 'deployment-workflow-workflow-api');
     const release = items.find((item) => item.id === 'deployment-new-release-workflow-api');
 
-    expect(details).toMatchObject({
-      group: 'deployment',
-      keywords: expect.stringContaining('Payments API'),
-    });
-    expect(details?.keywords).toContain(profile.host);
-    details?.run();
-    release?.run();
-    expect(openDeployment).toHaveBeenNthCalledWith(1, workflow.id, 'details');
-    expect(openDeployment).toHaveBeenNthCalledWith(2, workflow.id, 'newRelease');
-    expect(items.some((item) => /approve|execute|shell/i.test(item.id))).toBe(false);
+    expect(details).toBeUndefined();
+    expect(release).toBeUndefined();
+    expect(items.some((item) => item.group === 'deployment')).toBe(false);
   });
 
   it('deduplicates bookmark loads by endpoint and retains a usable profile target', async () => {

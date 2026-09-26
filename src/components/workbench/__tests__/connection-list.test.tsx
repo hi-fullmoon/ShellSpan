@@ -468,7 +468,6 @@ describe('ConnectionList', () => {
 
     const menuActionNames = [
       'remoteHealth.open',
-      'deployment.openForHost',
       'portForward.open',
       'hostQuickActions.open',
       'hostOverview.open',
@@ -481,5 +480,6 @@ describe('ConnectionList', () => {
     for (const name of menuActionNames) {
       expect(screen.getByRole('menuitem', { name })).toBeInTheDocument();
     }
+    expect(screen.queryByRole('menuitem', { name: 'deployment.openForHost' })).not.toBeInTheDocument();
   });
 });
