@@ -265,7 +265,7 @@ pub(crate) fn capture_cancellable(
             return Err(format!("DEPLOYMENT_SOURCE_FORBIDDEN_MEMBER:{relative}"));
         }
         let source =
-            checked_member(&root, &relative).map_err(|error| format!("{error}:{relative}"))?;
+            checked_member(&root, relative).map_err(|error| format!("{error}:{relative}"))?;
         let metadata = fs::metadata(&source).map_err(|e| e.to_string())?;
         total = total.saturating_add(metadata.len());
         if total > 512 * 1024 * 1024 {
@@ -275,7 +275,7 @@ pub(crate) fn capture_cancellable(
         if bytes.len() as u64 != metadata.len() {
             return Err("DEPLOYMENT_SOURCE_CHANGED_DURING_CAPTURE".into());
         }
-        let destination = directory.path().join(&relative);
+        let destination = directory.path().join(relative);
         fs::create_dir_all(destination.parent().unwrap()).map_err(|e| e.to_string())?;
         fs::write(&destination, &bytes).map_err(|e| e.to_string())?;
         digest.update((relative.len() as u64).to_be_bytes());

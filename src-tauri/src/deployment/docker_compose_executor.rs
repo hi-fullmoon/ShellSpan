@@ -175,6 +175,8 @@ pub(crate) fn docker_compose_executor_registry(
     Ok(registry)
 }
 
+type FrozenSourceCache = BTreeMap<(String, String), (FrozenSourceSnapshot, Arc<tempfile::TempDir>)>;
+
 #[derive(Clone)]
 pub(crate) struct NativeDockerComposeBackend {
     app: Option<AppHandle>,
@@ -182,7 +184,7 @@ pub(crate) struct NativeDockerComposeBackend {
     credentials: CredentialManager,
     cancellations: ExecutionCancellationRegistry,
     known_hosts_path: PathBuf,
-    sources: Arc<Mutex<BTreeMap<(String, String), (FrozenSourceSnapshot, Arc<tempfile::TempDir>)>>>,
+    sources: Arc<Mutex<FrozenSourceCache>>,
     artifacts: DeploymentArtifactCas,
 }
 
@@ -730,8 +732,8 @@ fn build_image_bundle(
     let materialized = super::source_binding::materialize(frozen_root)
         .map_err(|error| NodeFailure::definite("sourceMaterialize", error))?;
     let source_root = materialized.path();
-    let context_path = canonical_member(&source_root, &config.context)?;
-    let dockerfile = canonical_member(&source_root, &config.dockerfile)?;
+    let context_path = canonical_member(source_root, &config.context)?;
+    let dockerfile = canonical_member(source_root, &config.dockerfile)?;
     if !context_path.is_dir() || !dockerfile.is_file() {
         return Err(NodeFailure::definite(
             "pathBoundary",
@@ -748,8 +750,8 @@ fn build_image_bundle(
     fixed_command(
         "docker",
         &["buildx".into(), "version".into()],
-        &source_root,
-        &cancellation,
+        source_root,
+        cancellation,
         Duration::from_secs(30),
     )?;
     let temporary = tempfile::tempdir()
@@ -772,8 +774,8 @@ fn build_image_bundle(
             format!("type=docker,dest={}", archive.display()),
             context_path.to_string_lossy().into_owned(),
         ],
-        &source_root,
-        &cancellation,
+        source_root,
+        cancellation,
         timeout,
     )?;
     let identity = super::docker_archive::docker_archive_image_identity(&archive, &image_reference)
@@ -806,7 +808,7 @@ fn build_image_bundle(
         producer: ArtifactProducer {
             node_type: "build.docker-buildx".into(),
             node_type_version: 2,
-            config_digest: config_digest,
+            config_digest,
         },
         annotations: BTreeMap::from([("releaseId".into(), release_id)]),
     };
@@ -2775,7 +2777,7 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                         .map_err(|error| NodeFailure::definite("sourceMaterialize", error))?;
                     let source_root = materialized.path();
                     let handle = execute_package_script_build(
-                        &source_root,
+                        source_root,
                         &source,
                         &config,
                         &planned,
@@ -2854,7 +2856,7 @@ impl DockerComposeExecutionBackend for NativeDockerComposeBackend {
                         .map_err(|error| NodeFailure::definite("sourceMaterialize", error))?;
                     let source_root = materialized.path();
                     let handle = execute_artifact_collect(
-                        &source_root,
+                        source_root,
                         &source,
                         &config,
                         &planned,

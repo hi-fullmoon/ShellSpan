@@ -51,10 +51,12 @@ pub(crate) struct DockerArchiveIdentity {
     pub manifest_id: Option<String>,
 }
 
+type ArchiveEntryReader<'a> = dyn Fn(&str, u64) -> Result<Option<Vec<u8>>, String> + 'a;
+
 fn verify_oci_manifest(
     descriptor: &serde_json::Value,
     config_id: &str,
-    read_entry: &dyn Fn(&str, u64) -> Result<Option<Vec<u8>>, String>,
+    read_entry: &ArchiveEntryReader<'_>,
     depth: u8,
 ) -> Result<u32, String> {
     if depth > 3 {
