@@ -806,8 +806,8 @@ export async function invokeStoreKeyCredential(
   });
 }
 
-export async function invokeListKeyCredentials(): Promise<{ id: string; label: string; keyType: string; kind: KeychainKeyKind; service: string }[]> {
-  const credentials = await invokeLogged<Array<{ id: string; label: string; keyType: string; kind: string; service: string }>>('list_key_credentials');
+export async function invokeListKeyCredentials(): Promise<{ id: string; label: string; keyType: string; kind: KeychainKeyKind; service: string; publicKey?: string | null; fingerprint?: string | null }[]> {
+  const credentials = await invokeLogged<Array<{ id: string; label: string; keyType: string; kind: string; service: string; publicKey?: string | null; fingerprint?: string | null }>>('list_key_credentials');
   return credentials.map((credential) => ({
     ...credential,
     kind: fromBackendKeychainKind(credential.kind),
