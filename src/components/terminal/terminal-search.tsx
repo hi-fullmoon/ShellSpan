@@ -105,7 +105,7 @@ export function TerminalSearch({ terminal, addon, onClose, active = true }: {
       : t(result.resultCount >= 1000 ? 'terminal.search.cappedResults' : 'terminal.search.results', { current: result.resultIndex + 1, count: result.resultCount });
 
   return (
-    <div data-terminal-search style={surfaceStyle} className="absolute right-2 top-2 z-20 flex w-80 max-w-[calc(100%-1rem)] items-center gap-1 rounded-md border p-1 shadow-md">
+    <div data-terminal-search style={surfaceStyle} className="absolute right-2 top-2 z-20 flex w-80 max-w-[calc(100%-1rem)] flex-wrap items-center gap-1 rounded-md border p-1 shadow-md">
       <Input
         ref={inputRef}
         value={query}
@@ -114,7 +114,7 @@ export function TerminalSearch({ terminal, addon, onClose, active = true }: {
         aria-label={t('terminal.search.placeholder')}
         aria-invalid={invalidRegex || undefined}
         aria-describedby={statusId}
-        className="h-6 min-w-0 flex-1 px-2 text-xs"
+        className="h-6 min-w-0 flex-[1_0_6rem] px-2 text-xs"
         autoFocus
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
@@ -128,24 +128,28 @@ export function TerminalSearch({ terminal, addon, onClose, active = true }: {
           }
         }}
       />
-      <span id={statusId} role="status" aria-live="polite" aria-atomic="true" aria-label={feedback || undefined} title={feedback} className="w-14 shrink-0 truncate text-center text-xs tabular-nums">
-        {invalidRegex ? t('terminal.search.invalidRegexShort') : !query || result?.resultCount === 0 ? '0/0' : feedback}
-      </span>
-      <Button variant="ghost" size="icon-xs" disabled={!query || invalidRegex || result?.resultCount === 0} onClick={() => find(true)} aria-label={t('terminal.search.previous')} title={t('terminal.search.previous')}>
-        <ChevronUpIcon />
-      </Button>
-      <Button variant="ghost" size="icon-xs" disabled={!query || invalidRegex || result?.resultCount === 0} onClick={() => find(false)} aria-label={t('terminal.search.next')} title={t('terminal.search.next')}>
-        <ChevronDownIcon />
-      </Button>
-      <Button variant={caseSensitive ? 'secondary' : 'ghost'} size="icon-xs" onClick={() => setCaseSensitive(!caseSensitive)} aria-pressed={caseSensitive} aria-label={t('terminal.search.caseSensitive')} title={t('terminal.search.caseSensitive')}>
-        Aa
-      </Button>
-      <Button variant={regex ? 'secondary' : 'ghost'} size="icon-xs" onClick={() => setRegex(!regex)} aria-pressed={regex} aria-label={t('terminal.search.regex')} title={t('terminal.search.regex')}>
-        .*
-      </Button>
-      <Button variant="ghost" size="icon-xs" onClick={onClose} aria-label={t('terminal.search.close')} title={t('terminal.search.close')}>
-        <XIcon />
-      </Button>
+      <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1 [&>button]:shrink-0">
+        <span id={statusId} role="status" aria-live="polite" aria-atomic="true" aria-label={feedback || undefined} title={feedback} className="w-14 shrink-0 truncate text-center text-xs tabular-nums">
+          {invalidRegex ? t('terminal.search.invalidRegexShort') : !query || result?.resultCount === 0 ? '0/0' : feedback}
+        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button variant="ghost" size="icon-xs" disabled={!query || invalidRegex || result?.resultCount === 0} onClick={() => find(true)} aria-label={t('terminal.search.previous')} title={t('terminal.search.previous')}>
+            <ChevronUpIcon />
+          </Button>
+          <Button variant="ghost" size="icon-xs" disabled={!query || invalidRegex || result?.resultCount === 0} onClick={() => find(false)} aria-label={t('terminal.search.next')} title={t('terminal.search.next')}>
+            <ChevronDownIcon />
+          </Button>
+        </div>
+        <Button variant={caseSensitive ? 'secondary' : 'ghost'} size="icon-xs" onClick={() => setCaseSensitive(!caseSensitive)} aria-pressed={caseSensitive} aria-label={t('terminal.search.caseSensitive')} title={t('terminal.search.caseSensitive')}>
+          Aa
+        </Button>
+        <Button variant={regex ? 'secondary' : 'ghost'} size="icon-xs" onClick={() => setRegex(!regex)} aria-pressed={regex} aria-label={t('terminal.search.regex')} title={t('terminal.search.regex')}>
+          .*
+        </Button>
+        <Button variant="ghost" size="icon-xs" onClick={onClose} aria-label={t('terminal.search.close')} title={t('terminal.search.close')}>
+          <XIcon />
+        </Button>
+      </div>
     </div>
   );
 }

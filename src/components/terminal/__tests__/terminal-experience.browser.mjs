@@ -209,6 +209,8 @@ try {
   for (const { width, height, paneWidth } of [
     { width: 1280, height: 800, paneWidth: 900 },
     { width: 1280, height: 800, paneWidth: 260 },
+    { width: 1280, height: 800, paneWidth: 240 },
+    { width: 1280, height: 800, paneWidth: 130 },
     { width: 320, height: 420, paneWidth: 320 },
   ]) {
     await page.setViewportSize({ width, height });
@@ -228,10 +230,19 @@ try {
     });
     assert.ok(geometry.inside && !geometry.overflow, JSON.stringify(geometry));
     assert.ok(geometry.controls.every((height) => height === geometry.controls[0]), JSON.stringify(geometry));
-    assert.equal(geometry.height, 34, 'Search should remain a compact single row');
-    assert.ok(geometry.centers.every(center => Math.abs(center - geometry.centers[0]) < 1), JSON.stringify(geometry));
+    const wrapped = paneWidth < 326;
+    assert.equal(geometry.centers[2], geometry.centers[3], 'Previous and next arrows must always wrap together');
+    if (paneWidth === 130) {
+      assert.ok(geometry.height > 62, 'Very narrow panes should allow additional control rows');
+      assert.ok(geometry.centers[2] > geometry.centers[1], 'Both arrows should move below the result count together');
+    } else {
+      assert.equal(geometry.height, wrapped ? 62 : 34, 'Narrow panes should wrap without compressing controls');
+      assert.ok(geometry.centers.slice(1).every(center => Math.abs(center - geometry.centers[1]) < 1), JSON.stringify(geometry));
+      assert.equal(geometry.centers[1] - geometry.centers[0], wrapped ? 28 : 0);
+    }
     const originalQuery = await search.inputValue();
     const inputWidth = (await search.boundingBox()).width;
+    assert.ok(inputWidth >= 96, `Search input must remain usable at pane width ${paneWidth}: ${inputWidth}`);
     await search.fill(crypto.randomUUID());
     const noResults = page.getByRole('status', { name: '未找到匹配项' });
     await noResults.waitFor();
