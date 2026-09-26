@@ -3042,6 +3042,21 @@ pub(crate) fn list_log_files(app: AppHandle) -> Result<Vec<LogFileInfo>, String>
 }
 
 #[tauri::command]
+pub(crate) async fn read_log_chunk(
+    app: AppHandle,
+    name: String,
+    cursor: Option<crate::log_reader::LogCursor>,
+) -> Result<crate::log_reader::LogChunk, String> {
+    let dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || crate::log_reader::read_chunk(&dir, &name, cursor))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 pub(crate) fn read_log_file(app: AppHandle, name: String) -> Result<String, String> {
     use std::fs;
 

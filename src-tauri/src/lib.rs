@@ -15,6 +15,7 @@ mod keychain;
 mod known_hosts;
 mod llm;
 mod local_fs;
+mod log_reader;
 mod menu;
 mod models;
 mod path_utils;
@@ -433,6 +434,7 @@ pub fn run() {
             commands::remove_known_host,
             commands::list_log_files,
             commands::read_log_file,
+            commands::read_log_chunk,
             commands::export_log_file,
             commands::list_local_directory,
             commands::store_key_credential,
