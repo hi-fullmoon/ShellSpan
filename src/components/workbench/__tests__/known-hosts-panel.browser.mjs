@@ -43,12 +43,32 @@ try {
     useKnownHostsStore.setState({ hosts, error: undefined, loading: false });
   }, hosts);
   await mkdir('.drawer-review', { recursive: true });
-  for (const width of [1440, 420]) {
+  for (const width of [1440, 960, 420, 320]) {
     await page.setViewportSize({ width, height: 720 });
+    const search = page.getByRole('textbox', { name: '搜索主机、端口、指纹或密钥类型' });
+    const searchLayout = await search.evaluate((input) => {
+      const group = input.closest('[data-slot="input-group"]');
+      const actions = group.parentElement;
+      const bounds = [...actions.children].map((element) => element.getBoundingClientRect());
+      return {
+        width: group.getBoundingClientRect().width,
+        tops: bounds.map((rect) => rect.top),
+        right: Math.max(...bounds.map((rect) => rect.right)),
+        containerRight: actions.getBoundingClientRect().right,
+      };
+    });
+    assert.ok(searchLayout.width <= 256, 'Search must not grow beyond the connection manager search width');
+    if (width >= 420) assert.equal(searchLayout.width, 256);
+    else assert.ok(searchLayout.width < 256, 'Search must shrink in narrow containers');
+    assert.equal(new Set(searchLayout.tops).size, 1, 'Search and refresh must remain on one row');
+    assert.ok(searchLayout.right <= searchLayout.containerRight, 'Refresh must remain inside the action row');
+    if (process.argv.includes('--search-only')) {
+      await page.screenshot({ path: `.drawer-review/known-hosts-search-${width}.png` });
+      continue;
+    }
     await page.getByRole('button', { name: '复制 ED25519 指纹', exact: true }).waitFor();
     assert.ok((await page.locator('#known-hosts-review').innerText()).includes('1 个主机 · 2 条密钥'), await page.locator('#known-hosts-review').innerText());
     assert.equal(await page.locator('#known-hosts-review .grid > *').count(), 1);
-    const search = page.getByRole('textbox', { name: '搜索主机、端口、指纹或密钥类型' });
     await search.fill('ECDSA');
     await page.getByText('匹配 1 个主机 · 1/2 条密钥', { exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: '复制 ED25519 指纹', exact: true }).count(), 0);
@@ -136,7 +156,9 @@ try {
     await page.getByText('没有匹配的已知主机记录', { exact: true }).waitFor();
     await search.fill('');
   }
-  console.log('Known hosts: grouping, search, clipboard, confirmation and wide/narrow rendering passed.');
+  console.log(process.argv.includes('--search-only')
+    ? 'Known hosts search: fixed width and narrow container shrinking passed.'
+    : 'Known hosts: grouping, search, clipboard, confirmation and wide/narrow rendering passed.');
 } finally {
   await browser.close();
   await rm(directory, { recursive: true, force: true });

@@ -43,7 +43,7 @@ describe('KnownHostsPanel', () => {
     expect(search.parentElement).toHaveClass(
       'min-w-0',
       'w-64',
-      'max-w-full',
+      'max-w-64',
       'flex-1',
       '@min-[64rem]:flex-none',
     );

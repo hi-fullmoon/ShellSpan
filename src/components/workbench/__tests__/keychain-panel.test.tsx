@@ -103,7 +103,7 @@ describe('KeychainPanel', () => {
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
     expect(search.parentElement).toHaveClass(
       'min-w-0',
-      'max-w-full',
+      'max-w-64',
       'flex-1',
     );
   });
