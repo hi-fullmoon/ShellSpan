@@ -1,9 +1,10 @@
-import { useEffect, useId, useMemo, useRef } from 'react';
+import { Activity, useEffect, useId, useMemo, useRef } from 'react';
 import { CircleAlertIcon, InfoIcon, MessageCircleQuestionIcon } from 'lucide-react';
 import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 import { Spinner } from '@/components/ui/spinner';
 
 import { useI18n } from '@/hooks/useI18n';
+import { useAppStore } from '@/stores/appStore';
 import { aiErrorMessage } from '@/lib/ai/error-message';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import { canResumeTokenBudgetedTask, hasTokenBudgetCheckpoint, taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
@@ -376,6 +377,7 @@ export function AiWorkspaceRoot({
   loadArtifact,
 }: AiWorkspaceRootProps): React.ReactNode {
   const { t } = useI18n();
+  const profileName = useAppStore((state) => state.profileName);
   const agentUnavailableReason = rawAgentUnavailableReason === null
     ? null : aiErrorMessage(rawAgentUnavailableReason, t);
   const rootRef = useRef<HTMLElement>(null);
@@ -393,8 +395,12 @@ export function AiWorkspaceRoot({
     ?? sessions.find((summary) => summary.id === selectedSessionId)?.title
     ?? t(scope === 'workbench' ? 'ai.workbench.conversationTitle' : 'ai.newConversation');
   const heroTitle = scope === 'terminal'
-    ? t('agent.emptyTitle')
-    : t('ai.workbench.emptyTitle');
+    ? profileName
+      ? t('agent.emptyTitleWithName', { name: profileName })
+      : t('agent.emptyTitle')
+    : profileName
+      ? t('ai.workbench.emptyTitleWithName', { name: profileName })
+      : t('ai.workbench.emptyTitle');
   const heroDescription = scope === 'terminal'
     ? t('agent.emptyDescription')
     : t('ai.workbench.empty');
@@ -486,8 +492,8 @@ export function AiWorkspaceRoot({
           onBack={() => onBack?.()}
           onClose={onClose}
         />
-      ) : (
-      <>
+      ) : null}
+      <Activity mode={route.kind === 'toolDetails' || route.kind === 'artifactDetails' ? 'hidden' : 'visible'}>
       <AiSessionHeader
         title={resolvedTitle}
         context={mode
@@ -719,8 +725,7 @@ export function AiWorkspaceRoot({
           }}
         />
       </div>
-      </>
-      )}
+      </Activity>
     </section>
   );
 }

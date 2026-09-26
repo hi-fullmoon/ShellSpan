@@ -85,6 +85,47 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiWorkspaceRoot Phase 3 skeleton', () => {
+  it('preserves expanded tools and the draft after returning from tool details', async () => {
+    const user = userEvent.setup();
+    const base = agentView();
+    const view = {
+      ...base,
+      nodes: base.nodes.map((node) => node.kind === 'turnProcess' ? { ...node, sessionId: 'tool-details-return-test' } : node),
+    };
+    function DetailsWorkspace() {
+      const [navigation, setNavigation] = useState(createAiWorkspaceNavigationState(view.summary.id));
+      return (
+        <AiWorkspaceRoot
+          view={view}
+          scope="terminal"
+          defaultDraft="Unsent draft"
+          navigation={navigation}
+          onOpenTool={(node) => setNavigation({
+            ...navigation,
+            route: { kind: 'toolDetails', sessionId: node.sessionId, nodeKey: node.key },
+          })}
+          onBack={() => setNavigation({ ...navigation, route: { kind: 'conversation', sessionId: view.summary.id } })}
+        />
+      );
+    }
+    render(<DetailsWorkspace />);
+    await user.click(screen.getByRole('button', { name: 'Process complete' }));
+    const tool = screen.getByRole('button', { name: /^Command:/u });
+    await user.click(tool);
+    const command = screen.getByRole('button', { name: 'Show full command' });
+    await user.click(command);
+    await user.click(screen.getByRole('button', { name: 'Open details for run_terminal_command' }));
+    expect(tool).not.toBeVisible();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    expect(tool).toBeVisible();
+    expect(tool).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Collapse command' })).toBe(command);
+    expect(screen.getByTestId('ai-workspace-composer')).toHaveTextContent('Unsent draft');
+    await user.click(tool);
+    expect(tool).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it.each(['stopping', 'waitingApproval', 'waitingQuestion'] as const)('places %s notices above the conversation instead of beside the composer', (phase) => {
     const { container, rerender } = render(<AiWorkspaceRoot scope="terminal" view={agentView('running')}
       composerState={createAiComposerState({ phase, runtimeStatus: 'running' })} />);

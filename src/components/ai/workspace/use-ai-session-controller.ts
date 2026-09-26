@@ -276,7 +276,8 @@ export function useAiSessionController({
   useEffect(()=>{if(isTauriRuntime()&&!routeSnapshot)void hydrateRoutes();},[routeSnapshot,hydrateRoutes]);
   const providers = useMemo(()=>routeSnapshot ? routeProviderConfigs(routeSnapshot,routeModels) : isTauriRuntime() ? [] : browserProviders,[routeSnapshot,routeModels,browserProviders]);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
-  const preferredAgentPermission = useAiSettingsStore((state) => state.agentPermissionMode);
+  const preferredAgentPermission = useAgentPermissionStore((state) =>
+    state.preferences[activeTerminalId ?? '']?.mode ?? 'autoApproveReadOnly');
   const provider = useMemo(() => {
     if (routeSnapshot) {
       if (!routeSnapshot.defaultSelection) return undefined;
@@ -340,7 +341,7 @@ export function useAiSessionController({
   const viewRef = useRef(view);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [newExecutionSurface, setNewExecutionSurface] = useState<AgentExecutionSurface>(
-    () => useAiSettingsStore.getState().agentExecutionSurface,
+    () => useAgentPermissionStore.getState().getExecutionSurface(activeTerminalId ?? ''),
   );
   const settingsPending = useRef(false);
   const currentProviderConfig = useCallback((): AiProviderConfig => {
@@ -680,12 +681,20 @@ export function useAiSessionController({
     const epoch = projectEpoch.current;
     if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
     if (!adapter.listFileReferences) throw new Error('Unavailable');
+    const target = viewRef.current?.snapshot.value.header.target;
+    if (root === undefined && !skillRoot && target && !target.cwd && !target.rootPath
+      && scope === 'terminal' && activeTerminal?.status === 'connected'
+      && target.sessionId === activeTerminal.sessionId) {
+      root = await resolveProjectRoot() ?? undefined;
+      if (signal.aborted || epoch !== projectEpoch.current) throw new DOMException('Cancelled', 'AbortError');
+      if (!root) throw new Error(`RootRequired: ${t('ai.workspace.skills.absoluteRoot')}`);
+    }
     const sessionId = await ensureProjectSession(root);
     if (signal.aborted || epoch !== projectEpoch.current) throw new DOMException('Cancelled', 'AbortError');
     const result = await adapter.listFileReferences(sessionId, query, signal);
     if (signal.aborted || epoch !== projectEpoch.current) throw new DOMException('Cancelled', 'AbortError');
     return result;
-  }, [adapter, ensureProjectSession]);
+  }, [activeTerminal, adapter, ensureProjectSession, resolveProjectRoot, scope, skillRoot, t]);
 
   effectExecutorRef.current = (effect): void => {
     const context = submissionContextRef.current;
@@ -808,7 +817,7 @@ export function useAiSessionController({
       return;
     }
     resetComposer();
-    setNewExecutionSurface(useAiSettingsStore.getState().agentExecutionSurface);
+    setNewExecutionSurface(useAgentPermissionStore.getState().getExecutionSurface(activeTerminal?.sessionId ?? ''));
     appliedWorkspaceRef.current = workspaceScopeKey;
     if (composerRef.current.draft) claimWorkspace();
     setOpenedSessionId(null);
@@ -1092,7 +1101,7 @@ export function useAiSessionController({
     setSkillNavigation((generation) => generation + 1);
     setSkillRoot(null);
     resetComposer();
-    setNewExecutionSurface(useAiSettingsStore.getState().agentExecutionSurface);
+    setNewExecutionSurface(useAgentPermissionStore.getState().getExecutionSurface(activeTerminal?.sessionId ?? ''));
     setOpenedSessionId(null);
     setView(null);
     setQueueMutation(null);
@@ -1103,7 +1112,7 @@ export function useAiSessionController({
       route: { kind: 'conversation', sessionId: null },
       returnFocus: null,
     }));
-  }, [claimWorkspace, resetComposer]);
+  }, [activeTerminal?.sessionId, claimWorkspace, resetComposer]);
 
   const startHistoricalContinuation = useCallback((content: string): void => {
     const message = content.trim();
@@ -1425,7 +1434,10 @@ export function useAiSessionController({
       if (target) return `${target.label ?? target.targetId} (${target.kind === 'local' ? 'local' : `${target.username}@${target.host}:${target.port}`}) · ${target.kind === 'local' ? target.cwd ?? '' : target.rootPath ?? ''}`;
       return activeTerminal ? `${activeTerminal.title} (${activeTerminal.host === 'local' ? 'local' : `${activeTerminal.username}@${activeTerminal.host}:${activeTerminal.port}`})${skillRoot ? ` · ${skillRoot}` : ''}` : '';
     })(),
-    skillsNeedsRoot: !skillRoot && !(visibleView?.snapshot.value.header.target?.cwd || visibleView?.snapshot.value.header.target?.rootPath),
+    skillsNeedsRoot: !skillRoot && !(visibleView?.snapshot.value.header.target?.cwd || visibleView?.snapshot.value.header.target?.rootPath)
+      && !(scope === 'terminal' && activeTerminal?.status === 'connected'
+        && (!openedSessionId && !visibleView
+          || visibleView?.snapshot.value.header.target?.sessionId === activeTerminal.sessionId)),
     skillsScopeKey: `${workspaceScopeKey}:${openedSessionId ?? "new"}:${skillNavigation}`,
     view: displayView,
     restoringSession: scope === 'workbench' && canRestoreWorkbench && !displayView
@@ -1464,7 +1476,7 @@ export function useAiSessionController({
       if (canContinueHistoricalView) {
         claimWorkspace();
         setNewExecutionSurface(surface);
-        useAiSettingsStore.getState().setAgentExecutionSurface(surface);
+        useAgentPermissionStore.getState().setExecutionSurface(activeTerminal?.sessionId ?? '', surface);
         return;
       }
       if (viewRef.current) {
@@ -1472,7 +1484,7 @@ export function useAiSessionController({
           if (!adapter.setExecutionSurface) throw new Error('Execution surface selection is unavailable');
           await adapter.setExecutionSurface(sessionId, surface);
           if (viewRef.current?.summary.id === sessionId) {
-            useAiSettingsStore.getState().setAgentExecutionSurface(surface);
+            useAgentPermissionStore.getState().setExecutionSurface(activeTerminal?.sessionId ?? '', surface);
           }
         });
         return;
@@ -1480,7 +1492,7 @@ export function useAiSessionController({
       if (composerRef.current.sessionId) return;
       claimWorkspace();
       setNewExecutionSurface(surface);
-      useAiSettingsStore.getState().setAgentExecutionSurface(surface);
+      useAgentPermissionStore.getState().setExecutionSurface(activeTerminal?.sessionId ?? '', surface);
     },
     providerLabel: routeSnapshot?.routes.find((route) => route.id === (
       (canContinueHistoricalView ? undefined : visibleView?.snapshot.value.header.modelSelection?.routeId) ?? provider?.id

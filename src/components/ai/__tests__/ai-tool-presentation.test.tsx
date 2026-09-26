@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -27,6 +27,22 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('AI tool presentation', () => {
+  it.each([
+    { locale: 'zh-CN' as const, label: '查看详情', accessibleName: '打开 run_terminal_command 的详情' },
+    { locale: 'en-US' as const, label: 'View details', accessibleName: 'Open details for run_terminal_command' },
+  ])('labels the tool details action clearly in $locale', async ({ locale, label, accessibleName }) => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const opened: AiConversationNodeOf<'tool'>[] = [];
+    render(<AiToolRow node={node} onInspect={(tool) => opened.push(tool)} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button'));
+    const details = screen.getByRole('button', { name: accessibleName });
+    expect(details).toHaveTextContent(label);
+    await user.click(details);
+    expect(opened).toEqual([node]);
+  });
+
   it('explains rejected historical input while preserving the diagnostic in details', async () => {
     await initI18n('zh-CN');
     useAppStore.setState({ locale: 'zh-CN' });
@@ -84,30 +100,19 @@ describe('AI tool presentation', () => {
     expect(stateDot).toHaveClass('mt-1.5');
   });
 
-  it('copies the command and output from their respective controls', async () => {
-    const user = userEvent.setup();
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText },
-    });
-    const { container } = render(<AiToolExpandedContent node={node} compact />);
+  it.each(['run_terminal_command', 'read_file'])('keeps one output copy action in the %s header', (name) => {
+    const { container, rerender } = render(<AiToolExpandedContent node={{ ...node, name }} compact />);
+    const copy = screen.getByRole('button', { name: 'Copy output' });
+    expect(container.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
+    expect(copy.closest('.ai-terminal-header, .ai-block-banner')).toHaveClass('pr-1', 'pl-3.5');
+    expect(screen.queryByRole('button', { name: 'Copy command' })).not.toBeInTheDocument();
 
-    const commandCopy = screen.getByRole('button', { name: 'Copy command' });
-    const outputCopy = screen.getByRole('button', { name: 'Copy output' });
-    expect(commandCopy.closest('.ai-terminal-header')).toBeInTheDocument();
-    expect(outputCopy.closest('.ai-terminal-output')).toBeInTheDocument();
-    expect(commandCopy).toHaveClass('ai-tool-copy-button');
-    expect(outputCopy).toHaveClass('ai-tool-copy-button');
-    expect(commandCopy.closest('.ai-terminal-header')).toHaveClass('pr-1', 'pl-3.5');
-    expect(outputCopy.parentElement).toHaveClass('right-1');
-    expect(container.querySelector('.ai-terminal-output > div:first-child')).toHaveClass('pr-9');
-    expect(container.querySelector('.ai-terminal-output')).toHaveTextContent('File contents');
-
-    await user.click(commandCopy);
-    await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(1, command));
-    await user.click(outputCopy);
-    await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(2, 'File contents'));
+    rerender(<AiToolExpandedContent node={{ ...node, name }} showCopyActions={false} />);
+    expect(container.querySelector('.ai-tool-copy-button')).not.toBeInTheDocument();
+    rerender(<AiToolExpandedContent node={{ ...node, name, output: '' }} />);
+    expect(container.querySelector('.ai-tool-copy-button')).not.toBeInTheDocument();
+    rerender(<AiToolExpandedContent node={{ ...node, name, state: 'running' }} />);
+    expect(container.querySelector('.ai-tool-copy-button')).not.toBeInTheDocument();
   });
 
   it('shows a leading icon on the inspect action and still opens tool details', async () => {
