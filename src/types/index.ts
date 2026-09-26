@@ -440,6 +440,21 @@ export interface LogFileInfo {
   modifiedAt: number;
 }
 
+export interface LogCursor {
+  identity: string;
+  offset: number;
+  anchor: number[];
+  size: number;
+  modifiedAt: string | null;
+}
+
+export interface LogChunk {
+  content: string;
+  cursor: LogCursor;
+  reset: boolean;
+  size: number;
+}
+
 export interface HostKeyCheckResult {
   status: 'match' | 'mismatch' | 'notFound' | 'failure';
   fingerprint?: string;

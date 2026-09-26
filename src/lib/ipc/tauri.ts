@@ -18,6 +18,8 @@ import type {
   JumpHostConfig,
   KnownHostEntry,
   LocalDirectoryListing,
+  LogChunk,
+  LogCursor,
   LogFileInfo,
   ProfileRow,
   PortForwardRuntime,
@@ -753,6 +755,13 @@ export async function invokeListLogFiles(): Promise<LogFileInfo[]> {
 
 export async function invokeReadLogFile(name: string): Promise<string> {
   return invokeLogged('read_log_file', { name }, { logLifecycle: false });
+}
+
+export async function invokeReadLogChunk(
+  name: string,
+  cursor?: LogCursor,
+): Promise<LogChunk> {
+  return invokeLogged('read_log_chunk', { name, cursor }, { logLifecycle: false });
 }
 
 export async function invokeExportLogFile(
