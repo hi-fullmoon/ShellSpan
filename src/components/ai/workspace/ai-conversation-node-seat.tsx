@@ -581,7 +581,7 @@ function TurnProcessDisclosure({
           }
         >
           {node.status === 'running' ? (
-            <AiProcessingStatus iconClassName={AI_DISCLOSURE_LEADING_CLASS} labelClassName={AI_DISCLOSURE_TITLE_CLASS} />
+            <AiProcessingStatus />
           ) : <>
             <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
               <ChevronDownIcon className="ai-disclosure-chevron" />
