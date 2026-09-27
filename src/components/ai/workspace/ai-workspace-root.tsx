@@ -1,4 +1,4 @@
-import { Activity, useEffect, useId, useMemo, useRef } from 'react';
+import { Activity, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { CircleAlertIcon, InfoIcon, MessageCircleQuestionIcon } from 'lucide-react';
 import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 import { Spinner } from '@/components/ui/spinner';
@@ -442,6 +442,21 @@ export function AiWorkspaceRoot({
     && status === 'idle' && composerState?.phase !== 'submitting';
   const firstSubmitTransition = useFirstSubmitTransition(hero, imageBusy, submissionContext);
   const sessionLedgerKey = view ? sessionRouteKey(view.summary.kind, view.summary.id) : null;
+  const [conversationIdentity, setConversationIdentity] = useState({
+    context: submissionContext, sessionId: selectedSessionId, generation: 0,
+  });
+  if (conversationIdentity.context !== submissionContext
+    || conversationIdentity.sessionId !== selectedSessionId) {
+    // The controller keeps this context through creation and replaces it on
+    // navigation. Adopting the new session must not restart the scroller.
+    const adoptingSession = submissionContext !== undefined
+      && conversationIdentity.context === submissionContext
+      && conversationIdentity.sessionId === null && selectedSessionId !== null;
+    setConversationIdentity({
+      context: submissionContext, sessionId: selectedSessionId,
+      generation: conversationIdentity.generation + (adoptingSession ? 0 : 1),
+    });
+  }
   const scrollAnchor = sessionLedgerKey
     ? navigation.scrollAnchorBySession[sessionLedgerKey]
     : undefined;
@@ -628,7 +643,7 @@ export function AiWorkspaceRoot({
             />
           ) : (
             <AiConversation
-              key={sessionLedgerKey ?? 'pending'}
+              key={conversationIdentity.generation}
               nodes={conversationNodes}
               renderers={surfaceMode === 'ask' ? aiAskConversationNodeRenderers : undefined}
               runningIndicator={historicalTargetUnavailable ? 'none' : surfaceMode}

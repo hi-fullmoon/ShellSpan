@@ -43,9 +43,10 @@ export function useTurnScrollTransition(viewportRef: RefObject<HTMLDivElement | 
       const inset = Number.parseFloat(getComputedStyle(content).paddingBlockStart) || 0;
       if (Math.abs(item.getBoundingClientRect().top - viewport.getBoundingClientRect().top - inset) < 2) finish();
     };
-    // scrollend restores immediate streaming follow. The timer also covers
-    // no-op jumps and browsers without scrollend support.
-    const timeout = window.setTimeout(interrupt, 1200);
+    // Restore the style without cancelling an in-flight scroll: long jumps
+    // can take more than 1200ms. Only explicit user input should stop them.
+    // This also covers no-op jumps and browsers without scrollend support.
+    const timeout = window.setTimeout(finish, 1200);
     viewport.addEventListener('scrollend', scrollEnd);
     viewport.addEventListener('wheel', interrupt, { capture: true, passive: true });
     viewport.addEventListener('touchstart', interrupt, { capture: true, passive: true });

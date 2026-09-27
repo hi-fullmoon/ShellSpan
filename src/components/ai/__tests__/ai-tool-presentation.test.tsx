@@ -6,6 +6,9 @@ import { AiToolExpandedContent, AiToolRow, classifyAiTool } from '@/components/a
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import skillsCapture from '@/test/fixtures/agent-skills-runtime.json';
+import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
+import type { AgentSessionEvent } from '@/types/agent-session';
 
 const command = 'powershell $f="$env:USERPROFILE\\todo.html"; $c=Get-Content $f; Write-Output $c';
 const node: AiConversationNodeOf<'tool'> = {
@@ -27,6 +30,20 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('AI tool presentation', () => {
+  it.each(['zh-CN', 'en-US'] as const)('localizes the captured skill tool title in %s', async (locale) => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const nodes = projectAgentChatNodes(skillsCapture as unknown as readonly AgentSessionEvent[]);
+    const skill = nodes.flatMap((item) => item.kind === 'turnProcess' ? item.children : [])
+      .find((item): item is AiConversationNodeOf<'tool'> => item.kind === 'tool' && item.name === 'skill');
+    expect(skill).toBeDefined();
+    render(<AiToolRow node={skill!} />);
+    const title = locale === 'zh-CN' ? '加载技能' : 'Load Skill';
+    expect(screen.getByText(title)).toBeVisible();
+    expect(screen.getByRole('button', { name: new RegExp(`^${title}:`) })).toBeVisible();
+    if (locale === 'zh-CN') expect(screen.queryByText('Load Skill')).not.toBeInTheDocument();
+  });
+
   it.each(['zh-CN', 'en-US'] as const)('shows system-trash recovery without promising in-app undo in %s', async (locale) => {
     useAppStore.setState({ locale });
     await initI18n(locale);

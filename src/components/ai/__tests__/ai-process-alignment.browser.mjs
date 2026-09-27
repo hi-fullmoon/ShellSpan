@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
-// Replay a real cancelled session; do not manufacture runtime events.
+// Replay a real session; do not manufacture runtime events.
 const events = (await readFile(process.argv[2], 'utf8')).trim().split('\n').map(JSON.parse);
 const browser = await chromium.launch();
 try {
@@ -16,8 +16,9 @@ try {
     const { projectAgentChatNodes } = await import('/src/lib/ai/conversation-projection.ts');
     const { initI18n } = await import('/src/locales/index.ts');
     await initI18n('zh-CN');
-    const node = projectAgentChatNodes(events).find(node => node.kind === 'turnProcess' && node.status === 'cancelled');
-    if (!node) throw new Error('Session must contain a cancelled process');
+    const node = projectAgentChatNodes(events).find(node => node.kind === 'turnProcess' && node.status === 'completed')
+      ?? projectAgentChatNodes(events).find(node => node.kind === 'turnProcess' && node.status === 'cancelled');
+    if (!node) throw new Error('Session must contain a completed or cancelled process');
     const host = document.createElement('main');
     host.id = 'process-alignment-check';
     host.className = 'ai-panel-shell';
@@ -54,8 +55,8 @@ try {
     await trigger.focus();
     await page.keyboard.press('Enter');
     assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
-    console.log(`Process alignment and keyboard toggle passed at ${width}px`);
   }
+  console.log('Process alignment and keyboard toggle passed at 900px and 320px');
 } finally {
   await browser.close();
 }
