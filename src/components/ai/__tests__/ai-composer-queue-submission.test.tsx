@@ -97,6 +97,11 @@ describe('Composer queue visibility during submission', () => {
       type: 'agent/inbox/spliced', data: { operation: 'claimed', lane, messages },
     }));
     rerender(seat());
+    expectQueue(running);
+    events.push(sessionEvent(events.length, {
+      type: 'user/message', turnId: 'turn-2', stepId: 'step-2', data: { message: messages[0] },
+    }));
+    rerender(seat());
     expectQueue(false);
   });
 });
