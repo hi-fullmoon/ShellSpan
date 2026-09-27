@@ -1536,7 +1536,6 @@ export default {
   'ai.clear': '清空对话',
   'ai.newConversation': '新建会话',
   'ai.workspace': 'AI 工作区',
-  'ai.workspace.processing': '处理中…',
   'ai.workspace.sessionActions': '会话操作',
   'ai.workspace.runningSubmitDeferred': '当前任务运行期间暂不发送新输入',
   'ai.workspace.composerPlaceholder': '输入问题… · Enter 发送 · Shift+Enter 换行',

@@ -810,7 +810,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(container.querySelector('.ai-reasoning-body'))
       .toHaveTextContent('Read the frozen context. Prepare a concise answer.');
     expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
-    expect(screen.queryByText('Working…')).toBeNull();
+    expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
 
     const settledNodes = view.nodes.map((node) => node.kind === 'turnProcess' ? ({
       ...node,
@@ -855,7 +855,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(thinkingIndicator).toHaveTextContent('Thinking…');
     expect(thinkingIndicator?.querySelector('.lucide-brain')).toBeInTheDocument();
     expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
-    expect(screen.queryByText('Working…')).toBeNull();
+    expect(thinkingIndicator).not.toHaveTextContent('Processing');
   });
 
   it('renders Agent sessions through the conversation-only surface', () => {
@@ -918,7 +918,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.getByRole('log', { name: 'AI conversation' })).toBeVisible();
-    expect(screen.getAllByText('Working…')).toHaveLength(1);
+    expect(screen.getAllByText('Processing')).toHaveLength(1);
   });
 
   it('gives every icon-only workspace action an accessible name and tooltip', () => {

@@ -50,6 +50,7 @@ try {
         await page.evaluate(() => window.startup.prefix(window.startup.firstVisibleProcess));
         await page.locator('[data-ai-thinking-indicator]').waitFor({ state: 'visible' });
         assert.equal(await page.locator('.ai-turn-process').count(), 0);
+        const pendingLabel = await page.locator('[data-ai-thinking-indicator] .shimmer').textContent();
         const pendingGeometry = await page.locator('[data-ai-thinking-indicator]').evaluate(element => {
           const row = element.getBoundingClientRect();
           const label = element.querySelector('[data-slot="marker-content"]').getBoundingClientRect();
@@ -59,6 +60,9 @@ try {
         await page.locator('.ai-turn-process').waitFor({ state: 'visible' });
         assert.equal(await page.locator('[data-ai-thinking-indicator]').count(), 0);
         assert.equal(await page.locator('.ai-turn-process-trigger [data-slot="spinner"]').count(), 1);
+        const processLabel = page.locator('.ai-turn-process-trigger .shimmer');
+        assert.equal(await processLabel.textContent(), pendingLabel, 'Processing text must stay consistent after the first output');
+        assert.notEqual(await processLabel.evaluate(element => getComputedStyle(element).animationName), 'none');
         assert.equal(await page.locator('[data-message-scroller-viewport]').evaluate(element =>
           element.scrollWidth <= element.clientWidth + 1), true, 'Startup output must fit the narrow viewport');
         await page.screenshot({ path: `/tmp/shellspan-startup-${engine.name()}-${width}.png` });
