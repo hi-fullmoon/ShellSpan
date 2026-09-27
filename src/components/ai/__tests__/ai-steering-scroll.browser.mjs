@@ -78,6 +78,28 @@ try {
               const viewport = document.querySelector('[data-message-scroller-viewport]');
               return following ? Math.abs(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) <= 8 : viewport.scrollTop === 0;
             }, following);
+            const submissionSamples = await page.evaluate(async () => {
+              const viewport = document.querySelector('[data-message-scroller-viewport]');
+              const samples = [];
+              window.timeline.nextTurn();
+              const start = performance.now();
+              while (performance.now() - start < 400) {
+                await new Promise(requestAnimationFrame);
+                samples.push(viewport.scrollTop);
+              }
+              return samples;
+            });
+            assert.equal(await page.locator('[data-message-id="user:queued"]').getAttribute('data-scroll-anchor'), 'false',
+              `${scenario}: a new question must not create a top-aligned turn anchor`);
+            if (following) {
+              await page.waitForFunction(() => {
+                const viewport = document.querySelector('[data-message-scroller-viewport]');
+                return Math.abs(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) <= 8;
+              });
+            } else {
+              assert.ok(submissionSamples.every(top => Math.abs(top) <= 1),
+                `${scenario}: submitting a question moved the reading position: ${JSON.stringify(submissionSamples)}`);
+            }
             if (motion === 'reduce') await page.screenshot({
               path: `/tmp/shellspan-steering-scroll-${engine.name()}-${width}-${following ? 'following' : 'reading'}.png`,
             });

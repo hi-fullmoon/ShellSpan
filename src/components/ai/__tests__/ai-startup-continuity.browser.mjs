@@ -50,6 +50,11 @@ try {
         await page.evaluate(() => window.startup.prefix(window.startup.firstVisibleProcess));
         await page.locator('[data-ai-thinking-indicator]').waitFor({ state: 'visible' });
         assert.equal(await page.locator('.ai-turn-process').count(), 0);
+        const pendingGeometry = await page.locator('[data-ai-thinking-indicator]').evaluate(element => {
+          const row = element.getBoundingClientRect();
+          const label = element.querySelector('[data-slot="marker-content"]').getBoundingClientRect();
+          return { height: row.height, center: label.top + label.height / 2 - row.top };
+        });
         await page.evaluate(() => window.startup.prefix(window.startup.firstVisibleProcess + 1));
         await page.locator('.ai-turn-process').waitFor({ state: 'visible' });
         assert.equal(await page.locator('[data-ai-thinking-indicator]').count(), 0);
@@ -57,6 +62,30 @@ try {
         assert.equal(await page.locator('[data-message-scroller-viewport]').evaluate(element =>
           element.scrollWidth <= element.clientWidth + 1), true, 'Startup output must fit the narrow viewport');
         await page.screenshot({ path: `/tmp/shellspan-startup-${engine.name()}-${width}.png` });
+        await page.evaluate(() => window.startup.prefix(window.startup.completedProcess));
+        const completed = page.locator('.ai-turn-process[data-status="completed"] .ai-turn-process-trigger').first();
+        await completed.waitFor({ state: 'visible' });
+        const completedGeometry = await completed.evaluate(element => {
+          const row = element.getBoundingClientRect();
+          const label = element.querySelector('.ai-disclosure-title').getBoundingClientRect();
+          return { height: row.height, center: label.top + label.height / 2 - row.top };
+        });
+        assert.deepEqual(pendingGeometry, completedGeometry,
+          'Processing and completed rows must retain the same height and label center');
+        assert.equal(completedGeometry.height, 32);
+        await page.evaluate(() => window.startup.delivery('pending'));
+        const bubble = page.locator('.ai-message-bubble-user');
+        await bubble.waitFor();
+        const pendingBounds = await bubble.boundingBox();
+        assert.equal(await page.locator('.ai-user-delivery').count(), 0,
+          'Pending user messages must not show a sending label');
+        await page.screenshot({ path: `/tmp/shellspan-user-pending-${engine.name()}-${width}.png` });
+        await page.evaluate(() => window.startup.delivery('committed'));
+        assert.deepEqual(await bubble.boundingBox(), pendingBounds,
+          'Committing the user message must not resize or move its bubble');
+        await page.evaluate(() => window.startup.delivery('failed'));
+        assert.equal(await page.locator('.ai-user-delivery[data-state="failed"]').count(), 1,
+          'Failed delivery must retain its visible feedback');
         assert.deepEqual(errors, []);
         await page.close();
       }
