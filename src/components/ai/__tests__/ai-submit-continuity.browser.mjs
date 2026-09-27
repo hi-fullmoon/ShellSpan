@@ -55,7 +55,7 @@ for (const engine of [chromium, webkit]) {
         assert.equal(await host.locator('[data-ai-thinking-indicator]').count(), 1,
           'Submitting must immediately show one thinking indicator before any model output');
         const processing = host.locator('[data-ai-thinking-indicator] .shimmer');
-        assert.equal(await processing.textContent(), '处理中…');
+        assert.equal(await processing.textContent(), '处理中');
         assert.notEqual(await processing.evaluate(element => getComputedStyle(element).animationName), 'none',
           'The processing label must retain its animated gradient');
         await page.keyboard.insertText('继续说明如何运行测试');

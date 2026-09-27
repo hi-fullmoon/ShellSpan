@@ -5,6 +5,7 @@ import { AiConversationNodeSeat } from '../workspace/ai-conversation-node-seat';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
 import { initI18n } from '@/locales';
+import { useAppStore } from '@/stores/appStore';
 import skillsCapture from '@/test/fixtures/agent-skills-runtime.json';
 import type { AgentSessionEvent } from '@/types/agent-session';
 
@@ -118,7 +119,7 @@ it('shows processing before the first Agent output and preserves waiting and Ask
   rerender(<AiConversation nodes={[]} status="running" pending throughSeq={null} />);
   expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
   expect(container.querySelectorAll('[data-ai-thinking-indicator]')).toHaveLength(1);
-  expect(container.querySelector('[data-ai-thinking-indicator] .shimmer')).toHaveTextContent('处理中…');
+  expect(container.querySelector('[data-ai-thinking-indicator] .shimmer')?.textContent).toBe('处理中');
   expect(container.querySelector('[data-ai-thinking-indicator] [data-slot="spinner"]')).toBeInTheDocument();
 
   rerender(<AiConversation nodes={[]} status="idle" pending throughSeq={null} />);
@@ -138,8 +139,9 @@ it('shows processing before the first Agent output and preserves waiting and Ask
   expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
 });
 
-it('hands the initial thinking feedback over to real recorded process output', async () => {
-  await initI18n('en-US');
+it.each([['en-US', 'Processing'], ['zh-CN', '处理中']] as const)('keeps the processing status consistent through recorded output in %s', async (locale, label) => {
+  useAppStore.setState({ locale });
+  await initI18n(locale);
   const events = skillsCapture as unknown as AgentSessionEvent[];
   const firstOutput = events.findIndex((_, index) => projectAgentChatNodes(events.slice(0, index + 1))
     .some(node => node.kind === 'turnProcess' && node.children.some(child => child.kind === 'contextInjection'
@@ -149,10 +151,18 @@ it('hands the initial thinking feedback over to real recorded process output', a
     nodes={projectAgentChatNodes(events.slice(0, firstOutput))}
     status="running" throughSeq={events[firstOutput - 1].seq} />);
   expect(container.querySelector('[data-ai-thinking-indicator]')).toBeInTheDocument();
-  expect(container.querySelector('[data-ai-thinking-indicator] .shimmer')).toHaveTextContent('Working…');
+  expect(container.querySelector('[data-ai-thinking-indicator] .shimmer')?.textContent).toBe(label);
   rerender(<AiConversation nodes={projectAgentChatNodes(events.slice(0, firstOutput + 1))}
     status="running" throughSeq={events[firstOutput].seq} />);
   expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
+  const trigger = container.querySelector('.ai-turn-process-trigger');
+  expect(trigger).toHaveAttribute('aria-label', label);
+  expect(trigger?.querySelector('.shimmer')?.textContent).toBe(label);
+  expect(trigger?.querySelector('[data-slot="spinner"]')).toBeInTheDocument();
+  fireEvent.click(trigger!);
+  expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(trigger!);
+  expect(trigger).toHaveAttribute('aria-expanded', 'true');
   rerender(<AiConversation nodes={projectAgentChatNodes(events)}
     status="running" throughSeq={events[events.length - 1].seq} />);
   expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();

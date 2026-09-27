@@ -1538,7 +1538,6 @@ export default {
   'ai.clear': 'Clear conversation',
   'ai.newConversation': 'New conversation',
   'ai.workspace': 'AI workspace',
-  'ai.workspace.processing': 'Working…',
   'ai.workspace.sessionActions': 'Session actions',
   'ai.workspace.runningSubmitDeferred': 'New input is not sent while the current task is running',
   'ai.workspace.composerPlaceholder': 'Ask anything… · Enter to send · Shift+Enter for a new line',
