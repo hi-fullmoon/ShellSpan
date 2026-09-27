@@ -124,16 +124,35 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const suppressProgrammaticFollowRef = useRef(initialAnchor?.atBottom === false);
   const followIntentRef = useRef(initialAnchor?.atBottom !== false && !turnAnchorKey);
   const resumeFollowOnScrollRef = useRef(false);
+  const jumpingToLatestRef = useRef(false);
   const pointerScrollStartRef = useRef<number | null>(null);
   const restoredAnchorRef = useRef(false);
   const restoreFrameRef = useRef<number | null>(null);
   const [positionReady, setPositionReady] = useState(false);
+  const [atBottom, setAtBottom] = useState(true);
   const { scrollToEnd, scrollToMessage, scrollToStart } = useMessageScroller();
   const observedBottomKeys = useRef(new Set(scrollToBottomKeys));
   const childItems = React.Children.toArray(children);
   const turnAnchor = [...childItems].reverse().find(wantsScrollAnchor);
   useTurnScrollTransition(viewportRef, turnAnchor ? messageItemId(turnAnchor, childItems.indexOf(turnAnchor)) : undefined);
   const observedAnchorItemsRef = useRef(new Set(childItems.filter(wantsScrollAnchor).map(messageItemId)));
+  const updateBottomVisibility = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (viewport) setAtBottom(isNearBottom(viewport));
+  }, []);
+
+  useLayoutEffect(() => {
+    updateBottomVisibility();
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+    // The primitive also tracks virtual spacer/follow state. Button visibility
+    // must reflect the actual scroll range, including composer/content resizes.
+    const observer = new ResizeObserver(updateBottomVisibility);
+    observer.observe(viewport);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [updateBottomVisibility]);
   const messageItems = childItems.map((child, index) => {
     const itemKey = React.isValidElement(child) && child.key !== null ? child.key : index;
     const messageId = messageItemId(child, index);
@@ -154,6 +173,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   }, []);
 
   const interruptRestore = useCallback(() => {
+    jumpingToLatestRef.current = false;
     cancelRestore();
     setPositionReady(true);
   }, [cancelRestore]);
@@ -180,6 +200,28 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     });
   }, [interruptRestore, scrollToMessage]);
 
+  const transitionToLatest = useCallback(() => {
+    // Read intent before the new row's height changes are compensated. A
+    // submission at the live edge must not enter detached jump mode.
+    const wasFollowing = followIntentRef.current;
+    interruptRestore();
+    suppressProgrammaticFollowRef.current = false;
+    pointerScrollStartRef.current = null;
+    const lastMessageId = contentRef.current?.lastElementChild?.previousElementSibling?.getAttribute('data-message-id');
+    const smooth = !wasFollowing && !!lastMessageId
+      && !!viewportRef.current && !isNearBottom(viewportRef.current)
+      && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    jumpingToLatestRef.current = smooth;
+    followIntentRef.current = !smooth;
+    // Defer bottom-follow until arrival so layout updates preserve the transition.
+    if (smooth && lastMessageId) {
+      scrollToMessage(lastMessageId, { align: 'end', behavior: 'smooth' });
+    } else {
+      scrollToEnd({ behavior: 'instant' });
+    }
+    onFollowLatest?.();
+  }, [interruptRestore, onFollowLatest, scrollToEnd, scrollToMessage]);
+
   useLayoutEffect(() => {
     let requested = false;
     for (const key of scrollToBottomKeys ?? []) {
@@ -193,18 +235,9 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     while (observedBottomKeys.current.size > 256) {
       observedBottomKeys.current.delete(observedBottomKeys.current.values().next().value!);
     }
-    cancelRestore();
     restoredAnchorRef.current = true;
-    suppressProgrammaticFollowRef.current = false;
-    followIntentRef.current = true;
-    onFollowLatest?.();
-    pointerScrollStartRef.current = null;
-    scrollToEnd();
-    // Resume the primitive's bottom-follow mode once. It observes subsequent
-    // composer/content resizes; replaying the jump on later frames competes
-    // with that adjustment and can override the user's next scroll gesture.
-    setPositionReady(true);
-  }, [cancelRestore, onFollowLatest, scrollToBottomKeys, scrollToEnd]);
+    transitionToLatest();
+  }, [scrollToBottomKeys, transitionToLatest]);
 
   const handlePointerDown = useCallback(() => {
     interruptRestore();
@@ -227,7 +260,13 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   }, []);
 
   const handleScrollCapture = useCallback(() => {
+    updateBottomVisibility();
     const viewport = viewportRef.current;
+    if (viewport && jumpingToLatestRef.current && isNearBottom(viewport)) {
+      jumpingToLatestRef.current = false;
+      followIntentRef.current = true;
+      scrollToEnd({ behavior: 'instant' });
+    }
     // Keyboard scrolling happens after keydown's default action. Resume only
     // once that requested movement has actually reached the live edge.
     if (viewport && resumeFollowOnScrollRef.current && isNearBottom(viewport)) {
@@ -262,7 +301,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
         });
       }
     }
-  }, [scrollToEnd, scrollToMessage]);
+  }, [scrollToEnd, scrollToMessage, updateBottomVisibility]);
 
   const handleWheelCapture = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     const viewport = viewportRef.current;
@@ -414,6 +453,12 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
         ref={viewportRef}
         onScrollCapture={handleScrollCapture}
         onScroll={readAnchor}
+        onScrollEnd={() => {
+          // Output can grow while the native transition is in flight.
+          if (!jumpingToLatestRef.current) return;
+          const id = contentRef.current?.lastElementChild?.previousElementSibling?.getAttribute('data-message-id');
+          if (id) scrollToMessage(id, { align: 'end', behavior: 'smooth' });
+        }}
         onWheelCapture={handleWheelCapture}
         onWheel={interruptRestore}
         onTouchMove={() => {
@@ -458,18 +503,20 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       </MessageScrollerViewport>
       <Tooltip>
         <TooltipTrigger render={<MessageScrollerButton
+          className={cn('group/latest-message', atBottom && 'hidden')}
           aria-label={t('ai.scrollToLatest')}
-          onClick={() => {
-            suppressProgrammaticFollowRef.current = false;
-            followIntentRef.current = true;
-            onFollowLatest?.();
+          onClick={(event) => {
+            event.preventDefault();
+            event.currentTarget.blur();
+            transitionToLatest();
           }}
         />}>
           {generating ? (
-            <span className="ai-scroll-loading inline-flex size-5 items-center justify-center gap-[3px]" aria-hidden="true">
+            <span className="ai-scroll-loading inline-flex size-5 items-center justify-center gap-[3px] group-hover/latest-message:hidden" aria-hidden="true">
               <span /><span /><span />
             </span>
-          ) : <ArrowDownIcon />}
+          ) : null}
+          <ArrowDownIcon className={generating ? 'hidden group-hover/latest-message:block' : undefined} />
         </TooltipTrigger>
         <TooltipContent>{t('ai.scrollToLatest')}</TooltipContent>
       </Tooltip>
