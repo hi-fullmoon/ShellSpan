@@ -64,13 +64,12 @@ it('explains blocked Ask submission once and preserves the draft until the reply
   expect(submissions).toEqual(['Explain the result']);
 });
 
-it('keeps the Agent processing indicator mounted from submission through runtime startup', () => {
+it('keeps Agent submission and runtime startup free of a processing row', () => {
   const props = { nodes: [], status: 'idle' as const, throughSeq: null };
   const { container, rerender } = render(<AiConversation {...props} pending />);
-  const indicator = container.querySelector('[data-ai-running-indicator]');
-  expect(indicator).toHaveTextContent('Working…');
+  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
   rerender(<AiConversation {...props} status="running" />);
-  expect(container.querySelector('[data-ai-running-indicator]')).toBe(indicator);
+  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
   rerender(<AiConversation {...props} />);
   expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
 });

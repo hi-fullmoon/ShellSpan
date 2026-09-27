@@ -50,7 +50,14 @@ for (const engine of [chromium, webkit]) {
         else await host.getByRole('button', { name: '发送', exact: true }).click();
         await page.waitForFunction(() => window.submittedEditor.textContent === '');
         assert.equal(await editor.evaluate(element => document.activeElement === element), true);
-        await host.locator('[data-ai-running-indicator]').waitFor({ state: 'visible' });
+        assert.equal(await host.locator('[data-ai-running-indicator]').count(), 0);
+        await host.locator('[data-ai-thinking-indicator]').waitFor({ state: 'visible' });
+        assert.equal(await host.locator('[data-ai-thinking-indicator]').count(), 1,
+          'Submitting must immediately show one thinking indicator before any model output');
+        const processing = host.locator('[data-ai-thinking-indicator] .shimmer');
+        assert.equal(await processing.textContent(), '处理中…');
+        assert.notEqual(await processing.evaluate(element => getComputedStyle(element).animationName), 'none',
+          'The processing label must retain its animated gradient');
         await page.keyboard.insertText('继续说明如何运行测试');
         await page.keyboard.press('Enter');
         await page.keyboard.press('Enter');

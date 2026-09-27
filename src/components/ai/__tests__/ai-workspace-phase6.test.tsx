@@ -75,7 +75,7 @@ describe('Phase 6 Queue Dock', () => {
     expect(update).toHaveBeenCalledWith(queue[0], 'Updated task');
 
     await user.click(screen.getAllByRole('button', { name: 'Reorder queued input' })[0]);
-    await user.click(await screen.findByRole('menuitem', { name: 'Move down in this lane' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Move down' }));
     expect(reorder).toHaveBeenCalledWith('nextTurn', ['item-b', 'item-a']);
 
     await user.click(screen.getAllByRole('button', { name: 'Remove queued input' })[1]);
@@ -135,7 +135,11 @@ describe('Phase 6 Queue Dock', () => {
     );
     expect(screen.getByText('Queue changed elsewhere')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
-    expect(within(screen.getByRole('alert')).queryByRole('button')).toBeNull();
+    const details = within(screen.getByRole('alert')).getByRole('button', { name: 'Technical details' });
+    expect(details).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('current revision 9')).toBeNull();
+    await userEvent.click(details);
+    expect(screen.getByText('current revision 9')).toBeVisible();
   });
 });
 
@@ -397,9 +401,10 @@ describe('Queue steering controls', () => {
 
   it('keeps a failed operation visible without retry buttons after the queue becomes empty', async () => {
     render(<AiQueueDock items={[]} mutation={{ intent: { type: 'steer', itemId: 'gone' }, status: 'failed', error: 'receipt unavailable', conflict: false }} />);
-    expect(screen.getByRole('alert')).toHaveTextContent('receipt unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent('Queue update failed');
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
-    expect(within(screen.getByRole('alert')).queryByRole('button')).toBeNull();
+    await userEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Technical details' }));
+    expect(screen.getByText('receipt unavailable')).toBeVisible();
   });
 
   it('localizes the dedicated action and timing in Chinese', async () => {

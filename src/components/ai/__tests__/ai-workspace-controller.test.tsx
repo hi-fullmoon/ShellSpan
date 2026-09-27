@@ -2163,7 +2163,7 @@ describe('Queue mutation controller', () => {
     expect(result.current.queueMutation).toBeNull();
   });
 
-  it('wires the production root/composer queue action to mutateInbox and removes a claimed row', async () => {
+  it('wires the production root/composer queue action to mutateInbox and removes a consumed row', async () => {
     connectedTerminal();
     const view = steerableView();
     let publish: ((next: AiSessionView) => void) | undefined;
@@ -2172,6 +2172,8 @@ describe('Queue mutation controller', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Steer now' }));
     await waitFor(() => expect(agent.mutateInbox).toHaveBeenCalledWith(expect.objectContaining({ type: 'steer', itemId: 'queued' })));
     act(() => publish?.({ ...view, inbox: [{ ...view.inbox[0], lane: 'nextStep', state: 'claimed' }] }));
+    expect(screen.getByText('queued text')).toBeInTheDocument();
+    act(() => publish?.({ ...view, inbox: [{ ...view.inbox[0], lane: 'nextStep', state: 'claimed', consumed: true }] }));
     expect(screen.queryByText('queued text')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Steer now' })).toBeNull();
   });

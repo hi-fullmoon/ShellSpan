@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -6,6 +7,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { chromium, webkit } from 'playwright';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
+const document = await readFile(new URL('../../../../AGENTS.md', import.meta.url), 'utf8');
 const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `/tmp/shellspan-turn-anchor-${process.pid}`,
@@ -78,7 +80,6 @@ try {
         await page.evaluate(length => window.renderTurnPrefix(length), nodes.length);
         await page.waitForTimeout(100);
         assert.ok(Math.abs((await metrics()).top - reading.top) < 2, 'Parent updates must preserve reading position');
-        console.log(JSON.stringify({ engine: engine.name(), width, motion, intermediatePositions: positions.size, aligned, grown }));
         if (motion === 'no-preference') {
           await page.reload();
           await page.waitForFunction(() => Boolean(window.renderTurnPrefix));
@@ -94,9 +95,23 @@ try {
           assert.ok(Math.abs((await metrics()).top - interrupted.top) < 2, 'Wheel input must stop the transition');
           assert.equal(await viewport.evaluate(element => element.style.scrollBehavior), '');
         }
+        await page.reload();
+        await page.waitForFunction(() => Boolean(window.renderDocumentTurn));
+        await page.evaluate(text => window.renderDocumentTurn(text, false), document);
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        await viewport.focus();
+        await page.keyboard.press('Home');
+        await page.waitForTimeout(200);
+        await page.evaluate(text => window.renderDocumentTurn(text, true), document);
+        await page.waitForTimeout(1600);
+        const distant = await metrics();
+        assert.ok(Math.abs(distant.offset - 20) < 2,
+          `${engine.name()} ${width} ${motion}: a submission from distant history must reach the top: ${JSON.stringify(distant)}`);
+        await page.screenshot({ path: `/tmp/shellspan-distant-turn-${engine.name()}-${width}-${motion}.png` });
         await page.close();
       }
       }
     } finally { await browser.close(); }
   }
+  console.log('Turn alignment, long-distance submission and manual interruption passed in Chromium and WebKit at 360px and 900px with both motion settings');
 } finally { await server.close(); }
