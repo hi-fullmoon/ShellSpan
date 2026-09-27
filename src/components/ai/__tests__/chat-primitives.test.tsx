@@ -276,8 +276,10 @@ describe('MessageScroller', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(scrollTo).not.toHaveBeenCalled();
 
+    installItemRects();
     fireEvent.click(jump!);
     expect(scrollTo).toHaveBeenCalledWith({ behavior: 'smooth', top: 400 });
+    fireEvent.scroll(viewport);
 
     // Jump-to-latest resumes following subsequent output, too.
     itemCount = 6;

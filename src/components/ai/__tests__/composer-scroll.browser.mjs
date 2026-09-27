@@ -66,6 +66,8 @@ try {
                 style: { whiteSpace: 'pre-wrap' },
               }, text))),
               h('button', { onClick: () => setGenerating(false) }, 'Finish generation'),
+              h('button', { onClick: () => setMessages(current => current.map((text, index) =>
+                index === current.length - 1 ? text + '\\nContinued output'.repeat(8) : text)) }, 'Continue output'),
               h('textarea', {
                 'aria-label': 'Message', value: draft,
                 style: { flexShrink: 0, height: draft ? 180 : 40 },
@@ -86,6 +88,18 @@ try {
           await input.fill(`Message ${index}\n` + 'A multiline message that wraps in a narrow panel. '.repeat(30));
           await input.press('Enter');
         }
+        await input.fill('Submit while already following the latest message');
+        await input.press('Enter');
+        const activeDuringFollow = await page.evaluate(async () => {
+          const button = document.querySelector('[data-slot="message-scroller-button"]');
+          let active = button.dataset.active === 'true';
+          for (let frame = 0; frame < 20; frame++) {
+            await new Promise(requestAnimationFrame);
+            active ||= button.dataset.active === 'true';
+          }
+          return active;
+        });
+        assert.equal(activeDuringFollow, false, 'Submitting at the bottom must keep the jump/loading button hidden');
         await viewport.hover();
         await page.mouse.wheel(0, -800);
         await page.waitForFunction(() => {
@@ -117,8 +131,39 @@ try {
         await page.emulateMedia({ reducedMotion: 'no-preference' });
         await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-slot="message-scroller-button"]')).scale === '1');
         const generatingBounds = await jump.boundingBox();
+        assert.equal(await jump.locator('svg').isVisible(), false);
+        await jump.hover();
+        assert.equal(await jump.locator('svg').isVisible(), true, 'Hover should show the down arrow during generation');
+        assert.equal(await jump.locator('.ai-scroll-loading').isVisible(), false);
+        const hoverBounds = await jump.boundingBox();
+        assert.equal(hoverBounds.width, generatingBounds.width);
+        assert.equal(hoverBounds.height, generatingBounds.height);
+        await page.screenshot({ path: `/tmp/scroll-hover-${engine.name()}-${width}.png` });
+        await viewport.hover();
+        assert.equal(await jump.locator('svg').isVisible(), false);
+        assert.equal(await jump.locator('.ai-scroll-loading').isVisible(), true, 'Leaving should restore loading dots');
         await page.screenshot({ path: `/tmp/scroll-loading-${engine.name()}-${width}.png` });
-        await jump.click();
+        const transition = await jump.evaluate(async button => {
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          const start = viewport.scrollTop;
+          button.click();
+          const immediate = viewport.scrollTop;
+          const positions = [];
+          let continued = false;
+          const deadline = performance.now() + 2000;
+          while (performance.now() < deadline) {
+            await new Promise(requestAnimationFrame);
+            positions.push(viewport.scrollTop);
+            if (!continued && viewport.scrollTop > start + 2) {
+              continued = true;
+              Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Continue output').click();
+            }
+            if (Math.abs(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) <= 1) break;
+          }
+          return { start, immediate, positions, end: viewport.scrollHeight - viewport.clientHeight };
+        });
+        assert.ok(Math.abs(transition.immediate - transition.start) < 2, 'Click must not immediately jump to the end');
+        assert.ok(transition.positions.some(top => top > transition.start + 2 && top < transition.end - 2), 'Scroll must pass through intermediate positions');
         await page.waitForFunction(() => {
           const element = document.querySelector('[data-message-scroller-viewport]');
           return Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 1;
@@ -132,6 +177,13 @@ try {
         const finishedBounds = await jump.boundingBox();
         assert.equal(finishedBounds.width, generatingBounds.width);
         assert.equal(finishedBounds.height, generatingBounds.height);
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        const reducedDistance = await jump.evaluate(button => {
+          button.click();
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+        });
+        assert.ok(Math.abs(reducedDistance) <= 1, 'Reduced motion should reach the end immediately');
         await page.close();
       }
     } finally {
