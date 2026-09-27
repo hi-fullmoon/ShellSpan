@@ -170,8 +170,28 @@ try {
       assert.deepEqual(await page.locator('.ai-queue-row').first().boundingBox(), rowBefore, 'Editing must preserve queue row geometry');
       await page.mouse.move(0, 0);
       await page.screenshot({ path: join(screenshots, `${locale}-${width}-editing.png`) });
-      await input.press('Escape');
-      assert.equal(await edit.evaluate(element => document.activeElement === element), true);
+      for (const key of ['Enter', 'Escape']) {
+        if (key === 'Escape') await edit.click();
+        await page.mouse.move(0, 0);
+        await input.fill('Updated queued input');
+        await input.press(key);
+        assert.equal(await edit.evaluate(element => document.activeElement === element), true);
+        // Wait beyond the tooltip delay to catch an unintended focus-triggered popup.
+        await page.waitForTimeout(700);
+        assert.equal(await page.getByRole('tooltip').count(), 0, `${key} must restore focus without opening a tooltip`);
+        assert.equal(await page.locator('.ai-queue-row-content > span').first().textContent(), 'Updated queued input');
+        await page.screenshot({ path: join(screenshots, `${locale}-${width}-after-${key}.png`) });
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('Shift+Tab');
+        await page.getByRole('tooltip').filter({ hasText: chinese ? '编辑排队输入' : 'Edit queued input' }).waitFor();
+        await page.keyboard.press('Escape');
+        await page.waitForFunction(() => document.querySelectorAll('[role="tooltip"]').length === 0);
+        await edit.hover();
+        await page.getByRole('tooltip').filter({ hasText: chinese ? '编辑排队输入' : 'Edit queued input' }).waitFor();
+        await page.mouse.move(0, 0);
+        await page.keyboard.press('Escape');
+        await page.waitForFunction(() => document.querySelectorAll('[role="tooltip"]').length === 0);
+      }
       await page.close();
     }
   }

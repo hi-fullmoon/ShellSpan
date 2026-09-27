@@ -53,6 +53,7 @@ function IconAction({
   disabled,
   onClick,
   buttonRef,
+  onTooltipOpenChange,
   children,
 }: {
   readonly label: string;
@@ -60,11 +61,12 @@ function IconAction({
   readonly disabled?: boolean;
   readonly onClick: () => void;
   readonly buttonRef?: React.Ref<HTMLButtonElement>;
+  readonly onTooltipOpenChange?: React.ComponentProps<typeof Tooltip>['onOpenChange'];
   readonly children: React.ReactNode;
 }): React.ReactNode {
   const tooltipId = useId();
   return (
-    <Tooltip>
+    <Tooltip onOpenChange={onTooltipOpenChange}>
       <TooltipTrigger
         render={(
           <Button
@@ -277,6 +279,12 @@ export function AiQueueDock({
                       </DropdownMenu>}
                       <IconAction
                         label={t('ai.workspace.queue.edit')}
+                        onTooltipOpenChange={(open, details) => {
+                          // Restoring focus after editing should not announce the edit hint again.
+                          if (open && details.reason === 'trigger-focus' && restoreEditFocus.current === item.id) {
+                            details.cancel();
+                          }
+                        }}
                         buttonRef={(button) => {
                           if (button) editButtons.current.set(item.id, button);
                           else editButtons.current.delete(item.id);
