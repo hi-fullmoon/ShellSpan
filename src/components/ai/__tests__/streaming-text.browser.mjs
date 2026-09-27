@@ -36,6 +36,32 @@ try {
         page.on('pageerror', (error) => errors.push(error.message));
         await page.goto(`http://127.0.0.1:${address.port}/__text-reveal`);
         await page.waitForFunction(() => Boolean(window.streamingCheck));
+        await page.evaluate(source => window.streamingCheck.resetFollowing(source), document);
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        await page.evaluate(() => document.fonts.ready);
+        const layoutFollow = await page.evaluate(async source => {
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+          await frame();
+          await frame();
+          // Submission transitions use this native CSS setting. Streaming
+          // compensation must not inherit it and chase a moving destination.
+          viewport.style.scrollBehavior = 'smooth';
+          const gaps = [];
+          for (const paragraph of source.split('\n\n').slice(0, 8)) {
+            window.streamingCheck.append(paragraph + '\n\n');
+            gaps.push(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop);
+          }
+          const top = viewport.scrollTop;
+          for (let index = 0; index < 6; index++) await frame();
+          const drift = viewport.scrollTop - top;
+          viewport.style.scrollBehavior = '';
+          return { gaps, drift };
+        }, document);
+        assert.ok(layoutFollow.gaps.every(gap => Math.abs(gap) <= 1),
+          `Stream layout must align before paint even with smooth scrolling: ${JSON.stringify(layoutFollow)}`);
+        assert.ok(Math.abs(layoutFollow.drift) <= 1,
+          `Stream layout must not keep scrolling after its commit: ${layoutFollow.drift}`);
         const initial = await page.evaluate((heading) => {
           window.streamingCheck.resetFollowing('');
           window.streamingCheck.append(heading.slice(0, 8));
@@ -64,12 +90,12 @@ try {
           };
         }, heading);
         assert.equal(initial.text, heading.slice(8));
-        assert.equal(initial.duration, 420);
+        assert.equal(initial.duration, 180);
         assert.equal(initial.initialAnimated, true);
         assert.ok(initial.samples.every((sample) => sample.filter === 'none'));
         assert.ok(initial.samples.every((sample) => sample.weight === initial.samples[0].weight
           && sample.size === initial.samples[0].size));
-        assert.ok(initial.opacity > 0 && initial.opacity < 0.5);
+        assert.ok(initial.opacity > 0 && initial.opacity < 1);
         await page.evaluate(() => new Promise((resolve) => {
           requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         }));
@@ -146,6 +172,40 @@ try {
           };
         }, document);
         assert.deepEqual(arrivals, { headingPreserved: true, paragraphAnimated: true, itemsAnimated: true });
+        const boundary = await page.evaluate(async (source) => {
+          const { splitStreamingMarkdown } = await import('/src/lib/streaming-markdown.ts');
+          const chunks = splitStreamingMarkdown(source);
+          const before = chunks[0] + chunks[1].split('\n')[0];
+          window.streamingCheck.resetFollowing('');
+          window.streamingCheck.append(before);
+          document.getAnimations().forEach(animation => animation.finish());
+          const answer = document.querySelector('[data-ai-node-key="answer"] .ai-assistant-answer');
+          const last = answer.lastElementChild.lastElementChild;
+          const text = last.textContent;
+          const offset = last.getBoundingClientRect().top - answer.getBoundingClientRect().top;
+          const height = answer.getBoundingClientRect().height;
+          const count = answer.children.length;
+          window.streamingCheck.append('\n');
+          const moved = answer.lastElementChild.firstElementChild;
+          const result = {
+            split: answer.children.length === count + 1,
+            tag: moved.tagName,
+            unchanged: moved.textContent === text,
+            offsetDelta: moved.getBoundingClientRect().top - answer.getBoundingClientRect().top - offset,
+            heightDelta: answer.getBoundingClientRect().height - height,
+            replayed: moved.getAnimations({ subtree: true }).length,
+          };
+          window.streamingCheck.append('\n' + source.split('\n').find(line => line.startsWith('本文件')));
+          return { ...result, newAnimations: answer.lastElementChild.lastElementChild.getAnimations({ subtree: true }).length };
+        }, document);
+        assert.equal(boundary.split, true, 'Repository Markdown must exercise a chunk boundary');
+        assert.match(boundary.tag, /^H[123]$/);
+        assert.equal(boundary.unchanged, true);
+        assert.ok(Math.abs(boundary.offsetDelta) < 1, 'A split must not move an already visible heading');
+        assert.ok(Math.abs(boundary.heightDelta) < 1, 'A split must preserve answer height');
+        assert.equal(boundary.replayed, 0, 'A split must not replay existing text animations');
+        assert.ok(boundary.newAnimations > 0, 'New text after a split must still animate');
+
         const completion = await page.evaluate((heading) => {
           window.streamingCheck.resetFollowing('');
           window.streamingCheck.append(heading);
@@ -179,20 +239,25 @@ try {
             });
           });
           animations.forEach((animation) => { animation.currentTime = 120; });
+          const firstOpacity = Number(getComputedStyle(runs[0]).opacity);
+          const lastOpacity = Number(getComputedStyle(runs[runs.length - 1]).opacity);
+          animations.forEach((animation) => { animation.currentTime = 280; });
           return {
             samples,
             count: runs.length,
             text: document.querySelector('[data-ai-node-key="answer"]').textContent,
             expected: paragraph,
-            firstOpacity: Number(getComputedStyle(runs[0]).opacity),
-            lastOpacity: Number(getComputedStyle(runs[runs.length - 1]).opacity),
+            firstOpacity,
+            lastOpacity,
+            settled: runs.every(run => getComputedStyle(run).opacity === '1'),
             duration: animations[0].effect.getTiming().duration,
           };
         }, document);
         assert.ok(stagger.count > 1 && stagger.count <= 8);
         assert.equal(stagger.text, stagger.expected);
         assert.ok(stagger.firstOpacity > stagger.lastOpacity);
-        assert.equal(stagger.duration, 420);
+        assert.equal(stagger.duration, 180);
+        assert.equal(stagger.settled, true, 'A burst must become fully readable within 280ms');
         for (const sample of stagger.samples) {
           assert.ok(sample.every((run, index) => run.filter === 'none'
             && run.weight === stagger.samples[0][index].weight

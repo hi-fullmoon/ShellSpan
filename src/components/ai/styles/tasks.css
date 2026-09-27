@@ -7,17 +7,20 @@
 
 .ai-queue-dock {
   border: 0;
-  border-radius: 12px 12px 0 0;
+  border-radius: 12px;
   background: var(--ai-selector);
   color: var(--ai-text);
   box-shadow: none;
+}
+
+.ai-queue-dock:has(> .ai-queue-header[aria-expanded='false']) {
+  padding-bottom: 0;
 }
 
 .ai-queue-dock::after {
   position: absolute;
   inset: 0;
   border: 0.5px solid var(--ai-border-subtle);
-  border-bottom: 0;
   border-radius: inherit;
   content: '';
   pointer-events: none;
@@ -47,9 +50,13 @@
 }
 
 .ai-queue-header {
-  border-radius: 8px;
+  border-radius: 0;
   font-size: 13px;
   line-height: 24px;
+}
+
+.ai-queue-header[aria-expanded='true'] {
+  border-bottom: 1px solid var(--ai-border-subtle);
 }
 
 .ai-task-strip-trigger:hover,
@@ -85,7 +92,7 @@
 }
 
 .ai-queue-row {
-  border-radius: 8px;
+  border-radius: 0;
   font-size: 13px;
   line-height: 20px;
 }
@@ -137,6 +144,11 @@
 
 .ai-queue-actions {
   color: var(--ai-text-muted);
+}
+
+.ai-queue-actions button:not(:disabled):is(:hover, [aria-expanded='true']) {
+  background: var(--ai-action-hover);
+  color: var(--ai-text);
 }
 
 .ai-queue-row[data-state='pending'] {

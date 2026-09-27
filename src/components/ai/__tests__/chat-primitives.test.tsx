@@ -144,6 +144,17 @@ describe('MessageScroller', () => {
     });
   });
 
+  it('shows three loading dots while generating and restores the jump arrow when finished', () => {
+    const { container, rerender } = render(<MessageScroller followKey="1" generating>Response</MessageScroller>);
+    const jump = container.querySelector('[data-slot="message-scroller-button"]')!;
+    expect(jump.querySelector('.ai-scroll-loading')).toHaveAttribute('aria-hidden', 'true');
+    expect(jump.querySelectorAll('.ai-scroll-loading > span')).toHaveLength(3);
+    expect(jump).not.toBeDisabled();
+    rerender(<MessageScroller followKey="1" generating={false}>Response</MessageScroller>);
+    expect(jump.querySelector('.ai-scroll-loading')).not.toBeInTheDocument();
+    expect(jump.querySelector('svg')).toBeInTheDocument();
+  });
+
   it('does not allocate spacing for empty conditional children', async () => {
     const { container } = render(
       <MessageScroller followKey="1" ariaLabel="Conversation">
@@ -734,8 +745,9 @@ describe('MessageScroller', () => {
     height = 324;
     rerender(row('First line\nSecond line', '2'));
     expect(scrollTop).toBe(224);
-    expect(scrollTo).toHaveBeenCalledWith({ top: 224, behavior: 'auto' });
+    expect(scrollTo).toHaveBeenCalledWith({ top: 224, behavior: 'instant' });
 
+    fireEvent.wheel(viewport, { deltaY: -144 });
     scrollTop = 80;
     viewport.dataset.scrollable = 'end';
     scrollTo.mockClear();

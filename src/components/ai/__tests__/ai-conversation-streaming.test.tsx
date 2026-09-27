@@ -5,8 +5,67 @@ import { AiConversationNodeSeat } from '../workspace/ai-conversation-node-seat';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
 import { initI18n } from '@/locales';
+import skillsCapture from '@/test/fixtures/agent-skills-runtime.json';
+import type { AgentSessionEvent } from '@/types/agent-session';
 
 afterEach(cleanup);
+
+it('completes the footer without a processing row from recorded turn events', async () => {
+  await initI18n('en-US');
+  const events = skillsCapture as unknown as AgentSessionEvent[];
+  const end = events.findIndex(event => event.type === 'turn/end');
+  const message = events.map(event => event.type).lastIndexOf('assistant/message');
+  expect(message).toBeLessThan(end);
+  const at = (length: number) => projectAgentChatNodes(events.slice(0, length));
+  const { container, rerender } = render(
+    <AiConversation nodes={at(message + 1)} status="running" throughSeq={events[message].seq} />,
+  );
+  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  expect(container.querySelector('.ai-assistant-actions')).toBeNull();
+  expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toBeNull();
+
+  const nodes = at(end + 1);
+  rerender(<AiConversation nodes={nodes} status="running" throughSeq={events[end].seq} />);
+  const footer = container.querySelector('[data-ai-node-kind="turnTail"]');
+  expect(footer).toBeInTheDocument();
+  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  expect(container.querySelector('[data-slot="message-scroller-button"] .ai-scroll-loading')).toBeNull();
+  rerender(<AiConversation nodes={nodes} status="idle" throughSeq={events[end].seq} />);
+  expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toBe(footer);
+  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+
+  rerender(<AiConversation nodes={nodes} status="running" pending throughSeq={events[end].seq} />);
+  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  expect(container.querySelector('[data-slot="message-scroller-button"] .ai-scroll-loading')).toBeInTheDocument();
+});
+
+it('keeps standalone message actions when no complete turn boundary is available', async () => {
+  await initI18n('en-US');
+  const events = skillsCapture as unknown as AgentSessionEvent[];
+  const message = events.map(event => event.type).lastIndexOf('assistant/message');
+  const nodes = projectAgentChatNodes(events.slice(0, message + 1));
+  const { container, rerender } = render(<AiConversation nodes={nodes} status="running" throughSeq={null} />);
+  expect(container.querySelector('.ai-assistant-actions')).toBeNull();
+  // The same message can be rendered outside its parent turn, e.g. a partial
+  // history page. Its fallback copy action must remain available there.
+  rerender(<AiConversation nodes={nodes.filter(node => node.kind !== 'turnProcess')} status="idle" throughSeq={null} />);
+  expect(container.querySelector('.ai-assistant-actions')).toBeInTheDocument();
+  rerender(<AiConversation nodes={nodes} status="failed" throughSeq={null} />);
+  expect(container.querySelector('.ai-assistant-actions')).toBeInTheDocument();
+});
+
+it('animates the latest-message button only while generating or submitting', async () => {
+  await initI18n('en-US');
+  const { container, rerender } = render(<AiConversation nodes={[]} status="running" throughSeq={null} />);
+  const spinner = () => container.querySelector('[data-slot="message-scroller-button"] .ai-scroll-loading');
+  expect(spinner()).toBeInTheDocument();
+  for (const status of ['waiting', 'completed', 'failed', 'cancelled'] as const) {
+    rerender(<AiConversation nodes={[]} status={status} throughSeq={null} />);
+    expect(spinner()).not.toBeInTheDocument();
+  }
+  rerender(<AiConversation nodes={[]} status="completed" pending throughSeq={null} />);
+  expect(spinner()).toBeInTheDocument();
+});
 
 it('preserves the process panel, focus and disclosure state across model requests', async () => {
   await initI18n('en-US');
@@ -48,16 +107,53 @@ it('lays out every row immediately after history has been paged', async () => {
   });
 });
 
-it('uses the running indicator actual height while following streamed output', async () => {
+it('shows processing before the first Agent output and preserves waiting and Ask feedback', async () => {
   await initI18n('zh-CN');
   const { container, rerender } = render(
     <AiConversation nodes={[]} status="running" throughSeq={null} />,
   );
-  const indicator = container.querySelector('[data-ai-running-indicator]');
-  const row = indicator?.closest('[data-slot="message-scroller-item"]');
-  expect(row).toHaveClass('[content-visibility:visible]', '[contain-intrinsic-size:none]');
+  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeInTheDocument();
+
+  rerender(<AiConversation nodes={[]} status="running" pending throughSeq={null} />);
+  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  expect(container.querySelectorAll('[data-ai-thinking-indicator]')).toHaveLength(1);
+  expect(container.querySelector('[data-ai-thinking-indicator] .shimmer')).toHaveTextContent('处理中…');
+  expect(container.querySelector('[data-ai-thinking-indicator] [data-slot="spinner"]')).toBeInTheDocument();
+
+  rerender(<AiConversation nodes={[]} status="idle" pending throughSeq={null} />);
+  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeInTheDocument();
+
+  rerender(<AiConversation nodes={[]} status="failed" throughSeq={null} />);
+  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
 
   rerender(<AiConversation nodes={[]} status="waiting" throughSeq={null} />);
+  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
   expect(container.querySelector('[data-ai-running-indicator]')?.closest('[data-slot="message-scroller-item"]'))
     .toHaveClass('[content-visibility:visible]', '[contain-intrinsic-size:none]');
+  rerender(<AiConversation nodes={[]} status="running" runningIndicator="ask" throughSeq={null} />);
+  expect(container.querySelector('[data-ai-thinking-indicator] .shimmer')).toHaveTextContent('思考中…');
+  expect(container.querySelector('[data-ai-thinking-indicator] [data-slot="spinner"]')).toBeNull();
+  rerender(<AiConversation nodes={[]} status="running" runningIndicator="none" throughSeq={null} />);
+  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
+});
+
+it('hands the initial thinking feedback over to real recorded process output', async () => {
+  await initI18n('en-US');
+  const events = skillsCapture as unknown as AgentSessionEvent[];
+  const firstOutput = events.findIndex((_, index) => projectAgentChatNodes(events.slice(0, index + 1))
+    .some(node => node.kind === 'turnProcess' && node.children.some(child => child.kind === 'contextInjection'
+      && child.provenance.kind === 'skill-invocation')));
+  expect(firstOutput).toBeGreaterThan(0);
+  const { container, rerender } = render(<AiConversation
+    nodes={projectAgentChatNodes(events.slice(0, firstOutput))}
+    status="running" throughSeq={events[firstOutput - 1].seq} />);
+  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeInTheDocument();
+  expect(container.querySelector('[data-ai-thinking-indicator] .shimmer')).toHaveTextContent('Working…');
+  rerender(<AiConversation nodes={projectAgentChatNodes(events.slice(0, firstOutput + 1))}
+    status="running" throughSeq={events[firstOutput].seq} />);
+  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
+  rerender(<AiConversation nodes={projectAgentChatNodes(events)}
+    status="running" throughSeq={events[events.length - 1].seq} />);
+  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
 });

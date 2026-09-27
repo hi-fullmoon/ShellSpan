@@ -85,7 +85,7 @@ export function StreamingText({ children, sourceStart = 0 }: { children: string;
       data-streaming={streaming || undefined} data-reveal={fragment.reveal || undefined}
       data-staggered={fragment.runs.length > 0 || undefined}>
       {fragment.runs.length > 0 ? fragment.runs.map((run, index) => (
-        <span key={index} className="ai-stream-text-run" style={{ animationDelay: `${index * 24}ms` }}>{run}</span>
+        <span key={index} className="ai-stream-text-run" style={{ animationDelay: `${index * 12}ms` }}>{run}</span>
       )) : fragment.text}
     </span>
   ))}</>;

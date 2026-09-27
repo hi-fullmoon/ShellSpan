@@ -9,6 +9,8 @@ import React, {
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
+import { Check, Copy } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 import {
   ContextMenu,
@@ -184,21 +186,24 @@ function MarkdownCodeBlock({
   }, [code, copied]);
 
   return (
-    <div className="ai-code-block relative my-4 min-w-0 max-w-full overflow-hidden" data-language={language || undefined}>
-      <div className="ai-code-block-banner flex min-w-0 items-center justify-between gap-3 px-3.5 py-[9px]">
-        <span className="ai-code-block-language min-w-0 truncate">{language}</span>
+    <div className="ai-code-block ai-markdown-code-block relative my-3 min-w-0 max-w-full overflow-hidden" data-language={language || undefined}>
+      {(language || showActions) && <div className="ai-markdown-code-toolbar flex min-w-0 items-center gap-3 px-3 pt-2">
+        {language && <span className="ai-code-block-language min-w-0 truncate">{language}</span>}
         {showActions && (
-          <button
+          <Button
             type="button"
-            className="ai-code-block-copy m-0 shrink-0 cursor-pointer p-0"
+            variant="ghost"
+            size="icon-xs"
+            className="ai-markdown-code-copy ml-auto shrink-0"
             aria-label={copied ? copiedLabel : copyLabel}
+            title={copied ? copiedLabel : copyLabel}
             onClick={copy}
           >
-            {copied ? copiedLabel : copyLabel}
-          </button>
+            {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+          </Button>
         )}
-      </div>
-      <pre className="ai-code-block-pre m-0 max-w-full overflow-x-auto p-4 whitespace-pre-wrap break-all">{children}</pre>
+      </div>}
+      <pre tabIndex={0} className="ai-code-block-pre m-0 max-w-full overflow-x-auto overscroll-x-contain px-3 py-3 whitespace-pre">{children}</pre>
     </div>
   );
 }
@@ -323,6 +328,10 @@ const AssistantMessageContentComponent: React.FC<{
   const answer = useMemo(() => answerFromBlocks(blocks), [blocks]);
   const splitMarkdown = useMemo(() => createStreamingMarkdownSplitter(), []);
   const answerChunks = useMemo(() => splitMarkdown(answer), [answer, splitMarkdown]);
+  const previousSource = useRef('');
+  const previous = answer.startsWith(previousSource.current) ? previousSource.current : '';
+  useLayoutEffect(() => { previousSource.current = answer; }, [answer]);
+  let offset = 0;
 
   if (!answer) {
     return streaming
@@ -333,17 +342,24 @@ const AssistantMessageContentComponent: React.FC<{
   return (
     <div className="ai-assistant-content flex min-w-0 max-w-full flex-col gap-4" data-streaming={streaming || undefined}>
       <div className="ai-assistant-answer flex min-w-0 max-w-full flex-col gap-4">
-        {answerChunks.map((chunk, index) => (
-          <StreamingMarkdownContent
-            key={index}
-            copiedLabel={t('common.copied')}
-            copyLabel={t('common.copy')}
-            showCodeBlockActions={showCodeBlockActions}
-            streaming={streaming && index === answerChunks.length - 1}
-          >
-            {chunk}
-          </StreamingMarkdownContent>
-        ))}
+        {answerChunks.map((chunk, index) => {
+          // Splitting moves already displayed text into a newly mounted chunk.
+          // Only source beyond its previous position should animate again.
+          const initialSource = previous.slice(offset, offset + chunk.length);
+          offset += chunk.length;
+          return (
+            <StreamingMarkdownContent
+              key={index}
+              initialSource={initialSource}
+              copiedLabel={t('common.copied')}
+              copyLabel={t('common.copy')}
+              showCodeBlockActions={showCodeBlockActions}
+              streaming={streaming && index === answerChunks.length - 1}
+            >
+              {chunk}
+            </StreamingMarkdownContent>
+          );
+        })}
       </div>
     </div>
   );
