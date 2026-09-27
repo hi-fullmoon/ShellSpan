@@ -626,20 +626,16 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       .toHaveAttribute('data-phase', 'active');
   });
 
-  it('shows one Turn-level running indicator without exposing process children as top-level rows', () => {
+  it('keeps the process hierarchy without a separate processing row', () => {
     const view = runningHierarchyView();
     const { container, rerender } = render(
       <AiWorkspaceRoot view={view} scope="workbench" />,
     );
 
-    expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(0);
     expect(container.querySelectorAll('[data-ai-node-kind="turnProcess"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-ai-node-kind="reasoning"]')).toHaveLength(0);
     expect(container.querySelectorAll('[data-tool-state="running"]')).toHaveLength(0);
-    const runningIndicator = container.querySelector('[data-ai-running-indicator]');
-    expect(runningIndicator).toHaveTextContent('Working…');
-    expect(runningIndicator?.querySelector('[data-slot="marker-icon"]')).toBeNull();
-    expect(runningIndicator?.querySelector('[data-slot="marker-content"]')).toHaveClass('shimmer');
 
     const finalNode = view.nodes[view.nodes.length - 1]!;
     const appendedNode = {
@@ -654,9 +650,8 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       />,
     );
 
-    expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
-    expect(container.querySelector('[data-ai-running-indicator]')?.closest('[data-slot="message-scroller-item"]'))
-      .toContainElement(container.querySelector('[data-ai-node-key="test:additional-flow-node"]'));
+    expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(0);
+    expect(container.querySelector('[data-ai-node-key="test:additional-flow-node"]')).toBeInTheDocument();
   });
 
   it('anchors a new user message and preserves its row on commit', async () => {
@@ -924,7 +919,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.getByRole('log', { name: 'AI conversation' })).toBeVisible();
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Working…'));
+    expect(screen.getAllByText('Working…')).toHaveLength(1);
   });
 
   it('gives every icon-only workspace action an accessible name and tooltip', () => {
