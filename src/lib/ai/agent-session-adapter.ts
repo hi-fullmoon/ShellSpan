@@ -1,6 +1,7 @@
 import { AgentSessionCommittedClient, type AgentSessionStreamState } from '@/lib/ai/agent-session-client';
 import { createCommittedEventProjection } from './committed-event-projection';
 import { fallbackSessionTitle } from './session-title';
+import { normalizeAiSessionError } from './session-error';
 import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeListAgentFileReferences } from '@/lib/ipc/tauri';
 import { projectQuestions } from './question-projection';
 import { invokeSubmitAgentImages } from '@/lib/ipc/tauri';
@@ -90,6 +91,7 @@ interface AgentCommittedClientLike {
   onChange(listener: (state: AgentSessionStreamState) => void): () => void;
   connect(): Promise<AgentSessionStreamState>;
   reconnect(): Promise<AgentSessionStreamState>;
+  retrySync?(): Promise<AgentSessionStreamState>;
   disconnect(): void;
 }
 
@@ -361,6 +363,8 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
     pendingQuestion: projectQuestions(events).find((q) => q.status === 'pending') ?? null,
     status: activity.status,
     error: activity.status === 'failed' || activity.status === 'cancelled' ? terminalError(nodes) : null,
+    syncError: state.syncError ? normalizeAiSessionError(state.syncError) : undefined,
+    syncRecovery: state.syncRecovery,
     throughSeq: state.lastCommittedSeq ?? null,
     revision: state.lastCommittedSeq === undefined ? state.snapshot.eventCount : state.lastCommittedSeq + 1,
     committedOperationIds: events.flatMap((event) => {
@@ -402,6 +406,8 @@ export function createAgentSessionViewProjector(): (state: AgentSessionStreamSta
     // view identity so both consumers can reuse it without replaying metadata.
     if (view && previous && previous.snapshot === state.snapshot && previous.events === state.events
       && previous.lastCommittedSeq === state.lastCommittedSeq
+      && previous.syncError === state.syncError
+      && previous.syncRecovery === state.syncRecovery
       && previous.hasTerminalEvent === state.hasTerminalEvent) return view;
     view = agentSessionView(state, {
       activity: activity(state.events), nodes: chat(state.events), metadataEvents: metadata(state.events),
@@ -655,7 +661,7 @@ export function createAgentSessionAdapter(
           if (connecting) {
             void connecting.finally(() => {
               if (entry.listeners.size === 0) entry.client.disconnect();
-            });
+            }).catch(() => undefined);
           } else {
             entry.client.disconnect();
           }
@@ -804,6 +810,14 @@ export function createAgentSessionAdapter(
     async refresh(sessionId: string): Promise<AiSessionView> {
       const entry = ensureEntry(sessionId);
       const state = await entry.client.reconnect();
+      const view = entry.project(state);
+      entry.view = view;
+      for (const listener of entry.listeners) listener(view);
+      return view;
+    },
+    async retrySync(sessionId: string): Promise<AiSessionView> {
+      const entry = ensureEntry(sessionId);
+      const state = await (entry.client.retrySync?.() ?? entry.client.reconnect());
       const view = entry.project(state);
       entry.view = view;
       for (const listener of entry.listeners) listener(view);

@@ -83,6 +83,12 @@ export interface AiSessionError {
   readonly currentRevision?: number;
 }
 
+export interface AiSessionSyncRecovery {
+  readonly attempts: number;
+  readonly retrying: boolean;
+  readonly lastSyncedAt?: number;
+}
+
 export interface AiSessionView {
   readonly pendingQuestion?: import('@/types/agent-question').AgentQuestionView | null;
   readonly summary: AiSessionSummary;
@@ -95,6 +101,9 @@ export interface AiSessionView {
   readonly pendingApproval: AiPendingApproval | null;
   readonly status: AiSessionStatus;
   readonly error: AiSessionError | null;
+  /** Client synchronization failure; does not change the backend task status. */
+  readonly syncError?: AiSessionError;
+  readonly syncRecovery?: AiSessionSyncRecovery;
   readonly throughSeq: number | null;
   readonly revision?: number | null;
   readonly committedOperationIds?: readonly string[];
@@ -200,6 +209,7 @@ export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
   mutateInbox(input: AiInboxMutationInput): Promise<void>;
   rename(input: AiSessionRenameInput): Promise<void>;
   refresh(sessionId: string): Promise<AiSessionView>;
+  retrySync?(sessionId: string): Promise<AiSessionView>;
   loadOlder(sessionId: string, cursor: string): Promise<readonly AiConversationNode[]>;
   loadArtifact(sessionId: string, artifactId: string, maxBytes: number): Promise<AgentArtifactResponse>;
   dispose(): void;

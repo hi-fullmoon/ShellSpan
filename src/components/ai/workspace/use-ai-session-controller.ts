@@ -143,6 +143,7 @@ export interface AiSessionController {
   readonly historicalContinuationError: string | null;
   readonly retryFailedDraft: (failedDraftId: string) => void;
   readonly dismissError: () => void;
+  readonly retrySync: () => Promise<void>;
   readonly openSessions: () => void;
   readonly openSession: (summary: AiSessionSummary) => void;
   readonly newSession: () => void;
@@ -1646,6 +1647,20 @@ export function useAiSessionController({
       });
     },
     dismissError: () => dispatch({ type: 'error.dismissed' }),
+    retrySync: async () => {
+      const sessionId = viewRef.current?.summary.id;
+      const context = submissionContextRef.current;
+      if (!sessionId || !adapter.retrySync) return;
+      try {
+        await adapter.retrySync(sessionId);
+      } catch (error) {
+        // Stream failures remain in the persistent synchronization notice.
+        if (mountedRef.current && submissionContextRef.current === context
+          && !viewRef.current?.syncError) {
+          dispatch({ type: 'error.reported', error: normalizeAiSessionError(error) });
+        }
+      }
+    },
     openSessions,
     openSession,
     newSession,
