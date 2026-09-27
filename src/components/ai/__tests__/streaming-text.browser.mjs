@@ -279,6 +279,75 @@ try {
           return { animation: getComputedStyle(node).animationName, opacity: getComputedStyle(node).opacity };
         }, heading);
         assert.deepEqual(reduced, { animation: 'none', opacity: '1' });
+        const paragraph = document.split('\n').find((line) => line.startsWith('- ') && !line.includes('`') && line.length > 80).slice(2);
+        await page.evaluate((paragraph) => {
+          window.streamingCheck.resetFollowing('');
+          window.streamingCheck.append(paragraph.slice(0, 3));
+        }, paragraph);
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        const activeSelection = await page.evaluate((paragraph) => {
+          const answer = document.querySelector('[data-ai-node-key="answer"]');
+          const node = answer.querySelector('.ai-stream-text-fragment').firstChild;
+          const selection = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          for (let offset = 3; offset < 80; offset++) window.streamingCheck.append(paragraph.slice(offset, offset + 1));
+          const selected = selection.toString();
+          const sameNode = selection.anchorNode === node;
+          selection.removeAllRanges();
+          window.streamingCheck.append(paragraph.slice(80));
+          return { selected, sameNode, text: answer.textContent,
+            fragments: answer.querySelectorAll('.ai-stream-text-fragment').length };
+        }, paragraph);
+        assert.equal(activeSelection.selected, paragraph.slice(0, 3));
+        assert.equal(activeSelection.sameNode, true);
+        assert.equal(activeSelection.text, paragraph);
+        assert.ok(activeSelection.fragments <= 24, 'Deselection must restore bounded fragment storage');
+        await page.evaluate(({ history, paragraph }) => {
+          window.streamingCheck.resetFollowing(history);
+          window.streamingCheck.append(paragraph);
+        }, { history: document, paragraph });
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        const selectionStart = await page.evaluate(() => {
+          const answer = document.querySelector('[data-ai-node-key="answer"]');
+          const node = document.createTreeWalker(answer.querySelector('p'), NodeFilter.SHOW_TEXT).nextNode();
+          const range = document.createRange();
+          range.setStart(node, 0);
+          range.setEnd(node, Math.min(3, node.length));
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          return { top: document.querySelector('[data-message-scroller-viewport]').scrollTop, text: selection.toString() };
+        });
+        await page.evaluate(source => window.streamingCheck.append('\n\n' + source), document);
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        const paused = await page.evaluate(() => ({
+          top: document.querySelector('[data-message-scroller-viewport]').scrollTop,
+          text: window.getSelection().toString(),
+        }));
+        assert.ok(Math.abs(paused.top - selectionStart.top) < 3,
+          `Selecting text must pause both layout and primitive follow: ${JSON.stringify({ selectionStart, paused })}`);
+        assert.equal(paused.text, selectionStart.text);
+        await page.evaluate(source => {
+          window.getSelection().removeAllRanges();
+          window.streamingCheck.append('\n\n' + source);
+        }, document);
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        const detachedTop = await page.locator('[data-message-scroller-viewport]').evaluate(element => element.scrollTop);
+        assert.ok(Math.abs(detachedTop - selectionStart.top) < 3, 'Clearing a selection must not jump away from the reading position');
+        await page.locator('[data-slot="message-scroller-button"]').click();
+        await page.waitForFunction(() => {
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 8;
+        });
+        const resumedGap = await page.evaluate(source => {
+          window.streamingCheck.append('\n\n' + source);
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+        }, document);
+        assert.ok(resumedGap <= 8, 'Jump to latest must resume synchronous streaming follow');
         assert.deepEqual(errors, []);
         console.log(`${browserType.name()} ${width}px: first arrivals, selection-preserving completion, history, stable height and reduced motion passed`);
         await page.close();

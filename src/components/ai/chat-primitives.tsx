@@ -126,6 +126,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const resumeFollowOnScrollRef = useRef(false);
   const jumpingToLatestRef = useRef(false);
   const pointerScrollStartRef = useRef<number | null>(null);
+  const selectionPausedRef = useRef(false);
   const restoredAnchorRef = useRef(false);
   const restoreFrameRef = useRef<number | null>(null);
   const [positionReady, setPositionReady] = useState(false);
@@ -200,7 +201,36 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     });
   }, [interruptRestore, scrollToMessage]);
 
+  const hasTranscriptSelection = useCallback(() => {
+    const selection = window.getSelection();
+    const content = contentRef.current;
+    return Boolean(content && selection && !selection.isCollapsed
+      && Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index))
+        .some((range) => range.intersectsNode(content)));
+  }, []);
+
+  const pauseForSelection = useCallback(() => {
+    if (!hasTranscriptSelection()) {
+      selectionPausedRef.current = false;
+      return false;
+    }
+    if (!selectionPausedRef.current) {
+      selectionPausedRef.current = true;
+      // Use the primitive's anchored reading mode so its resize observer also
+      // stops following. Clearing the selection alone must not jump the reader.
+      preserveHistoryPosition();
+    }
+    return true;
+  }, [hasTranscriptSelection, preserveHistoryPosition]);
+
+  useEffect(() => {
+    document.addEventListener('selectionchange', pauseForSelection);
+    return () => document.removeEventListener('selectionchange', pauseForSelection);
+  }, [pauseForSelection]);
+
   const transitionToLatest = useCallback(() => {
+    if (hasTranscriptSelection()) window.getSelection()?.removeAllRanges();
+    selectionPausedRef.current = false;
     // Read intent before the new row's height changes are compensated. A
     // submission at the live edge must not enter detached jump mode.
     const wasFollowing = followIntentRef.current;
@@ -220,7 +250,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       scrollToEnd({ behavior: 'instant' });
     }
     onFollowLatest?.();
-  }, [interruptRestore, onFollowLatest, scrollToEnd, scrollToMessage]);
+  }, [hasTranscriptSelection, interruptRestore, onFollowLatest, scrollToEnd, scrollToMessage]);
 
   useLayoutEffect(() => {
     let requested = false;
@@ -261,6 +291,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
 
   const handleScrollCapture = useCallback(() => {
     updateBottomVisibility();
+    if (pauseForSelection()) return;
     const viewport = viewportRef.current;
     if (viewport && jumpingToLatestRef.current && isNearBottom(viewport)) {
       jumpingToLatestRef.current = false;
@@ -301,9 +332,10 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
         });
       }
     }
-  }, [scrollToEnd, scrollToMessage, updateBottomVisibility]);
+  }, [pauseForSelection, scrollToEnd, scrollToMessage, updateBottomVisibility]);
 
   const handleWheelCapture = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (pauseForSelection()) return;
     const viewport = viewportRef.current;
     if (event.deltaY < 0) {
       followIntentRef.current = false;
@@ -326,7 +358,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
         event.stopPropagation();
       }
     }
-  }, [interruptRestore, scrollToEnd]);
+  }, [interruptRestore, pauseForSelection, scrollToEnd]);
 
   useLayoutEffect(() => () => {
     cancelRestore();
@@ -334,6 +366,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   }, [cancelRestore]);
 
   const commitMessageLayout = useCallback(() => {
+    if (pauseForSelection()) return;
     // A throttled child can commit without changing children/followKey here.
     // Use the recorded user intent, not geometry after the text has grown.
     const viewport = viewportRef.current;
@@ -344,7 +377,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       // geometry also makes child and parent commits share one correction.
       scrollToEnd({ behavior: 'instant' });
     }
-  }, [positionReady, scrollToEnd]);
+  }, [pauseForSelection, positionReady, scrollToEnd]);
 
   useLayoutEffect(() => {
     for (const [index, child] of childItems.entries()) {
