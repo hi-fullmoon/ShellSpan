@@ -12,6 +12,38 @@ async function readJson(relativePath) {
 }
 
 describe('terminal execution Phase 0 protocol contract', () => {
+  it('keeps automatic review evidence native-owned and output-only', async () => {
+    const validator = new Ajv2020({ allErrors: true, strict: true });
+    const validate = validator.compile(await readJson('tool-contract.schema.json'));
+    const call = {
+      requestId: 'review-request', callId: 'review-call', capabilityId: 'review-capability', toolName: 'exec_command',
+      target: { kind: 'local', targetId: 'local', sessionId: 'terminal', cwd: '/workspace' },
+      arguments: { command: 'pwd', explanation: 'inspect workspace', channel: 'direct' },
+    };
+    expect(validate(call), validator.errorsText(validate.errors)).toBe(true);
+    expect(validate({ ...call, arguments: { ...call.arguments, approvalReview: 'boundedLocalRead' } })).toBe(false);
+    expect(validate({ requestId: call.requestId, callId: call.callId, toolName: call.toolName,
+      targetId: 'local', status: 'completed', summary: 'Read completed',
+      data: { channel: 'direct', state: 'exited', stdout: '/workspace\n', stderr: '', truncated: false, approvalReview: 'boundedLocalRead' },
+    }), validator.errorsText(validate.errors)).toBe(true);
+  });
+  it('allows only digest-bound local trash calls and reports system recovery', async () => {
+    const validator = new Ajv2020({ allErrors: true, strict: true });
+    const validate = validator.compile(await readJson('tool-contract.schema.json'));
+    const call = {
+      requestId: 'trash-request', callId: 'trash-call', capabilityId: 'trash-capability', toolName: 'trash_file',
+      target: { kind: 'local', targetId: 'local', sessionId: 'terminal', cwd: '/workspace' },
+      arguments: { path: 'old.json', expectedSha256: 'a'.repeat(64) },
+    };
+    expect(validate(call), validator.errorsText(validate.errors)).toBe(true);
+    expect(validate({ ...call, arguments: { path: 'old.json' } })).toBe(false);
+    expect(validate({ ...call, arguments: { ...call.arguments, permanent: true } })).toBe(false);
+    expect(validate({ ...call, target: { kind: 'remote', targetId: 'remote', sessionId: 'terminal', host: 'localhost', port: 22, username: 'operator' } })).toBe(false);
+    expect(validate({ requestId: call.requestId, callId: call.callId, toolName: call.toolName,
+      targetId: 'local', status: 'completed', summary: 'Moved to system trash',
+      data: { path: '/workspace/old.json', trashed: true, recovery: 'systemTrash' },
+    }), validator.errorsText(validate.errors)).toBe(true);
+  });
   it('validates the normative TSP/1 fixture and its generation fences', async () => {
     const [schema, fixture] = await Promise.all([
       readJson('terminal-protocol-v1.schema.json'),
