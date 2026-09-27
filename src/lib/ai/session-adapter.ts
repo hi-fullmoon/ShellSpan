@@ -49,6 +49,8 @@ export interface AiInboxItem {
   readonly lane: 'nextTurn' | 'nextStep';
   readonly content: string;
   readonly state: 'queued' | 'pending' | 'claimed';
+  /** The durable user/message has replaced this item in the transcript. */
+  readonly consumed?: boolean;
   /** Input accepted between turns; displayed in the conversation, without a queue row. */
   readonly startsTurn?: boolean;
   readonly images?: import('@/types/agent-session').AgentSessionInboxMessage['images'];
