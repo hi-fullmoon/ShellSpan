@@ -71,6 +71,7 @@ describe('single Agent Runtime architecture', () => {
       'write_file',
       'edit_file',
       'apply_patch',
+      'trash_file',
       'transfer_file',
     ]);
   });

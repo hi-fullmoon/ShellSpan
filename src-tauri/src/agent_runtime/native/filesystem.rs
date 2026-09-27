@@ -18,8 +18,8 @@ use crate::agent_runtime::{
     ApplyPatchArgumentsNative, EditFileArgumentsNative, FileEncodingNative,
     ListDirectoryArgumentsNative, PatchPreconditionNative, ReadFileArgumentsNative,
     SearchModeNative, SearchTextArgumentsNative, TransferDirectionNative,
-    TransferFileArgumentsNative, WriteFileArgumentsNative, WriteFilePreconditionNative,
-    MAX_WRITE_FILE_CONTENT_BYTES,
+    TransferFileArgumentsNative, TrashFileArgumentsNative, WriteFileArgumentsNative,
+    WriteFilePreconditionNative, MAX_WRITE_FILE_CONTENT_BYTES,
 };
 use crate::connection::connect_sftp;
 use crate::db::Database;
@@ -142,7 +142,30 @@ pub(super) fn preview_file_call_native(
     credentials: &CredentialManager,
     known_hosts_path: &Path,
 ) -> Result<AgentCallPreviewNative, String> {
+    if matches!(
+        call.tool_name.as_str(),
+        "read_file" | "list_directory" | "search_text"
+    ) {
+        if let AgentToolTargetNative::Local {
+            cwd: Some(root), ..
+        } = &call.target
+        {
+            // Reject an unusable root before presenting an approval that could
+            // never safely execute. This reads metadata, not file contents.
+            canonical_local_root(Path::new(root))?;
+        }
+    }
     match call.tool_name.as_str() {
+        "trash_file" => {
+            let path = validate_trash_file(call)?;
+            Ok(AgentCallPreviewNative {
+                tool_name: call.tool_name.clone(),
+                target_id: call.target.target_id().to_string(),
+                summary: "Move one digest-checked regular file to the system trash. Restore using the operating system trash; no permanent-delete fallback.".into(),
+                path: Some(path.to_string_lossy().into_owned()),
+                diff: None,
+            })
+        }
         "write_file" => {
             let arguments = decode_write_file_arguments_native(&call.arguments)?;
             let preview = compute_write_preview(
@@ -222,10 +245,108 @@ pub(super) fn execute_file_tool_native(
         "list_directory" => execute_list_directory(&context, &operation),
         "search_text" => execute_search_text(&context, &operation),
         "write_file" => execute_write_file(&context, &operation),
+        "trash_file" => execute_trash_file(&context, &operation),
         "apply_patch" | "edit_file" => execute_apply_patch(&context, &operation),
         "transfer_file" => execute_transfer_file(&context, &operation),
         _ => Err("tool has no native M2 file driver".into()),
     }
+}
+
+fn validate_trash_file(call: &AgentToolCallNative) -> Result<PathBuf, String> {
+    let arguments: TrashFileArgumentsNative = serde_json::from_value(call.arguments.clone())
+        .map_err(|error| format!("invalid trash_file arguments: {error}"))?;
+    let AgentToolTargetNative::Local {
+        cwd: Some(root), ..
+    } = &call.target
+    else {
+        return Err(
+            "trash_file requires a frozen local workspace; remote deletion is not supported".into(),
+        );
+    };
+    let root = canonical_local_root(Path::new(root))?;
+    let path = resolve_local_existing(&root, &arguments.path, false)?;
+    if super::protected_delete_path_native(&path.to_string_lossy()) {
+        return Err(
+            "AGENT_CRITICAL_OPERATION_DENIED: system files cannot be moved to trash by the Agent"
+                .into(),
+        );
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options
+        .open(&path)
+        .map_err(|error| format!("failed to inspect trash file: {error}"))?;
+    let before = file
+        .metadata()
+        .map_err(|error| format!("failed to inspect trash file: {error}"))?;
+    if !before.is_file() || before.len() > MAX_FILE_BYTES {
+        return Err("trash_file only accepts regular files up to 64 MiB".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("failed to verify trash file: {error}"))?;
+    if bytes.len() as u64 > MAX_FILE_BYTES || sha256_hex(&bytes) != arguments.expected_sha256 {
+        return Err("trash_file digest precondition failed; no file was moved. Read the current file before requesting deletion again.".into());
+    }
+    let rechecked = resolve_local_existing(&root, &arguments.path, false)?;
+    let after = fs::symlink_metadata(&rechecked)
+        .map_err(|error| format!("failed to revalidate trash file: {error}"))?;
+    if rechecked != path
+        || before.len() != after.len()
+        || before.modified().ok() != after.modified().ok()
+    {
+        return Err("trash_file target changed during verification; no file was moved".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if before.dev() != after.dev() || before.ino() != after.ino() {
+            return Err("trash_file target identity changed; no file was moved".into());
+        }
+    }
+    Ok(path)
+}
+
+fn execute_trash_file(
+    context: &FileExecutionContextNative<'_>,
+    operation: &FileOperationGuardNative,
+) -> Result<FileToolOutputNative, String> {
+    operation.ensure_active()?;
+    let path = validate_trash_file(context.call)?;
+    operation.ensure_active()?;
+    // The platform trash operation is not interruptible or transactional. Never
+    // fall back to remove_file, and never retry automatically after an error.
+    let trash_context = trash::TrashContext::new();
+    #[cfg(target_os = "macos")]
+    let trash_context = {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        let mut context = trash_context;
+        // Avoid a second Finder automation permission prompt. Recovery is manual
+        // from the system trash; this API does not guarantee Finder's Put Back.
+        context.set_delete_method(DeleteMethod::NsFileManager);
+        context
+    };
+    trash_context.delete(&path).map_err(|error| format!(
+        "trash_file failed: {error}. No permanent-delete fallback was attempted. Inspect the source and system trash before retrying."
+    ))?;
+    let path = path.to_string_lossy().into_owned();
+    Ok(FileToolOutputNative {
+        summary: "Moved the file to the system trash. Restore it using the operating system trash; no in-app undo is available.".into(),
+        data: json!({"path": path, "trashed": true, "recovery": "systemTrash"}),
+        truncated: false,
+        paths: vec![path],
+    })
 }
 
 fn execute_read_file(
@@ -1473,12 +1594,12 @@ fn collect_remote_files(
 }
 
 fn canonical_local_root(root: &Path) -> Result<PathBuf, String> {
-    let metadata = fs::symlink_metadata(root)
-        .map_err(|error| format!("failed to inspect local root: {error}"))?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err("local file root must be a real directory".into());
-    }
-    fs::canonicalize(root).map_err(|error| format!("failed to canonicalize local root: {error}"))
+    use super::scoped_read::{LocalScopedReader, ScopedReader};
+    let reader =
+        LocalScopedReader::open(root.to_str().ok_or("invalid local root")?).map_err(|error| {
+            format!("AGENT_UNSAFE_FILE_ROOT: local file root must be a real directory without symlink ancestors: {error}")
+        })?;
+    Ok(PathBuf::from(reader.root()))
 }
 
 fn resolve_local_existing(
@@ -2046,6 +2167,9 @@ fn detect_binary(bytes: &[u8]) -> bool {
 }
 
 fn path_is_sensitive(path: &str) -> bool {
+    if super::path_is_sensitive_native(path) {
+        return true;
+    }
     let lower = path.to_ascii_lowercase();
     lower.split(['/', '\\']).any(|component| {
         component == ".env"
@@ -2149,6 +2273,205 @@ fn truncate_utf8(value: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn file_driver_rejects_root_ancestor_replacement_before_reading() {
+        let temporary = tempfile::tempdir().unwrap();
+        let base = fs::canonicalize(temporary.path()).unwrap();
+        let root = base.join("parent/workspace");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("data.rs"), include_bytes!("filesystem.rs")).unwrap();
+        let database = Database::open(&base.join("runtime.db")).unwrap();
+        let credentials = CredentialManager::in_memory_for_tests();
+        let checkpoints = CheckpointStoreNative::default();
+        let operations = FileOperationRegistryNative::default();
+        let call = AgentToolCallNative {
+            request_id: "root-read".into(),
+            call_id: "read".into(),
+            tool_name: "read_file".into(),
+            arguments: json!({"path":"data.rs", "encoding":"utf8"}),
+            target: AgentToolTargetNative::Local {
+                target_id: "local".into(),
+                session_id: "terminal".into(),
+                cwd: Some(root.to_string_lossy().into()),
+            },
+            capability_id: "read-capability".into(),
+        };
+        let scope = super::super::inspect_call_policy_scope_native(&call).unwrap();
+        let engine = super::super::NativeToolEngine::default();
+        let effect = super::super::assess_effect_native(
+            &engine.tool("read_file").unwrap().descriptor,
+            &call,
+        )
+        .unwrap();
+        assert!(
+            !super::super::review_call(
+                crate::agent_runtime::AgentPermissionModeNative::ScopedAutopilot,
+                &call,
+                &effect,
+                &scope
+            )
+            .requires_approval
+        );
+        fs::create_dir_all(base.join(".ssh/workspace")).unwrap();
+        fs::write(
+            base.join(".ssh/workspace/data.rs"),
+            include_bytes!("call_policy.rs"),
+        )
+        .unwrap();
+        fs::rename(base.join("parent"), base.join("original-parent")).unwrap();
+        std::os::unix::fs::symlink(base.join(".ssh"), base.join("parent")).unwrap();
+        assert!(preview_file_call_native(
+            &call,
+            &database,
+            &credentials,
+            &base.join("known_hosts")
+        )
+        .unwrap_err()
+        .starts_with("AGENT_UNSAFE_FILE_ROOT"));
+        let result = execute_file_tool_native(FileExecutionContextNative {
+            task_id: "read-task",
+            call: &call,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &base.join("known_hosts"),
+            checkpoint_root: &base,
+            checkpoints: &checkpoints,
+            operations: &operations,
+        });
+        assert!(result.err().unwrap().contains("symlink ancestors"));
+        assert_eq!(
+            fs::read(base.join(".ssh/workspace/data.rs")).unwrap(),
+            include_bytes!("call_policy.rs")
+        );
+    }
+
+    fn trash_call(root: &Path, path: &str, contents: &[u8]) -> AgentToolCallNative {
+        AgentToolCallNative {
+            request_id: "trash-request".into(),
+            call_id: Uuid::new_v4().to_string(),
+            tool_name: "trash_file".into(),
+            arguments: json!({"path": path, "expectedSha256": sha256_hex(contents)}),
+            target: AgentToolTargetNative::Local {
+                target_id: "local".into(),
+                session_id: "terminal".into(),
+                cwd: Some(root.to_string_lossy().into()),
+            },
+            capability_id: "trash-test".into(),
+        }
+    }
+
+    #[test]
+    fn trash_file_revalidates_contents_and_rejects_directories_and_escapes() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(workspace.path()).unwrap();
+        let content = include_bytes!("call_policy.rs");
+        fs::write(root.join("policy.rs"), content).unwrap();
+        let call = trash_call(&root, "policy.rs", content);
+        assert_eq!(validate_trash_file(&call).unwrap(), root.join("policy.rs"));
+        fs::write(root.join("policy.rs"), include_bytes!("capability.rs")).unwrap();
+        assert!(validate_trash_file(&call)
+            .unwrap_err()
+            .contains("digest precondition"));
+        assert!(root.join("policy.rs").exists());
+        for path in [".", "../outside", "missing"] {
+            assert!(
+                validate_trash_file(&trash_call(&root, path, content)).is_err(),
+                "{path}"
+            );
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("policy.rs"), root.join("link")).unwrap();
+            assert!(validate_trash_file(&trash_call(&root, "link", content))
+                .unwrap_err()
+                .contains("symlink"));
+            std::os::unix::fs::symlink(&root, root.join("linked-directory")).unwrap();
+            assert!(
+                validate_trash_file(&trash_call(&root, "linked-directory/policy.rs", content))
+                    .unwrap_err()
+                    .contains("symlink")
+            );
+        }
+        let mut unrooted = call;
+        unrooted.target = AgentToolTargetNative::Local {
+            target_id: "local".into(),
+            session_id: "terminal".into(),
+            cwd: None,
+        };
+        assert!(validate_trash_file(&unrooted)
+            .unwrap_err()
+            .contains("frozen local workspace"));
+    }
+
+    #[test]
+    fn trash_file_driver_moves_a_real_file_to_system_trash() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(workspace.path()).unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let database = Database::open(&runtime.path().join("trash.db")).unwrap();
+        let credentials = CredentialManager::in_memory_for_tests();
+        let checkpoints = CheckpointStoreNative::default();
+        let operations = FileOperationRegistryNative::default();
+        let filename = format!("shellspan-trash-test-{}.rs", Uuid::new_v4());
+        let original = root.join(&filename);
+        let content = include_bytes!("call_policy.rs");
+        fs::write(&original, content).unwrap();
+        let call = trash_call(&root, &filename, content);
+        let guard = operations.begin("trash-task", &call.call_id).unwrap();
+        operations.cancel_task("trash-task").unwrap();
+        let cancelled = execute_trash_file(
+            &FileExecutionContextNative {
+                task_id: "trash-task",
+                call: &call,
+                database: &database,
+                credentials: &credentials,
+                known_hosts_path: &runtime.path().join("known_hosts"),
+                checkpoint_root: runtime.path(),
+                checkpoints: &checkpoints,
+                operations: &operations,
+            },
+            &guard,
+        );
+        assert!(cancelled.err().unwrap().contains("cancelled"));
+        assert_eq!(fs::read(&original).unwrap(), content);
+        drop(guard);
+        let result = execute_file_tool_native(FileExecutionContextNative {
+            task_id: "trash-task",
+            call: &call,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &runtime.path().join("known_hosts"),
+            checkpoint_root: runtime.path(),
+            checkpoints: &checkpoints,
+            operations: &operations,
+        })
+        .unwrap();
+        assert_eq!(result.data["trashed"], true);
+        assert_eq!(result.data["recovery"], "systemTrash");
+        assert!(!original.exists());
+        #[cfg(target_os = "macos")]
+        {
+            let trashed = PathBuf::from(std::env::var_os("HOME").unwrap())
+                .join(".Trash")
+                .join(&filename);
+            assert_eq!(fs::read(&trashed).unwrap(), content);
+            fs::rename(&trashed, &original).unwrap();
+            assert_eq!(fs::read(&original).unwrap(), content);
+        }
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        {
+            let items: Vec<_> = trash::os_limited::list()
+                .unwrap()
+                .into_iter()
+                .filter(|item| item.original_path() == original)
+                .collect();
+            assert_eq!(items.len(), 1);
+            trash::os_limited::restore_all(items).unwrap();
+            assert_eq!(fs::read(&original).unwrap(), content);
+        }
+    }
 
     #[test]
     fn search_text_accepts_files_and_directories_with_literal_queries_and_pagination() {

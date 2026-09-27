@@ -40,7 +40,8 @@
         "write_file",
         "edit_file",
         "apply_patch",
-        "transfer_file"
+        "transfer_file",
+        "trash_file"
       ]
     },
     "targetKind": {
@@ -571,6 +572,23 @@
       ],
       "unevaluatedProperties": false
     },
+    "trashFileArguments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "expectedSha256"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "expectedSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "trashFileCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "type": "object", "properties": { "toolName": { "const": "trash_file" }, "arguments": { "$ref": "#/$defs/trashFileArguments" }, "target": { "$ref": "#/$defs/localTarget" } } }
+      ],
+      "unevaluatedProperties": false
+    },
     "agentToolCall": {
       "oneOf": [
         { "$ref": "#/$defs/execCommandCall" },
@@ -588,7 +606,8 @@
         { "$ref": "#/$defs/writeFileCall" },
         { "$ref": "#/$defs/editFileCall" },
         { "$ref": "#/$defs/applyPatchCall" },
-        { "$ref": "#/$defs/transferFileCall" }
+        { "$ref": "#/$defs/transferFileCall" },
+        { "$ref": "#/$defs/trashFileCall" }
       ]
     },
     "execCommandResultData": {
@@ -598,6 +617,7 @@
       "properties": {
         "channel": { "const": "direct" },
         "state": { "enum": ["running", "exited"] },
+        "approvalReview": { "const": "boundedLocalRead" },
         "exitCode": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
         "stdout": { "type": "string", "maxLength": 1048576 },
         "stderr": { "type": "string", "maxLength": 1048576 },
@@ -934,6 +954,17 @@
     "editFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "edit_file" }, "data": { "$ref": "#/$defs/applyPatchResultData" } } }], "unevaluatedProperties": false },
     "applyPatchResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "apply_patch" }, "data": { "$ref": "#/$defs/applyPatchResultData" } } }], "unevaluatedProperties": false },
     "transferFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "transfer_file" }, "data": { "$ref": "#/$defs/transferFileResultData" } } }], "unevaluatedProperties": false },
+    "trashFileResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "trashed", "recovery"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "trashed": { "const": true },
+        "recovery": { "const": "systemTrash" }
+      }
+    },
+    "trashFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "trash_file" }, "data": { "$ref": "#/$defs/trashFileResultData" } } }], "unevaluatedProperties": false },
     "agentToolResult": {
       "oneOf": [
         { "$ref": "#/$defs/execCommandResult" },
@@ -951,7 +982,8 @@
         { "$ref": "#/$defs/writeFileResult" },
         { "$ref": "#/$defs/editFileResult" },
         { "$ref": "#/$defs/applyPatchResult" },
-        { "$ref": "#/$defs/transferFileResult" }
+        { "$ref": "#/$defs/transferFileResult" },
+        { "$ref": "#/$defs/trashFileResult" }
       ]
     }
   }

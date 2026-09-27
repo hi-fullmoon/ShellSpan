@@ -242,6 +242,22 @@
       "untrustedResultFields": []
     },
     {
+      "name": "trash_file",
+      "version": "1.0.0",
+      "targetKinds": ["local"],
+      "effectMode": "fixed",
+      "allowedEffects": ["destructive"],
+      "idempotency": "no",
+      "parallel": false,
+      "cancellable": true,
+      "retryPolicy": "never",
+      "defaultTimeoutMs": 60000,
+      "maxOutputBytes": 16384,
+      "maxConcurrency": 1,
+      "requiredCapabilities": ["filesystem.trash"],
+      "untrustedResultFields": []
+    },
+    {
       "name": "transfer_file",
       "version": "1.0.0",
       "targetKinds": ["local", "remote"],

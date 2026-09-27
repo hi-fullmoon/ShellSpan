@@ -339,6 +339,13 @@ pub enum FileEncodingNative {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrashFileArgumentsNative {
+    pub path: String,
+    pub expected_sha256: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReadFileArgumentsNative {
     pub path: String,
     pub encoding: FileEncodingNative,

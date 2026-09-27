@@ -6,9 +6,10 @@ use super::types::{
     ExecCommandArgumentsNative, KillProcessArgumentsNative, ListDirectoryArgumentsNative,
     ProbeHttpArgumentsNative, ReadFileArgumentsNative, ReadTerminalArgumentsNative,
     SearchTextArgumentsNative, TerminalExecuteArgumentsNative, TerminalInteractiveInputKindNative,
-    TransferFileArgumentsNative, WaitProcessArgumentsNative, WaitTerminalArgumentsNative,
-    WriteFileArgumentsNative, WriteFilePreconditionNative, WriteStdinArgumentsNative,
-    WriteTerminalInputArgumentsNative, MAX_WRITE_FILE_CONTENT_BYTES, NATIVE_TOOL_CONTRACT_VERSION,
+    TransferFileArgumentsNative, TrashFileArgumentsNative, WaitProcessArgumentsNative,
+    WaitTerminalArgumentsNative, WriteFileArgumentsNative, WriteFilePreconditionNative,
+    WriteStdinArgumentsNative, WriteTerminalInputArgumentsNative, MAX_WRITE_FILE_CONTENT_BYTES,
+    NATIVE_TOOL_CONTRACT_VERSION,
 };
 
 pub enum AgentToolEffectModeNative {
@@ -46,7 +47,13 @@ const EXEC_EFFECTS: &[AgentEffectKindNative] = &[
     AgentEffectKindNative::ExternalSideEffect,
 ];
 
-pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 16] = [
+pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 17] = [
+    AgentToolDescriptorNative {
+        name: "trash_file",
+        target_kinds: &[AgentTargetKindNative::Local],
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: &[AgentEffectKindNative::Destructive],
+    },
     AgentToolDescriptorNative {
         name: "exec_command",
         target_kinds: LOCAL_REMOTE,
@@ -647,6 +654,11 @@ pub fn validate_tool_arguments_native(
             {
                 return Err("invalid search_text arguments".into());
             }
+        }
+        "trash_file" => {
+            let value: TrashFileArgumentsNative = decode_arguments(arguments)?;
+            validate_path(&value.path)?;
+            validate_sha256(&value.expected_sha256)?;
         }
         "write_file" => {
             let value = decode_write_file_arguments_native(arguments)?;

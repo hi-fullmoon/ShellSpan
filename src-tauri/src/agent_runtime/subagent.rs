@@ -1705,6 +1705,7 @@ fn delegated_scope(
                 "list_directory",
                 "search_text",
                 "write_file",
+                "trash_file",
                 "apply_patch",
                 "transfer_file",
                 "inspect_child_agent",
